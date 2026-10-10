@@ -466,9 +466,8 @@ through unsigned, but only while no secret is configured yet
 Every other delivery is rejected until it matches what GitHub signs with.
 
 **There is no supported interface that writes this value** — no API route, no
-CLI command, no settings screen. That gap is tracked as issue #1832. Until it
-lands, call the backend's own settings helper. Do not edit the database file
-by hand.
+CLI command, no settings screen. Until one exists, call the backend's own
+settings helper. Do not edit the database file by hand.
 
 The one real hazard is writing to the *wrong* database: `default_state_root`
 picks a platform default unless `CORSIA_STATE_DIR` is set
