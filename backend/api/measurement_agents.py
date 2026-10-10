@@ -347,8 +347,8 @@ def _rank(registry: dict[str, Any], rows: list[dict[str, Any]], metric: str, sor
 def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: str, sort: str,
                  grain: Grain, comparable: Callable[[str, str], bool],
                  measured: Callable[[str, str], bool], with_dollars: bool = True,
-                 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]], int]:
-    """Return ranked rows, findings, PL-4 project summaries and the agent population.
+                 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]], int, dict[str, Any]]:
+    """Return ranked rows, findings, PL-4 project summaries, the agent population and the scope's pooled cells.
 
     ``registry``, ``comparable`` and ``measured`` are the caller's: the route that owns
     the ids, thresholds, comparability bound and instrument starts passes its own, so
@@ -383,6 +383,8 @@ def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: s
     costs = query_task_hour_cost(db, {**query, "grain": two_windows(grain)}) if with_dollars else None
     for row in aggregated if costs is not None else ():
         row["metrics"][DOLLARS_PER_HOUR] = dollars_metric(costs, row["agent"]["id"], grain, RANKING_MINIMUM_N)
+    # What an agent's own cell is read against: every agent's tasks pooled, by the same function.
+    overall = {DOLLARS_PER_HOUR: dollars_metric(costs, None, grain, RANKING_MINIMUM_N)} if costs is not None else {}
     rows = _rank(registry, aggregated, metric, sort)
     findings = _findings(rows)
-    return rows, findings, _project_summaries(db, rows, grain), len(agents)
+    return rows, findings, _project_summaries(db, rows, grain), len(agents), overall

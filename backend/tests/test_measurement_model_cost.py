@@ -350,7 +350,7 @@ def test_a_size_cell_is_the_rate_of_that_class_with_its_change_and_first_try_sha
     sizes = {cost["task_id"]: "M" for cost in latest + previous} | {cost["task_id"]: "S" for cost in small}
     first = frozenset(cost["task_id"] for cost in latest[:7])
     (cell,) = _sized(costs, sizes, first)["m"]
-    assert cell == {"size": "M", "tasks": 14, "cost_per_task": 2.0, "cost_change": pytest.approx(1.0),
+    assert cell == {"size": "M", "tasks": 14, "cost_per_task": 2.0, "previous_cost_per_task": 1.0, "cost_change": pytest.approx(1.0),
                     "change_reason": "none", "first_try": 0.5, "partial": False, "recording_gap": False}
 
 
@@ -365,6 +365,17 @@ def test_a_class_with_no_priced_dollars_has_no_cell():
     unpriced = _period("u", 14, outcome="no_pricing", dollars=None)
     cells = _sized(local + unpriced, {cost["task_id"]: "M" for cost in local + unpriced})
     assert cells == {"m": [], "u": []}
+
+
+def test_the_overall_size_cells_pool_every_models_tasks_of_a_class_whatever_each_models_own_cell():
+    costs = [*_period("a", 7, dollars=2.0), *_period("b", 7, dollars=4.0),
+             *_period("a", 7, PREVIOUS, dollars=1.0), *_period("b", 7, PREVIOUS, dollars=1.0)]
+    outcomes = {cost["task_id"]: ("S", 0) for cost in costs}
+    built = build_models([], [], [], costs, resolve=_resolve, latest=(LATEST,), previous=(PREVIOUS,),
+                         offered=set(), outcomes=outcomes)
+    # Neither model has 14 S tasks alone; together they do, and that is the class's figure.
+    (cell,) = built["size_overall"]
+    assert (cell["size"], cell["tasks"], cell["cost_per_task"], cell["previous_cost_per_task"]) == ("S", 14, 3.0, 1.0)
 
 
 def test_the_floor_rows_cells_pool_its_members_tasks():
