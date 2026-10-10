@@ -59,12 +59,19 @@ def _report(limits: object, *, available: bool = True) -> dict:
 
 
 async def drain():
-    from infra import unavailable_model_recovery as recovery
+    """Wait for every wake already scheduled, and every wake those schedule, to finish.
 
-    for _ in range(30):
-        await asyncio.sleep(0)
-        if recovery._TASK is not None:
-            await asyncio.wait_for(asyncio.shield(recovery._TASK), 5)
+    A cleared limit wakes a held head by two routes, catalog recovery and the
+    connection-limit release, each its own tracked task, and whichever claims the
+    head carries its delivery. Waiting on one route, or counting yields, misses the other.
+    """
+    from infra import unavailable_model_recovery as recovery
+    from ws.ingress import background_tasks
+
+    loop = asyncio.get_running_loop()
+    await asyncio.sleep(0)  # An on-loop app_loop.submit starts its task on the next iteration.
+    while pending := {task for task in background_tasks if task.get_loop() is loop and not task.done()}:
+        await asyncio.wait_for(asyncio.wait(pending), 5)
     assert recovery._TASK is not None
 
 
@@ -616,14 +623,29 @@ def test_a_non_plan_or_unnameable_meter_stays_an_observation(isolated_db, event)
 
 
 @pytest.mark.asyncio
-async def test_recheck_receipt_loop_fifo_and_terminal_settlement(accounts, notification_owner, control):
+@pytest.mark.parametrize('release_claims_slowly', [False, True])
+async def test_recheck_receipt_loop_fifo_and_terminal_settlement(accounts, notification_owner, control, monkeypatch,
+                                                                  release_claims_slowly):
     from connections import harness_usage_check as checks, harness_usage
+    from infra import unavailable_model_recovery as recovery
     from infra.thread_driver import finish_turn
     from infra.state.ws import notify_models_changed
     from subagents.codex_usage_observer import observe_account_limits
     from subagents.vendor_write_admission import session_receipt
 
     db, default, *_ = accounts
+    if release_claims_slowly:
+        # The cleared limit wakes the head twice, by the connection-limit release and by
+        # catalog recovery, and either may claim it. Force the release to claim, with
+        # post-claim work that outlasts any fixed count of loop yields.
+        monkeypatch.setattr(recovery, '_held_thread_ids', lambda: [])
+        resolve = recovery.resolve_or_hold
+
+        async def slow_resolve(model, batch):
+            await asyncio.sleep(0.05)
+            return await resolve(model, batch)
+
+        monkeypatch.setattr(recovery, 'resolve_or_hold', slow_resolve)
     _known_default(db, default)
     harness_usage.record_limited(reason='limit', resets_at=None, source='test', provider='codex', receipt=default_receipt('codex'))
     _accept(db, 'm')
