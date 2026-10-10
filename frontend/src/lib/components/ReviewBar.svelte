@@ -206,8 +206,12 @@
 		.review-bar.expanded .rb-others { display: block; flex: 1 1 100%; margin: 0; padding: 0 0 0 27px; list-style: none; color: var(--text-secondary); line-height: 19px; }
 		.rb-others li + li { margin-top: 4px; }
 		.rb-others strong { color: var(--text-primary); font-weight: var(--fw-semibold); }
-		.rb-actions { flex: 1 1 100%; margin-left: 0; }
-		.rb-actions :global(.btn) { flex: 1 1 0; min-width: 0; min-height: 44px; }
+		/* A fine pointer keeps the compact header-size buttons, right-aligned on row 2; only a touch screen stretches them to 44px. */
+		.rb-actions { flex: 1 1 100%; margin-left: 0; justify-content: flex-end; }
+		@media (pointer: coarse) {
+			.rb-actions { justify-content: stretch; }
+			.rb-actions :global(.btn) { flex: 1 1 0; min-width: 0; min-height: 44px; }
+		}
 		/* Note open: the input takes row 1 at full width; the buttons take row 2, so the bar keeps its height. */
 		.review-bar.noting .rb-head { display: none; }
 		.review-bar.noting .rb-note { flex: 1 1 100%; width: 100%; min-height: 28px; }

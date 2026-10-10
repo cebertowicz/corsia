@@ -59,109 +59,140 @@ async function comment(request: APIRequestContext, doc: Doc, body: string, step:
 	expect(created.ok(), await created.text()).toBeTruthy();
 }
 
-async function open(page: Page, doc: Doc, width: number, theme: 'light' | 'dark') {
-	await page.setViewportSize({ width, height: width < 500 ? 852 : 900 });
+/**
+ * The three surfaces the bar is proved on. `default` is a desktop user's first layout: the plan pane open
+ * and the default split, so the document canvas is under 600px and the bar stacks, with compact buttons
+ * under a fine pointer. `closed` closes the pane for the one-row layout. `phone` emulates a touch screen,
+ * where the stacked buttons are 44px.
+ */
+type Mode = 'default' | 'closed' | 'phone';
+const WIDTH: Record<Mode, number> = { default: 1440, closed: 1440, phone: 393 };
+
+async function open(page: Page, doc: Doc, mode: Mode, theme: 'light' | 'dark') {
+	await page.setViewportSize({ width: WIDTH[mode], height: mode === 'phone' ? 852 : 900 });
 	await page.addInitScript(({ doc, theme, wide }) => {
 		localStorage.setItem('corsia_theme', theme);
 		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [doc.threadId]: {
 			tabs: [{ instanceId: doc.threadId, artifactId: doc.artifactId, path: doc.docPath, title: doc.name, loadedRevision: null, latestRevision: null, status: 'loading' }],
 			activeTabId: doc.threadId, visible: true, activeSurface: 'artifact',
-		} }, splitWidth: wide ? 700 : 500 }));
-	}, { doc, theme, wide: width >= 1000 });
+		} }, splitWidth: wide ? 700 : null }));
+	}, { doc, theme, wide: mode === 'closed' });
 	await loginByUrl(page, { waitForComposer: false });
-	if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.locator('.thread-item').filter({ hasText: doc.title }).click();
-	await expect(page.locator('.cm-content')).toContainText('Step 1:');
-	// The plan pane opens beside the document by default; closing it gives the 1440 canvas its full width.
-	if (width >= 1000 && !(await page.locator('.pane').evaluate((pane) => pane.classList.contains('collapsed')))) {
+	await selectThread(page, doc, mode);
+	// The plan pane opens beside the document by default; the one-row layout needs the canvas's full width.
+	if (mode === 'closed' && !(await page.locator('.pane').evaluate((pane) => pane.classList.contains('collapsed')))) {
 		await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 		await expect(page.locator('.pane.collapsed')).toBeVisible();
 	}
 }
+async function selectThread(page: Page, doc: Doc, mode: Mode) {
+	if (mode === 'phone') await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	await page.locator('.thread-item').filter({ hasText: doc.title }).click();
+	await expect(page.locator('.cm-content')).toContainText('Step 1:');
+}
 
 const bar = (page: Page) => page.locator('.review-bar');
-/** At 600px and wider the bar is one row of compact buttons; below it, the stacked layout. */
-async function expectLayout(page: Page, width: number) {
-	if (width >= 1000) await expect.poll(() => page.locator('.document-canvas').first().evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(600);
+/** The bar's geometry per surface: one compact row, a stacked bar with compact right-aligned buttons, or 44px touch buttons. */
+async function expectLayout(page: Page, mode: Mode) {
+	const canvas = () => page.locator('.document-canvas').first().evaluate((el) => el.getBoundingClientRect().width);
+	if (mode === 'closed') await expect.poll(canvas).toBeGreaterThan(600);
+	else if (mode === 'default') expect(await canvas(), 'the default layout is a narrow canvas').toBeLessThan(600);
 	const box = (await bar(page).boundingBox())!;
-	const approve = (await bar(page).getByRole('button').first().boundingBox())!;
-	if (width >= 1000) {
+	const buttons = await bar(page).locator('.btn').evaluateAll((els) =>
+		els.map((el) => { const r = el.getBoundingClientRect(); return { h: r.height, w: r.width, right: r.right }; }));
+	expect(buttons.length).toBeGreaterThanOrEqual(2);
+	if (mode === 'closed') {
 		await expect(bar(page).locator('.rb-narrow')).toBeHidden();
 		expect(box.height, 'one row').toBeLessThanOrEqual(52);
-		expect(approve.height, 'compact button').toBeLessThanOrEqual(32);
-		expect(approve.width, 'compact button').toBeLessThan(220);
-	} else {
-		expect(box.width).toBeLessThanOrEqual(width);
 	}
+	if (mode === 'phone') {
+		for (const button of buttons) expect(button.h, 'touch target').toBeGreaterThanOrEqual(44);
+		expect(box.width).toBeLessThanOrEqual(WIDTH.phone);
+		return;
+	}
+	for (const button of buttons) {
+		expect(button.h, 'compact header-style button').toBeLessThanOrEqual(32);
+		expect(button.w, 'never stretched to half the bar').toBeLessThan(box.width * 0.45);
+	}
+	expect(box.x + box.width - Math.max(...buttons.map((button) => button.right)), 'right-aligned').toBeLessThanOrEqual(24);
 }
 const shot = (page: Page, name: string, info: TestInfo) =>
 	page.screenshot({ path: info.outputPath(`${name}.png`), animations: 'disabled' });
 
-for (const [label, width, theme] of [['1440 light', 1440, 'light'], ['1440 dark', 1440, 'dark'], ['393 light', 393, 'light']] as const) {
-	test(`@surface:review-bar approve a plain ask from the reading (${label})`, async ({ page, request }, info) => {
-		const doc = await seed(request, `Review plain ${width} ${theme}`);
-		raiseAsk(doc.threadId, doc.artifactId, 'Is the rollout plan right?');
-		await open(page, doc, width, theme);
-		await expect(bar(page)).toBeVisible();
-		await expect(bar(page)).toContainText('Is the rollout plan right?');
-		await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
-		await expectLayout(page, width);
-		await shot(page, 'ask', info);
-		await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
-		const receipt = bar(page).locator('.rb-receipt');
-		await expect(receipt).toContainText('You approved this');
-		await expect(receipt).toBeFocused();
-		await shot(page, 'receipt', info);
-		await page.reload();
-		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-		await page.locator('.thread-item').filter({ hasText: doc.title }).click();
-		await expect(page.locator('.cm-content')).toContainText('Step 1:');
-		await expect(bar(page)).toHaveCount(0);
-	});
+type Case = readonly [label: string, mode: Mode, theme: 'light' | 'dark'];
+type Run = (args: { page: Page; request: APIRequestContext; info: TestInfo; mode: Mode; theme: 'light' | 'dark' }) => Promise<void>;
+/** One test per case; a phone case runs with a touch screen so `(pointer: coarse)` applies. */
+function journey(name: string, cases: readonly Case[], run: Run) {
+	for (const [label, mode, theme] of cases) {
+		test.describe(label, () => {
+			if (mode === 'phone') test.use({ hasTouch: true, isMobile: true });
+			test(`@surface:review-bar ${name} (${label})`, async ({ page, request }, info) => run({ page, request, info, mode, theme }));
+		});
+	}
 }
+const ALL: readonly Case[] = [
+	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
+	['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light'],
+];
 
-for (const [label, width, theme] of [['1440 light', 1440, 'light'], ['1440 dark', 1440, 'dark'], ['393 light', 393, 'light']] as const) {
-	test(`@surface:review-bar approve with changes after two comments (${label})`, async ({ page, request }, info) => {
-		const doc = await seed(request, `Review changes ${width} ${theme}`);
-		raiseAsk(doc.threadId, doc.artifactId, 'Check the ring order.');
-		await comment(request, doc, 'Ring two should wait.', 2);
-		await comment(request, doc, 'Add a rollback line.', 5);
-		await open(page, doc, width, theme);
-		const approve = bar(page).getByRole('button', { name: 'Approve with changes', exact: true });
-		await expect(approve).toBeVisible();
-		await expectLayout(page, width);
-		await expect(page.getByText('Place again')).toHaveCount(0);
-		// One primary on screen: the status row's Send stays secondary while the bar's Approve is primary.
-		const send = page.locator('.document-status-row').getByRole('button', { name: /^Send 2 comments/ });
-		await expect(send).toBeVisible();
-		await expect(send).not.toHaveClass(/primary/);
-		await expect(approve).toHaveClass(/primary/);
-		await shot(page, 'ask-with-changes', info);
-		await approve.click();
-		await expect(bar(page).locator('.rb-receipt')).toContainText('You approved this with changes');
-		await expect(bar(page).locator('.rb-receipt')).toContainText('sent 2 comments');
-		await expect(page.locator('.document-status-row').getByRole('button', { name: /^Send \d+ comment/ })).toHaveCount(0);
-		await expect(page.getByText('Place again')).toHaveCount(0);
-		await shot(page, 'receipt-with-changes', info);
-	});
-}
+journey('approve a plain ask from the reading', ALL, async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Review plain ${mode} ${theme}`);
+	raiseAsk(doc.threadId, doc.artifactId, 'Is the rollout plan right?');
+	await open(page, doc, mode, theme);
+	await expect(bar(page)).toBeVisible();
+	await expect(bar(page)).toContainText('Is the rollout plan right?');
+	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
+	await expectLayout(page, mode);
+	await shot(page, 'ask', info);
+	await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
+	const receipt = bar(page).locator('.rb-receipt');
+	await expect(receipt).toContainText('You approved this');
+	await expect(receipt).toBeFocused();
+	await shot(page, 'receipt', info);
+	await page.reload();
+	await selectThread(page, doc, mode);
+	await expect(bar(page)).toHaveCount(0);
+});
 
-for (const [label, width, theme] of [['1440 light', 1440, 'light'], ['393 light', 393, 'light']] as const) {
-	test(`@surface:review-bar request changes with only a note (${label})`, async ({ page, request }, info) => {
-		const doc = await seed(request, `Review note ${width} ${theme}`);
-		raiseAsk(doc.threadId, doc.artifactId, 'Is this ready to ship?');
-		await open(page, doc, width, theme);
-		await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
-		const note = bar(page).getByRole('textbox');
-		await expect(note).toBeFocused();
-		const send = bar(page).getByRole('button', { name: 'Request changes', exact: true });
-		await expect(send).toBeDisabled();
-		await note.fill('Not yet: the rollback is missing.');
-		await shot(page, 'noting', info);
-		await send.click();
-		await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
-		await shot(page, 'receipt-requested', info);
-		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-		expect(overflow).toBeLessThanOrEqual(0);
-	});
-}
+journey('approve with changes after two comments', ALL, async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Review changes ${mode} ${theme}`);
+	raiseAsk(doc.threadId, doc.artifactId, 'Check the ring order.');
+	await comment(request, doc, 'Ring two should wait.', 2);
+	await comment(request, doc, 'Add a rollback line.', 5);
+	await open(page, doc, mode, theme);
+	const approve = bar(page).getByRole('button', { name: 'Approve with changes', exact: true });
+	await expect(approve).toBeVisible();
+	await expectLayout(page, mode);
+	await expect(page.getByText('Place again')).toHaveCount(0);
+	// One primary on screen: the status row's Send stays secondary while the bar's Approve is primary.
+	const send = page.locator('.document-status-row').getByRole('button', { name: /^Send 2 comments/ });
+	await expect(send).toBeVisible();
+	await expect(send).not.toHaveClass(/primary/);
+	await expect(approve).toHaveClass(/primary/);
+	await shot(page, 'ask-with-changes', info);
+	await approve.click();
+	await expect(bar(page).locator('.rb-receipt')).toContainText('You approved this with changes');
+	await expect(bar(page).locator('.rb-receipt')).toContainText('sent 2 comments');
+	await expect(page.locator('.document-status-row').getByRole('button', { name: /^Send \d+ comment/ })).toHaveCount(0);
+	await expect(page.getByText('Place again')).toHaveCount(0);
+	await shot(page, 'receipt-with-changes', info);
+});
+
+journey('request changes with only a note', [['1440 light', 'default', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Review note ${mode} ${theme}`);
+	raiseAsk(doc.threadId, doc.artifactId, 'Is this ready to ship?');
+	await open(page, doc, mode, theme);
+	await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
+	const note = bar(page).getByRole('textbox');
+	await expect(note).toBeFocused();
+	const send = bar(page).getByRole('button', { name: 'Request changes', exact: true });
+	await expect(send).toBeDisabled();
+	await note.fill('Not yet: the rollback is missing.');
+	await expectLayout(page, mode);
+	await shot(page, 'noting', info);
+	await send.click();
+	await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
+	await shot(page, 'receipt-requested', info);
+	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+	expect(overflow).toBeLessThanOrEqual(0);
+});
