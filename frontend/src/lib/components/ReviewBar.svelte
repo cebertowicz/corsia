@@ -9,7 +9,7 @@
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, draftOpen = false }: { artifactId: string | null; draftOpen?: boolean } = $props();
+	let { artifactId, draftOpen = false, onAnswered }: { artifactId: string | null; draftOpen?: boolean; onAnswered?: () => void } = $props();
 
 	const bar = createReviewBarState();
 	let expanded = $state(false);
@@ -64,9 +64,13 @@
 		bar.failure = DRAFT_OPEN;
 		return true;
 	}
+	/** The answer closes the user's feedback batch on the server; the viewer's pending-batch state re-reads it. */
+	async function settle(sent: Promise<boolean>) {
+		if (await sent) onAnswered?.();
+	}
 	function approve() {
 		if (round > 0 && blocked()) return;
-		void bar.answer(round > 0 ? 'approved_with_changes' : 'approved');
+		void settle(bar.answer(round > 0 ? 'approved_with_changes' : 'approved'));
 	}
 	async function requestChanges() {
 		if (blocked()) return;
@@ -81,7 +85,7 @@
 	}
 	function sendNote() {
 		if (blocked()) return;
-		void bar.answer('changes_requested');
+		void settle(bar.answer('changes_requested'));
 	}
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter') { event.preventDefault(); sendNote(); }

@@ -109,9 +109,19 @@ def round_counts(db, artifact_id: str, since: str | None) -> dict:
               AND (e.prior_segments_diff<>'' OR e.latest_sha256<>e.baseline_sha256)""",
         (USER_AUTHOR_ID, artifact_id, floor),
     ).fetchone()[0]
+    # An edit item is deleted once its batch is delivered, but the batch keeps its item count, which
+    # is its comment rows plus the one edit item: the difference is the edits the user already sent.
+    sent_edits = db.execute(
+        """SELECT COALESCE(SUM(MAX(b.item_count - (
+                    SELECT COUNT(*) FROM doc_feedback_batch_items i WHERE i.batch_id=b.id), 0)), 0)
+             FROM doc_feedback_batches b
+            WHERE b.state='delivered' AND b.author_kind='user' AND b.author_id=?
+              AND b.artifact_id=? AND b.last_item_at>?""",
+        (USER_AUTHOR_ID, artifact_id, floor),
+    ).fetchone()[0]
     return {
         "comments": rows["comments"] or 0, "suggestions": rows["suggestions"] or 0,
-        "edits": edits,
+        "edits": edits + sent_edits,
     }
 
 

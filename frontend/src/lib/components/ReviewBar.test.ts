@@ -20,8 +20,8 @@ function read(comments = 0): ReviewBarRead {
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
-async function render(draftOpen = false) {
-	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', draftOpen } });
+async function render(draftOpen = false, onAnswered?: () => void) {
+	component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1', draftOpen, onAnswered } });
 	await vi.waitFor(() => expect(host.querySelector('.review-bar')).toBeTruthy());
 	flushSync();
 }
@@ -113,5 +113,18 @@ describe('ReviewBar', () => {
 		api.fetchReviewBar.mockResolvedValue({ ...read(0), ask_raised: false });
 		button('Approve')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.stale')).toBeTruthy());
+	});
+
+	it('tells the viewer to re-read its pending batch once the answer is confirmed, and not on a failed send', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(2));
+		const onAnswered = vi.fn();
+		await render(false, onAnswered);
+		api.answerReview.mockRejectedValueOnce(new Error('500'));
+		button('Approve with changes')!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
+		expect(onAnswered).not.toHaveBeenCalled();
+		api.answerReview.mockResolvedValueOnce({ verdict: 'approved_with_changes', note: null, feedback_counts: counts(2) });
+		button('Approve with changes')!.click();
+		await vi.waitFor(() => expect(onAnswered).toHaveBeenCalledTimes(1));
 	});
 });

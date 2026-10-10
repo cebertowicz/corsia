@@ -311,3 +311,31 @@ def test_the_read_names_the_newest_ask_and_the_other_askers(db):
     assert state["other_askers"] == ["Style"]
     assert state["other_asks"] == [{"name": "Style", "reason": "Please read: Review the proposal"}]
     assert state["other_request_count"] == 1
+
+
+def test_an_edit_sent_before_the_answer_still_counts_in_the_round(db):
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+
+    from doceditor import feedback_batches
+    from doceditor.feedback_state import USER_AUTHOR_ID
+
+    artifact = seed_document(db, "owner", name="edited.md")
+    _ask(db, artifact)
+    later = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
+    batch = feedback_batches.record_edit(
+        db, artifact_id=artifact, recipient_id="owner", author_kind="user",
+        author_id=USER_AUTHOR_ID, actor_display="Steve", path=Path("/workspace/shared/edited.md"),
+        before=b"before\n", after=b"after\n", at=later,
+    )
+    db.commit()
+    assert review_answer.round_state(db, artifact)["round_feedback_counts"]["edits"] == 1
+    delivered, _ = feedback_batches.close_batch(db, batch, "send")
+    db.commit()
+    assert delivered
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items").fetchone()[0] == 0
+    state = review_answer.round_state(db, artifact)
+    assert state["round_feedback_counts"] == {"comments": 0, "suggestions": 0, "edits": 1}
+    result = _answer(db, artifact, "approved")
+    assert result.review["verdict"] == "approved_with_changes"
+    assert result.review["feedback_counts"]["edits"] == 1

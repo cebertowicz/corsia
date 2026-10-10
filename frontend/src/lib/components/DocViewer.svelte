@@ -334,7 +334,7 @@
 		onReopen={() => reloadNonce += 1}
 		onRead={() => reloadNonce += 1}
 	>
-		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} />{/snippet}
+		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
 		{#snippet presence()}
 			{#if target && loadedArtifactId}
 				<DocPresenceStatus {target} artifactId={loadedArtifactId} {docState} root={docRoot}
