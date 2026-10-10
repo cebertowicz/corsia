@@ -1,4 +1,4 @@
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import * as Y from 'yjs';
 import { withLiveUpdateAuthor, type LiveUpdateAuthor } from '$lib/stores/liveUpdateAuthor';
@@ -21,7 +21,7 @@ export interface Rig {
 }
 const laneList = (view: EditorView) => view.state.field(typedReveals);
 
-export function rig(initial = 'Start. '): Rig {
+export function rig(initial = 'Start. ', extensions: Extension[] = []): Rig {
 	const doc = new Y.Doc();
 	const text = doc.getText('t');
 	text.insert(0, initial);
@@ -32,7 +32,7 @@ export function rig(initial = 'Start. '): Rig {
 	const binding = liveDocumentBinding(text);
 	const reveal = createTypedReveal({ canType: () => options.canType, isInView: () => options.inView });
 	const view = new EditorView({
-		state: EditorState.create({ doc: text.toString(), extensions: [binding.extensions, presenceMarks, reveal] }),
+		state: EditorState.create({ doc: text.toString(), extensions: [binding.extensions, presenceMarks, reveal, ...extensions] }),
 		parent: document.body,
 	});
 	const edit: Rig['edit'] = (author, change) => {
@@ -79,7 +79,12 @@ export function trackRigs() {
 	const rigs: Rig[] = [];
 	let restore: (() => void) | null = null;
 	return {
-		make: (initial?: string) => { restore ??= memoizeComputedStyle(); const r = rig(initial); rigs.push(r); return r; },
+		make: (initial?: string, extensions?: Extension[]) => {
+			restore ??= memoizeComputedStyle();
+			const r = rig(initial, extensions);
+			rigs.push(r);
+			return r;
+		},
 		cleanup: () => { rigs.forEach((r) => r.view.destroy()); rigs.length = 0; restore?.(); restore = null; },
 	};
 }
