@@ -148,6 +148,7 @@ def _observe(
                 text,
                 bool(meta.get("is_error")),
                 _db,
+                call_id=tool_call_id,
             )
         except Exception as error:
             logger.warning(

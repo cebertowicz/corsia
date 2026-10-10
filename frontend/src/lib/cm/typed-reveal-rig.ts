@@ -1,4 +1,4 @@
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import * as Y from 'yjs';
 import { withLiveUpdateAuthor, type LiveUpdateAuthor } from '$lib/stores/liveUpdateAuthor';
@@ -21,7 +21,7 @@ export interface Rig {
 }
 const laneList = (view: EditorView) => view.state.field(typedReveals);
 
-export function rig(initial = 'Start. '): Rig {
+export function rig(initial = 'Start. ', extensions: Extension[] = []): Rig {
 	const doc = new Y.Doc();
 	const text = doc.getText('t');
 	text.insert(0, initial);
@@ -32,7 +32,7 @@ export function rig(initial = 'Start. '): Rig {
 	const binding = liveDocumentBinding(text);
 	const reveal = createTypedReveal({ canType: () => options.canType, isInView: () => options.inView });
 	const view = new EditorView({
-		state: EditorState.create({ doc: text.toString(), extensions: [binding.extensions, presenceMarks, reveal] }),
+		state: EditorState.create({ doc: text.toString(), extensions: [binding.extensions, presenceMarks, reveal, ...extensions] }),
 		parent: document.body,
 	});
 	const edit: Rig['edit'] = (author, change) => {
@@ -49,10 +49,42 @@ export const append = (s: string) => (t: Y.Text) => t.insert(t.length, s);
 
 
 
+/**
+ * CodeMirror reads `getComputedStyle` on every measure, and jsdom answers it with a full cascade over
+ * every stylesheet (several ms each). A typed backlog measures once per frame, so without this memo a
+ * test's run time is that cascade times the frame count and stretches with machine load. jsdom has no
+ * layout, so an element's computed style changes only with its own class or style attribute or the sheets.
+ */
+function memoizeComputedStyle(): () => void {
+	// The test environment defines window globals as accessors, so install and restore by descriptor.
+	const original = Object.getOwnPropertyDescriptor(window, 'getComputedStyle');
+	const cascade = window.getComputedStyle;
+	const memo = new WeakMap<Element, { key: string; style: CSSStyleDeclaration }>();
+	const memoized = (element: Element, pseudo?: string | null) => {
+		const key = `${element.getAttribute('class')}|${element.getAttribute('style')}|${document.styleSheets.length}|${pseudo ?? ''}`;
+		const hit = memo.get(element);
+		if (hit?.key === key) return hit.style;
+		const style = cascade.call(window, element, pseudo);
+		memo.set(element, { key, style });
+		return style;
+	};
+	Object.defineProperty(window, 'getComputedStyle', { configurable: true, writable: true, value: memoized });
+	return () => {
+		if (original) Object.defineProperty(window, 'getComputedStyle', original);
+		else delete (window as { getComputedStyle?: unknown }).getComputedStyle;
+	};
+}
+
 export function trackRigs() {
 	const rigs: Rig[] = [];
+	let restore: (() => void) | null = null;
 	return {
-		make: (initial?: string) => { const r = rig(initial); rigs.push(r); return r; },
-		cleanup: () => { rigs.forEach((r) => r.view.destroy()); rigs.length = 0; },
+		make: (initial?: string, extensions?: Extension[]) => {
+			restore ??= memoizeComputedStyle();
+			const r = rig(initial, extensions);
+			rigs.push(r);
+			return r;
+		},
+		cleanup: () => { rigs.forEach((r) => r.view.destroy()); rigs.length = 0; restore?.(); restore = null; },
 	};
 }

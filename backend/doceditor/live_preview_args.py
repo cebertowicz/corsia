@@ -29,9 +29,18 @@ class Value:
 
 
 class ArgScanner:
-    """Decode a tool-input object incrementally: top-level strings, booleans and ``edits[]`` strings."""
+    """Decode a tool-input object incrementally: top-level strings, booleans and ``edits[]`` strings.
 
-    def __init__(self) -> None:
+    ``nested`` names a key whose object holds the real input, as a ``tool_call``
+    wrapper's ``arguments`` do. The wrapper's own top-level strings (its
+    ``name``) land in ``outer``; everything else reads as if the nested object
+    were the whole input.
+    """
+
+    def __init__(self, nested: str | None = None) -> None:
+        self._nested = nested
+        self._shift = 0 if nested is None else 1
+        self.outer: dict[str, Value] = {}
         self.fields: dict[str, Value] = {}
         self.flags: dict[str, bool] = {}
         self.edits: list[dict[str, Value]] = []
@@ -127,12 +136,25 @@ class ArgScanner:
             self._target = self._value_slot()
 
     def _value_slot(self) -> Value | None:
-        depth, key = len(self._stack), self._key[-1] if self._key else None
-        if depth == 1 and key is not None:
+        key = self._key[-1] if self._key else None
+        if key is None:
+            return None
+        if self._nested is not None and len(self._stack) == 1:
+            return self.outer.setdefault(key, Value())
+        if self._at_arguments():
             return self.fields.setdefault(key, Value())
-        if depth == 3 and self._stack == ["o", "a", "o"] and self._key[0] == "edits" and key is not None:
+        if self._under_edits(["a", "o"]):
             return self.edits[-1].setdefault(key, Value())
         return None
+
+    def _at_arguments(self) -> bool:
+        """Directly inside the input object: the top level, or the nested one."""
+        return len(self._stack) == 1 + self._shift and (not self._shift or self._key[0] == self._nested)
+
+    def _under_edits(self, tail: list[str]) -> bool:
+        shift = self._shift
+        return (self._stack == ["o"] * (1 + shift) + tail and self._key[shift] == "edits"
+                and (not shift or self._key[0] == self._nested))
 
     def _structural(self, char: str) -> None:
         if char in " \t\r\n":
@@ -153,7 +175,7 @@ class ArgScanner:
             self._scalar.append(char)
 
     def _open(self, char: str) -> None:
-        if char == "{" and self._stack == ["o", "a"] and self._key[0] == "edits":
+        if char == "{" and self._under_edits(["a"]):
             self.edits.append({})
         self._stack.append("o" if char == "{" else "a")
         if char == "{":
@@ -173,7 +195,7 @@ class ArgScanner:
             return
         token, self._scalar = "".join(self._scalar), []
         key = self._key[-1] if self._key else None
-        if len(self._stack) == 1 and key is not None and token in {"true", "false"}:
+        if self._at_arguments() and key is not None and token in {"true", "false"}:
             self.flags[key] = token == "true"
 
     def string(self, key: str) -> Value | None:

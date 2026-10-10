@@ -1,4 +1,4 @@
-import type { EditorState, Extension, Range } from '@codemirror/state';
+import { Facet, type EditorState, type Extension, type Range } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
 import { commentRanges, type InlineSuggestion } from './comment-marks';
 import { suggestionTones } from './suggestion-tones';
@@ -6,16 +6,26 @@ import { suggestionTones } from './suggestion-tones';
 const ID_ATTR = 'data-suggestion-id';
 const HEX = /^#[0-9a-f]{6}$/i;
 
+const sameTyping = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>) =>
+	a.size === b.size && [...a].every(([id, typed]) => b.get(id) === typed);
+
+/** Suggestions an agent lane is still typing, by id, with what it has typed so far (`typed-reveal-state` provides it). */
+export const suggestionTyping = Facet.define<ReadonlyMap<string, string>, ReadonlyMap<string, string>>({
+	combine: (values) => values.length === 1 ? values[0] : new Map(values.flatMap((value) => [...value])),
+	compare: sameTyping,
+	compareInput: sameTyping,
+});
+
 /**
- * Typed-reveal seam: receives the full insert and returns the text the widget shows. It returns the whole
- * insert today; the reveal replaces this body once it can drive a progressive value.
+ * Typed-reveal seam: the text the insert shows. While the suggesting agent's lane types it, that is what
+ * has typed so far; otherwise, or when the typed text is not the insert's start, the whole insert.
  */
-export function suggestionInsertShown(insert: string): string {
-	return insert;
+export function suggestionInsertShown(insert: string, typed?: string): string {
+	return typed !== undefined && insert.startsWith(typed) ? typed : insert;
 }
 
 /** The suggestion's own colour as style variables: raw for the tint, plus a text tone per theme (4.5:1). */
-function colourStyle(colour: string): string {
+export function colourStyle(colour: string): string {
 	const base = HEX.test(colour) ? colour : 'var(--accent)';
 	const tones = suggestionTones(base);
 	return `--suggestion-color:${base};--suggestion-tone-light:${tones.light};--suggestion-tone-dark:${tones.dark}`;
@@ -31,11 +41,12 @@ class SuggestionInsert extends WidgetType {
 		private readonly suggestion: InlineSuggestion,
 		private readonly focused: boolean,
 		private readonly afterStrike: boolean,
+		private readonly shown: string,
 	) { super(); }
 
 	eq(other: SuggestionInsert): boolean {
 		return this.id === other.id && this.focused === other.focused && this.afterStrike === other.afterStrike
-			&& this.suggestion.insert === other.suggestion.insert && this.suggestion.color === other.suggestion.color
+			&& this.shown === other.shown && this.suggestion.color === other.suggestion.color
 			&& !!this.suggestion.busy === !!other.suggestion.busy;
 	}
 
@@ -46,7 +57,7 @@ class SuggestionInsert extends WidgetType {
 		if (this.afterStrike) insert.classList.add('cm-suggestion-insert-after');
 		insert.setAttribute(ID_ATTR, this.id);
 		insert.setAttribute('style', colourStyle(this.suggestion.color));
-		insert.setAttribute('data-insert', suggestionInsertShown(this.suggestion.insert));
+		insert.setAttribute('data-insert', this.shown);
 		insert.contentEditable = 'false';
 		// Screen readers read CSS generated content, so the drawn insert would run on from the struck text with no cue.
 		// Its card carries the suggestion for assistive tech instead.
@@ -61,6 +72,7 @@ class SuggestionInsert extends WidgetType {
 
 function marks(state: EditorState): DecorationSet {
 	const length = state.doc.length;
+	const typing = state.facet(suggestionTyping);
 	const out: Range<Decoration>[] = [];
 	for (const range of state.field(commentRanges)) {
 		const suggestion = range.suggestion;
@@ -80,7 +92,8 @@ function marks(state: EditorState): DecorationSet {
 		}
 		if (suggestion.insert) {
 			out.push(Decoration.widget({
-				widget: new SuggestionInsert(range.id, suggestion, !!range.focused, from < to),
+				widget: new SuggestionInsert(range.id, suggestion, !!range.focused, from < to,
+					suggestionInsertShown(suggestion.insert, typing.get(range.id))),
 				side: 1,
 			}).range(to));
 		}
@@ -133,7 +146,7 @@ const theme = EditorView.baseTheme({
 /** The inline marks of open suggestions, derived from `commentRanges`, with the pointer behavior that goes with them. */
 export function suggestionMarks(pointer: () => SuggestionPointer): Extension[] {
 	return [
-		EditorView.decorations.compute([commentRanges], marks),
+		EditorView.decorations.compute([commentRanges, suggestionTyping], marks),
 		theme,
 		EditorView.domEventHandlers({
 			mousedown(event) {

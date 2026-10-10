@@ -23,9 +23,7 @@ jobs:
   close-referenced:
     name: Close issues named in the merged PR body
     if: github.event.pull_request.merged == true
-    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
-    # job to a hosted runner needs the repository owner's explicit approval.
-    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       PR_BODY: ${{ github.event.pull_request.body }}

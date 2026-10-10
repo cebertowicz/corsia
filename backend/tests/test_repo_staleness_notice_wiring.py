@@ -37,7 +37,8 @@ def _stale_repo(tmp_path: Path) -> Path:
     remote = tmp_path / "remote.git"
     local = tmp_path / "local"
     other = tmp_path / "other"
-    _git(["init", "-q", "--bare", str(remote)], cwd=tmp_path)
+    # Pin the remote's HEAD: the host's init.defaultBranch need not be main.
+    _git(["init", "-q", "--bare", "--initial-branch=main", str(remote)], cwd=tmp_path)
     _git(["clone", "-q", str(remote), str(local)], cwd=tmp_path)
     (local / "f.txt").write_text("one\n")
     _git(["add", "f.txt"], cwd=local)

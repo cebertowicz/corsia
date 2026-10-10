@@ -68,6 +68,11 @@ export interface TabLoadSignal {
 	revision?: string | null;
 	/** False when the doc API would refuse a write to this path. */
 	writable?: boolean;
+	/**
+	 * Which viewer the backend says this file needs. Viewer-local and never stored on the tab: the
+	 * leaf reads it, the workspace store ignores it, and each load decides it again.
+	 */
+	renderer?: 'image' | 'document';
 }
 
 export interface RevisionCheck {

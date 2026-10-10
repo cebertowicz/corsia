@@ -126,7 +126,7 @@ matrix; the journeys inherit it.
 
 ## 6. Manual only — real time
 
-- **Warm checkpoint end to end (USER-REPORTS #5, #961).** Force a checkpoint on
+- **Warm checkpoint end to end (USER-REPORTS #5).** Force a checkpoint on
   a large native thread and a codex thread; confirm a `warm_path` telemetry row
   appears and that post-checkpoint provider input tokens actually drop. No
   successful checkpoint has been observed in production since the fix deployed.

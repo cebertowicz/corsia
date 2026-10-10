@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { createTypedReveal, typedReveals } from '$lib/cm/typed-reveal';
-import { attachPreviewFeed } from './livePreviewFeed';
+import { attachPreviewFeed, CLAIM_GRACE_MS } from './livePreviewFeed';
 import { textDigest, type DocumentFrame } from './documentWire';
 
 const DOC = 'Hello world. The rest stays.';
@@ -19,10 +19,11 @@ function harness(doc = DOC) {
 
 const previews = (view: EditorView) => view.state.field(typedReveals).flatMap((lane) => lane.previews.map((p) => ({ ...p, threadId: lane.threadId })));
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
-const preview = (digest: string, slots: unknown[], callId = 'call-1') =>
-	({ type: 'doc_preview', call_id: callId, thread_id: 'thread-a', name: 'Alpha', digest, slots });
+const preview = (digest: string, slots: unknown[], callId = 'call-1', kind?: string) =>
+	({ type: 'doc_preview', call_id: callId, thread_id: 'thread-a', name: 'Alpha', digest, slots, ...(kind ? { kind } : {}) });
+const end = (outcome: string) => ({ type: 'doc_preview_end', call_id: 'call-1', thread_id: 'thread-a', outcome });
 
-afterEach(() => { document.body.innerHTML = ''; });
+afterEach(() => { vi.useRealTimers(); document.body.innerHTML = ''; });
 
 describe('live preview feed', () => {
 	it('places a slot when the frame was computed on the text this editor shows', async () => {
@@ -73,6 +74,47 @@ describe('live preview feed', () => {
 		h.send(preview(digest, [{ slot: 0, from: 6, to: 11, at: 5, text: '!' }]));
 		await settle();
 		expect(previews(h.view)).toEqual([]);
+	});
+
+	it('passes each frame\'s kind to the lane, an edit when the frame names none', async () => {
+		const h = harness();
+		const digest = await textDigest(DOC);
+		h.send(preview(digest, [{ slot: 0, from: 6, to: 11, at: 0, text: '' }], 'call-c', 'comment'));
+		h.send(preview(digest, [{ slot: 0, from: 13, to: 16, at: 0, text: 'A' }], 'call-e'));
+		await settle();
+		expect(previews(h.view).map((p) => [p.callId, p.mode])).toEqual([['call-c', 'comment'], ['call-e', 'edit']]);
+	});
+
+	it('ignores a frame of a kind it does not know', async () => {
+		const h = harness();
+		h.send(preview(await textDigest(DOC), [{ slot: 0, from: 6, to: 11, at: 0, text: 'x' }], 'call-1', 'review'));
+		await settle();
+		expect(previews(h.view)).toEqual([]);
+	});
+
+	it('a call that turns from a comment into a suggestion is drawn again as a suggestion', async () => {
+		const h = harness();
+		const digest = await textDigest(DOC);
+		h.send(preview(digest, [{ slot: 0, from: 6, to: 11, at: 0, text: '' }], 'call-1', 'comment'));
+		h.send(preview(digest, [{ slot: 0, from: 6, to: 11, at: 0, text: 'the' }], 'call-1', 'suggest'));
+		await settle();
+		expect(previews(h.view)).toMatchObject([{ mode: 'suggest', text: 'the' }]);
+	});
+
+	it('a settled comment or suggestion stays briefly for its arrival to take it over; any other end goes at once', async () => {
+		for (const [kind, outcome, kept] of [['comment', 'settled', true], ['suggest', 'settled', true], ['comment', 'failed', false], ['edit', 'settled', false]] as const) {
+			vi.useRealTimers();
+			const h = harness();
+			h.send(preview(await textDigest(DOC), [{ slot: 0, from: 6, to: 11, at: 0, text: kind === 'comment' ? '' : 'the' }], 'call-1', kind));
+			await settle();
+			vi.useFakeTimers();
+			h.send(end(outcome));
+			expect(previews(h.view).length, `${kind} ${outcome}`).toBe(kept ? 1 : 0);
+			vi.advanceTimersByTime(CLAIM_GRACE_MS);
+			expect(previews(h.view), `${kind} ${outcome}`).toEqual([]);
+			h.stop();
+			h.view.destroy();
+		}
 	});
 
 	it('stops listening when detached', () => {
