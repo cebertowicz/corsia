@@ -127,6 +127,12 @@ describe('MeasurementAgentsTable', () => {
 		expect(host.querySelector('tbody')?.textContent).not.toContain('Agent 0');
 	});
 
+	it('capitalises the first letter of an agent name wherever the table prints it', () => {
+		render(state([agentRow({ agent: { id: 'agent-9', name: 'conductor', project: { id: 'p1', name: 'CORSIA' } } })]));
+		expect(host.querySelector('tbody th button.filter')?.textContent).toBe('Conductor');
+		expect(host.querySelector('tbody th button.filter')?.getAttribute('aria-label')).toBe('Filter to this agent: Conductor');
+	});
+
 	it('leaves out an agent with no outcomes in the window', () => {
 		render(state([agentRow({ n: 0, status: 'too_few', rank: null }), agentRow({ n: 5, agent: { id: 'a2', name: 'Busy', project: { id: 'p1', name: 'CORSIA' } } })]));
 		expect(host.querySelectorAll('tbody tr')).toHaveLength(1);

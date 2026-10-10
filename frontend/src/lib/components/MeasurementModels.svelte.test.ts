@@ -9,7 +9,7 @@ Object.defineProperty(window, 'matchMedia', { configurable: true, value: (query:
 
 afterEach(() => { if (component) unmount(component); host?.remove(); component = null; host = undefined; });
 const row = { model: 'claude-code/claude-opus-5-5', label: 'Claude Opus 5.5', tasks: 498, failed_turns_per_100: 2.7, recorded_cost_per_task: 2.3, spend_usd: 1145.4, cost_class: 'priced' as const, rate_reason: 'none' as const, cost_change: -0.13, change_reason: 'none' as const, previous_tasks: 500, not_offered_now: false, other: false, includes_local: false, recording_gap: false, sizes: [] as ModelsState['rows'][number]['sizes'] };
-const other = { ...row, model: '', label: 'Other models (under 14 tasks)', tasks: 9, recorded_cost_per_task: null, spend_usd: null, cost_class: 'no_pricing' as const, rate_reason: 'unpriced' as const, cost_change: null, change_reason: 'too_few_before' as const, previous_tasks: 4, other: true };
+const other = { ...row, model: '', label: 'Other (3 more models)', tasks: 9, recorded_cost_per_task: null, spend_usd: null, cost_class: 'no_pricing' as const, rate_reason: 'unpriced' as const, cost_change: null, change_reason: 'too_few_before' as const, previous_tasks: 4, other: true };
 function state(overrides: Partial<ModelsState> = {}): ModelsState { return { loading: false, error: null, rows: [row], minTasks: 14, tokenShares: [{ model: 'claude-code/claude-opus-5-5', label: 'Claude Opus 5.5', share_of_tokens: .4, tokens: 4_600_000_000 }, { model: 'codex/gpt-6.1-sol', label: 'GPT-6.1 Sol', share_of_tokens: .3, tokens: 9_800_000_000 }, { model: 'small', label: 'small', share_of_tokens: .3, tokens: 9_800_000_000 }], unmatchedFailedTurns: 0, unresolvedTokenShare: .026, period: null, scopeKey: 'all:none', grain: 'days', ...overrides }; }
 function render(overrides: Partial<ModelsState> = {}) { host = document.body.appendChild(document.createElement('div')); component = mount(MeasurementModels, { target: host, props: { state: state(overrides) } }); flushSync(); return host; }
 
@@ -97,18 +97,13 @@ describe('MeasurementModels', () => {
 		expect(rateCell({ recorded_cost_per_task: null, cost_class: 'local', rate_reason: 'local' })).toBe('no list price');
 		expect(rateCell({ tasks: 0, recorded_cost_per_task: null, cost_class: null, rate_reason: 'no_tasks' })).toBe('—');
 	});
-	it('groups models under the task cutoff as Other and keeps their unknown cost unknown', () => {
+	it('groups the models past the named rows as Other and keeps their unknown cost unknown', () => {
 		const page = render({ rows: [row, other] });
 		const cells = [...page.querySelectorAll('tbody tr')].at(-1)?.textContent ?? '';
-		expect(cells).toContain('Other models (under 14 tasks)');
+		expect(cells).toContain('Other (3 more models)');
 		expect(cells).toContain('unpriced');
 		expect(cells).not.toContain('$0');
-		expect(page.textContent).toContain('Models with under 14 accepted tasks share the last table row.');
-	});
-	it('states the served minimum-tasks floor, never a copy of it', () => {
-		const page = render({ rows: [row, { ...other, label: 'Other models (under 20 tasks)' }], minTasks: 20 });
-		expect(page.textContent).toContain('Models with under 20 accepted tasks share the last table row.');
-		expect(page.textContent).not.toContain('14');
+		expect(page.textContent).not.toContain('share the last table row');
 	});
 	it('discloses local models in a priced group without calling its calls unpriced', () => {
 		const page = render({ rows: [{ ...other, recorded_cost_per_task: 2, cost_class: 'priced', rate_reason: 'none', includes_local: true }] });
@@ -181,6 +176,6 @@ describe('MeasurementModels', () => {
 		host?.remove(); component && unmount(component); component = null;
 		const shown = render({ rows: [row, other] });
 		expect(shown.querySelectorAll('tbody tr')).toHaveLength(2);
-		expect(shown.textContent).toContain('Models with under 14 accepted tasks share the last table row.');
+		expect(shown.textContent).toContain('Other (3 more models)');
 	});
 });

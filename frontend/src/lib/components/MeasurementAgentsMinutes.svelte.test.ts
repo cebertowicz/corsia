@@ -65,6 +65,11 @@ describe('MeasurementAgentsMinutes', () => {
 		expect(cells).toEqual([['13', '135', '30'], ['3.6', '7.3', '30']]);
 	});
 
+	it('capitalises the first letter of an agent name', () => {
+		render([row('a', 5.1, { agent: { id: 'a', name: 'conductor', project: { id: 'p1', name: 'CORSIA' } } })]);
+		expect(host.querySelector('tbody th')?.textContent).toBe('Conductor');
+	});
+
 	it('shows a dash for minutes the server did not serve', () => {
 		render([row('a', 5.1, { active_minutes: null })]);
 		expect(host.querySelectorAll('tbody tr:first-child td')[1].textContent).toContain('–');

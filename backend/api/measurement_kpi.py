@@ -30,6 +30,11 @@ _TOKEN_SQL = f"""
 """
 
 
+# The stored UTC instant the token total counts as fully recorded from. A window that begins earlier was only
+# partly recorded, so a change against it reads new, never a percentage over a partial base.
+TOKENS_RECORDED_FROM = "2026-09-07"
+
+
 def _token_figure(row: dict[str, Any] | None, name: str) -> dict[str, int]:
     """One token figure: the sum of what was recorded, and how many calls recorded none of it."""
     if row is None:
@@ -44,6 +49,7 @@ def build_kpi(db, current: Period, previous: Period) -> dict[str, Any]:
     return {
         name: {
             "start": period.start, "end": period.end,
+            "tokens_recorded": period.start >= TOKENS_RECORDED_FROM,
             "tokens": {key: _token_figure(tokens.get(name), key) for key, _, _ in TOKEN_FIGURE_SQL},
         }
         for name, period in (("current", current), ("previous", previous))

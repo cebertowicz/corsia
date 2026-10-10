@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { agentLabel } from '$lib/stores/measurementAgentLabel';
 	import {
 		loadMeasurementAgents,
 		type AgentsMetric,
@@ -131,7 +132,7 @@
 					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 					<tr class:thin onclick={() => filterMeasurementAgent(row.agent.id, row.agent.project.id)}>
 						<th scope="row">
-							<button class="filter name" aria-label={`Filter to this agent: ${row.agent.name}`}>{row.agent.name}</button>
+							<button class="filter name" aria-label={`Filter to this agent: ${agentLabel(row.agent.name)}`}>{agentLabel(row.agent.name)}</button>
 							{#if thin}<span class="sr-only">Too few outcomes to rank</span>{/if}
 						</th>
 						<td class="n">{formatMeasurementValue(row.n, 'count')}</td>

@@ -5,8 +5,9 @@ remainder row's membership, its counts and its cost class follow one rule set
 instead of one per surface. Each section states its own membership in the
 remainder's label, and no two share the bare word "Other":
 
-* the Models table keeps models with at least ``MIN_TASKS`` accepted tasks and
-  puts the rest in "Other models (under N tasks)";
+* the Models table keeps models that spent something or have at least ``MIN_TASKS``
+  accepted tasks, ranks them by priced spend, shows the top ``MODEL_ROWS`` and puts
+  the rest in "Other (N more models)";
 * token share and Spend keep their top ``SHOWN`` by their own measure and put
   the rest in "N more models".
 
@@ -24,6 +25,8 @@ from typing import Any
 #: Accepted tasks a model needs in the latest period for its own table row (and in
 #: the previous period for a change); the rest share the floor group.
 MIN_TASKS = 14
+#: Named rows the Models table shows before its "Other (N more models)" row.
+MODEL_ROWS = 6
 #: Named rows a ranked section (token share, Spend) shows before "N more models".
 SHOWN = 7
 #: The cost outcome of a call on a model with no list price (a local model).
@@ -53,9 +56,9 @@ def includes_local(outcomes: Iterable[str]) -> bool:
     return LOCAL in seen and seen != {LOCAL}
 
 
-def floor_label(minimum: int = MIN_TASKS) -> str:
-    """The Models table's remainder: models under the minimum-tasks floor."""
-    return f"Other models (under {minimum} tasks)"
+def other_label(count: int) -> str:
+    """The Models table's remainder: the models past its named rows, counted."""
+    return f"Other ({rest_label(count)})"
 
 
 def rest_label(count: int) -> str:
@@ -119,18 +122,17 @@ class ModelTally:
         self.failed += other.failed
 
 
-def split_by_floor(
-    tallies: Mapping[str, ModelTally], minimum: int = MIN_TASKS,
-) -> tuple[list[str], ModelTally | None]:
-    """Keys that hold their own table row, and the floor group of the rest (None if empty)."""
-    kept = [key for key, tally in tallies.items() if len(tally.latest.tasks) >= minimum]
-    rest = [tally for key, tally in tallies.items() if len(tally.latest.tasks) < minimum]
-    if not rest:
-        return kept, None
-    group = ModelTally()
-    for tally in rest:
-        group.merge(tally)
-    return kept, group
+def split_by_spend(
+    tallies: Mapping[str, ModelTally], minimum: int = MIN_TASKS, shown: int = MODEL_ROWS,
+) -> tuple[list[str], list[str]]:
+    """Keys that hold their own table row, and the keys of the models pooled into "Other".
+
+    A model is listed when it spent something in the latest window or has ``minimum`` accepted
+    tasks; the listed models rank by priced spend, then tasks, and the first ``shown`` keep a row.
+    """
+    listed = [key for key, tally in tallies.items() if tally.latest.dollars > 0 or len(tally.latest.tasks) >= minimum]
+    listed.sort(key=lambda key: (-tallies[key].latest.dollars, -len(tallies[key].latest.tasks), key))
+    return listed[:shown], listed[shown:]
 
 
 def _split_ranked(rows: list[dict[str, Any]], shown: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

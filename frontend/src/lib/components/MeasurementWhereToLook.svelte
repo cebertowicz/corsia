@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { agentLabel } from '$lib/stores/measurementAgentLabel';
 	import type { Snippet } from 'svelte';
 	import {
 		formatChange,
@@ -10,10 +11,12 @@
 
 	let { state, onRetry, children }: { state: WhereToLookState; onRetry: () => void; children?: Snippet } = $props();
 
-	const lists: { id: 'worse' | 'improved'; title: string; empty: string }[] = [
-		{ id: 'worse', title: 'Largest changes for the worse', empty: 'Nothing moved the wrong way by 10% or more with enough outcomes in both periods.' },
-		{ id: 'improved', title: 'Improved', empty: 'Nothing improved by 10% or more with enough outcomes in both periods.' },
-	];
+	const latestName = $derived(state.period ? periodName(state.period.latest) : 'the latest period');
+	const previousName = $derived(state.period ? periodName(state.period.previous) : 'the previous period');
+	const lists = $derived<{ id: 'worse' | 'improved'; title: string; empty: string }[]>([
+		{ id: 'worse', title: 'Largest changes for the worse', empty: `Nothing got worse by 10% or more with at least 20 outcomes (or turns, or tasks) in both ${latestName} and ${previousName}.` },
+		{ id: 'improved', title: 'Improved', empty: `Nothing improved by 10% or more with at least 20 outcomes (or turns, or tasks) in both ${latestName} and ${previousName}.` },
+	]);
 	function rows(id: 'worse' | 'improved'): WhereToLookRow[] { return state[id]; }
 </script>
 
@@ -41,7 +44,7 @@
 						{#each rows(list.id) as row (`${row.subject.id}:${row.measure}`)}
 							<tr>
 								<!-- On a phone the measure column is hidden and the measure sits under the subject, in this cell. -->
-								<td class="subj"><b>{row.subject.name}</b>{#if row.subject.kind === 'agent'}<span class="kind">Agent</span>{/if}<div class="stacked">{row.label}<div class="act">{row.action}</div></div></td>
+								<td class="subj"><b>{row.subject.kind === 'agent' ? agentLabel(row.subject.name) : row.subject.name}</b>{#if row.subject.kind === 'agent'}<span class="kind">Agent</span>{/if}<div class="stacked">{row.label}<div class="act">{row.action}</div></div></td>
 								<td class="measure">{row.label}<div class="act">{row.action}</div></td>
 								<td class="n"><span class="v">{formatWhereToLookValue(row.previous, row.format)}</span> to <span class="v">{formatWhereToLookValue(row.latest, row.format)}</span></td>
 								<td class="n">{formatChange(row.change)}</td>

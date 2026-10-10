@@ -109,6 +109,12 @@ describe('MeasurementKpiRow', () => {
 		expect(tile('tokens')).toContain('Sep 28 to Oct 4, new');
 	});
 
+	it('reads new on the tokens tile when the previous window began before tokens were fully recorded, never a percentage over a partial base', async () => {
+		await render(state({ current: period(), previous: { ...before, tokens_recorded: false } }));
+		expect(tile('tokens')).toContain('Sep 28 to Oct 4, new vs Sep 21 to Sep 27');
+		expect(tile('tokens')).not.toContain('%');
+	});
+
 	it('reads new on the size tile when the instrument began inside the previous window, as its section headline does', async () => {
 		const size = 'estimated_human_hours_per_active_hour';
 		const windows = (body.windows as Record<string, SeriesWindows>)[size];

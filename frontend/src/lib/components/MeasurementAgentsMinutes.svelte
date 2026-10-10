@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { agentLabel } from '$lib/stores/measurementAgentLabel';
 	import type { AgentsState } from '$lib/stores/measurementAgents';
 	import { formatMeasurementValue } from '$lib/stores/measurement';
 	import { periodName } from '$lib/stores/measurementPeriod';
@@ -39,7 +40,7 @@
 		<tbody>
 			{#each top as { row, minutesPerOutcome } (row.agent.id)}
 				<tr>
-					<th scope="row">{row.agent.name}</th>
+					<th scope="row">{agentLabel(row.agent.name)}</th>
 					<td class="n">{minutesText(minutesPerOutcome)}</td>
 					<td class="n">{#if row.active_minutes === null || row.active_minutes === undefined}<span class="unmeasured">&ndash;</span><span class="sr-only">Unmeasured</span>{:else}{minutesText(row.active_minutes)}{/if}</td>
 					<td class="n">{formatMeasurementValue(row.n, 'count')}</td>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { agentLabel } from '$lib/stores/measurementAgentLabel';
 	import { onMount } from 'svelte';
 	import MeasurementAgentsTable from './MeasurementAgentsTable.svelte';
 	import MeasurementWhereToLook from './MeasurementWhereToLook.svelte';
@@ -45,12 +46,12 @@
 	const pickerProjects = $derived($projects.map((project) => ({ id: project.id, name: project.name })));
 	const pickerAgents = $derived.by(() => {
 		const measured = $measurementAgents.rows.map((row) => ({
-			id: row.agent.id, name: row.agent.name, projectId: row.agent.project.id, projectName: row.agent.project.name,
+			id: row.agent.id, name: agentLabel(row.agent.name), projectId: row.agent.project.id, projectName: row.agent.project.name,
 		}));
 		const measuredIds = new Set(measured.map((row) => row.id));
 		const projectNames = new Map($projects.map((row) => [row.id, row.name]));
 		const navigationOnly = $threads.filter((thread) => isNavAgent(thread) && !measuredIds.has(thread.id))
-			.map((thread) => ({ id: thread.id, name: thread.title, projectId: thread.project_id ?? null, projectName: projectNames.get(thread.project_id ?? '') ?? null }));
+			.map((thread) => ({ id: thread.id, name: agentLabel(thread.title), projectId: thread.project_id ?? null, projectName: projectNames.get(thread.project_id ?? '') ?? null }));
 		return [...measured, ...navigationOnly] satisfies PickerAgent[];
 	});
 

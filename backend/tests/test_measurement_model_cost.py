@@ -40,17 +40,35 @@ def _build(tokens=(), turns=(), errors=(), costs=(), offered=frozenset(), gaps=(
                         latest=(LATEST,), previous=(PREVIOUS,), offered=set(offered), **({"gaps": gaps} if gaps else {}))
 
 
-def test_models_under_fourteen_tasks_fold_into_other_with_unknown_cost_kept():
-    costs = [_cost("big", f"b{index}") for index in range(14)]
+def _top(count: int = 6) -> list[dict]:
+    """``count`` named models that each outspend every small model below them."""
+    return [_cost(f"top{model}", f"top{model}-{index}", dollars=100.0) for model in range(count) for index in range(14)]
+
+
+def test_models_past_the_sixth_by_spend_pool_into_one_counted_other_row():
+    costs = _top() + [_cost("big", f"b{index}") for index in range(14)]
     costs += [_cost("small-a", "s1"), _cost("small-b", "s2", outcome="no_list_price", dollars=None)]
-    built = _build(turns=[{"model": "small-a", "turns": 30}, {"model": "small-b", "turns": 30}],
+    built = _build(turns=[{"model": "small-a", "turns": 60}, {"model": "small-b", "turns": 60}],
                    errors=[{"model": "small-a", "error": "socket closed"}], costs=costs, offered={"big"})
-    big, other = built["rows"]
-    assert (big["model"], big["tasks"], big["recorded_cost_per_task"], big["cost_class"]) == ("big", 14, 1.0, "priced")
-    assert other["other"] is True and other["label"] == "Other models (under 14 tasks)"
-    assert (other["tasks"], other["failed_turns_per_100"]) == (2, pytest.approx(100 / 60))
-    # Other keeps small-a's priced dollar over both tasks and stays marked partial.
-    assert (other["recorded_cost_per_task"], other["cost_class"]) == (0.5, "no_pricing")
+    labels = [row["label"] for row in built["rows"]]
+    # Six named rows by priced spend, then big (14 tasks, $14) and small-a ($1) pool; small-b spent nothing and is unlisted.
+    assert labels == [f"top{model}" for model in range(6)] + ["Other (2 more models)"]
+    other = built["rows"][-1]
+    assert other["other"] is True and other["model"] == ""
+    assert (other["tasks"], other["failed_turns_per_100"]) == (15, pytest.approx(100 / 60))
+    # Other keeps its members' priced dollars over their tasks: $14 and $1 over 15 distinct tasks.
+    assert (other["recorded_cost_per_task"], other["cost_class"]) == (pytest.approx(1.0), "priced")
+
+
+def test_a_listed_model_has_spend_or_the_task_floor_and_ranks_by_spend_then_tasks():
+    costs = [_cost("pricey", "p1", dollars=50.0)]
+    costs += [_cost("free-big", f"f{index}", outcome="not_api_priced", dollars=None) for index in range(14)]
+    costs += [_cost("cheap", f"c{index}", dollars=1.0) for index in range(3)]
+    costs += [_cost("local-small", "l1", outcome="not_api_priced", dollars=None)]
+    built = _build(tokens=[{"model": "token-only", "tokens": 10}], costs=costs)
+    # token-only and local-small neither spent nor reached 14 tasks, so only their token share names them.
+    assert [row["model"] for row in built["rows"]] == ["pricey", "cheap", "free-big"]
+    assert [row["label"] for row in built["token_shares"]] == ["token-only"]
 
 
 def test_a_few_unpriced_calls_keep_the_known_rate_and_mark_it_partial():
@@ -110,12 +128,12 @@ def test_a_local_model_has_no_list_price_in_both_cells():
 
 
 def test_a_row_with_no_tasks_this_period_names_no_cause():
-    (other,) = _build(tokens=[{"model": "token-only", "tokens": 10}])["rows"]
-    assert (other["tasks"], other["rate_reason"], other["change_reason"], other["cost_change"]) == (0, "no_tasks", "none", None)
+    costs = [_cost("spent-before", "s0", dollars=5.0, period=PREVIOUS)]
+    assert _build(tokens=[{"model": "token-only", "tokens": 10}], costs=costs)["rows"] == []
 
 
-def test_a_task_using_two_folded_models_counts_once_in_the_floor_row():
-    costs = [_cost("big", f"b{index}") for index in range(14)]
+def test_a_task_using_two_pooled_models_counts_once_in_the_other_row():
+    costs = _top()
     costs += [_cost("small-a", "shared"), _cost("small-b", "shared"), _cost("small-b", "own")]
     costs += [_cost("small-a", "was", period=PREVIOUS), _cost("small-b", "was", period=PREVIOUS)]
     other = _build(costs=costs)["rows"][-1]
@@ -123,11 +141,12 @@ def test_a_task_using_two_folded_models_counts_once_in_the_floor_row():
     assert (other["tasks"], other["recorded_cost_per_task"], other["previous_tasks"]) == (2, 1.5, 1)
 
 
-def test_priced_plus_local_floor_row_is_priced_and_leaves_local_tasks_out_of_the_rate():
-    costs = [_cost("small-a", "p1", dollars=2.0), _cost("local", "l1", outcome="not_api_priced", dollars=None)]
-    (other,) = _build(costs=costs)["rows"]
+def test_priced_plus_local_other_row_is_priced_and_leaves_local_tasks_out_of_the_rate():
+    costs = _top() + [_cost("small-a", "p1", dollars=2.0), _cost("local", "l1", outcome="not_api_priced", dollars=None)]
+    costs += [_cost("local", f"m{index}", outcome="not_api_priced", dollars=None) for index in range(13)]
+    other = _build(costs=costs)["rows"][-1]
     assert (other["cost_class"], other["includes_local"]) == ("priced", True)
-    assert (other["tasks"], other["recorded_cost_per_task"]) == (2, 2.0)
+    assert (other["tasks"], other["recorded_cost_per_task"]) == (15, 2.0)
 
 
 def test_the_minimum_tasks_floor_is_served():
@@ -368,9 +387,9 @@ def test_a_class_with_no_priced_dollars_has_no_cell():
 
 
 def test_the_floor_rows_cells_pool_its_members_tasks():
-    costs = [*_period("big", 14), *_period("a", 7, dollars=2.0), *_period("b", 7, dollars=4.0)]
-    rows = _sized(costs, {cost["task_id"]: "S" for cost in costs if not cost["task_id"].startswith("big")})
-    assert rows["big"] == []
+    costs = [*_top(), *_period("a", 7, dollars=2.0), *_period("b", 7, dollars=4.0)]
+    rows = _sized(costs, {cost["task_id"]: "S" for cost in costs if not cost["task_id"].startswith("top")})
+    assert rows["top0"] == []
     (cell,) = rows[""]
     assert (cell["size"], cell["tasks"], cell["cost_per_task"], cell["change_reason"]) == ("S", 14, 3.0, "new")
 
