@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import AssistantMessage from '$lib/components/AssistantMessage.svelte';
 import { renderMarkdown } from '$lib/markdown';
+import vectors from '../../../testdata/link-target-vectors.json';
 import * as productEvents from '$lib/product_events';
 import { installLinkTargetResolver, resolveLinkTarget, type LinkResolverDeps } from './linkTargetResolver';
 
@@ -310,5 +311,18 @@ describe('delegated rendered-markdown listener', () => {
 		anchor.dispatchEvent(click);
 		expect(click.defaultPrevented).toBe(false);
 		expect(d.openArtifact).not.toHaveBeenCalled();
+	});
+});
+
+// The server turns a message's text into reference cards with a Python port of this path
+// logic (backend/registry/path_cards.py); both suites read the same vectors.
+describe('workspace path vectors shared with the server', () => {
+	const roots = vectors.roots.map((path) => ({ ...ROOTS[0], id: path, path }));
+
+	it.each(vectors.cases)('resolves $href', async ({ href, expected }) => {
+		const d = deps({ fetchTree: vi.fn().mockResolvedValue(roots) });
+		await resolveLinkTarget(href, d);
+		if (expected === null) expect(d.fetchRevision).not.toHaveBeenCalled();
+		else expect(d.fetchRevision).toHaveBeenCalledWith(expected, 'project-1');
 	});
 });

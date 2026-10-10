@@ -13,6 +13,7 @@ from functools import partial
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from api.thread_cards import hydrate_update_asks
 from infra import thread_updates
 from infra.auth import require_user
 from infra.database import get_db
@@ -29,6 +30,7 @@ def _read(thread_id: str, user_id: str, from_seq: int, divider: bool) -> dict | 
         if thread is None or thread["purged_at"] is not None:
             return None
         cards, has_more = thread_updates.read_newest_cards(db, thread_id, min_seq=from_seq)
+        hydrate_update_asks(db, cards)
         return {
             "cards": cards,
             # The fixed window omits only older cards, never a forward page.

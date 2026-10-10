@@ -1,3 +1,5 @@
+import type { MessageCard } from './messageCards';
+
 /** A plan update card: the item's title as it read when the outcome happened, and that outcome (AS17). */
 export interface UpdateCard {
 	id: number;
@@ -12,8 +14,10 @@ export interface UpdateCard {
 	node_exists: boolean;
 	/** The plan item is assigned to the user now; only then does a failure ask for them. */
 	asks_user: boolean;
-	/** The plan item is blocked, assigned to the user, in work and in a live branch: a block asks for them (B5). */
+	/** The plan item is blocked on the user now (assigned to them, or holding their ask), in work and in a live branch: a block asks for them (B5). */
 	blocked_asks_user: boolean;
+	/** The user ask this blocked update recorded, as it reads now; null when it has none or its hold is gone. */
+	ask?: MessageCard | null;
 }
 
 /** Where "Since your last visit" goes; `first_seq` is null when only cards are new. */

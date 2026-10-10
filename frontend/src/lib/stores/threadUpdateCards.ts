@@ -89,6 +89,8 @@ export function watchUpdateCardNudges(): void {
 	on('plans_changed', (message: PlansChangedMessage) => {
 		reload(message.plans.filter((change) => change.owner.kind === 'thread').map((change) => change.owner.id));
 	});
+	// An ask card's title is the artifact's, so a rename or retirement re-reads every loaded thread's cards.
+	on('artifacts_changed', () => reload(Object.keys(get(threadUpdateCards))));
 	on('thread_updates_changed', (message: { thread_ids?: unknown }) => {
 		const named = Array.isArray(message?.thread_ids) ? message.thread_ids : [];
 		reload(named.filter((id): id is string => typeof id === 'string'));
