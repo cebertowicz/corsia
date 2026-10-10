@@ -130,7 +130,7 @@ def test_registration_observer_receives_the_stored_flag(native, monkeypatch, res
 
     seen: list[bool] = []
 
-    def activity(_thread, _name, _args, _text, is_error, _db):
+    def activity(_thread, _name, _args, _text, is_error, _db, *, call_id=None):
         seen.append(is_error)
         return None
 

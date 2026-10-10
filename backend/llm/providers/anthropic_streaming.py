@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import json_repair
 
 from llm.base_streaming import _notify_response_started
-from llm.tool_input_stream import abandon_tool_input, send_tool_input
+from llm.tool_input_stream import abandoning_unreturned, send_tool_input
 from llm.stream_idle import ProviderStreamStalled, ProviderStreamTruncated, await_with_idle_bound, bounded_stream, cut_off_response, output_reached_turn
 from llm.providers.anthropic_translation import (
     _annotate_usage,
@@ -36,18 +36,14 @@ async def _streaming_completion(
     cut off, or will be retried) is abandoned here, the one place that knows.
     """
     tool_calls_by_index: dict[int, dict[str, Any]] = {}
-    try:
-        response = await _stream_attempt(
+    return await abandoning_unreturned(
+        _stream_attempt(
             client, create_kwargs, tool_calls_by_index, model=model,
             on_reasoning_chunk=on_reasoning_chunk, on_content_chunk=on_content_chunk,
             on_tool_call_chunk=on_tool_call_chunk, on_response_started=on_response_started,
-        )
-    except Exception:
-        abandon_tool_input(call["id"] for call in tool_calls_by_index.values())
-        raise
-    returned = {call.id for call in response.tool_calls}
-    abandon_tool_input(call["id"] for call in tool_calls_by_index.values() if call["id"] not in returned)
-    return response
+        ),
+        lambda: [call["id"] for call in tool_calls_by_index.values()],
+    )
 
 
 async def _stream_attempt(

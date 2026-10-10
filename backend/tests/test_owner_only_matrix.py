@@ -30,6 +30,7 @@ from tests.test_owner_only_edit import (
 )
 from tests.test_shared_document_ownership import (
     _event_types,
+    _shell_write,
     ownership_scope as ownership_scope,  # noqa: F401 - the fixture
 )
 
@@ -177,7 +178,7 @@ def test_a_shell_edit_is_decided_like_every_other_write(helpers, actor):
     scope = helpers
     path, artifact_id = _shared_doc(scope)
     started = time.time_ns()
-    path.write_text("shell edit\n", encoding="utf-8")
+    _shell_write(path, "shell edit\n", started)
     notices = detect_shell_shared_writes(
         scope[actor], "project-alpha", "printf x > shared/documents/owned.md", started, scope["root"],
     )

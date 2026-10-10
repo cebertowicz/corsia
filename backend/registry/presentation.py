@@ -4,7 +4,7 @@ Resolves a stable label/icon/capability descriptor by ``(integration, type)``
 for the pane and Artifact Leaf. This is new internal infra — deliberately not
 ``tools/catalog.py``, which resolves harness-tool schemas, not artifact
 presentation. Core ships handlers for the types this backend actually
-produces (workspace document/code/skill, upload, GitHub pull request); any
+produces (workspace document/code/image/skill, upload, GitHub pull request); any
 other type falls back to an honest unsupported descriptor rather than a
 silently-broken row. A connector contributes a new descriptor by registering
 one here, never by branching pane control flow.
@@ -41,6 +41,9 @@ _DESCRIPTORS: dict[tuple[str, str], PresentationDescriptor] = {
     ),
     ("workspace", "code"): PresentationDescriptor(
         label="Code", icon="file-code", capability=CAPABILITY_LEAF_PACKAGE,
+    ),
+    ("workspace", "image"): PresentationDescriptor(
+        label="Image", icon="image", capability=CAPABILITY_LEAF_PACKAGE,
     ),
     ("workspace", "skill"): PresentationDescriptor(
         label="Skill", icon="sparkles", capability=CAPABILITY_LEAF_PACKAGE,

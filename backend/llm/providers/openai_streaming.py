@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import json_repair
 from openai import AsyncOpenAI
 from llm.base_streaming import _notify_response_started
 from llm.stream_idle import ProviderStreamStalled, ProviderStreamTruncated, await_with_idle_bound, bounded_stream, cut_off_response, output_reached_turn
+from llm.tool_input_stream import abandoning_unreturned, forward_tool_input, forwarded_ids
+
+if TYPE_CHECKING:
+    from llm.router import LLMResponse
 
 
 _OUTPUT_EVENTS = frozenset({
@@ -38,7 +42,23 @@ async def _streaming_responses_completion(
     on_content_chunk,
     on_tool_call_chunk=None, on_response_started=None,
 ) -> "LLMResponse":
-    """Stream a Responses API call and build an ``LLMResponse``."""
+    """Stream a Responses API call and build an ``LLMResponse``.
+
+    A call whose input this attempt streamed but did not return is abandoned here, the one place that knows.
+    """
+    tool_calls_by_index: dict[int, dict[str, Any]] = {}
+    return await abandoning_unreturned(
+        _responses_attempt(client, kwargs, tool_calls_by_index, model=model, on_reasoning_chunk=on_reasoning_chunk,
+                           on_content_chunk=on_content_chunk, on_tool_call_chunk=on_tool_call_chunk,
+                           on_response_started=on_response_started),
+        lambda: forwarded_ids(tool_calls_by_index),
+    )
+
+
+async def _responses_attempt(
+    client: AsyncOpenAI, kwargs: dict[str, Any], tool_calls_by_index: dict[int, dict[str, Any]], *,
+    model: str, on_reasoning_chunk, on_content_chunk, on_tool_call_chunk, on_response_started,
+) -> "LLMResponse":
     from llm.router import LLMResponse, ToolCallRequest
 
     response_iter = await await_with_idle_bound(
@@ -48,7 +68,6 @@ async def _streaming_responses_completion(
     text_parts: list[str] = []
     reasoning_parts: list[str] = []
     reasoning_references: dict[str, None] = {}
-    tool_calls_by_index: dict[int, dict[str, Any]] = {}
     _emitted_tool_indices: set[int] = set()
     finish_reason = "stop"
     final_response: Any = None
@@ -129,11 +148,15 @@ def _track_output_item_added(
             reasoning_references.setdefault(reference, None)
     elif item_type == "function_call":
         idx = getattr(event, "output_index", 0) or 0
-        tool_calls_by_index.setdefault(idx, {
+        call = tool_calls_by_index.setdefault(idx, {
             "id": getattr(item, "call_id", "") or getattr(item, "id", "") or "",
             "name": getattr(item, "name", "") or "",
             "arguments": getattr(item, "arguments", "") or "",
+            # Only this header carries the call id the call will run under; input is streamed only once it is known.
+            "header": True,
         })
+        if call.get("header"):
+            forward_tool_input(call)
 
 
 async def _consume_tool_call_event(
@@ -160,6 +183,8 @@ async def _consume_tool_call_event(
         "arguments": "",
     })
     tc["arguments"] = tc["arguments"] + delta
+    if tc.get("header"):
+        forward_tool_input(tc)
 
     if on_tool_call_chunk and idx not in emitted_tool_indices:
         await on_tool_call_chunk(idx, tc["id"], tc["name"], tc["arguments"])

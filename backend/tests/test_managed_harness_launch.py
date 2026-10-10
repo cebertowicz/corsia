@@ -262,8 +262,17 @@ def test_cc_reviewer_uses_conversation_project_control(
     tmp_path,
     monkeypatch,
 ):
+    from reviewer.reviewer_exact_source import reader_command
+
     monkeypatch.setenv("CLAUDE_BIN", "claude")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://provider.example.test")
+    confined: list[tuple[list[str], object]] = []
+
+    def fake_confine(cmd, writable_dirs, config_state=None):
+        confined.append((writable_dirs, config_state))
+        return cmd
+
+    monkeypatch.setattr("reviewer.reviewer_backends.write_confined", fake_confine)
     mock_run.return_value = _proc(
         stdout=json.dumps({
             "type": "result",
@@ -282,6 +291,14 @@ def test_cc_reviewer_uses_conversation_project_control(
 
     cmd = mock_run.call_args.args[0]
     kwargs = mock_run.call_args.kwargs
+    reader = reader_command(git_dir, _BASE_SHA, _HEAD_SHA)
+    (writable_dirs, config_state), = confined
+    assert writable_dirs == [str(tmp_path)]
+    run_dir = Path(kwargs["cwd"])
+    assert run_dir.parent == tmp_path
+    assert run_dir.name.startswith("corsia-cc-")
+    assert config_state.run_name == run_dir.name
+    assert not run_dir.exists()
     assert cmd == [
         "claude",
         "-p",
@@ -295,16 +312,12 @@ def test_cc_reviewer_uses_conversation_project_control(
         "--tools",
         "Bash",
         "--allowedTools",
-        f"Bash(git --git-dir={git_dir} diff --no-ext-diff --no-textconv --stat "
-        f"{_BASE_SHA}...{_HEAD_SHA})",
-        f"Bash(git --git-dir={git_dir} diff --no-ext-diff --no-textconv --name-only "
-        f"{_BASE_SHA}...{_HEAD_SHA})",
-        f"Bash(git --git-dir={git_dir} diff --no-ext-diff --no-textconv --find-renames "
-        f"{_BASE_SHA}...{_HEAD_SHA} *)",
-        f"Bash(git --git-dir={git_dir} show {_HEAD_SHA}:*)",
-        f"Bash(git --git-dir={git_dir} grep -n -F -e * {_HEAD_SHA} -- *)",
-        "--add-dir",
-        git_dir,
+        f"Bash({reader} stat)",
+        f"Bash({reader} names)",
+        f"Bash({reader} diff)",
+        f"Bash({reader} diff *)",
+        f"Bash({reader} show *)",
+        f"Bash({reader} grep *)",
         "--disable-slash-commands",
         "--no-session-persistence",
         "--no-chrome",
@@ -329,6 +342,7 @@ def test_cc_reviewer_uses_conversation_project_control(
     assert kwargs["env"]["ANTHROPIC_BASE_URL"] == "https://provider.example.test"
     assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
     assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert kwargs["env"]["TMPDIR"] == str(tmp_path / "tmp")
 
 
 @patch("reviewer.reviewer_backends.subprocess.run")

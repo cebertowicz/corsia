@@ -473,6 +473,8 @@ def test_setup_moves_blocking_omlx_install_off_the_event_loop(monkeypatch):
 def test_terminal_setup_error_projects_as_a_distinct_source_state(monkeypatch):
     monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    # The host's own oMLX install must not decide the state under test.
+    monkeypatch.setattr(local_sources, "installed_omlx", lambda: "/usr/local/bin/omlx")
     failure = {
         "ok": False, "message": "oMLX failed", "next_action": "Fix oMLX, then rerun.",
     }

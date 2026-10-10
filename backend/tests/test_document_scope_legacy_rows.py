@@ -19,6 +19,7 @@ from tests.test_owner_only_edit import (
     _write_text,
     ownership_scope as ownership_scope,  # noqa: F401 - the fixture
 )
+from tests.test_shared_document_ownership import _shell_write
 
 LEGACY_ROWS = {
     "null_path": lambda workspace: None,
@@ -61,7 +62,7 @@ def test_conductor_shell_edit_and_file_tool_edit_agree_on_a_legacy_row(legacy_sc
     path, artifact_id = _shared_doc(scope, "legacy-shell.md")
     _write_text(scope, path, "conductor", content="file tool edit\n")
     started = time.time_ns()
-    path.write_text("shell edit\n", encoding="utf-8")
+    _shell_write(path, "shell edit\n", started)
     notices = detect_shell_shared_writes(
         scope["conductor"], "project-alpha", "printf x > shared/documents/legacy-shell.md",
         started, scope["root"],

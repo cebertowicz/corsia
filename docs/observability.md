@@ -174,7 +174,7 @@ All six onboarding events are backend-only lifecycle observations. They contain 
 | `update_card.earlier_updates_expanded` | The `N earlier updates` transcript disclosure expands | frontend |
 | `thread.seen_mark` | A mark-read or mark-unread request succeeds, is refused, or fails | backend |
 
-### Navigation — open timing (#2280)
+### Navigation — open timing
 
 Client-observed click-to-usable time. The server half of a slow open is already
 readable from request timing (see `request_timing_daily`); these two events carry
