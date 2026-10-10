@@ -18,10 +18,14 @@ concurrency:
 jobs:
   cache-evals:
     name: Cache evals (local oMLX, advisory)
-    runs-on: [self-hosted, macOS, ARM64, mac-studio, ci-integration]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     env:
+      # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
+      # the HOME-prefix guard (it protects a shared host's live workspace)
+      # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CORSIA_ANALYTICS_DISABLE: '1'
@@ -38,21 +42,9 @@ jobs:
           echo "CORSIA_STATE_DIR=$RUNNER_TEMP/corsia-ci-state" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
 
-      - name: Set up Python (system)
-        run: |
-          set -e
-          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
-          echo "/usr/local/bin" >> "$GITHUB_PATH"
-          PY_BIN="$(command -v python3.11 || true)"
-          if [ -z "$PY_BIN" ]; then
-            echo "::error::python3.11 not found on PATH"
-            exit 1
-          fi
-          mkdir -p "$RUNNER_TEMP/python-shim/bin"
-          ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
-          echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"
-          "$PY_BIN" --version
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Install backend deps
         run: |
