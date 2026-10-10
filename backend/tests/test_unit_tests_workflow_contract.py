@@ -55,8 +55,12 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert LINUX_RUNNER in frontend_job
     assert "self-hosted" not in workflow
     assert "hdiutil" not in workflow
-    assert "python-version: '3.11'" in backend_job
+    # Linux uses uv's managed CPython so its SQLite matches the Mac's, not the distro's.
+    assert "uv venv --python 3.11 --managed-python --seed .venv" in backend_job
+    assert "actions/setup-python" not in backend_job
+    assert "CORSIA_BACKUP_FREE_FLOOR_BYTES:" in backend_job
     assert "python-version: '3.11'" in macos_job
+    assert "brew install eugene1g/safehouse/agent-safehouse" in macos_job
     assert "PYTHONUNBUFFERED: '1'" in workflow
     assert "CORSIA_TEST_MODE: '1'" in workflow
     assert 'local isolated_root="$CI_TEST_ROOT/corsia-ci-backend/${shard}"' in workflow

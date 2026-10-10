@@ -28,6 +28,10 @@ jobs:
     timeout-minutes: ${{ inputs.live_reviewer && 30 || 15 }}
 
     env:
+      # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
+      # the HOME-prefix guard (it protects a shared host's live workspace)
+      # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CORSIA_ANALYTICS_DISABLE: '1'

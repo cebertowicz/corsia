@@ -41,6 +41,10 @@ jobs:
         run-index: ${{ fromJSON(github.event.inputs.runs || '[0]') }}
 
     env:
+      # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
+      # the HOME-prefix guard (it protects a shared host's live workspace)
+      # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
       CORSIA_E2E_MOCK: '1'
       CORSIA_E2E_MODEL: 'mock/test-model'
       CORSIA_E2E_TRIM_FIX: ${{ vars.CORSIA_E2E_TRIM_FIX || '0' }}
@@ -126,6 +130,10 @@ jobs:
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'pull_request' && github.base_ref == 'main')
     env:
+      # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
+      # the HOME-prefix guard (it protects a shared host's live workspace)
+      # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
       CORSIA_ANALYTICS_DISABLE: '1'
     steps:
       - name: Checkout

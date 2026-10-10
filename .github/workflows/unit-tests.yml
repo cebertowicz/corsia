@@ -23,6 +23,14 @@ jobs:
     # runner has four slower cores, so the cap leaves room for that hardware.
     timeout-minutes: 25
     env:
+      # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
+      # the HOME-prefix guard (it protects a shared host's live workspace)
+      # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
+      # The 10 GiB pre-migration backup reserve protects a long-lived host's
+      # disk; the in-memory test root is about 8 GB and holds only test-sized
+      # databases, so a 1 GiB reserve keeps the check without refusing them.
+      CORSIA_BACKUP_FREE_FLOOR_BYTES: '1073741824'
       CORSIA_ANALYTICS_DISABLE: '1'
       CORSIA_CONTRACT_SUITE: '1'
       CORSIA_TEST_MODE: '1'
@@ -31,13 +39,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      # uv's managed CPython bundles the same current SQLite the Mac Python
+      # does; setup-python on Ubuntu links the distro's older SQLite, whose
+      # parser and query planner differ from what CORSIA runs on.
+      - uses: astral-sh/setup-uv@v6
 
       - name: Install deps
         run: |
-          python -m venv .venv
+          uv venv --python 3.11 --managed-python --seed .venv
+          .venv/bin/python -c 'import sqlite3, sys; print(sys.version.split()[0], "SQLite", sqlite3.sqlite_version)'
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install -r backend/requirements.txt
           .venv/bin/pip install -r backend/requirements-test.txt
@@ -246,6 +256,10 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 15
     env:
+      # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
+      # the HOME-prefix guard (it protects a shared host's live workspace)
+      # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
       CORSIA_ANALYTICS_DISABLE: '1'
       CORSIA_CONTRACT_SUITE: '1'
       CORSIA_TEST_MODE: '1'
@@ -257,6 +271,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      # The jailed-export cases require the real Safehouse sandbox.
+      - name: Install Safehouse
+        run: |
+          brew install eugene1g/safehouse/agent-safehouse
+          safehouse --version
 
       - name: Install deps
         run: |
