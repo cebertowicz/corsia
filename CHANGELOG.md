@@ -3,6 +3,103 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
+## v2026.10.09 — A guided start, live documents, and a measured view
+
+### Upgrading
+
+- The default port moves from 3000 to 1956. An existing install keeps its service on port 3000 until you move it: run `BACKEND_PORT=3000 corsia service stop`, then `BACKEND_PORT=3000 corsia service uninstall`, then `corsia service install` and `corsia service start`, or follow the commands the refusal prints. To keep the old port, set `BACKEND_PORT=3000` in `~/.corsia/.env`. Bookmarks and port forwarding pointed at 3000 need the new port.
+- Web search now reads its key from Settings > Keys first.
+
+### Getting Started and Contributing
+
+- First run offers four clear setup paths, including importing existing tool connections and setting up a local starter model; it reports a setup that is still running or has stopped, gives a readable failure reason, and offers a safe retry path.
+- Installation no longer downloads optional assistant tools you did not choose, avoiding a setup that can appear to hang.
+- The first-run screen shows one card per model source — Claude, ChatGPT, a local model, or another provider — each naming its account with a Connect action and a Choose model action, in a fixed order.
+- Installation finishes before CORSIA opens: when a local model is needed it installs and its starter model downloads with visible progress, and the assistant is warmed meanwhile so your first reply starts faster.
+- When this computer cannot run the local model, the install tells you how to get a model instead of asking you to run it again, and setup offers a local model sized to this machine's memory, with other sizes available through `corsia local setup --profile <id>`.
+- Setup leaves a local model server you installed yourself untouched, finds it on the port its own settings name, signs in with the administrator key it already holds, and repairs one that CORSIA installed when it goes out of date or stops working.
+- Setup runs as a short list of tasks in a sensible order — providers, configuration checks, web search, GitHub, remote access — asks you a small number of decisions in the conversation, including who reviews document requests, and ends with a single handoff to an agent or a project.
+- A setup decision can be a pick-any question: tick any subset of the options, optionally add a note, and answer once. When both optional extras apply, they are offered together as one checklist instead of two separate questions.
+- A fresh install ends with the GitHub command-line tool and a supported browser ready, already knows your email when it creates your account, and gives real in-app links for the settings it asks you to open.
+- You can install a provider's command-line tool from within Sources: it shows progress and then continues straight into signing in.
+- When setting up an assistant needs a Google sign-in, CORSIA hands you the browser and posts one message asking you to finish it, instead of failing the setup.
+- A new install shows its setup tasks before the first conversation, and a project you create during setup appears in the project switcher right away.
+- Settings gains a Keys section holding keys that agents can use but can never read.
+
+### Chat and Interface
+
+- Activity shows only current work, separates waiting and paused work from work in progress, opens a requested decision in its own conversation, and stays clear on a phone.
+- Decision answers appear as soon as they are recorded, and skipping an attention item moves focus to the next item.
+- A decision raised by the conversation you are looking at opens on its own as soon as you are not typing.
+- You can answer a raised decision even while the work it belongs to is set aside.
+- A decision's panel now covers the whole app, including while a document is open.
+- Updates sent from background work reliably reach you instead of being silently dropped, and each one shows the model that actually produced it.
+- Focus opens faster, keeps each item's work summary stable, improves text contrast, and keeps routine completion notices quiet — a routine completion no longer raises a badge.
+- Focus groups each stretch of work into a single block that only breaks where something needs you, and a failed item you do not own reads as a quiet row rather than a card.
+- The command palette filters down to what you typed, keeps keyboard selection on the visible rows, and no longer lists a separate conductors group.
+- The conductor row in the navigation rail shows its most recent update.
+- A turn that ends badly no longer strands the input you queued behind it.
+- Work scheduled well ahead is gathered into one collapsible Scheduled row per level, and a task shows the total cost of everything beneath it.
+- The artifact pane no longer carries an attention item you could neither answer nor dismiss.
+- On a phone, a first-run screen that arrives late no longer closes a menu you had opened.
+- The navigation drawer opens normally after an interrupted swipe.
+
+### Documents and Artifacts
+
+- Open documents now edit live: people and agents can work in the same document at the same time and see each other's changes as they happen, with comments arriving live.
+- Agents visibly type their edits in the document at their own named, colored caret while they are still composing them.
+- Suggested edits now show in the document itself, not only on their cards.
+- Asking for a review is a compact picker where you can choose several reviewers at once, leading with their names and keeping its actions in view; the document header is redesigned to match.
+- Only a document's owner, you, and the conductor of the space holding it can edit an owned document; everyone else reads it.
+- Commenting is steadier: a comment is no longer rejected just because someone else typed at the same moment, your selection stays highlighted while you write the comment on it, a comment that fails to post says what went wrong, and each agent's comments arrive in order and appear when they are meant to.
+- A comment's card opens beside the text it belongs to, stays inside the canvas, never covers that text, and follows it while you scroll; the Comment button on a selection stays inside the document column, including on a phone.
+- The document canvas can ask an agent to review the open document: the request follows the task it came from, a reviewer's decision reaches whoever suggested the edit, and a reply that is still waiting is tracked per comment thread.
+- Comment rules are visible and enforced: you can edit only the text of comments you wrote, and only the document's owner or a comment's author can resolve it.
+- Reading and editing a document got steadier: comment markers sit in a clickable margin rail, a commented line keeps its first letter, the caret lands on the line you clicked, and a second open document stays current.
+- Saving a document comment preserves your reading position and draft after a failure, then clears the error after a successful retry.
+
+### Providers and Models
+
+- Provider settings show each signed-in account, its usage, spending control, order, and enablement; a project can use those workspace settings or set its own policy.
+- Provider rows expand with a real control and keep sensible keyboard order, and the model list in Settings agrees with what the picker offers — a model you switched off stays visible there as an off control so you can switch it back on.
+- The model picker shows model versions and full names when space permits, keeps a model available when another signed-in account can run it, presents each account's usable state, and remains usable on phones and desktops.
+- Several signed-in accounts for one vendor collapse under a single vendor header showing the account in use and its usage, the same way for every vendor, with vendor names kept on one line; the local fallback keeps its own header with setup status and a retry.
+- Choosing another vendor's signed-in account now binds it instead of refusing it, and the receipt that a move happened appears only once the switch actually takes effect.
+- A model switch survives a refresh that only touches that model's own details, and a switch that cannot get ready fails visibly with the reason and offers to continue instead of hanging.
+- A model whose tool reports no context window still appears in the picker once you save one in its details.
+- When an account cannot run a model, held input explains why and can continue on another usable account; an account chosen during a response applies to the next response; and when a vendor refuses a request for hitting a limit, the work continues on another usable account rather than stopping.
+- An expired sign-in for a connected account is recognised as signed out and shows how to get back in, rather than failing with a generic error.
+- A cloud provider you switched off reads as off everywhere — indicator, label and switch all agree.
+- A local model server protected by its own key works for inference and status checks, and recommended local performance settings are applied only after you approve the specific change being made.
+
+### Context and Memory
+
+- The context sheet keeps its grouping while work is running, makes its reading and freshness state easier to understand, and avoids repeated refreshes while it is open.
+- Resuming a conversation keeps the right account context and uses a measured context reading instead of overstating usage.
+- The context estimate now counts only what you have put into the conversation and shows its marker inline before the percentage, instead of reserving space for the reply.
+
+### Measurement and Workflow Evidence
+
+- Measurement shows comparable weekly trends, clear gaps and definitions, accessible chart data, and responsive spending and learning views.
+- Measurement also reports estimated delivered hours with coverage, provenance, and clear reasons when a rate is unavailable.
+- The page now has one Days or Weeks control that switches every panel at once, opens with a reviewed layout, and names the scope you are looking at rather than the last conversation you had open.
+- A new Total tokens section gives a headline figure that includes this week so far, a new Cost section opens on API-equivalent dollars and can switch to what you actually paid, and a new Limits section shows how often model limits were hit and how long you waited.
+- The models view is now one row per model, showing what an accepted task cost on that model and how often turns failed for it, with cost counting the whole chain of attempts beneath a task; and you can record what a subscription costs per account, including a monthly price and charge day, to see real spending and overage.
+- The leverage figure says what it is made of, shows whether it moved up, down or stayed the same against the previous comparable week, and engagement is reported as minutes per accepted outcome.
+- Every chart is easier to read against the others: weekly charts share one axis, bars and trend points carry their values, the alignment chart is back as three stacked shares of answered decisions, and each section says what it shows instead of listing caveats.
+- Measurement now shows recorded activity from your first hour, instead of waiting for a full week or an accepted task, and it lists which sources are missing or partial, how much coverage they have, and what would fix them.
+- Figures are more truthful: a task that was sent back and redone no longer counts as accepted on the first attempt, and usage that ran on a vendor's own cloud endpoint is priced at that vendor's published rate.
+- The learning section no longer stays stuck on loading once its data has arrived, and long names no longer make the page scroll sideways on a phone.
+
+### Agents and Automation
+
+- CORSIA now announces changes to its own instructions and checks once a day for signed bulletins, with a switch in Settings to turn that check off. This release ships that check inert: it reports nothing until the release carries its signing key.
+- When an agent's browser is left waiting and the wait runs out, the page stays open for the agent to keep working with, and a captcha is handed to you rather than ending the task.
+
+### Data and Migrations
+
+- Stored data rises from schema 76 to 103 and migrates automatically at startup.
+
 ## v2026.10.01 — Plan limits hold and release work cleanly
 
 ### Providers and Models
