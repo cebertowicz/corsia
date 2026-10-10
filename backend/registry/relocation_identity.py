@@ -17,7 +17,7 @@ def target_identity(
     file-derived default ``path.name`` that registration assigns — an
     explicitly chosen title survives the move.
 
-    ``service.classify`` only knows the workspace document/code/skill types,
+    ``service.classify`` only knows the workspace document/code/image/skill types,
     so this is meaningful only for ``workspace`` identities; callers reject
     every other integration before reaching here.
     """

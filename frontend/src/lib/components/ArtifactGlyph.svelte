@@ -7,6 +7,7 @@
 	const ICON_COLOR: Record<string, string> = {
 		'file-text': 'var(--violet-2, var(--violet))',
 		'file-code': 'var(--amber)',
+		image: 'var(--sky)',
 		sparkles: 'var(--teal)',
 		paperclip: 'var(--green)',
 		'git-pull-request': 'var(--sky)'
@@ -19,6 +20,8 @@
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
 	{:else if icon === 'file-code'}
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m8 6-5 6 5 6M16 6l5 6-5 6" /></svg>
+	{:else if icon === 'image'}
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="m21 16-5-5-8 9" /></svg>
 	{:else if icon === 'sparkles'}
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.8L18.5 9l-4.8 1.7L12 15.5l-1.7-4.8L5.5 9l4.8-1.7L12 3z" /><path d="M19 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" /></svg>
 	{:else if icon === 'paperclip'}

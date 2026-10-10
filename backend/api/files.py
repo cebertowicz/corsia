@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from api.files_roots import (
@@ -68,11 +69,26 @@ async def tree(token: str, project_id: str | None = None):
 
 
 @router.get("/content")
-async def content(token: str, path: str, project_id: str | None = None, thread_id: str | None = None):
-    """One file's text. With ``session_id``, registers the open to that thread."""
+async def content(token: str, path: str, project_id: str | None = None, thread_id: str | None = None, raw: bool = False):
+    """One file's text. With ``session_id``, registers the open to that thread.
+
+    ``raw`` serves an image file's bytes with its image Content-Type instead.
+    """
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+
+    if raw:
+        from api.files_load import read_image_file
+
+        image, media_type = await run_in_db(read_image_file, path, project_id)
+        # nosniff keeps the declared type authoritative; the sandboxed policy makes
+        # a scripted SVG inert even if someone navigates to this URL directly.
+        return FileResponse(image, media_type=media_type, headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            "Cache-Control": "private, no-cache",
+        })
 
     from api.files_load import read_document
 

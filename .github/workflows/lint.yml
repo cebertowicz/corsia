@@ -17,9 +17,7 @@ concurrency:
 jobs:
   ruff:
     name: ruff (advisory)
-    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
-    # job to a hosted runner needs the repository owner's explicit approval.
-    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     # Advisory: findings are visible in the job log but the check conclusion is
     # always success so the reviewer gate is never blocked by a lint issue.
@@ -27,7 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/mac-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Install ruff
         run: |
@@ -40,9 +40,7 @@ jobs:
 
   mypy:
     name: mypy (regression gate)
-    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
-    # job to a hosted runner needs the repository owner's explicit approval.
-    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # The pre-existing backlog is tolerated via per-target error limits in
     # quality/mypy-error-limits.json; the job fails only when a target
@@ -54,7 +52,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/mac-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Install deps + mypy
         run: |

@@ -199,8 +199,9 @@ async def test_new_daemon_start_may_read_older_than_it_is(synthetic_browser, mon
     child = fake.spawn(runtime.record.session)
     await asyncio.to_thread(child.stdout.readline)
     runtime.attempt = sessions.CommandResult(0, '', '')
-    measured = identity.process_create_time
-    monkeypatch.setattr(identity, 'process_create_time', lambda process: measured(process) - lag)
+    # Anchor to the attempt start: a Linux reading is already quantized, so
+    # subtracting from it would stack the real lag on top of the simulated one.
+    monkeypatch.setattr(identity, 'process_create_time', lambda process: runtime.attempt_started_at - lag)
     if stale:
         with pytest.raises(sessions.BrowserSessionCleanupError, match='stale'):
             await fake.owner._observe(runtime)

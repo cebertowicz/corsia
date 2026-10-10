@@ -22,9 +22,7 @@ permissions:
 jobs:
   antipatterns:
     name: Anti-pattern detector (error-severity, blocking)
-    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
-    # job to a hosted runner needs the repository owner's explicit approval.
-    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       CORSIA_ANALYTICS_DISABLE: '1'
@@ -38,7 +36,9 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/mac-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Run full error-severity antipattern gate (whole repo, blocking)
         run: |
