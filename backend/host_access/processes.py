@@ -22,7 +22,6 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 
 import psutil
 from host_access.group_probe import live_group_members_after_eperm
-from host_access.spawn_stage import stage
 from host_access.browser_sessions import BROWSER_NAMESPACE, BrowserSessionOwner
 from host_access.managed_lifecycle import (
     DEFAULT_STALL_AFTER_SECONDS,
@@ -656,7 +655,6 @@ class ProcessOwner(ManagedLifecycleMixin):
         gate_write_fd: int | None = None
 
         async with self._owner_lock:
-            stage("lock_wait")
             await self._require_process_admission(
                 thread_id=thread_id,
                 turn_id=turn_id,
@@ -722,7 +720,6 @@ class ProcessOwner(ManagedLifecycleMixin):
                 close_fd(gate_write_fd)
                 gate_write_fd = None
                 raise
-            stage("exec")
             record = ProcessRecord(
                 handle=handle,
                 thread_id=thread_id,
