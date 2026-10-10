@@ -15,7 +15,7 @@
 	import PlanRowActions from './PlanRowActions.svelte';
 	import type { ScheduledView } from './planDisplay';
 	import { carriedByParent, rolledLive } from './planLiveStep';
-	import PlanNodeDetails from './PlanNodeDetails.svelte';
+	import PlanRowDetails from './PlanRowDetails.svelte';
 	import PlanTaskMenuHost from './PlanTaskMenuHost.svelte';
 	import { createTaskMenu } from './taskMenu.svelte';
 	import { createRowDisclosure } from './rowDisclosure.svelte';
@@ -91,6 +91,8 @@
 	// Each level's fold row reads the server's counts; its older rows are fetched when the user opens them.
 	const history = createFoldHistory({ planId: () => folded?.planId ?? '', rootParent: () => folded?.rootParent ?? null });
 	const foldView = $derived(buildFoldLevels({ nodes: shownNodes, held: hold.held, work: folded, history: history.level, maxDepth }));
+	// A row the history route fetched carries no details; opening it reads the node (`PlanHistoryDetails`).
+	const historyIds = $derived(new Set(foldView.extra.map((row) => row.id)));
 	const treeNodes = $derived(foldView.extra.length > 0 ? [...shownNodes, ...foldView.extra] : shownNodes);
 	const index = $derived(indexPlanNodes(treeNodes, { maxDepth, currentNodeIds, deepFolded: foldView.deep }));
 
@@ -237,7 +239,7 @@
 			/>
 		</div>
 		{#if detailsExpanded(node.id)}
-			<PlanNodeDetails {node} id={detailsId(node.id)} />
+			<PlanRowDetails {node} id={detailsId(node.id)} planId={folded?.planId ?? ''} fromHistory={historyIds.has(node.id)} />
 		{/if}
 		{#if node.child?.available && isChildExpanded(node.id)}
 			{@const child = childRowState(node.id)}

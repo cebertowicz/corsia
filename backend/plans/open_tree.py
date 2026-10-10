@@ -374,3 +374,24 @@ def load(
                 found[str(cursor)] = known[str(cursor)]
                 cursor = known[str(cursor)]["parent_id"]
     return OpenTree(plan=plan, listed=tuple(_order(found)), shape=_shape(found))
+
+
+def load_node(connection, plan_id: str, node_id: str) -> OpenTree:
+    """One row of a plan and its ancestors, nothing else: a read of a single node.
+
+    The row is listed whatever its state. No open work, window or sibling is loaded,
+    so the cost is the row and the plan's depth; the node's own aggregates stand for
+    the rows beneath it, as in ``load``. Raises ``errors.UnknownPlan`` for an unknown
+    plan and ``KeyError`` when the node is not an unarchived row of it.
+    """
+    plan = connection.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
+    if plan is None:
+        raise errors.UnknownPlan(f"unknown plan: {plan_id}")
+    row = connection.execute(
+        _ROWS_BY_ID_SQL.format(marks="?") + " AND plan_id=?", (node_id, plan_id),
+    ).fetchone()
+    if row is None:
+        raise KeyError(node_id)
+    found: dict[str, sqlite3.Row] = {str(row["id"]): row}
+    _fetch_missing(connection, found, [row["parent_id"]])
+    return OpenTree(plan=plan, listed=tuple(_order(found)), shape=_shape(found))

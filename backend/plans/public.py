@@ -92,6 +92,7 @@ from plans.activity_projection import (
 from plans.user_ask import cleared as ask_cleared
 from plans.node_states import blocked_user_task_sql, failure_asks_user_sql
 from plans.folded_reads import read_folded, read_path as read_folded_path
+from plans.operator_node_read import read_node as read_operator_node
 from plans.operator_chat_state import THREAD_STATE_LIMIT, read_thread_states
 from plans.operator_projection import (
     read_child as read_operator_child,

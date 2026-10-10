@@ -50,3 +50,9 @@ async def read_plan_folded(
 async def read_plan_node_path(plan_id: str, node_id: str, user: dict = Depends(require_user)):
     """Place one node: its ancestors and the folded page it sits on."""
     return await _folded_read(partial(public.read_folded_path, plan_id, node_id), user)
+
+
+@router.get("/{plan_id}/nodes/{node_id}")
+async def read_plan_node(plan_id: str, node_id: str, user: dict = Depends(require_user)):
+    """Read one node as the pane lists a row: the details a folded-history row leaves off."""
+    return await _folded_read(partial(public.read_operator_node, plan_id, node_id), user)

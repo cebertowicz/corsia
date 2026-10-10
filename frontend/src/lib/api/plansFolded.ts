@@ -5,7 +5,8 @@
  * its path. Same read boundary as the operator envelope (`planRead`).
  */
 import { readPlan, type ReadOutcome } from './planRead';
-import type { OperatorDisplay, OperatorNodeLabelKey } from './plansTypes';
+import { decodeOperatorNode } from './plansDecode';
+import type { OperatorDisplay, OperatorNode, OperatorNodeLabelKey } from './plansTypes';
 
 /**
  * One level's folded work, as the server counts it (`plans.open_folds`): the
@@ -110,4 +111,15 @@ export async function readFoldedPath(
 		bearerValue, null, decodeFoldedPath,
 	);
 	return outcome as FoldedReadOutcome<FoldedPath>;
+}
+
+/** One node in full, as the pane lists a row: the details a history row does not carry. */
+export async function readFoldedNode(
+	bearerValue: string, planId: string, nodeId: string,
+): Promise<FoldedReadOutcome<OperatorNode>> {
+	const outcome = await readPlan(
+		`/api/plans/${encodeURIComponent(planId)}/nodes/${encodeURIComponent(nodeId)}`,
+		bearerValue, null, decodeOperatorNode,
+	);
+	return outcome as FoldedReadOutcome<OperatorNode>;
 }

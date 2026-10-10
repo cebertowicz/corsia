@@ -7,7 +7,7 @@
  * failed one -- never "Unavailable" rendered from undefined, never a throw
  * inside a consumer. Every operator read passes through this (`plans.ts`).
  */
-import type { OperatorEnvelope } from './plansTypes';
+import type { OperatorEnvelope, OperatorNode } from './plansTypes';
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === 'string';
@@ -66,6 +66,11 @@ function isNode(v: unknown): boolean {
 	if (!isCommitmentCost(v.commitment_cost) || !isNodeCost(v.node_cost) || !isInitiative(v.initiative)) return false;
 	if (!isNum(v.requirements_revision) || !isEvidence(v.evidence)) return false;
 	return Array.isArray(v.user_actions) && isStrArray(v.attention_path);
+}
+
+/** One operator node (the single-node read), or null when the body is not one. */
+export function decodeOperatorNode(v: unknown): OperatorNode | null {
+	return isNode(v) ? (v as unknown as OperatorNode) : null;
 }
 
 const isFoldLevel = (v: unknown): boolean =>

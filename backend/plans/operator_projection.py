@@ -159,8 +159,11 @@ def _child_plan_ids(projected: list[rollup.PlanRollup]) -> set[str]:
 def presented_plans(
     projected: list[rollup.PlanRollup], actor: PlanActor, *, db, include_archived: bool = False,
     costs: bool = True, memo: dict | None = None, lean: bool = False,
+    detail_ids: frozenset[str] | None = None,
 ) -> list[dict]:
     """Present each visible top-level plan; ``lean`` is ``operator_node_state.project``'s.
+
+    ``detail_ids`` narrows an open-tree read's detail facts to these rows (a read of one node).
 
     A rollup over open trees (``plans.open_rollup``) is presented from the rows it
     lists: each node's facts are read for those rows alone, and each presented plan
@@ -172,7 +175,10 @@ def presented_plans(
     review_targets = _review_targets(projected, actor, db=db, open_nodes=opened)
     node_states = operator_node_state.project(
         projected, review_targets, db=db, costs=costs, memo=memo, lean=lean,
-        detail_ids=frozenset(node["id"] for item in projected for node in item.nodes) if opened else None,
+        detail_ids=(
+            detail_ids if detail_ids is not None
+            else frozenset(node["id"] for item in projected for node in item.nodes)
+        ) if opened else None,
         titles=open_tree.PlansTitles(db, [item.tree for item in projected]) if opened else None,
     )
     plans = []
