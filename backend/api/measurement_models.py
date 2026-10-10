@@ -126,6 +126,20 @@ def _row(
     }
 
 
+def _other_row(
+    rest: list[str], tallies: Mapping[str, ModelTally],
+    sizes: Mapping[str, Mapping[str, ModelTally]], first_try: Mapping[str, int],
+) -> dict[str, Any]:
+    # The other row's cells pool its members' tasks, as its own rate does.
+    pooled = ModelTally()
+    pooled_sizes: dict[str, ModelTally] = defaultdict(ModelTally)
+    for key in rest:
+        pooled.merge(tallies[key])
+        for size, tally in sizes[key].items():
+            pooled_sizes[size].merge(tally)
+    return {**_row("", other_label(len(rest)), pooled, False, pooled_sizes, first_try), "other": True}
+
+
 def build_models(
     token_rows: list[dict[str, Any]], turn_rows: list[dict[str, Any]], error_rows: list[dict[str, Any]],
     cost_rows: list[dict[str, Any]], *, resolve: Callable[[Mapping[str, Any]], ModelIdentity],
@@ -185,14 +199,7 @@ def build_models(
     kept, rest = split_by_spend(tallies)
     rows = [_row(key, identities[key].label, tallies[key], key not in offered, sizes[key], first_try) for key in kept]
     if rest:
-        # The other row's cells pool its members' tasks, as its own rate does.
-        pooled = ModelTally()
-        pooled_sizes: dict[str, ModelTally] = defaultdict(ModelTally)
-        for key in rest:
-            pooled.merge(tallies[key])
-            for size, tally in sizes[key].items():
-                pooled_sizes[size].merge(tally)
-        rows.append({**_row("", other_label(len(rest)), pooled, False, pooled_sizes, first_try), "other": True})
+        rows.append(_other_row(rest, tallies, sizes, first_try))
 
     total = sum(tokens.values())
     return {
