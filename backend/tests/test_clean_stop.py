@@ -3210,20 +3210,29 @@ async def test_stop_task_cancellation_propagates_from_cc_owner(monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_stop_task_cancellation_propagates_from_native_owner(monkeypatch) -> None:
-    """The Native branch of Stop also refuses to swallow Stop's own cancellation."""
-    from core import native_turn_control
+    """The Native branch of Stop also refuses to swallow Stop's own cancellation,
+    but only after it has still cleaned up the thread's warm task."""
+    from core import native_turn_control, thread_warm
+    from infra import state
     from ws import stop_runtime
 
     sid = "sid-native-cancel"
     identity, cancel_event = _native_handle(monkeypatch, sid)
+    warm_task = asyncio.create_task(asyncio.sleep(30))
+    state._active_warm_tasks[sid] = warm_task
+    warm_cleanups: list[asyncio.Task] = []
 
     async def _join_and_hang(*_args, **_kwargs) -> bool:
         await asyncio.Future()
         return True
 
+    async def _cancel_warm(_sid: str, *, expected_task: asyncio.Task) -> None:
+        warm_cleanups.append(expected_task)
+
     monkeypatch.setattr(
         native_turn_control, "cancel_and_join_native_turn", _join_and_hang,
     )
+    monkeypatch.setattr(thread_warm, "cancel_thread_warm", _cancel_warm)
     log = _StopLogLevels()
 
     stop = asyncio.create_task(stop_runtime.stop_runtimes(
@@ -3234,6 +3243,8 @@ async def test_stop_task_cancellation_propagates_from_native_owner(monkeypatch) 
 
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(stop, timeout=1.0)
+    assert warm_cleanups == [warm_task]
+    assert log.errors == []
 
 
 @pytest.mark.asyncio

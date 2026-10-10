@@ -70,6 +70,6 @@
     "2026-10-07: backend lowered 223 -> 221 after shutdown-owner failures were",
     "narrowed to BaseException; the pinned local mypy 2.3.0 gate reports 221."
   ],
-  "backend": 221,
+  "backend": 220,
   "tools": 4
 }
