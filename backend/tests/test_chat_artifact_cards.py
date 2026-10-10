@@ -59,14 +59,14 @@ def _node(db, title="Review the plan") -> tuple[str, str]:
     return plan.id, node.id
 
 
-def _ask(db, plan_id, node_id, artifact_id, *, turn="turn-1", calls=("inv-1", "prov-1")):
+def _ask(db, plan_id, node_id, artifact_id, *, turn="turn-1", calls=None):
     """The agent's own user ask, through the real write path with its Turn and call ids."""
     mutate(
         plan_id, "block_node",
         {"node_id": node_id, "reason_key": "needs_review", "reason": "read it",
          "owner_kind": "user", "ask_artifact_id": artifact_id,
          "expected_revision": service._node_row(db, node_id)["revision"]},
-        actor=PlanActor("owner", "user", "p", turn_id=turn, call_ids=calls),
+        actor=PlanActor("owner", "user", "p", turn_id=turn, **({"tool_invocation_id": "inv-1", "provider_call_id": "prov-1"} if calls is None else calls)),
         provenance="test.ask", mutation_id=uuid.uuid4().hex, db=db,
     )
     db.commit()
@@ -161,7 +161,7 @@ def test_a_hold_without_call_ids_binds_to_the_latest_step_of_its_turn_at_that_ti
     _message(db, 2, turn="turn-1", at="2026-10-01T10:00:05+00:00")
     _message(db, 3, turn="turn-1", at="2099-01-01T00:00:00+00:00")  # after the hold: never its step
     _message(db, 4, turn="turn-2", at="2026-10-01T10:00:06+00:00")
-    _ask(db, plan_id, node_id, ask, calls=())
+    _ask(db, plan_id, node_id, ask, calls={})
 
     page = _page(db)
 
@@ -173,7 +173,7 @@ def test_the_turn_fallback_compares_times_not_their_text_format(db):
     plan_id, node_id = _node(db)
     _message(db, 1, turn="turn-1", at="2026-10-01T10:00:05+00:00")
     _message(db, 2, turn="turn-1", at="2026-10-01T10:00:20+00:00")
-    _ask(db, plan_id, node_id, document_ask(db, "owner"), calls=())
+    _ask(db, plan_id, node_id, document_ask(db, "owner"), calls={})
     db.execute("UPDATE thread_updates SET created_at='2026-10-01 10:00:10'")
     db.commit()
 
@@ -185,7 +185,7 @@ def test_the_turn_fallback_compares_times_not_their_text_format(db):
 def test_a_hold_with_neither_call_id_nor_turn_attaches_to_no_message(db):
     plan_id, node_id = _node(db)
     _message(db, 1)
-    _ask(db, plan_id, node_id, document_ask(db, "owner"), turn=None, calls=())
+    _ask(db, plan_id, node_id, document_ask(db, "owner"), turn=None, calls={})
 
     assert "cards" not in _page(db)["m1"]
     card = thread_updates.read_newest_cards(db, "owner", min_seq=0)[0][0]
@@ -264,7 +264,7 @@ def test_an_earlier_round_keeps_its_own_state_beside_a_newer_open_round(db):
     ask = document_ask(db, "owner")
     first = _ask(db, plan_id, node_id, ask)
     clear_attention(ask, outcome="answer", db=db)
-    second = _ask(db, plan_id, node_id, ask, calls=("inv-2",))
+    second = _ask(db, plan_id, node_id, ask, calls={"tool_invocation_id": "inv-2"})
 
     cards = ask_cards(db, {first: ask, second: ask})
 
@@ -297,7 +297,7 @@ def test_an_earlier_round_stays_tucked_while_a_newer_round_is_open(db):
     ask = document_ask(db, "owner")
     _ask(db, plan_id, node_id, ask)
     clear_attention(ask, outcome="answer", db=db)
-    _ask(db, plan_id, node_id, ask, calls=("inv-2",))
+    _ask(db, plan_id, node_id, ask, calls={"tool_invocation_id": "inv-2"})
 
     assert _blocked_asks(db) == [False, True]
 
@@ -384,12 +384,34 @@ def test_the_ask_read_does_not_grow_with_older_history(db):
     assert statements() == baseline
 
 
+def test_ask_holds_reads_only_user_asks_with_where_they_were_raised_and_how_they_ended(db):
+    from plans import public
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    hold_id = _ask(db, plan_id, node_id, ask)
+    db.execute(
+        "INSERT INTO plan_node_holds (id,node_id,kind,reason_key,reason,owner_kind,provenance,created_at)"
+        " VALUES ('agent-hold',?, 'blocked','r','r','thread','test','t')",
+        (node_id,),
+    )
+    db.commit()
+
+    open_ask = public.ask_holds(db, [hold_id, "agent-hold", "missing"])
+
+    assert open_ask == {hold_id: {
+        "artifact_id": ask, "open": True, "answer": {},
+        "raised_in": {"turn_id": "turn-1", "tool_invocation_id": "inv-1", "provider_call_id": "prov-1"},
+    }}
+    assert public.ask_holds(db, []) == {}
+
+
 def test_the_ask_reads_seek_an_index_instead_of_scanning(db):
     from api import thread_cards
 
     queries = [
-        (thread_cards._ASK_UPDATES_SQL.format(upper=" AND u.after_seq < ?"), ("owner", 1, 9, 200)),
-        (thread_cards._ASK_UPDATES_SQL.format(upper=""), ("owner", 1, 200)),
+        (thread_cards.ask_updates_sql(" AND u.after_seq < ?"), ("owner", 1, 9, 200)),
+        (thread_cards.ask_updates_sql(""), ("owner", 1, 200)),
         ("SELECT id FROM messages WHERE thread_id=? AND role='assistant'"
          " AND json_extract(metadata, '$.turn_id')=? AND created_at<=? ORDER BY seq DESC LIMIT 1",
          ("owner", "turn-1", "t")),

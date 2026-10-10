@@ -37,10 +37,11 @@ class PlanActor:
     project_id: str | None
     kind: str = "thread"
     turn_id: str | None = None
-    #: The ids the running tool call is known by: CORSIA's invocation id, then the
-    #: provider's own call id when it differs. An assistant step lists its calls
-    #: by one of them, so a hold's origin can find the step that raised it.
-    call_ids: tuple[str, ...] = ()
+    #: The ids the running tool call is known by: CORSIA's invocation id and the
+    #: provider's own call id. An assistant step lists its calls by one of them,
+    #: so a hold's origin can find the step that raised it.
+    tool_invocation_id: str | None = None
+    provider_call_id: str | None = None
 
     @property
     def audit_id(self) -> str:

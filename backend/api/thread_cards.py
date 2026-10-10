@@ -36,12 +36,10 @@ from registry.path_cards import reference_cards
 _ASK_UPDATES_LIMIT = 200
 
 _ASK_UPDATES_SQL = """
-SELECT u.created_at, h.id AS hold_id, h.owner_id AS artifact_id, e.payload_json
+SELECT u.created_at, {hold_id} AS hold_id
   FROM thread_updates u
-  JOIN plan_node_events e ON e.id = u.source_id
-  JOIN plan_node_holds h ON h.id = json_extract(e.payload_json, '$.hold_id')
  WHERE u.thread_id = ? AND u.kind = 'blocked' AND u.after_seq >= ?{upper}
-   AND h.kind = 'blocked' AND h.owner_kind = 'user' AND h.owner_id IS NOT NULL
+   AND {hold_id} IS NOT NULL
  ORDER BY u.after_seq, u.id LIMIT ?"""
 
 
@@ -67,6 +65,13 @@ def _step_calls(row: dict) -> set[str]:
     return {c["id"] for c in calls if isinstance(c, dict) and isinstance(c.get("id"), str)}
 
 
+def ask_updates_sql(upper: str) -> str:
+    """The ask-update read, with ``upper`` as its optional upper sequence bound."""
+    from plans import public
+
+    return _ASK_UPDATES_SQL.format(upper=upper, hold_id=public.user_ask_hold_sql("u.source_id", "id"))
+
+
 def _page_updates(db, thread_id: str, rows: list[dict]) -> list:
     seqs = [r["seq"] for r in rows if isinstance(r.get("seq"), int)]
     if not seqs:
@@ -80,7 +85,7 @@ def _page_updates(db, thread_id: str, rows: list[dict]) -> list:
     ).fetchone()[0]
     upper = " AND u.after_seq < ?" if following is not None else ""
     args = [thread_id, min(seqs), *([following] if following is not None else []), _ASK_UPDATES_LIMIT]
-    return db.execute(_ASK_UPDATES_SQL.format(upper=upper), args).fetchall()
+    return db.execute(ask_updates_sql(upper), args).fetchall()
 
 
 def _turn_step(db, thread_id: str, turn_id: str, placed_at: str) -> str | None:
@@ -99,6 +104,8 @@ def _ask_cards_by_message(
 ) -> tuple[dict[str, list[dict]], dict[str, dict[str, list[str]]]]:
     """Ask cards by message id, and the holds that asked each artifact in each Turn, wherever the card renders."""
     assistants = [r for r in rows if r.get("role") == "assistant"]
+    from plans import public
+
     updates = _page_updates(db, thread_id, rows) if assistants else []
     if not updates:
         return {}, {}
@@ -110,8 +117,12 @@ def _ask_cards_by_message(
     turn_of = {r["id"]: _loads(r.get("metadata")).get("turn_id") for r in assistants}
     asked: dict[str, dict[str, list[str]]] = {}
     placed: list[tuple[str, str, str]] = []  # (message id, hold id, ask artifact id)
+    holds = public.ask_holds(db, [u["hold_id"] for u in updates])
     for update in updates:
-        raised_in = _loads(_loads(update["payload_json"]).get("raised_in"))
+        hold = holds.get(update["hold_id"])
+        if hold is None:
+            continue
+        raised_in = hold["raised_in"]
         ids = [raised_in[k] for k in ("tool_invocation_id", "provider_call_id") if raised_in.get(k)]
         if ids:
             message_id = next((by_call[i] for i in ids if i in by_call), None)
@@ -121,9 +132,9 @@ def _ask_cards_by_message(
             message_id = None
         turn = raised_in.get("turn_id") or turn_of.get(message_id)
         if turn:
-            asked.setdefault(turn, {}).setdefault(update["artifact_id"], []).append(update["hold_id"])
+            asked.setdefault(turn, {}).setdefault(hold["artifact_id"], []).append(update["hold_id"])
         if message_id is not None and message_id in in_page:
-            placed.append((message_id, update["hold_id"], update["artifact_id"]))
+            placed.append((message_id, update["hold_id"], hold["artifact_id"]))
     live = ask_cards(db, {hold_id: artifact_id for _, hold_id, artifact_id in placed})
     found: dict[str, list[dict]] = {}
     for message_id, hold_id, _ in placed:

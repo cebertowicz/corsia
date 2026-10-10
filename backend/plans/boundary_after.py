@@ -16,9 +16,8 @@ import plans.watch_operations as watch_operations
 
 def _raised_in(actor) -> dict[str, str]:
     """Where this call ran: its Turn and the ids its tool call is known by."""
-    ids = list(actor.call_ids)
-    found = {"turn_id": actor.turn_id, "tool_invocation_id": ids[0] if ids else None,
-             "provider_call_id": ids[1] if len(ids) > 1 else None}
+    found = {"turn_id": actor.turn_id, "tool_invocation_id": actor.tool_invocation_id,
+             "provider_call_id": actor.provider_call_id}
     return {key: value for key, value in found.items() if value}
 
 

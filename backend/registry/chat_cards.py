@@ -99,21 +99,22 @@ def card_for(
 
 
 def ask_state(
-    hold: Mapping[str, Any], payload_json: object, artifact: Mapping[str, Any] | None,
+    hold: Mapping[str, Any], artifact: Mapping[str, Any] | None,
 ) -> tuple[str, dict[str, int] | None]:
-    """The round state one hold reads as, with the feedback counts its verdict carried.
+    """The round state one ask reads as, with the feedback counts its verdict carried.
 
-    Open reads as needing review. A cleared hold reads as its verdict when the
-    review bar recorded one in the clearance event's payload. Without one it
-    reads as replaced when the artifact's attention was cleared as superseded,
-    and as answered otherwise (a round answered before verdicts were recorded).
+    ``hold`` is one ``plans.public.ask_holds`` entry. Open reads as needing
+    review. A cleared ask reads as its verdict when the review bar recorded one.
+    Without one it reads as replaced when the artifact's attention was cleared as
+    superseded, and as answered otherwise (a round answered before verdicts were
+    recorded).
     """
-    if hold["cleared_at"] is None:
+    if hold["open"]:
         return NEEDS_REVIEW, None
-    payload = _payload(payload_json)
-    verdict = payload.get("verdict")
+    answer = hold["answer"]
+    verdict = answer.get("verdict")
     if verdict in VERDICTS:
-        return verdict, _counts(payload.get("feedback_counts"))
+        return verdict, _counts(answer.get("feedback_counts"))
     attention = _payload(artifact.get("metadata")) if artifact else {}
     if attention.get("attention_state") == "cleared" and attention.get("attention_outcome") == "supersede":
         return REPLACED, None
@@ -122,33 +123,16 @@ def ask_state(
 
 def ask_cards(db, asks: Mapping[str, str]) -> dict[str, dict[str, Any]]:
     """Cards for user asks, by hold id: ``{hold_id: artifact_id}`` in, live state out."""
-    if not asks:
-        return {}
-    ids = list(asks)
-    marks = ",".join("?" * len(ids))
-    holds = {
-        row["id"]: row for row in db.execute(
-            f"SELECT id, cleared_at, clearance_event_id FROM plan_node_holds WHERE id IN ({marks})",
-            ids,
-        )
-    }
-    event_ids = [h["clearance_event_id"] for h in holds.values() if h["clearance_event_id"]]
-    events = {}
-    if event_ids:
-        event_marks = ",".join("?" * len(event_ids))
-        events = {
-            row["id"]: row["payload_json"] for row in db.execute(
-                f"SELECT id, payload_json FROM plan_node_events WHERE id IN ({event_marks})",
-                event_ids,
-            )
-        }
+    from plans import public
+
+    holds = public.ask_holds(db, asks)
     cards: dict[str, dict[str, Any]] = {}
     for hold_id, artifact_id in asks.items():
         hold = holds.get(hold_id)
         if hold is None:
             continue
         artifact = registry_models.get_artifact(artifact_id, db=db)
-        state, feedback = ask_state(hold, events.get(hold["clearance_event_id"]), artifact)
+        state, feedback = ask_state(hold, artifact)
         cards[hold_id] = card_for(
             artifact, artifact_id, kind="ask", hold_id=hold_id, state=state, feedback=feedback,
         )

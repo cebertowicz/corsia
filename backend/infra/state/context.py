@@ -62,12 +62,16 @@ def tool_invocation_context(
         _current_tool_invocation_id.reset(reset_handle)
 
 
-def running_call_ids() -> tuple[str, ...]:
-    """The ids the executing tool call is known by: CORSIA's invocation id, then the provider's."""
-    return tuple(dict.fromkeys(
-        value for value in (_current_tool_invocation_id.get(), _current_provider_call_id.get())
-        if isinstance(value, str) and value
-    ))
+def running_call_ids() -> dict[str, str]:
+    """The ids the executing tool call is known by, keyed ``tool_invocation_id`` and ``provider_call_id``.
+
+    Only the ids that are set appear, so the result spreads into a ``PlanActor``.
+    """
+    found = {
+        "tool_invocation_id": _current_tool_invocation_id.get(),
+        "provider_call_id": _current_provider_call_id.get(),
+    }
+    return {key: value for key, value in found.items() if isinstance(value, str) and value}
 
 
 _browser_thread_last_activity: dict[str, datetime] = {}

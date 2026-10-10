@@ -60,7 +60,7 @@ _OPERATIONS = [
 ]
 
 
-def _thread_actor(thread_id, actor_row, turn_identity=None, call_ids=()) -> PlanActor:
+def _thread_actor(thread_id, actor_row, turn_identity=None, call_ids=None) -> PlanActor:
     """Build one current execution actor from server-bound task context."""
 
     return PlanActor(
@@ -68,7 +68,7 @@ def _thread_actor(thread_id, actor_row, turn_identity=None, call_ids=()) -> Plan
         user_id=actor_row["user_id"],
         project_id=actor_row["project_id"],
         turn_id=getattr(turn_identity, "turn_id", None),
-        call_ids=tuple(call_ids),
+        **(call_ids or {}),
     )
 
 
@@ -199,7 +199,7 @@ class PlanEnsureTool(Tool):
 
 def _mutation_operation(
     thread_id, actor_row, turn_identity, plan_id, operation, params, mutation_id, workflows,
-    call_ids=(),
+    call_ids=None,
 ):
     """Execute one actor-bound mutation on a worker database connection."""
 
