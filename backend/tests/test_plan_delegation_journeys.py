@@ -153,10 +153,11 @@ def test_journey1_structured_childs_explicit_completion_is_refused(
     )
 
     assert "already delivers your result to the parent" in result
-    assert "review evidence" in result
     assert len(wakes(deleg_db, thread_id="parent-1")) == before_wakes
     assert tool_service.get_node(node.id, db=deleg_db).state == "active"
-    assert "final reply" in result  # #282: no step to hold evidence, the reply returns
+    # #282: no step to hold evidence; the Turn's last message is the return.
+    assert "last message this turn is the return" in result
+    assert "write nothing after it" in result
 
 
 def test_journey1_refusal_for_a_worker_with_steps_names_step_evidence(

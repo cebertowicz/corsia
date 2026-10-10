@@ -11,10 +11,12 @@ STEPS = (
     "then stop"
 )
 
+#: The harvest takes the Turn's last message as the return, so a sign-off
+#: written after the result would replace it.
 PLANLESS = (
     "Error: your plan's return already delivers your result to the "
-    "parent; nothing was sent. You have no step to put review "
-    "evidence on: end the turn with the result as your final reply, "
-    "which returns to the parent for review (register an artifact "
-    "and name it there if it is long)"
+    "parent; nothing was sent. You have no step, so your last message "
+    "this turn is the return: end the turn with the result as that "
+    "message and write nothing after it. If the result is long, "
+    "register an artifact and name it in that message"
 )
