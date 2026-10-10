@@ -55,6 +55,7 @@ export function openPlanAsk(
 		artifactId: artifact.id,
 		path: artifact.path ?? artifact.external_id,
 		title: artifact.title ?? nodeTitle,
+		...(artifact.type === 'image' ? { isImage: true } : {}),
 	});
 	paneOpen.set(false);
 }

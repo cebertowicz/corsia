@@ -10,6 +10,8 @@ from infra import config
 from infra.project_repo_policy import get_project_repo_policies
 
 MAX_TEXT_BYTES = 1_000_000
+#: Bytes read per step when a revision is computed from a file, so a probe holds one chunk, never the file.
+REVISION_CHUNK_BYTES = 1024 * 1024
 UI_THREAD = "ui"
 
 
@@ -68,3 +70,12 @@ def path_write_allowed(path: Path, bases: list[Path]) -> bool:
 def revision(raw: bytes) -> str:
     """Opaque revision derived solely from the document's current bytes."""
     return hashlib.sha256(raw).hexdigest()
+
+
+def file_revision(path: Path, chunk_bytes: int = REVISION_CHUNK_BYTES) -> str:
+    """The same revision as ``revision(path.read_bytes())``, hashed in chunks."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(chunk_bytes):
+            digest.update(chunk)
+    return digest.hexdigest()

@@ -11,7 +11,7 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_migration_registered_and_adds_the_reviewer_index(tmp_path):
-    assert SCHEMA_VERSION == 103 and MIGRATIONS[101] is migrate_101_to_102
+    assert SCHEMA_VERSION == 104 and MIGRATIONS[101] is migrate_101_to_102
     path = tmp_path / "v101.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
@@ -20,7 +20,7 @@ def test_migration_registered_and_adds_the_reviewer_index(tmp_path):
         db.commit()
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 103
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         columns = [r[2] for r in db.execute("PRAGMA index_info(idx_doc_review_requests_reviewer)")]
         assert columns == ["reviewer_thread_id", "created_at"]
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

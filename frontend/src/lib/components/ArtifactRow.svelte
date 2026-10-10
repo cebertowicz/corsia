@@ -66,7 +66,7 @@
 		if (effectiveDisabled(it)) return;
 		if (it.action.capability === 'leaf-package') {
 			if (!threadId) return;
-			openArtifactTab(threadId, { artifactId: it.id, path: it.path!, title: it.name });
+			openArtifactTab(threadId, { artifactId: it.id, path: it.path!, title: it.name, ...(it.type === 'image' ? { isImage: true } : {}) });
 			// This widget lives in the right drawer on narrow canvases; leaving it open
 			// would cover the document the tap just opened.
 			if (isPaneDrawer()) paneOpen.set(false);

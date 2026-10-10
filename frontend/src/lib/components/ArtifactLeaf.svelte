@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import DocViewer from './DocViewer.svelte';
+	import ImageViewer from './ImageViewer.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
@@ -43,12 +44,19 @@
 		};
 	}
 
-	const target = $derived<DocViewerTarget | null>(
+	// A tab opens as an image when the backend said its file is one (the artifact
+	// type, a revision probe, or a text open's typed refusal); everything else
+	// opens in the document viewer.
+	const showable = $derived<DocViewerTarget | null>(
 		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? targetForTab(activeTab) : null
 	);
+	const isImage = $derived(showable !== null && activeTab?.isImage === true);
+	const target = $derived(isImage ? null : showable);
+	const imageTarget = $derived(isImage ? showable : null);
 	const activeStale = $derived(activeTab ? isTabChanged(activeTab) : false);
 
 	let viewer = $state<DocViewer | undefined>(undefined);
+	let imageViewer = $state<ImageViewer | undefined>(undefined);
 
 	// One timing sample per artifact this leaf actually brings on screen (#2280).
 	// Keyed on the tab instance, not on re-renders, so a reactive re-run can only
@@ -163,7 +171,7 @@
 				onCollapse={collapse}
 			/>
 		{/if}
-		<div class="leaf-body" class:document-canvas={!!target}>
+		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget}>
 			{#if activeTab?.kind === 'subagent' && activeTab.threadId}
 				<SubagentConversationLeaf threadId={activeTab.threadId} {onOpenLightbox} />
 				{:else if activeTab?.kind === 'legacy-discussion' && activeTab.artifactId}
@@ -175,6 +183,14 @@
 					<span>It was deleted, moved out of this scope, or unregistered.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
+			{:else if imageTarget}
+				<ImageViewer
+					bind:this={imageViewer}
+					target={imageTarget}
+					{onSignal}
+					stale={activeStale}
+					onReload={() => imageViewer?.reload()}
+				/>
 			{:else if target}
 				<!-- DocViewer owns Escape precedence (comment draft, then selection),
 				     so handing it onClose keeps that order intact in compact. -->
@@ -227,6 +243,7 @@
 	.leaf.compact { flex: 1; border-left: none; }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
 	.leaf-body.document-canvas { overflow: hidden; container: doc-canvas / inline-size; }
+	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
 
 	.gone {
 		display: flex; flex-direction: column; align-items: flex-start; gap: 6px;

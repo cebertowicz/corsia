@@ -55,6 +55,17 @@ export function sessionRefusal(reason: LiveUnavailable | null): DocOpenRefusal {
 		: { code: 'not_live', title: UNAVAILABLE_TITLE, message: 'Text in this tab is kept. Copy it to keep working.', retryable: false };
 }
 
+/** `detail.code` of the 415 a text open answers for an image file (`backend/api/files_load.py`). */
+export const IMAGE_FILE_CODE = 'image_file';
+
+/** The backend refused to open this file as text because it is an image. */
+export class ImageFileError extends Error {
+	constructor() {
+		super('This file is an image');
+		this.name = 'ImageFileError';
+	}
+}
+
 export class DocOpenError extends Error {
 	readonly code: DocOpenRefusal['code'];
 	readonly title: string;
@@ -63,4 +74,11 @@ export class DocOpenError extends Error {
 		this.code = detail.code;
 		this.title = detail.title;
 	}
+}
+
+/** The typed error for a failed text open's `detail`, or null when it is neither a refusal nor an image. */
+export function docOpenFailure(detail: unknown): DocOpenError | ImageFileError | null {
+	const refusal = docOpenRefusal(detail);
+	if (refusal) return new DocOpenError(refusal);
+	return (detail as { code?: unknown } | undefined)?.code === IMAGE_FILE_CODE ? new ImageFileError() : null;
 }

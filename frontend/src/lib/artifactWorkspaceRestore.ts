@@ -43,6 +43,7 @@ export function restoreWorkspace(
 			loadedRevision: typeof entry.loadedRevision === 'string' ? entry.loadedRevision : null,
 			latestRevision: null,
 			status: 'loading',
+			...(entry.isImage === true ? { isImage: true } : {}),
 		});
 	}
 	if (!tabs.length) return null;

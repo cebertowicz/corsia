@@ -92,6 +92,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		if (input.artifactId && !tabs[existing].artifactId) {
 			tabs[existing] = { ...tabs[existing], artifactId: input.artifactId };
 		}
+		if (input.isImage && !tabs[existing].isImage) tabs[existing] = { ...tabs[existing], isImage: true };
 		return {
 			...ws,
 			tabs,
@@ -110,6 +111,7 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		loadedRevision: null,
 		latestRevision: null,
 		status: 'loading',
+		...(input.isImage ? { isImage: true } : {}),
 	};
 	return {
 		...ws,
@@ -179,6 +181,7 @@ function commitTab(ws: ThreadArtifactWorkspace, idx: number, next: ArtifactTab, 
 		status: next.status,
 		loadedRevision: keepIdx === idx ? next.loadedRevision : tabs[keepIdx].loadedRevision,
 		latestRevision: next.latestRevision ?? tabs[keepIdx].latestRevision,
+		...(next.isImage || tabs[keepIdx].isImage ? { isImage: true } : {}),
 	};
 	const droppedId = tabs[dropIdx].instanceId;
 	const merged = tabs.filter((_, i) => i !== dropIdx);
@@ -191,7 +194,7 @@ function commitTab(ws: ThreadArtifactWorkspace, idx: number, next: ArtifactTab, 
 }
 
 function unchanged(a: ArtifactTab, b: ArtifactTab): boolean {
-	return a.status === b.status && a.artifactId === b.artifactId && a.path === b.path && a.loadedRevision === b.loadedRevision && a.latestRevision === b.latestRevision;
+	return a.status === b.status && a.artifactId === b.artifactId && a.path === b.path && a.loadedRevision === b.loadedRevision && a.latestRevision === b.latestRevision && a.isImage === b.isImage;
 }
 
 /**
@@ -213,6 +216,7 @@ export function applyLoadSignal(ws: ThreadArtifactWorkspace, signal: TabLoadSign
 		loadedRevision: loaded ? signal.revision! : prev.loadedRevision,
 		latestRevision: loaded ? signal.revision! : prev.latestRevision,
 		artifactId: signal.artifactId ?? prev.artifactId,
+		...(signal.isImage ? { isImage: true } : {}),
 	};
 	if (unchanged(prev, next)) return null;
 	return commitTab(ws, idx, next, canMergeDuplicate);

@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from api.files_roots import scope_bases
-from doceditor.document_scope import MAX_TEXT_BYTES, path_write_allowed, revision as _revision
+from doceditor.document_scope import MAX_TEXT_BYTES, file_revision, path_write_allowed
 from infra.auth import authenticate, may_access_artifact
 from infra import config
 from infra.database import get_db
@@ -20,6 +20,7 @@ from infra.db_async import run_in_db
 from core.workspace_context_sources import is_workspace_context_path
 from registry import models as registry_models
 from registry import service as registry_service
+from registry.file_types import image_media_type
 from registry.doc_freshness import artifact_freshness
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -101,13 +102,17 @@ async def revision(
                 art = registry_service.resolve_file_identity(str(candidate), db=db)
                 resolved_artifact_id = (art or {}).get("id")
             st = candidate.stat()
-            if st.st_size > MAX_TEXT_BYTES:
+            # An image is never opened as text, so its ceiling is the image one.
+            media_type = image_media_type(candidate)
+            if media_type and st.st_size > config.MAX_IMAGE_UPLOAD_BYTES:
+                raise HTTPException(413, "Image too large to display")
+            if not media_type and st.st_size > MAX_TEXT_BYTES:
                 raise HTTPException(413, "File too large for the doc editor")
-            raw = candidate.read_bytes()
             return {
                 "exists": True,
                 "path": str(candidate),
-                "revision": _revision(raw),
+                "revision": file_revision(candidate),
+                "media_type": media_type,
                 "size": st.st_size,
                 "writable": _writable(candidate, bases, db=db),
                 "artifact_id": resolved_artifact_id,
@@ -123,7 +128,7 @@ async def revision(
 def _unavailable() -> dict:
     """Canonical response for a previously open document that is no longer usable."""
     return {
-        "exists": False, "path": None, "revision": None,
+        "exists": False, "path": None, "revision": None, "media_type": None,
         "size": None, "writable": False, "artifact_id": None,
         "artifact": None, "freshness": None,
     }

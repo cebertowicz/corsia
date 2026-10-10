@@ -57,6 +57,27 @@ describe('resolveLinkTarget', () => {
 		});
 	});
 
+	it('opens a file the backend says is an image as one, and any other file without the fact', async () => {
+		const d = deps({
+			fetchRevision: vi.fn().mockResolvedValue({
+				exists: true, path: '/workspace/shared/linked.md', revision: 'rev-1', size: 1, writable: false,
+				artifact_id: null, media_type: 'image/png',
+			}),
+		});
+		await resolveLinkTarget('shared/linked.md', d);
+		expect(d.openArtifact).toHaveBeenCalledWith('thread-1', {
+			artifactId: null, path: '/workspace/shared/linked.md', title: 'linked.md', isImage: true,
+		});
+		const plain = deps({
+			fetchRevision: vi.fn().mockResolvedValue({
+				exists: true, path: '/workspace/shared/linked.md', revision: 'rev-1', size: 1, writable: true,
+				artifact_id: null, media_type: null,
+			}),
+		});
+		await resolveLinkTarget('shared/linked.md', plain);
+		expect(vi.mocked(plain.openArtifact).mock.calls[0][1]).not.toHaveProperty('isImage');
+	});
+
 	it('preserves the resolved registered artifact identity when opening its path', async () => {
 		const d = deps({
 			fetchRevision: vi.fn().mockResolvedValue({

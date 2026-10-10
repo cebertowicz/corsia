@@ -21,6 +21,8 @@ export interface ArtifactTab {
 	/** Latest revision observed on the server; null until this session verifies it. */
 	latestRevision: string | null;
 	status: ArtifactTabStatus;
+	/** The backend said this file is an image, so the canvas shows it as one; absent on older persisted tabs. */
+	isImage?: boolean;
 }
 
 export interface ThreadArtifactWorkspace {
@@ -34,6 +36,8 @@ export interface OpenArtifactInput {
 	artifactId?: string | null;
 	path: string;
 	title: string;
+	/** Set only by a caller the backend already told (artifact type `image`, or a probe's `media_type`). */
+	isImage?: boolean;
 }
 
 export interface OpenSubagentInput {
@@ -68,6 +72,8 @@ export interface TabLoadSignal {
 	revision?: string | null;
 	/** False when the doc API would refuse a write to this path. */
 	writable?: boolean;
+	/** The backend refused a text open because the file is an image: show the tab as one. */
+	isImage?: boolean;
 }
 
 export interface RevisionCheck {

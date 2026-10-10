@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, getActiveTab, hasChangedTab, isTabChanged, openLegacyDiscussionTab, openSubagentTab, openTab, renameTab, resolveTabArtifact, restoreWorkspace, type RevisionCheck, type ThreadArtifactWorkspace } from './artifactTabs';
 
-function withTabs(...opens: { artifactId?: string | null; path: string; title: string }[]): ThreadArtifactWorkspace {
+function withTabs(...opens: { artifactId?: string | null; path: string; title: string; isImage?: boolean }[]): ThreadArtifactWorkspace {
 	return opens.reduce((ws, input) => openTab(ws, input), emptyWorkspace());
 }
 
@@ -173,6 +173,49 @@ describe('load signals apply to the tab that initiated them', () => {
 		expect(ws.tabs[0].artifactId).toBe('art-1');
 		expect(ws.tabs[0].instanceId).toBe(instanceId);
 		expect(ws.activeTabId).toBe(instanceId);
+	});
+});
+
+describe('the image fact comes from the backend', () => {
+	it('is set only when the opener was told, and a path alone never sets it', () => {
+		const ws = withTabs({ path: '/a.png', title: 'a.png' }, { path: '/b.png', title: 'b.png', isImage: true });
+		expect(ws.tabs[0].isImage).toBeUndefined();
+		expect(ws.tabs[1].isImage).toBe(true);
+	});
+
+	it('is added to an open tab by a later opener that knows, and never removed by one that does not', () => {
+		let ws = withTabs({ path: '/a.png', title: 'a.png' });
+		ws = openTab(ws, { path: '/a.png', title: 'a.png', isImage: true });
+		expect(ws.tabs).toHaveLength(1);
+		expect(ws.tabs[0].isImage).toBe(true);
+		ws = openTab(ws, { path: '/a.png', title: 'a.png' });
+		expect(ws.tabs[0].isImage).toBe(true);
+	});
+
+	it('is set by a load signal carrying the image refusal of a text open', () => {
+		let ws = withTabs({ path: '/legacy.png', title: 'legacy.png' });
+		ws = applyLoadSignal(ws, { instanceId: idOf(ws, '/legacy.png'), status: 'loading', isImage: true })!;
+		expect(ws.tabs[0].isImage).toBe(true);
+		expect(applyLoadSignal(ws, { instanceId: ws.tabs[0].instanceId, status: 'loading', isImage: true })).toBeNull();
+	});
+
+	it('survives a restore', () => {
+		const restored = restoreWorkspace({
+			tabs: [
+				{ instanceId: 'i1', artifactId: null, path: '/a.png', title: 'a', isImage: true },
+				{ instanceId: 'i2', artifactId: null, path: '/b.md', title: 'b', isImage: 'yes' },
+			],
+			activeTabId: 'i1', visible: true, activeSurface: 'artifact',
+		})!;
+		expect(restored.tabs.map((t) => t.isImage)).toEqual([true, undefined]);
+	});
+
+	it('survives folding two tabs of one artifact into one', () => {
+		let ws = withTabs({ path: '/a.png', title: 'a' }, { path: '/moved/a.png', title: 'a', isImage: true });
+		ws = applyLoadSignal(ws, { instanceId: idOf(ws, '/a.png'), status: 'ready', revision: 'r1', artifactId: 'art-1' })!;
+		ws = applyLoadSignal(ws, { instanceId: idOf(ws, '/moved/a.png'), status: 'ready', revision: 'r1', artifactId: 'art-1' })!;
+		expect(ws.tabs).toHaveLength(1);
+		expect(ws.tabs[0].isImage).toBe(true);
 	});
 });
 
