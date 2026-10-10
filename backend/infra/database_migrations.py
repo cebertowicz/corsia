@@ -159,6 +159,7 @@ from infra.migration_99_to_100_usage_rollup import migrate_99_to_100
 from infra.migration_100_to_101_billing_charge_day import migrate_100_to_101
 from infra.migration_101_to_102_reviewer_awareness import migrate_101_to_102
 from infra.migration_102_to_103_recovered_errors import migrate_102_to_103
+from infra.migration_103_to_104_review_time import migrate_103_to_104
 
 log = logging.getLogger(__name__)
 
@@ -725,6 +726,7 @@ MIGRATIONS[99] = migrate_99_to_100
 MIGRATIONS[100] = migrate_100_to_101
 MIGRATIONS[101] = migrate_101_to_102
 MIGRATIONS[102] = migrate_102_to_103
+MIGRATIONS[103] = migrate_103_to_104
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

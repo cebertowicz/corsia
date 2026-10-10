@@ -94,7 +94,7 @@ def test_migration_40_staging_copy_matches_the_live_schema_while_current() -> No
     from infra.migration_39_to_40_placement_marks import STAGING_40_DDL
     from infra.schema import SCHEMA_VERSION
 
-    if SCHEMA_VERSION == 103:
+    if SCHEMA_VERSION == 104:
         assert STAGING_40_DDL == STAGING_SCHEMA_SQL
 
 
@@ -123,15 +123,16 @@ def test_review_block_asks_the_fork_where_unmarked_lessons_go(
     monkeypatch.setattr(
         "core.placement_answer.history", lambda db, thread_id, entry: [],
     )
-    block = review_block("cp-1", "thread-1", db=db)
+    block = review_block("cp-1", "thread-1", 8_000, db=db)
     assert block is not None
     assert GUIDE in block
-    where = json.loads(block.split("Where it can go:\n", 1)[1].split("\n\nLessons:", 1)[0])
+    where = json.loads(block.split("Where it can go:\n", 1)[1].split("\n\nEntries:", 1)[0])
     assert set(where) == {"thread", "destinations"}
-    offered = json.loads(block.split("Lessons:\n", 1)[1])
-    assert [item["entry_id"] for item in offered] == [lesson]
-    assert fact not in [item["entry_id"] for item in offered]
+    offered = json.loads(block.split("Entries:\n", 1)[1])
+    assert [item["entry_id"] for item in offered] == [lesson, fact]
+    assert [item["kind"] for item in offered] == ["lesson", "work_state"]
     assert offered[0]["earlier_history"] == []
+    assert "earlier_history" not in offered[1]
 
 
 def test_review_block_skips_child_threads(tmp_path, monkeypatch) -> None:
@@ -140,7 +141,7 @@ def test_review_block_skips_child_threads(tmp_path, monkeypatch) -> None:
     _, db, _, _ = _review_setup(tmp_path, monkeypatch)
     _seed_thread(db, "parent")
     db.execute("UPDATE threads SET spawned_by='parent' WHERE id='thread-1'")
-    assert review_block("cp-1", "thread-1", db=db) is None
+    assert review_block("cp-1", "thread-1", 8_000, db=db) is None
 
 
 def test_staged_verdicts_publish_marks_only_when_the_checkpoint_installs(
@@ -172,16 +173,22 @@ def test_staged_verdicts_publish_marks_only_when_the_checkpoint_installs(
     )
     selected = continuity._run(
         "thread-1", "review",
-        {"entry_id": lesson, "verdict": "select", "placement": _raw(q1="thread")},
+        {"entry_id": lesson, "verdict": "select", "placement": _raw(q1="agent")},
         "cp-1",
     )
-    on_fact = continuity._run(
+    kept_lesson = continuity._run(
         "thread-1", "review",
-        {"entry_id": fact, "verdict": "select", "placement": _raw()}, "cp-1",
+        {"entry_id": already, "verdict": "reaffirm", "reason": "still matters"},
+        "cp-1",
+    )
+    no_reason = continuity._run(
+        "thread-1", "review", {"entry_id": fact, "verdict": "reaffirm"}, "cp-1",
     )
     stray = continuity._run(
         "thread-1", "review",
-        {"entry_id": already, "verdict": "reaffirm", "placement": _raw()}, "cp-1",
+        {"entry_id": fact, "verdict": "reaffirm", "reason": "still true",
+         "placement": _raw()},
+        "cp-1",
     )
     twice = continuity._run(
         "thread-1", "review", {"entry_id": lesson, "verdict": "reaffirm"}, "cp-1",
@@ -210,7 +217,8 @@ def test_staged_verdicts_publish_marks_only_when_the_checkpoint_installs(
     assert bare_select == "Error: verdict select requires placement"
     assert bad_answer == "Error: q1 or q2 is outside the table"
     assert selected == f"Staged entry {lesson} verdict select."
-    assert on_fact.startswith("Error: review applies to")
+    assert kept_lesson.startswith("Error: a lesson is never kept in continuity")
+    assert no_reason.startswith("Error: verdict reaffirm requires reason")
     assert stray == "Error: placement and room go only with verdict select"
     assert "already has a staged edit" in twice
     assert bare_already == "Error: verdict already requires destination and quote"
@@ -228,7 +236,7 @@ def test_staged_verdicts_publish_marks_only_when_the_checkpoint_installs(
     )
     stored = json.loads(marked["placement_detail"])
     assert stored["checkpoint"] == "checkpoint:cp-1"
-    assert stored["answer"] == {"placement": _raw(q1="thread"), "room": None}
+    assert stored["answer"] == {"placement": _raw(q1="agent"), "room": None}
     retired = _mark(db, already)
     assert (retired["state"], retired["placement_state"]) == ("retired", "already")
     assert retired["placement_detail"] == "context/X.md"
@@ -279,7 +287,7 @@ def test_select_over_the_cap_asks_the_fork_for_room_in_the_same_loop(
     asked = continuity._run("thread-1", "review", params, "cp-1")
     unasked = continuity._run(
         "thread-1", "review",
-        {**params, "placement": _raw(q1="thread"), "room": []}, "cp-1",
+        {**params, "placement": _raw(q1="everywhere"), "room": []}, "cp-1",
     )
     unusable = continuity._run(
         "thread-1", "review",

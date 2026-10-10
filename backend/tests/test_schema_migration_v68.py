@@ -30,7 +30,7 @@ def test_schema_67_upgrades_to_current_without_changing_existing_state() -> None
 
         result = migrate_to_current(db, 68)
 
-        assert SCHEMA_VERSION == 103
+        assert SCHEMA_VERSION == 104
         assert (result.migrated, result.from_version, result.to_version) == (
             True,
             67,
