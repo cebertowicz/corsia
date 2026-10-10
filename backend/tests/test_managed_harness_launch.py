@@ -266,10 +266,10 @@ def test_cc_reviewer_uses_conversation_project_control(
 
     monkeypatch.setenv("CLAUDE_BIN", "claude")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://provider.example.test")
-    confined: list[list[str]] = []
+    confined: list[tuple[list[str], object]] = []
 
-    def fake_confine(cmd, writable_dirs):
-        confined.append(writable_dirs)
+    def fake_confine(cmd, writable_dirs, config_state=None):
+        confined.append((writable_dirs, config_state))
         return cmd
 
     monkeypatch.setattr("reviewer.reviewer_backends.write_confined", fake_confine)
@@ -292,7 +292,13 @@ def test_cc_reviewer_uses_conversation_project_control(
     cmd = mock_run.call_args.args[0]
     kwargs = mock_run.call_args.kwargs
     reader = reader_command(git_dir, _BASE_SHA, _HEAD_SHA)
-    assert confined == [[str(tmp_path)]]
+    (writable_dirs, config_state), = confined
+    assert writable_dirs == [str(tmp_path)]
+    run_dir = Path(kwargs["cwd"])
+    assert run_dir.parent == tmp_path
+    assert run_dir.name.startswith("corsia-cc-")
+    assert config_state.run_name == run_dir.name
+    assert not run_dir.exists()
     assert cmd == [
         "claude",
         "-p",

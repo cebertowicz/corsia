@@ -23,8 +23,10 @@ from reviewer.failures import (
     raise_cli_failure,
 )
 from reviewer.reviewer_exact_source import (
+    claude_config_state_scope,
     claude_exact_source_controls,
     codex_exact_source_controls,
+    discard_config_state,
     write_confined,
 )
 
@@ -56,6 +58,34 @@ def _resolve_cc_binary() -> str:
     except Exception as exc:  # config lookup must never break the reviewer
         log.warning("reviewer: claude-code connection lookup failed: %s", exc)
     return "claude"
+
+
+def _run_write_confined(
+    cmd: list[str], prompt: str, working_dir: str, env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run the Claude CLI where it may write only its own scopes.
+
+    The model reads untrusted PR text: it may write only its scratch directory
+    and its own run's state folder under the account config. The run directory
+    is fresh, so that folder is named for this run alone.
+    """
+    scratch = os.path.join(working_dir, "tmp")
+    os.makedirs(scratch, exist_ok=True)
+    env["TMPDIR"] = scratch
+    with tempfile.TemporaryDirectory(prefix="corsia-cc-", dir=working_dir) as run_dir:
+        config_state = claude_config_state_scope(env, run_dir)
+        try:
+            return subprocess.run(
+                write_confined(cmd, [working_dir], config_state),
+                input=prompt,
+                capture_output=True,
+                text=True,
+                cwd=run_dir,
+                timeout=1800,  # 30 min per locked decision #16
+                env=env,
+            )
+        finally:
+            discard_config_state(config_state)
 
 
 def invoke_cc_subagent(
@@ -91,19 +121,7 @@ def invoke_cc_subagent(
     env = dict(env)
     env["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
     env.update(source_env)
-    # The model reads untrusted PR text: it may write only its scratch directory.
-    scratch = os.path.join(working_dir, "tmp")
-    os.makedirs(scratch, exist_ok=True)
-    env["TMPDIR"] = scratch
-    result = subprocess.run(
-        write_confined(cmd, [working_dir]),
-        input=prompt,
-        capture_output=True,
-        text=True,
-        cwd=working_dir,
-        timeout=1800,  # 30 min per locked decision #16
-        env=env,
-    )
+    result = _run_write_confined(cmd, prompt, working_dir, env)
 
     output = result.stdout.strip()
     stderr = result.stderr.strip()
