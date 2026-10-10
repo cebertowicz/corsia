@@ -33,6 +33,10 @@ from plans import aggregates, writer_context
 from plans.aggregates_rebuild import rebuild
 from plans.aggregates_recount import stored_mismatches
 
+# Its wrapper frames sit between a test and ``infra.db_connection``; the producer
+# attribution of a pooled cursor must skip them and name the test line.
+__producer_transparent__ = True
+
 INPUT_COLUMNS = frozenset(
     {"state", "archived_at", "spawned_thread_id", "parent_id", "plan_id", "sent_back"}
 )
