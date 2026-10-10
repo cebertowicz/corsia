@@ -260,10 +260,6 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 15
     env:
-      # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
-      # the HOME-prefix guard (it protects a shared host's live workspace)
-      # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
-      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
       CORSIA_ANALYTICS_DISABLE: '1'
       CORSIA_CONTRACT_SUITE: '1'
       CORSIA_TEST_MODE: '1'
@@ -292,7 +288,11 @@ jobs:
           set -euo pipefail
           files=()
           while IFS= read -r path; do files+=("$path"); done < <(grep -v '^[[:space:]]*#' backend/tests/macos_only_tests.txt | grep -v '^[[:space:]]*$')
-          isolated_root="$RUNNER_TEMP/corsia-ci-backend/macos"
+          # Safehouse denies HOME, where RUNNER_TEMP sits, so sandboxed git
+          # tests cannot resolve a path there; use the user temp directory.
+          tmp_parent="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"
+          tmp_parent="$(cd "$tmp_parent" && pwd -P)"
+          isolated_root="$tmp_parent/corsia-ci-backend/macos"
           export CORSIA_WORKSPACE="$isolated_root/workspace"
           export CORSIA_STATE_DIR="$isolated_root/state"
           mkdir -p "$CORSIA_WORKSPACE/.corsia" "$CORSIA_STATE_DIR"
