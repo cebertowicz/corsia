@@ -1,10 +1,11 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { CLAIM_GRACE_MS } from '$lib/stores/livePreviewFeed';
 import {
 	beginSelect, endSelect, userTouchedAny, userTouchedSelect, type SelectOutcome, type Selecting,
 } from './typed-reveal-select';
 import { adoptPreviewSelect } from './typed-reveal-claims';
-import { endPreview } from './typed-reveal-preview';
+import { endPreview, previewSlot } from './typed-reveal-preview';
 import { typedReveals, typedRevealOptions } from './typed-reveal-state';
 
 export type { SelectOutcome } from './typed-reveal-select';
@@ -75,6 +76,7 @@ export function startArrivalSelect(view: EditorView, request: ArrivalSelect): Pr
 	if (!settlements || !view.state.facet(typedRevealOptions).canType() || to <= from) return null;
 	const taken = request.callId ? takeOver(view, settlements.waiting, { ...request, from, to }, request.callId) : null;
 	if (taken) return taken;
+	if (request.insert) return typeInsert(view, request, from, to);
 	if (view.state.field(typedReveals).some((lane) => lane.threadId === request.threadId && lane.select)) return null;
 	const select: Selecting = {
 		key: request.key, from, to, ghost: null, shown: 0, length: to - from, sweepMs: request.sweepMs, holdMs: request.holdMs,
@@ -82,6 +84,21 @@ export function startArrivalSelect(view: EditorView, request: ArrivalSelect): Pr
 	const settled = new Promise<SelectOutcome>((resolve) => settlements.waiting.set(request.key, { threadId: request.threadId, settle: resolve }));
 	view.dispatch({ effects: beginSelect.of({ threadId: request.threadId, name: request.name, color: request.color, select }) });
 	return settled;
+}
+
+/**
+ * A suggestion nothing streamed (a non-streaming provider, a call that settled before its preview was drawn, or a
+ * preview that differs from what committed) types its insert like a streamed one: the whole insert enters the
+ * lane as a preview, which the committed suggestion claims, so there is one typing path. The card shows at once.
+ */
+function typeInsert(view: EditorView, request: ArrivalSelect, from: number, to: number): Promise<SelectOutcome> {
+	const callId = request.callId ?? request.key;
+	view.dispatch({ effects: previewSlot.of({
+		callId, threadId: request.threadId, name: request.name, slot: 0, from, to, text: request.insert!, mode: 'suggest',
+	}) });
+	// A claimed preview outlives this (the suggestion owns it); one nothing claimed, because the card never showed, goes.
+	setTimeout(() => { if (view.dom.isConnected) view.dispatch({ effects: endPreview.of({ callId }) }); }, CLAIM_GRACE_MS);
+	return Promise.resolve('ended');
 }
 
 /**

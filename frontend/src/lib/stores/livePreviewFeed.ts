@@ -39,6 +39,8 @@ function parts(value: unknown): PreviewPart[] | null {
 export function attachPreviewFeed(view: EditorView, source: PreviewFrameSource): () => void {
 	const texts = new Map<string, string>();
 	const ended = new Set<string>();
+	/** Calls whose queued frames must not be placed: every end but a settled comment or suggestion, which a queued frame may still reach. */
+	const cancelled = new Set<string>();
 	const modes = new Map<string, PreviewMode>();
 	const graces = new Set<ReturnType<typeof setTimeout>>();
 	let digested: { doc: Text; digest: Promise<string> } | null = null;
@@ -50,26 +52,32 @@ export function attachPreviewFeed(view: EditorView, source: PreviewFrameSource):
 		return digested.digest;
 	};
 
+	const finish = (callId: string) => {
+		cancelled.add(callId);
+		for (const key of [...texts.keys()]) if (key.startsWith(`${callId}\n`)) texts.delete(key);
+		modes.delete(callId);
+		view.dispatch({ effects: endPreview.of({ callId }) });
+	};
+
 	const end = (callId: string, outcome?: unknown) => {
 		ended.add(callId);
-		for (const key of [...texts.keys()]) if (key.startsWith(`${callId}\n`)) texts.delete(key);
 		const mode = modes.get(callId);
-		modes.delete(callId);
 		if (outcome === 'settled' && (mode === 'comment' || mode === 'suggest')) {
+			// Its text and kind stay too: a frame still queued for placement is drawn, not lost to a fast settle.
 			const timer = setTimeout(() => {
 				graces.delete(timer);
-				view.dispatch({ effects: endPreview.of({ callId }) });
+				finish(callId);
 			}, CLAIM_GRACE_MS);
 			graces.add(timer);
 			return;
 		}
-		view.dispatch({ effects: endPreview.of({ callId }) });
+		finish(callId);
 	};
 
 	const place = async (callId: string, threadId: string, name: string, digest: string, slots: PreviewPart[]) => {
 		const doc = view.state.doc;
 		const matches = (await digestOf(doc)) === digest && view.state.doc === doc;
-		if (stopped || ended.has(callId)) return;
+		if (stopped || cancelled.has(callId)) return;
 		const effects = slots.flatMap((part) => {
 			const text = texts.get(`${callId}\n${part.slot}`);
 			if (text === undefined) return [];
