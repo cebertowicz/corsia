@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,9 +45,9 @@ def test_exact_source_uses_object_store_from_a_neutral_directory(tmp_path):
         assert Path(cwd).parent != repo
         assert not (Path(cwd) / "example.py").exists()
         assert Path(git_dir) == repo / ".git"
-        assert f"diff --no-ext-diff --no-textconv --find-renames {base_sha}...{head_sha}" in source
-        assert f"show {head_sha}:<path>" in source
-        assert f"grep -n -F -e <pattern> {head_sha}" in source
+        assert f"reviewer_read.py {git_dir} {base_sha} {head_sha} diff" in source
+        assert "show <path>" in source
+        assert "grep <fixed-string>" in source
 
 
 def test_exact_diff_is_grounded_in_the_requested_commits(tmp_path):
@@ -87,12 +88,93 @@ def test_claude_source_allowlist_is_pinned_to_exact_revisions(tmp_path):
     args, _ = claude_exact_source_controls(
         str(tmp_path / "repo.git"), base_sha, head_sha,
     )
-    rendered = "\n".join(args)
+    rules = [arg for arg in args if arg.startswith("Bash(")]
+    reader = f"reviewer_read.py {tmp_path / 'repo.git'} {base_sha} {head_sha}"
 
-    assert f"{base_sha}...{head_sha}" in rendered
-    assert f"show {head_sha}:*" in rendered
-    assert f"grep -n -F -e * {head_sha} -- *" in rendered
-    assert " show *)" not in rendered
+    assert len(rules) == 6
+    assert all(reader in rule for rule in rules)
+    # No rule lets the model run Git itself, so it can never add a Git option.
+    assert not any(rule.startswith("Bash(git") for rule in rules)
+    assert "--add-dir" not in args
+
+
+def _read(git_dir, base_sha, head_sha, *args):
+    from reviewer import reviewer_read
+
+    return subprocess.run(
+        [sys.executable, "-I", reviewer_read.__file__, str(git_dir), base_sha, head_sha, *args],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_reader_serves_the_exact_change(tmp_path):
+    repo, base_sha, head_sha = _two_commit_repo(tmp_path)
+    git_dir = repo / ".git"
+
+    assert "example.py" in _read(git_dir, base_sha, head_sha, "names").stdout
+    assert "+VALUE = 2" in _read(git_dir, base_sha, head_sha, "diff").stdout
+    assert "+VALUE = 2" in _read(git_dir, base_sha, head_sha, "diff", "example.py").stdout
+    assert _read(git_dir, base_sha, head_sha, "show", "example.py").stdout == "VALUE = 2\n"
+    grep = _read(git_dir, base_sha, head_sha, "grep", "-VALUE", "example.py")
+    assert grep.returncode == 1  # a leading dash is searched for, not parsed
+    assert "VALUE = 2" in _read(git_dir, base_sha, head_sha, "grep", "VALUE").stdout
+
+
+@pytest.mark.parametrize("args", [
+    ("diff", "--output=OUT"),
+    ("diff", "example.py", "--output=OUT"),
+    ("show", "--output=OUT"),
+    ("show", "example.py", "--output=OUT"),
+    ("grep", "VALUE", "--open-files-in-pager=touch OUT"),
+    ("grep", "VALUE", "-OOUT"),
+    ("stat", "--output=OUT"),
+    ("names", "extra"),
+    ("log",),
+])
+def test_reader_refuses_anything_that_could_become_an_option(tmp_path, args):
+    repo, base_sha, head_sha = _two_commit_repo(tmp_path)
+    out = tmp_path / "written"
+    args = tuple(arg.replace("OUT", str(out)) for arg in args)
+
+    result = _read(repo / ".git", base_sha, head_sha, *args)
+
+    assert result.returncode == 2
+    assert "reviewer_read:" in result.stderr
+    assert not out.exists()
+
+
+def _can_apply_sandbox() -> bool:
+    if sys.platform != "darwin":
+        return False
+    probe = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)", "/usr/bin/true"]
+    return subprocess.run(probe, capture_output=True).returncode == 0
+
+
+@pytest.mark.skipif(
+    not _can_apply_sandbox(),
+    reason="needs macOS sandbox-exec outside another sandbox (the backend and CI runners are not sandboxed)",
+)
+def test_write_confinement_allows_only_the_scratch_directory(tmp_path):
+    from reviewer.reviewer_exact_source import write_confined
+
+    inside, outside = tmp_path / "review", tmp_path / "outside"
+    inside.mkdir()
+    script = f"echo ok > {inside}/a; echo no > {outside}"
+
+    subprocess.run(write_confined(["/bin/sh", "-c", script], [str(inside)]))
+
+    assert (inside / "a").read_text() == "ok\n"
+    assert not outside.exists()
+
+
+def test_write_confinement_fails_closed_without_sandbox(monkeypatch):
+    from reviewer import reviewer_exact_source
+
+    monkeypatch.setattr(reviewer_exact_source.sys, "platform", "linux")
+
+    with pytest.raises(reviewer_exact_source.ExactSourceError):
+        reviewer_exact_source.write_confined(["claude"], ["/tmp"])
 
 
 @pytest.mark.parametrize("bad_sha", ["", "abc123", "G" * 40, "a" * 41])

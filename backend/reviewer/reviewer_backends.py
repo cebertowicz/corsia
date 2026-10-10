@@ -25,6 +25,7 @@ from reviewer.failures import (
 from reviewer.reviewer_exact_source import (
     claude_exact_source_controls,
     codex_exact_source_controls,
+    write_confined,
 )
 
 log = logging.getLogger(__name__)
@@ -90,8 +91,12 @@ def invoke_cc_subagent(
     env = dict(env)
     env["CLAUDE_CODE_DISABLE_BUNDLED_SKILLS"] = "1"
     env.update(source_env)
+    # The model reads untrusted PR text: it may write only its scratch directory.
+    scratch = os.path.join(working_dir, "tmp")
+    os.makedirs(scratch, exist_ok=True)
+    env["TMPDIR"] = scratch
     result = subprocess.run(
-        cmd,
+        write_confined(cmd, [working_dir]),
         input=prompt,
         capture_output=True,
         text=True,
