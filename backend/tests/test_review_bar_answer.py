@@ -9,7 +9,8 @@ import pytest
 
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
 from infra.database import get_db
-from plans import holds, review_answer, service, user_ask
+from doceditor import review_bar
+from plans import holds, service, user_ask
 from plans.boundary import PlanActor, mutate
 from registry import attention, models
 
@@ -79,7 +80,7 @@ def _clearance(db, node_id: str) -> dict:
              JOIN plan_node_events e ON e.id=h.clearance_event_id WHERE h.node_id=?""",
         (node_id,),
     ).fetchone()
-    return json.loads(row["payload_json"])
+    return json.loads(row["payload_json"])["detail"]
 
 
 def test_a_plain_approval_reaches_the_agent_with_its_note(db):
@@ -103,11 +104,17 @@ def test_a_plain_approval_reaches_the_agent_with_its_note(db):
 def test_the_round_feedback_switches_approve_to_approve_with_changes(db):
     artifact = seed_document(db, "owner", name="proposal.md")
     _ask(db, artifact)
-    assert review_answer.round_state(db, artifact)["round_feedback_count"] == 0
+    assert review_bar.round_state(db, artifact)["round_feedback_count"] == 0
 
     _comment(db, artifact)
     _comment(db, artifact, replacement="better words")
-    state = review_answer.round_state(db, artifact)
+    state = review_bar.round_state(db, artifact)
+
+    # Both columns are UTC ISO-8601 written by their own domains, so a comment made after the
+    # raise sorts after the hold's stamp as a string and counts.
+    stamp = db.execute("SELECT MIN(created_at) FROM doc_comments WHERE artifact_id=?", (artifact,)).fetchone()[0]
+    assert stamp > state["ask_raised_at"]
+    assert stamp[10] == state["ask_raised_at"][10] == "T"
 
     assert state["round_feedback_count"] == 2
     assert state["round_feedback_counts"] == {"comments": 1, "suggestions": 1, "edits": 0}
@@ -154,7 +161,7 @@ def test_request_changes_with_no_feedback_needs_a_note(db):
     artifact = seed_document(db, "owner", name="proposal.md")
     node = _ask(db, artifact)
 
-    with pytest.raises(review_answer.AnswerRefused) as refused:
+    with pytest.raises(review_bar.AnswerRefused) as refused:
         attention.clear_attention(
             artifact, outcome="answer", verdict="changes_requested", db=db,
         )
@@ -201,7 +208,7 @@ def test_a_superseded_ask_returns_stale_and_is_never_cleared_twice(db):
     db.commit()
     before = len(_notices(db))
 
-    with pytest.raises(review_answer.AnswerRefused) as refused:
+    with pytest.raises(review_bar.AnswerRefused) as refused:
         attention.clear_attention(artifact, outcome="answer", verdict="approved", db=db)
 
     assert refused.value.code == "ask_stale"
@@ -215,7 +222,7 @@ def test_a_retired_ask_returns_stale(db):
     models.retire(artifact, db=db)
     db.commit()
 
-    with pytest.raises(review_answer.AnswerRefused) as refused:
+    with pytest.raises(review_bar.AnswerRefused) as refused:
         attention.clear_attention(artifact, outcome="answer", verdict="approved", db=db)
 
     assert refused.value.code == "ask_stale"
@@ -239,7 +246,7 @@ def test_an_unknown_verdict_is_refused(db):
     artifact = seed_document(db, "owner", name="proposal.md")
     _ask(db, artifact)
 
-    with pytest.raises(review_answer.AnswerRefused) as refused:
+    with pytest.raises(review_bar.AnswerRefused) as refused:
         attention.clear_attention(artifact, outcome="answer", verdict="maybe", db=db)
 
     assert refused.value.code == "verdict_unknown"
@@ -254,7 +261,7 @@ def test_an_image_can_be_asked_about_and_answered(db):
     artifact = str(image["id"])
     node = _ask(db, artifact, title="Look at the mock")
 
-    state = review_answer.round_state(db, artifact)
+    state = review_bar.round_state(db, artifact)
     assert state["ask_raised"] is True
     _answer(db, artifact, "changes_requested", "Darker header.")
 
@@ -304,7 +311,7 @@ def test_the_read_names_the_newest_ask_and_the_other_askers(db):
     )
     db.commit()
 
-    state = review_answer.round_state(db, artifact)
+    state = review_bar.round_state(db, artifact)
 
     assert state["ask_reason"] == "Check my sources too"
     assert state["asker"]["name"] == "Research"
@@ -329,12 +336,12 @@ def test_an_edit_sent_before_the_answer_still_counts_in_the_round(db):
         before=b"before\n", after=b"after\n", at=later,
     )
     db.commit()
-    assert review_answer.round_state(db, artifact)["round_feedback_counts"]["edits"] == 1
+    assert review_bar.round_state(db, artifact)["round_feedback_counts"]["edits"] == 1
     delivered, _ = feedback_batches.close_batch(db, batch, "send")
     db.commit()
     assert delivered
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items").fetchone()[0] == 0
-    state = review_answer.round_state(db, artifact)
+    state = review_bar.round_state(db, artifact)
     assert state["round_feedback_counts"] == {"comments": 0, "suggestions": 0, "edits": 1}
     result = _answer(db, artifact, "approved")
     assert result.review["verdict"] == "approved_with_changes"

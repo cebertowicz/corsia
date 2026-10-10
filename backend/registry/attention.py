@@ -175,9 +175,9 @@ def _clear_attention(
         if verdict is not None:
             # Before the state flips: a stale ask refuses, and the round's feedback
             # reaches its owner in this same write.
-            from plans import review_answer
+            from doceditor import review_bar
 
-            answer = review_answer.answer(_db, str(row["id"]), verdict, note)
+            answer = review_bar.answer(_db, str(row["id"]), verdict, note)
         defer_condition = None
         if outcome == "defer":
             defer_condition = validate_defer_condition(condition)
@@ -200,7 +200,9 @@ def _clear_attention(
         # ordinary artifacts and decisions, and ``defer`` keeps the hold.
         from plans import public as plans_public
 
-        plans_public.ask_cleared(str(row["id"]), outcome, db=_db, answer=answer)
+        plans_public.ask_cleared(
+            str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
+        )
     if db is None or not db.in_transaction:
         emit_product_event(
             "artifact_attention", "cleared",

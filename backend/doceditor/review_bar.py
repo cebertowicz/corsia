@@ -1,16 +1,22 @@
-"""The user's verdict on an artifact an agent asked them to review (DCOL-FR12.4).
+"""The user's verdict on a document or image an agent asked them to review (DCOL-FR12.4).
 
 One round is one user hold: it runs from the ask's raise to the user's answer.
-The round's feedback is what the user authored on the artifact after the raise.
-Answering closes the user's open feedback batch through the same writer as
-send-on-close, so the comments reach the owner once as the usual feedback task,
-and then releases every raised ask on the artifact with the verdict, the note
-and a pointer to that task. ``shared/documents/DRAFT-review-bar-design.md``.
+The round's feedback is what the user authored on the artifact after the raise,
+which is Documents state: its comments, suggestions and edits are counted here,
+and answering closes the user's open feedback batch through the same writer as
+send-on-close, so the comments reach the owner once as the usual feedback task.
+Plans owns the hold; this module composes the answer and hands Plans the
+release it applies (``plans.public.AskRelease``): an opaque payload for the
+clearance event and the text the asking agent wakes on.
+``shared/documents/DRAFT-review-bar-design.md``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from doceditor import feedback_batches
+from doceditor.feedback_state import USER_AUTHOR_ID
 
 VERDICTS = {
     "approved": "approved",
@@ -31,7 +37,7 @@ class AnswerRefused(ValueError):
 
 
 @dataclass(frozen=True)
-class Answer:
+class ReviewAnswer:
     """What the user decided, as the release notice and the clearance event carry it."""
 
     verdict: str
@@ -44,6 +50,15 @@ class Answer:
             "verdict": self.verdict, "note": self.note,
             "feedback_counts": self.counts,
         }
+
+    def release(self):
+        """The part of the answer Plans applies: its event payload and the agent's notice."""
+        from plans.public import AskRelease
+
+        return AskRelease(
+            detail=self.payload(),
+            text=lambda ask, kind, title: release_summary(self, ask=ask, kind=kind, title=title),
+        )
 
 
 def _plural(count: int, noun: str) -> str:
@@ -58,7 +73,7 @@ def counts_phrase(counts: dict) -> str:
     )
 
 
-def release_summary(answer: Answer, *, ask: str, kind: str, title: str) -> str:
+def release_summary(answer: ReviewAnswer, *, ask: str, kind: str, title: str) -> str:
     """The notice an asking agent wakes on (design D5)."""
     detail = counts_phrase(answer.counts)
     if answer.feedback_task:
@@ -71,28 +86,12 @@ def release_summary(answer: Answer, *, ask: str, kind: str, title: str) -> str:
     return f"{text}\nTheir note: {answer.note}" if answer.note else text
 
 
-def raised_holds(db, artifact_id: str) -> list:
-    """The user holds that wait on this artifact, newest first, with their asking agent."""
-    return db.execute(
-        """SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
-                  n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name
-             FROM plan_node_artifact_links l
-             JOIN plan_nodes n ON n.id = l.node_id
-             JOIN plans p ON p.id = n.plan_id
-             JOIN plan_node_holds h ON h.node_id = n.id
-             LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'
-            WHERE l.artifact_id=? AND l.role='attention'
-              AND h.kind='blocked' AND h.owner_kind='user'
-              AND h.owner_id=l.artifact_id AND h.cleared_at IS NULL
-            ORDER BY h.created_at DESC, h.id DESC""",
-        (artifact_id,),
-    ).fetchall()
-
-
 def round_counts(db, artifact_id: str, since: str | None) -> dict:
-    """The comments, suggestions and edits the user made on the artifact since ``since``."""
-    from doceditor.feedback_state import USER_AUTHOR_ID
+    """The comments, suggestions and edits the user made on the artifact since ``since``.
 
+    ``since`` is the ask's raise stamp. Plans and Documents both write UTC ISO-8601
+    (``plans.service._now``, ``doceditor.comments._now``), so the string comparison is exact.
+    """
     floor = since or ""
     rows = db.execute(
         """SELECT SUM(replacement IS NULL) AS comments,
@@ -127,31 +126,37 @@ def round_counts(db, artifact_id: str, since: str | None) -> dict:
 
 def _feedback_task(db, artifact_id: str, since: str | None) -> str | None:
     """The title of the newest feedback task the user's batches made since the raise."""
-    from doceditor.feedback_state import USER_AUTHOR_ID
+    from plans.public import PlanError, get_node
 
     row = db.execute(
-        """SELECT n.title FROM doc_feedback_batches b
-             JOIN plan_nodes n ON n.id=b.delivered_node_id
-            WHERE b.author_kind='user' AND b.author_id=? AND b.artifact_id=?
-              AND b.delivery_outcome='node' AND b.updated_at>=?
-            ORDER BY b.updated_at DESC, b.id DESC LIMIT 1""",
+        """SELECT delivered_node_id FROM doc_feedback_batches
+            WHERE author_kind='user' AND author_id=? AND artifact_id=?
+              AND delivery_outcome='node' AND updated_at>=?
+            ORDER BY updated_at DESC, id DESC LIMIT 1""",
         (USER_AUTHOR_ID, artifact_id, since or ""),
     ).fetchone()
-    return str(row["title"]) if row else None
+    if row is None or not row["delivered_node_id"]:
+        return None
+    try:
+        return get_node(str(row["delivered_node_id"]), db=db).title
+    except PlanError:
+        return None
 
 
 def round_state(db, artifact_id: str) -> dict:
     """The review bar's read: the newest raised ask, the other askers and the round's feedback."""
-    holds = raised_holds(db, artifact_id)
-    counts = round_counts(db, artifact_id, holds[0]["raised_at"] if holds else None)
-    newest = holds[0] if holds else None
+    from plans.public import raised_asks
+
+    asks = raised_asks(db, artifact_id)
+    newest = asks[0] if asks else None
+    counts = round_counts(db, artifact_id, newest["raised_at"] if newest else None)
     seen = {newest["asker_id"]} if newest else set()
     others, other_asks = [], []
-    for hold in holds[1:]:
-        if hold["asker_id"] not in seen:
-            seen.add(hold["asker_id"])
-            others.append(hold["asker_name"] or str(hold["asker_id"]))
-            other_asks.append({"name": others[-1], "reason": hold["reason"]})
+    for ask in asks[1:]:
+        if ask["asker_id"] not in seen:
+            seen.add(ask["asker_id"])
+            others.append(ask["asker_name"] or str(ask["asker_id"]))
+            other_asks.append({"name": others[-1], "reason": ask["reason"]})
     return {
         "ask_raised": newest is not None,
         "ask_reason": newest["reason"] if newest else None,
@@ -162,31 +167,30 @@ def round_state(db, artifact_id: str) -> dict:
         ),
         "other_askers": others,
         "other_asks": other_asks,
-        "other_request_count": len(holds) - 1 if holds else 0,
+        "other_request_count": len(asks) - 1 if asks else 0,
         "round_feedback_count": sum(counts.values()),
         "round_feedback_counts": counts,
     }
 
 
-def answer(db, identity_id: str, verdict: str, note: str | None) -> Answer:
+def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer:
     """Check the verdict against the round, then close the user's open feedback batch.
 
     Runs in the caller's write transaction, before the asks are released, so
     the feedback task exists when the release notice points at it.
     """
-    from doceditor import feedback_batches
-    from doceditor.feedback_state import USER_AUTHOR_ID
+    from plans.public import raised_asks
 
     if verdict not in VERDICTS:
         raise AnswerRefused("verdict_unknown", f"unknown verdict {verdict!r}")
     note = (note or "").strip() or None
     if note and len(note) > NOTE_MAX:
         raise AnswerRefused("note_too_long", f"The note is over {NOTE_MAX} characters.")
-    holds = raised_holds(db, identity_id)
-    if not holds:
+    asks = raised_asks(db, artifact_id)
+    if not asks:
         raise AnswerRefused("ask_stale", STALE)
-    since = holds[0]["raised_at"]
-    counts = round_counts(db, identity_id, since)
+    since = asks[0]["raised_at"]
+    counts = round_counts(db, artifact_id, since)
     if verdict == "changes_requested" and not note and not any(counts.values()):
         raise AnswerRefused("note_required", NOTE_REQUIRED)
     # The round decides which approval it was, whatever the client last showed.
@@ -194,6 +198,6 @@ def answer(db, identity_id: str, verdict: str, note: str | None) -> Answer:
         verdict = "approved_with_changes" if any(counts.values()) else "approved"
     feedback_batches.close_for_document(
         db, author_kind="user", author_id=USER_AUTHOR_ID,
-        artifact_id=identity_id, reason="send",
+        artifact_id=artifact_id, reason="send",
     )
-    return Answer(verdict, note, counts, _feedback_task(db, identity_id, since))
+    return ReviewAnswer(verdict, note, counts, _feedback_task(db, artifact_id, since))

@@ -165,8 +165,8 @@ def clear_write(
 ) -> None:
     """Clear exactly one cause and record it; the caller reconciles, if needed.
 
-    ``detail`` rides in the append-only clearance event beside the hold id, for
-    what the clearing decided (a review verdict).
+    ``detail`` rides in the append-only clearance event under its own ``detail`` key,
+    for what the clearing decided (a review verdict); it can never shadow the event's fields.
     """
     hold = db.execute(
         """SELECT * FROM plan_node_holds
@@ -175,15 +175,16 @@ def clear_write(
     ).fetchone()
     if hold is None:
         raise service.PlanError("plan hold is unavailable or already cleared")
+    payload: dict = {"hold_id": hold_id, "kind": expected_kind}
+    if detail is not None:
+        payload["detail"] = detail
     event_id = service._event(
         db,
         node_id,
         "hold_cleared",
         actor_id=actor_id,
         provenance=provenance,
-        payload={
-            "hold_id": hold_id, "kind": expected_kind, **(detail or {}),
-        },
+        payload=payload,
     )
     now = service._now()
     changed = db.execute(

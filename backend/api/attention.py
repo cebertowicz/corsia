@@ -28,7 +28,8 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
-from plans import public, review_answer, user_ask
+from doceditor import review_bar
+from plans import public
 from registry import artifact_record as AR
 from registry import attention
 
@@ -83,11 +84,11 @@ def _review_bar(artifact_id: str) -> dict | None:
     db = get_db()
     try:
         row = AR.identity_row_for(artifact_id, db=db)
-        if row is None or row["type"] not in user_ask.ASKABLE_TYPES:
+        if row is None or row["type"] not in public.ASKABLE_TYPES:
             return None
         return {
             "artifact_id": artifact_id, "artifact_type": row["type"],
-            **review_answer.round_state(db, str(row["id"])),
+            **review_bar.round_state(db, str(row["id"])),
         }
     finally:
         db.close()
@@ -258,7 +259,7 @@ async def post_clear(artifact_id: str, body: ClearBody):
             artifact_id, outcome=body.outcome, condition=body.condition,
             reason=body.reason, verdict=body.verdict, note=body.note,
         ))
-    except review_answer.AnswerRefused as exc:
+    except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422
         raise HTTPException(
             status_code=status, detail={"code": exc.code, "message": str(exc)},
