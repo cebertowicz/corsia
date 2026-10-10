@@ -15,7 +15,7 @@ from collections.abc import Callable
 from core.project_context import resolve_project_paths
 from infra.config import WORKSPACE
 from infra.database import get_db
-from infra.git_state_cache import cached_git_answer
+from infra.git_state_cache import cached_current_branch, cached_layout_error
 from infra.project_repo_lock_recovery import recover_stale_git_index_lock
 from infra.project_repo_policy_writes import (
     clear_repo_policy as clear_repo_policy,
@@ -226,9 +226,7 @@ def branch_pin_support_error(repo_path: Path) -> str | None:
             "Git ref storage `reftable` is not supported by branch pinning; "
             "only `files` ref storage can be protected"
         )
-    if layout_error := cached_git_answer(
-        repo, "layout", lambda: _git_layout_support_error(repo, git_dir), cache_if=lambda error: error is None,
-    ):
+    if layout_error := cached_layout_error(repo, _git_layout_support_error, git_dir):
         return layout_error
     branch_path, branch_error = _branch_path(git_dir)
     if branch_error:
@@ -568,9 +566,7 @@ def fast_forward_repo(
     """Fast-forward one clean base to its sole configured upstream."""
     repo = policy.path
     if policy.enforcement_error:
-        raise ValueError(
-            f"repository enforcement is invalid: {policy.enforcement_error}"
-        )
+        raise ValueError(f"repository enforcement is invalid: {policy.enforcement_error}")
     if timeout <= 0:
         raise ValueError("controlled fast-forward timeout must be positive")
     if (
@@ -985,7 +981,7 @@ def coalesce_repo_policies(
             and source_binding_valid
         ):
             try:
-                actual_branch = cached_git_answer(path, "current-branch", lambda: current_repo_branch(path))
+                actual_branch = cached_current_branch(path, current_repo_branch)
             except ValueError as exc:
                 errors.append(
                     f"could not verify pinned branch {pinned_branch!r}: {exc}"

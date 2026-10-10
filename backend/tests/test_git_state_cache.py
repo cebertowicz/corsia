@@ -10,7 +10,12 @@ import pytest
 
 from infra import git_state_cache
 from infra import project_repo_policy as policy_module
-from infra.git_state_cache import cached_git_answer, clear_git_state_cache
+from infra.git_state_cache import (
+    cached_current_branch,
+    cached_git_answer,
+    cached_layout_error,
+    clear_git_state_cache,
+)
 from infra.project_repo_policy import branch_pin_support_error, current_repo_branch
 
 
@@ -55,16 +60,11 @@ def git_runs(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
 
 def _branch(repo: Path) -> str:
-    return cached_git_answer(repo, "current-branch", lambda: current_repo_branch(repo))
+    return cached_current_branch(repo, current_repo_branch)
 
 
 def _layout(repo: Path) -> str | None:
-    return cached_git_answer(
-        repo,
-        "layout",
-        lambda: policy_module._git_layout_support_error(repo, repo / ".git"),
-        cache_if=lambda error: error is None,
-    )
+    return cached_layout_error(repo, policy_module._git_layout_support_error, repo / ".git")
 
 
 def test_unchanged_inputs_reuse_the_answer_without_running_git(repo, git_runs) -> None:
@@ -192,3 +192,59 @@ def test_cache_is_lru_bounded(tmp_path, repo, monkeypatch) -> None:
         _branch(repo)
         cached_git_answer(repo, f"other-{index}", lambda: "x")
     assert len(git_state_cache._entries) <= 2
+
+
+def test_tag_named_like_the_branch_changes_the_abbreviation(repo) -> None:
+    assert _branch(repo) == "main"
+    _git(repo, "tag", "main")
+    assert _branch(repo) == current_repo_branch(repo) == "heads/main"
+    _git(repo, "tag", "-d", "main")
+    assert _branch(repo) == "main"
+
+
+def test_packed_tag_and_packed_deletion_are_seen(repo) -> None:
+    assert _branch(repo) == "main"
+    _git(repo, "tag", "main")
+    _git(repo, "pack-refs", "--all")  # the loose tag file is gone
+    assert not (repo / ".git" / "refs" / "tags" / "main").exists()
+    assert _branch(repo) == current_repo_branch(repo) == "heads/main"
+    _git(repo, "tag", "-d", "main")
+    assert _branch(repo) == current_repo_branch(repo) == "main"
+
+
+@pytest.mark.parametrize(
+    "ref", ["refs/remotes/main", "refs/remotes/main/HEAD", "refs/main", "refs/tags/main"],
+)
+def test_every_shadowing_ref_location_is_seen(repo, ref) -> None:
+    assert _branch(repo) == "main"
+    _git(repo, "update-ref", ref, "HEAD")
+    assert _branch(repo) == current_repo_branch(repo)
+
+
+def test_slashed_branch_shadowed_by_a_tag_is_seen(repo) -> None:
+    _git(repo, "checkout", "-b", "feature/x")
+    assert _branch(repo) == "feature/x"
+    _git(repo, "tag", "feature/x")
+    assert _branch(repo) == current_repo_branch(repo) == "heads/feature/x"
+
+
+def test_routine_git_activity_does_not_invalidate(repo, git_runs) -> None:
+    assert _branch(repo) == "main"
+    assert _layout(repo) is None
+    (repo / "file.txt").write_text("x\n", encoding="utf-8")
+    _git(repo, "status")  # refreshes the index through index.lock
+    _git(repo, "hash-object", "-w", "file.txt")  # writes a loose object
+    _git(repo, "branch", "side")  # writes under refs/heads
+    git_runs.clear()
+    assert _branch(repo) == "main"
+    assert _layout(repo) is None
+    assert git_runs == []
+
+
+def test_core_worktree_is_never_cached(repo, git_runs) -> None:
+    config = repo / ".git" / "config"
+    config.write_text(config.read_text(encoding="utf-8") + "[core]\n\tworktree = " + str(repo) + "\n", encoding="utf-8")
+    assert _layout(repo) == policy_module._git_layout_support_error(repo, repo / ".git")
+    git_runs.clear()
+    _layout(repo)
+    assert git_runs
