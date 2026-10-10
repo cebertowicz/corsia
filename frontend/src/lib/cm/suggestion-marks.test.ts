@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { commentMarks, commentRanges as commentRangesField, setCommentRanges, type CommentRange, type InlineSuggestion } from './comment-marks';
-import { suggestionInsertShown, suggestionMarks, type SuggestionPointer } from './suggestion-marks';
+import { suggestionInsertShown, suggestionMarks, suggestionTyping, type SuggestionPointer } from './suggestion-marks';
 
 const DOC = 'Before the meeting closed, The team met on Tuesday. Everyone agreed.';
 const QUOTE = 'The team met on Tuesday.';
@@ -186,6 +186,14 @@ describe('inline suggestion marks', () => {
 
 	it('routes the insert text through the typed-reveal seam', () => {
 		expect(suggestionInsertShown('whole insert')).toBe('whole insert');
+		// A lane still typing this insert shows what it has typed; text that is not the insert's start never shows.
+		expect(suggestionInsertShown('whole insert', 'whole')).toBe('whole');
+		expect(suggestionInsertShown('whole insert', 'other')).toBe('whole insert');
+	});
+
+	it('draws the part a lane has typed while it types the rest', () => {
+		const view = mount([range()], [suggestionTyping.of(new Map([['s1', 'The team']]))]);
+		expect(inserts(view)[0].getAttribute('data-insert')).toBe('The team');
 	});
 });
 

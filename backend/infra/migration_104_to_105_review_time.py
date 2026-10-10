@@ -1,4 +1,4 @@
-"""Schema 103 -> 104: when a continuity entry was last reviewed.
+"""Schema 104 -> 105: when a continuity entry was last reviewed.
 
 Adds the nullable ``reviewed_at`` column to ``continuity_entries``. The
 checkpoint review orders its rotating queue by it, so a verdict, a keep
@@ -13,7 +13,10 @@ from __future__ import annotations
 import sqlite3
 
 
-def migrate_103_to_104(conn: sqlite3.Connection) -> None:
-    if any(row[1] == "reviewed_at" for row in conn.execute("PRAGMA table_info(continuity_entries)")):
+def migrate_104_to_105(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(continuity_entries)")}
+    # A fixture database that old tests build by hand may carry no continuity
+    # table; the full schema creates it with the column.
+    if not columns or "reviewed_at" in columns:
         return
     conn.execute("ALTER TABLE continuity_entries ADD COLUMN reviewed_at TEXT")

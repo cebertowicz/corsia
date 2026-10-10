@@ -26,6 +26,8 @@ class Slot:
     span: tuple[int, int] | None = None
     #: write_file only: how much of the content matched the document so far.
     prefix: int = 0
+    #: doc_comment_create only: the kind last broadcast, comment or suggest.
+    kind: str | None = None
 
 
 def _unique(text: str, anchor: str) -> int | None:
@@ -82,6 +84,11 @@ def _frame_slot(index: int, start: int | None, end: int, new: str, slot: Slot, t
     range; the browser keeps the range it drew moving with its own edits.
     """
     span = None if start is None else (utf16_length(text[:start]), utf16_length(text[:end]))
+    return frame_part(index, span, new, slot)
+
+
+def frame_part(index: int, span: tuple[int, int] | None, new: str, slot: Slot) -> dict | None:
+    """``_frame_slot`` for a range already in UTF-16 units, or None when nothing changed."""
     piece = new[slot.sent:]
     if not piece and (span is None or span == slot.span):
         return None
