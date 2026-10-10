@@ -22,7 +22,9 @@ concurrency:
 jobs:
   integration:
     name: ${{ inputs.live_reviewer && 'Live host reviewer proof (Haiku)' || 'Integration tests (L3)' }}
-    runs-on: [self-hosted, macOS, ARM64, mac-studio, ci-integration]
+    # macOS: the L3 contract suite runs agent shells under Seatbelt
+    # (sandbox-exec) and requires Safehouse, neither of which exists on Linux.
+    runs-on: macos-15
     timeout-minutes: ${{ inputs.live_reviewer && 30 || 15 }}
 
     env:
@@ -43,21 +45,14 @@ jobs:
           echo "CORSIA_STATE_DIR=$RUNNER_TEMP/corsia-ci-state" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
 
-      - name: Set up Python (system)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Safehouse
         run: |
-          set -e
-          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
-          echo "/usr/local/bin" >> "$GITHUB_PATH"
-          PY_BIN="$(command -v python3.11 || true)"
-          if [ -z "$PY_BIN" ]; then
-            echo "::error::python3.11 not found on PATH"
-            exit 1
-          fi
-          mkdir -p "$RUNNER_TEMP/python-shim/bin"
-          ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
-          echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"
-          "$PY_BIN" --version
+          brew install eugene1g/safehouse/agent-safehouse
+          safehouse --version
 
       - name: Install backend deps
         run: |
