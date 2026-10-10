@@ -328,3 +328,99 @@ async def test_a_transient_provider_failure_writes_no_fact_and_is_counted(isolat
         ).fetchone()[0] == 1
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_write_is_a_counted_failure_not_a_checker_refusal(isolated_db, monkeypatch):
+    from infra.outcome_event_input import OutcomeInputRefusal
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+
+    _seed_one_message()
+    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
+    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+
+    def refused_write(*args, **kwargs):
+        raise OutcomeInputRefusal("write refused")
+
+    monkeypatch.setattr(job, "_record_fact", refused_write)
+
+    async def good(*args, **kwargs):
+        return kwargs["validator"]({"label": "correction", "reason": "It is wrong."})
+
+    result = await job.run_corrections_recording(batch_size=1, invoke=good)
+    assert result == {"status": "partial", "processed": 1, "recorded": 0, "refused": 0, "failed": 1}
+    assert _facts() == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_write_does_not_abort_the_rest_of_the_batch(isolated_db, monkeypatch):
+    from infra.outcome_event_input import OutcomeInputRefusal
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+
+    db = _db()
+    try:
+        _thread(db)
+        _message(db, "agent", "assistant", "I shipped it.", at="2026-10-01T00:00:00Z")
+        _message(db, "m1", "user", "That is wrong.", at="2026-10-01T00:01:00Z")
+        _message(db, "m2", "user", "Also wrong.", at="2026-10-01T00:02:00Z")
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
+    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+    real = job._record_fact
+    calls = []
+
+    def flaky(candidate, classification, version):
+        calls.append(candidate.message_id)
+        if len(calls) == 1:
+            raise OutcomeInputRefusal("write refused")
+        return real(candidate, classification, version)
+
+    monkeypatch.setattr(job, "_record_fact", flaky)
+
+    async def good(*args, **kwargs):
+        return kwargs["validator"]({"label": "correction", "reason": "It is wrong."})
+
+    result = await job.run_corrections_recording(batch_size=2, invoke=good)
+    assert result == {"status": "partial", "processed": 2, "recorded": 1, "refused": 0, "failed": 1}
+    assert len(_facts()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_rate_limit_is_a_counted_failure_with_no_fact(isolated_db, monkeypatch):
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+    from llm.isolated_structured import IsolatedStructuredRateLimitError
+
+    _seed_one_message()
+    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
+    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+
+    async def limited(*args, **kwargs):
+        raise IsolatedStructuredRateLimitError("limited")
+
+    result = await job.run_corrections_recording(batch_size=1, invoke=limited)
+    assert result == {"status": "partial", "processed": 1, "recorded": 0, "refused": 0, "failed": 1}
+    assert _facts() == []
+
+
+@pytest.mark.asyncio
+async def test_a_context_overflow_is_refused_once_as_input_too_long(isolated_db, monkeypatch):
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+    from llm.isolated_structured import IsolatedStructuredContextOverflowError
+
+    _seed_one_message()
+    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
+    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+
+    async def overflow(*args, **kwargs):
+        raise IsolatedStructuredContextOverflowError("too long")
+
+    result = await job.run_corrections_recording(batch_size=1, invoke=overflow)
+    assert result == {"status": "ok", "processed": 1, "recorded": 0, "refused": 1, "failed": 0}
+    assert [(fact["label"], fact["reason"]) for fact in _facts()] == [("refused", "input_too_long")]
+    assert (await job.run_corrections_recording(batch_size=1, invoke=overflow))["processed"] == 0

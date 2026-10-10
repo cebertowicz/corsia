@@ -25,7 +25,8 @@ LABEL_REFUSED = "refused"
 FACT_LABELS = LABELS + (LABEL_REFUSED,)
 REFUSAL_OUTPUT_TRUNCATED = "output_truncated"
 REFUSAL_INVALID_OUTPUT = "invalid_output"
-REFUSAL_REASONS = (REFUSAL_OUTPUT_TRUNCATED, REFUSAL_INVALID_OUTPUT)
+REFUSAL_INPUT_TOO_LONG = "input_too_long"
+REFUSAL_REASONS = (REFUSAL_OUTPUT_TRUNCATED, REFUSAL_INVALID_OUTPUT, REFUSAL_INPUT_TOO_LONG)
 RUBRIC_V1 = """A message counts as a correction when it tells an agent that something it delivered, claimed, decided or did is wrong, missing, not what was meant, or must be redone or undone. This includes rejecting a proposal for being wrong, pointing out a bug or a factual error, and saying \"that's not what I asked\".
 
 It is **not** a correction when it is:
@@ -165,6 +166,10 @@ def classifier_prompt(preceding_agent: str | None, owner_message: str) -> str:
     )
 
 
+class ClassificationOutputError(ValueError):
+    """The checker's own output was unusable; nothing else raises this."""
+
+
 def validate_classification(raw: object) -> dict[str, str]:
     """Parse one raw JSON document, then accept exactly the declared shape."""
     if isinstance(raw, str):
@@ -173,15 +178,15 @@ def validate_classification(raw: object) -> dict[str, str]:
         try:
             raw = json.loads(fenced.group(1) if fenced else text)
         except json.JSONDecodeError as exc:
-            raise ValueError("correction result must be one valid JSON object") from exc
+            raise ClassificationOutputError("correction result must be one valid JSON object") from exc
     if not isinstance(raw, dict) or set(raw) != {"label", "reason"}:
-        raise ValueError("correction result must be an object with only label and reason")
+        raise ClassificationOutputError("correction result must be an object with only label and reason")
     label = raw["label"]
     reason = raw["reason"]
     if label not in LABELS:
-        raise ValueError("correction result label is invalid")
+        raise ClassificationOutputError("correction result label is invalid")
     if not isinstance(reason, str) or not reason.strip():
-        raise ValueError("correction result reason must be non-empty")
+        raise ClassificationOutputError("correction result reason must be non-empty")
     # The reason is explanatory only: fold it to one bounded line instead of
     # discarding a valid verdict for its formatting.
     reason = " ".join(reason.split())[:MAX_REASON_CHARS]

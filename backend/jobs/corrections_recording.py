@@ -11,10 +11,13 @@ from core.measurement_scope import scope_cte
 from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS,
+    LABEL_REFUSED,
+    REFUSAL_INPUT_TOO_LONG,
     REFUSAL_INVALID_OUTPUT,
     REFUSAL_OUTPUT_TRUNCATED,
     SYSTEM_PROMPT,
     CheckerVersion,
+    ClassificationOutputError,
     CorrectionCandidate,
     checker_version,
     classifier_prompt,
@@ -28,8 +31,9 @@ from core.corrections_recording import (
 from infra.db_async import run_in_db
 from llm.isolated_contract import IsolatedStructuredTelemetry
 from llm.isolated_structured import (
+    IsolatedStructuredContextOverflowError,
+    IsolatedStructuredError,
     IsolatedStructuredOutputTruncatedError,
-    IsolatedStructuredUnavailableError,
     invoke_isolated_structured,
 )
 
@@ -211,6 +215,14 @@ def _write_status(status: str, reason: str | None = None, **counts: int) -> None
     set_setting("corrections_recording_status", value)
 
 
+def _refusal_code(exc: Exception) -> str:
+    if isinstance(exc, IsolatedStructuredOutputTruncatedError):
+        return REFUSAL_OUTPUT_TRUNCATED
+    if isinstance(exc, IsolatedStructuredContextOverflowError):
+        return REFUSAL_INPUT_TOO_LONG
+    return REFUSAL_INVALID_OUTPUT
+
+
 def _record_failure() -> None:
     from infra.database import write_transaction
     from infra.outcome_events import count_outcome_event
@@ -246,6 +258,54 @@ def _record_fact(
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
         return result.inserted
+
+
+async def _classify_and_record(
+    candidate: CorrectionCandidate, target: Any, binary: str | None,
+    version: CheckerVersion, invoke: Invoke,
+) -> str:
+    """Classify one candidate and write its fact: "recorded", "refused" or "failed"."""
+    try:
+        classification = await invoke(
+            target,
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=classifier_prompt(candidate.preceding_agent, candidate.content),
+            output_schema=OUTPUT_SCHEMA,
+            validator=validate_classification,
+            max_output_tokens=CLASSIFIER_MAX_OUTPUT_TOKENS,
+            timeout_seconds=60.0,
+            binary=binary,
+            telemetry_sink=_UsageTelemetry(candidate.thread_id).record,
+            thread_id=candidate.thread_id,
+        )
+    except (
+        IsolatedStructuredOutputTruncatedError,
+        IsolatedStructuredContextOverflowError,
+        ClassificationOutputError,
+    ) as exc:
+        # Only the checker's own output (or an item it can never fit) is a
+        # refusal: this version will not re-ask it.
+        classification = refusal_classification(_refusal_code(exc))
+        logger.warning(
+            "corrections recording refused {}: {}", candidate.message_id, classification["reason"],
+        )
+    except Exception as exc:
+        # Rate limit, provider, timeout, unavailable or anything unexpected:
+        # no fact, so the next run retries this message.
+        if isinstance(exc, IsolatedStructuredError):
+            logger.warning("corrections recording skipped {}: {}", candidate.message_id, type(exc).__name__)
+        else:
+            logger.exception("corrections recording failed {}", candidate.message_id)
+        await run_in_db(_record_failure)
+        return "failed"
+    try:
+        inserted = await run_in_db(_record_fact, candidate, classification, version)
+    except Exception:
+        # A failed write is ours, not the checker's: never a refusal fact.
+        logger.exception("corrections recording write failed {}", candidate.message_id)
+        await run_in_db(_record_failure)
+        return "failed"
+    return "refused" if classification["label"] == LABEL_REFUSED else "recorded"
 
 
 async def run_corrections_recording(
@@ -287,42 +347,11 @@ async def run_corrections_recording(
     candidates = sorted(
         candidates, key=lambda candidate: (candidate.created_at, candidate.message_id)
     )[:batch_size]
-    recorded = failed = refused = 0
+    counts = {"recorded": 0, "refused": 0, "failed": 0}
     for candidate in candidates:
-        try:
-            classification = await invoke(
-                target,
-                system_prompt=SYSTEM_PROMPT,
-                user_prompt=classifier_prompt(candidate.preceding_agent, candidate.content),
-                output_schema=OUTPUT_SCHEMA,
-                validator=validate_classification,
-                max_output_tokens=CLASSIFIER_MAX_OUTPUT_TOKENS,
-                timeout_seconds=60.0,
-                binary=binary,
-                telemetry_sink=_UsageTelemetry(candidate.thread_id).record,
-                thread_id=candidate.thread_id,
-            )
-            inserted = await run_in_db(_record_fact, candidate, classification, version)
-            recorded += int(inserted)
-        except (IsolatedStructuredOutputTruncatedError, ValueError) as exc:
-            code = (
-                REFUSAL_OUTPUT_TRUNCATED
-                if isinstance(exc, IsolatedStructuredOutputTruncatedError)
-                else REFUSAL_INVALID_OUTPUT
-            )
-            logger.warning("corrections recording refused {}: {} {}", candidate.message_id, code, exc)
-            inserted = await run_in_db(
-                _record_fact, candidate, refusal_classification(code), version,
-            )
-            refused += int(inserted)
-        except IsolatedStructuredUnavailableError as exc:
-            logger.warning("corrections recording skipped {}: {}", candidate.message_id, type(exc).__name__)
-            await run_in_db(_record_failure)
-            failed += 1
-        except Exception:
-            logger.exception("corrections recording failed {}", candidate.message_id)
-            await run_in_db(_record_failure)
-            failed += 1
+        outcome = await _classify_and_record(candidate, target, binary, version, invoke)
+        counts[outcome] += 1
+    recorded, refused, failed = counts["recorded"], counts["refused"], counts["failed"]
     status = "ok" if not failed else "partial"
     await run_in_db(
         _write_status,
