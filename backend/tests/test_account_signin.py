@@ -956,9 +956,11 @@ async def test_an_error_while_a_cancelled_sign_in_is_stopping_leaves_it_cancelle
     from connections import account_controls, harness_process
 
     account = scripted_vendor_clis[provider]
+    holding = asyncio.Event()
 
     @contextlib.asynccontextmanager
     async def killed_then_broken(process):
+        holding.set()
         try:
             yield
         except asyncio.CancelledError:
@@ -970,6 +972,8 @@ async def test_an_error_while_a_cancelled_sign_in_is_stopping_leaves_it_cancelle
     async with asyncio.timeout(30):
         await account_controls.start_signin(account["id"])
         await _started(scripted_vendor_clis["log"])
+        # The vendor can record its call before the sign-in task takes its first step; cancel only once it holds.
+        await holding.wait()
         operation = account_controls._SIGNINS[account["id"]]
         with caplog.at_level("DEBUG"):
             cancelled = await account_controls.cancel_signin(account["id"])
