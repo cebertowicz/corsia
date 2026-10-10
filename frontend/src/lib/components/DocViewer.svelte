@@ -1,14 +1,12 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import './DocViewer.css';
 	import { docCanvasBounds } from '$lib/actions/docCanvasBounds';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import { cubicOut } from 'svelte/easing';
 	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
-	import {
-		docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements
-	} from '$lib/stores/docComments';
+	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
@@ -37,6 +35,7 @@
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
 	import DocCanvasActivity from './DocCanvasActivity.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
+	import ReviewBar from './ReviewBar.svelte';
 	import { toasts } from '$lib/stores/toast';
 	import { shouldReloadPresenceEdit } from '$lib/docPresence';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
@@ -162,6 +161,8 @@
 	// unrelated re-render that recreates the `target` prop object (e.g. a
 	// sibling tab's status update) never re-triggers a reload.
 	const targetKey = $derived(commentDraftScope(target));
+	// A comment the user has typed but not posted: the review bar never answers over it.
+	const composerHasText = $derived(Boolean($commentDraft && $commentDraft.scope === targetKey && $commentDraft.body?.trim()));
 
 	let prevTarget: DocViewerTarget | null = null;
 	let reloadNonce = $state(0);
@@ -333,6 +334,7 @@
 		onReopen={() => reloadNonce += 1}
 		onRead={() => reloadNonce += 1}
 	>
+		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
 		{#snippet presence()}
 			{#if target && loadedArtifactId}
 				<DocPresenceStatus {target} artifactId={loadedArtifactId} {docState} root={docRoot}

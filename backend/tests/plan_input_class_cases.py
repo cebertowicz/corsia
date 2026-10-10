@@ -518,7 +518,7 @@ _CASES = {
     ): _user_block_on_decision_artifact,
     (
         "user_ask.py",
-        '"ask_artifact_id must name an active registered document"',
+        '"ask_artifact_id must name an active registered document or image"',
     ): _user_block_on_non_document,
     # --- plans/node_creation.py ---
     ("node_creation.py", 'f"invalid plan node kind: {kind}"'): _operation(
