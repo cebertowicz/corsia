@@ -231,7 +231,7 @@ def notify_returned(
     plan = service._plan_row(db, node["plan_id"])
     if plan["owner_kind"] != "thread":
         return None
-    leaves = delegation_harvest.return_rows(db, child_plan_id)
+    leaves = delegation_harvest.return_rows(db, child_plan_id, delegation_harvest.attached_since(db, node_id))
     steps = [delegation_reply.reply_step(reply)] if reply and not leaves else []
     for leaf in leaves[:RETURNED_STEPS_MAX]:
         evidence = review_evidence.latest(

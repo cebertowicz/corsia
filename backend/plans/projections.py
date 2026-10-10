@@ -7,6 +7,9 @@ import json
 
 from infra.packed_rows import fetch_all
 from plans import aggregates, node_states, open_tree, wait_causes
+from plans.delegation_epoch import (  # noqa: F401
+    delegated_work_returned, open_delegated_node_ids, open_delegated_work, open_row_sql,
+)
 from plans.models import PlanLivenessSignal, PlanState, Progress
 
 
@@ -126,64 +129,6 @@ def progress_liveness(plan, conditions: list[str], *, moving: bool, held: bool) 
     return "idle"
 
 
-def delegated_work_returned(connection, plan_id: str) -> bool:
-    """Return whether a delegated plan has returned: steps exist, none still runs.
-
-    A worker returns by putting its last step up for review, failing it, or
-    closing it. Every unarchived leaf is then settled or awaiting the parent's
-    verdict; a plan whose remaining work was all closed has only closed steps
-    left, and that is its return too. A plan that never held a step has
-    returned nothing, and a step awaiting its own owner's verdict still runs.
-    So does a step that waits on an answer from the user or the parent
-    (``delegation_harvest.waiting_on_answer``): the worker acts on the answer
-    before the parent judges the work.
-    """
-    from plans import delegation_harvest
-
-    steps = delegation_harvest.return_rows(connection, plan_id)
-    return bool(steps) and not delegation_harvest.waiting_on_answer(connection, plan_id) and all(
-        row["state"] not in ("pending", "active")
-        and not delegation_harvest.awaiting_owner_verdict(connection, row)
-        for row in steps
-    )
-
-
-def open_delegated_node_ids(connection, plan_id: str, *, limit: int = -1) -> tuple[str, ...]:
-    """Return up to ``limit`` open step ids with nothing open beneath them.
-
-    The one answer to "does the worker still have work open": an open leaf, or
-    a started step (not ``node_states.is_container``) whose own steps have all
-    settled, which would otherwise read in progress under finished work. A
-    never-started container reads as its steps. Settling one can open its
-    parent, so a caller that settles them asks again until none remain.
-
-    A refusal that says only *that* a child plan is unfinished leaves the owner
-    hunting for the rows; naming them is what makes it actionable. ``limit``
-    (all by default) keeps the mere-existence caller below at ``LIMIT 1``.
-    """
-    return tuple(
-        str(row["id"])
-        for row in connection.execute(
-            f"""SELECT n.id FROM plan_nodes n
-               WHERE n.plan_id=? AND {node_states.in_work_sql('n')}
-                 AND n.state IN ('pending','active','review_requested')
-                 AND NOT EXISTS (SELECT 1 FROM plan_nodes c
-                      WHERE c.parent_id=n.id AND {node_states.in_work_sql('c')}
-                        AND c.state IN ('pending','active','review_requested'))
-                 AND NOT {node_states.is_container_sql('n')}
-               ORDER BY n.order_key,n.created_at
-               LIMIT ?""",
-            (plan_id, limit),
-        )
-    )
-
-
-def open_delegated_work(connection, plan_id: str) -> bool:
-    """Return whether a plan still holds open work (``open_delegated_node_ids``)."""
-
-    return bool(open_delegated_node_ids(connection, plan_id, limit=1))
-
-
 def movable_leaf_sql(alias: str) -> str:
     """SQL conditions for a leaf its plan's owner can still move itself.
 
@@ -207,7 +152,8 @@ def movable_leaf_sql(alias: str) -> str:
 def movable_work(connection, plan_id: str) -> bool:
     """Whether the plan's owner still has a leaf it can move itself."""
     return connection.execute(
-        f"SELECT 1 FROM plan_nodes w WHERE w.plan_id=? AND {movable_leaf_sql('w')} LIMIT 1",
+        f"SELECT 1 FROM plan_nodes w WHERE w.plan_id=? AND {open_row_sql(connection, 'w')}"
+        f" AND {movable_leaf_sql('w')} LIMIT 1",
         (plan_id,),
     ).fetchone() is not None
 
