@@ -52,4 +52,4 @@ Reusing the application's existing handlers keeps validation, authorization, aud
 
 ### Falsification / removal condition
 
-When #1182 lands, agent calls authenticate as a scoped agent principal, and `bind_delegation_origin`, `attribution_matches` and the credential regex layers are deleted.
+When scoped agent tokens land, agent calls authenticate as a scoped agent principal, and `bind_delegation_origin`, `attribution_matches` and the credential regex layers are deleted.

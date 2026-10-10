@@ -24,6 +24,8 @@ export interface DocActivityFrame {
 	comment_id: string | null;
 	revision: string | null;
 	at: string;
+	/** The tool call this activity settles; a streamed preview of that call is handed over by it. */
+	call_id?: string | null;
 }
 
 export interface DocAgentPresence {
@@ -72,6 +74,7 @@ function parsedFrame(value: unknown): DocActivityFrame | null {
 	if (frame.span !== null && !validSpan(frame.span)) return null;
 	if (frame.comment_id !== null && typeof frame.comment_id !== 'string') return null;
 	if (frame.revision !== null && typeof frame.revision !== 'string') return null;
+	if (frame.call_id !== undefined && frame.call_id !== null && typeof frame.call_id !== 'string') return null;
 	return frame as unknown as DocActivityFrame;
 }
 

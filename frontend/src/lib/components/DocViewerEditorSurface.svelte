@@ -27,6 +27,7 @@
 		onEdit,
 		onLayout,
 		readOnly,
+		imageBase = null,
 		saveError,
 		saveStatus,
 		pendingSel,
@@ -49,6 +50,7 @@
 		onEdit: (mapPos: (position: number) => number) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;
 		readOnly: boolean;
+		imageBase?: { path: string; projectId: string | null } | null;
 		saveError: string;
 		saveStatus: 'idle' | 'saving' | 'saved';
 		pendingSel: PendingSelection | null;
@@ -79,7 +81,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} />
+			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}

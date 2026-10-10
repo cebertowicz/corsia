@@ -31,14 +31,14 @@ permissions:
 jobs:
   file-sizes:
     name: File size ratchet
-    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
-    # job to a hosted runner needs the repository owner's explicit approval.
-    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/mac-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Test the ratchet itself
         # scripts/tests/ is outside backend/, so the "Unit tests (L1)" job's
