@@ -25,7 +25,7 @@ def _validate_parent(
         state = "archived" if parent["archived_at"] is not None else "closed"
         raise service.PlanError(f"node parent is {state}")
     if parent["state"] in service._TERMINAL_STATES:
-        # A finished parent over open work is impossible (Steve, 2026-09-29).
+        # A finished parent over open work is impossible.
         shown = "accepted" if parent["state"] in service._ACCEPTED_STATES else parent["state"]
         raise service.PlanError(
             f"node parent is {shown}: finished work takes no new child. Add the work at the "

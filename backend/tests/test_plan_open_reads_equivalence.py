@@ -38,7 +38,7 @@ def _full_active(world: World) -> list[str]:
 def _verdicts(world: World, node_id: str) -> tuple:
     node = service._node_row(world.db, node_id)
 
-    def refused(call) -> bool:
+    def refused(call) -> str | bool:
         try:
             call()
         except service.PlanError as error:
