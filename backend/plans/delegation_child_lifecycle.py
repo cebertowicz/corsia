@@ -96,10 +96,6 @@ def notify_turn_error(
     )
 
 
-#: How much of the worker's last message the wake carries.
-_FINAL_MESSAGE_CHARS = 2000
-
-
 def _waits_elsewhere(connection, plan) -> bool:
     """Whether the worker recorded what it waits on: a watch or a block on open work.
 
@@ -131,7 +127,7 @@ def notify_stopped_open(connection, thread_id: str, *, wake_id: str) -> None:
     """
     from plans import projections
     from plans.delegation_notice import _delegation, _wake_parent
-    from plans.delegation_turn_end import WAITING_STATES, instant, latest_turn
+    from plans.delegation_turn_end import WAITING_STATES, turn_reply
 
     plan = connection.execute(
         "SELECT * FROM plans WHERE owner_kind='thread' AND owner_id=?",
@@ -146,24 +142,8 @@ def notify_stopped_open(connection, thread_id: str, *, wake_id: str) -> None:
     step = projections.delegated_step(connection, parent_plan_id, worker)
     if step is None or step["state"] not in WAITING_STATES:
         return
-    last = connection.execute(
-        """SELECT id,content,created_at FROM messages WHERE thread_id=? AND seq IS NOT NULL
-             AND role='assistant' AND length(trim(content)) > 0
-           ORDER BY seq DESC LIMIT 1""",
-        (worker,),
-    ).fetchone()
-    # Only what this Turn said: an older reply may be a question already
-    # answered. Not every harness passes its Turn id here, so the bound is
-    # the worker's latest Turn start.
-    turn = latest_turn(connection, worker)
-    if last is not None and turn is not None and (
-        instant(last["created_at"]) < instant(turn["started_at"])
-    ):
-        last = None
-    final = str(last["content"]).strip() if last is not None else ""
-    if len(final) > _FINAL_MESSAGE_CHARS:
-        # The question usually ends the reply, so the tail is what travels.
-        final = "…" + final[-_FINAL_MESSAGE_CHARS:]
+    last = turn_reply(connection, worker)
+    final = last["text"] if last is not None else ""
     _wake_parent(
         connection, parent_plan_id, worker,
         kind="child_stopped_open",

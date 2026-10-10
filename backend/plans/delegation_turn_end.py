@@ -100,7 +100,10 @@ def _tell_parent(
     if step["state"] in WAITING_STATES:
         nothing = (
             False if turn_errored
-            else _returned_nothing(connection, str(plan["id"]), parent_plan_id, worker)
+            else _returned_nothing(
+                connection, str(plan["id"]), step, parent_plan_id, worker,
+                changed_plan_ids=changed_plan_ids,
+            )
         )
         failed = _step_failed(connection, str(plan["id"]), parent_plan_id, worker)
         if nothing or failed:
@@ -114,8 +117,15 @@ def _tell_parent(
     return False
 
 
-def _returned_nothing(connection, plan_id: str, parent_plan_id: str, worker: str) -> bool:
+def _returned_nothing(
+    connection, plan_id: str, step, parent_plan_id: str, worker: str,
+    *, changed_plan_ids: list[str] | None = None,
+) -> bool:
     """A11: the parent waits on a worker whose plan holds no step at all.
+
+    A worker with no plan that ended its Turn with a reply has returned that
+    reply (#282): the step moves to review through the harvest, which is the
+    parent's one "has returned" wake. Only a Turn that said nothing is A11.
 
     It applies only to a Turn that ended without a provider error. Once per
     empty plan revision, so a worker that ends several Turns still
@@ -131,6 +141,13 @@ def _returned_nothing(connection, plan_id: str, parent_plan_id: str, worker: str
     ).fetchone()
     if live is not None or projections.delegated_work_returned(connection, plan_id):
         return False
+    from plans import delegation_reply
+
+    reply = turn_reply(connection, worker)
+    if reply is not None and delegation_reply.harvest_reply(
+        connection, step=step, reply=reply["text"], changed_plan_ids=changed_plan_ids,
+    ):
+        return True
     _wake_parent(
         connection, parent_plan_id, worker,
         kind="child_returned_nothing", subject_id=plan_id, child_plan_id=plan_id,
@@ -273,6 +290,35 @@ def _round_returned(
         turn_id=str(turn["id"]),
         changed_plan_ids=changed_plan_ids,
     )
+
+
+#: How much of the worker's final reply travels as its return or in a wake.
+FINAL_REPLY_CHARS = 2000
+
+
+def turn_reply(connection, worker: str):
+    """What the worker said as its last words this Turn: ``{id, text}``, or None.
+
+    The latest non-empty assistant message, only if the worker's latest Turn
+    began before it: an older reply may be a question already answered. Not
+    every harness passes its Turn id here, so the bound is that Turn's start.
+    The question or result usually ends the reply, so the tail is what travels.
+    """
+    last = connection.execute(
+        """SELECT id,content,created_at FROM messages WHERE thread_id=? AND seq IS NOT NULL
+             AND role='assistant' AND length(trim(content)) > 0
+           ORDER BY seq DESC LIMIT 1""",
+        (worker,),
+    ).fetchone()
+    turn = latest_turn(connection, worker)
+    if last is None or (
+        turn is not None and instant(last["created_at"]) < instant(turn["started_at"])
+    ):
+        return None
+    text = str(last["content"]).strip()
+    if len(text) > FINAL_REPLY_CHARS:
+        text = "…" + text[-FINAL_REPLY_CHARS:]
+    return {"id": str(last["id"]), "text": text}
 
 
 def instant(value: str) -> datetime:

@@ -309,7 +309,7 @@ def record_round_return(
     return True
 
 
-def _harvest(node, attachment, payload, child_event, db) -> bool:
+def _harvest(node, attachment, payload, child_event, db, reply: str = "") -> bool:
     """Harvest one return as a unit: event, review transition, slot and wake.
 
     The result-bearing wake is the one way the parent learns the return, so
@@ -322,7 +322,7 @@ def _harvest(node, attachment, payload, child_event, db) -> bool:
     service._event(
         db, node["id"], "child_plan_completed", actor_id=None,
         provenance="plan.delegation_harvest",
-        causal_event_id=child_event["id"],
+        causal_event_id=None if child_event is None else child_event["id"],
         payload={
             "child_plan_id": payload["child_plan_id"],
             "attachment_event_id": attachment["id"],
@@ -336,7 +336,7 @@ def _harvest(node, attachment, payload, child_event, db) -> bool:
     _hand_on_parent_slot(node, db)
     accepted = plan_wake.notify_returned(
         db, node_id=node["id"], child_plan_id=payload["child_plan_id"],
-        worker_thread_id=payload["spawned_thread_id"],
+        worker_thread_id=payload["spawned_thread_id"], reply=reply,
     )
     if accepted is None:
         db.execute("ROLLBACK TO harvest_one")

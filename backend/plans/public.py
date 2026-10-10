@@ -168,6 +168,7 @@ from plans.delegation_child_lifecycle import (
     on_child_thread_archived, on_child_thread_ended, silent_children,
 )
 from plans.delegation_turn_end import on_worker_turn_end
+from plans.delegation_reply import plan_is_empty as plan_is_empty
 from plans.delegation_needs import answer as answer_worker_needs
 from plans.hierarchy import _set_parent as set_parent_plan, derive_parent_plan_id, rehome
 from plans.upkeep_notice import is_plans_tool as is_plans_tool, notice_for as upkeep_notice_for
