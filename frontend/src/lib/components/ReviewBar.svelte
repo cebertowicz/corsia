@@ -15,6 +15,7 @@
 	let expanded = $state(false);
 	let noteInput = $state<HTMLInputElement>();
 	let requestButton = $state<HTMLButtonElement>();
+	let approveButton = $state<HTMLButtonElement>();
 	let receiptEl = $state<HTMLElement>();
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -25,6 +26,8 @@
 	const round = $derived(read?.round_feedback_count ?? 0);
 	const pending = $derived(`${round} comment${round === 1 ? '' : 's'}`);
 	const busy = $derived(bar.phase === 'sending');
+	/** A send keeps the layout it came from: the note stays mounted while its own send is in flight. */
+	const noting = $derived(bar.phase === 'noting' || (busy && bar.sendingFrom === 'noting'));
 	const placeholder = $derived(bar.noteRequired ? `What should ${asker} change?` : `Add a note for ${asker} (optional)`);
 	const label = $derived(
 		`${asker} asked for your review: ${ask}${others.length ? `. ${others.join(' and ')} also asked.` : ''}`,
@@ -66,7 +69,11 @@
 	}
 	/** The answer closes the user's feedback batch on the server; the viewer's pending-batch state re-reads it. */
 	async function settle(sent: Promise<boolean>) {
-		if (await sent) onAnswered?.();
+		if (await sent) { onAnswered?.(); return; }
+		// A send that came back without a receipt leaves focus on the control that sent it.
+		await tick();
+		if (bar.phase === 'noting') noteInput?.focus();
+		else if (bar.phase === 'ask') approveButton?.focus();
 	}
 	function approve() {
 		if (round > 0 && blocked()) return;
@@ -116,12 +123,12 @@
 		</section>
 	{:else}
 		{#snippet avatar()}<Avatar name={asker} color={agentColor(read?.asker?.id ?? asker)} hidden />{/snippet}
-		<section class="review-bar" class:noting={bar.phase === 'noting'} class:expanded aria-label="Review request" aria-busy={busy}>
+		<section class="review-bar" class:noting class:expanded aria-label="Review request" aria-busy={busy}>
 			<span class="rb-head">
 				<span class="rb-wide rb-head">
 					{@render avatar()}
-					<!-- svelte-ignore a11y_no_noninteractive_tabindex: the truncated ask is focusable so keyboard users can read it in full via its title. -->
-					<span class="rb-line" tabindex="0" title={ask}><strong>{asker}</strong> asked for your review<span class="rb-ask">{ask}</span></span>
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex: the truncated ask is focusable so keyboard users can read it in full: on focus it unclamps. -->
+					<span class="rb-line" tabindex="0" title={ask}><strong class="rb-who">{asker}</strong> <span class="rb-boiler">asked for your review</span> <span class="rb-ask">{ask}</span></span>
 					{#if others.length === 1}
 						<span class="rb-more">{others[0]} also asked</span>
 					{:else if others.length > 1}
@@ -140,20 +147,20 @@
 				{/if}
 			</span>
 			<span class="rb-failure" role="status">{bar.failure}</span>
-			{#if bar.phase === 'noting'}
-				<input class="rb-note" type="text" aria-label={`Note for ${asker}`} {placeholder} maxlength="2000"
+			{#if noting}
+				<input class="rb-note" type="text" aria-label={`Note for ${asker}`} {placeholder} maxlength="2000" readonly={busy}
 					bind:this={noteInput} bind:value={bar.note} onkeydown={onNoteKey} />
 				<div class="rb-actions">
-					<Button size="sm" variant="primary" disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>Request changes</Button>
-					<Button size="sm" variant="ghost" onclick={cancelNote}>Cancel</Button>
+					<Button size="sm" variant="primary" loading={busy} disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>Request changes</Button>
+					<Button size="sm" variant="ghost" disabled={busy} onclick={cancelNote}>Cancel</Button>
 				</div>
 			{:else}
 				<div class="rb-actions">
-					<Button size="sm" variant="primary" loading={busy} description={alsoSends} title={alsoSends} onclick={approve}>{bar.approveLabel}</Button>
+					<Button size="sm" variant="primary" loading={busy} bind:el={approveButton} description={alsoSends} title={alsoSends} onclick={approve}>{bar.approveLabel}</Button>
 					<Button size="sm" variant="secondary" disabled={busy} bind:el={requestButton} onclick={requestChanges}>Request changes</Button>
 				</div>
 			{/if}
-			{#if busy}<span class="sr-only" role="status">Sending your review</span>{/if}
+			<span class="sr-only" role="status">{busy ? 'Sending your review' : ''}</span>
 		</section>
 	{/if}
 {/if}
@@ -162,9 +169,17 @@
 	.review-bar { flex: none; display: flex; align-items: center; gap: 6px 12px; min-height: 40px; padding: 6px 8px 6px 12px; border: 1px solid var(--violet-line); border-radius: var(--radius-sm); background: var(--violet-bg); font-size: var(--text-footnote); color: var(--text-secondary); min-width: 0; }
 	.rb-head { display: contents; }
 	.rb-narrow, .rb-others { display: none; }
-	.rb-line { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+	/* The agent name, the boilerplate and the ask are flex items, so the line gives way in order: the boilerplate
+	   first, then the name (capped), and the ask always keeps a readable minimum. Keyboard focus unclamps the line
+	   in place so its full text is readable; a title alone never shows on focus. */
+	.rb-line { flex: 1 1 0; min-width: 0; display: flex; gap: 0 0.3em; overflow: hidden; white-space: nowrap; color: var(--text-primary); }
 	.rb-line strong { font-weight: var(--fw-semibold); }
-	.rb-ask { margin-left: 8px; color: var(--text-secondary); }
+	.rb-who, .rb-boiler, .rb-ask { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+	.rb-who { flex: 0 1 auto; max-width: 40%; }
+	.rb-boiler { flex: 0 100 auto; }
+	.rb-ask { flex: 1 1 auto; min-width: 12ch; margin-left: 5px; color: var(--text-secondary); }
+	.rb-line:focus-visible { display: block; overflow: visible; white-space: normal; }
+	.rb-line:focus-visible .rb-who { max-width: none; }
 	.review-bar.noting .rb-line { flex: 0 1 auto; max-width: 46%; }
 	.rb-more { flex: none; white-space: nowrap; color: var(--text-secondary); }
 	.rb-actions { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }

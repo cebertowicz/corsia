@@ -74,6 +74,66 @@ describe('ReviewBar', () => {
 		expect(host.querySelector<HTMLInputElement>('input')!.value).toBe('Tighten the rollout');
 	});
 
+	it('R4: a send from the note keeps the note, busies only the pressed button, and returns focus to the note on failure', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		let fail!: (error: Error) => void;
+		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
+		await render();
+		button('Request changes')!.click();
+		flushSync();
+		const input = host.querySelector<HTMLInputElement>('input')!;
+		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		button('Request changes')!.click();
+		flushSync();
+
+		// Mid-send: the same input is still mounted, the bar is still the note layout, and only the sender spins.
+		expect(host.querySelector('input')).toBe(input);
+		expect(host.querySelector('.review-bar.noting')).toBeTruthy();
+		expect(button('Approve')).toBeUndefined();
+		expect(host.querySelectorAll('.spinner')).toHaveLength(1);
+		expect(button('Request changes')!.querySelector('.spinner')).toBeTruthy();
+		expect(button('Cancel')!.disabled).toBe(true);
+		input.focus();
+
+		fail(new Error('500'));
+		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
+		expect(host.querySelector('input')).toBe(input);
+		expect(input.value).toBe('Tighten the rollout');
+		await vi.waitFor(() => expect(document.activeElement).toBe(input));
+	});
+
+	it('R4: a failed Approve returns focus to Approve and spins only Approve while it sends', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		let fail!: (error: Error) => void;
+		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
+		await render();
+		button('Approve')!.click();
+		flushSync();
+		expect(button('Approve')!.querySelector('.spinner')).toBeTruthy();
+		expect(button('Request changes')!.disabled).toBe(true);
+		expect(button('Request changes')!.querySelector('.spinner')).toBeNull();
+		fail(new Error('500'));
+		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
+		await vi.waitFor(() => expect(document.activeElement).toBe(button('Approve')));
+	});
+
+	it('announces the send through a status region that is already mounted when it starts', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		let fail!: (error: Error) => void;
+		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
+		await render();
+		const region = [...host.querySelectorAll<HTMLElement>('[role="status"].sr-only')][0];
+		expect(region).toBeTruthy();
+		expect(region.textContent).toBe('');
+		button('Approve')!.click();
+		flushSync();
+		expect(region.isConnected).toBe(true);
+		expect(region.textContent).toBe('Sending your review');
+		fail(new Error('500'));
+		await vi.waitFor(() => expect(region.textContent).toBe(''));
+	});
+
 	it('R2: the receipt takes focus and is announced as status', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(0) });

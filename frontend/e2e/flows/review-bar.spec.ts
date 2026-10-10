@@ -237,3 +237,60 @@ journey('answer a plain ask on an image', [['1440 light', 'default', 'light'], [
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 	expect(overflow).toBeLessThanOrEqual(0);
 });
+
+journey('a note in flight keeps its layout', [['1440 light', 'default', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Review sending ${mode} ${theme}`);
+	raiseAsk(doc.threadId, doc.artifactId, 'Is this ready to ship?');
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	await page.route('**/api/attention/*/clear', async (route) => { await held; await route.continue(); });
+	await open(page, doc, mode, theme);
+	await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
+	const note = bar(page).getByRole('textbox');
+	await note.fill('Not yet: the rollback is missing.');
+	await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
+
+	// Mid-send the bar is still the note layout: the same input, only the sender busy, nothing else pressable.
+	await expect(bar(page).locator('.spinner')).toHaveCount(1);
+	await expect(note).toBeVisible();
+	await expect(note).toHaveValue('Not yet: the rollback is missing.');
+	await expect(note).toHaveJSProperty('readOnly', true);
+	await expect(bar(page).getByRole('button', { name: 'Approve' })).toHaveCount(0);
+	await expect(bar(page).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+	await expect(bar(page).getByRole('status').filter({ hasText: 'Sending your review' })).toHaveCount(1);
+	// The buttons ease into their disabled look; measure once that has settled.
+	await page.waitForTimeout(400);
+	await expectLayout(page, mode);
+	await shot(page, 'note-sending', info);
+	release();
+	await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
+});
+
+journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light']], async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Review long ${mode} ${theme} Platform Reliability Engineering Operations Release Coordination Agent`);
+	const reason = 'Is the rollout plan right for every region before we promote it?';
+	raiseAsk(doc.threadId, doc.artifactId, reason);
+	await open(page, doc, mode, theme);
+	await expectLayout(page, mode);
+	const line = bar(page).locator('.rb-line');
+	const ask = bar(page).locator('.rb-wide .rb-ask');
+	await expect(ask).toBeVisible();
+	// What shows is the part of the ask inside the clipped line, not its full unclipped box.
+	const visible = await ask.evaluate((el) => {
+		const box = el.getBoundingClientRect(), edge = el.closest('.rb-line')!.getBoundingClientRect().right;
+		return Math.max(0, Math.min(box.right, edge) - box.left);
+	});
+	expect(visible, 'the ask keeps a readable minimum next to a long name').toBeGreaterThanOrEqual(100);
+	await shot(page, 'long-name-closed', info);
+
+	// Keyboard focus unclamps the whole line in place, so the full ask is readable without a hover title.
+	const closedHeight = (await bar(page).boundingBox())!.height;
+	for (let step = 0; step < 12 && !(await line.evaluate((el) => el === document.activeElement)); step += 1) await page.keyboard.press('Tab');
+	await expect(line).toBeFocused();
+	await expect(line).toHaveCSS('white-space', 'normal');
+	await expect(line).toHaveCSS('overflow', 'visible');
+	await expect(ask).toHaveText(reason);
+	expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'no horizontal clipping once focused').toBe(true);
+	expect((await bar(page).boundingBox())!.height).toBeGreaterThan(closedHeight);
+	await shot(page, 'long-name-focused', info);
+});

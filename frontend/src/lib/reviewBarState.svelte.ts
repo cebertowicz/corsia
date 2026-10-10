@@ -23,6 +23,8 @@ export function createReviewBarState() {
 	let settledAsk: string | null = null;
 	let read = $state<ReviewBarRead | null>(null);
 	let phase = $state<ReviewBarPhase>('ask');
+	/** The layout a send came from: the sending bar keeps it, so nothing remounts under the user's hands. */
+	let sendingFrom = $state<'ask' | 'noting'>('ask');
 	let note = $state('');
 	let failure = $state('');
 	let receipt = $state<ReviewReceipt | null>(null);
@@ -61,7 +63,8 @@ export function createReviewBarState() {
 		const id = artifactId, stamp = generation;
 		if (!id || (phase !== 'ask' && phase !== 'noting')) return false;
 		if (verdict === 'changes_requested' && noteRequired() && !note.trim()) { failure = NOTE_NEEDED; return false; }
-		const from: ReviewBarPhase = phase;
+		const from = phase;
+		sendingFrom = from;
 		phase = 'sending'; failure = '';
 		try {
 			const sent = await answerReview(id, verdict, verdict === 'changes_requested' ? note : '');
@@ -86,7 +89,7 @@ export function createReviewBarState() {
 		}
 	}
 	return {
-		get read() { return read; }, get phase() { return phase; }, get receipt() { return receipt; },
+		get read() { return read; }, get phase() { return phase; }, get sendingFrom() { return sendingFrom; }, get receipt() { return receipt; },
 		get note() { return note; }, set note(value: string) { note = value; },
 		get failure() { return failure; }, set failure(value: string) { failure = value; },
 		get visible() { return visible(); }, get approveLabel() { return approveLabel(); },
