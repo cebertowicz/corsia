@@ -51,6 +51,8 @@ jobs:
           set -e
           python -m venv "$RUNNER_TEMP/ratchet-test-venv"
           "$RUNNER_TEMP/ratchet-test-venv/bin/pip" install --quiet pytest
+          # The speed-gate tests import the harness, which needs its pinned SQLite (dev/CI only).
+          "$RUNNER_TEMP/ratchet-test-venv/bin/pip" install --quiet --require-hashes --only-binary :all: -r scripts/speed_gate/requirements.txt
           "$RUNNER_TEMP/ratchet-test-venv/bin/python" -m pytest scripts/tests/ -q
 
       - name: No file grows past its recorded size

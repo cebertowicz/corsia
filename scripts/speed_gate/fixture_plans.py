@@ -8,10 +8,10 @@ hang under the project scope plan, as they do in a real workspace.
 from __future__ import annotations
 
 import random
-import sqlite3
 from collections.abc import Iterator
 from datetime import datetime
 
+from .sqlite_pin import sqlite3
 from . import fixture_spec as spec
 from .fixture_core import AGENT_THREADS, PROJECT_COUNT
 from .fixture_rows import Pools, timestamp

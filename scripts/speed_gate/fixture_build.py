@@ -8,7 +8,9 @@ The schema (tables, indexes, triggers, ``user_version``) comes from the target
 tree's ``init_db``; this module only fills it. Core tables are hand-shaped to
 the census skew; the remaining tables with a census figure are filled by
 ``fixture_rows``. A table whose constraints reject a generated row is recorded
-in the manifest's ``unseeded`` list, never silently dropped and never fatal.
+in the manifest's ``unseeded`` list. Every table the build leaves empty, because the census has no figure
+for it or its rows were rejected, must be listed with a reason in ``fixture_excluded``; one that is not
+fails the build (``FixtureCoverageError``), and the listed ones are reported in the manifest.
 """
 
 from __future__ import annotations
@@ -18,12 +20,14 @@ import hashlib
 import json
 import os
 import random
-import sqlite3
 import sys
 import time
 from pathlib import Path
 
+from .sqlite_pin import sqlite3
 from . import fixture_core as core
+from . import fixture_excluded as excluded
+from . import fixture_hosts as hosts
 from . import fixture_plans as plans
 from . import fixture_rows as rows
 from . import fixture_spec as spec
@@ -43,6 +47,10 @@ TERMINAL = {
     "host_access_leases": {"state": "expired"},
     "plan_node_holds": {"kind": "blocked"},
 }
+
+
+class FixtureCoverageError(RuntimeError):
+    """A table is empty in the fixture and nothing says why."""
 
 
 def _overrides(table: str) -> dict:
@@ -82,6 +90,19 @@ def _seed_generic(db: sqlite3.Connection, rng: random.Random, pools: rows.Pools,
             pools.add("artifact", [r[0] for r in db.execute("SELECT id FROM artifact_identities")])
 
 
+def _account_for_empty_tables(manifest: dict) -> None:
+    """Fail on a table left empty without a listed reason; record the listed ones in the manifest."""
+    empty = sorted({*manifest["no_target"], *(item["table"] for item in manifest["unseeded"])})
+    unexplained = [table for table in empty if table not in excluded.EXCLUDED]
+    if unexplained:
+        rejected = {item["table"]: item["reason"] for item in manifest["unseeded"]}
+        raise FixtureCoverageError(
+            "table(s) empty in the fixture with no listed reason: "
+            + "; ".join(f"{table} ({rejected.get(table, 'no census figure in fixture_spec')})" for table in unexplained)
+            + ". Give each a census figure in fixture_spec, or list it with a reason in fixture_excluded.")
+    manifest["excluded"] = {table: excluded.EXCLUDED[table] for table in empty}
+
+
 def build_into(db: sqlite3.Connection) -> dict:
     """Fill an initialised database; returns the build manifest."""
     rng = random.Random(spec.SEED)
@@ -91,6 +112,7 @@ def build_into(db: sqlite3.Connection) -> dict:
     db.execute("PRAGMA synchronous=OFF")
     db.execute("PRAGMA journal_mode=MEMORY")
     db.execute("PRAGMA cache_size=-262144")
+    hosts.pin_cli_connections(db)
     message_counts, usage_counts = core.seed_counts(rng)
     core.seed_projects(db, rng, pools)
     core.seed_threads(db, rng, pools, message_counts)
@@ -108,6 +130,7 @@ def build_into(db: sqlite3.Connection) -> dict:
     manifest["tables"]["plan_node_events"] = {"target": spec.target_rows("plan_node_events"),
                                               "rows": plans.seed_node_events(db, rng)}
     _seed_generic(db, rng, pools, manifest)
+    _account_for_empty_tables(manifest)
     db.commit()
     manifest["top_thread"] = {"id": "thread-00000", "messages": message_counts[0],
                               "llm_usage": usage_counts[0]}
@@ -115,7 +138,8 @@ def build_into(db: sqlite3.Connection) -> dict:
 
 
 def source_hash() -> str:
-    """Digest of the fixture builder itself, part of the cache key."""
+    """Digest of the fixture builder's own source, recorded in the manifest so a measurement names the exact
+    fixture code it ran on. Nothing is cached or keyed on it: every run rebuilds the fixture."""
     digest = hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob("fixture*.py")):
         digest.update(path.read_bytes())
@@ -143,7 +167,11 @@ def main(argv: list[str] | None = None) -> int:
     init_db()
     close_thread_db()
     db = sqlite3.connect(str(DB_PATH))
-    manifest = build_into(db)
+    try:
+        manifest = build_into(db)
+    except FixtureCoverageError as error:
+        print(f"fixture build failed: {error}", file=sys.stderr)
+        return 1
     manifest["schema"] = schema_digest(db)
     manifest["builder_sha256"] = source_hash()
     manifest["sqlite_version"] = sqlite3.sqlite_version

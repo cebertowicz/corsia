@@ -8,10 +8,10 @@ plan) and include exactly one thread, and one plan, at the production maximum.
 from __future__ import annotations
 
 import random
-import sqlite3
 from collections.abc import Iterator
 from datetime import timedelta
 
+from .sqlite_pin import sqlite3
 from . import fixture_spec as spec
 from .fixture_rows import END, START, Pools, timestamp
 

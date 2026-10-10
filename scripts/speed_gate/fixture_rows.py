@@ -12,11 +12,11 @@ from __future__ import annotations
 import json
 import random
 import re
-import sqlite3
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from .sqlite_pin import sqlite3
 from . import clock
 
 _ITEM = r"(?:'[^']*'|-?\d+)"

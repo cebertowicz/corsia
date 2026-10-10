@@ -20,9 +20,11 @@ jobs:
     # The check-run name is the job name below; keep it stable.
     name: Read-cost speed gate
     # The verdict counts SQLite VM steps, statements and response bytes, never
-    # time, so it does not depend on the host's load. It does depend on the
-    # SQLite version, which the baseline records, so the baseline is generated
-    # from this job's own measurement artifact on this hosted image.
+    # time, so it does not depend on the host's load. The count depends on the
+    # SQLite build, so the harness runs on one pinned build (sqlean.py, exact
+    # version and hashes in scripts/speed_gate/requirements.txt) and the
+    # baseline records it. The baseline is generated from this job's own
+    # measurement artifact.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
@@ -68,14 +70,17 @@ jobs:
           if [ ! -x .venv/bin/python ]; then python -m venv .venv; fi
           .venv/bin/pip install --quiet --upgrade pip
           .venv/bin/pip install --quiet -r backend/requirements.txt
+          # Dev/CI only; never in backend/requirements.txt and never imported by product code.
+          .venv/bin/pip install --quiet --require-hashes --only-binary :all: -r scripts/speed_gate/requirements.txt
 
       - name: Measure every read route
         if: steps.scope.outputs.measure == 'true'
-        # Two independent runs must agree: statements exactly, steps within 1% of the larger run. A gate whose
-        # own counts move beyond that is a defect; phase 1 reports it (warning and job summary) and stays green.
+        # Three independent runs must agree exactly on steps and statements (bytes too, except the routes with a
+        # committed tolerance). A gate whose own counts move is a defect; phase 1 reports it (warning and job
+        # summary) and stays green.
         run: |
           PYTHONPATH=scripts .venv/bin/python -m speed_gate.cli measure \
-            --backend backend --out "$RUNNER_TEMP/speed-gate.json" --repeats 2 \
+            --backend backend --out "$RUNNER_TEMP/speed-gate.json" --repeats 3 \
             --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Compare with the baseline (report-only)

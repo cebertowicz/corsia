@@ -18,21 +18,20 @@ GROWTH = 0.25
 MIN_RISE = {"steps": 10_000, "statements": 5, "bytes": 16_384}
 #: Fresh-route ceilings: a route above one is a would-fail unless grandfathered.
 CEILINGS = {"steps": 500_000, "statements": 500, "bytes": 1_048_576}
-#: Two runs of one tree may differ in steps by this share of the larger run, or by ``STEP_SLACK``, whichever
-#: is more. Statements must match exactly. A route's step count carries a sampling phase from every statement
-#: any connection ran before it, so it moves by a few samples between runs; on the costliest routes the
-#: wiggle grows with the work (a fraction of a percent), and 1% stays far below a real regression (a route
-#: ceiling is 500,000 steps and a rise must exceed 25%).
-RUN_BAND = 0.01
-#: The floor under that band, for small routes, where one or two samples are a large share. Over 9 runs of the
-#: fixture the largest deviation was 300 (two routes); this is twice that.
-STEP_SLACK = 600
+#: Two runs of one tree must agree exactly on steps and statements (the SQLite build is pinned, one pooled
+#: connection serves each lane and background work is drained), and on response bytes except on the routes
+#: below. A route listed here reports the host's own live readings, so its payload changes by a few digits
+#: between two runs of the same tree; the tolerance is that route's, named with its reason, never a global band.
+BYTE_TOLERANCE: dict[str, tuple[int, str]] = {
+    "/api/system": (8, "reports psutil memory and CPU readings, whose digits change between calls"),
+    "/api/system/host-resources": (8, "reports psutil memory and CPU readings, whose digits change between calls"),
+}
 
 
 @dataclass
 class Finding:
     route: str
-    kind: str  # "growth" | "ceiling" | "improved" | "new" | "removed"
+    kind: str  # "growth" | "ceiling" | "error" | "improved" | "new" | "removed"
     metric: str
     before: int | None
     after: int | None
@@ -40,7 +39,7 @@ class Finding:
 
     @property
     def fails(self) -> bool:
-        return self.kind in ("growth", "ceiling")
+        return self.kind in ("growth", "ceiling", "error")
 
 
 @dataclass
@@ -78,6 +77,7 @@ def compare(current: dict, baseline: dict) -> Verdict:
     ceilings = baseline.get("ceilings", CEILINGS)
     grandfathered = set(baseline.get("grandfathered", ()))
     recorded = baseline.get("routes", {})
+    not_called = current.get("not_called", {})
     findings: list[Finding] = []
     for route, cost in sorted(measured(current).items()):
         before = recorded.get(route)
@@ -101,7 +101,16 @@ def compare(current: dict, baseline: dict) -> Verdict:
                 findings.append(Finding(route, "ceiling", metric, before[metric], cost[metric],
                                         f"{metric} is over the ceiling of {ceilings[metric]:,}"))
     for route in sorted(set(recorded) - set(measured(current))):
-        findings.append(Finding(route, "removed", "steps", recorded[route]["steps"], None, "route no longer measured"))
+        status = current["routes"].get(route, {}).get("status")
+        if status is not None:  # the route answered with an error: its read is no longer measured
+            findings.append(Finding(route, "error", "status", recorded[route]["steps"], status,
+                                    f"HTTP {status} from the fixture request; a baselined route must still answer"))
+        elif route in not_called:  # still in the app, but the harness can no longer call it
+            findings.append(Finding(route, "error", "status", recorded[route]["steps"], None,
+                                    f"the gate can no longer call this baselined route: {not_called[route]}"))
+        else:  # in neither list: the app has no such route any more
+            findings.append(Finding(route, "removed", "steps", recorded[route]["steps"], None,
+                                    "route is no longer in the application"))
     status = "would_fail" if any(item.fails for item in findings) else "pass"
     return Verdict(status, findings)
 
@@ -124,34 +133,26 @@ def distribution(current: dict) -> list[tuple[str, dict]]:
 
 @dataclass
 class Disagreement:
-    """One count that differs between two runs of the same tree, with the band it was judged against."""
+    """One count that differs between two runs of the same tree, with the tolerance it was judged against."""
 
     route: str
     metric: str  # "steps" | "statements" | "bytes" | "measured"
     first: int | None
     second: int | None
-    band: int
+    tolerance: int  # 0 unless the route has a ``BYTE_TOLERANCE`` entry and the metric is bytes
+    reason: str = ""
 
     @property
-    def within_band(self) -> bool:
-        return self.first is not None and self.second is not None and abs(self.first - self.second) <= self.band
-
-
-def run_band(metric: str, first: int, second: int) -> int:
-    """How far apart two runs of one tree may be on ``metric``."""
-    larger = max(first, second)
-    if metric == "statements":
-        return 0
-    if metric == "steps":
-        return max(STEP_SLACK, int(larger * RUN_BAND))
-    return max(16, larger // 100)  # response bytes: a few digits on a route that reports the host's own readings
+    def tolerated(self) -> bool:
+        return self.first is not None and self.second is not None and abs(self.first - self.second) <= self.tolerance
 
 
 def compare_runs(first: dict, second: dict) -> list[Disagreement]:
-    """Every count that differs between two runs of one tree (the determinism check), in or out of its band.
+    """Every count that differs between two runs of one tree (the determinism check).
 
-    Only a difference outside the band (``Disagreement.within_band`` false) is an instability; the rest is
-    reported so the tolerance is visible. A route measured in only one run is always outside the band.
+    Steps and statements must be equal. Bytes must be equal except on a route with a ``BYTE_TOLERANCE``
+    entry, where a difference up to its tolerance is listed but ``tolerated``. A route measured in only one
+    run is never tolerated.
     """
     found = []
     one, two = measured(first), measured(second)
@@ -163,5 +164,6 @@ def compare_runs(first: dict, second: dict) -> list[Disagreement]:
             continue
         for metric in METRICS:
             if a[metric] != b[metric]:
-                found.append(Disagreement(route, metric, a[metric], b[metric], run_band(metric, a[metric], b[metric])))
+                tolerance, reason = BYTE_TOLERANCE.get(route, (0, "")) if metric == "bytes" else (0, "")
+                found.append(Disagreement(route, metric, a[metric], b[metric], tolerance, reason))
     return found

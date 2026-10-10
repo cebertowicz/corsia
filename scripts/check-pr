@@ -242,12 +242,13 @@ report_owner_identity_scan() {
   fi
 }
 
-header "6/7 read cost (merge-base vs head, report-only)"
-# Builds the synthetic production-shaped database for both trees and compares SQLite
-# VM steps, statements and response bytes per read route: the same >25% growth and
-# ceiling rule as the speed-gate CI job. Counts only, so it is as deterministic here
-# as in CI. A would-fail is printed and does not stop the push (phase 1);
-# SPEED_GATE_ENFORCE=1 makes it fail. SPEED_GATE_SKIP=1 skips it.
+header "6/7 read cost (head vs the committed baseline)"
+# Builds the synthetic production-shaped database, measures SQLite VM steps, statements and response bytes
+# per read route on this tree, and compares them with quality/speed-gate-baseline.json using the same
+# `compare` as the speed-gate CI job. Counts only, on one pinned SQLite build, so the numbers here match
+# CI's. CI stays report-only in phase 1; this is where a head is refused: a route that rose past the rule,
+# or fell enough that the baseline should drop, fails unless this PR also updates the baseline.
+# SPEED_GATE_SKIP=1 skips it.
 if [ "${SPEED_GATE_SKIP:-0}" = "1" ]; then
   yellow "read cost: skipped (SPEED_GATE_SKIP=1)"
 else
@@ -255,35 +256,45 @@ else
   for candidate in "${SPEED_GATE_BASE:-}" origin/dev dev; do
     [ -n "$candidate" ] && git rev-parse --verify --quiet "$candidate" >/dev/null && { SG_BASE_REF="$candidate"; break; }
   done
-  [ -n "$SG_BASE_REF" ] || fail "read cost: no merge-base ref (set SPEED_GATE_BASE to the branch this PR targets)"
+  [ -n "$SG_BASE_REF" ] || fail "read cost: no base ref to scope the change against (set SPEED_GATE_BASE to the branch this PR targets)"
   if ! "$VENV_PY" -c 'import fastapi, litellm, aiohttp' >/dev/null 2>&1; then
-    yellow "read cost: NOT MEASURED — $VENV_PY lacks the backend dependencies. Set CHECK_PR_PYTHON to the backend venv (backend/requirements.txt) to run it."
-    SG_BASE_REF=""
+    fail "read cost: NOT MEASURED. $VENV_PY lacks the backend dependencies. Set CHECK_PR_PYTHON to the backend venv (backend/requirements.txt) to run it, or SPEED_GATE_SKIP=1 to skip knowingly."
   fi
-  SG_BASE="${SG_BASE_REF:+$(git merge-base "$SG_BASE_REF" HEAD)}"
-  if [ -z "$SG_BASE_REF" ]; then
-    :  # reported above
-  elif git diff --quiet "$SG_BASE" -- backend scripts/speed_gate quality/speed-gate-baseline.json; then
-    green "read cost: nothing under backend/ changed since the merge-base ($SG_BASE_REF); not measured"
+  SG_BASE="$(git merge-base "$SG_BASE_REF" HEAD)"
+  # The same paths as the CI job's scope step: a PR that touches none of them cannot change a read cost.
+  if git diff --quiet "$SG_BASE" -- backend scripts/speed_gate quality/speed-gate-baseline.json .github/workflows/speed-gate.yml; then
+    green "read cost: nothing under backend/ or the gate changed since the merge-base ($SG_BASE_REF); not measured"
   else
     SG_START="$(date +%s)"
-    SG_TREE="$CHECKPR_TEMP_DIR/speed-gate-base"
-    git worktree add --detach --quiet "$SG_TREE" "$SG_BASE" || fail "read cost: could not check out the merge-base"
-    SG_ENFORCE=""
-    [ "${SPEED_GATE_ENFORCE:-0}" = "1" ] && SG_ENFORCE="--enforce"
+    SG_DIR="$REPO_ROOT/.check-pr-speed-gate"
+    SG_SITE="$SG_DIR/site"
+    mkdir -p "$SG_DIR"
+    if [ ! -d "$SG_SITE/sqlean" ]; then
+      # The gate measures on one pinned SQLite (sqlean.py, exact version and hashes in requirements.txt). It is
+      # provisioned here, next to the pinned mypy environment, and never installed into the source venv.
+      SG_STAGE="$(mktemp -d "$SG_DIR/site.staging.XXXXXX")" || fail "read cost: could not create a staging directory in $SG_DIR"
+      "$MYPY_PY" -m pip install --quiet --require-hashes --only-binary :all: --target "$SG_STAGE" \
+        -r scripts/speed_gate/requirements.txt \
+        || fail "read cost: could not install the pinned SQLite (scripts/speed_gate/requirements.txt) into $SG_STAGE"
+      if [ ! -e "$SG_SITE" ]; then mv "$SG_STAGE" "$SG_SITE" || fail "read cost: could not publish $SG_SITE"; else rm -rf "$SG_STAGE"; fi
+    fi
     set +e
-    PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli gate \
-      --head-backend backend --base-backend "$SG_TREE/backend" $SG_ENFORCE
+    SPEED_GATE_SQLEAN_PATH="$SG_SITE" PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli measure \
+      --backend backend --out "$SG_DIR/measurement.json" --repeats 2 --enforce
     SG_RC=$?
+    if [ "$SG_RC" = "0" ]; then
+      SPEED_GATE_SQLEAN_PATH="$SG_SITE" PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli compare \
+        --current "$SG_DIR/measurement.json" --baseline quality/speed-gate-baseline.json --enforce
+      SG_RC=$?
+    fi
     set -e
-    git worktree remove --force "$SG_TREE" >/dev/null 2>&1 || true
     SG_SECONDS=$(( $(date +%s) - SG_START ))
     case "$SG_RC" in
-      0) green "read cost: measured in ${SG_SECONDS}s (see the table above for any would-fail)" ;;
-      1) fail "read cost: a route rose past the rule (${SG_SECONDS}s)" ;;
-      2) fail "read cost: SQLite version mismatch; rebaseline needed" ;;
-      3) fail "read cost: two runs of one tree gave different counts; this is a defect in the gate" ;;
-      *) fail "read cost: the fixture build or harness could not run (exit $SG_RC)" ;;
+      0) green "read cost: measured in ${SG_SECONDS}s and matches the committed baseline" ;;
+      1) fail "read cost: a route moved past the rule; update quality/speed-gate-baseline.json in this PR (${SG_SECONDS}s; measurement kept at $SG_DIR/measurement.json)" ;;
+      2) fail "read cost: SQLite version mismatch with the baseline; rebaseline needed" ;;
+      3) fail "read cost: runs of one tree gave different counts; this is a defect in the gate" ;;
+      *) fail "read cost: the fixture build or a harness run could not run, or a measurement guard stopped it (exit $SG_RC); there is no verdict" ;;
     esac
   fi
 fi

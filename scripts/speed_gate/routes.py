@@ -7,10 +7,11 @@ it in the report, it is never skipped silently.
 from __future__ import annotations
 
 import re
-import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
+
+from .sqlite_pin import sqlite3
 
 _PATH_PARAM = re.compile(r"\{(\w+)(?::\w+)?\}")
 #: Routes that are not a database read: framework docs, the SPA catch-all, a live stream.

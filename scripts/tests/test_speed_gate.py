@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,13 +12,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from speed_gate import cli, fixture_rows, harness, ratchet, report, routes, runner  # noqa: E402
+from speed_gate import cli, fixture_build, fixture_excluded, fixture_rows, harness, ratchet, report, routes, runner  # noqa: E402
+from speed_gate.sqlite_pin import PINNED_SQLITE, PinError, sqlite3  # noqa: E402  (the pinned build, not the stdlib one)
+from speed_gate import sqlite_pin  # noqa: E402
 
-VERSION = "3.50.4"
+VERSION = PINNED_SQLITE
 
 
-def cost(steps=2000, statements=5, size=500, status=200):
-    return {"steps": steps, "statements": statements, "bytes": size, "status": status}
+def cost(steps=2000, statements=5, size=500, status=200, **extra):
+    return {"steps": steps, "statements": statements, "bytes": size, "status": status, **extra}
 
 
 def result(routes_, version=VERSION, **extra):
@@ -103,32 +105,6 @@ def test_error_responses_are_not_measured():
     current = result({"/a": cost(), "/broken": cost(9_999_999, status=500)})
     assert set(ratchet.measured(current)) == {"/a"}
     assert "/broken" not in ratchet.new_baseline(current, "x")["routes"]
-
-
-def unstable(first, second):
-    return sorted((item.route, item.metric) for item in ratchet.compare_runs(first, second) if not item.within_band)
-
-
-def test_run_to_run_steps_may_differ_by_one_percent_of_the_larger_run_but_statements_must_match():
-    first = result({"/a": cost(100_000, size=1000)})
-    # 1% of the larger run (1,006) is the band on this route; the 600-step floor is below it
-    assert unstable(first, result({"/a": cost(100_900, size=1005)})) == []
-    assert unstable(first, result({"/a": cost(101_200, size=1000)})) == [("/a", "steps")]
-    assert unstable(first, result({"/a": cost(100_000, statements=6, size=1000)})) == [("/a", "statements")]
-    assert unstable(first, result({"/b": cost()})) == [("/a", "measured"), ("/b", "measured")]
-
-
-def test_the_step_band_grows_with_the_route_and_has_a_floor_for_small_ones():
-    assert ratchet.run_band("steps", 11_238_100, 11_238_800) == 112_388
-    assert ratchet.run_band("steps", 1_890_000, 1_892_500) == 18_925
-    assert ratchet.run_band("steps", 20_000, 20_500) == ratchet.STEP_SLACK
-    assert ratchet.run_band("statements", 51, 51) == 0
-
-
-def test_a_difference_inside_the_band_is_still_listed_with_both_numbers_and_its_band():
-    items = ratchet.compare_runs(result({"/a": cost(1_892_500)}), result({"/a": cost(1_890_000)}))
-    assert [(item.metric, item.first, item.second, item.band, item.within_band) for item in items] \
-        == [("steps", 1_892_500, 1_890_000, 18_925, True)]
 
 
 def test_report_names_the_would_fail_route_and_the_mode():
@@ -229,32 +205,85 @@ def test_a_stuck_stage_is_stopped_and_reports_where_it_stopped(tmp_path, capsys,
     assert "route 7: /api/slow" in capsys.readouterr().err
 
 
-MANIFEST = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s"}
+def test_a_difference_between_runs_names_the_statement_and_thread_that_differ():
+    def run(trace):
+        return {"routes": {"/a": {"info": {"trace": trace}}}}
+    common = ["portal: SELECT 1", "db_0: SELECT 2"]
+    lines = cli._trace_difference([run(common + ["db_0: SELECT 3"]), run(common)], "/a")
+    assert lines == ["    only in run 1: db_0: SELECT 3 (x1)"]
 
 
-def test_runs_that_disagree_beyond_the_band_are_a_warning_report_only_and_exit_3_when_enforcing(tmp_path, monkeypatch, capsys):
-    runs = [result({"/a": cost(100_000), "/b": cost()}), result({"/a": cost(102_000, statements=6), "/b": cost()})]
+MANIFEST = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s", "excluded": {}}
+
+
+def disagreements(first, second):
+    return sorted((item.route, item.metric, item.tolerated) for item in ratchet.compare_runs(first, second))
+
+
+def test_runs_of_one_tree_must_agree_exactly_on_steps_and_statements():
+    first = result({"/a": cost(100_000)})
+    assert disagreements(first, result({"/a": cost(100_000)})) == []
+    assert disagreements(first, result({"/a": cost(100_001)})) == [("/a", "steps", False)]
+    assert disagreements(first, result({"/a": cost(100_000, statements=6)})) == [("/a", "statements", False)]
+    assert disagreements(first, result({"/b": cost()})) == [("/a", "measured", False), ("/b", "measured", False)]
+
+
+def test_bytes_are_exact_except_on_a_route_with_a_committed_tolerance_and_reason():
+    live = "/api/system"
+    assert live in ratchet.BYTE_TOLERANCE and ratchet.BYTE_TOLERANCE[live][1]
+    tolerance = ratchet.BYTE_TOLERANCE[live][0]
+    first = result({live: cost(size=1000), "/api/other": cost(size=1000)})
+    within = result({live: cost(size=1000 + tolerance), "/api/other": cost(size=1000)})
+    assert disagreements(first, within) == [(live, "bytes", True)]
+    beyond = result({live: cost(size=1000 + tolerance + 1), "/api/other": cost(size=1001)})
+    assert disagreements(first, beyond) == [("/api/other", "bytes", False), (live, "bytes", False)]
+    # the tolerance never reaches steps or statements
+    assert disagreements(first, result({live: cost(steps=2001, size=1000), "/api/other": cost(size=1000)})) \
+        == [(live, "steps", False)]
+
+
+def test_a_baselined_route_that_errors_or_cannot_be_called_is_an_error_not_a_removal():
+    base = baseline_for({"/a": cost(), "/b": cost(), "/c": cost(), "/gone": cost()})
+    current = result({"/a": cost(), "/b": cost(9, status=500)}, not_called={"/c": "needs a path parameter"})
+    verdict = ratchet.compare(current, base)
+    assert verdict.status == "would_fail"
+    assert kinds(verdict) == [("/b", "error", "status"), ("/c", "error", "status"), ("/gone", "removed", "steps")]
+    assert [item.route for item in verdict.failing] == ["/b", "/c"]
+    assert ratchet.compare(result({"/a": cost(), "/b": cost(), "/c": cost()}), base).status == "pass"
+
+
+def test_report_lists_removed_routes_drained_background_work_and_excluded_tables():
+    base = baseline_for({"/a": cost(), "/gone": cost()})
+    current = result({"/a": cost(info={"background_tasks": ["api/usage_rollup.py:refresh"]})},
+                     fixture_manifest={"excluded": {"llm_usage_hourly": "derived from llm_usage"}})
+    text = report.render(current, ratchet.compare(current, base), base, report_only=True, base_label="the baseline")
+    assert "`/gone`" in text and "api/usage_rollup.py:refresh" in text and "llm_usage_hourly" in text
+    assert "derived from llm_usage" in text
+
+
+def test_report_only_prints_a_disagreement_and_stays_green_enforcing_exits_3(tmp_path, monkeypatch, capsys):
+    runs = [result({"/a": cost(100_000), "/b": cost()}), result({"/a": cost(100_001), "/b": cost()})]
     monkeypatch.setattr(cli.runner, "build_and_measure", lambda backend, repeats: (runs, MANIFEST, {}))
     out, summary = tmp_path / "m.json", tmp_path / "summary.md"
     _, code = cli.measure_tree(tmp_path, 2, keep_runs=out, summary=summary)
     captured = capsys.readouterr()
     assert code == 0 and "::warning title=Read-cost speed gate" in captured.out and "/b" not in captured.err
-    assert "run 1: steps 100,000, statements 5" in captured.err and "run 2: steps 102,000, statements 6" in captured.err
-    assert "statements run 1 5, run 2 6, difference 1, band 0: OUTSIDE the band" in captured.err
+    assert "run 1: steps 100,000, statements 5" in captured.err and "run 2: steps 100,001, statements 5" in captured.err
+    assert "NOT tolerated" in captured.err
     assert "report-only: the job stays green" in summary.read_text() and "`/a`" in summary.read_text()
-    assert json.loads(Path(f"{out}.run2.json").read_text())["routes"]["/a"]["steps"] == 102_000
+    assert json.loads(Path(f"{out}.run2.json").read_text())["routes"]["/a"]["steps"] == 100_001
     _, code = cli.measure_tree(tmp_path, 2, enforce=True)
     assert code == cli.EXIT_NONDETERMINISTIC
 
 
-def test_runs_that_differ_inside_the_band_print_the_numbers_and_never_fail(tmp_path, monkeypatch, capsys):
-    runs = [result({"/a": cost(1_892_500)}), result({"/a": cost(1_890_000)})]
+def test_a_tolerated_byte_difference_is_listed_and_never_fails(tmp_path, monkeypatch, capsys):
+    runs = [result({"/api/system": cost(size=1000)}), result({"/api/system": cost(size=1004)})]
     monkeypatch.setattr(cli.runner, "build_and_measure", lambda backend, repeats: (runs, MANIFEST, {}))
     for enforce in (False, True):
         _, code = cli.measure_tree(tmp_path, 2, enforce=enforce, summary=tmp_path / "summary.md")
         assert code == 0
     printed = capsys.readouterr().err
-    assert "steps run 1 1,892,500, run 2 1,890,000, difference 2,500, band 18,925: within the band" in printed
+    assert "bytes run 1 1,000, run 2 1,004, difference 4: within its tolerance of 8" in printed
     assert "NONDETERMINISTIC" not in printed and not (tmp_path / "summary.md").exists()
 
 
@@ -266,39 +295,130 @@ def test_a_difference_between_runs_names_the_statement_and_thread_that_differ():
     assert lines == ["    only in run 1: db_0: SELECT 3 (x1)"]
 
 
-def test_database_jobs_are_limited_to_one_worker_so_a_call_never_depends_on_which_thread_ran_it(monkeypatch):
-    import importlib.machinery
-    import types
-
-    module = types.ModuleType("infra.db_async")
-    module.__spec__ = importlib.machinery.ModuleSpec("infra.db_async", None)
-    module._pool = SimpleNamespace(_max_workers=8)
-    module._read_pool = SimpleNamespace(_max_workers=6)
-    module._bulk_pool = SimpleNamespace(_max_workers=2)
-    monkeypatch.setitem(sys.modules, "infra", types.ModuleType("infra"))
-    monkeypatch.setitem(sys.modules, "infra.db_async", module)
-    monkeypatch.setattr(sys.modules["infra"], "db_async", module, raising=False)
-    harness._single_db_worker()
-    assert [pool._max_workers for pool in (module._pool, module._read_pool, module._bulk_pool)] == [1, 1, 1]
+def test_enforcing_also_fails_when_a_route_improved_so_the_baseline_cannot_go_stale(tmp_path, capsys):
+    base = tmp_path / "baseline.json"
+    base.write_text(json.dumps(baseline_for({"/a": cost(1_000_000)})))
+    current = tmp_path / "current.json"
+    current.write_text(json.dumps(result({"/a": cost(100_000)})))
+    args = ["compare", "--current", str(current), "--baseline", str(base)]
+    assert cli.main(args) == 0
+    assert cli.main(args + ["--enforce"]) == cli.EXIT_WOULD_FAIL
+    assert "update-baseline" in capsys.readouterr().err
 
 
-def test_the_usage_rollup_is_built_to_its_end_and_no_request_schedules_a_refresh(monkeypatch):
-    import importlib.machinery
-    import types
+def test_there_is_no_merge_base_gate_command_and_no_step_band():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["gate", "--head-backend", "b", "--base-backend", "b"])
+    assert not hasattr(ratchet, "run_band") and not hasattr(ratchet, "STEP_SLACK")
 
-    steps = iter([True, True, False])
-    refreshed = []
-    rollup = types.ModuleType("api.usage_rollup")
-    rollup.__spec__ = importlib.machinery.ModuleSpec("api.usage_rollup", None)
-    rollup.refresh_step = lambda db: refreshed.append(db) or next(steps)
-    rollup.schedule_refresh = lambda: "scheduled"
-    database = types.ModuleType("infra.database")
-    database.get_db = lambda: SimpleNamespace(close=lambda: refreshed.append("closed"))
-    api = types.ModuleType("api")
-    api.usage_rollup = rollup
-    for name, module in (("api", api), ("api.usage_rollup", rollup), ("infra", types.ModuleType("infra")),
-                         ("infra.database", database)):
-        monkeypatch.setitem(sys.modules, name, module)
-    harness._settle_usage_rollup()
-    assert len(refreshed) == 4 and refreshed[-1] == "closed"  # three steps, then the connection is closed
-    assert rollup.schedule_refresh() is None
+
+@pytest.fixture
+def background(tmp_path, monkeypatch):
+    """A ``Background`` rooted at ``tmp_path``; the global create_task patch is undone after the test."""
+    monkeypatch.setattr(asyncio.BaseEventLoop, "create_task", asyncio.BaseEventLoop.create_task)
+    namespace: dict = {}
+    source = (
+        "import asyncio\n"
+        "async def refresh():\n    await asyncio.sleep(0.01)\n"
+        "async def explode():\n    raise ValueError('boom')\n"
+        "async def slow():\n    await asyncio.sleep(5)\n"
+        "async def request(loop_holder):\n    loop_holder.append(asyncio.get_running_loop().create_task(refresh()))\n"
+        "async def spawn_unparented(loop):\n    loop.call_soon(lambda: loop.create_task(refresh()))\n    await asyncio.sleep(0.05)\n"
+    )
+    exec(compile(source, str(tmp_path / "app.py"), "exec"), namespace)
+    return harness.Background(tmp_path), namespace
+
+
+def test_drain_waits_for_a_task_the_request_started_and_names_it(background):
+    bg, app = background
+
+    async def scenario():
+        bg.portal = SimpleNamespace(call=lambda fn: None)
+        await app["request"]([])
+        return await bg._wait()
+
+    assert asyncio.run(scenario()) == ["app.py:refresh"]
+
+
+def test_a_background_task_with_no_running_parent_is_an_error_no_verdict(background):
+    bg, app = background
+
+    async def scenario():
+        await app["spawn_unparented"](asyncio.get_running_loop())
+        await bg._wait()
+        bg.check_traceable()
+
+    with pytest.raises(harness.GuardError, match="not traceable to the measured request: app.py:refresh"):
+        asyncio.run(scenario())
+
+
+def test_a_drained_task_that_raises_or_never_finishes_is_an_error(background, monkeypatch):
+    bg, app = background
+
+    async def raises():
+        asyncio.get_running_loop().create_task(app["explode"]())
+        await asyncio.sleep(0.01)
+        await bg._wait()
+
+    with pytest.raises(harness.GuardError, match="app.py:explode raised"):
+        asyncio.run(raises())
+    monkeypatch.setattr(harness, "DRAIN_TIMEOUT_SECONDS", 0.05)
+
+    async def hangs():
+        asyncio.get_running_loop().create_task(app["slow"]())
+        await bg._wait()
+
+    with pytest.raises(harness.GuardError, match="did not finish in 0.05s: app.py:slow"):
+        asyncio.run(hangs())
+
+
+def test_a_window_opening_with_an_application_task_alive_is_an_error(background):
+    bg, app = background
+
+    async def scenario():
+        task = asyncio.get_running_loop().create_task(app["slow"]())
+        try:
+            bg.assert_quiet()
+        finally:
+            task.cancel()
+
+    with pytest.raises(harness.GuardError, match="alive when a measured window opened: app.py:slow"):
+        asyncio.run(scenario())
+
+
+def test_the_one_worker_per_lane_proof_fails_on_a_second_worker_and_on_no_lane_at_all():
+    counters = harness.Counters()
+    counters.threads = {"db_0", "db-read_0", "asyncio-portal-x"}
+    harness.assert_one_worker_per_lane(counters)
+    counters.threads = {"db_0", "db_1"}
+    with pytest.raises(harness.GuardError, match="more than one worker thread"):
+        harness.assert_one_worker_per_lane(counters)
+    counters.threads = {"asyncio-portal-x"}
+    with pytest.raises(harness.GuardError, match="no database lane thread ran"):
+        harness.assert_one_worker_per_lane(counters)
+
+
+def test_the_harness_refuses_a_sqlite_that_is_not_the_pinned_build(monkeypatch):
+    fake = SimpleNamespace(sqlite_version="3.45.1", dbapi2=object())
+    monkeypatch.setitem(sys.modules, "sqlean", fake)
+    monkeypatch.delitem(sys.modules, "sqlite3")
+    with pytest.raises(PinError, match="3.45.1 is loaded but the gate pins " + PINNED_SQLITE):
+        sqlite_pin.install()
+
+
+def test_the_pin_is_a_dev_only_requirement_with_exact_version_and_hashes():
+    pinned = (Path(__file__).resolve().parents[1] / "speed_gate" / "requirements.txt").read_text()
+    assert sqlite_pin.PINNED_PACKAGE in pinned and pinned.count("--hash=sha256:") >= 1
+    runtime = (Path(__file__).resolve().parents[2] / "backend" / "requirements.txt").read_text()
+    assert "sqlean" not in runtime
+
+
+def test_the_build_fails_on_an_empty_table_with_no_listed_reason_and_records_the_listed_ones():
+    listed = sorted(fixture_excluded.EXCLUDED)[:1]
+    manifest = {"no_target": [*listed], "unseeded": []}
+    fixture_build._account_for_empty_tables(manifest)
+    assert manifest["excluded"] == {listed[0]: fixture_excluded.EXCLUDED[listed[0]]}
+    manifest = {"no_target": ["brand_new_table"], "unseeded": [{"table": "other_new", "reason": "IntegrityError: x"}]}
+    with pytest.raises(fixture_build.FixtureCoverageError, match="brand_new_table .*other_new \\(IntegrityError: x\\)"):
+        fixture_build._account_for_empty_tables(manifest)
+    assert all(reason.strip() for reason in fixture_excluded.EXCLUDED.values())

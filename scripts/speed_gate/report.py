@@ -21,8 +21,8 @@ def render(current: dict, verdict: ratchet.Verdict, baseline: dict, *, report_on
     ceilings = baseline.get("ceilings", ratchet.CEILINGS)
     mode = "report-only (does not block merging)" if report_only else "enforcing"
     lines = ["## Read-cost speed gate", "",
-             f"Result: **{verdict.status.replace('_', ' ')}**, {mode}. SQLite {current['sqlite_version']}, "
-             f"compared with {base_label}. The verdict uses only VM steps, statements and response bytes; "
+             f"Result: **{verdict.status.replace('_', ' ')}**, {mode}. SQLite {current['sqlite_version']} "
+             f"({current.get('sqlite_package', 'build not recorded')}), compared with {base_label}. The verdict uses only VM steps, statements and response bytes; "
              "wall time is never an input.", ""]
     if verdict.message:
         lines += [f"> {verdict.message}", ""]
@@ -39,6 +39,11 @@ def render(current: dict, verdict: ratchet.Verdict, baseline: dict, *, report_on
         lines += _table(["Route", "Metric", "Before", "After"],
                         [[f"`{item.route}`", item.metric, _cell(item.before), _cell(item.after)] for item in improved])
         lines += [""]
+    removed = [item for item in verdict.findings if item.kind == "removed"]
+    if removed:
+        lines += ["### Routes no longer in the application (drop them from the baseline)", ""]
+        lines += _table(["Route", "Steps before"], [[f"`{item.route}`", _cell(item.before)] for item in removed])
+        lines += [""]
     costly = ratchet.distribution(current)[:TOP_ROUTES]
     grandfathered = set(baseline.get("grandfathered", ()))
     lines += [f"### Most costly routes (ceilings: {ceilings['steps']:,} steps, {ceilings['statements']:,} "
@@ -51,6 +56,19 @@ def render(current: dict, verdict: ratchet.Verdict, baseline: dict, *, report_on
               f"{len(current.get('not_called', {}))} not covered.", ""]
     if current.get("not_called"):
         lines += ["<details><summary>Routes the gate cannot call</summary>", "", uncovered(current), "", "</details>", ""]
+    background = {route: cost["info"]["background_tasks"] for route, cost in sorted(current["routes"].items())
+                  if cost.get("info", {}).get("background_tasks")}
+    if background:
+        lines += ["<details><summary>Background work drained inside the measured window</summary>", "",
+                  "Work the application starts after its response, awaited so the read is counted with it on every run.", ""]
+        lines += _table(["Route", "Tasks (name, once per start)"],
+                        [[f"`{route}`", ", ".join(f"`{name}`" for name in names)] for route, names in background.items()])
+        lines += ["", "</details>", ""]
+    excluded = current.get("fixture_manifest", {}).get("excluded", {})
+    if excluded:
+        lines += [f"<details><summary>{len(excluded)} fixture tables left unseeded, each with its reason</summary>", ""]
+        lines += _table(["Table", "Reason"], [[f"`{table}`", reason] for table, reason in sorted(excluded.items())])
+        lines += ["", "</details>", ""]
     return "\n".join(lines)
 
 

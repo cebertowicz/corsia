@@ -20,6 +20,8 @@ class MeasurementError(RuntimeError):
     """The fixture build or a harness run failed; there is nothing to compare."""
 
 
+#: What a measured process may find on PATH: the operating system's own tools (git, curl) and nothing a user installed.
+SYSTEM_PATH = "/usr/bin:/bin"
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent  # the ``scripts`` directory holding this package
 
 
@@ -31,9 +33,14 @@ def _env(root: Path) -> dict[str, str]:
     home.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env.pop("CODEX_HOME", None)
-    # An empty HOME: some read routes look at the user's own tool configs, and the counts must not depend on the host.
+    # An empty HOME and a system-only PATH: read routes look for the user's own tool configs and installed CLIs
+    # (Claude Code, Codex, oMLX), and the model-source routes change shape with what they find, so the counts
+    # must not depend on what this host has installed. The interpreter is run by absolute path.
     env.update({"CORSIA_WORKSPACE": str(workspace), "CORSIA_STATE_DIR": str(state), "CORSIA_TEST_MODE": "1",
-                "CORSIA_ANALYTICS_DISABLE": "1", "PYTHONPATH": str(PACKAGE_ROOT), "HOME": str(home)})
+                "CORSIA_ANALYTICS_DISABLE": "1", "PYTHONPATH": str(PACKAGE_ROOT), "HOME": str(home),
+                "PATH": SYSTEM_PATH,
+                # Measurement-only: one pooled connection per lane, so a call never depends on which one served it.
+                "CORSIA_DB_POOL_WORKERS": "1"})
     return env
 
 
