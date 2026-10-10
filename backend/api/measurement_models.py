@@ -186,7 +186,8 @@ def build_models(
     rows = [_row(key, identities[key].label, tallies[key], key not in offered, sizes[key], first_try) for key in kept]
     if rest:
         # The other row's cells pool its members' tasks, as its own rate does.
-        pooled, pooled_sizes = ModelTally(), defaultdict(ModelTally)
+        pooled = ModelTally()
+        pooled_sizes: dict[str, ModelTally] = defaultdict(ModelTally)
         for key in rest:
             pooled.merge(tallies[key])
             for size, tally in sizes[key].items():
