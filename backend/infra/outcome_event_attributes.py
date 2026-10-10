@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS, MAX_REASON_CHARS
+from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, FACT_LABELS, MAX_REASON_CHARS
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
@@ -184,7 +184,7 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
     # source message text. Every other field is an opaque id or closed enum.
     CORRECTION_EVENT: {
         **{key: id_attr() for key in CORRECTION_FACT_KEYS if key not in {"label", "reason"}},
-        "label": enum_attr(*LABELS),
+        "label": enum_attr(*FACT_LABELS),
         "reason": text_attr(MAX_REASON_CHARS),
     },
     "github.issue.opened": {**_ISSUE_ATTRS},

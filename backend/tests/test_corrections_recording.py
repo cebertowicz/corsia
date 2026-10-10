@@ -155,9 +155,9 @@ async def test_global_batch_selects_oldest_candidates_across_owners(isolated_db,
     set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
     result = await job.run_corrections_recording(batch_size=2, invoke=classify)
 
-    assert result == {"status": "ok", "processed": 2, "recorded": 2, "failed": 0}
+    assert result == {"status": "ok", "processed": 2, "recorded": 2, "refused": 0, "failed": 0}
     assert ["other earliest" in prompt for prompt in seen] == [True, False]
-    assert job.CLASSIFIER_MAX_OUTPUT_TOKENS == 2048
+    assert job.CLASSIFIER_MAX_OUTPUT_TOKENS == 4096
     assert output_budgets == [job.CLASSIFIER_MAX_OUTPUT_TOKENS] * 2
     assert ["owner earliest" in prompt for prompt in seen] == [False, True]
 
@@ -211,10 +211,10 @@ async def test_reclassification_on_version_change_and_idempotent_rerun(isolated_
 
     set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
     assert await job.run_corrections_recording(batch_size=1, invoke=correction) == {
-        "status": "ok", "processed": 1, "recorded": 1, "failed": 0,
+        "status": "ok", "processed": 1, "recorded": 1, "refused": 0, "failed": 0,
     }
     assert await job.run_corrections_recording(batch_size=1, invoke=correction) == {
-        "status": "ok", "processed": 0, "recorded": 0, "failed": 0,
+        "status": "ok", "processed": 0, "recorded": 0, "refused": 0, "failed": 0,
     }
     set_setting("agents", {"defaults": {"corrections_checker_model": "model-b"}})
     assert (await job.run_corrections_recording(batch_size=1, invoke=correction))["recorded"] == 1
@@ -230,11 +230,7 @@ async def test_reclassification_on_version_change_and_idempotent_rerun(isolated_
         db.close()
 
 
-@pytest.mark.asyncio
-async def test_malformed_output_records_nothing_and_is_counted(isolated_db, monkeypatch):
-    from infra.settings import set_setting
-    from jobs import corrections_recording as job
-
+def _seed_one_message():
     db = _db()
     try:
         _thread(db)
@@ -243,17 +239,90 @@ async def test_malformed_output_records_nothing_and_is_counted(isolated_db, monk
         db.commit()
     finally:
         db.close()
+
+
+def _facts():
+    db = _db()
+    try:
+        return [
+            json.loads(row[0]) for row in db.execute(
+                "SELECT attributes FROM outcome_events WHERE event_name='measurement.correction'"
+            ).fetchall()
+        ]
+    finally:
+        db.close()
+
+
+def test_reason_formatting_never_discards_a_valid_verdict():
+    from core.corrections_recording import MAX_REASON_CHARS, validate_classification
+
+    folded = validate_classification('{"label":"correction","reason":"Line one.\\nLine two."}')
+    assert folded == {"label": "correction", "reason": "Line one. Line two."}
+    long = validate_classification(json.dumps({"label": "not_correction", "reason": "x" * 900}))
+    assert len(long["reason"]) == MAX_REASON_CHARS
+    fenced = validate_classification('```json\n{"label":"correction","reason":"Wrong."}\n```')
+    assert fenced == {"label": "correction", "reason": "Wrong."}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ['{"label":"maybe","reason":"No."}', '{"label":"correction","reason":"  "}', '{"label":"correction"}'],
+)
+def test_a_missing_or_unknown_verdict_is_still_rejected(raw):
+    from core.corrections_recording import validate_classification
+
+    with pytest.raises(ValueError):
+        validate_classification(raw)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        ("truncated", "output_truncated"),
+        ("invalid", "invalid_output"),
+    ],
+)
+async def test_unusable_output_records_a_typed_refusal_once(isolated_db, monkeypatch, error, code):
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+    from llm.isolated_structured import IsolatedStructuredOutputTruncatedError
+
+    _seed_one_message()
     monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
     set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
 
-    async def malformed(*args, **kwargs):
+    async def unusable(*args, **kwargs):
+        if error == "truncated":
+            raise IsolatedStructuredOutputTruncatedError("reviewer_output_truncated")
         return kwargs["validator"]({"label": "wrong-shape", "reason": "No."})
 
-    result = await job.run_corrections_recording(batch_size=1, invoke=malformed)
-    assert result == {"status": "partial", "processed": 1, "recorded": 0, "failed": 1}
+    result = await job.run_corrections_recording(batch_size=1, invoke=unusable)
+    assert result == {"status": "ok", "processed": 1, "recorded": 0, "refused": 1, "failed": 0}
+    assert [(fact["label"], fact["reason"]) for fact in _facts()] == [("refused", code)]
+    # The refusal is the message's fact under this version: it is not re-asked.
+    again = await job.run_corrections_recording(batch_size=1, invoke=unusable)
+    assert again["processed"] == 0 and len(_facts()) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_transient_provider_failure_writes_no_fact_and_is_counted(isolated_db, monkeypatch):
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+    from llm.isolated_structured import IsolatedStructuredUnavailableError
+
+    _seed_one_message()
+    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
+    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+
+    async def down(*args, **kwargs):
+        raise IsolatedStructuredUnavailableError("down")
+
+    result = await job.run_corrections_recording(batch_size=1, invoke=down)
+    assert result == {"status": "partial", "processed": 1, "recorded": 0, "refused": 0, "failed": 1}
+    assert _facts() == []
     db = _db()
     try:
-        assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name='measurement.correction'").fetchone()[0] == 0
         assert db.execute(
             "SELECT n FROM outcome_event_counters WHERE counter='mapping_failed' AND event_name='measurement.correction'"
         ).fetchone()[0] == 1

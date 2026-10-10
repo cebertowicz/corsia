@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -18,6 +19,13 @@ MESSAGE_SUBJECT_PREFIX = "message:"
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
 LABELS = (LABEL_CORRECTION, LABEL_NOT_CORRECTION)
+# A typed refusal is a recorded fact, not a label: the checker was asked and
+# produced no usable verdict, so this version never silently re-asks.
+LABEL_REFUSED = "refused"
+FACT_LABELS = LABELS + (LABEL_REFUSED,)
+REFUSAL_OUTPUT_TRUNCATED = "output_truncated"
+REFUSAL_INVALID_OUTPUT = "invalid_output"
+REFUSAL_REASONS = (REFUSAL_OUTPUT_TRUNCATED, REFUSAL_INVALID_OUTPUT)
 RUBRIC_V1 = """A message counts as a correction when it tells an agent that something it delivered, claimed, decided or did is wrong, missing, not what was meant, or must be redone or undone. This includes rejecting a proposal for being wrong, pointing out a bug or a factual error, and saying \"that's not what I asked\".
 
 It is **not** a correction when it is:
@@ -160,8 +168,10 @@ def classifier_prompt(preceding_agent: str | None, owner_message: str) -> str:
 def validate_classification(raw: object) -> dict[str, str]:
     """Parse one raw JSON document, then accept exactly the declared shape."""
     if isinstance(raw, str):
+        text = raw.strip()
+        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL)
         try:
-            raw = json.loads(raw)
+            raw = json.loads(fenced.group(1) if fenced else text)
         except json.JSONDecodeError as exc:
             raise ValueError("correction result must be one valid JSON object") from exc
     if not isinstance(raw, dict) or set(raw) != {"label", "reason"}:
@@ -170,9 +180,19 @@ def validate_classification(raw: object) -> dict[str, str]:
     reason = raw["reason"]
     if label not in LABELS:
         raise ValueError("correction result label is invalid")
-    if not isinstance(reason, str) or not reason.strip() or "\n" in reason or len(reason) > MAX_REASON_CHARS:
-        raise ValueError("correction result reason must be one non-empty bounded sentence")
-    return {"label": label, "reason": reason.strip()}
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("correction result reason must be non-empty")
+    # The reason is explanatory only: fold it to one bounded line instead of
+    # discarding a valid verdict for its formatting.
+    reason = " ".join(reason.split())[:MAX_REASON_CHARS]
+    return {"label": label, "reason": reason}
+
+
+def refusal_classification(reason_code: str) -> dict[str, str]:
+    """The typed refusal recorded when the checker gave no usable verdict."""
+    if reason_code not in REFUSAL_REASONS:
+        raise ValueError("unknown refusal reason")
+    return {"label": LABEL_REFUSED, "reason": reason_code}
 
 
 def fact_attributes(

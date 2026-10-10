@@ -11,6 +11,8 @@ from core.measurement_scope import scope_cte
 from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS,
+    REFUSAL_INVALID_OUTPUT,
+    REFUSAL_OUTPUT_TRUNCATED,
     SYSTEM_PROMPT,
     CheckerVersion,
     CorrectionCandidate,
@@ -19,15 +21,22 @@ from core.corrections_recording import (
     dedupe_key,
     fact_attributes,
     is_owner_authored_message,
+    refusal_classification,
     subject_key,
     validate_classification,
 )
 from infra.db_async import run_in_db
 from llm.isolated_contract import IsolatedStructuredTelemetry
-from llm.isolated_structured import IsolatedStructuredUnavailableError, invoke_isolated_structured
+from llm.isolated_structured import (
+    IsolatedStructuredOutputTruncatedError,
+    IsolatedStructuredUnavailableError,
+    invoke_isolated_structured,
+)
 
 DEFAULT_BATCH_SIZE = 20
-CLASSIFIER_MAX_OUTPUT_TOKENS = 2048
+# Fortissimo reasons by default (as in the gated run), so the cap must leave room
+# for thinking plus the verdict; the 60s call timeout bounds it (~80 tok/s).
+CLASSIFIER_MAX_OUTPUT_TOKENS = 4096
 MAX_PENDING_SCAN_MULTIPLIER = 8
 MANUAL_REQUEST_SETTING = "corrections_recording_manual_request"
 OUTPUT_SCHEMA: dict[str, Any] = {
@@ -258,16 +267,16 @@ async def run_corrections_recording(
     model_id = await run_in_db(get_corrections_checker_model)
     if model_id is None:
         await run_in_db(_write_status, "unconfigured", "No checker model configured")
-        return {"status": "unconfigured", "processed": 0, "recorded": 0, "failed": 0}
+        return {"status": "unconfigured", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
     try:
         target, binary = await run_in_db(_resolve_target, model_id)
     except (ModelUnavailableError, ValueError) as exc:
         await run_in_db(_write_status, "unavailable", str(exc)[:500])
-        return {"status": "unavailable", "processed": 0, "recorded": 0, "failed": 0}
+        return {"status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
     if not target.available:
         reason = target.availability_reason or "Configured checker model is unavailable"
         await run_in_db(_write_status, "unavailable", reason)
-        return {"status": "unavailable", "processed": 0, "recorded": 0, "failed": 0}
+        return {"status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
 
     version = checker_version(model_id)
     candidates: list[CorrectionCandidate] = []
@@ -278,7 +287,7 @@ async def run_corrections_recording(
     candidates = sorted(
         candidates, key=lambda candidate: (candidate.created_at, candidate.message_id)
     )[:batch_size]
-    recorded = failed = 0
+    recorded = failed = refused = 0
     for candidate in candidates:
         try:
             classification = await invoke(
@@ -295,7 +304,18 @@ async def run_corrections_recording(
             )
             inserted = await run_in_db(_record_fact, candidate, classification, version)
             recorded += int(inserted)
-        except (ValueError, IsolatedStructuredUnavailableError) as exc:
+        except (IsolatedStructuredOutputTruncatedError, ValueError) as exc:
+            code = (
+                REFUSAL_OUTPUT_TRUNCATED
+                if isinstance(exc, IsolatedStructuredOutputTruncatedError)
+                else REFUSAL_INVALID_OUTPUT
+            )
+            logger.warning("corrections recording refused {}: {} {}", candidate.message_id, code, exc)
+            inserted = await run_in_db(
+                _record_fact, candidate, refusal_classification(code), version,
+            )
+            refused += int(inserted)
+        except IsolatedStructuredUnavailableError as exc:
             logger.warning("corrections recording skipped {}: {}", candidate.message_id, type(exc).__name__)
             await run_in_db(_record_failure)
             failed += 1
@@ -310,6 +330,10 @@ async def run_corrections_recording(
         None if not failed else "One or more classifications failed and will retry",
         processed=len(candidates),
         recorded=recorded,
+        refused=refused,
         failed=failed,
     )
-    return {"status": status, "processed": len(candidates), "recorded": recorded, "failed": failed}
+    return {
+        "status": status, "processed": len(candidates), "recorded": recorded,
+        "refused": refused, "failed": failed,
+    }
