@@ -34,6 +34,7 @@ export interface FoldHistoryInput {
 export function createFoldHistory(input: FoldHistoryInput) {
 	let levels = $state.raw<Record<string, LevelHistory>>({});
 	let epoch = 0;
+	let inFlight = new Map<string, Promise<void>>();
 
 	// Another plan is another history; a read still in flight for the old one is dropped.
 	$effect.pre(() => {
@@ -41,6 +42,7 @@ export function createFoldHistory(input: FoldHistoryInput) {
 		untrack(() => {
 			epoch += 1;
 			levels = {};
+			inFlight = new Map();
 		});
 	});
 
@@ -48,10 +50,20 @@ export function createFoldHistory(input: FoldHistoryInput) {
 	const put = (level: string, next: LevelHistory) => { levels = { ...levels, [level]: next }; };
 	const parentOf = (level: string) => (level === ROOT_LEVEL ? input.rootParent() ?? FOLDED_ROOT : level);
 
-	/** Fetch the next page of a level; a no-op while one is in flight or after the last. */
-	async function loadMore(level: string): Promise<void> {
+	/** Fetch the next page of a level; while one is in flight, that fetch; a no-op after the last. */
+	function loadMore(level: string): Promise<void> {
+		const pending = inFlight.get(level);
+		if (pending) return pending;
+		if (at(level).status === 'end') return Promise.resolve();
+		const fetching = fetchPage(level).finally(() => {
+			if (inFlight.get(level) === fetching) inFlight.delete(level);
+		});
+		inFlight.set(level, fetching);
+		return fetching;
+	}
+
+	async function fetchPage(level: string): Promise<void> {
 		const before = at(level);
-		if (before.status === 'loading' || before.status === 'end') return;
 		const run = epoch;
 		const planId = input.planId();
 		put(level, { ...before, status: 'loading' });
