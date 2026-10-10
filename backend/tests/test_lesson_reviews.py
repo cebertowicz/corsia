@@ -847,7 +847,9 @@ def test_the_owners_own_wake_for_the_new_date_is_kept_and_the_stale_one_resolved
         mutation_id="extend", db=db,
     )
     db.commit()
-    assert len(_armed(db, node_id)) == 2
+    # A task has one schedule (#903): the owner's wait replaces the review's own wake.
+    [owners] = _armed(db, node_id)
+    assert _instant(owners["condition_value"]) == _instant(other)
 
     again, created = _lesson(db, due=other)
 
