@@ -72,6 +72,15 @@ def revision_conflict(
     )
 
 
+def open_descendants(count: object) -> PlanError:
+    """The refusal for failing a node whose descendants are still open work."""
+    return PlanError(
+        f"plan node has {count} open descendant node(s) and cannot be failed over them: "
+        "settle or close the open descendants first (close_node, accept or fail each), "
+        "then fail this node"
+    )
+
+
 def require_node_revision(node, expected: object) -> None:
     """Refuse a node write computed against a superseded node revision."""
     if node["revision"] != expected:

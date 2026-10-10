@@ -7,8 +7,10 @@ import infra.thread_updates as thread_updates
 import plans.node_states as node_states
 import plans.not_moving as not_moving
 import plans.operator_node_state as operator_node_state
+import plans.open_rollup as open_rollup
+import plans.open_tree as open_tree
+import plans.operator_owners as operator_owners
 import plans.operator_projection as operator_projection
-import plans.rollup as rollup
 import plans.service as service
 from plans.boundary import PlanActor
 
@@ -70,15 +72,20 @@ def _failed_nodes(plan_ids: list[str], *, actor: PlanActor, db) -> dict[str, lis
     if not plan_ids:
         return {}
     marks = ",".join("?" for _ in plan_ids)
+    # A plan whose stored counters hold no failed leaf has nothing to ask. Otherwise the
+    # candidates are the user's failed rows changed since the viewer last saw the plan
+    # (``idx_plan_nodes_user_failed``): a failure unseen happened after ``seen_through``, and
+    # a node's last change is never before its failure. Settled history is never read (#731 S2-2).
     rows = db.execute(
-        f"""SELECT n.plan_id,n.id AS node_id,n.title FROM plan_nodes n
-              JOIN plans p ON p.id=n.plan_id
-              LEFT JOIN plan_pane_views v
-                ON v.user_id=? AND v.thread_id=p.owner_id
+        f"""SELECT n.plan_id,n.id AS node_id,n.title FROM plans p
+              LEFT JOIN plan_pane_views v ON v.user_id=? AND v.thread_id=p.owner_id
+              CROSS JOIN plan_nodes n ON n.plan_id=p.id
               LEFT JOIN plan_node_events failure
                 ON failure.node_id=n.id AND failure.event='state_transition'
                AND failure.new_state='failed'
-              WHERE n.plan_id IN ({marks}) AND {node_states.failure_asks_user_sql('n')}
+              WHERE p.id IN ({marks}) AND p.top_failed>0
+                AND n.own_last_changed>COALESCE(v.seen_through,'')
+                AND {node_states.failure_asks_user_sql('n')}
                 AND (failure.created_at IS NULL OR v.seen_through IS NULL
                      OR failure.created_at > v.seen_through)
               ORDER BY n.plan_id,n.order_key,n.id""",
@@ -95,7 +102,7 @@ def _access_requests(thread_ids: list[str], *, actor: PlanActor, db) -> dict[str
         f"""SELECT l.root_thread_id,l.purpose FROM host_access_leases l
               JOIN threads t ON t.id=l.root_thread_id
              WHERE l.state='awaiting_user' AND t.user_id=? AND t.purged_at IS NULL
-               AND {operator_projection._LIVE_THREAD}
+               AND {operator_owners.LIVE_THREAD}
              ORDER BY l.root_thread_id,l.created_at,l.id""",
         (actor.user_id,),
     ).fetchall()
@@ -134,7 +141,7 @@ def _live_visible_thread_ids(ids: list[str], *, actor: PlanActor, db) -> list[st
     """Return requested threads which are live and visible to the operator."""
     rows = db.execute(
         f"""SELECT id FROM threads WHERE user_id = ? AND purged_at IS NULL
-              AND {operator_projection._LIVE_THREAD} AND id IN ({','.join('?' * len(ids))})""",
+              AND {operator_owners.LIVE_THREAD} AND id IN ({','.join('?' * len(ids))})""",
         (actor.user_id, *ids),
     ).fetchall()
     return [str(row["id"]) for row in rows]
@@ -152,21 +159,26 @@ def _plan_word(plan_row: dict, plan: dict | None, *, owed: bool) -> tuple[str, s
 
 
 def _plan_rows(thread_ids: list[str], *, db) -> list:
-    """Each named thread's live plan row, with whether it has open and finished work."""
+    """Each named thread's live plan row, with whether it has open and finished work.
+
+    Open is a row of the open work, the rule the pane lists it by
+    (``node_states.listed_open_sql``, the open index); finished is a settled row in work,
+    read from a folded index, so neither walks a plan's history.
+    """
     terminal = sorted(service._TERMINAL_STATES)
     marks = ','.join('?' * len(terminal))
     return db.execute(
         f"""SELECT p.*, EXISTS (
                 SELECT 1 FROM plan_nodes n WHERE n.plan_id = p.id
-                  AND n.state NOT IN ({marks})
+                  AND {node_states.listed_open_sql('n')}
               ) AS has_open, EXISTS (
                 SELECT 1 FROM plan_nodes n WHERE n.plan_id = p.id
-                  AND n.state IN ({marks}) AND {node_states.in_work_sql('n')}
+                  AND n.folded = 1 AND n.state IN ({marks}) AND {node_states.in_work_sql('n')}
               ) AS has_finished
             FROM plans p
             WHERE p.owner_kind = 'thread' AND p.state != 'archived'
               AND p.owner_id IN ({','.join('?' * len(thread_ids))})""",
-        (*terminal, *terminal, *thread_ids),
+        (*terminal, *thread_ids),
     ).fetchall()
 
 
@@ -191,8 +203,10 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
     states: dict[str, dict] = {}
     plans_by_id = {str(row["id"]): dict(row) for row in rows}
     memo: dict = {}
-    projected = rollup.rollup_threads(
-        [row for row in rows if row["has_open"]], db=db, child_depth=0, memo=memo,
+    # No folded rows are listed (cap 0): the header counts come from the stored counters.
+    projected = open_rollup.rollup_plans(
+        db, [row for row in rows if row["has_open"]], memo,
+        window=open_tree.FoldWindow(since=None, cap=0),
     )
     # The chat list reads the plan header and the ask list only: no costs, no
     # attempt, evidence or transition facts, and none of the envelope's

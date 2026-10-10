@@ -6,6 +6,7 @@ import {
 } from '$lib/components/plans/planDisplay';
 import type { OperatorNode, OperatorPlanEntry } from '$lib/api/plans';
 import { operatorNode, planDisplay, withPlanContract } from './fixtures/operatorPlan';
+import { planFoldFields } from './fixtures/planFolds';
 
 function entry(nodes: OperatorNode[], display: OperatorPlanEntry['display'] = planDisplay('waiting', 'waiting')): OperatorPlanEntry {
 	return withPlanContract({
@@ -18,7 +19,7 @@ function entry(nodes: OperatorNode[], display: OperatorPlanEntry['display'] = pl
 		display,
 		current_node_ids: [],
 		next_node_ids: [],
-		nodes,
+		nodes, ...planFoldFields(nodes),
 	});
 }
 

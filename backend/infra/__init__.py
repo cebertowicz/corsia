@@ -19,7 +19,7 @@ __all__ = [
 
 def __getattr__(name: str):
     if name in __all__:
-        from infra import product_events
+        import infra.product_events as product_events
 
         return getattr(product_events, name)
     raise AttributeError(f"module 'infra' has no attribute {name!r}")

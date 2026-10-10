@@ -555,6 +555,8 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
                 (f"measurement-fixture-message-{week}-{index}", thread_id,
                  sent_at.strftime("%Y-%m-%dT%H:%M:%SZ")),
             )
+    # The nodes above were written straight to the table, so compute their stored aggregates.
+    _import_backend_module("plans.public").rebuild_plan_aggregates(wt, _MEASUREMENT_PLAN_ID)
     print("Seeded Measurement weekly fixture")
 
 

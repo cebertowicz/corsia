@@ -10,6 +10,7 @@ from infra.schema import SCHEMA_SQL
 from plans import admission, delegation, mutations, projections, service
 from tests.plan_execution_helpers import open_turn
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _db() -> sqlite3.Connection:
@@ -57,9 +58,10 @@ def test_signal_uses_only_active_unarchived_actionable_owned_leaves():
         own_active.id, actor_id="owner", provenance="test", db=db, touch=False,
     )
     archived = _task(db, plan.id, "Archived")
-    db.execute(
-        "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (archived.id,)
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (archived.id,)
+        )
     done = _task(db, plan.id, "Done")
     service.transition_node(done.id, "active", db=db)
     submit_review_evidence(done.id, db=db)

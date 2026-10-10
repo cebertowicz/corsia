@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
 import { node } from './fixtures/planTreeNode';
+import { withFolds } from './fixtures/planFolds';
 
 /**
  * S1-S3: leaf tasks whose own agent scheduled a wait ending more than 24 hours
@@ -79,7 +80,7 @@ async function press(label: string): Promise<void> {
 }
 
 async function mountTree(nodes: OperatorNode[]) {
-	component = mount(PlanTree, { target: host, props: { nodes } });
+	component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 	await settle();
 }
 
@@ -125,7 +126,7 @@ describe('who gathers into the Scheduled row', () => {
 			scheduled_until: hours === null ? null : new Date(NOW.getTime() + hours * HOUR).toISOString(), ...over,
 		});
 		const mountOpen = async (nodes: OperatorNode[]) => {
-			component = mount(PlanTree, { target: host, props: { nodes, expandBranchesByDefault: true } });
+			component = mount(PlanTree, { target: host, props: withFolds({ nodes, expandBranchesByDefault: true }) });
 			await settle();
 		};
 

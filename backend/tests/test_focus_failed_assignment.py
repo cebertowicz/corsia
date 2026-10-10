@@ -5,6 +5,7 @@ from tests.test_plan_chat_list_state import (
     db, seed_threads, _thread, _plan, _failed_task, _states, _record_view,
 )  # noqa: F401 - fixtures
 from tests.plan_close_next_helpers import HUMAN, task
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 @pytest.mark.parametrize("assignee", ["user", "coordinator", "subagent", None])
@@ -49,13 +50,16 @@ def test_human_assignment_never_resurrects_suppressed_failures(db, suppression):
     if suppression == "seen":
         _record_view(db, HUMAN.user_id, actor.thread_id)
     elif suppression == "archived":
-        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node.id,))
     elif suppression == "closed":
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (node.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (node.id,))
     elif suppression == "retired-parent":
         parent = task(db, plan.id, "Retired phase")
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent.id,))
-        db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent.id, node.id))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent.id,))
+            db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent.id, node.id))
     else:
         follow_up = task(db, plan.id, "Retry")
         db.execute("UPDATE plan_nodes SET follow_up_of=? WHERE id=?", (node.id, follow_up.id))

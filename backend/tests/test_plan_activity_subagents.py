@@ -9,6 +9,7 @@ import plans.service as service
 from plans import activity_projection, decision_projection
 from tests.test_plan_activity_decision_facts import _body
 from tests.test_plan_activity_index import _actor, _seed, _task, db  # noqa: F401
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _thread(
@@ -77,7 +78,8 @@ def test_visible_chat_with_lineage_keeps_its_own_row(db):
 def _answerable_decision(db, plan_id: str, thread_id: str) -> None:
     source = _task(plan_id, "Source", db=db)
     review = _task(plan_id, "Review", db=db)
-    db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (review.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (review.id,))
     body = _body() | {
         "plan_id": plan_id, "node_id": review.id, "source_node_id": source.id,
         "thread_id": thread_id, "order_key": 0, "revision": 1,

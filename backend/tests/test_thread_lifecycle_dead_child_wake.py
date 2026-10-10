@@ -20,6 +20,7 @@ import core.thread_lifecycle as lifecycle
 from infra.database import write_transaction
 from infra.schema import SCHEMA_SQL
 from plans import service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _archive(db, *args, **kwargs):
@@ -63,10 +64,11 @@ def _delegate_to_worker(db) -> str:
         spawn_kind="claude-code", db=db,
     )
     service.transition_node(node.id, "active", db=db)
-    db.execute(
-        "UPDATE plan_nodes SET spawned_thread_id='worker' WHERE id=?",
-        (node.id,),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET spawned_thread_id='worker' WHERE id=?",
+            (node.id,),
+        )
     db.commit()
     return node.id
 

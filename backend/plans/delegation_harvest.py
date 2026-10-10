@@ -13,6 +13,7 @@ import plans.notifications as notifications
 import plans.plan_wake as plan_wake
 import plans.plan_write as plan_write
 import plans.service as service
+from plans.delegation_epoch import attached_since, open_leaves, open_row_sql, return_rows
 from plans.harvest_review_event import HARVEST_EVENT, latest_review_event_sql
 from plans.delegation import (
     _HARVESTABLE_STATES,
@@ -66,7 +67,7 @@ def _returned_since(connection, node, child_plan_id: str) -> bool:
            ) AS at""",
         {"node": node["id"], "rev": node["requirements_revision"]},
     ).fetchone()["at"]
-    ids = [row["id"] for row in return_rows(connection, child_plan_id)]
+    ids = [row["id"] for row in return_rows(connection, child_plan_id, attached_since(connection, node["id"]))]
     if not ids:
         return False
     marks = ",".join("?" * len(ids))
@@ -76,31 +77,6 @@ def _returned_since(connection, node, child_plan_id: str) -> bool:
             LIMIT 1""",
         (*ids, boundary),
     ).fetchone() is not None
-
-
-def return_rows(connection, plan_id: str) -> list:
-    """The steps a delegated plan's return is made of, in plan order.
-
-    A worker's return is its leaves. Closed steps are out of the work
-    (``node_states.work_ids``), so a plan whose remaining work was all closed
-    has no leaf left; its closed steps are the return then, and the parent
-    reads each as ``closed``. A plan that never held a step has neither, and
-    returned nothing.
-    """
-    leaves = service._plan_leaf_rows(connection, plan_id)
-    if leaves:
-        return leaves
-    return connection.execute(
-        """SELECT n.* FROM plan_nodes n
-           WHERE n.plan_id=? AND n.state=? AND n.archived_at IS NULL
-             AND NOT EXISTS (
-               SELECT 1 FROM plan_nodes child
-               WHERE child.parent_id=n.id AND child.state=?
-                 AND child.archived_at IS NULL
-             )
-           ORDER BY n.order_key,n.id""",
-        (plan_id, service.CLOSED, service.CLOSED),
-    ).fetchall()
 
 
 def awaiting_owner_verdict(connection, node) -> bool:
@@ -152,7 +128,7 @@ def returned_steps(connection, node) -> list:
         return []
     child_plan_id = attachment_payload(harvest)["child_plan_id"]
     returned = []
-    for leaf in service._plan_leaf_rows(connection, child_plan_id):
+    for leaf in open_leaves(connection, child_plan_id):
         if leaf["state"] != "review_requested":
             continue
         entered = connection.execute(
@@ -186,7 +162,7 @@ def parent_reviews(connection, plan) -> frozenset[str]:
         return frozenset()
     reviews = {
         str(leaf["id"])
-        for leaf in service._plan_leaf_rows(connection, plan["id"])
+        for leaf in open_leaves(connection, plan["id"])
         if leaf["state"] == "review_requested"
         and not awaiting_owner_verdict(connection, leaf)
         and (leaf["assignee"] or "") != "user"
@@ -214,6 +190,7 @@ def waiting_on_answer(connection, plan_id: str) -> bool:
         f"""SELECT 1 FROM plan_nodes w
            WHERE w.plan_id=? AND w.archived_at IS NULL AND w.assignee='user'
              AND w.state IN ('pending','active','review_requested')
+             AND {open_row_sql(connection, 'w')}
              AND NOT {node_states.has_child_in_work_sql('w')}
            LIMIT 1""",
         (plan_id,),

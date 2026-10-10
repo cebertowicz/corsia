@@ -15,6 +15,9 @@ import { resetObserversForTests } from '$lib/stores/planQuery.svelte';
 import type { ActivityIndexEnvelope, OperatorEnvelope, OperatorNode } from '$lib/api/plans';
 import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from './fixtures/operatorPlan';
 import { CHILD_AVAILABLE, node as treeNode } from './fixtures/planTreeNode';
+import { withFolds } from './fixtures/planFolds';
+import { planFoldFields } from './fixtures/planFolds';
+import { childState } from './fixtures/planFolds';
 
 /**
  * Every place the plan tree mounts must gather scheduled work: the thread pane,
@@ -71,7 +74,7 @@ function threadEnvelope(nodes: OperatorNode[], open: number, state = 'active'): 
 			plan: { id: 'plan-t1', owner_kind: 'thread', owner_id: 't1', state, revision: 1, updated_at: 'now' },
 			owner: { label: 'Thread', project_id: null, thread_id: 't1' },
 			progress: { done: 0, total: open, open, liveness: 'waiting', distribution: { ...EMPTY_DISTRIBUTION } },
-			display: planDisplay('waiting', 'waiting'), oversize: null, current_node_ids: [], next_node_ids: [], nodes,
+			display: planDisplay('waiting', 'waiting'), oversize: null, current_node_ids: [], next_node_ids: [], nodes, ...planFoldFields(nodes),
 		}],
 	} as OperatorEnvelope;
 }
@@ -147,7 +150,7 @@ describe('the drill view', () => {
 			op('A', 48, { parent_id: 'root', depth: 3 }),
 			op('B', 72, { parent_id: 'root', depth: 3 }),
 		];
-		component = mount(PlanDrillView, { target: host, props: { nodes, rootId: 'root', onBack: () => {} } });
+		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes, rootId: 'root', onBack: () => {} }) });
 		flushSync();
 		expect(titles()).toContain('{Scheduled}');
 		expect(titles()).not.toContain('A');
@@ -160,11 +163,11 @@ describe('a nested subagent plan', () => {
 		const childNodes = [scheduled(treeNode({ id: 'c1', title: 'C1' }), 48), scheduled(treeNode({ id: 'c2', title: 'C2' }), 72)];
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes: [step],
 				isChildExpanded: () => true,
-				childRowState: () => ({ status: 'ready', planId: 'child-plan', nodes: childNodes, currentNodeIds: [], nextNodeIds: [], errorMessage: null }),
-			},
+				childRowState: () => (childState({ status: 'ready', planId: 'child-plan', nodes: childNodes, currentNodeIds: [], nextNodeIds: [], errorMessage: null })),
+			}),
 		});
 		flushSync();
 		expect(titles()).toEqual(['Delegated step', '{Scheduled}']);

@@ -8,6 +8,7 @@ import time
 from plans import activity_projection, admission_projection, operator_node_state, service
 from tests.test_plan_activity_index import db, _actor
 from tests.test_plan_activity_decision_facts import _body
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def seed_scale(db, *, rich: bool) -> None:
@@ -37,9 +38,10 @@ def seed_scale(db, *, rich: bool) -> None:
         VALUES (?,?,?,?,?,?)""", threads)
     db.executemany("""INSERT INTO plans(id,owner_kind,owner_id,parent_plan_id,created_at,updated_at)
         VALUES (?,'thread',?,?,?,?)""", plans)
-    db.executemany("""INSERT INTO plan_nodes
-        (id,plan_id,order_key,kind,title,commitment_id,state,acceptance_criteria,created_at,updated_at)
-        VALUES (?,?,?,'task',?,?,?,'done','t','t')""", nodes)
+    with raw_plan_seed(db):
+        db.executemany("""INSERT INTO plan_nodes
+            (id,plan_id,order_key,kind,title,commitment_id,state,acceptance_criteria,created_at,updated_at)
+            VALUES (?,?,?,'task',?,?,?,'done','t','t')""", nodes)
     db.executemany("""INSERT INTO artifact_identities
         (id,integration,type,external_id,state,metadata,created_at,updated_at)
         VALUES (?,'local','plan-decision',?,'active',?,'t','t')""",

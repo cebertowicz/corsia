@@ -4,6 +4,7 @@
  */
 
 import type { OperatorCommitmentCost, OperatorInitiative, OperatorNodeCost } from './plansCostTypes';
+import type { OperatorFoldLevel } from './plansFolded';
 
 export type OperatorLiveness =
 	| 'advancing'
@@ -255,7 +256,11 @@ export interface OperatorPlanEntry {
 	oversize: { open: number; budget: number } | null;
 	current_node_ids: string[];
 	next_node_ids: string[];
+	/** Open rows, plus the window of folded rows this read lists (`folds` says what the rest of each level is). */
 	nodes: OperatorNode[];
+	folds: OperatorFoldLevel[];
+	/** Every top-level root of the plan, folded ones included: the sole-wrapper rule reads it, not `nodes`. */
+	root_count: number;
 }
 
 export interface OperatorTarget {

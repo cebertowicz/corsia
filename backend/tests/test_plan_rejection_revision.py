@@ -27,6 +27,7 @@ from plans import closure, mutations, service
 from plans.boundary import PlanActor, mutate
 from plans.operator_node_state import retired_display
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 NOW = "2026-08-01T00:00:00+00:00"
 PARENT = PlanActor("parent", "user-1", "project-1")
@@ -252,7 +253,8 @@ def test_replaying_a_rejection_the_upgrade_left_failed_returns_its_revision(monk
         plan, step = _plain_step(db)
         seen = service._node_row(db, step.id)["revision"]
         first = _reject(db, plan.id, step.id)
-        db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (step.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (step.id,))
         db.commit()
 
         again = mutate(

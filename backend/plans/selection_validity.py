@@ -179,7 +179,8 @@ def _blockers(db, node_plans) -> dict[str, str | None]:
     marks = ",".join("?" for _ in candidates)
     parents = node_states.parent_ids(
         db.execute(
-            f"SELECT id,parent_id,state,archived_at FROM plan_nodes WHERE parent_id IN ({marks})",
+            "SELECT id,parent_id,state,archived_at FROM plan_nodes"
+            f" WHERE parent_id IN ({marks}) AND {node_states.unarchived_sql('plan_nodes')}",
             tuple(str(node["id"]) for node, _plan in candidates),
         ).fetchall()
     )

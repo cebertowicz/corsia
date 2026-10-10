@@ -13,6 +13,7 @@ from plans import activity_projection, hierarchy
 from plans.boundary import PlanActor
 from tests.test_attention_queue import _seed, db, raise_decision  # noqa: F401
 from tests.test_attention_queue_api import _attention_client
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _archive_project_of(db, thread_id: str) -> None:
@@ -168,7 +169,8 @@ def test_a_parent_cycle_ends_and_has_no_top_level_plan(db):
     loop = service.add_node(
         ids[1], kind="task", title="Back to root", acceptance_criteria="Done", db=db,
     )
-    db.execute("UPDATE plan_nodes SET spawned_thread_id='root' WHERE id=?", (loop.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET spawned_thread_id='root' WHERE id=?", (loop.id,))
     db.execute("UPDATE plans SET parent_plan_id=? WHERE id=?", (ids[1], ids[0]))
     db.commit()
     shown = db.execute(

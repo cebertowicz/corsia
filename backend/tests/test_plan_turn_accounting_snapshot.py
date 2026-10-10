@@ -446,4 +446,6 @@ def test_turn_start_read_count_is_flat_for_eligible_work(db):
     one = _work_turn_start_reads(db, "one-ready-task", 1)
     hundred = _work_turn_start_reads(db, "hundred-ready-tasks", 100)
 
-    assert hundred == one <= 120
+    # 130: the plan-status digest a start journals now reads the open work through the
+    # batched open-tree facts (ten more constant reads) instead of the whole plan (#149 S2w).
+    assert hundred == one <= 130

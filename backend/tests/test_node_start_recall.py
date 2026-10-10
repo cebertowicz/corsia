@@ -17,6 +17,7 @@ from checkpoint_retrieval_fixtures import (  # noqa: F401
     _install_checkpoint,
     fresh_db,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 
 #: Where a node of t1's plan points a caller in t2: plan_read cannot open it,
 #: and no read returns the node, so the pointer promises only that thread's
@@ -47,10 +48,11 @@ def db(fresh_db):
 
 
 def _node(db, node_id, title, *, state="accepted", plan="p1", evidence=None):
-    db.execute(
-        "INSERT INTO plan_nodes VALUES (?,?,?,?,NULL,?,?,1)",
-        (node_id, plan, title, "Done when it is shipped.", state, "2026-09-21T12:00:00"),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "INSERT INTO plan_nodes VALUES (?,?,?,?,NULL,?,?,1)",
+            (node_id, plan, title, "Done when it is shipped.", state, "2026-09-21T12:00:00"),
+        )
     if evidence is not None:
         db.execute(
             "INSERT INTO plan_node_events VALUES (?, 'review_evidence_submitted', ?, ?)",
@@ -210,7 +212,8 @@ def test_the_node_being_started_is_not_its_own_hit(db):
 
 
 def test_a_lookup_error_is_logged_and_never_raised(db, logged):
-    db.execute("DROP TABLE plan_nodes")
+    with raw_plan_seed(db):  # dropping the table deletes its rows
+        db.execute("DROP TABLE plan_nodes")
 
     assert _related(db, "missed idle checkpoints") == []
     assert any(

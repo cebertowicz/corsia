@@ -3,11 +3,14 @@
 The whole-plan read carries every unarchived node's identity, state, revision,
 hierarchy and ownership -- never its description or acceptance criteria, which
 ``plan_read(node_id=...)`` returns -- in canonical depth-first order, cut into
-pages of at most ``PAGE_BYTES`` as the tool emits them. A continuation cursor
-is bound to the plan revision, which every node, dependency and link write
-moves, so a page after any change is refused as stale instead of mixing two
-plan states. ``known_revision`` lets a caller that already holds the current
-revision skip a read entirely; nothing about the caller is persisted.
+pages of at most ``PAGE_BYTES`` as the tool emits them. The page lists the open
+work, and its cursor is a keyset: the sort key of the last row served, so a page
+continues after it whatever the plan did in between and costs the open work, never
+the length of the plan's history. The explicit history read (``include_folded``)
+pages by offset, and its cursor is bound to the plan revision, which every node,
+dependency and link write moves, so a page after any change is refused as stale
+instead of mixing two plan states. ``known_revision`` lets a caller that already
+holds the current revision skip a read entirely; nothing about the caller is persisted.
 
 A branch with no open work left in it is *folded* (``plans.node_states``):
 left out of the page by default and counted per level under ``folded``, with
@@ -22,7 +25,7 @@ from dataclasses import asdict
 from typing import Any
 
 import plans.service as service
-from plans import node_order, status_cursor
+from plans import current_keyset, node_order, open_tree, status_cursor
 from plans.boundary import PlanActor
 from plans.close_next_bounds import json_bytes
 from plans.errors import PlanError, PlanInputError
@@ -61,7 +64,7 @@ INCLUDE_FOLDED_CURSOR = (
     "continue_read exactly"
 )
 INCLUDE_FOLDED_READ = "plan_read(mode='full', include_folded=true)"
-FOLD_RULE = "finished, with no open work beneath it"
+FOLD_RULE = "finished, with no open work beneath it; sent-back rounds are not counted"
 
 
 def read_current_plan(
@@ -260,11 +263,22 @@ def _page(db, plan_row, cursor: str | None, include_folded: bool | None) -> dict
     revision = str(plan_row["revision"])
     position = status_cursor.decode(cursor, plan_id=plan_id, section=status_cursor.FULL)
     cut = _cut(position, include_folded)
-    ordered = node_order.ordered_nodes(db, plan_id)
-    fold = folded_ids(dict(row) for row in ordered)
-    listed = ordered if cut["f"] else [row for row in ordered if row["id"] not in fold]
-    total = len(listed)
-    offset = _offset(position, revision, total)
+    if cut["f"]:
+        # The explicit history read: every unarchived row, so it costs the plan's history.
+        ordered = node_order.ordered_nodes(db, plan_id)
+        fold = folded_ids(dict(row) for row in ordered)
+        listed, summary, keys = ordered, None, None
+        total = len(listed)
+        offset = _offset(position, revision, total)
+    else:
+        # What the page lists is the open work, read through the open index; the folded
+        # branches it leaves out are counted from the stored fold counters.
+        tree = open_tree.load(db, plan_id)
+        fold, listed = frozenset(), tree.rows
+        summary = _folded_summary(tree)
+        keys = current_keyset.sort_keys(tree)
+        total = len(listed)
+        offset = current_keyset.after(position, keys)
     page: dict[str, Any] = {
         "plan": asdict(service._plan_from_row(plan_row)),
         "progress": asdict(service.progress(plan_id, db=db)),
@@ -272,18 +286,17 @@ def _page(db, plan_row, cursor: str | None, include_folded: bool | None) -> dict
         "omitted_count": total,
         "total_count": total,
     }
-    if fold and not cut["f"]:
-        page["folded"] = _folded_summary(ordered, fold)
+    if summary is not None:
+        page["folded"] = summary
     # Size the envelope at its widest -- the largest count and cursor it can
     # carry -- so the nodes' room holds whatever this page ends up emitting.
-    _continue(page, plan_id, revision, total, cut)
+    _continue(page, plan_id, revision, total, cut, keys)
     room = PAGE_BYTES - json_bytes(page)
     del page["cursor"], page["continue_read"]
-    marked = fold if cut["f"] else frozenset()
-    page["nodes"] = _fill(db, listed[offset:], room, marked)
+    page["nodes"] = _fill(db, listed[offset:], room, fold)
     page["omitted_count"] = total - offset - len(page["nodes"])
     if page["omitted_count"] > 0:
-        _continue(page, plan_id, revision, offset + len(page["nodes"]), cut)
+        _continue(page, plan_id, revision, offset + len(page["nodes"]), cut, keys)
     return page
 
 
@@ -299,22 +312,25 @@ def _cut(position: dict | None, include_folded: bool | None) -> dict[str, Any]:
     return cut
 
 
-def _folded_summary(rows, fold: set[str]) -> dict[str, Any]:
-    """Count what the page leaves out, per level, with the read that includes it.
+def _folded_summary(tree: open_tree.OpenTree) -> dict[str, Any] | None:
+    """What the page leaves out, per level by tone, with the read that includes it.
 
-    A level's count is its folded rows; a folded parent's own folded children
-    are inside it, so ``node_count`` can exceed the levels' sum.
+    The plan's top level and each listed open row say how many folded rows sit
+    directly beneath them as done, failed and closed: the stored counters the pane's
+    fold row reads, so sent-back rounds are not counted. A tone with none is left
+    out, and so is a level with none at all; None when nothing is folded.
     """
-    levels: dict[str | None, int] = {}
-    for row in rows:
-        if row["id"] in fold and row["parent_id"] not in fold:
-            levels[row["parent_id"]] = levels.get(row["parent_id"], 0) + 1
-    return {
-        "node_count": len(fold),
-        "levels": [{"parent_id": parent, "count": count} for parent, count in levels.items()],
-        "rule": FOLD_RULE,
-        "include": INCLUDE_FOLDED_READ,
-    }
+    sources = [(None, tree.plan, "top_folded")] + [
+        (row["id"], row, "child_folded") for row in tree.rows if row["id"] in tree.shape.open
+    ]
+    levels: list[dict[str, Any]] = []
+    for parent, source, prefix in sources:
+        counts = {tone: source[f"{prefix}_{tone}"] for tone in ("done", "failed", "closed")}
+        if any(counts.values()):
+            levels.append({"parent_id": parent, **{tone: n for tone, n in counts.items() if n}})
+    if not levels:
+        return None
+    return {"levels": levels, "rule": FOLD_RULE, "include": INCLUDE_FOLDED_READ}
 
 
 def _offset(position: dict | None, revision: str, total: int) -> int:
@@ -328,13 +344,19 @@ def _offset(position: dict | None, revision: str, total: int) -> int:
 
 def _continue(
     page: dict[str, Any], plan_id: str, revision: str, offset: int, cut: dict[str, Any],
+    keys: list[tuple] | None,
 ) -> None:
-    """Attach the cursor and the exact read that continues from ``offset``."""
-    payload = {
-        "v": 1, "p": plan_id, "s": status_cursor.FULL, "t": revision, "o": offset,
-    }
-    if cut["f"]:
-        payload["f"] = 1
+    """Attach the cursor and the exact read that continues from ``offset``.
+
+    The open-work read names the last row served by its sort key; the history read
+    names an offset, bound to the revision.
+    """
+    payload: dict[str, Any] = {"v": 1, "p": plan_id, "s": status_cursor.FULL}
+    if keys is None:
+        payload.update(t=revision, o=offset, f=1)
+    else:
+        last = keys[max(offset - 1, 0)] if keys else (0,)
+        payload["k"] = [last[0], *map(list, last[1:])]
     cursor = status_cursor.encode(payload)
     include = "include_folded=true, " if cut["f"] else ""
     page["cursor"] = cursor

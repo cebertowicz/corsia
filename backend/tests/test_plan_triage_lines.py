@@ -166,8 +166,9 @@ def test_add_order_key_is_the_live_position_of_the_topmost_ready_task(db):
     result = _add(db, plan.id, "New ask")
 
     # The closed task takes no rank, so the new task is 2 of 2 open, but it keeps
-    # its position: reorder's order_key names a position among unarchived siblings.
-    assert result["rank"] == _rank_line(2, 2, [("Ready work", ready.id)], 1)
+    # its position: reorder's order_key names a position among open siblings, so the
+    # settled task takes none.
+    assert result["rank"] == _rank_line(2, 2, [("Ready work", ready.id)], 0)
 
 
 def test_add_with_nothing_above_has_no_rank_line(db):
@@ -281,7 +282,7 @@ def test_a_start_names_the_topmost_ready_task_and_ranks_among_open_tasks(db):
 
     result = _activate(db, plan.id, chosen.id)
 
-    assert result["jumped"] == _jumped_line("Topmost ready", top.id, 1, 3, chosen.id, 1)
+    assert result["jumped"] == _jumped_line("Topmost ready", top.id, 1, 3, chosen.id, 0)
 
 
 def test_a_start_names_the_top_level_task_a_nested_start_belongs_to(db):
@@ -382,7 +383,7 @@ def test_a_next_node_id_start_ahead_of_a_ready_task_reports_what_it_jumped(db):
 
     assert block["named"]["started"] is True
     assert block["named"]["jumped"] == _jumped_line(
-        "Waiting P0 fix", passed.id, 1, 2, chosen.id, 1,
+        "Waiting P0 fix", passed.id, 1, 2, chosen.id, 0,
     )
 
 

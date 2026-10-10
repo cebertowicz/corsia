@@ -6,6 +6,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import PlanTree from '$lib/components/plans/PlanTree.svelte';
 	import PlanDrillView from '$lib/components/plans/PlanDrillView.svelte';
+	import { foldedOf } from '$lib/components/plans/planFoldLevels';
 	import { createChildExpansion } from '$lib/components/plans/childExpansion.svelte';
 	import { cardStateLabel, cardStateTone } from '$lib/components/plans/planDisplay';
 	import { openPlanAsk } from '$lib/planLeafReturn';
@@ -178,6 +179,7 @@
 				{#if drillRootId}
 					<PlanDrillView
 						nodes={detailEntry.nodes}
+						folded={foldedOf(detailEntry)}
 						rootId={drillRootId}
 						currentNodeIds={detailEntry.current_node_ids}
 						nextNodeIds={detailEntry.next_node_ids}
@@ -192,6 +194,7 @@
 				{:else}
 					<PlanTree
 						nodes={detailEntry.nodes}
+						folded={foldedOf(detailEntry)}
 						currentNodeIds={detailEntry.current_node_ids}
 						nextNodeIds={detailEntry.next_node_ids}
 						isChildExpanded={childExpansion.isExpanded}

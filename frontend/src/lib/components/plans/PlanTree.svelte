@@ -1,18 +1,21 @@
 <script lang="ts">
 	import type { OperatorArtifactLink, OperatorNode, UserActionHandler } from '$lib/api/plans';
-	import { ancestorChain, buildPlanTreeView, childPlanNodes, indexPlanNodes } from './planTreeFilter';
+	import { ancestorChain, buildPlanTreeView, childPlanView, indexPlanNodes } from './planTreeFilter';
 	import { FOLD_PAGE, isFinished, levelOf, revealFoldedPath } from './planTreeFold';
+	import { buildFoldLevels, foldRemaining, type FoldedWork } from './planFoldLevels';
+	import { createFoldHistory } from './foldHistory.svelte';
 	import { formatMoment, minuteClock } from '$lib/time';
 	import { createFoldWave, createPaneHold, type PaneView } from './foldMotion.svelte';
 	import { createFocusKeeper } from './focusKeeper.svelte';
 	import PlanRowFace from './PlanRowFace.svelte';
 	import PlanFoldMark from './PlanFoldMark.svelte';
+	import PlanFoldHistory from './PlanFoldHistory.svelte';
 	import PlanGroupFace from './PlanGroupFace.svelte';
 	import PlanLevelToggle from './PlanLevelToggle.svelte';
 	import PlanRowActions from './PlanRowActions.svelte';
 	import type { ScheduledView } from './planDisplay';
 	import { carriedByParent, rolledLive } from './planLiveStep';
-	import PlanNodeDetails from './PlanNodeDetails.svelte';
+	import PlanRowDetails from './PlanRowDetails.svelte';
 	import PlanTaskMenuHost from './PlanTaskMenuHost.svelte';
 	import { createTaskMenu } from './taskMenu.svelte';
 	import { createRowDisclosure } from './rowDisclosure.svelte';
@@ -41,6 +44,7 @@
 		userActionBusy = false,
 		onUserAction,
 		paneView = null,
+		folded = null,
 	}: {
 		nodes: OperatorNode[];
 		/** Scopes DOM ids, flip keys and fold levels when a child plan nests in this tree. */
@@ -64,6 +68,8 @@
 		onUserAction?: UserActionHandler;
 		/** What the user has seen of this plan in the pane; only the pane's own tree passes it. */
 		paneView?: PaneView | null;
+		/** The server's folds for this plan and where its older finished rows are read from; none: nothing is folded. */
+		folded?: FoldedWork | null;
 	} = $props();
 
 	// Right-click, Shift+F10 or a long-press opens the row's actions, when it has any.
@@ -82,7 +88,13 @@
 	const hold = createPaneHold(() => nodes, () => paneView);
 	// Only finished work folds: an open task, however far off its wait ends, stays a row.
 	const shownNodes = $derived(hold.nodes);
-	const index = $derived(indexPlanNodes(shownNodes, { maxDepth, currentNodeIds }));
+	// Each level's fold row reads the server's counts; its older rows are fetched when the user opens them.
+	const history = createFoldHistory({ planId: () => folded?.planId ?? '', rootParent: () => folded?.rootParent ?? null });
+	const foldView = $derived(buildFoldLevels({ nodes: shownNodes, held: hold.held, work: folded, history: history.level, maxDepth }));
+	// A row the history route fetched carries no details; opening it reads the node (`PlanHistoryDetails`).
+	const historyIds = $derived(new Set(foldView.extra.map((row) => row.id)));
+	const treeNodes = $derived(foldView.extra.length > 0 ? [...shownNodes, ...foldView.extra] : shownNodes);
+	const index = $derived(indexPlanNodes(treeNodes, { maxDepth, currentNodeIds, deepFolded: foldView.deep }));
 
 	const { isBranchExpanded, toggleBranch, openBranches, detailsExpanded, toggleDetails } = createRowDisclosure(
 		(nodeId) => expandBranchesByDefault || index.defaultExpandedBranches.has(nodeId),
@@ -93,14 +105,13 @@
 	// collapsed-ancestor filter. The per-level fold row is the one control that
 	// hides finished work; there is no separate plan-wide toggle.
 	const view = $derived(buildPlanTreeView({
-		nodes: shownNodes, index, maxDepth, isBranchExpanded, revealed,
+		nodes: treeNodes, index, maxDepth, isBranchExpanded, levels: foldView.levels, revealed,
 		now: now.getTime(), isScheduledOpen: (level) => scheduledOpen[level] === true,
 	}));
 	const visibleNodes = $derived(view.visibleNodes);
 	const items = $derived(view.items);
 	const branchParents = $derived(view.branchParents);
 	const boundaryParents = $derived(index.boundaryParents);
-
 	const scope = $derived(planId ? `${planId}:` : '');
 
 	function rowId(nodeId: string): string {
@@ -126,10 +137,17 @@
 		if ((index.byId.get(nodeId)?.depth ?? Infinity) > maxDepth) return false;
 		const ancestors = ancestorChain(index.byId, nodeId).slice(1);
 		openBranches(ancestors);
-		revealed = revealFoldedPath(shownNodes, index.byId, maxDepth, [nodeId, ...ancestors], revealed);
+		revealed = revealFoldedPath(foldView.levels, index.byId, [nodeId, ...ancestors], revealed);
 		const hiding = items.find((item) => item.kind === 'scheduled' && !item.open && item.members.some((member) => member.id === nodeId));
 		if (hiding?.kind === 'scheduled') scheduledOpen = { ...scheduledOpen, [hiding.level]: true };
 		return true;
+	}
+
+	/** Open a node the read did not list (older finished work): page its levels' history down to it, then reveal it. */
+	export async function revealFolded(nodeId: string): Promise<boolean> {
+		if (index.byId.has(nodeId)) return revealNode(nodeId);
+		if (!(await history.openPath(nodeId, (id) => index.byId.has(id)))) return false;
+		return revealNode(nodeId);
 	}
 
 	/** Focus one rendered row, this tree's or an expanded subagent plan's nested in it; false when none is rendered. */
@@ -139,14 +157,15 @@
 		return !!body || Object.values(childTrees).some((tree) => tree?.focusRow(nodeId));
 	}
 
-	/** Open the next page of a level's folded rows, or fold them all away again. */
-	function pageFold(level: string, shown: number, total: number): void {
-		revealed = { ...revealed, [level]: Math.min(total, shown + FOLD_PAGE) };
+	/** Open the next page of a level's folded rows, fetching older ones when it holds no more. */
+	function pageFold(level: string): void {
+		const { rows = [], total = 0 } = foldView.levels.get(level) ?? {};
+		const target = Math.min(total, Math.min(revealed[level] ?? 0, rows.length) + FOLD_PAGE);
+		revealed = { ...revealed, [level]: target };
+		if (target > rows.length) void history.loadMore(level);
 	}
 
-	function collapseFold(level: string): void {
-		revealed = { ...revealed, [level]: 0 };
-	}
+	const collapseFold = (level: string) => (revealed = { ...revealed, [level]: 0 });
 
 	function isFinishedNode(node: OperatorNode): boolean {
 		return isFinished(node) && !index.openBlocked.has(node.id);
@@ -220,7 +239,7 @@
 			/>
 		</div>
 		{#if detailsExpanded(node.id)}
-			<PlanNodeDetails {node} id={detailsId(node.id)} />
+			<PlanRowDetails {node} id={detailsId(node.id)} planId={folded?.planId ?? ''} fromHistory={historyIds.has(node.id)} />
 		{/if}
 		{#if node.child?.available && isChildExpanded(node.id)}
 			{@const child = childRowState(node.id)}
@@ -244,9 +263,11 @@
 				<!-- The child plan is this same tree, nested one level under its step: the
 				     same rows, folds, details and subagent controls, whose leaf opens name this
 				     step. No drill boundary; user actions stay off (they mutate this pane's plan). -->
+				{@const childView = childPlanView(child)}
 				<div class="child-tree" role="listitem">
 					<PlanTree
-						nodes={childPlanNodes(child)}
+						nodes={childView.nodes}
+						folded={childView.work}
 						planId={child.planId ?? `child-of-${node.id}`}
 						depthOffset={depthOffset + node.depth + nest + 1}
 						currentNodeIds={child.currentNodeIds}
@@ -283,14 +304,18 @@
 				aria-level={depthOffset + item.depth + 1}
 			>
 				<span class="row-body">
-					<PlanFoldMark folded={item.folded} />
+					<PlanFoldMark counts={item.view.counts} />
 				</span>
 				<PlanLevelToggle
-					shown={item.shown} total={item.folded.length} page={FOLD_PAGE} noun="finished steps"
-					controls={item.folded.slice(0, item.shown).map((folded) => rowId(folded.id)).join(' ')}
-					onShow={() => pageFold(item.level, item.shown, item.folded.length)} onCollapse={() => collapseFold(item.level)}
+					shown={item.shown} total={foldRemaining(item.view)} page={FOLD_PAGE} noun="finished steps"
+					controls={item.view.rows.slice(0, item.shown).map((folded) => rowId(folded.id)).join(' ')}
+					onShow={() => pageFold(item.level)} onCollapse={() => collapseFold(item.level)}
 				/>
 			</div>
+			<PlanFoldHistory
+				history={item.view.history} depth={depthOffset + item.depth}
+				exhausted={item.view.rows.length < item.view.total} onRetry={() => history.retry(item.level)}
+			/>
 		{:else if item.kind === 'scheduled'}
 			<!-- A level's quietly scheduled tasks, gathered after its open rows: opened all at once. -->
 			<div
@@ -364,7 +389,7 @@
 	}
 	.child-row { color: var(--text-secondary); }
 	/* A notice with a retry is prose, not a plan row: it may wrap. */
-	.child-error { flex-wrap: wrap; color: var(--red); justify-content: space-between; }
+	.child-error { flex-wrap: wrap; color: var(--red-text); justify-content: space-between; }
 	.child-stale { flex-wrap: wrap; color: var(--amber); justify-content: space-between; }
 	@media (max-width: 620px) {
 		.drill-row { min-height: 44px; }

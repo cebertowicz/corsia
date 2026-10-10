@@ -218,8 +218,10 @@ def latest(node_id: str, *, requirements_revision: int, db) -> dict[str, Any] | 
     return None if row is None else _current(row["payload_json"], requirements_revision)
 
 
-def latest_by_node(plan_ids: list[str], *, db) -> dict[str, dict[str, Any]]:
-    """Apply ``latest`` to every node of these plans in one read.
+def latest_by_node(
+    plan_ids: list[str], *, db, node_ids: list[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Apply ``latest`` to every node of these plans (or of ``node_ids`` alone) in one read.
 
     The event trail is append-only, so each node's latest submission is found
     per node in SQL: the read returns one row per node however often its
@@ -228,14 +230,18 @@ def latest_by_node(plan_ids: list[str], *, db) -> dict[str, dict[str, Any]]:
 
     if not plan_ids:
         return {}
-    marks = ",".join("?" for _ in plan_ids)
-    rows = fetch_all(
-        db,
-        f"""SELECT id,requirements_revision,
-                   ({_LATEST.format(node="plan_nodes.id")}) AS payload_json
-            FROM plan_nodes WHERE plan_id IN ({marks})""",
-        tuple(plan_ids),
-    )
+    from plans.operator_node_facts import id_chunks, scope
+
+    rows = []
+    for chunk in id_chunks(node_ids):
+        where, params = scope("plan_id", "id", plan_ids, chunk)
+        rows.extend(fetch_all(
+            db,
+            f"""SELECT id,requirements_revision,
+                       ({_LATEST.format(node="plan_nodes.id")}) AS payload_json
+                FROM plan_nodes WHERE {where}""",
+            params,
+        ))
     found = {}
     for row in rows:
         payload = _current(row["payload_json"], row["requirements_revision"])

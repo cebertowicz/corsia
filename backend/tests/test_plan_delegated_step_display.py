@@ -26,6 +26,7 @@ from plans import admission, holds, mutations, operator_projection, projections,
 from plans.boundary import PlanActor
 from tests.plan_blocked_wait_helpers import wait_on
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 HUMAN = PlanActor(None, "user", None, kind="user")
 WORKING = {"label_key": "working", "tone_key": "active"}
@@ -284,9 +285,10 @@ def test_a_cycle_through_attached_child_plans_is_a_hierarchy_error():
         db.execute(
             "UPDATE plans SET parent_plan_id=? WHERE id=?", (child_plan.id, owner_plan.id),
         )
-        db.execute(
-            "UPDATE plan_nodes SET spawned_thread_id='owner' WHERE id=?", (child_step.id,),
-        )
+        with raw_plan_seed(db):
+            db.execute(
+                "UPDATE plan_nodes SET spawned_thread_id='owner' WHERE id=?", (child_step.id,),
+            )
         db.commit()
 
         with pytest.raises(service.PlanError, match="cycle"):

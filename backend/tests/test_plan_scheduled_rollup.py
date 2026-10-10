@@ -17,6 +17,7 @@ import pytest
 from infra.schema import SCHEMA_SQL
 from plans import operator_projection, service
 from plans.boundary import PlanActor, mutate
+from tests.plan_writer_authorizer import raw_plan_seed
 
 OWNER = PlanActor("owner", "user", "project")
 HUMAN = PlanActor(None, "user", None, kind="user")
@@ -75,7 +76,8 @@ class Tree:
 
     def accept(self, node) -> None:
         """Mark a task done, as acceptance leaves it: a settled child that stays a leaf of its parent."""
-        self.db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (node.id,))
+        with raw_plan_seed(self.db):
+            self.db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (node.id,))
         self.db.commit()
 
     def until(self) -> dict[str, str | None]:
@@ -188,4 +190,53 @@ def test_a_parent_whose_children_are_accepted_is_scheduled_by_its_own_wait(db):
     tree.schedule(phase, end)
     until = tree.until()
     assert _same(until["Phase"], end)
-    assert until["Kid"] is None
+    # The pane lists open work and a recent window; a settled child outside it is folded, not listed.
+    assert until.get("Kid") is None
+
+
+# The pane lists the open work and the newest folded rows per level, and nothing beneath a
+# folded row. A parent whose children all settled (accepted, so still in the work) is listed
+# with none of them: it must be scheduled (or not) by the same rule as when they are listed.
+
+
+def test_a_parent_whose_settled_children_are_not_listed_is_scheduled_by_its_own_wait(db):
+    tree = Tree(db)
+    phase = tree.add("Phase", kind="phase")
+    for number in range(3):
+        tree.accept(tree.add(f"Kid {number}", parent=phase))
+    end = _at(days=2)
+    tree.schedule(phase, end)
+    until = tree.until()
+    assert not any(title.startswith("Kid") for title in until)
+    assert _same(until["Phase"], end)
+
+
+def test_a_parent_with_unlisted_settled_children_needing_a_person_is_not_scheduled(db):
+    tree = Tree(db)
+    phase = tree.add("Phase", kind="phase", assignee="user")
+    tree.accept(tree.add("Kid", parent=phase))
+    tree.schedule(phase, _at(days=2))
+    until = tree.until()
+    assert "Kid" not in until and until["Phase"] is None
+
+
+@pytest.mark.parametrize("sibling_days", [None, 2])
+def test_a_scheduled_parent_with_unlisted_children_rolls_up_by_the_same_rule(db, sibling_days):
+    tree = Tree(db)
+    top = tree.add("Top", kind="phase")
+    middle = tree.add("Middle", kind="phase", parent=top)
+    tree.accept(tree.add("Kid", parent=middle))
+    sibling = tree.add("Sibling", parent=top)
+    middle_end = _at(days=5)
+    tree.schedule(middle, middle_end)
+    sibling_end = None if sibling_days is None else _at(days=sibling_days)
+    if sibling_end is not None:
+        tree.schedule(sibling, sibling_end)
+    until = tree.until()
+    assert "Kid" not in until
+    assert _same(until["Middle"], middle_end)
+    # With the sibling ready the top has unscheduled work; with it scheduled, the soonest end wins.
+    if sibling_end is None:
+        assert until["Top"] is None
+    else:
+        assert _same(until["Top"], sibling_end)

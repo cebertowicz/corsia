@@ -5,6 +5,8 @@ import { withoutSoleWrapper } from '$lib/components/plans/planTreeFilter';
 import type { OperatorArtifactLink, OperatorNode } from '$lib/api/plans';
 import { CHILD_AVAILABLE, node } from './fixtures/planTreeNode';
 import { blockedPlanTree } from './fixtures/blockedPlanTree';
+import { withFolds } from './fixtures/planFolds';
+import { childState } from './fixtures/planFolds';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -36,7 +38,7 @@ function toggleFor(title: string): HTMLButtonElement | null {
 describe('PlanTree — same renderer contract', () => {
 	it('PLANS-AC19: opens only the blocked ancestor path; off-path branches stay collapsed and reachable', async () => {
 		const { nodes, currentNodeIds, nextNodeIds } = blockedPlanTree();
-		component = mount(PlanTree, { target: host, props: { nodes, currentNodeIds, nextNodeIds } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds, nextNodeIds }) });
 		flushSync();
 
 		expect(toggleFor('Build')?.getAttribute('aria-expanded')).toBe('true');
@@ -69,7 +71,7 @@ describe('PlanTree — same renderer contract', () => {
 			node({ id: 'docs', title: 'Docs', kind: 'phase', state: 'active' }),
 			node({ id: 'guide', title: 'Guide written', parent_id: 'docs', depth: 1, state: 'accepted' }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 		expect(rowTitled('Guide written')).toBeUndefined();
 		expect(toggleFor('Docs')?.getAttribute('aria-expanded')).toBe('false');
@@ -77,13 +79,13 @@ describe('PlanTree — same renderer contract', () => {
 
 	it('always shows a completed row that is also the current node', () => {
 		const nodes = [node({ id: 'a', title: 'Done but current', state: 'accepted' })];
-		component = mount(PlanTree, { target: host, props: { nodes, currentNodeIds: ['a'] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['a'] }) });
 		flushSync();
 		expect(host.textContent).toContain('Done but current');
 	});
 
 	it('does not create a disclosure control for a leaf row', () => {
-		component = mount(PlanTree, { target: host, props: { nodes: [node({ id: 'leaf', title: 'Leaf step' })] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [node({ id: 'leaf', title: 'Leaf step' })] }) });
 		flushSync();
 		expect(host.querySelector('.branch-toggle')).toBeNull();
 		expect(host.querySelector('.branch-chevron')).toBeNull();
@@ -98,10 +100,10 @@ describe('PlanTree — same renderer contract', () => {
 		const onOpenArtifact = vi.fn();
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes: [node({ id: 'ask', title: 'Review brief', artifacts: [artifact] })],
 				onOpenArtifact,
-			},
+			}),
 		});
 		flushSync();
 
@@ -120,7 +122,7 @@ describe('PlanTree — same renderer contract', () => {
 		};
 		component = mount(PlanTree, {
 			target: host,
-			props: { nodes: [node({ id: 'ask', title: 'Review brief', artifacts: [artifact] })] },
+			props: withFolds({ nodes: [node({ id: 'ask', title: 'Review brief', artifacts: [artifact] })] }),
 		});
 		flushSync();
 		expect(rowTitled('Review brief')!.querySelector('.ask-open')).toBeNull();
@@ -134,7 +136,7 @@ describe('PlanTree — same renderer contract', () => {
 				progress: { done: 0, total: 0, open: 0, liveness: 'idle' as const },
 			},
 		})];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 		const chip = host.querySelector('.spawn-chip') as HTMLButtonElement;
 		expect(chip).toBeTruthy();
@@ -151,7 +153,7 @@ describe('PlanTree — same renderer contract', () => {
 				progress: { done: 1, total: 3, open: 2, liveness: 'needs-review' as const },
 			},
 		})];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 		const chip = host.querySelector('.spawn-chip') as HTMLButtonElement;
 		expect(chip.getAttribute('aria-label')).toContain('awaiting review');
@@ -164,7 +166,7 @@ describe('PlanTree — same renderer contract', () => {
 	it('renders a bounded child-plan toggle and calls onToggleChild', () => {
 		const nodes = [node({ id: 'a', title: 'Delegated step', state: 'active', child: CHILD_AVAILABLE })];
 		const onToggleChild = vi.fn();
-		component = mount(PlanTree, { target: host, props: { nodes, onToggleChild } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, onToggleChild }) });
 		flushSync();
 		expect(host.textContent).toContain('1 left');
 		expect(host.textContent).not.toContain('Subagent');
@@ -180,7 +182,7 @@ describe('PlanTree — same renderer contract', () => {
 		// The owner is not running the step itself, so admission says ready; the
 		// server display carries the child's work, and the row must follow it.
 		const nodes = [{ ...delegated, execution: { ...delegated.execution, condition: 'ready' as const } }];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 		const row = rowTitled('Delegated step');
 		expect(row?.querySelector('.row-status')?.textContent).toContain('Working');
@@ -190,7 +192,7 @@ describe('PlanTree — same renderer contract', () => {
 	it('opens a child conversation in the host artifact leaf without replacing inline expansion', () => {
 		const nodes = [node({ id: 'a', title: 'Delegated step', state: 'active', child: CHILD_AVAILABLE })];
 		const onOpenChild = vi.fn();
-		component = mount(PlanTree, { target: host, props: { nodes, onOpenChild } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, onOpenChild }) });
 		flushSync();
 
 		const open = host.querySelector('.child-open') as HTMLButtonElement;
@@ -209,7 +211,7 @@ describe('PlanTree — same renderer contract', () => {
 			node({ id: 'without', title: 'No discussion' }),
 		];
 		const onOpenLegacyDiscussion = vi.fn();
-		component = mount(PlanTree, { target: host, props: { nodes, onOpenLegacyDiscussion } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, onOpenLegacyDiscussion }) });
 		flushSync();
 
 		const archive = host.querySelector('.discussion-archive') as HTMLButtonElement;
@@ -244,11 +246,11 @@ describe('PlanTree — same renderer contract', () => {
 		];
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				currentNodeIds: ['done', 'active', 'blocked', 'review', 'decision'],
 				nextNodeIds: ['next'],
-			},
+			}),
 		});
 		flushSync();
 
@@ -274,7 +276,7 @@ describe('PlanTree — same renderer contract', () => {
 			node({ id: 'child', title: 'Child step', parent_id: 'parent', depth: 1 }),
 			node({ id: 'grandchild', title: 'Grandchild step', parent_id: 'child', depth: 2 }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 
 		const parentToggle = host.querySelector('.branch-toggle') as HTMLButtonElement;
@@ -301,7 +303,7 @@ describe('PlanTree — same renderer contract', () => {
 			node({ id: 'blocked-parent', title: 'Blocked parent', kind: 'phase' }),
 			node({ id: 'blocked-child', title: 'Blocked child', parent_id: 'blocked-parent', depth: 1, unmet_dependencies: [], held_by: 'user', attention_path: ['blocked-parent', 'blocked-child'] }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 
 		const disclosure = host.querySelector('.branch-toggle') as HTMLButtonElement;
@@ -324,7 +326,7 @@ describe('PlanTree — same renderer contract', () => {
 			node({ id: 'child', title: 'Child step', parent_id: 'parent', depth: 1 }),
 		];
 		const onOpenChild = vi.fn();
-		component = mount(PlanTree, { target: host, props: { nodes, onOpenChild } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, onOpenChild }) });
 		flushSync();
 
 		const disclosure = host.querySelector('.branch-toggle') as HTMLButtonElement;
@@ -349,7 +351,7 @@ describe('PlanTree — same renderer contract', () => {
 		];
 		component = mount(PlanTree, {
 			target: host,
-			props: { nodes, currentNodeIds: ['current-child'] },
+			props: withFolds({ nodes, currentNodeIds: ['current-child'] }),
 		});
 		flushSync();
 		expect(host.textContent).toContain('Current child');
@@ -358,7 +360,7 @@ describe('PlanTree — same renderer contract', () => {
 
 	it('keeps overview titles to one accessible line with the full title available', () => {
 		const title = 'A deliberately long task title whose meaning must remain available';
-		component = mount(PlanTree, { target: host, props: { nodes: [node({ title })] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [node({ title })] }) });
 		flushSync();
 		const rowTitle = host.querySelector('.row-title');
 		expect(rowTitle?.getAttribute('title')).toBe(title);
@@ -375,7 +377,7 @@ describe('PlanTree — same renderer contract', () => {
 			}),
 			node({ id: 'child', parent_id: 'phase', depth: 1 }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 		const row = [...host.querySelectorAll('.tree-row')]
 			.find((item) => item.textContent?.includes('Phase'));
@@ -391,7 +393,7 @@ describe('PlanTree — same renderer contract', () => {
 			title: 'Compact row',
 			description: 'Long durable working notes that belong in detail.',
 		})];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 		expect(host.textContent).toContain('Compact row');
 		expect(host.textContent).not.toContain('Long durable working notes');
@@ -402,11 +404,11 @@ describe('PlanTree — same renderer contract', () => {
 		const childNode = node({ id: 'child-1', title: 'Child step', depth: 0 });
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				isChildExpanded: (id: string) => id === 'a',
-				childRowState: () => ({ status: 'ready', planId: 'child-plan', nodes: [childNode], currentNodeIds: [], nextNodeIds: [], errorMessage: null }),
-			},
+				childRowState: () => (childState({ status: 'ready', planId: 'child-plan', nodes: [childNode], currentNodeIds: [], nextNodeIds: [], errorMessage: null })),
+			}),
 		});
 		flushSync();
 		expect(host.textContent).toContain('Child step');
@@ -418,14 +420,14 @@ describe('PlanTree — same renderer contract', () => {
 		const onOpenChild = vi.fn();
 		const tree = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				onOpenChild,
 				isChildExpanded: (id: string) => id === 'a',
 				childRowState: (id: string) => id === 'a'
-					? { status: 'ready', planId: 'child-plan', nodes: [childNode], currentNodeIds: [], nextNodeIds: [], errorMessage: null }
-					: { status: 'idle', planId: null, nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null },
-			},
+					? childState({ status: 'ready', planId: 'child-plan', nodes: [childNode], currentNodeIds: [], nextNodeIds: [], errorMessage: null })
+					: childState({ status: 'idle', planId: null, nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null }),
+			}),
 		});
 		component = tree;
 		flushSync();
@@ -447,14 +449,14 @@ describe('PlanTree — same renderer contract', () => {
 		});
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				isChildExpanded: (id: string) => id === 'a',
-				childRowState: () => ({
+				childRowState: () => (childState({
 					status: 'ready', planId: 'child-plan', nodes: [open, done],
 					currentNodeIds: [], nextNodeIds: [], errorMessage: null,
-				}),
-			},
+				})),
+			}),
 		});
 		flushSync();
 		const nested = host.querySelector('.child-tree [role="list"]');
@@ -474,14 +476,14 @@ describe('PlanTree — same renderer contract', () => {
 		const deeper = node({ id: 's2', title: 'Check the rename', parent_id: 's1', depth: 2 });
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				isChildExpanded: (id: string) => id === 'a',
-				childRowState: () => ({
+				childRowState: () => (childState({
 					status: 'ready', planId: 'child-plan', nodes: [wrapper, step, deeper],
 					currentNodeIds: ['s1'], nextNodeIds: [], errorMessage: null,
-				}),
-			},
+				})),
+			}),
 		});
 		flushSync();
 		expect(host.querySelector('#plan-row-child-plan\\:w')).toBeNull();
@@ -497,14 +499,14 @@ describe('PlanTree — same renderer contract', () => {
 		const step = node({ id: 's1', title: 'Rename the field', parent_id: 'w', depth: 1 });
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				isChildExpanded: (id: string) => id === 'a',
-				childRowState: () => ({
+				childRowState: () => (childState({
 					status: 'ready', planId: 'child-plan', nodes: [wrapper, step],
 					currentNodeIds: ['w'], nextNodeIds: [], errorMessage: null,
-				}),
-			},
+				})),
+			}),
 		});
 		flushSync();
 		const row = host.querySelector('#plan-row-child-plan\\:w');
@@ -520,27 +522,39 @@ describe('PlanTree — same renderer contract', () => {
 			under(node({ id: 'w', held_by: 'user', requires_user_action: true })),
 			under(node({ id: 'w', requires_user_action: true })),
 		];
-		for (const nodes of kept) expect(withoutSoleWrapper(nodes)).toBe(nodes);
+		for (const nodes of kept) expect(withoutSoleWrapper(nodes).nodes).toBe(nodes);
 		const current = under(node({ id: 'w' }));
-		expect(withoutSoleWrapper(current, ['w'])).toBe(current);
-		expect(withoutSoleWrapper(current).map((n) => n.id)).toEqual(['k']);
+		expect(withoutSoleWrapper(current, ['w']).nodes).toBe(current);
+		expect(withoutSoleWrapper(current).nodes.map((n) => n.id)).toEqual(['k']);
+	});
+
+	it('the sole root is the server\'s root count, folded roots included; its folded children take over the top level', () => {
+		const wrapper = node({ id: 'w', depth: 0 });
+		const under = [wrapper, node({ id: 'k', parent_id: 'w', depth: 1 })];
+		// A second root the read does not list (it is folded): the wrapper stays.
+		expect(withoutSoleWrapper(under, [], null, 2).nodes).toBe(under);
+		// A wrapper whose children are all folded still gives way: they page from it.
+		const work = { planId: 'p', levels: [{ parent_id: 'w', done: 3, failed: 0, closed: 0, more: 3 }] };
+		const lone = withoutSoleWrapper([wrapper], [], work, 1);
+		expect(lone.nodes).toEqual([]);
+		expect(lone.work).toEqual({ planId: 'p', rootParent: 'w', levels: [{ parent_id: null, done: 3, failed: 0, closed: 0, more: 3 }] });
 	});
 
 	it('a child plan whose one task has no steps shows that task, and several roots stay as they are', () => {
-		expect(withoutSoleWrapper([node({ id: 'only', depth: 0 })]).map((n) => n.id)).toEqual(['only']);
+		expect(withoutSoleWrapper([node({ id: 'only', depth: 0 })]).nodes.map((n) => n.id)).toEqual(['only']);
 		const two = [node({ id: 'r1', depth: 0 }), node({ id: 'r2', depth: 0 }), node({ id: 'k', parent_id: 'r1', depth: 1 })];
-		expect(withoutSoleWrapper(two)).toBe(two);
+		expect(withoutSoleWrapper(two).nodes).toBe(two);
 	});
 
 	it('aria-expanded reflects expansion intent immediately, regardless of load outcome (M3)', () => {
 		const nodes = [node({ id: 'a', title: 'Parent', child: CHILD_AVAILABLE })];
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				isChildExpanded: (id: string) => id === 'a',
-				childRowState: () => ({ status: 'loading', planId: 'child-plan', nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null }),
-			},
+				childRowState: () => (childState({ status: 'loading', planId: 'child-plan', nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null })),
+			}),
 		});
 		flushSync();
 		expect(host.querySelector('.spawn-chip')?.getAttribute('aria-expanded')).toBe('true');
@@ -551,12 +565,12 @@ describe('PlanTree — same renderer contract', () => {
 		const onRetryChild = vi.fn();
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				isChildExpanded: (id: string) => id === 'a',
-				childRowState: () => ({ status: 'error', planId: 'child-plan', nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: 'boom' }),
+				childRowState: () => (childState({ status: 'error', planId: 'child-plan', nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: 'boom' })),
 				onRetryChild,
-			},
+			}),
 		});
 		flushSync();
 		const alert = host.querySelector('[role="alert"]');
@@ -570,11 +584,11 @@ describe('PlanTree — same renderer contract', () => {
 		const nodes = [node({ id: 'a', title: 'Parent', child: CHILD_AVAILABLE })];
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				isChildExpanded: (id: string) => id === 'a',
-				childRowState: () => ({ status: 'unauthorized', planId: 'child-plan', nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null }),
-			},
+				childRowState: () => (childState({ status: 'unauthorized', planId: 'child-plan', nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null })),
+			}),
 		});
 		flushSync();
 		expect(host.textContent).toContain('Sign in again');
@@ -585,11 +599,11 @@ describe('PlanTree — same renderer contract', () => {
 		const nodes = [node({ id: 'a', title: 'Parent', child: CHILD_AVAILABLE })];
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes,
 				isChildExpanded: (id: string) => id === 'a',
-				childRowState: () => ({ status, planId: 'child-plan', nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null }),
-			},
+				childRowState: () => childState({ status, planId: 'child-plan', nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null }),
+			}),
 		});
 		flushSync();
 		expect(host.textContent).toContain('This subagent’s plan isn’t available.');
@@ -603,7 +617,7 @@ describe('PlanTree — same renderer contract', () => {
 			node({ id: 'deep', title: 'Too deep to render inline', parent_id: 'root', depth: 2 }),
 		];
 		const onDrill = vi.fn();
-		component = mount(PlanTree, { target: host, props: { nodes, maxDepth: 1, onDrill } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, maxDepth: 1, onDrill }) });
 		flushSync();
 		expect(host.textContent).not.toContain('Too deep to render inline');
 		expect(host.textContent).toContain('View deeper steps');
@@ -622,7 +636,7 @@ describe('PlanTree — same renderer contract', () => {
 		];
 		component = mount(PlanTree, {
 			target: host,
-			props: { nodes, currentNodeIds: ['blocked-step', 'active-step'] },
+			props: withFolds({ nodes, currentNodeIds: ['blocked-step', 'active-step'] }),
 		});
 		flushSync();
 		expect(toggleFor('Blocked phase')?.getAttribute('aria-expanded')).toBe('true');
@@ -642,7 +656,7 @@ describe('PlanTree — same renderer contract', () => {
 		const start = Date.now();
 		component = mount(PlanTree, {
 			target: host,
-			props: { nodes, currentNodeIds: ['a'] },
+			props: withFolds({ nodes, currentNodeIds: ['a'] }),
 		});
 		flushSync();
 		expect(Date.now() - start).toBeLessThan(1000);
@@ -653,7 +667,7 @@ describe('PlanTree — same renderer contract', () => {
 			node({ id: 'a', title: 'First step', state: 'pending' }),
 			node({ id: 'b', title: 'Second step', state: 'pending' }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes, nextNodeIds: ['b'] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, nextNodeIds: ['b'] }) });
 		flushSync();
 		const rowB = [...host.querySelectorAll('.tree-row')].find((el) => el.textContent?.includes('Second step'));
 		const rowA = [...host.querySelectorAll('.tree-row')].find((el) => el.textContent?.includes('First step'));
@@ -666,7 +680,7 @@ describe('PlanTree — same renderer contract', () => {
 
 	it('L3: exposes real list semantics instead of an unsupported aria-label-on-div', () => {
 		const nodes = [node({ id: 'a', title: 'Step' })];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 		expect(host.querySelector('[role="list"]')).toBeTruthy();
 		expect(host.querySelectorAll('[role="listitem"]').length).toBeGreaterThan(0);
@@ -677,7 +691,7 @@ describe('PlanTree — same renderer contract', () => {
 			node({ id: 'root', title: 'Root', depth: 0 }),
 			node({ id: 'deep', title: 'Deep', parent_id: 'root', depth: 2 }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes, maxDepth: 1 } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, maxDepth: 1 }) });
 		flushSync();
 		expect(host.querySelector('.drill-row')).toBeTruthy();
 	});

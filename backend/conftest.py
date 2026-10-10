@@ -42,6 +42,13 @@ atexit.register(_cleanup_ephemeral_roots, tuple(_ephemeral_roots))
 os.environ.setdefault("CORSIA_TEST_MODE", "1")
 os.environ.setdefault("CORSIA_ANALYTICS_DISABLE", "1")
 
+# Every SQLite connection a test opens refuses an aggregate-input write to
+# ``plan_nodes`` outside the sanctioned writers (#731); installed before any
+# connection exists and after the roots above, which importing ``plans`` reads.
+from tests import plan_writer_authorizer  # noqa: E402
+
+plan_writer_authorizer.install()
+
 
 class _CapturedEmits(list):
     """List subclass with an extra ``by_event`` helper."""
@@ -53,6 +60,21 @@ class _CapturedEmits(list):
     @property
     def _entries(self) -> list[tuple[str, str | None, dict[str, Any]]]:
         return getattr(self, "_full", [])
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item):
+    """Compare every plan a test wrote with the recount oracle, while its fixtures are alive."""
+    result = yield
+    mismatches = plan_writer_authorizer.recount_changed_plans()
+    if mismatches:
+        pytest.fail(
+            "stored plan aggregates differ from the recount after this test: "
+            + ", ".join(mismatches[:10])
+            + " (a raw plan_nodes write needs `raw_plan_seed`; see tests/plan_writer_authorizer.py)",
+            pytrace=False,
+        )
+    return result
 
 
 @pytest.fixture

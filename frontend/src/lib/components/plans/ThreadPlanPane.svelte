@@ -6,6 +6,7 @@
 	import { requestFocus } from '$lib/stores/attentionDock.svelte';
 	import { createChildExpansion } from './childExpansion.svelte';
 	import { createPaneView } from './paneView.svelte';
+	import { foldedOf, hasFolded } from './planFoldLevels';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import { connectionState } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
@@ -36,9 +37,8 @@
 	 * folded count below it. Nothing is left, so the count is suppressed with
 	 * the rest.
 	 */
-	const allFolded = $derived(
-		(plan?.nodes.length ?? 0) > 0 && (plan?.nodes.every((node) => node.folded) ?? false),
-	);
+	const hasSteps = $derived(!!plan && (plan.nodes.length > 0 || hasFolded(plan.folds)));
+	const allFolded = $derived(hasSteps && (plan?.nodes.every((node) => node.folded) ?? false));
 
 	let drillRootId = $state<string | null>(null);
 	let userActionBusy = $state(false);
@@ -99,6 +99,18 @@
 			// Not this plan's node: a nested subagent plan's row while rendered, else its owning step.
 			if ((drillRootId ? drillView : overviewTree)?.focusRow(nodeId)) return;
 			if (stepId && stepId !== nodeId) return focusNode(stepId);
+			// Older finished work is not in the read: page it in from the server's folded history.
+			const forThread = threadId;
+			const drilled = drillRootId;
+			drillRootId = null;
+			await tick();
+			if (threadId !== forThread) return;
+			if (await overviewTree?.revealFolded(nodeId)) {
+				await tick();
+				if (threadId === forThread && !overviewTree?.focusRow(nodeId)) focusNotice = 'That item couldn’t be shown in this plan';
+				return;
+			}
+			drillRootId = drilled;
 			focusNotice = 'That item is no longer in this plan';
 			return;
 		}
@@ -222,12 +234,13 @@
 		{#if focusNotice}
 			<p class="decision-message" role="status">{focusNotice}</p>
 		{/if}
-		{#if plan.nodes.length === 0}
+		{#if !hasSteps}
 			<div class="plan-state empty"><strong>No plan steps yet</strong></div>
 		{:else if drillRootId}
 			<PlanDrillView
 				bind:this={drillView}
 				nodes={plan.nodes}
+				folded={foldedOf(plan)}
 				rootId={drillRootId}
 				currentNodeIds={plan.current_node_ids}
 				nextNodeIds={plan.next_node_ids}
@@ -248,6 +261,7 @@
 				<PlanTree
 					bind:this={overviewTree}
 					nodes={plan.nodes}
+					folded={foldedOf(plan)}
 					currentNodeIds={plan.current_node_ids}
 					nextNodeIds={plan.next_node_ids}
 					isChildExpanded={childExpansion.isExpanded}

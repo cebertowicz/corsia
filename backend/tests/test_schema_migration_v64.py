@@ -45,7 +45,7 @@ def _legacy_63(path) -> None:
 
 
 def test_fresh_schema_is_the_current_version_with_the_seen_columns():
-    assert SCHEMA_VERSION == 103
+    assert SCHEMA_VERSION == 104
     assert MIGRATIONS[63] is migrate_63_to_64
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)

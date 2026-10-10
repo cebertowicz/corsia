@@ -46,6 +46,7 @@ from tests.plan_close_next_helpers import (
     task,
 )
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
+from tests.plan_writer_authorizer import raw_plan_seed
 
 EMOJI = "\U0001F600"
 QUOTE_RUN = '"\\' * 20
@@ -76,8 +77,9 @@ def _uuid_executor(db) -> PlanActor:
 
 def _legacy(db, node_id: str, **columns) -> None:
     """Write legacy values the authoring boundary would refuse today."""
-    for column, value in columns.items():
-        db.execute(f"UPDATE plan_nodes SET {column}=? WHERE id=?", (value, node_id))
+    with raw_plan_seed(db):
+        for column, value in columns.items():
+            db.execute(f"UPDATE plan_nodes SET {column}=? WHERE id=?", (value, node_id))
     db.commit()
 
 

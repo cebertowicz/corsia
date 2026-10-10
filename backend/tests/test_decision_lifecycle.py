@@ -36,6 +36,7 @@ from tests.test_attention_queue import (  # noqa: F401 - shared fixtures
     raise_decision,
 )
 from tests.test_attention_queue_api import _DbProxy, _immediate
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _client(db, monkeypatch, user_id: str = "user-1") -> TestClient:
@@ -405,10 +406,11 @@ def test_an_unanswerable_row_never_enters_the_queue(db, monkeypatch, break_it):
             "UPDATE plans SET state='archived' WHERE id=?", (decision["plan_id"],),
         )
     else:
-        db.execute(
-            "UPDATE plan_nodes SET archived_at='t' WHERE id=?",
-            (decision["source_node_id"],),
-        )
+        with raw_plan_seed(db):
+            db.execute(
+                "UPDATE plan_nodes SET archived_at='t' WHERE id=?",
+                (decision["source_node_id"],),
+            )
     db.commit()
 
     assert _queue(_client(db, monkeypatch))["count"] == 0
@@ -417,10 +419,11 @@ def test_an_unanswerable_row_never_enters_the_queue(db, monkeypatch, break_it):
 def test_each_unanswerable_state_would_in_fact_be_refused(db, monkeypatch):
     """The guard mirrors the answer route rather than guessing at it."""
     decision = raise_decision(db, "child", "child")
-    db.execute(
-        "UPDATE plan_nodes SET archived_at='t' WHERE id=?",
-        (decision["source_node_id"],),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at='t' WHERE id=?",
+            (decision["source_node_id"],),
+        )
     db.commit()
 
     assert _answer(_client(db, monkeypatch), decision).status_code in (403, 404)

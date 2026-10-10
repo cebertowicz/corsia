@@ -6,6 +6,20 @@ import plans.errors as errors
 import plans.service as service
 
 
+def _unsettled_parent(connection, parent_id: str | None) -> str | None:
+    """Where a follow-up lands: the source's parent, else its nearest unsettled ancestor.
+
+    A settled parent takes no new child, so the follow-up goes up to the first
+    ancestor that is neither settled nor archived, or to the top level.
+    """
+    while parent_id is not None:
+        parent = service._node_row(connection, parent_id)
+        if parent["state"] not in service._TERMINAL_STATES and parent["archived_at"] is None:
+            return parent_id
+        parent_id = parent["parent_id"]
+    return None
+
+
 def add_follow_up(
     node_id: str,
     *,
@@ -37,7 +51,8 @@ def add_follow_up(
         follow_up_id = service._id()
         return service._create_node(
             connection, source["plan_id"], kind="task", title=title,
-            acceptance_criteria=acceptance_criteria, parent_id=source["parent_id"],
+            acceptance_criteria=acceptance_criteria,
+            parent_id=_unsettled_parent(connection, source["parent_id"]),
             order_key=None, description=description,
             workflow_ref=None, workflow_version=None, workflow_step=None,
             difficulty=None, size=None, checkpoint_exception=False, assignee=source["assignee"],

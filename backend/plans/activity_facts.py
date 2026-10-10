@@ -9,7 +9,7 @@ from infra.packed_rows import fetch_all
 from plans import (
     admission_attempts, admission_projection, artifact_links, decision_projection, delegation,
     hierarchy,
-    node_states, node_waits, not_moving, operator_display_state, operator_stopped, rollup,
+    node_states, node_waits, not_moving, operator_display_state, operator_stopped,
     user_steering, wait_causes,
 )
 
@@ -56,24 +56,50 @@ def _apply_owner_facts(by_plan: dict[str, list[dict]], *, db) -> None:
 
 
 def compact_nodes(plan_ids: list[str], *, db) -> dict[str, list[dict]]:
-    """Read minimal nodes; every lifecycle fact comes from its canonical owner."""
+    """Read minimal nodes of each plan's open work; every lifecycle fact comes from its canonical owner.
+
+    The open rows (``idx_plan_nodes_open``), whose ancestors are open too, never the settled
+    history (#731 S2-2): a settled leaf is counted by the plan's stored counters
+    (``plans.top_done``, ``top_failed``), and a row with a child in work says so in
+    ``has_child_in_work``, which ``node_states`` reads for a parent whose children are not
+    loaded. A sent-back round and what is beneath it is history, never a row.
+    """
     by_plan: dict[str, list[dict]] = defaultdict(list)
     for start in range(0, len(plan_ids), hierarchy._ID_CHUNK):
         chunk = plan_ids[start:start + hierarchy._ID_CHUNK]
         marks = ",".join("?" for _ in chunk)
-        for row in fetch_all(
-            db,
-            f"""{rollup.rejected_branch_cte(marks)}
-                SELECT {_COMPACT_NODE_COLUMNS} FROM plan_nodes n
-                JOIN plans p ON p.id=n.plan_id
-                WHERE n.plan_id IN ({marks}) AND {node_states.unarchived_sql('n')}
-                  AND NOT EXISTS (SELECT 1 FROM rejected WHERE rejected.id=n.id)
-                ORDER BY n.plan_id,n.order_key,n.id""",
-            (*chunk, *chunk),
-        ):
-            by_plan[str(row["plan_id"])].append(dict(row))
+        rows = [
+            dict(row) for row in fetch_all(
+                db,
+                f"""SELECT {_COMPACT_NODE_COLUMNS},n.sent_back,n.child_in_work FROM plan_nodes n
+                    JOIN plans p ON p.id=n.plan_id
+                    WHERE n.plan_id IN ({marks}) AND {node_states.unarchived_sql('n')} AND n.folded=0
+                    ORDER BY n.plan_id,n.order_key,n.id""",
+                chunk,
+            )
+        ]
+        for row in _without_rounds(rows):
+            row["has_child_in_work"] = row.pop("child_in_work") > 0
+            del row["sent_back"]
+            by_plan[str(row["plan_id"])].append(row)
     _apply_owner_facts(by_plan, db=db)
     return dict(by_plan)
+
+
+def _without_rounds(rows: list[dict]) -> list[dict]:
+    """The rows but for sent-back rounds and everything beneath them."""
+    children: dict[str, list[str]] = defaultdict(list)
+    for row in rows:
+        if row["parent_id"] is not None:
+            children[str(row["parent_id"])].append(str(row["id"]))
+    hidden: set[str] = set()
+    pending = [str(row["id"]) for row in rows if row["sent_back"]]
+    while pending:
+        node_id = pending.pop()
+        if node_id not in hidden:
+            hidden.add(node_id)
+            pending.extend(children.get(node_id, []))
+    return [row for row in rows if str(row["id"]) not in hidden]
 
 
 def delegation_closure_ids(seed_ids: list[str], plans: dict[str, dict], *, db) -> list[str]:
