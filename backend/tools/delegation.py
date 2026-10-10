@@ -159,12 +159,12 @@ async def _send_explicit_completion(
             "its registered parent during an active turn"
         )
     from plans.public import has_open_structured_attachment, plan_is_empty
-    from tools import completion_refusals
+    from tools.completion_refusals import PLANLESS, STEPS
 
     if await run_in_db(has_open_structured_attachment, child_thread_id):
         if await run_in_db(plan_is_empty, child_thread_id):
-            return completion_refusals.PLANLESS
-        return completion_refusals.STEPS
+            return PLANLESS
+        return STEPS
     from infra.database import get_db
 
     def _parent() -> dict | None:
