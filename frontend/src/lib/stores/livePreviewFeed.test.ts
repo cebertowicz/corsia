@@ -117,6 +117,23 @@ describe('live preview feed', () => {
 		}
 	});
 
+	it('a suggestion whole in one frame and settled at once is still placed, and held for its arrival', async () => {
+		const h = harness();
+		const digest = await textDigest(DOC);
+		h.send(preview(digest, [{ slot: 0, from: 6, to: 11, at: 0, text: 'the whole insert' }], 'call-1', 'suggest'));
+		h.send(end('settled'));
+		await settle();
+		expect(previews(h.view)).toMatchObject([{ mode: 'suggest', text: 'the whole insert', typed: 0 }]);
+	});
+
+	it('a frame still waiting to be placed when its call ends any other way is never placed', async () => {
+		const h = harness();
+		h.send(preview(await textDigest(DOC), [{ slot: 0, from: 6, to: 11, at: 0, text: 'the' }], 'call-1', 'suggest'));
+		h.send(end('refused'));
+		await settle();
+		expect(previews(h.view)).toEqual([]);
+	});
+
 	it('stops listening when detached', () => {
 		const h = harness();
 		h.stop();

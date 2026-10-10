@@ -374,7 +374,7 @@ def test_entry_fields_do_not_run_into_each_other() -> None:
 def test_schema_53_returns_every_proposed_mark_to_review(tmp_path) -> None:
     """In-turn proposals before #2479 kept free text and nothing filed them."""
     from infra.database_migrations import migrate_to_current
-    from infra.placement_marks import review_candidates, set_mark
+    from infra.placement_marks import set_mark
 
     db = _db(str(tmp_path / "marks.db"))
     _seed_thread(db)
@@ -396,12 +396,7 @@ def test_schema_53_returns_every_proposed_mark_to_review(tmp_path) -> None:
     result = migrate_to_current(db, 53)
 
     assert (result.from_version, result.to_version) == (52, 53)
-    frozen = [
-        {"entry_id": entry, "field": "decisions",
-         "revision": _mark(db, entry)["revision"]}
-        for entry in (stuck, filed, written)
+    assert [_mark(db, entry)["placement_state"] for entry in (stuck, filed)] == [
+        None, None,
     ]
-    assert [
-        row["entry_id"] for row in review_candidates(db, "thread-1", 0, frozen)
-    ] == [stuck, filed]
     assert _mark(db, written)["placement_state"] == "written"

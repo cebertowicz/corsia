@@ -293,14 +293,14 @@ def root_decision_family_sql(grain: Grain, scope_threads: str, root_outcomes: st
 
 
 def model_family_sql(grain: Grain, scope_threads: str) -> str:
-    """Return the latest window's fresh tokens per literal model and its manifest identity.
+    """Return the latest window's tokens per literal model and its manifest identity.
 
-    It is the share numerator and remains the same expression used by the tokens
-    family. ``api.cost_identity`` turns each shape into one model identity. Accepted-task
+    It is the share numerator: fresh tokens plus cache re-reads, the total the Tokens figure
+    sums (``TOKEN_FIGURE_SQL``). ``api.cost_identity`` turns each shape into one model identity. Accepted-task
     cost is deliberately not added: it has a different clock and a node-bound join in ``measurement_model_cost``.
     """
     return f"""
-      SELECT {identity_columns("u")},{ROLLUP_TOKEN_SUM_SQL} AS tokens
+      SELECT {identity_columns("u")},{ROLLUP_TOKEN_SUM_SQL}+SUM({CACHED_TOKEN_SQL}) AS tokens
       FROM {usage_source(scope_threads, grain)} u {identity_join("u")}
       WHERE {grain.bucket('u.hour')} BETWEEN '{grain.latest.first}' AND '{grain.latest.last}'
       GROUP BY {IDENTITY_GROUP} ORDER BY tokens DESC,model

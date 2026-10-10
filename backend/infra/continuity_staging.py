@@ -269,13 +269,10 @@ def stage_edit(
     if operation == "add":
         return _stage_add(db, checkpoint, entries, params)
     if operation == "review":
-        from core.placement_answer import stage
-        from core.placement_receipt import verify as verify_at
-        from infra.placement_marks import stage_review
+        from infra.placement_marks import stage_checkpoint_review
 
         insert = functools.partial(_insert, db, str(checkpoint["id"]))
-        answer, verify = (functools.partial(f, db, thread_id) for f in (stage, verify_at))
-        return stage_review(entries, prior, params, insert=insert, answer=answer, verify=verify)
+        return stage_checkpoint_review(db, thread_id, entries, prior, params, insert=insert)
     entry_id = int(params["entry_id"])
     target = entries.get(entry_id)
     if target is None:

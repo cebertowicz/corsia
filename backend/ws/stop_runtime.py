@@ -7,8 +7,53 @@ import asyncio
 from loguru import logger as default_logger
 
 from core.stop_causes import PlanLimitStop
-from core.turn_core import TerminalSettlement, TurnIdentity
+from core.turn_core import (
+    TerminalSettlement,
+    TurnIdentity,
+    TurnTerminalOwnershipError,
+)
 from infra import state
+
+# A terminal claimed by another owner means the Turn has ended, which is what
+# Stop came for; it is not a Stop failure.
+_EXPECTED_STOP_OUTCOMES = (TurnTerminalOwnershipError,)
+
+
+def _stop_is_being_cancelled() -> bool:
+    """Whether the running Stop, not the owner it asked to end, is cancelled.
+
+    A ``CancelledError`` reaching Stop has two very different owners, and only
+    ``Task.cancelling()`` tells them apart. A cancellation requested on this
+    task stays counted while it unwinds; a cancellation owned by work Stop
+    already cancelled arrives as an ordinary exception re-raised in this frame,
+    leaving the count at zero.
+    """
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+def _log_owner_failure(
+    log, subject: str, sid: str, failure: BaseException,
+) -> asyncio.CancelledError | None:
+    """Record one runtime-owner Stop outcome at the level it actually deserves.
+
+    Stop's own cancellation is returned, not logged: the caller asks every
+    remaining owner first, then re-raises it, because swallowing it makes
+    shutdown wait on a Turn that already ended. A cancellation owned by work
+    this Stop itself cancelled, and a terminal another owner already claimed,
+    are the outcomes Stop asked for, so they are recorded at INFO. Anything
+    else is a genuine owner failure and keeps its ERROR traceback.
+    """
+    if isinstance(failure, asyncio.CancelledError):
+        if _stop_is_being_cancelled():
+            return failure
+        log.info(f"_do_stop: {subject} for {sid} was already cancelled")
+        return None
+    if isinstance(failure, _EXPECTED_STOP_OUTCOMES):
+        log.info(f"_do_stop: {subject} for {sid}: {failure}")
+        return None
+    log.exception(f"_do_stop: {subject} for {sid} raised")
+    return None
 
 
 def _captured_native_identity(
@@ -56,24 +101,27 @@ async def _stop_captured_native(
 
     from core.native_turn_control import cancel_and_join_native_turn
 
+    cancelled: asyncio.CancelledError | None = None
     try:
         await cancel_and_join_native_turn(
             sid,
             expected_turn=identity,
             replacement_requested=False,
         )
-    except BaseException as exc:
-        first_failure = first_failure or exc
-        log.exception(f"_do_stop: Native turn teardown raised for {sid}")
+    except BaseException as failure:
+        first_failure = first_failure or failure
+        cancelled = _log_owner_failure(log, "Native turn teardown", sid, failure)
 
     from core.thread_warm import cancel_thread_warm
 
     if warm_task is not None:
         try:
             await cancel_thread_warm(sid, expected_task=warm_task)
-        except BaseException as exc:
-            first_failure = first_failure or exc
-            log.exception(f"_do_stop: warm cleanup raised for {sid}")
+        except BaseException as failure:
+            first_failure = first_failure or failure
+            cancelled = cancelled or _log_owner_failure(log, "warm cleanup", sid, failure)
+    if cancelled is not None:
+        raise cancelled
     return True, first_failure
 
 
@@ -87,7 +135,9 @@ async def stop_runtimes(
     log=default_logger,
     cause: PlanLimitStop | None = None,
 ) -> bool:
-    """Ask every runtime owner to end the exact Turn; log failures, never raise.
+    """Ask every runtime owner to end the exact Turn; log owner failures.
+
+    Raises only Stop's own cancellation, once every owner has been asked.
 
     A system ``cause`` reaches each harness runtime's own terminal commit.
     """
@@ -99,6 +149,7 @@ async def stop_runtimes(
     stopped = False
     # A user Stop keeps its exact call; only a system Stop names a cause.
     caused = {} if cause is None else {"cause": cause}
+    cancelled: asyncio.CancelledError | None = None
     try:
         stopped, failure = await _stop_captured_native(
             sid, turn_event, llm_task, turn_id, log=log,
@@ -107,8 +158,8 @@ async def stop_runtimes(
             log.error(f"_do_stop: plan-limit Stop of {sid} reached a Native owner")
         if failure is not None and not stopped:
             log.error(f"_do_stop: Native owner of {sid} is not exact: {failure}")
-    except BaseException:
-        log.exception(f"_do_stop: Native stop raised for {sid}")
+    except BaseException as failure:
+        cancelled = _log_owner_failure(log, "Native stop", sid, failure)
     for name, runtime in (("cc_runtime", cc_runtime), ("codex_runtime", codex_runtime)):
         if not runtime.has_pending_or_live(sid):
             continue
@@ -116,8 +167,10 @@ async def stop_runtimes(
             stopped = await runtime.stop(
                 sid, expected_turn_id=turn_id, broadcast=broadcast, **caused,
             ) or stopped
-        except BaseException:
-            log.exception(f"_do_stop: {name}.stop raised for {sid}")
+        except BaseException as failure:
+            cancelled = cancelled or _log_owner_failure(log, f"{name}.stop", sid, failure)
+    if cancelled is not None:
+        raise cancelled
     return stopped
 
 

@@ -105,7 +105,7 @@ def _plan_revision(db, plan_id: str) -> int:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 104
+    assert SCHEMA_VERSION == 105
 
 
 def test_only_rejection_failures_close_as_sent_back(tmp_path):

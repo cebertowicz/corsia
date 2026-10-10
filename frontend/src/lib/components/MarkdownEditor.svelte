@@ -9,6 +9,9 @@
 	import { GFM } from '@lezer/markdown';
 	import { docTheme, docHighlight } from '$lib/cm/theme';
 	import { markdownLivePreview } from '$lib/cm/markdown-live';
+	import { imageContext } from '$lib/cm/markdown-image';
+	import { token } from '$lib/stores/auth';
+	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
 	import { commentMarks, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
@@ -26,6 +29,7 @@
 		typingAllowed = false,
 		previews = null,
 		readOnly = false,
+		imageBase = null,
 		onSave,
 		onSelect,
 		onAnchorFocus,
@@ -43,6 +47,8 @@
 		/** Where an agent's edits arrive while it is still writing them; they type out before they are saved. */
 		previews?: PreviewFrameSource | null;
 		readOnly?: boolean;
+		/** Where this document lives, so its markdown images resolve against it; none means they stay links. */
+		imageBase?: { path: string; projectId: string | null } | null;
 		onSave?: () => void;
 		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
@@ -173,6 +179,7 @@
 				docTheme,
 				docHighlight,
 				markdownLivePreview,
+				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '' }),
 				markdownTasks,
 				commentMarks,
 				pendingCommentMark,

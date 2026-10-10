@@ -361,6 +361,7 @@
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
 		readOnly={readonly || suggestionBusyId !== null}
+		imageBase={target}
 		{saveError}
 		{saveStatus}
 		pendingSel={draftController.pending}

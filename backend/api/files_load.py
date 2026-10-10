@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from api.files_revision import _path_allowed, _writable
+from api.files_revision import _writable
 from api.files_roots import scope_bases
 from doceditor.document_scope import MAX_TEXT_BYTES, revision
 from infra import config
@@ -12,6 +12,7 @@ from infra.auth import owns_thread
 from infra.database import get_db
 from registry import service as registry_service
 from registry.file_types import image_media_type
+from registry.path_access import path_allowed
 from registry.doc_freshness import artifact_freshness
 
 #: Typed ``detail.code`` of the 415 a text open answers for an image file.
@@ -57,7 +58,7 @@ def checked_read_path(path: str, project_id: str | None, db) -> tuple[Path, list
         p = Path(path).expanduser().resolve(strict=True)
     except OSError as exc:
         raise HTTPException(404, f"No such file: {exc}") from exc
-    if not _path_allowed(p, bases, db=db):
+    if not path_allowed(p, bases, db=db):
         raise HTTPException(400, "Path is outside this scope's roots")
     if not p.is_file():
         raise HTTPException(400, "Not a file")
