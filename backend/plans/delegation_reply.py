@@ -43,13 +43,18 @@ def reply_step(reply: str) -> dict:
     from plans.plan_wake import RETURNED_EVIDENCE_MAX_BYTES
 
     return {
-        "id": None, "title": "final reply", "state": "replied",
+        "id": None, "title": "final reply (whole text: delegate_status)", "state": "replied",
         "evidence": bounded(reply, RETURNED_EVIDENCE_MAX_BYTES), "artifact_ids": [],
     }
 
 
 def plan_is_empty(thread_id: str, *, db=None) -> bool:
-    """Whether this thread's own plan holds no step: nothing for a return to carry."""
+    """Whether this thread's own plan holds no step: nothing for a return to carry.
+
+    A closed but unarchived step counts as a step, the same rule
+    ``delegation_turn_end._returned_nothing`` applies, so the refusal and the
+    harvest agree on who has a step.
+    """
     from plans import node_states, service
 
     with service._connection(db) as connection:
