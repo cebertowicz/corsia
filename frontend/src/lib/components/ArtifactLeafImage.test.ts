@@ -2,7 +2,9 @@ import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn() }));
+const mocks = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), fetchReviewBar: vi.fn() }));
+vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), fetchReviewBar: mocks.fetchReviewBar }));
+vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
 
 vi.mock('$lib/api/docs', () => ({
 	fetchContent: mocks.fetchContent,
@@ -58,6 +60,11 @@ beforeEach(() => {
 	mocks.fetchRevision.mockReset().mockResolvedValue({
 		exists: true, path: null, revision: 'r-image', media_type: 'image/png', writable: false, artifact_id: 'art-1',
 	});
+	mocks.fetchReviewBar.mockReset().mockResolvedValue({
+		ask_raised: true, ask_reason: 'Is this the right diagram?', ask_raised_at: '2026-10-10T10:00:00',
+		asker: { id: 'a1', name: 'Docs agent' }, other_askers: [], other_asks: [], other_request_count: 0,
+		round_feedback_count: 0, round_feedback_counts: { comments: 0, suggestions: 0, edits: 0 },
+	});
 	host = document.createElement('div');
 	document.body.appendChild(host);
 	component = mount(ArtifactLeaf, { target: host, props: { threadId: THREAD, mode: 'expanded' } });
@@ -83,6 +90,15 @@ describe('artifact leaf renderer choice', () => {
 		expect(url.searchParams.get('raw')).toBe('true');
 		expect(url.searchParams.get('path')).toBe('/ws/shot.PNG');
 		expect(host.querySelector('.doc')).toBeNull();
+	});
+
+	it('shows the review bar above an image with a raised ask, read for the image\'s own artifact', async () => {
+		openArtifactTab(THREAD, { artifactId: 'art-1', path: '/ws/shot.png', title: 'shot.png' });
+		await vi.waitFor(() => expect(host.querySelector('.image-viewer .review-bar')).toBeTruthy());
+
+		expect(mocks.fetchReviewBar).toHaveBeenCalledWith('art-1');
+		expect(host.querySelector('.image-viewer')!.firstElementChild!.classList.contains('review-bar')).toBe(true);
+		expect(host.textContent).toContain('Is this the right diagram?');
 	});
 
 	it('reports ready with the probed revision once the image has loaded', async () => {

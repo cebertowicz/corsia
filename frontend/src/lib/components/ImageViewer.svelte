@@ -4,6 +4,7 @@
 	// route and are only ever shown through <img>, so an SVG can never run
 	// script or reach the DOM.
 	import './DocViewer.css';
+	import ReviewBar from './ReviewBar.svelte';
 	import { untrack } from 'svelte';
 	import { fetchRevision } from '$lib/api/docs';
 	import { imageContentUrl } from '$lib/artifactImage';
@@ -89,6 +90,7 @@
 </script>
 
 <div class="image-viewer">
+	<ReviewBar artifactId={resolvedArtifactId ?? target.artifactId ?? null} />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
 			<button type="button" class="stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
@@ -110,7 +112,7 @@
 </div>
 
 <style>
-	.image-viewer { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; }
+	.image-viewer { --doc-rail: 0px; position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; }
 	.stage { flex: 1; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 	.stage.pending { visibility: hidden; position: absolute; }
 	/* max-* sizing scales the image down to the canvas and never past its natural size. */

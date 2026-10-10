@@ -257,7 +257,7 @@
 	   role is taken over by the app header. */
 	.leaf.compact { flex: 1; border-left: none; }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
-	.leaf-body.document-canvas { overflow: hidden; container: doc-canvas / inline-size; }
+	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; }
 	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
 
 	.gone {

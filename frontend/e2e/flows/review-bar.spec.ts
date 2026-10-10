@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { syntheticPng } from '../support/syntheticImages';
 
 /**
  * The in-view review bar (DCOL-FR12.4) on the real composed canvas: an agent's raised ask on an open
@@ -49,6 +51,20 @@ async function seed(request: APIRequestContext, title: string) {
 }
 type Doc = Awaited<ReturnType<typeof seed>>;
 
+/** A registered image the owning thread asks about; the same fixture shape as a document, with no text. */
+async function seedImage(request: APIRequestContext, title: string): Promise<Doc> {
+	const threadId = await createSession(request, title);
+	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
+	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
+	const name = `${title} ${Date.now()}.png`, docPath = path.join(workspace, name);
+	fs.writeFileSync(docPath, syntheticPng(640, 400));
+	const registered = await request.post('/api/files/register', { params: { token: TEST_TOKEN }, data: { path: docPath, thread_id: threadId } });
+	expect(registered.ok(), await registered.text()).toBeTruthy();
+	const artifact = (await registered.json()).artifact;
+	expect(artifact.type).toBe('image');
+	return { threadId, title, name, docPath, text: '', artifactId: artifact.id as string };
+}
+
 /** A comment on the real text of "Step <n>", anchored the way the editor anchors a selection. */
 async function comment(request: APIRequestContext, doc: Doc, body: string, step: number) {
 	const from = doc.text.indexOf(`Step ${step}:`), to = from + 'Step'.length;
@@ -86,15 +102,17 @@ async function open(page: Page, doc: Doc, mode: Mode, theme: 'light' | 'dark') {
 	}
 }
 async function selectThread(page: Page, doc: Doc, mode: Mode) {
+	const image = doc.name.endsWith('.png');
 	if (mode === 'phone') await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.locator('.thread-item').filter({ hasText: doc.title }).click();
-	await expect(page.locator('.cm-content')).toContainText('Step 1:');
+	if (image) await expect(page.getByRole('img', { name: doc.name })).toBeVisible();
+	else await expect(page.locator('.cm-content')).toContainText('Step 1:');
 }
 
 const bar = (page: Page) => page.locator('.review-bar');
 /** The bar's geometry per surface: one compact row, a stacked bar with compact right-aligned buttons, or 44px touch buttons. */
 async function expectLayout(page: Page, mode: Mode) {
-	const canvas = () => page.locator('.document-canvas').first().evaluate((el) => el.getBoundingClientRect().width);
+	const canvas = () => page.locator('.document-canvas, .image-canvas').first().evaluate((el) => el.getBoundingClientRect().width);
 	if (mode === 'closed') await expect.poll(canvas).toBeGreaterThan(600);
 	else if (mode === 'default') expect(await canvas(), 'the default layout is a narrow canvas').toBeLessThan(600);
 	const box = (await bar(page).boundingBox())!;
@@ -193,6 +211,29 @@ journey('request changes with only a note', [['1440 light', 'default', 'light'],
 	await send.click();
 	await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
 	await shot(page, 'receipt-requested', info);
+	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+	expect(overflow).toBeLessThanOrEqual(0);
+});
+
+journey('answer a plain ask on an image', [['1440 light', 'default', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
+	const doc = await seedImage(request, `Review image ${mode} ${theme}`);
+	raiseAsk(doc.threadId, doc.artifactId, 'Is this the right diagram?');
+	await open(page, doc, mode, theme);
+	await expect(bar(page)).toContainText('Is this the right diagram?');
+	// An image takes no comments, so Approve is always plain and Request changes always needs a note.
+	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
+	await expect(bar(page).getByRole('button', { name: 'Approve with changes' })).toHaveCount(0);
+	await expectLayout(page, mode);
+	await shot(page, 'image-ask', info);
+	await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
+	const send = bar(page).getByRole('button', { name: 'Request changes', exact: true });
+	await expect(send).toBeDisabled();
+	await bar(page).getByRole('textbox').fill('Use the new palette.');
+	await shot(page, 'image-noting', info);
+	await send.click();
+	await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
+	await expect(page.getByRole('img', { name: doc.name })).toBeVisible();
+	await shot(page, 'image-receipt', info);
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 	expect(overflow).toBeLessThanOrEqual(0);
 });
