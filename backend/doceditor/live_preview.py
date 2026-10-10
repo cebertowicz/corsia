@@ -17,7 +17,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from doceditor.document_scope import MAX_TEXT_BYTES
 from doceditor.live_preview_args import ArgScanner
@@ -36,13 +36,18 @@ _ENDED_KEPT = 4096
 
 
 def preview_tool(name: object) -> str | None:
-    """The previewed tool a provider tool name calls, if any."""
+    """The previewed tool a provider tool name calls, if any.
+
+    The ``tool_call`` wrapper is previewed too: which tool it calls is only
+    known once its ``name`` has streamed, so the route resolves it then.
+    """
     from tools.catalog import normalize_tool_name
+    from tools.tool_surface import TOOL_CALL
 
     if not isinstance(name, str):
         return None
     tool = normalize_tool_name(name)
-    return tool if tool in PREVIEW_TOOLS else None
+    return tool if tool in PREVIEW_TOOLS or tool == TOOL_CALL else None
 
 
 @dataclass
@@ -53,6 +58,7 @@ class _Call:
     tool: str
     workspace: Path | None
     scanner: ArgScanner = field(default_factory=ArgScanner)
+    workspace_for: Callable[[str], Path | None] | None = None
     size: int = 0
     entry: LiveEntry | None = None
     name: str | None = None
@@ -71,12 +77,20 @@ class PreviewRoute:
         self.loop: asyncio.AbstractEventLoop | None = None
 
     def start(self, call_id: object, *, thread_id: str, turn_id: str | None, tool: str,
-              workspace: Path | None) -> None:
-        """Open a call; a repeated or already-ended id is ignored."""
+              workspace: Path | None, workspace_for: Callable[[str], Path | None] | None = None) -> None:
+        """Open a call; a repeated or already-ended id is ignored.
+
+        A ``tool_call`` wrapper opens as the wrapper and becomes the tool it names once that
+        name is read; ``workspace_for`` gives that tool's workspace when the caller has no other.
+        """
+        from tools.tool_surface import TOOL_CALL
+
         if not isinstance(call_id, str) or not call_id or call_id in self.calls or call_id in self.ended:
             return
         self.loop = asyncio.get_running_loop()
-        self.calls[call_id] = _Call(call_id, thread_id, turn_id, tool, workspace)
+        scanner = ArgScanner(nested="arguments") if tool == TOOL_CALL else ArgScanner()
+        self.calls[call_id] = _Call(call_id, thread_id, turn_id, tool, workspace, scanner=scanner,
+                                    workspace_for=workspace_for)
 
     def update(self, call_id: object, fragment: object) -> None:
         """Feed one input fragment; parsing is incremental and the broadcast is deferred."""
@@ -96,12 +110,33 @@ class PreviewRoute:
         if call.scanner.failed:
             self.end(call.call_id, "malformed")
             return
+        if not self._unwrap(call):
+            return
         target = _target(call)
         if call.entry is None and not call.resolving and target is not None:
             call.resolving = True
             resolve = self._resolve_comment(call, *target) if call.tool == COMMENT_TOOL else self._resolve(call, target[1])
             asyncio.get_running_loop().create_task(resolve, name=f"preview-resolve:{call.call_id}")
         self._schedule(call)
+
+    def _unwrap(self, call: _Call) -> bool:
+        """Turn a wrapper call into the tool its streamed ``name`` selects; False while it cannot be drawn yet."""
+        from tools.catalog import normalize_tool_name
+        from tools.tool_surface import TOOL_CALL
+
+        if call.tool != TOOL_CALL:
+            return True
+        name = call.scanner.outer.get("name")
+        if name is None or not name.complete:
+            return False
+        tool = normalize_tool_name(name.text())
+        if tool not in PREVIEW_TOOLS:
+            self.end(call.call_id, "unpreviewed")
+            return False
+        call.tool = tool
+        if call.workspace is None and call.workspace_for is not None:
+            call.workspace = call.workspace_for(tool)
+        return True
 
     def end(self, call_id: object, outcome: str) -> None:
         """Close a call for good: its preview is removed, and later frames for it are ignored."""
