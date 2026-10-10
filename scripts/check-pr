@@ -91,7 +91,7 @@ if [ -z "$OWNER_IDENTITY_FILE" ] && [ -f "$RETIRED_TOKEN_FILE" ]; then
   yellow "Note: ${RETIRED_TOKEN_FILE} is no longer read automatically. To keep using it: CORSIA_OWNER_IDENTITY_FILE=${RETIRED_TOKEN_FILE} bash scripts/check-pr"
 fi
 
-header "0/6 actionlint (GHA workflow validation)"
+header "0/7 actionlint (GHA workflow validation)"
 if command -v actionlint >/dev/null 2>&1; then
   if ls .github/workflows/*.yml >/dev/null 2>&1; then
     actionlint .github/workflows/*.yml || fail "actionlint reported workflow issues — see output above"
@@ -103,17 +103,17 @@ else
   yellow "actionlint not installed; skipping workflow validation. Install: brew install actionlint"
 fi
 
-header "1/6 file-size ratchet"
+header "1/7 file-size ratchet"
 "$VENV_PY" scripts/file_size_limits.py || fail "file-size ratchet failed — see output above"
 green "file-size ratchet: recorded limits satisfied"
 
-header "2/6 antipatterns (severity=error, whole repo)"
+header "2/7 antipatterns (severity=error, whole repo)"
 PYTHONPATH=tools "$VENV_PY" -m antipatterns \
   --all --severity error --repo-root . \
   || fail "antipatterns errors present in repository — see output above"
 green "antipatterns: no errors in repository"
 
-header "3/6 mypy (regression gate)"
+header "3/7 mypy (regression gate)"
 MYPY_VENV="$REPO_ROOT/.check-pr-mypy-venv"
 MYPY_PY="$MYPY_VENV/bin/python"
 if [ ! -x "$MYPY_PY" ]; then
@@ -163,10 +163,10 @@ esac
   || fail "mypy error limits exceeded — see output above"
 green "mypy: error counts within recorded limits"
 
-header "4/6 tools pytest"
+header "4/7 tools pytest"
 "$VENV_PY" -m pytest tools/ --tb=line -q || fail "tools tests failed"
 
-header "5/6 docs drift"
+header "5/7 docs drift"
 # CI's checkout has no git identity, so blank the repo-local one too: a
 # commit identity such as a bot or the product's own name is not the owner's.
 # The owner comes from the explicit identity file or workspace profile only.
@@ -242,14 +242,60 @@ report_owner_identity_scan() {
   fi
 }
 
+header "6/7 read cost (merge-base vs head, report-only)"
+# Builds the synthetic production-shaped database for both trees and compares SQLite
+# VM steps, statements and response bytes per read route: the same >25% growth and
+# ceiling rule as the speed-gate CI job. Counts only, so it is as deterministic here
+# as in CI. A would-fail is printed and does not stop the push (phase 1);
+# SPEED_GATE_ENFORCE=1 makes it fail. SPEED_GATE_SKIP=1 skips it.
+if [ "${SPEED_GATE_SKIP:-0}" = "1" ]; then
+  yellow "read cost: skipped (SPEED_GATE_SKIP=1)"
+else
+  SG_BASE_REF=""
+  for candidate in "${SPEED_GATE_BASE:-}" origin/dev dev; do
+    [ -n "$candidate" ] && git rev-parse --verify --quiet "$candidate" >/dev/null && { SG_BASE_REF="$candidate"; break; }
+  done
+  [ -n "$SG_BASE_REF" ] || fail "read cost: no merge-base ref (set SPEED_GATE_BASE to the branch this PR targets)"
+  if ! "$VENV_PY" -c 'import fastapi, litellm, aiohttp' >/dev/null 2>&1; then
+    yellow "read cost: NOT MEASURED — $VENV_PY lacks the backend dependencies. Set CHECK_PR_PYTHON to the backend venv (backend/requirements.txt) to run it."
+    SG_BASE_REF=""
+  fi
+  SG_BASE="${SG_BASE_REF:+$(git merge-base "$SG_BASE_REF" HEAD)}"
+  if [ -z "$SG_BASE_REF" ]; then
+    :  # reported above
+  elif git diff --quiet "$SG_BASE" -- backend scripts/speed_gate quality/speed-gate-baseline.json; then
+    green "read cost: nothing under backend/ changed since the merge-base ($SG_BASE_REF); not measured"
+  else
+    SG_START="$(date +%s)"
+    SG_TREE="$CHECKPR_TEMP_DIR/speed-gate-base"
+    git worktree add --detach --quiet "$SG_TREE" "$SG_BASE" || fail "read cost: could not check out the merge-base"
+    SG_ENFORCE=""
+    [ "${SPEED_GATE_ENFORCE:-0}" = "1" ] && SG_ENFORCE="--enforce"
+    set +e
+    PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli gate \
+      --head-backend backend --base-backend "$SG_TREE/backend" $SG_ENFORCE
+    SG_RC=$?
+    set -e
+    git worktree remove --force "$SG_TREE" >/dev/null 2>&1 || true
+    SG_SECONDS=$(( $(date +%s) - SG_START ))
+    case "$SG_RC" in
+      0) green "read cost: measured in ${SG_SECONDS}s (see the table above for any would-fail)" ;;
+      1) fail "read cost: a route rose past the rule (${SG_SECONDS}s)" ;;
+      2) fail "read cost: SQLite version mismatch; rebaseline needed" ;;
+      3) fail "read cost: two runs of one tree gave different counts; this is a defect in the gate" ;;
+      *) fail "read cost: the fixture build or harness could not run (exit $SG_RC)" ;;
+    esac
+  fi
+fi
+
 if [ "$FULL_BACKEND" != "1" ]; then
-  yellow "6/6 backend pytest — CI-OWNED"
+  yellow "7/7 backend pytest — CI-OWNED"
   report_owner_identity_scan
   green "Run targeted tests from the actual change blast radius before push."
   exit 0
 fi
 
-header "6/6 backend pytest"
+header "7/7 backend pytest"
 (
   cd backend
   "$VENV_PY" -m pytest tests/ --tb=line -q

@@ -1,0 +1,356 @@
+{
+  "ceilings": {
+    "bytes": 1048576,
+    "statements": 500,
+    "steps": 500000
+  },
+  "grandfathered": [
+    "/api/costs/budget",
+    "/api/costs/summary",
+    "/api/measurement/agents",
+    "/api/measurement/cost",
+    "/api/measurement/lessons",
+    "/api/measurement/limits",
+    "/api/measurement/models",
+    "/api/measurement/recent-activity",
+    "/api/measurement/series",
+    "/api/measurement/series/index",
+    "/api/plans/operator/scopes/projects/{project_id}",
+    "/api/threads/{thread_id}/context-snapshot/next-turn"
+  ],
+  "progress_every": 100,
+  "reason": "initial baseline measured on the GitHub-hosted runner image (SQLite 3.45.1) at the speed gate's introduction, with an empty HOME and bindings that reference real accounts",
+  "routes": {
+    "/api/agents": {
+      "bytes": 221,
+      "statements": 5,
+      "steps": 6000
+    },
+    "/api/artifacts/{artifact_id}/comments": {
+      "bytes": 148,
+      "statements": 17,
+      "steps": 28300
+    },
+    "/api/artifacts/{artifact_id}/reviews": {
+      "bytes": 14,
+      "statements": 8,
+      "steps": 10700
+    },
+    "/api/attention/queue": {
+      "bytes": 37,
+      "statements": 7,
+      "steps": 34400
+    },
+    "/api/attention/raised": {
+      "bytes": 12,
+      "statements": 5,
+      "steps": 31300
+    },
+    "/api/attention/rollup": {
+      "bytes": 63,
+      "statements": 5,
+      "steps": 31300
+    },
+    "/api/auth/status": {
+      "bytes": 18,
+      "statements": 1,
+      "steps": 0
+    },
+    "/api/conductor": {
+      "bytes": 78,
+      "statements": 5,
+      "steps": 2300
+    },
+    "/api/costs/budget": {
+      "bytes": 240,
+      "statements": 6,
+      "steps": 929000
+    },
+    "/api/costs/summary": {
+      "bytes": 10256,
+      "statements": 25,
+      "steps": 16825300
+    },
+    "/api/delegation/threads/{thread_id}/status": {
+      "bytes": 2912,
+      "statements": 18,
+      "steps": 2600
+    },
+    "/api/files/tree": {
+      "bytes": 138,
+      "statements": 26,
+      "steps": 2600
+    },
+    "/api/fs/browse": {
+      "bytes": 70,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/health": {
+      "bytes": 15,
+      "statements": 0,
+      "steps": 0
+    },
+    "/api/host-access/leases": {
+      "bytes": 223781,
+      "statements": 6,
+      "steps": 20200
+    },
+    "/api/host-access/leases/{lease_id}": {
+      "bytes": 900,
+      "statements": 8,
+      "steps": 2300
+    },
+    "/api/keys": {
+      "bytes": 210,
+      "statements": 6,
+      "steps": 2300
+    },
+    "/api/mcp/sources": {
+      "bytes": 14,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/measurement/agents": {
+      "bytes": 49752,
+      "statements": 31,
+      "steps": 4127700
+    },
+    "/api/measurement/cost": {
+      "bytes": 818,
+      "statements": 20,
+      "steps": 23139000
+    },
+    "/api/measurement/lessons": {
+      "bytes": 70408,
+      "statements": 569,
+      "steps": 2300
+    },
+    "/api/measurement/limits": {
+      "bytes": 315,
+      "statements": 11,
+      "steps": 1584000
+    },
+    "/api/measurement/models": {
+      "bytes": 1083,
+      "statements": 43,
+      "steps": 4246800
+    },
+    "/api/measurement/recent-activity": {
+      "bytes": 1069,
+      "statements": 11,
+      "steps": 554900
+    },
+    "/api/measurement/series": {
+      "bytes": 33504,
+      "statements": 23,
+      "steps": 12714300
+    },
+    "/api/measurement/series/index": {
+      "bytes": 6512,
+      "statements": 5,
+      "steps": 900900
+    },
+    "/api/models": {
+      "bytes": 2257,
+      "statements": 32,
+      "steps": 500
+    },
+    "/api/models/{model_id:path}/profile": {
+      "bytes": 380,
+      "statements": 9,
+      "steps": 2300
+    },
+    "/api/plans/activity/scopes/projects/{project_id}": {
+      "bytes": 9419,
+      "statements": 36,
+      "steps": 274000
+    },
+    "/api/plans/activity/scopes/workspace": {
+      "bytes": 326,
+      "statements": 8,
+      "steps": 5400
+    },
+    "/api/plans/operator/scopes/projects/{project_id}": {
+      "bytes": 1954281,
+      "statements": 720,
+      "steps": 3989700
+    },
+    "/api/plans/operator/scopes/workspace": {
+      "bytes": 306,
+      "statements": 8,
+      "steps": 5500
+    },
+    "/api/plans/operator/thread-states": {
+      "bytes": 13,
+      "statements": 5,
+      "steps": 11500
+    },
+    "/api/plans/operator/threads/{thread_id}": {
+      "bytes": 9474,
+      "statements": 117,
+      "steps": 116800
+    },
+    "/api/projects": {
+      "bytes": 4530,
+      "statements": 5,
+      "steps": 2800
+    },
+    "/api/projects/{project_id}": {
+      "bytes": 3397,
+      "statements": 7,
+      "steps": 5600
+    },
+    "/api/projects/{project_id}/artifacts": {
+      "bytes": 24894,
+      "statements": 7,
+      "steps": 458400
+    },
+    "/api/provider-policy": {
+      "bytes": 544,
+      "statements": 9,
+      "steps": 2500
+    },
+    "/api/providers/cli/{vendor}/install": {
+      "bytes": 30,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/providers/local/setup": {
+      "bytes": 43,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/providers/sources": {
+      "bytes": 1058,
+      "statements": 34,
+      "steps": 2900
+    },
+    "/api/security/alert": {
+      "bytes": 4,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/settings": {
+      "bytes": 714,
+      "statements": 9,
+      "steps": 2400
+    },
+    "/api/settings/models": {
+      "bytes": 1978,
+      "statements": 13,
+      "steps": 4700
+    },
+    "/api/settings/network-servers": {
+      "bytes": 14,
+      "statements": 5,
+      "steps": 2300
+    },
+    "/api/settings/providers": {
+      "bytes": 701,
+      "statements": 11,
+      "steps": 4600
+    },
+    "/api/skills": {
+      "bytes": 106,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/system": {
+      "bytes": 392,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/system/drain": {
+      "bytes": 171,
+      "statements": 5,
+      "steps": 14400
+    },
+    "/api/system/host-resources": {
+      "bytes": 195,
+      "statements": 8,
+      "steps": 4600
+    },
+    "/api/system/perf/routes": {
+      "bytes": 11,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/system/update-status": {
+      "bytes": 185,
+      "statements": 4,
+      "steps": 2300
+    },
+    "/api/threads": {
+      "bytes": 474121,
+      "statements": 9,
+      "steps": 33100
+    },
+    "/api/threads/{thread_id}/active-turn-state": {
+      "bytes": 29,
+      "statements": 6,
+      "steps": 2300
+    },
+    "/api/threads/{thread_id}/artifacts": {
+      "bytes": 8565,
+      "statements": 33,
+      "steps": 5200
+    },
+    "/api/threads/{thread_id}/artifacts/reconcile": {
+      "bytes": 79,
+      "statements": 6,
+      "steps": 2600
+    },
+    "/api/threads/{thread_id}/checkpoints": {
+      "bytes": 199,
+      "statements": 6,
+      "steps": 2400
+    },
+    "/api/threads/{thread_id}/context-snapshot/next-turn": {
+      "bytes": 172242,
+      "statements": 44,
+      "steps": 2023100
+    },
+    "/api/threads/{thread_id}/messages": {
+      "bytes": 50061,
+      "statements": 11,
+      "steps": 5200
+    },
+    "/api/threads/{thread_id}/updates": {
+      "bytes": 44,
+      "statements": 6,
+      "steps": 2400
+    },
+    "/api/threads/{thread_id}/vendor-account": {
+      "bytes": 412,
+      "statements": 8,
+      "steps": 2400
+    },
+    "/api/turns/active": {
+      "bytes": 29,
+      "statements": 5,
+      "steps": 2300
+    },
+    "/api/upload/limits": {
+      "bytes": 77,
+      "statements": 0,
+      "steps": 0
+    },
+    "/api/vendor-accounts": {
+      "bytes": 892,
+      "statements": 14,
+      "steps": 2500
+    },
+    "/api/vendor-accounts/{account_id}/billing": {
+      "bytes": 122,
+      "statements": 9,
+      "steps": 2400
+    },
+    "/api/version": {
+      "bytes": 766,
+      "statements": 0,
+      "steps": 0
+    }
+  },
+  "sqlite_version": "3.45.1"
+}
