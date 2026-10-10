@@ -454,6 +454,44 @@ def test_a_message_past_the_cap_shows_eight_cards_and_the_count_of_the_rest(db, 
     assert (len(cards), more) == (MAX_CARDS, 3)
 
 
+def test_an_asked_artifact_is_one_card_in_its_turn_not_an_ask_and_a_reference(db, ws, monkeypatch):
+    """The ask rides the tool step; the turn's closing text naming the same file adds no second card."""
+    plan_id, node_id = _node(db)
+    ask = _registered(db, ws, "design.md")
+    _registered(db, ws, "other.md")
+    _message(db, 1, "user", text="draft it and ask me")
+    _message(db, 2, calls=("prov-1",), turn="turn-1")
+    _message(db, 3, turn="turn-1", text="Drafted [design](design.md) and [other](other.md).")
+    _message(db, 4, "user", text="thanks")
+    _message(db, 5, turn="turn-2", text="Still on [design](design.md).")
+    _ask(db, plan_id, node_id, ask)
+    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+
+    page = _page(db)
+
+    assert [(c["kind"], c["title"]) for c in page["m2"]["cards"]] == [("ask", "design.md")]
+    assert [(c["kind"], c["title"]) for c in page["m3"]["cards"]] == [("artifact", "other.md")]
+    assert [(c["kind"], c["title"]) for c in page["m5"]["cards"]] == [("artifact", "design.md")]
+
+
+def test_the_turn_dedup_holds_for_a_cleared_ask(db, ws, monkeypatch):
+    from registry.attention import clear_attention
+
+    plan_id, node_id = _node(db)
+    ask = _registered(db, ws, "design.md")
+    # Clearing posts its own message, so these sit well clear of the next sequence number.
+    _message(db, 100, calls=("prov-1",), turn="turn-1", at="2026-10-01T10:00:00+00:00")
+    _message(db, 101, turn="turn-1", text="See [design](design.md).", at="2026-10-01T10:00:05+00:00")
+    _ask(db, plan_id, node_id, ask)
+    clear_attention(ask, outcome="answer", db=db)
+    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+
+    page = _page(db)
+
+    cards = [c for row in page.values() for c in row.get("cards", [])]
+    assert [(c["kind"], c["title"]) for c in cards] == [("ask", "design.md")]
+
+
 def test_an_artifact_an_ask_and_a_reference_both_name_shows_once_as_the_ask(db, ws, monkeypatch):
     plan_id, node_id = _node(db)
     ask = _registered(db, ws, "design.md")

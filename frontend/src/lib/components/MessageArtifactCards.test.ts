@@ -54,6 +54,20 @@ describe('MessageArtifactCards', () => {
 		expect(opened).toContain('a1');
 	});
 
+	it('omits the file-name line when it equals the title and keeps it when they differ', () => {
+		render({ cards: [
+			ask({ title: 'launch-plan.md', name: 'launch-plan.md' }),
+			ask({ artifact_id: 'a2', hold_id: 'h2', title: 'Launch plan', name: 'launch-plan.md' }),
+			ask({ artifact_id: 'a3', hold_id: 'h3', title: 'launch-plan.md', name: 'Launch-plan.md', state: 'answered' }),
+		] });
+
+		const [same, differs, caseOnly] = tiles();
+		expect(same.querySelector('.name')).toBeNull();
+		expect(same.querySelector('.state')?.textContent).toBe('Needs your review');
+		expect(differs.querySelector('.name')?.textContent).toBe('launch-plan.md');
+		expect(caseOnly.querySelector('.name')?.textContent).toBe('Launch-plan.md');
+	});
+
 	it('shows the clearing round as text beside the title, with the feedback counts as a second line', () => {
 		render({ cards: [ask({ state: 'changes_requested', feedback: { comments: 2, suggestions: 1 } })] });
 

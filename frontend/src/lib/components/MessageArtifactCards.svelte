@@ -25,7 +25,9 @@
 
 	const stateLabel = (card: MessageCard): string | null =>
 		card.state ? CARD_STATE_LABELS[card.state] : card.available ? null : CARD_STATE_LABELS.unavailable;
-	const secondary = (card: MessageCard): string | null => feedbackLine(card.feedback) ?? card.name;
+	// The file name repeats the title for a file titled by its name: omit it, comparing the full strings.
+	const secondary = (card: MessageCard): string | null =>
+		feedbackLine(card.feedback) ?? (card.name && card.name !== card.title ? card.name : null);
 	const typeWord = (card: MessageCard): string => (card.type ?? 'file').replace(/-/g, ' ');
 	const accessibleName = (card: MessageCard): string =>
 		[card.title, typeWord(card), stateLabel(card)].filter(Boolean).join(', ');

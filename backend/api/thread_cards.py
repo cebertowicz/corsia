@@ -13,6 +13,11 @@ assistant step whose tool calls contain it. A hold with no call id (placed
 before they were recorded) attaches to the latest step of its Turn that
 existed when the hold was placed. A step outside the page gets nothing from this
 page: its own page reads its asks.
+
+An artifact asked in a Turn is one card in that Turn: it suppresses its reference
+card on every message of the Turn, wherever the ask card renders and whatever round
+state it reads. An ask raised on an earlier page of a Turn is not seen from a later
+page, so a Turn that crosses a page boundary can show the reference there.
 """
 
 from __future__ import annotations
@@ -86,16 +91,21 @@ def _turn_step(db, thread_id: str, turn_id: str, placed_at: str) -> str | None:
     return row["id"] if row else None
 
 
-def _ask_cards_by_message(db, thread_id: str, rows: list[dict]) -> dict[str, list[dict]]:
+def _ask_cards_by_message(
+    db, thread_id: str, rows: list[dict],
+) -> tuple[dict[str, list[dict]], dict[str, set[str]]]:
+    """Ask cards by message id, and the artifact ids asked in each Turn, wherever the card renders."""
     assistants = [r for r in rows if r.get("role") == "assistant"]
     updates = _page_updates(db, thread_id, rows) if assistants else []
     if not updates:
-        return {}
+        return {}, {}
     by_call: dict[str, str] = {}
     for row in assistants:
         for call_id in _step_calls(row):
             by_call.setdefault(call_id, row["id"])
     in_page = {r["id"] for r in assistants}
+    turn_of = {r["id"]: _loads(r.get("metadata")).get("turn_id") for r in assistants}
+    asked: dict[str, set[str]] = {}
     placed: list[tuple[str, str, str]] = []  # (message id, hold id, ask artifact id)
     for update in updates:
         payload = _loads(update["payload_json"])
@@ -106,6 +116,9 @@ def _ask_cards_by_message(db, thread_id: str, rows: list[dict]) -> dict[str, lis
             message_id = _turn_step(db, thread_id, payload["turn_id"], update["created_at"])
         else:
             message_id = None
+        turn = payload.get("turn_id") or turn_of.get(message_id)
+        if turn:
+            asked.setdefault(turn, set()).add(update["artifact_id"])
         if message_id is not None and message_id in in_page:
             placed.append((message_id, update["hold_id"], update["artifact_id"]))
     live = ask_cards(db, {hold_id: artifact_id for _, hold_id, artifact_id in placed})
@@ -113,14 +126,14 @@ def _ask_cards_by_message(db, thread_id: str, rows: list[dict]) -> dict[str, lis
     for message_id, hold_id, _ in placed:
         if hold_id in live:
             found.setdefault(message_id, []).append(live[hold_id])
-    return found
+    return found, asked
 
 
 def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[dict]) -> None:
     """Add ``cards`` (and ``cards_more``) to the assistant rows that carry artifacts."""
     if not messages:
         return
-    asks = _ask_cards_by_message(db, thread_id, messages)
+    asks, asked_in_turn = _ask_cards_by_message(db, thread_id, messages)
     bases: list[Path] | None = None
     for row in messages:
         if row.get("role") != "assistant":
@@ -131,8 +144,10 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
         if isinstance(text, str) and text:
             if bases is None:
                 bases = scope_bases(thread_row["project_id"], db)
+            # An artifact asked in a Turn is one card there: the ask, never a reference too.
+            skip = asked_in_turn.get(_loads(row.get("metadata")).get("turn_id"), set())
             refs, more = reference_cards(
-                db, text, bases, user_id, skip={c["artifact_id"] for c in cards},
+                db, text, bases, user_id, skip=skip | {c["artifact_id"] for c in cards},
             )
             cards.extend(refs)
         if cards:
