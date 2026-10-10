@@ -217,3 +217,24 @@ def test_a_closed_row_keeps_its_close_reason(db):
     db.commit()
 
     assert _pane(db)[keys.id]["status_reason"] == "Not needed"
+
+
+def test_marking_ends_the_steps_other_stops(db):
+    from plans import dependencies, holds, node_waits
+
+    plan = owner_plan(db)
+    first = task(db, plan.id, "Create the account")
+    keys = task(db, plan.id, "Set the key", assignee="user")
+    dependencies.add_dependency(keys.id, first.id, actor_id="owner", db=db)
+    holds.block_hold(
+        keys.id, reason_key="awaiting_user", reason="Waiting on the key",
+        owner_kind="user", owner_id=None, expected_revision=revision(db, keys.id),
+        actor_id="owner", provenance="test", db=db,
+    )
+    db.commit()
+
+    _mark(db, plan.id, keys.id)
+
+    assert row(db, keys.id)["state"] == "accepted"
+    assert holds.active_holds(keys.id, db=db) == []
+    assert node_waits.unmet_prerequisites(db, [keys.id]).get(keys.id, []) == []

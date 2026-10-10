@@ -103,6 +103,8 @@ def settled_reasons(db, nodes, *, labels: dict[str, str] | None = None) -> dict[
     ids = sorted(closed | marked)
     if not ids:
         return {}
+    from plans.boundary import is_user_audit_id
+
     accepted = sorted(service._ACCEPTED_STATES)
     rows = db.execute(
         f"""SELECT node_id,new_state,payload_json FROM plan_node_events
@@ -122,8 +124,6 @@ def settled_reasons(db, nodes, *, labels: dict[str, str] | None = None) -> dict[
             if node_id in closed and payload.get("reason"):
                 reasons[node_id] = str(payload["reason"])
         elif node_id in marked:
-            from plans.boundary import is_user_audit_id
-
             markers.pop(node_id, None)
             verifier = str(payload.get("verified_by") or "")
             if verifier and not is_user_audit_id(verifier):

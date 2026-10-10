@@ -15,7 +15,9 @@ from typing import Any
 
 import plans.boundary_after as after
 import plans.boundary_fields as fields
+import plans.errors as errors
 import plans.service as service
+import plans.user_settle as user_settle
 
 USER_PAUSED_STEP = (
     "the user paused this step and only they end it: leave it, or ask them to "
@@ -29,12 +31,14 @@ def mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
     A user step is never selectable, so this never takes the executor slot; it
     settles through the writers the user's own Mark done uses. A row with open
     children or one the user paused is refused, because only the user ends what
-    they paused.
+    they paused. Its other stops (a blocker, an unmet prerequisite, a watch)
+    end with it, as on the user's own Mark done: the step is done.
     """
     from plans import archival, boundary_dispatch, holds
 
     node_id = params["node_id"]
-    state = service._node_row(db, node_id)["state"]
+    node = service._node_row(db, node_id)
+    state = node["state"]
     if state == "review_requested":
         raise service.PlanError(boundary_dispatch.MARK_DONE_REVIEW)
     if state not in {"pending", "active"}:
@@ -51,12 +55,14 @@ def mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
     ):
         raise service.PlanError(USER_PAUSED_STEP)
     fields.require_passed_verification(params)
-    archival.settle_watches(db, node_id)
+    errors.require_node_revision(node, params["expected_revision"])
+    user_settle.clear_stops(db, node_id, common)
     if state == "pending":
         service.transition_node(
-            node_id, "active", expected_revision=params["expected_revision"], **common,
+            node_id, "active",
+            expected_revision=service._node_row(db, node_id)["revision"], **common,
         )
-        params = {**params, "expected_revision": service._node_row(db, node_id)["revision"]}
+    params = {**params, "expected_revision": service._node_row(db, node_id)["revision"]}
     expected = boundary_dispatch._submit_finished_work(
         node_id, params, common, actor.thread_id, db,
     )
