@@ -12,14 +12,13 @@ from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_writer
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
+from registry.file_types import extension_type
 from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
 from registry.origin_telemetry import emit_committed_origin
 from tools.sandbox_config import get_allowed_dirs_rw
-
-_DOC_EXTS = {".md", ".txt", ".markdown", ".rst"}
 
 
 def classify(path: Path) -> str:
@@ -28,7 +27,7 @@ def classify(path: Path) -> str:
 
     if is_skill_file(path):
         return "skill"
-    return "document" if path.suffix.lower() in _DOC_EXTS else "code"
+    return extension_type(path)
 
 
 def is_tmp(path: Path) -> bool:

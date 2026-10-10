@@ -14,7 +14,7 @@
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
-	import { docOpenRefusal, type DocOpenRefusal } from '$lib/docOpenRefusal';
+	import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, markFreshnessVerified, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer } from '$lib/docViewerOperations';
 	import { handleDocumentEscape } from '$lib/docViewerKeyboard';
@@ -248,6 +248,8 @@
 			})
 				.catch((e) => {
 					if (seq !== loadSeq) return;
+					// A tab opened before the backend's type was known: the leaf swaps it to the image viewer.
+					if (e instanceof ImageFileError) { signal({ status: 'loading', renderer: 'image' }); return; }
 					openRefusal = docOpenRefusal(e);
 					loadError = e instanceof Error ? e.message : String(e);
 					docState = openRefusal || dirty ? 'ready' : 'error';

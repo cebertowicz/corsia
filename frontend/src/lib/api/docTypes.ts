@@ -28,6 +28,8 @@ export interface DocRevision {
 	/** Authoritative current path — differs when the document relocated. */
 	path: string | null;
 	revision: string | null;
+	/** The image media type the backend serves this file as; null for anything else. */
+	media_type?: string | null;
 	size: number | null;
 	writable: boolean;
 	artifact_id: string | null;
