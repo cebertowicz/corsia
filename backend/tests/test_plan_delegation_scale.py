@@ -114,16 +114,8 @@ def measured():
 
 READS = [
     "D1 harvest ready", "D1 delegated_work_returned", "D1 parent_reviews", "D1 returned_steps",
-    "D2 open_delegated_node_ids", "D2 open_delegated_work",
+    "D2 open_delegated_node_ids", "D2 open_delegated_work", "D2 worker retirement",
 ]
-#: Reads that still grow with settled history for one named cause outside S2d, so the test
-#: fails (strict xfail) the day the cause is fixed and the read joins ``READS``.
-KNOWN_GROWTH = {
-    "D2 worker retirement": (
-        "each step it fails costs a settled-history scan in the transition write, not in the delegation "
-        "read: cross_plan._dependents (plan_node_dependencies joined to plan_nodes with plan_id <> ?)"
-    ),
-}
 
 
 def _assert_flat(measured, read: str) -> None:
@@ -135,12 +127,4 @@ def _assert_flat(measured, read: str) -> None:
 
 @pytest.mark.parametrize("read", READS)
 def test_delegation_read_cost_is_flat_in_settled_history(measured, read: str) -> None:
-    _assert_flat(measured, read)
-
-
-@pytest.mark.parametrize("read", [
-    pytest.param(read, marks=pytest.mark.xfail(strict=True, reason=reason))
-    for read, reason in KNOWN_GROWTH.items()
-])
-def test_the_retirement_write_still_grows_for_a_named_cause(measured, read: str) -> None:
     _assert_flat(measured, read)
