@@ -3,7 +3,10 @@ import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 import { agentColor } from '$lib/docPresence';
 import { hashSeed, ghostHoldMs, mulberry32, selectSweepMs } from '$lib/typingPace';
 import { currentLiveUpdateAuthor, type LiveUpdateAuthor } from '$lib/stores/liveUpdateAuthor';
+import { commentRanges } from './comment-marks';
 import { PresenceCursor, revealingThreads } from './presence-marks';
+import { suggestionTyping } from './suggestion-marks';
+import { adoptPreviewSelect, typedSuggestions, withAdopted, withClaimedSuggestions } from './typed-reveal-claims';
 import {
 	beginSelect, endSelect, GHOST_MAX_CHARS, nextGhostKey, selectHead, selectMarks, selectShown, selectTheme, type Selecting,
 } from './typed-reveal-select';
@@ -204,6 +207,7 @@ export const typedReveals = StateField.define<readonly Lane[]>({
 			} else if (effect.is(endPreview)) {
 				next = next.flatMap((lane) => { const kept = withoutCall(lane, effect.value.callId); return cleaned(kept, kept.segments, kept.caret) ?? []; });
 			}
+			else if (effect.is(adoptPreviewSelect)) next = withAdopted(next, effect.value);
 			else if (effect.is(selectShown)) {
 				const { threadId, key, shown } = effect.value;
 				next = next.map((lane) => lane.threadId === threadId && lane.select?.key === key ? { ...lane, select: { ...lane.select, shown } } : lane);
@@ -213,25 +217,30 @@ export const typedReveals = StateField.define<readonly Lane[]>({
 					? [lane] : cleaned({ ...lane, select: null }, lane.segments, lane.caret) ?? []);
 			}
 		}
-		return next;
+		const claimed = withClaimedSuggestions(next, transaction.state.field(commentRanges, false) ?? []);
+		return claimed.some((lane, index) => lane !== next[index])
+			? claimed.flatMap((lane) => cleaned(lane, lane.segments, lane.caret) ?? []) : next;
 	},
 	provide: (field) => [
-		EditorView.decorations.from(field, laneDecorations),
+		EditorView.decorations.compute([field, commentRanges], (state) => laneDecorations(state.field(field),
+			new Set(state.field(commentRanges).flatMap((range) => range.suggestion ? [range.id] : [])))),
+		suggestionTyping.compute([field], (state) => typedSuggestions(state.field(field))),
 		selectTheme,
 		revealingThreads.compute([field], (state) => new Set(state.field(field).map((lane) => lane.threadId))),
 	],
 });
 
-function laneDecorations(lanes: readonly Lane[]): DecorationSet {
+function laneDecorations(lanes: readonly Lane[], committed: ReadonlySet<string>): DecorationSet {
 	return Decoration.set(lanes.flatMap((lane) => {
 		const front = lane.segments[0];
-		const at = lane.select ? selectHead(lane.select) : front ? front.from : previewCaret(lane) ?? lane.caret;
+		const preview = lane.select || front ? null : previewCaret(lane);
+		const at = lane.select ? selectHead(lane.select) : front ? front.from : preview?.at ?? lane.caret;
 		const marks: Array<Range<Decoration>> = at === null ? [] : [Decoration.widget({
 			widget: new PresenceCursor(lane.threadId, lane.name, lane.color, lane.typing || !!lane.select, lane.quiet),
-			side: front || lane.select || lane.previews.length ? -1 : 1,
+			side: preview?.after ? 2 : front || lane.select || lane.previews.length ? -1 : 1,
 		}).range(at)];
 		if (lane.select) marks.push(...selectMarks(lane.select, lane.color, lane.threadId));
-		marks.push(...previewMarks(lane));
+		marks.push(...previewMarks(lane, committed));
 		for (const segment of lane.segments) {
 			if (segment.from > segment.start) {
 				marks.push(Decoration.mark({
