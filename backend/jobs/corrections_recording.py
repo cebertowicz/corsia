@@ -264,7 +264,11 @@ async def _classify_and_record(
     candidate: CorrectionCandidate, target: Any, binary: str | None,
     version: CheckerVersion, invoke: Invoke,
 ) -> str:
-    """Classify one candidate and write its fact: "recorded", "refused" or "failed"."""
+    """Classify one candidate and write its fact.
+
+    Returns "recorded", "refused", "failed", or "duplicate" when the fact
+    already existed and nothing was inserted.
+    """
     try:
         classification = await invoke(
             target,
@@ -305,6 +309,8 @@ async def _classify_and_record(
         logger.exception("corrections recording write failed {}", candidate.message_id)
         await run_in_db(_record_failure)
         return "failed"
+    if not inserted:
+        return "duplicate"
     return "refused" if classification["label"] == LABEL_REFUSED else "recorded"
 
 
@@ -347,7 +353,7 @@ async def run_corrections_recording(
     candidates = sorted(
         candidates, key=lambda candidate: (candidate.created_at, candidate.message_id)
     )[:batch_size]
-    counts = {"recorded": 0, "refused": 0, "failed": 0}
+    counts = {"recorded": 0, "refused": 0, "failed": 0, "duplicate": 0}
     for candidate in candidates:
         outcome = await _classify_and_record(candidate, target, binary, version, invoke)
         counts[outcome] += 1

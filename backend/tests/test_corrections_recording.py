@@ -354,6 +354,23 @@ async def test_a_refused_write_is_a_counted_failure_not_a_checker_refusal(isolat
 
 
 @pytest.mark.asyncio
+async def test_a_fact_that_already_existed_is_not_counted_as_recorded(isolated_db, monkeypatch):
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+
+    _seed_one_message()
+    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
+    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+    monkeypatch.setattr(job, "_record_fact", lambda *args, **kwargs: False)
+
+    async def good(*args, **kwargs):
+        return kwargs["validator"]({"label": "correction", "reason": "It is wrong."})
+
+    result = await job.run_corrections_recording(batch_size=1, invoke=good)
+    assert result == {"status": "ok", "processed": 1, "recorded": 0, "refused": 0, "failed": 0}
+
+
+@pytest.mark.asyncio
 async def test_a_failed_write_does_not_abort_the_rest_of_the_batch(isolated_db, monkeypatch):
     from infra.outcome_event_input import OutcomeInputRefusal
     from infra.settings import set_setting
