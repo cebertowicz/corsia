@@ -61,6 +61,15 @@ describe('orphaned is the text on screen, plus a refused accept', () => {
 		const [row] = commentsInDocumentOrder([comment('review', -1, '', { review: true, orphaned: true })], 'text');
 		expect(row.orphaned).toBe(false);
 	});
+	it.each([
+		{ name: 'accepted suggestion', overrides: { replacement: 'other', decision: 'accepted' as const } },
+		{ name: 'rejected suggestion', overrides: { replacement: 'other', decision: 'rejected' as const } },
+		{ name: 'resolved comment', overrides: {} },
+	])('never counts a resolved $name whose quote is gone as unplaced', ({ overrides }) => {
+		// A decision resolves its suggestion on the server; the header count is the list's open 'Text changed' group.
+		const rows = commentsInDocumentOrder([comment('done', 5, 'quote', { ...overrides, resolved: true }), comment('lost', 5, 'quote')], 'keep other here');
+		expect(commentSurfaceStatus(rows).orphanedCount).toBe(1);
+	});
 });
 
 describe('live placement on the canvas (4.2)', () => {
