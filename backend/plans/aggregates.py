@@ -190,9 +190,9 @@ def ready(connection: sqlite3.Connection) -> bool:
     version = connection.execute("PRAGMA schema_version").fetchone()[0]
     if _READY.get(connection) == version:
         return True
-    found = connection.execute(
-        "SELECT 1 FROM pragma_table_info('plan_nodes') WHERE name='sub_open'"
-    ).fetchone() is not None
+    # The statement form: a table-valued ``pragma_table_info(...)`` traces as ``PRAGMA table_info='...'``,
+    # which a lane's write classifier reads as a PRAGMA assignment.
+    found = any(row[1] == "sub_open" for row in connection.execute("PRAGMA table_info(plan_nodes)"))
     if found:
         _READY[connection] = version
     return found

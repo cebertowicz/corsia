@@ -56,13 +56,13 @@ def _node(db, node: str, plan: str = "plan", *, parent: str | None = None, state
     with raw_plan_seed(db):
         db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,spawned_thread_id,follow_up_of,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?,?,?,1,'task','task','done',?,?,?,?,1,1,'t','t')",
                    (node, plan, parent, state, worker, follow_up_of, node))
-    event = "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,payload_json,created_at) VALUES (?,?,'test',?,?,?,?,?)"
-    if state == "accepted" and at:
-        db.execute(event, (f"accept-{node}", node, "accepted", "active", "accepted", None, at))
-    if rejected:
-        db.execute(event, (f"reject-{node}", node, "review_rejected", "active", "review_requested", None, BEFORE))
-    if revision:
-        db.execute(event, (f"revision-{node}", node, "revision_created", None, None, None, BEFORE))
+        event = "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,payload_json,created_at) VALUES (?,?,'test',?,?,?,?,?)"
+        if state == "accepted" and at:
+            db.execute(event, (f"accept-{node}", node, "accepted", "active", "accepted", None, at))
+        if rejected:
+            db.execute(event, (f"reject-{node}", node, "review_rejected", "active", "review_requested", None, BEFORE))
+        if revision:
+            db.execute(event, (f"revision-{node}", node, "revision_created", None, None, None, BEFORE))
 
 
 def _attach(db, node: str, child_plan: str) -> None:

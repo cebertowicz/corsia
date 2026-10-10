@@ -202,16 +202,16 @@ def _seed_period(db, agent_id: str, period: str, outcomes: int, *, not_first_try
             [(node_id, plan_id, order_key, commitment_id, node_difficulty, settled, settled)
              for node_id, plan_id, order_key, commitment_id, node_difficulty, settled in rows],
         )
-    db.executemany(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?,'test','accepted','active','accepted',?)",
-        [(f"event-{node_id}", node_id, settled) for node_id, _, _, _, _, settled in rows],
-    )
-    db.executemany(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?,'test','review_rejected','active','active',?)",
-        [(f"reject-{node_id}", node_id, settled) for node_id, _, _, _, _, settled in rows[:not_first_try]],
-    )
+        db.executemany(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?,'test','accepted','active','accepted',?)",
+            [(f"event-{node_id}", node_id, settled) for node_id, _, _, _, _, settled in rows],
+        )
+        db.executemany(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?,'test','review_rejected','active','active',?)",
+            [(f"reject-{node_id}", node_id, settled) for node_id, _, _, _, _, settled in rows[:not_first_try]],
+        )
 
 
 def _seed_tokens(db, thread_id: str, period: str, tokens: int, *, count: int = 1) -> None:

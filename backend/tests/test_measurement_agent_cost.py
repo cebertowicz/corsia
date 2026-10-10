@@ -14,6 +14,7 @@ from api.measurement_model_cost import query_model_costs
 from api.measurement_queries import prepare_outcome_periods
 from core.measurement_scope import resolve_grain
 from model_identity_fixtures import LOCAL_ID, seed_identity_catalog
+from tests.plan_writer_authorizer import raw_plan_seed
 
 # Weeks in UTC on Monday 2026-10-05: the latest window is Sep 7 to Oct 4, the previous Aug 10 to Sep 6.
 GRAIN = resolve_grain("weeks", "UTC", now=datetime(2026, 10, 5, 12, tzinfo=timezone.utc))
@@ -38,9 +39,10 @@ def db(isolated_db):
 
 
 def _task(db, node: str, size: str | None, accepted: str = "2026-09-30T12:00:00Z") -> None:
-    db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,size,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,?,'t','t')",
-               (node, node, size))
-    db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accept-{node}", node, accepted))
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,size,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,?,'t','t')",
+                   (node, node, size))
+        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accept-{node}", node, accepted))
 
 
 def _usage(db, usage_id: str, node: str, model: str, *, source: str = "external_harness:claude-code", prompt: int = 1_000_000,

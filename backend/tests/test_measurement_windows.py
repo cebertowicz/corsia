@@ -7,20 +7,22 @@ from datetime import datetime, timezone
 import pytest
 
 from tests.test_measurement_api import USER, _seed_thread
+from tests.plan_writer_authorizer import raw_plan_seed
 
 # Noon UTC on Friday 2026-10-09: the latest 7 days are 10-02..10-08 and the 7 before are 09-25..10-01.
 NOW = datetime(2026, 10, 9, 12, tzinfo=timezone.utc)
 
 
 def _accept(db, node_id: str, accepted_at: str) -> None:
-    db.execute(
-        "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
-        "VALUES (?, 'plan-root', NULL, 1, 'task', 'task', 'done', 'accepted', ?, 1, 1, 't', 't')", (node_id, node_id),
-    )
-    db.execute(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?,'test','accepted','active','accepted',?)", (f"event-{node_id}", node_id, accepted_at),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
+            "VALUES (?, 'plan-root', NULL, 1, 'task', 'task', 'done', 'accepted', ?, 1, 1, 't', 't')", (node_id, node_id),
+        )
+        db.execute(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?,'test','accepted','active','accepted',?)", (f"event-{node_id}", node_id, accepted_at),
+        )
 
 
 def _seed(days: dict[str, int]) -> None:

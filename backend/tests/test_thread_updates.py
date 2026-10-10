@@ -481,8 +481,12 @@ def test_a_blocked_card_on_an_agent_owned_item_does_not_ask(db):
     assert _blocked_ask(db) is True
 
 
-@pytest.mark.parametrize("settle", [_closed_parent_of, lambda db, node: db.execute(
-    "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node,))])
+def _archived(db, node_id: str) -> None:
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node_id,))
+
+
+@pytest.mark.parametrize("settle", [_closed_parent_of, _archived])
 def test_a_blocked_card_in_a_retired_branch_or_archived_does_not_ask(db, settle):
     node_id = _node(db)
     _assign(db, node_id, "user")

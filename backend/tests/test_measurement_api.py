@@ -91,11 +91,11 @@ def _seed_outcomes(db, thread_id: str, count: int = 762) -> None:
             "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
             "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')", nodes,
         )
-    db.executemany(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?,'test','accepted','active','accepted','2026-09-23T12:00:00Z')",
-        [(f"event-{number}" if thread_id == "root" else f"{thread_id}-event-{number}", f"node-{number}" if thread_id == "root" else f"{thread_id}-node-{number}") for number in range(count)],
-    )
+        db.executemany(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?,'test','accepted','active','accepted','2026-09-23T12:00:00Z')",
+            [(f"event-{number}" if thread_id == "root" else f"{thread_id}-event-{number}", f"node-{number}" if thread_id == "root" else f"{thread_id}-node-{number}") for number in range(count)],
+        )
 
 
 def _seed_decision(db, index: int, answer: str | None, *, raised: str = "2026-09-15T12:00:00Z", thread_id: str = "root", recommendation: str | None = "B") -> None:
@@ -257,11 +257,11 @@ async def test_decision_uses_raised_period_for_asks_and_answered_period_for_alig
                 "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
                 "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')", prior_nodes,
             )
-        db.executemany(
-            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-            "VALUES (?,?,'test','accepted','active','accepted','2026-09-16T12:00:00Z')",
-            [(f"prior-event-{number}", f"prior-{number}") for number in range(20)],
-        )
+            db.executemany(
+                "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                "VALUES (?,?,'test','accepted','active','accepted','2026-09-16T12:00:00Z')",
+                [(f"prior-event-{number}", f"prior-{number}") for number in range(20)],
+            )
         for index, answer in enumerate(["B", "B", "B", "B", "A", "other", "other", "other", "other", "other"]):
             _seed_decision(db, index, answer)
         db.commit()
@@ -565,7 +565,7 @@ async def test_models_endpoint_compares_real_previous_window_tasks_and_cost(isol
                 node = f"{period}-{index}"
                 with raw_plan_seed(db):
                     db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,'t','t')", (node, node))
-                db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accepted-{node}", node, accepted_at))
+                    db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accepted-{node}", node, accepted_at))
                 db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,source,created_at,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) VALUES (?, 'root','claude-code/claude-opus-5-5',1000000,0,0,0,1000000,'external_harness:claude-code',?,'plan',?,'attempt',?,'execution')", (f"usage-{node}", accepted_at, node, node))
         db.commit()
     finally:
@@ -914,11 +914,11 @@ def _seed_task(db, plan_id: str, node_id: str, *, settled: str = _WEEK) -> None:
             "VALUES (?, ?, NULL, 1, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')",
             (node_id, plan_id, node_id),
         )
-    db.execute(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?, 'test', 'accepted', 'active', 'accepted', ?)",
-        (f"event-{node_id}", node_id, settled),
-    )
+        db.execute(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?, 'test', 'accepted', 'active', 'accepted', ?)",
+            (f"event-{node_id}", node_id, settled),
+        )
 
 
 def _seed_usage(db, row_id: str, *, total, prompt, completion, cache_creation, cache_read) -> None:
@@ -1326,8 +1326,8 @@ async def test_first_try_misses_a_revision_of_a_sent_back_task(isolated_db):
         # The send-back marks the node it rejects and closes it ('Sent back').
         with raw_plan_seed(db):
             db.execute("UPDATE plan_nodes SET state='closed', sent_back=1 WHERE id='sent-back'")
-        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-                   "VALUES ('e-sent-back','sent-back','test','review_rejected','active','active',?)", (_WEEK,))
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                       "VALUES ('e-sent-back','sent-back','test','review_rejected','active','active',?)", (_WEEK,))
         db.execute("UPDATE plan_nodes SET follow_up_of='sent-back' WHERE id='revision'")
         # An accept-with-follow-up predecessor is not reworked: its revision is a first try.
         with raw_plan_seed(db):
@@ -1335,8 +1335,8 @@ async def test_first_try_misses_a_revision_of_a_sent_back_task(isolated_db):
                        "commitment_id,requirements_revision,revision,created_at,updated_at) "
                        "VALUES ('handoff','plan-root',NULL,1,'task','Measured task','done','accepted_with_followup',"
                        "'handoff',1,1,'t','t')")
-        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-                   "VALUES ('event-handoff','handoff','test','accepted','active','accepted_with_followup',?)", (_WEEK,))
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                       "VALUES ('event-handoff','handoff','test','accepted','active','accepted_with_followup',?)", (_WEEK,))
         db.execute("UPDATE plan_nodes SET follow_up_of='handoff' WHERE id='handoff-revision'")
         db.commit()
     finally:

@@ -147,17 +147,18 @@ def test_batch_reader_keeps_terminal_states_tied_links_and_latest_armed_watch(db
     for node, state in zip(nodes, states):
         with raw_plan_seed(db):
             db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node))
+            db.execute(
+                "INSERT INTO plan_node_events(id,node_id,provenance,event,prior_state,new_state,created_at) "
+                "VALUES(?,?, 'test.batch', 'state_transition', 'active', ?, ?)",
+                (uuid.uuid4().hex, node, state, settled_at[node]),
+            )
+    # Same timestamp, later rowid: the selected settled timestamp remains exact.
+    with raw_plan_seed(db):
         db.execute(
             "INSERT INTO plan_node_events(id,node_id,provenance,event,prior_state,new_state,created_at) "
-            "VALUES(?,?, 'test.batch', 'state_transition', 'active', ?, ?)",
-            (uuid.uuid4().hex, node, state, settled_at[node]),
+            "VALUES(?,?, 'test.batch', 'state_transition', 'active', 'accepted', ?)",
+            (uuid.uuid4().hex, nodes[0], settled_at[nodes[0]]),
         )
-    # Same timestamp, later rowid: the selected settled timestamp remains exact.
-    db.execute(
-        "INSERT INTO plan_node_events(id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES(?,?, 'test.batch', 'state_transition', 'active', 'accepted', ?)",
-        (uuid.uuid4().hex, nodes[0], settled_at[nodes[0]]),
-    )
     open_node = review(db, subject="open")
     linked_at = {
         nodes[0]: "2026-09-10T00:00:00Z", nodes[1]: "2026-09-10T00:00:00Z",

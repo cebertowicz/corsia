@@ -41,10 +41,10 @@ def _accept(db, node_id: str, plan_id: str) -> None:
             "INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,acceptance_criteria,state,commitment_id,created_at,updated_at) "
             "VALUES (?,?,0,'task','t','c','accepted',?,'2026-09-15','2026-09-16')", (node_id, plan_id, node_id),
         )
-    db.execute(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,new_state,created_at) "
-        "VALUES (?,?,'test','accepted','accepted','2026-09-16T10:00:00Z')", (f"ev-{node_id}", node_id),
-    )
+        db.execute(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,new_state,created_at) "
+            "VALUES (?,?,'test','accepted','accepted','2026-09-16T10:00:00Z')", (f"ev-{node_id}", node_id),
+        )
     db.commit()
 
 

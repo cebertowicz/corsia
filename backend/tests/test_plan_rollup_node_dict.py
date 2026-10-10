@@ -12,7 +12,7 @@ from dataclasses import asdict, fields
 
 import pytest
 
-from plans import mutations, operator_chat_state, operator_projection, rollup, service
+from plans import mutations, node_states, operator_chat_state, operator_projection, rollup, service
 from plans.boundary import PlanActor
 from plans.models import PlanNode
 from tests.plan_close_next_helpers import HUMAN, plan_update, revision, task
@@ -175,8 +175,8 @@ def test_chat_list_batches_child_plan_reads(db, scene):
 
 
 _OPEN_READ = re.compile(
-    r"^WITH q\(.*AS \(SELECT \* FROM plan_nodes WHERE plan_id='(\w+)' "
-    r"AND plan_nodes\.archived_at IS NULL AND folded=0\)",
+    r"^WITH q\(.*AS \(SELECT \* FROM plan_nodes WHERE plan_id='(\w+)' AND "
+    + re.escape(node_states.listed_open_sql("plan_nodes")) + r"\)",
     re.DOTALL,
 )
 

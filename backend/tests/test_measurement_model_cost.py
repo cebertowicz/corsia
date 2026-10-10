@@ -205,10 +205,10 @@ def _task(db, node: str, accepted_at: str | None = "2026-09-30T12:00:00Z") -> No
     with raw_plan_seed(db):
         db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done',?,?,1,1,'t','t')",
                    (node, "accepted" if accepted_at else "review_requested", node))
-    if accepted_at:
-        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accept-{node}", node, accepted_at))
-    else:
-        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','review_rejected','active','review_requested','2026-09-30T12:00:00Z')", (f"reject-{node}", node))
+        if accepted_at:
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accept-{node}", node, accepted_at))
+        else:
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','review_rejected','active','review_requested','2026-09-30T12:00:00Z')", (f"reject-{node}", node))
 
 
 def _usage(db, usage_id: str, node: str | None, model: str, *, source: str = "external_harness:claude-code",

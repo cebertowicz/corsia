@@ -1,4 +1,4 @@
-"""Schema v102 adds the stored plan aggregates and proves them against a recount (#731)."""
+"""Schema v104 adds the stored plan aggregates and proves them against a recount (#731)."""
 
 from __future__ import annotations
 
@@ -97,7 +97,7 @@ def _objects(db, table: str) -> dict[str, str]:
     }
 
 
-def test_the_step_is_registered_and_102_is_current() -> None:
+def test_the_step_is_registered_and_104_is_current() -> None:
     assert SCHEMA_VERSION == 104
     assert MIGRATIONS[103] is step.migrate_103_to_104
 
