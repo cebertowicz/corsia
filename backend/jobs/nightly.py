@@ -142,7 +142,7 @@ def _should_run_on_idle() -> bool:
     return _is_system_idle(threshold_hours=IDLE_THRESHOLD_HOURS)
 
 
-async def _run_job_safely() -> None:
+async def _run_job_safely(*, include_corrections: bool = False) -> None:
     """Run the daily retention sweep once, recording a terminal disposition.
 
     The terminal record is written in ``finally`` so that a failed sweep still
@@ -191,6 +191,21 @@ async def _run_job_safely() -> None:
     # Second step, after the terminal record: it shares today's claim, and its
     # failure can never change the retention status already written.
     await _reap_worktrees_safely()
+    if include_corrections:
+        await _run_corrections_recording_safely()
+
+
+async def _run_corrections_recording_safely() -> None:
+    """Run one bounded correction batch without changing maintenance disposition."""
+    try:
+        from jobs.corrections_recording import run_corrections_recording
+
+        result = await run_corrections_recording()
+        logger.info("nightly_job: corrections recording {}", result["status"])
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("nightly_job: corrections recording failed")
 
 
 async def _reap_worktrees_safely() -> None:
@@ -216,10 +231,16 @@ async def nightly_job_loop() -> None:
         try:
             if _should_run_nightly():
                 logger.info("nightly_job: nightly trigger fired (02:00 window)")
-                await _run_job_safely()
+                await _run_job_safely(include_corrections=True)
             elif _should_run_on_idle():
                 logger.info("nightly_job: idle trigger fired ({}h+ idle)", IDLE_THRESHOLD_HOURS)
                 await _run_job_safely()
+            else:
+                from jobs.corrections_recording import claim_manual_corrections_recording
+
+                if await asyncio.to_thread(claim_manual_corrections_recording):
+                    logger.info("nightly_job: manual corrections recording trigger fired")
+                    await _run_corrections_recording_safely()
         except Exception:
             logger.exception("nightly_job: loop error")
 
