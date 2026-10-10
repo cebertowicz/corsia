@@ -190,6 +190,8 @@ def test_failed_node_keeps_its_blocker_as_detail_without_opening_its_path():
         prepare = _task(plan.id, "Prepare", parent=build, db=db)
         ship = _task(plan.id, "Ship", parent=build, db=db)
         service.add_dependency(ship.id, prepare.id, db=db)
+        # An open sibling keeps Build in the open work, so its failed rows are listed.
+        _task(plan.id, "Keep open", parent=build, db=db)
         mutations.fail_node(prepare.id, actor_id="owner", provenance=PROVENANCE, db=db)
 
         blocked, nodes = _read(db)

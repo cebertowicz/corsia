@@ -187,8 +187,7 @@ def open_tasks(db, plan, executor: str) -> list:
     settled, so neither is open; held, blocked and waiting tasks are, because
     they are still this executor's work.
     """
-    rows = ordered_cursor(db, plan["id"]).fetchall()
-    _warn_stranded(rows)
+    rows = [row for row, _path in open_nodes_with_paths(db, plan["id"])]
     parents = node_states.parent_ids(rows)
     return [row for row in rows if _is_open(row, plan, executor, parents)]
 

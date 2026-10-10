@@ -10,6 +10,7 @@ import pytest
 from plans import decisions, public, service
 from plans.boundary import PlanActor
 from tests.test_plan_decisions import _draft_kwargs, _mid, _task, db  # noqa: F401
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _author(owner_thread_id: str = "owner") -> PlanActor:
@@ -95,10 +96,11 @@ def test_raised_decision_is_historical_contact_after_answer(db):
 
 def test_retired_source_does_not_erase_historical_contact(db):
     decision = _raised_decision(db)
-    db.execute(
-        "UPDATE plan_nodes SET archived_at='retired' WHERE id=?",
-        (decision["source_node_id"],),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at='retired' WHERE id=?",
+            (decision["source_node_id"],),
+        )
     db.commit()
 
     assert public.has_genuine_decision_raised_at_or_after(
@@ -272,17 +274,18 @@ def test_query_plan_is_pinned_and_has_no_prohibited_alias_or_table_scan(db):
 
 def test_large_negative_owner_plan_has_no_historical_contact(db):
     plan = service.ensure_plan("thread", "owner", db=db)
-    db.executemany(
-        """INSERT INTO plan_nodes
-           (id, plan_id, parent_id, order_key, kind, title, acceptance_criteria,
-            state, commitment_id, revision, created_at, updated_at)
-           VALUES (?, ?, NULL, ?, 'task', ?, 'DOD', 'pending', ?, 1, 't', 't')""",
-        [
-            (f"unrelated-{index}", plan.id, index, f"Unrelated task {index}",
-             f"unrelated-{index}")
-            for index in range(1_000)
-        ],
-    )
+    with raw_plan_seed(db):
+        db.executemany(
+            """INSERT INTO plan_nodes
+               (id, plan_id, parent_id, order_key, kind, title, acceptance_criteria,
+                state, commitment_id, revision, created_at, updated_at)
+               VALUES (?, ?, NULL, ?, 'task', ?, 'DOD', 'pending', ?, 1, 't', 't')""",
+            [
+                (f"unrelated-{index}", plan.id, index, f"Unrelated task {index}",
+                 f"unrelated-{index}")
+                for index in range(1_000)
+            ],
+        )
     db.commit()
 
     assert public.has_genuine_decision_raised_at_or_after(

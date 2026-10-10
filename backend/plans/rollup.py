@@ -23,6 +23,9 @@ class PlanRollup:
     progress: dict
     nodes: list[dict]
     moving: bool = False
+    #: The loaded open tree when ``nodes`` are the open work and a window, not the whole plan
+    #: (``plans.open_rollup``); None for the full projection.
+    tree: Any = None
 
 
 @dataclass(frozen=True)
@@ -43,17 +46,6 @@ def _plan_data(row) -> dict:
 def rejected_round_sql(node_alias: str, event_alias: str) -> str:
     """One sent-back round membership predicate for detail and narrow reads."""
     return f"{event_alias}.event='review_rejected' AND {node_alias}.state='closed'"
-
-
-def rejected_branch_cte(marks: str) -> str:
-    """The sent-back rounds and descendants that have no independent row."""
-    return f"""WITH RECURSIVE rejected(id) AS (
-        SELECT DISTINCT e.node_id FROM plan_node_events e
-        JOIN plan_nodes n ON n.id=e.node_id
-        WHERE n.plan_id IN ({marks}) AND ({rejected_round_sql('n', 'e')})
-        UNION
-        SELECT child.id FROM plan_nodes child JOIN rejected ON child.parent_id=rejected.id
-    )"""
 
 
 def _settlements(connection, plan_id: str) -> tuple[dict, dict[str, str]]:
@@ -117,7 +109,7 @@ def _child_plan(
     if child_depth == 0:
         state = projections._plan_state(
             connection, str(child["id"]), memo,
-            plan=child, nodes=child_nodes[str(child["id"])],
+            plan=child, nodes=child_nodes.get(str(child["id"])),
         )
         return PlanRollup(
             plan=_plan_data(child),

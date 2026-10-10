@@ -14,6 +14,7 @@ from plans import operator_chat_state
 from tests.plan_close_next_helpers import HUMAN, plan_update, revision, task
 from tests.test_plan_chat_list_state import _awaiting_access_request, _plan, _thread
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixture
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _AT = "2026-09-29T10:00:00"
 
@@ -180,7 +181,8 @@ def test_done_is_a_plan_with_finished_work_nothing_open_and_no_pause(db):
     retired_actor = _thread(db, "retired")
     retired_plan = _plan(db, "retired")
     retired = _accepted(db, retired_plan.id, "Archived", retired_actor)
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (retired,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (retired,))
 
     _thread(db, "empty")
     _plan(db, "empty")

@@ -11,6 +11,7 @@ from infra.database import initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
 from plans import service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _ARCHIVED = "2026-09-20T10:00:00.000000+00:00"
 
@@ -24,10 +25,11 @@ def _node(db, plan_id: str, title: str, *, kind: str = "task", parent_id=None) -
 
 def _archive_as(db, node_id: str, state: str) -> None:
     """Write the row the way a pre-#1887 close (or an explicit archive) left it."""
-    db.execute(
-        "UPDATE plan_nodes SET state=?, archived_at=? WHERE id=?",
-        (state, _ARCHIVED, node_id),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET state=?, archived_at=? WHERE id=?",
+            (state, _ARCHIVED, node_id),
+        )
 
 
 def _legacy_db(path):
@@ -71,7 +73,7 @@ def _rows(db) -> dict[str, tuple]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 103
+    assert SCHEMA_VERSION == 104
 
 
 def test_closed_tasks_come_back_and_nothing_else_does(tmp_path):

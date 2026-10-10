@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from tests.plan_writer_authorizer import raw_plan_seed
 
 BACKEND = Path(__file__).resolve().parents[1]
 _UPDATE = re.compile(r"UPDATE\s+plan_nodes\s+SET(?P<sets>.*?)\bWHERE\b", re.S | re.I)

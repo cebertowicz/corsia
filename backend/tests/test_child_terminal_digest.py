@@ -19,6 +19,7 @@ import sqlite3
 from infra.schema import SCHEMA_SQL
 from plans import mutations, service
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 NOW = "2026-08-01T00:00:00+00:00"
 
@@ -237,14 +238,16 @@ def test_a_result_after_the_delegated_step_is_gone_is_not_the_parents(monkeypatc
             "SELECT id FROM plan_nodes WHERE plan_id=? AND spawned_thread_id='worker'",
             (parent_plan.id,),
         ).fetchone()["id"]
-        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (delegated,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (delegated,))
         db.commit()
         service.transition_node(node.id, "failed", actor_id="worker", db=db)
 
         later = service.add_node(
             plan.id, kind="task", title="Later work", acceptance_criteria="Done", db=db,
         )
-        db.execute("UPDATE plan_nodes SET archived_at=NULL WHERE id=?", (delegated,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET archived_at=NULL WHERE id=?", (delegated,))
         db.execute("UPDATE threads SET spawned_by=NULL WHERE id='worker'")
         db.commit()
         service.transition_node(later.id, "active", actor_id="worker", db=db)

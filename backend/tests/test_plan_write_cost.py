@@ -38,6 +38,7 @@ from tests.plan_scene import (  # noqa: F401 - shared plan fixtures
     scene,
 )
 from tests.test_attention_queue import _seed
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 class _Fetched:
@@ -338,7 +339,8 @@ def test_rollup_reuses_rows_without_changing_nested_rejected_or_stranded_status(
         scene.plan_id, kind="task", title="Old round", acceptance_criteria="done",
         parent_id=rejected.id, db=db,
     )
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (rejected.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed', sent_back=1 WHERE id=?", (rejected.id,))
     db.execute(
         """INSERT INTO plan_node_events(id,node_id,event,provenance,payload_json,created_at)
            VALUES ('rejected-branch',?,'review_rejected','test','{}','t')""",
@@ -351,7 +353,8 @@ def test_rollup_reuses_rows_without_changing_nested_rejected_or_stranded_status(
         scene.plan_id, kind="task", title="Stranded", acceptance_criteria="done",
         parent_id=stranded_parent.id, db=db,
     )
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (stranded_parent.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (stranded_parent.id,))
     db.commit()
 
     row = service._plan_row(db, scene.plan_id)

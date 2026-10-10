@@ -16,6 +16,7 @@ import pytest
 
 from infra.schema import SCHEMA_SQL
 from plans import mutations, node_cost, node_time, service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 T0 = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
 MINUTE = 60
@@ -199,7 +200,8 @@ def test_a_parents_time_never_exceeds_the_span_its_descendants_cover(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     phase = _phase(db, plan.id)
     inner = _phase(db, plan.id, "Inner")
-    db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (phase.id, inner.id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (phase.id, inner.id))
     leaves = []
     for index in range(12):
         leaf = _task(db, plan.id, f"Leaf {index}", parent_id=(inner if index % 2 else phase).id)

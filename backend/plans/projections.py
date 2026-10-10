@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from infra.packed_rows import fetch_all
-from plans import node_states, wait_causes
+from plans import aggregates, node_states, open_tree, wait_causes
 from plans.models import PlanLivenessSignal, PlanState, Progress
 
 
@@ -38,7 +38,7 @@ def plan_state(
 _WALKING = PlanState(progress=Progress(done=0, total=0, liveness="idle", open=0), moving=False)
 
 
-def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=None, nodes=None) -> PlanState:
+def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=None, nodes=None, tree=None):
     from plans import admission, service
 
     walked = memo.get(plan_id)
@@ -49,15 +49,19 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
     memo[plan_id] = _WALKING
     if plan is None:
         plan = service._plan_row(connection, plan_id)
-    if nodes is None:
-        nodes = service._plan_tree_rows(connection, plan_id)
-    rows = node_states.leaves(nodes)
-    counted = node_states.in_play(nodes)
-    done = sum(row["state"] in service._ACCEPTED_STATES for row in counted)
+    settled_done = settled_failed = 0  # no full rows: the open tree, plus the stored settled leaves
+    open_ids: open_tree.UnarchivedIds | None = None
+    if nodes is None and aggregates.ready(connection):
+        tree = tree or open_tree.load(connection, plan_id)
+        rows, counted = open_tree.leaves(tree), open_tree.in_play(tree)
+        settled_done, settled_failed = open_tree.settled_leaves_in_play(tree)
+        open_ids = open_tree.UnarchivedIds(connection, plan_id, (str(row["id"]) for row in tree.rows))
+    else:
+        nodes = service._plan_tree_rows(connection, plan_id) if nodes is None else nodes
+        rows, counted = node_states.leaves(nodes), node_states.in_play(nodes)
+    done = settled_done + sum(row["state"] in service._ACCEPTED_STATES for row in counted)
     incomplete = [row for row in rows if row["state"] not in service._TERMINAL_STATES]
-    projected = admission.project_many(
-        [(row, plan) for row in incomplete], db=connection, memo=memo,
-    )
+    projected = admission.project_many([(row, plan) for row in incomplete], db=connection, memo=memo)
     executions = [projected[str(row["id"])] for row in incomplete]
     conditions = [execution["condition"] for execution in executions]
     # A step waiting on its delegated child is this plan moving: the child's
@@ -71,11 +75,11 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
     )
     state = PlanState(
         progress=Progress(
-            done=done, total=len(counted),
+            done=done, total=len(counted) + settled_done + settled_failed,
             open=sum(row["state"] not in service._TERMINAL_STATES for row in counted),
             liveness=progress_liveness(
                 plan, conditions, moving=moving,
-                held=_held(connection, plan_id, executions),
+                held=_held(connection, plan_id, executions, open_ids),
             ),
         ),
         moving=moving,
@@ -84,14 +88,14 @@ def _plan_state(connection, plan_id: str, memo: dict[str, PlanState], *, plan=No
     return state
 
 
-def _held(connection, plan_id: str, executions: list[dict]) -> bool:
+def _held(connection, plan_id: str, executions: list[dict], listed_ids=None) -> bool:
     """Return whether any blocked leaf is blocked by something the user must clear."""
     from plans import operator_node_state
 
     blocked = [item for item in executions if item["condition"] == "blocked"]
     if not blocked:
         return False
-    open_ids = {
+    open_ids = listed_ids if listed_ids is not None else {
         str(row["id"])
         for row in fetch_all(
             connection, "SELECT id FROM plan_nodes WHERE plan_id=? AND archived_at IS NULL", (plan_id,)
@@ -227,9 +231,10 @@ def delegated_step(connection, parent_plan_id: str, worker: str):
 #: Leaf work this thread could be woken for: its own pending/active tasks, plus
 #: any node awaiting review in its plan. Parents derive from children, so a node
 #: with live children is never counted itself.
+#: ``{open_only}`` is ``AND n.folded=0`` once the aggregate columns exist (older migration rungs run first).
 _LIVE_LEAVES_SQL = f"""
     SELECT n.* FROM plan_nodes n
-    WHERE n.plan_id=? AND n.archived_at IS NULL
+    WHERE n.plan_id=? AND n.archived_at IS NULL{{open_only}}
       AND COALESCE(n.assignee,'') <> 'user'
       AND n.state IN ('pending','active','review_requested')
       AND NOT {node_states.has_child_in_work_sql('n')}
@@ -327,7 +332,8 @@ def actionable_leaves(connection, plan, *, executor: str | None = None):
     import plans.admission_projection as admission_projection
     from plans import admission, delegation_harvest
 
-    rows = connection.execute(_LIVE_LEAVES_SQL, (plan["id"],)).fetchall()
+    sql = _LIVE_LEAVES_SQL.format(open_only=" AND n.folded=0" if aggregates.ready(connection) else "")
+    rows = connection.execute(sql, (plan["id"],)).fetchall()
     parent_reviews = delegation_harvest.parent_reviews(connection, plan)
     if executor is not None:
         rows = [
@@ -360,18 +366,12 @@ def liveness_signal(thread_id: str, *, db=None) -> PlanLivenessSignal:
         if plan is None:
             return _signal(None, [], settled_events=0)
         actionable, projected = actionable_leaves(connection, plan)
-        settled_events = connection.execute(
-            """SELECT COUNT(*) FROM plan_node_events e
-               JOIN plan_nodes n ON n.id=e.node_id
-               WHERE n.plan_id=?
-                 AND e.new_state IN ('accepted','accepted_with_followup','failed')""",
-            (plan["id"],),
-        ).fetchone()[0]
+        settled_events = aggregates.settled_events(connection, plan)
         return _signal(
             plan["id"],
             actionable,
             payload=_liveness_payload(plan, actionable, projected),
-            settled_events=int(settled_events),
+            settled_events=settled_events,
         )
 
 

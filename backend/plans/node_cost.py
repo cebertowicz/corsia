@@ -346,6 +346,13 @@ def _load_plans(connection, tree: list[str], clock) -> tuple[dict, dict, dict, d
 def _roll_plans(
     tree: list[str], nodes_by_plan: dict, own: dict, attached: dict, spans: dict,
 ) -> dict:
+    return _roll_plans_with_totals(tree, nodes_by_plan, own, attached, spans)[0]
+
+
+def _roll_plans_with_totals(
+    tree: list[str], nodes_by_plan: dict, own: dict, attached: dict, spans: dict,
+) -> tuple[dict, dict, dict]:
+    """``_roll_plans`` plus each plan's total and merged span (its top-level nodes')."""
     by_plan: dict[str, dict[str, dict]] = {}
     totals: dict[str, dict] = {}
     plan_spans: dict[str, node_time.Span] = {}
@@ -376,7 +383,7 @@ def _roll_plans(
             if row["parent_id"] is None:
                 total = _add(total, rolled[row["id"]])
         totals[plan_id] = total
-    return by_plan
+    return by_plan, totals, plan_spans
 
 
 def _lineage_totals(connection, loaded: tuple[dict, dict, dict], clock) -> dict[str, dict]:

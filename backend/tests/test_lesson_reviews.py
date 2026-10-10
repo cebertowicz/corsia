@@ -36,6 +36,7 @@ from infra.schema import SCHEMA_SQL
 from plans import admission, admission_attempts, lesson_reviews, scheduled_wait, selection_validity, service
 from plans.projections import liveness_signal
 from plans.boundary import PlanActor, mutate
+from tests.plan_writer_authorizer import raw_plan_seed
 
 LESSON = "0f3a6f0e-7f0e-5a55-9d40-6f1f0e6f7a11"
 SHA = "a" * 64
@@ -674,7 +675,8 @@ def test_a_version_placed_again_after_its_review_was_settled_gets_a_new_review(d
 
 def test_an_archived_review_is_not_found_again(db):
     first, _ = _lesson(db)
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (first,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (first,))
     db.commit()
 
     second, created = _lesson(db)
@@ -935,7 +937,8 @@ def test_an_open_attempt_alone_keeps_the_waits_when_the_date_moves(db):
     """The guard does not rest on the node's state: an open attempt is enough."""
     node_id, _ = _lesson(db, due=_due(days=14))
     _owner_starts(db, node_id)
-    db.execute("UPDATE plan_nodes SET state='pending' WHERE id=?", (node_id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='pending' WHERE id=?", (node_id,))
     db.commit()
     before = _untouched(db, node_id)
     assert before[0] == "pending" and admission_attempts.open_attempt(db, node_id) is not None

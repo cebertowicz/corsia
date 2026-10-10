@@ -14,6 +14,7 @@ from api.measurement_scope import resolve_grain
 from model_identity_fixtures import (
     ALIBABA_HOST, LOCAL_ID, LOCAL_MODEL, seed_external_server, seed_identity_catalog, seed_manifest,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 
 # Weeks grain in UTC as of Monday 2026-10-05: the latest window is the four completed weeks
 # 09-07..09-28 and the previous one 08-10..08-31. The ``_build`` helpers below name one period of each.
@@ -201,8 +202,9 @@ def db(isolated_db):
 
 
 def _task(db, node: str, accepted_at: str | None = "2026-09-30T12:00:00Z") -> None:
-    db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done',?,?,1,1,'t','t')",
-               (node, "accepted" if accepted_at else "review_requested", node))
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done',?,?,1,1,'t','t')",
+                   (node, "accepted" if accepted_at else "review_requested", node))
     if accepted_at:
         db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accept-{node}", node, accepted_at))
     else:

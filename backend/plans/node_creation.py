@@ -6,6 +6,7 @@ import sqlite3
 
 import plans.node_states as node_states
 import plans.service as service
+from plans import aggregates, writer_context
 from plans.models import PlanNode
 
 
@@ -23,6 +24,14 @@ def _validate_parent(
         # Nothing may be added under a node out of the work (#1887).
         state = "archived" if parent["archived_at"] is not None else "closed"
         raise service.PlanError(f"node parent is {state}")
+    if parent["state"] in service._TERMINAL_STATES:
+        # A finished parent over open work is impossible (Steve, 2026-09-29).
+        shown = "accepted" if parent["state"] in service._ACCEPTED_STATES else parent["state"]
+        raise service.PlanError(
+            f"node parent is {shown}: finished work takes no new child. Add the work at the "
+            "top level or under a node that is still open; to continue finished work, "
+            "use add_follow_up on it"
+        )
     if parent["kind"] == "task":
         raise service.PlanInputError("task nodes are leaves and cannot contain children")
 
@@ -113,10 +122,10 @@ def _open_order_slot(
         order_key = _next_order(connection, plan_id, parent_id)
     if order_key < 0:
         raise service.PlanInputError("order key must be non-negative")
-    connection.execute(
+    writer_context.execute(
         # An insert shifts its siblings' order, which is not their change:
         # their revisions stay put (see service.touch_node).
-        "UPDATE plan_nodes SET order_key=order_key+1 WHERE plan_id=? AND parent_id IS ? "
+        connection, "UPDATE plan_nodes SET order_key=order_key+1 WHERE plan_id=? AND parent_id IS ? "
         "AND order_key>=? AND archived_at IS NULL",
         (plan_id, parent_id, order_key),
     )
@@ -132,12 +141,16 @@ def _insert_node_row(
     difficulty,
     size,
 ) -> None:
-    """Insert against the current node shape or its pre-v51 migration predecessor."""
+    """Insert against the current node shape or its pre-v51 migration predecessor.
+
+    The one creation write of a node, so it also runs the aggregate hook: the new
+    row joins its parent's counts and every ancestor's, in the same transaction.
+    """
     workflow_columns = {"workflow_ref", "workflow_version", "workflow_step", "difficulty"}
     present_columns = {row[1] for row in connection.execute("PRAGMA table_info(plan_nodes)")}
     if workflow_columns <= present_columns:
-        connection.execute(
-            "INSERT INTO plan_nodes "
+        writer_context.execute(
+            connection, "INSERT INTO plan_nodes "
             "(id,plan_id,parent_id,order_key,kind,title,description,workflow_ref,"
             "workflow_version,workflow_step,difficulty,size,acceptance_criteria,"
             "checkpoint_exception,assignee,spawn_kind,watchdog_budget_seconds,"
@@ -148,20 +161,21 @@ def _insert_node_row(
                 *base_values[7:],
             ),
         )
-        return
-    if any(value is not None for value in (workflow_ref, workflow_version, workflow_step, difficulty)):
-        raise service.PlanInputError("workflow fields require schema version 51")
-    if size is not None:
-        raise service.PlanInputError("size requires schema version 91")
-    # Mid-ladder migrations use the current plan service before v51 runs.
-    connection.execute(
-        "INSERT INTO plan_nodes "
-        "(id,plan_id,parent_id,order_key,kind,title,description,"
-        "acceptance_criteria,checkpoint_exception,assignee,spawn_kind,"
-        "watchdog_budget_seconds,follow_up_of,requirements_revision,"
-        "commitment_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        base_values,
-    )
+    else:
+        if any(value is not None for value in (workflow_ref, workflow_version, workflow_step, difficulty)):
+            raise service.PlanInputError("workflow fields require schema version 51")
+        if size is not None:
+            raise service.PlanInputError("size requires schema version 91")
+        # Mid-ladder migrations use the current plan service before v51 runs.
+        writer_context.execute(
+            connection, "INSERT INTO plan_nodes "
+            "(id,plan_id,parent_id,order_key,kind,title,description,"
+            "acceptance_criteria,checkpoint_exception,assignee,spawn_kind,"
+            "watchdog_budget_seconds,follow_up_of,requirements_revision,"
+            "commitment_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            base_values,
+        )
+    aggregates.apply(connection, base_values[0], at=base_values[-1])
 
 
 def _creation_values(

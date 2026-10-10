@@ -30,12 +30,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from plans import (
-    node_history, node_states, operator_node_state, operator_nodes, operator_projection, rollup,
-    service, wait_causes,
-)
+from plans import node_history, operator_node_state, service, status_facts, wait_causes
 from plans.close_next_bounds import bounded, json_bytes
 from plans.errors import PlanError
+from plans.status_facts import facts as _facts, full_facts as _full_facts
 from plans.status_cursor import STALE, decode as _decode, encode as _encode, token as _token
 from plans.status_time import ages as _ages, clock_at as _clock_at, parse as _parse
 
@@ -48,7 +46,7 @@ RECENT_BYTES = 1536
 TITLE_MAX_BYTES = 96
 REASON_MAX_BYTES = 72
 PATH_MAX_BYTES = 72
-RECENT_DAYS = 30
+RECENT_DAYS = status_facts.RECENT_DAYS
 SECTIONS = ("current", "recent")
 
 _TERMINAL = service._TERMINAL_STATES
@@ -107,7 +105,7 @@ def node_detail(db, plan_row, node_id: str, *, actor, clock: str | None = None) 
     ).fetchone()
     if durable is not None and durable["archived_at"] is not None:
         return node_history.retired_detail(db, durable, clock=clock)
-    facts = _facts(db, plan_row, actor, clock)
+    facts = _facts(db, plan_row, actor, clock, detail_id=node_id)
     node = next((n for n in facts["nodes"] if n["id"] == node_id), None)
     if durable is None or node is None:
         raise PlanError(f"node {node_id!r} is not in this plan; read plan_read() for its rows")
@@ -119,56 +117,6 @@ def node_detail(db, plan_row, node_id: str, *, actor, clock: str | None = None) 
         "events": node_history.events(db, node_id),
         "as_of": clock,
     }
-
-
-# --- facts: the one canonical projection, read once per call ---------------
-
-
-def _facts(db, plan_row, actor, clock: str, *, costs: bool = True) -> dict[str, Any]:
-    memo: dict = {}
-    projected = rollup.rollup_thread(str(plan_row["id"]), db=db, child_depth=0, memo=memo)
-    targets = operator_projection._review_targets([projected], actor, db=db)
-    states = operator_node_state.project(
-        [projected], targets, db=db, now=_parse(clock), costs=costs, memo=memo,
-    )
-    owner = {"kind": plan_row["owner_kind"], "id": plan_row["owner_id"]}
-    presented = operator_nodes.present_plan(projected, owner, targets, states)
-    nodes = presented["nodes"] if presented is not None else []
-    durable = {
-        str(row["id"]): (row["created_at"], row["size"])
-        for row in db.execute(
-            "SELECT id,created_at,size FROM plan_nodes WHERE plan_id=?", (str(plan_row["id"]),)
-        ).fetchall()
-    }
-    for node in nodes:
-        created_at, size = durable.get(node["id"], (None, None))
-        node["created_at"] = created_at
-        node["size"] = size
-    parent_ids = node_states.parent_ids(nodes)
-    leaves = [node for node in nodes if node["id"] not in parent_ids]
-    titles = {node["id"]: node["title"] for node in nodes}
-    parents = {node["id"]: node["parent_id"] for node in nodes}
-    return {
-        "plan": presented["plan"] if presented is not None else dict(plan_row),
-        "progress": presented["progress"] if presented is not None else {},
-        "nodes": nodes,
-        "leaves": leaves,
-        "current_ids": presented["current_node_ids"] if presented is not None else [],
-        "next_ids": presented["next_node_ids"] if presented is not None else [],
-        # Agent-continuation facts, present only when no open leaf can move.
-        "stuck": presented["display"].get("not_moving") if presented is not None else None,
-        "clock": clock,
-        "path": lambda node_id: _path(node_id, parents, titles),
-    }
-
-
-def _path(node_id: str, parents: dict, titles: dict) -> str | None:
-    names: list[str] = []
-    cursor = parents.get(node_id)
-    while cursor:
-        names.append(titles.get(cursor, ""))
-        cursor = parents.get(cursor)
-    return " / ".join(reversed(names)) or None
 
 
 def _condition(node: dict) -> str:

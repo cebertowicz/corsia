@@ -20,6 +20,7 @@ from infra import database, db_connection
 from infra.database import get_db
 from infra.db_async import run_bulk, run_in_db, run_read
 from infra.db_connection import LaneWriteError
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _USER = {"id": "steve", "token_kind": "session"}
 _WEEK = "2026-09-23T12:00:00Z"
@@ -103,11 +104,12 @@ def _seed() -> None:
                    "VALUES ('plan-root','thread','root','active',1,?,?)", (_WEEK, _WEEK))
         for number, state in enumerate(("accepted", "accepted", "active", "pending")):
             node_id = f"node-{number}"
-            db.execute(
-                "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-                "commitment_id,requirements_revision,revision,created_at,updated_at) "
-                "VALUES (?,'plan-root',NULL,?,'task','Measured task','done',?,?,1,1,?,?)",
-                (node_id, number, state, node_id, _WEEK, _WEEK))
+            with raw_plan_seed(db):
+                db.execute(
+                    "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
+                    "commitment_id,requirements_revision,revision,created_at,updated_at) "
+                    "VALUES (?,'plan-root',NULL,?,'task','Measured task','done',?,?,1,1,?,?)",
+                    (node_id, number, state, node_id, _WEEK, _WEEK))
             if state == "accepted":
                 db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,"
                            "created_at) VALUES (?,?,'test','accepted','active','accepted',?)",

@@ -17,6 +17,7 @@ from api.cost_identity import IdentityResolver
 from api.measurement_model_cost import query_model_costs, query_recording_gaps
 from api.measurement_scope import resolve_grain
 from model_identity_fixtures import seed_identity_catalog
+from tests.plan_writer_authorizer import raw_plan_seed
 
 # Weeks in UTC as of Monday 2026-10-05: the twelve completed weeks end on 2026-09-28.
 GRAIN = resolve_grain("weeks", "UTC", now=datetime(2026, 10, 5, 12, tzinfo=timezone.utc))
@@ -52,8 +53,9 @@ def _worker(db, thread: str, plan: str, parent_plan: str) -> None:
 def _node(db, node: str, plan: str = "plan", *, parent: str | None = None, state: str = "accepted", at: str | None = SETTLED,
           worker: str | None = None, follow_up_of: str | None = None, revision: bool = False, rejected: bool = False) -> None:
     """One task node; an accepted one carries its acceptance event, a sent-back one its rejection."""
-    db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,spawned_thread_id,follow_up_of,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?,?,?,1,'task','task','done',?,?,?,?,1,1,'t','t')",
-               (node, plan, parent, state, worker, follow_up_of, node))
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,spawned_thread_id,follow_up_of,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?,?,?,1,'task','task','done',?,?,?,?,1,1,'t','t')",
+                   (node, plan, parent, state, worker, follow_up_of, node))
     event = "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,payload_json,created_at) VALUES (?,?,'test',?,?,?,?,?)"
     if state == "accepted" and at:
         db.execute(event, (f"accept-{node}", node, "accepted", "active", "accepted", None, at))

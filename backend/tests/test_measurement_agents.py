@@ -17,6 +17,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 from fastapi import HTTPException
+from tests.plan_writer_authorizer import raw_plan_seed
 
 USER = {"id": "steve"}
 
@@ -193,13 +194,14 @@ def _seed_period(db, agent_id: str, period: str, outcomes: int, *, not_first_try
     UTC noon, unless ``at`` names the exact UTC instant they settle at."""
     rows = [(f"{agent_id}-{period}-{index}", f"plan-{agent_id}", index, f"commitment-{agent_id}-{period}-{index}",
              difficulty, at or f"{period}T12:00:00Z") for index in range(start, start + outcomes)]
-    db.executemany(
-        "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-        "commitment_id,requirements_revision,revision,difficulty,created_at,updated_at) "
-        "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, ?, ?, ?)",
-        [(node_id, plan_id, order_key, commitment_id, node_difficulty, settled, settled)
-         for node_id, plan_id, order_key, commitment_id, node_difficulty, settled in rows],
-    )
+    with raw_plan_seed(db):
+        db.executemany(
+            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
+            "commitment_id,requirements_revision,revision,difficulty,created_at,updated_at) "
+            "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, ?, ?, ?)",
+            [(node_id, plan_id, order_key, commitment_id, node_difficulty, settled, settled)
+             for node_id, plan_id, order_key, commitment_id, node_difficulty, settled in rows],
+        )
     db.executemany(
         "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
         "VALUES (?,?,'test','accepted','active','accepted',?)",

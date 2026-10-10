@@ -91,6 +91,7 @@ from plans.activity_projection import (
 )
 from plans.user_ask import cleared as ask_cleared
 from plans.node_states import blocked_user_task_sql, failure_asks_user_sql
+from plans.folded_reads import read_folded, read_path as read_folded_path
 from plans.operator_chat_state import THREAD_STATE_LIMIT, read_thread_states
 from plans.operator_projection import (
     read_child as read_operator_child,
@@ -210,3 +211,7 @@ from plans.worker_retirement import (
     _suppress_open_steps as fail_open_worker_steps,
     close_open_steps as close_open_worker_steps,
 )
+from plans.aggregates_rebuild import rebuild as rebuild_plan_aggregates
+from plans.aggregates_recount import stored_mismatches as plan_aggregate_mismatches
+from plans.node_states import is_container_sql as container_sql
+from plans.writer_context import sanctioned_write as sanctioned_plan_write

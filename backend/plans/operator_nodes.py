@@ -15,6 +15,7 @@ import plans.operator_scheduled as scheduled_work
 import plans.rollup as rollup
 import plans.service as service
 import plans.user_steering as user_steering
+from plans import open_tree
 from plans.node_states import folded_ids, is_container, parent_ids, work_ids
 
 
@@ -120,9 +121,14 @@ def _present_node(
 def distribution_from_buckets(
     rows: list[dict], buckets: dict[str, str],
 ) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
-    """Count compact raw-row leaves bottom-up, independent of input row order."""
+    """Count compact raw-row leaves bottom-up, independent of input row order.
+
+    A row saying ``has_child_in_work`` (a read of the open work) is a parent though its
+    children are not among ``rows``: it adds no leaf of its own.
+    """
     ids = {str(row["id"]) for row in rows}
     work = work_ids(rows)
+    holders = parent_ids(rows)
     children: dict[str, list[str]] = {}
     parent_of: dict[str, str] = {}
     for row in rows:
@@ -139,7 +145,7 @@ def distribution_from_buckets(
         node_id = ready.popleft()
         own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
         child_ids = children.get(node_id, [])
-        if not child_ids and node_id in work:
+        if not child_ids and node_id in work and node_id not in holders:
             own[buckets[node_id]] = 1
         for child_id in child_ids:
             for key, value in branches[child_id].items():
@@ -162,9 +168,14 @@ def distribution_from_buckets(
 
 
 def _branch_summary(
-    nodes: list[dict],
+    nodes: list[dict], tree: open_tree.OpenTree | None = None,
 ) -> tuple[dict[str, dict[str, int]], dict[str, bool], dict[str, bool], dict[str, str | None]]:
     """Count every presented node's leaves once, bottom-up in canonical order.
+
+    Given the open ``tree`` (a read that loaded only the open work), a node is a leaf
+    unless the stored aggregates say it has children, and the settled leaves of the
+    children left out count from the node's stored sums less what its listed children
+    passed up.
 
     The same pass rolls up what is quietly scheduled: ``scheduled`` maps each
     node to the soonest end among the agent-scheduled waits beneath it (its own
@@ -172,6 +183,7 @@ def _branch_summary(
     on it or beneath it needs a person; otherwise ``None``.
     """
     ids = {node["id"] for node in nodes}
+    rows = {str(row["id"]): row for row in tree.rows} if tree is not None else {}
     work = work_ids(nodes)
     children: dict[str, list[str]] = {}
     for node in nodes:
@@ -190,7 +202,8 @@ def _branch_summary(
         ends: list[datetime] = []
         if not child_ids and node["id"] in work:
             bucket = node_state.leaf_bucket(node)
-            own[bucket] = 1
+            if tree is None or node["id"] not in tree.shape.parents:
+                own[bucket] = 1
             if bucket in node_state.OPEN_KEYS:
                 end = scheduled_work.scheduled_leaf_end(node)
                 loose = end is None
@@ -205,6 +218,10 @@ def _branch_summary(
             loose = loose or unscheduled[child_id]
             if (child_end := soonest[child_id]) is not None:
                 ends.append(child_end)
+        if tree is not None and node["id"] in work:
+            row = rows[node["id"]]
+            own["done"] += row["sub_done"] - sum(rows[child]["prop_done"] for child in child_ids)
+            own["failed"] += row["sub_failed"] - sum(rows[child]["prop_failed"] for child in child_ids)
         counts[node["id"]] = own
         unscheduled[node["id"]] = loose
         soonest[node["id"]] = min(ends) if ends else None
@@ -251,15 +268,19 @@ def _queued_reason(node: dict) -> str | None:
     return "Not started" if node["state"] == "pending" else "Set aside"
 
 
-def _apply_branches(nodes: list[dict], raw: list[dict]) -> dict[str, int]:
+def _apply_branches(
+    nodes: list[dict], raw: list[dict], tree: open_tree.OpenTree | None = None,
+) -> dict[str, int]:
     """Give parents their branch progress and fold, and return the plan's counts.
 
     Only a container (``node_states.is_container``) reads as its leaves. Raw
     lifecycle ``state`` is never changed, so actions still read the node itself.
+    Given the open ``tree``, the fold and the parents are the stored aggregates' and the
+    plan's counts add the settled leaves no listed row stands for.
     """
-    counts, needs_user, working, scheduled = _branch_summary(nodes)
-    fold = folded_ids(raw)
-    parents = parent_ids(nodes)
+    counts, needs_user, working, scheduled = _branch_summary(nodes, tree)
+    fold = tree.shape.folded if tree is not None else folded_ids(raw)
+    parents = tree.shape.parents if tree is not None else parent_ids(nodes)
     ids = {node["id"] for node in nodes}
     for node, row in zip(nodes, raw):
         node["folded"] = node["id"] in fold
@@ -275,10 +296,14 @@ def _apply_branches(nodes: list[dict], raw: list[dict]) -> dict[str, int]:
                 own, needs_user=needs_user[node["id"]], working=working[node["id"]],
             )
     plan = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
-    for node in nodes:
-        if node["parent_id"] not in ids:
-            for key, value in counts[node["id"]].items():
-                plan[key] += value
+    roots = [node for node in nodes if node["parent_id"] not in ids]
+    for node in roots:
+        for key, value in counts[node["id"]].items():
+            plan[key] += value
+    if tree is not None:
+        rows = {str(row["id"]): row for row in tree.rows}
+        for key, column in (("done", "top_done"), ("failed", "top_failed")):
+            plan[key] += tree.plan[column] - sum(rows[node["id"]]["prop_" + key] for node in roots)
     return plan
 
 
@@ -299,8 +324,8 @@ def oversize(nodes: list[dict]) -> dict[str, int] | None:
     return {"open": open_nodes, "budget": OPEN_NODE_BUDGET}
 
 
-def _leaf_ids(nodes: list[dict]) -> set[str]:
-    parents = parent_ids(nodes)
+def _leaf_ids(nodes: list[dict], tree: open_tree.OpenTree | None = None) -> set[str]:
+    parents = tree.shape.parents if tree is not None else parent_ids(nodes)
     return {node["id"] for node in nodes if node["id"] not in parents}
 
 
@@ -309,8 +334,13 @@ def present_plan(
     owner: dict | None,
     review_targets: dict[str, dict],
     states: dict[str, dict],
+    tree: open_tree.OpenTree | None = None,
 ) -> dict | None:
     """Present one plan: its nodes, progress, current and next work, and folds.
+
+    ``tree`` is the open work a read loaded instead of the whole plan
+    (``plans.open_tree``); structure and settled counts then come from its stored
+    aggregates.
 
     A folded node (``plans.node_states.folded``) stays in ``nodes`` and its
     parent's branch count; a folded root branch leaves plan progress
@@ -324,8 +354,8 @@ def present_plan(
         )
         for node in projected.nodes
     ]
-    counts = _apply_branches(nodes, projected.nodes)
-    leaf_ids = _leaf_ids(nodes)
+    counts = _apply_branches(nodes, projected.nodes, tree)
+    leaf_ids = _leaf_ids(nodes, tree)
     # A delegated step whose child plan is moving reads Working without running
     # itself; it is current work all the same, so its path stays open.
     current = [

@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.plan_writer_authorizer import raw_plan_seed
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -41,10 +42,11 @@ def _nodes(db, owner, count, *, accepted_at=ACCEPTED_AT, evidence=False):
     ids = []
     for number in range(count):
         node_id = f"{owner}-node-{number}"
-        db.execute(
-            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,"
-            "requirements_revision,revision,created_at,updated_at) VALUES (?,?,NULL,?,'task','Synthetic task','done',"
-            "'accepted',?,1,1,'t','t')", (node_id, plan_id, number, node_id))
+        with raw_plan_seed(db):
+            db.execute(
+                "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,"
+                "requirements_revision,revision,created_at,updated_at) VALUES (?,?,NULL,?,'task','Synthetic task','done',"
+                "'accepted',?,1,1,'t','t')", (node_id, plan_id, number, node_id))
         db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,payload_json,created_at) "
                    "VALUES (?,?,'test','accepted','active','accepted',?,?)",
                    (f"{node_id}-accepted", node_id, json.dumps({"evidence": "synthetic proof"}) if evidence else None, accepted_at))

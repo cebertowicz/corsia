@@ -6,6 +6,7 @@ import sqlite3
 
 from infra.schema import SCHEMA_SQL
 from plans import node_order, selection_validity, service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _db() -> sqlite3.Connection:
@@ -71,7 +72,8 @@ def test_active_task_pages_match_depth_first_through_hierarchy_ties_and_strandin
         second = _active_task(db, plan.id, "Second root", 1)
         retired = _node(db, plan.id, "phase", "Retired phase", 2)
         stranded = _active_task(db, plan.id, "Stranded child", 0, parent_id=retired.id)
-        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (retired.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (retired.id,))
         db.commit()
 
         expected = [
@@ -133,7 +135,8 @@ def test_first_eligible_active_id_scans_over_64_ineligible_tasks_in_bounded_batc
             node_order.ACTIVE_TASK_PAGE_SIZE * 2 + 2,
         )
         child = _node(db, plan.id, "task", "Pending child", 0)
-        db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent.id, child.id))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent.id, child.id))
         eligible = _active_task(
             db,
             plan.id,

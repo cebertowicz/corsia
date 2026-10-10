@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from plans import errors, service
+from plans import errors, service, writer_context
 from plans.models import PlanNode
 
 _UNSET = object()
@@ -75,8 +75,8 @@ def reorder_node(
             if sibling_id == node_id:
                 service.touch_node(connection, node_id, order_key=position)
             else:
-                connection.execute(
-                    "UPDATE plan_nodes SET order_key=? WHERE id=? AND order_key<>?",
+                writer_context.execute(
+                    connection, "UPDATE plan_nodes SET order_key=? WHERE id=? AND order_key<>?",
                     (position, sibling_id, position),
                 )
         service._event(

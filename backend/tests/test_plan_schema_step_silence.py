@@ -11,6 +11,7 @@ from contextlib import closing
 
 from plans import plan_events, service
 from tests.child_parent_notice_helpers import delegated, notices, seeded_db, transcript, wakes
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _fail_top_level(db, *, provenance: str) -> None:
@@ -18,7 +19,8 @@ def _fail_top_level(db, *, provenance: str) -> None:
     node = service.add_node(
         plan.id, kind="task", title="Milestone", acceptance_criteria="Done", db=db,
     )
-    db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (node.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (node.id,))
     service._event(
         db, node.id, "state_transition", actor_id=None, provenance=provenance,
         prior_state="active", new_state="failed",
@@ -55,7 +57,8 @@ def test_a_schema_step_worker_event_neither_wakes_nor_tells_the_parent():
     with closing(seeded_db()) as db:
         _step, _plan, node = delegated(db)
         told, woken = len(notices(db)), len(wakes(db))
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (node.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (node.id,))
         service._event(
             db, node.id, "state_transition", actor_id=None,
             provenance="migration.56_to_57", prior_state="failed", new_state="closed",

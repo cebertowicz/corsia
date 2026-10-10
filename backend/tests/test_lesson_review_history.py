@@ -8,6 +8,7 @@ import pytest
 
 from infra.schema import SCHEMA_SQL
 from plans import closure, lesson_reviews, public, service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 @pytest.fixture
@@ -74,7 +75,8 @@ def test_superseded_reason_is_typed_by_plans(db, reason, typed):
 def test_closed_archived_nodes_archived_plan_and_missing_owner_remain_visible(db):
     node = review(db, kind="capture")
     closure.close_node(node, reason="Retired", db=db)
-    db.execute("UPDATE plan_nodes SET archived_at='2026-10-01T00:00:00Z' WHERE id=?", (node,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='2026-10-01T00:00:00Z' WHERE id=?", (node,))
     db.execute("UPDATE plans SET state='archived' WHERE owner_id='owner'")
     db.execute("DELETE FROM threads WHERE id='owner'")
     [row] = history(db)
@@ -143,7 +145,8 @@ def test_batch_reader_keeps_terminal_states_tied_links_and_latest_armed_watch(db
         for index, node in enumerate(nodes)
     }
     for node, state in zip(nodes, states):
-        db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node))
         db.execute(
             "INSERT INTO plan_node_events(id,node_id,provenance,event,prior_state,new_state,created_at) "
             "VALUES(?,?, 'test.batch', 'state_transition', 'active', ?, ?)",

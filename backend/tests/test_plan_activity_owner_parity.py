@@ -13,6 +13,7 @@ from plans import (
     operator_stopped, service, wait_causes,
 )
 from tests.test_plan_activity_index import db, _actor, _task, _priority_at
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def assert_header_parity(db, plan_id):
@@ -318,15 +319,19 @@ def test_executor_stop_facts_chunk_sqlite_reads(db):
 def test_ordinary_closed_disclosure_and_rejected_branch_suppression(db):
     plan = service.ensure_plan("thread", "moving", db=db)
     closed = _task(plan.id, "Ordinary closed", db=db)
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (closed.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (closed.id,))
     parent = service.add_node(plan.id, kind="phase", title="Rejected", acceptance_criteria="done", db=db)
     child = _task(plan.id, "Old round", parent_id=parent.id, db=db)
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed', sent_back=1 WHERE id=?", (parent.id,))
     db.execute("""INSERT INTO plan_node_events(id,node_id,event,provenance,payload_json,created_at)
         VALUES ('rejected',?,'review_rejected','test','{}','t')""", (parent.id,))
     detailed, row = assert_header_parity(db, plan.id)
     assert [node["id"] for node in detailed["nodes"]] == [closed.id]
-    assert [node["id"] for node in activity_facts.compact_nodes([plan.id], db=db)[plan.id]] == [closed.id]
+    # Closed work is settled, so the compact read loads no row for it (#731 S2-2): the
+    # disclosure is the plan's stored top level, which the header parity above holds equal.
+    assert activity_facts.compact_nodes([plan.id], db=db) == {}
     assert row["has_nodes"] is True
     assert parent.id != child.id
 
@@ -344,17 +349,20 @@ def test_terminal_plan_response_uses_canonical_reduction(db, case, expected_disp
     plan = service.ensure_plan("thread", "moving", db=db)
     if case == "all_closed":
         node = _task(plan.id, "Closed", db=db)
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (node.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (node.id,))
     elif case == "failed_with_accepted":
         accepted = _task(plan.id, "Accepted", db=db)
         failed = _task(plan.id, "Failed", db=db)
-        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (accepted.id,))
-        db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (failed.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (accepted.id,))
+            db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (failed.id,))
     elif case == "paused_terminal":
         accepted = _task(plan.id, "Accepted", db=db)
         closed = _task(plan.id, "Closed", db=db)
-        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (accepted.id,))
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (closed.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (accepted.id,))
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (closed.id,))
         db.execute("UPDATE plans SET state='paused' WHERE id=?", (plan.id,))
 
     payload = assert_terminal_response_identity(db)
@@ -368,8 +376,10 @@ def test_terminal_plan_response_uses_canonical_reduction(db, case, expected_disp
 def test_closed_reduced_node_uses_canonical_terminal_display(db):
     plan = service.ensure_plan("thread", "moving", db=db)
     closed = _task(plan.id, "Closed", db=db)
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (closed.id,))
-    row = activity_facts.compact_nodes([plan.id], db=db)[plan.id][0]
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (closed.id,))
+    # A closed row is never loaded by the compact read (it is settled); reduce its own facts.
+    row = dict(db.execute("SELECT * FROM plan_nodes WHERE id=?", (closed.id,)).fetchone())
     reduced = activity_reducer.reduce_node(
         row, dict(db.execute("SELECT * FROM plans WHERE id=?", (plan.id,)).fetchone()),
         review_kind=None, decision_wait=False, child_cause=None, executor_stop_fact=None,
