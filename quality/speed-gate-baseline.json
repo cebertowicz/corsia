@@ -14,42 +14,41 @@
     "/api/measurement/models",
     "/api/measurement/series",
     "/api/measurement/series/index",
-    "/api/measurement/where-to-look",
     "/api/plans/operator/scopes/projects/{project_id}",
     "/api/threads/{thread_id}/context-snapshot/next-turn"
   ],
   "progress_every": 100,
-  "reason": "regenerated from the GitHub-hosted job's measurement artifact (SQLite 3.45.1, ubuntu-24.04) on a dev base that adds routes, with every database lane served by one worker and the usage rollup settled before measuring",
+  "reason": "Measure on the pinned SQLite 3.50.4 (sqlean.py 3.50.4.5) with background work drained and one pooled connection per lane; recorded from a hosted three-run measurement whose runs agreed exactly",
   "routes": {
     "/api/agents": {
       "bytes": 221,
-      "statements": 5,
-      "steps": 6200
+      "statements": 2,
+      "steps": 3700
     },
     "/api/artifacts/{artifact_id}/comments": {
       "bytes": 148,
-      "statements": 17,
-      "steps": 28500
+      "statements": 14,
+      "steps": 26000
     },
     "/api/artifacts/{artifact_id}/reviews": {
       "bytes": 14,
-      "statements": 8,
-      "steps": 10900
+      "statements": 5,
+      "steps": 8400
     },
     "/api/attention/queue": {
       "bytes": 37,
-      "statements": 7,
-      "steps": 34600
+      "statements": 4,
+      "steps": 32100
     },
     "/api/attention/raised": {
       "bytes": 12,
-      "statements": 5,
-      "steps": 31500
+      "statements": 2,
+      "steps": 29000
     },
     "/api/attention/rollup": {
       "bytes": 63,
-      "statements": 5,
-      "steps": 31500
+      "statements": 2,
+      "steps": 29000
     },
     "/api/auth/status": {
       "bytes": 18,
@@ -58,28 +57,28 @@
     },
     "/api/conductor": {
       "bytes": 78,
-      "statements": 5,
-      "steps": 2500
+      "statements": 2,
+      "steps": 0
     },
     "/api/costs/summary": {
       "bytes": 10089,
-      "statements": 30,
-      "steps": 25891200
+      "statements": 27,
+      "steps": 25885200
     },
     "/api/delegation/threads/{thread_id}/status": {
       "bytes": 2912,
-      "statements": 18,
-      "steps": 2800
+      "statements": 15,
+      "steps": 400
     },
     "/api/files/tree": {
       "bytes": 138,
-      "statements": 26,
-      "steps": 2800
+      "statements": 23,
+      "steps": 300
     },
     "/api/fs/browse": {
       "bytes": 70,
-      "statements": 4,
-      "steps": 2500
+      "statements": 1,
+      "steps": 100
     },
     "/api/health": {
       "bytes": 15,
@@ -88,248 +87,248 @@
     },
     "/api/host-access/leases": {
       "bytes": 223781,
-      "statements": 6,
-      "steps": 20400
+      "statements": 3,
+      "steps": 17900
     },
     "/api/host-access/leases/{lease_id}": {
       "bytes": 900,
-      "statements": 9,
-      "steps": 2500
+      "statements": 6,
+      "steps": 100
     },
     "/api/keys": {
       "bytes": 753,
-      "statements": 8,
-      "steps": 2600
+      "statements": 5,
+      "steps": 100
     },
     "/api/mcp/sources": {
       "bytes": 14,
-      "statements": 4,
-      "steps": 2500
+      "statements": 1,
+      "steps": 0
     },
     "/api/measurement/agents": {
       "bytes": 68990,
-      "statements": 37,
-      "steps": 3384900
+      "statements": 36,
+      "steps": 3253800
     },
     "/api/measurement/cost": {
       "bytes": 1115,
-      "statements": 48,
-      "steps": 5421900
+      "statements": 47,
+      "steps": 5478800
     },
     "/api/measurement/key-figures": {
       "bytes": 1178,
-      "statements": 10,
-      "steps": 1243800
+      "statements": 9,
+      "steps": 1241900
     },
     "/api/measurement/lessons": {
       "bytes": 70408,
-      "statements": 569,
-      "steps": 2500
+      "statements": 568,
+      "steps": 0
     },
     "/api/measurement/limits": {
       "bytes": 509,
-      "statements": 10,
-      "steps": 793400
+      "statements": 9,
+      "steps": 797800
     },
     "/api/measurement/models": {
       "bytes": 1488,
-      "statements": 83,
-      "steps": 5575900
+      "statements": 82,
+      "steps": 5660800
     },
     "/api/measurement/series": {
       "bytes": 49740,
-      "statements": 30,
-      "steps": 7839400
+      "statements": 29,
+      "steps": 7945200
     },
     "/api/measurement/series/index": {
       "bytes": 6514,
-      "statements": 5,
-      "steps": 901100
+      "statements": 4,
+      "steps": 899200
     },
     "/api/measurement/where-to-look": {
       "bytes": 276,
-      "statements": 186,
-      "steps": 22214000
+      "statements": 3,
+      "steps": 200
     },
     "/api/models": {
-      "bytes": 2257,
-      "statements": 32,
-      "steps": 1000
+      "bytes": 38,
+      "statements": 12,
+      "steps": 200
     },
     "/api/models/{model_id:path}/profile": {
       "bytes": 380,
-      "statements": 9,
-      "steps": 2500
+      "statements": 6,
+      "steps": 100
     },
     "/api/plans/activity/scopes/projects/{project_id}": {
       "bytes": 9419,
-      "statements": 36,
-      "steps": 272200
+      "statements": 33,
+      "steps": 274000
     },
     "/api/plans/activity/scopes/workspace": {
       "bytes": 326,
-      "statements": 8,
-      "steps": 5700
+      "statements": 5,
+      "steps": 3200
     },
     "/api/plans/operator/scopes/projects/{project_id}": {
       "bytes": 2006790,
-      "statements": 1146,
-      "steps": 4086500
+      "statements": 1143,
+      "steps": 4084000
     },
     "/api/plans/operator/scopes/workspace": {
       "bytes": 306,
-      "statements": 8,
-      "steps": 5600
+      "statements": 5,
+      "steps": 3100
     },
     "/api/plans/operator/thread-states": {
       "bytes": 13,
-      "statements": 5,
-      "steps": 11800
+      "statements": 2,
+      "steps": 9700
     },
     "/api/plans/operator/threads/{thread_id}": {
       "bytes": 9730,
-      "statements": 128,
-      "steps": 111100
+      "statements": 125,
+      "steps": 115600
     },
     "/api/projects": {
       "bytes": 4530,
-      "statements": 5,
-      "steps": 3000
+      "statements": 2,
+      "steps": 500
     },
     "/api/projects/{project_id}": {
       "bytes": 3397,
-      "statements": 7,
-      "steps": 5800
+      "statements": 4,
+      "steps": 3300
     },
     "/api/projects/{project_id}/artifacts": {
       "bytes": 24894,
-      "statements": 7,
-      "steps": 458600
+      "statements": 4,
+      "steps": 456100
     },
     "/api/provider-policy": {
       "bytes": 544,
-      "statements": 9,
-      "steps": 2700
+      "statements": 6,
+      "steps": 200
     },
     "/api/providers/cli/{vendor}/install": {
       "bytes": 30,
-      "statements": 4,
-      "steps": 2500
+      "statements": 1,
+      "steps": 100
     },
     "/api/providers/local/setup": {
       "bytes": 98,
-      "statements": 4,
-      "steps": 2500
+      "statements": 1,
+      "steps": 0
     },
     "/api/providers/sources": {
-      "bytes": 1061,
-      "statements": 34,
-      "steps": 3300
+      "bytes": 632,
+      "statements": 19,
+      "steps": 400
     },
     "/api/security/alert": {
       "bytes": 4,
-      "statements": 4,
-      "steps": 2500
+      "statements": 1,
+      "steps": 0
     },
     "/api/settings": {
       "bytes": 806,
-      "statements": 11,
-      "steps": 2500
+      "statements": 8,
+      "steps": 0
     },
     "/api/settings/models": {
-      "bytes": 1978,
-      "statements": 13,
-      "steps": 5100
+      "bytes": 1114,
+      "statements": 6,
+      "steps": 100
     },
     "/api/settings/network-servers": {
       "bytes": 14,
-      "statements": 8,
-      "steps": 2500
+      "statements": 5,
+      "steps": 0
     },
     "/api/settings/providers": {
       "bytes": 770,
-      "statements": 12,
-      "steps": 5100
+      "statements": 6,
+      "steps": 200
     },
     "/api/skills": {
       "bytes": 106,
-      "statements": 4,
-      "steps": 2500
+      "statements": 1,
+      "steps": 0
     },
     "/api/system": {
       "bytes": 395,
-      "statements": 4,
-      "steps": 2500
+      "statements": 1,
+      "steps": 0
     },
     "/api/system/drain": {
       "bytes": 171,
-      "statements": 5,
-      "steps": 14600
+      "statements": 2,
+      "steps": 12200
     },
     "/api/system/host-resources": {
       "bytes": 197,
-      "statements": 8,
-      "steps": 5000
+      "statements": 2,
+      "steps": 100
     },
     "/api/system/perf/routes": {
       "bytes": 11,
-      "statements": 4,
-      "steps": 2500
+      "statements": 1,
+      "steps": 0
     },
     "/api/system/update-status": {
-      "bytes": 185,
-      "statements": 4,
-      "steps": 2500
+      "bytes": 235,
+      "statements": 1,
+      "steps": 0
     },
     "/api/threads": {
       "bytes": 474121,
-      "statements": 10,
-      "steps": 150100
+      "statements": 13,
+      "steps": 147700
     },
     "/api/threads/{thread_id}/active-turn-state": {
       "bytes": 29,
-      "statements": 6,
-      "steps": 2500
+      "statements": 3,
+      "steps": 100
     },
     "/api/threads/{thread_id}/artifacts": {
       "bytes": 8565,
-      "statements": 33,
-      "steps": 5400
+      "statements": 30,
+      "steps": 2900
     },
     "/api/threads/{thread_id}/artifacts/reconcile": {
       "bytes": 79,
-      "statements": 6,
-      "steps": 2700
+      "statements": 3,
+      "steps": 300
     },
     "/api/threads/{thread_id}/checkpoints": {
       "bytes": 199,
-      "statements": 6,
-      "steps": 2500
+      "statements": 3,
+      "steps": 0
     },
     "/api/threads/{thread_id}/context-snapshot/next-turn": {
       "bytes": 173373,
-      "statements": 44,
-      "steps": 2023100
+      "statements": 41,
+      "steps": 2020600
     },
     "/api/threads/{thread_id}/messages": {
       "bytes": 50061,
-      "statements": 15,
-      "steps": 5500
+      "statements": 12,
+      "steps": 2700
     },
     "/api/threads/{thread_id}/updates": {
       "bytes": 44,
-      "statements": 6,
-      "steps": 2700
+      "statements": 3,
+      "steps": 200
     },
     "/api/threads/{thread_id}/vendor-account": {
       "bytes": 412,
-      "statements": 8,
-      "steps": 2700
+      "statements": 5,
+      "steps": 0
     },
     "/api/turns/active": {
       "bytes": 29,
-      "statements": 5,
-      "steps": 2500
+      "statements": 2,
+      "steps": 0
     },
     "/api/upload/limits": {
       "bytes": 77,
@@ -338,14 +337,14 @@
     },
     "/api/vendor-accounts": {
       "bytes": 964,
-      "statements": 17,
-      "steps": 2800
+      "statements": 14,
+      "steps": 0
     },
     "/api/version": {
-      "bytes": 766,
+      "bytes": 712,
       "statements": 0,
       "steps": 0
     }
   },
-  "sqlite_version": "3.45.1"
+  "sqlite_version": "3.50.4"
 }
