@@ -174,7 +174,6 @@ async function routeLinkTarget(href: string, deps: LinkResolverDeps): Promise<Li
 			artifactId: revision.artifact_id,
 			path: revision.path ?? path,
 			title: titleFor(revision.path ?? path),
-			...(revision.media_type ? { isImage: true } : {}),
 		});
 		return { result: 'document', target: 'workspace_document' };
 	} catch {

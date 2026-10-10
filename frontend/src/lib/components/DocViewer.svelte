@@ -249,7 +249,7 @@
 				.catch((e) => {
 					if (seq !== loadSeq) return;
 					// A tab opened before the backend's type was known: the leaf swaps it to the image viewer.
-					if (e instanceof ImageFileError) { signal({ status: 'loading', isImage: true }); return; }
+					if (e instanceof ImageFileError) { signal({ status: 'loading', renderer: 'image' }); return; }
 					openRefusal = docOpenRefusal(e);
 					loadError = e instanceof Error ? e.message : String(e);
 					docState = openRefusal || dirty ? 'ready' : 'error';

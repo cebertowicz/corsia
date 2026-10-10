@@ -112,31 +112,3 @@ describe('ArtifactRow external links', () => {
 		expect(host.querySelector('.reply-mark')).toBeNull();
 	});
 });
-
-describe('ArtifactRow opens an artifact the backend typed as an image', () => {
-	const fileNode = (type: string, path: string) => externalLinkNode({
-		type, path, integration: 'workspace', external_id: path, name: path.split('/').pop(),
-		presentation: { label: 'Image', icon: 'image', capability: 'leaf-package' },
-		action: { capability: 'leaf-package', disabled: false, disabled_reason: null },
-	});
-
-	async function openRow(type: string, path: string, threadId: string) {
-		component = mount(ArtifactRow, {
-			target: host,
-			props: { item: fileNode(type, path) as any, onHide: vi.fn(), onPin: vi.fn(), threadId },
-		});
-		flushSync();
-		await clickOpenableRow();
-		unmount(component);
-		component = null;
-	}
-
-	it('hands the type to the tab, and a path alone carries nothing', async () => {
-		const { threadWorkspaces } = await import('$lib/stores/artifactWorkspace');
-		threadWorkspaces.set({});
-		await openRow('image', '/ws/shot.png', 't-image');
-		await openRow('code', '/ws/legacy.png', 't-code');
-		expect(get(threadWorkspaces)['t-image'].tabs[0].isImage).toBe(true);
-		expect(get(threadWorkspaces)['t-code'].tabs[0].isImage).toBeUndefined();
-	});
-});

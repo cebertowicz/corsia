@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from core.project_context import resolve_project_paths
@@ -10,8 +11,6 @@ from infra import config
 from infra.project_repo_policy import get_project_repo_policies
 
 MAX_TEXT_BYTES = 1_000_000
-#: Bytes read per step when a revision is computed from a file, so a probe holds one chunk, never the file.
-REVISION_CHUNK_BYTES = 1024 * 1024
 UI_THREAD = "ui"
 
 
@@ -72,10 +71,6 @@ def revision(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def file_revision(path: Path, chunk_bytes: int = REVISION_CHUNK_BYTES) -> str:
-    """The same revision as ``revision(path.read_bytes())``, hashed in chunks."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(chunk_bytes):
-            digest.update(chunk)
-    return digest.hexdigest()
+def stat_revision(st: os.stat_result) -> str:
+    """Opaque revision of a file too large to hash on every probe, from its size and modification time alone."""
+    return f"stat-{st.st_size}-{st.st_mtime_ns}"

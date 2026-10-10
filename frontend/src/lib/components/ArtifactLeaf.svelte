@@ -44,15 +44,18 @@
 		};
 	}
 
-	// A tab opens as an image when the backend said its file is one (the artifact
-	// type, a revision probe, or a text open's typed refusal); everything else
-	// opens in the document viewer.
+	// Every tab opens in the document viewer. A file the backend says is an image
+	// is switched to the image viewer for as long as this leaf is mounted; nothing
+	// about it is stored on the tab, so a file replaced by one of the other kind
+	// is shown by whichever viewer the next load finds it needs.
+	let imageTabs = $state<string[]>([]);
+	const imageKey = (instanceId: string) => `${threadId}\u0000${instanceId}`;
 	const showable = $derived<DocViewerTarget | null>(
 		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? targetForTab(activeTab) : null
 	);
-	const isImage = $derived(showable !== null && activeTab?.isImage === true);
-	const target = $derived(isImage ? null : showable);
-	const imageTarget = $derived(isImage ? showable : null);
+	const showsImage = $derived(showable !== null && !!activeTab && imageTabs.includes(imageKey(activeTab.instanceId)));
+	const target = $derived(showsImage ? null : showable);
+	const imageTarget = $derived(showsImage ? showable : null);
 	const activeStale = $derived(activeTab ? isTabChanged(activeTab) : false);
 
 	let viewer = $state<DocViewer | undefined>(undefined);
@@ -108,7 +111,19 @@
 	function onLeafInput() {
 		if (threadId) setActiveSurface(threadId, 'artifact');
 	}
+	// Forget this thread's image tabs that were closed.
+	$effect(() => {
+		const open = new Set(workspace.tabs.map((t) => imageKey(t.instanceId)));
+		const prefix = `${threadId}\u0000`;
+		const kept = imageTabs.filter((k) => !k.startsWith(prefix) || open.has(k));
+		if (kept.length !== imageTabs.length) imageTabs = kept;
+	});
 	function onSignal(signal: TabLoadSignal) {
+		if (signal.renderer) {
+			const key = imageKey(signal.instanceId);
+			const others = imageTabs.filter((k) => k !== key);
+			imageTabs = signal.renderer === 'image' ? [...others, key] : others;
+		}
 		if (threadId) applyTabLoadSignal(threadId, signal);
 		if (signal.status === 'ready') {
 			// The viewer has its content; the DOM update lands on the next tick.

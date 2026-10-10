@@ -12,11 +12,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from api.files_roots import scope_bases
-from doceditor.document_scope import MAX_TEXT_BYTES, file_revision, path_write_allowed
+from doceditor.document_scope import MAX_TEXT_BYTES, path_write_allowed, revision as _revision, stat_revision
 from infra.auth import authenticate, may_access_artifact
 from infra import config
 from infra.database import get_db
-from infra.db_async import run_in_db
+from infra.db_async import run_in_db, run_off_db
 from core.workspace_context_sources import is_workspace_context_path
 from registry import models as registry_models
 from registry import service as registry_service
@@ -66,12 +66,15 @@ async def revision(
     tab relocates instead of going unavailable. A document that is genuinely
     gone reports ``exists: false`` rather than 404, so the tab can show its
     explicit unavailable state instead of a transport error.
+
+    An image's revision comes from its size and modification time and its bytes are never read;
+    a text document's is the sha256 of its bytes, hashed after the database connection is released.
     """
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
 
-    def _revision_of():
+    def _locate():
         db = get_db()
         try:
             bases = scope_bases(project_id, db)
@@ -111,7 +114,7 @@ async def revision(
             return {
                 "exists": True,
                 "path": str(candidate),
-                "revision": file_revision(candidate),
+                "revision": stat_revision(st) if media_type else None,
                 "media_type": media_type,
                 "size": st.st_size,
                 "writable": _writable(candidate, bases, db=db),
@@ -122,7 +125,17 @@ async def revision(
         finally:
             db.close()
 
-    return await run_in_db(_revision_of)
+    found = await run_in_db(_locate)
+    if found["exists"] and found["revision"] is None:
+        try:
+            found["revision"] = await run_off_db(_text_revision, Path(found["path"]))
+        except OSError:
+            return _unavailable()
+    return found
+
+
+def _text_revision(path: Path) -> str:
+    return _revision(path.read_bytes())
 
 
 def _unavailable() -> dict:

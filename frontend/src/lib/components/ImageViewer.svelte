@@ -54,6 +54,11 @@
 						signal({ status: 'unavailable' });
 						return;
 					}
+					// The file stopped being an image since this tab chose its viewer: hand it back to the document one.
+					if (!probe.media_type) {
+						signal({ status: 'loading', renderer: 'document' });
+						return;
+					}
 					revision = probe.revision;
 					resolvedArtifactId = probe.artifact_id ?? d.artifactId;
 					src = imageContentUrl({

@@ -103,15 +103,34 @@ def _revision(client, path):
     return client.get("/api/files/revision" + _AUTH + f"&path={path}")
 
 
-def test_revision_probe_names_the_media_type_and_matches_the_content_hash(integration_client, image_file):
+def test_revision_probe_names_the_media_type_and_derives_an_image_revision_from_stat(
+    integration_client, image_file,
+):
     from doceditor.document_scope import revision
 
-    data = _PNG + bytes(2_500_000)  # more than two 1 MB chunks
+    data = _PNG + bytes(2_500_000)
     p = image_file(".png", data)
+    st = p.stat()
     body = _revision(integration_client, p).json()
     assert body["media_type"] == "image/png"
-    assert body["revision"] == revision(data)
+    assert body["revision"] == f"stat-{st.st_size}-{st.st_mtime_ns}"
+    assert body["revision"] != revision(data)
     assert _revision(integration_client, image_file(".svg", _SVG)).json()["media_type"] == "image/svg+xml"
+
+
+def test_image_revision_changes_with_size_or_modification_time(integration_client, image_file):
+    p = image_file(".png", _PNG)
+    first = _revision(integration_client, p).json()["revision"]
+    assert _revision(integration_client, p).json()["revision"] == first
+
+    st = p.stat()
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    touched = _revision(integration_client, p).json()["revision"]
+    assert touched != first
+
+    p.write_bytes(_PNG + b"\x00")
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+    assert _revision(integration_client, p).json()["revision"] not in (first, touched)
 
 
 def test_revision_probe_has_no_media_type_for_a_document(integration_client, integration_workspace):
@@ -124,16 +143,76 @@ def test_revision_probe_has_no_media_type_for_a_document(integration_client, int
     assert body["exists"] is True and body["media_type"] is None
 
 
-def test_revision_probe_never_reads_a_whole_file(integration_client, image_file, monkeypatch):
+def test_revision_probe_never_reads_an_image_file(integration_client, image_file, monkeypatch):
     from pathlib import Path
 
-    p = image_file(".png", _PNG)
+    p = image_file(".png", _PNG + bytes(100_000))
+    opened = []
+    real_open = Path.open
+
+    def watch(self, *args, **kwargs):
+        opened.append(self)
+        return real_open(self, *args, **kwargs)
 
     def refuse(self):
-        raise AssertionError("the probe must hash in chunks, not read_bytes()")
+        raise AssertionError("the probe must not read image bytes")
 
     monkeypatch.setattr(Path, "read_bytes", refuse)
+    monkeypatch.setattr(Path, "open", watch)
     assert _revision(integration_client, p).status_code == 200
+    assert p not in opened
+
+
+def test_text_revision_is_the_sha256_of_its_bytes(integration_client, integration_workspace):
+    from doceditor.document_scope import revision
+
+    p = integration_workspace / f"hash-{uuid.uuid4().hex[:8]}.md"
+    p.write_bytes(b"# hashed\n")
+    try:
+        body = _revision(integration_client, p).json()
+    finally:
+        p.unlink(missing_ok=True)
+    assert body["revision"] == revision(b"# hashed\n")
+
+
+def test_the_raw_route_streams_the_file_and_the_ceiling_is_fifty_mebibytes(integration_client, image_file):
+    from fastapi.responses import FileResponse
+
+    from api import files
+    from infra import config
+
+    assert config.MAX_IMAGE_UPLOAD_BYTES == 50 * 1024 * 1024
+    p = image_file(".png", _PNG)
+    original = files.FileResponse
+    made = []
+
+    def spy(*args, **kwargs):
+        made.append(args[0])
+        return FileResponse(*args, **kwargs)
+
+    files.FileResponse = spy
+    try:
+        assert _raw(integration_client, p).status_code == 200
+    finally:
+        files.FileResponse = original
+    assert made == [p]  # a path handed to FileResponse streams in chunks; bytes are never held
+
+
+@pytest.mark.parametrize("target", ["missing", "outside", "directory"])
+def test_raw_and_text_reads_refuse_a_bad_path_the_same_way(
+    integration_client, integration_workspace, tmp_path, target,
+):
+    if target == "missing":
+        bad, status = integration_workspace / "nope.png", 404
+    elif target == "outside":
+        bad, status = tmp_path / "out.png", 400
+        bad.write_bytes(_PNG)
+    else:
+        bad, status = integration_workspace, 400
+    raw = _raw(integration_client, bad)
+    text = integration_client.get("/api/files/content" + _AUTH + f"&path={bad}")
+    assert (raw.status_code, text.status_code) == (status, status)
+    assert raw.json() == text.json()
 
 
 def test_the_image_limit_is_the_upload_limit_and_each_message_names_its_own_limit(

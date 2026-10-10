@@ -70,15 +70,6 @@ describe('openPlanAsk', () => {
 		});
 	});
 
-	it('opens an image-typed artifact as an image and any other without the fact', () => {
-		openPlanAsk('t1', artifact({ type: 'image', path: '/shot.png' }), 'Shot', vi.fn());
-		openPlanAsk('t1', artifact({ id: 'artifact-2', path: '/other.md' }), 'Other', vi.fn());
-
-		const [shot, other] = get(threadWorkspaces).t1.tabs;
-		expect(shot.isImage).toBe(true);
-		expect(other.isImage).toBeUndefined();
-	});
-
 	it('opens a decision in the canonical attention surface, never as a document', () => {
 		const openDecision = vi.fn();
 		openPlanAsk('t1', artifact({ type: 'plan-decision', path: null }), 'Choose model', openDecision);
