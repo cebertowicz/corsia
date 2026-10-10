@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from plans import errors, service, writer_context
+from plans import aggregates, errors, service, writer_context
 from plans.models import PlanNode
 
 _UNSET = object()
@@ -24,17 +24,22 @@ def _node_for_plan(connection, plan_id: str, node_id: str):
 
 
 def _live_siblings(connection, node) -> list:
-    """Return the canonical ordered list of one parent's unarchived children.
+    """Return the canonical ordered list of one parent's open children, and the node itself.
 
-    Every ordered read of a plan filters `archived_at IS NULL`, so this list is
-    the only order a caller can observe, and a requested position is a position
-    in it.
+    Only the order among open rows is ever read (settled children are listed by when
+    they settled), so this list is the only order a caller can observe, and a requested
+    position is a position in it. A node that is not open (a container whose children
+    have all settled) is placed by its stored key, so it can still be moved.
     """
-    return connection.execute(
+    rows = connection.execute(
         "SELECT id, order_key FROM plan_nodes WHERE plan_id=? AND parent_id IS ? "
-        "AND archived_at IS NULL ORDER BY order_key, id",
+        f"AND {aggregates.open_siblings_sql(connection)} ORDER BY order_key, id",
         (node["plan_id"], node["parent_id"]),
     ).fetchall()
+    if any(row["id"] == node["id"] for row in rows):
+        return rows
+    rows = [*rows, {"id": node["id"], "order_key": node["order_key"]}]
+    return sorted(rows, key=lambda row: (row["order_key"], row["id"]))
 
 
 def reorder_node(
@@ -46,13 +51,13 @@ def reorder_node(
     provenance: str = "plan_mutation",
     db=None,
 ) -> PlanNode:
-    """Move one node to a live sibling position with concurrency protection.
+    """Move one node to an open sibling position with concurrency protection.
 
-    ``order_key`` names a **position among unarchived siblings**, not a stored
-    key. The two coincide until a sibling is archived; after that the stored
-    keys are sparse, so the move is applied to the live list and the live keys
-    are rewritten densely over that list. Archived siblings keep their historical
-    keys, take part in no arithmetic, and never shift.
+    ``order_key`` names a **position among open siblings**, not a stored key. The
+    two coincide until a sibling settles or is archived; after that the stored
+    keys are sparse, so the move is applied to the open list and the open keys
+    are rewritten densely over that list. Settled and archived siblings keep their
+    stored keys, take part in no arithmetic, and never shift.
     """
     if isinstance(order_key, bool) or not isinstance(order_key, int) or order_key < 0:
         raise service.PlanInputError("order key must be non-negative")

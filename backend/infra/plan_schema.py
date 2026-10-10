@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from infra.plan_aggregates_schema import (
     NODE_AGGREGATE_COLUMNS, NODE_AGGREGATE_INDEXES_SQL, NODE_UPDATE_TRIGGER_SQL,
-    PLAN_AGGREGATE_COLUMNS, column_ddl,
+    PLAN_AGGREGATE_COLUMNS, TOUCH_INDEXES_SQL, column_ddl,
 )
 from infra.plan_events_schema import PLAN_EVENTS_SCHEMA_SQL
 from infra.plan_pane_views_schema import PLAN_PANE_VIEWS_SCHEMA_SQL
@@ -392,4 +392,4 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
     );
     CREATE INDEX IF NOT EXISTS idx_plan_markdown_import_issues_import
         ON plan_markdown_import_issues(import_id, issue_order);
-""" + PLAN_EVENTS_SCHEMA_SQL + UNATTRIBUTED_DISPATCH_SCHEMA_SQL + PLAN_PANE_VIEWS_SCHEMA_SQL
+""" + PLAN_EVENTS_SCHEMA_SQL + UNATTRIBUTED_DISPATCH_SCHEMA_SQL + PLAN_PANE_VIEWS_SCHEMA_SQL + TOUCH_INDEXES_SQL

@@ -8,7 +8,7 @@ from typing import Any
 
 import plans.admission_projection as admission_projection
 from infra.packed_rows import fetch_all
-from plans import node_states
+from plans import aggregates, node_states
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,16 @@ _LIVE_ALL_SQL = f"""    live AS (
 
 #: Only the open nodes and their unarchived ancestors. ``scope`` climbs by
 #: parent id, so the read grows with the open work and its depth, never with
-#: the settled history the plan keeps.
+#: the settled history the plan keeps. ``_SEED`` and ``_STALE`` are where the open
+#: rows and the stale containers are chosen (``_open_cte``).
+_SEED = "__open_rows__"
+_STALE = "__stale_containers__"
 _LIVE_OPEN_SQL = f"""    scope(id,parent_id) AS (
         SELECT id,parent_id FROM plan_nodes
-        WHERE plan_id=? AND {node_states.open_sql("plan_nodes")}
+        WHERE plan_id=? AND {_SEED}
+        UNION
+        SELECT id,parent_id FROM plan_nodes
+        WHERE plan_id=? AND {_STALE}
         UNION
         SELECT parent.id,parent.parent_id FROM plan_nodes AS parent
         JOIN scope ON parent.id=scope.parent_id
@@ -73,14 +79,32 @@ _ORDERED_TAIL_SQL = """    ), ranked AS (
 """
 
 _ORDERED_CTE_SQL = "WITH RECURSIVE\n" + _LIVE_ALL_SQL + _ORDERED_TAIL_SQL
-_OPEN_ORDERED_CTE_SQL = "WITH RECURSIVE\n" + _LIVE_OPEN_SQL + _ORDERED_TAIL_SQL
+
+
+def _open_cte(db) -> str:
+    """The ordered CTE over the open rows and their ancestors; it binds the plan id twice.
+
+    The open rows are read through ``idx_plan_nodes_open``, the stored fold answer the pane
+    lists, and a pending parent whose children have all settled (a stale container, folded
+    but not settled) through ``idx_plan_nodes_stale``, so the read still lists every
+    unsettled node. A database below the aggregates schema (an older rung of the migration
+    ladder) has no such columns and reads the non-terminal states.
+    """
+    if aggregates.ready(db):
+        seed = node_states.listed_open_sql("plan_nodes")
+        stale = "archived_at IS NULL AND folded=1 AND state='pending'"
+    else:
+        seed, stale = node_states.open_sql("plan_nodes"), "0"
+    sql = _LIVE_OPEN_SQL.replace(_SEED, seed).replace(_STALE, stale)
+    return "WITH RECURSIVE\n" + sql + _ORDERED_TAIL_SQL
+
 
 _ORDER_BY_SQL = """ORDER BY ordered.stranded,
              CASE WHEN ordered.stranded=0 THEN ordered.tree_position END,
              CASE WHEN ordered.stranded=1 THEN ordered.order_key END,
              CASE WHEN ordered.stranded=1 THEN ordered.id END"""
 
-_ORDERED_CURSOR_SQL = _ORDERED_CTE_SQL + """SELECT ordered.* FROM ordered
+_ORDERED_CURSOR_TAIL_SQL = """SELECT ordered.* FROM ordered
     WHERE ?=0 OR (ordered.kind='task' AND ordered.state='active')
     """ + _ORDER_BY_SQL
 
@@ -93,13 +117,13 @@ _FULL_ORDERED_SQL = _ORDERED_CTE_SQL + """SELECT node.*, ordered.ancestor_path,
 
 
 def ordered_cursor(db, plan_id: str, *, active_tasks_only: bool = False):
-    """Return the sole canonical ordered cursor for a plan's live nodes.
+    """Return the canonical ordered cursor for a plan's open nodes and their ancestors.
 
-    Callers that need only the first eligible task retain this single SQL
-    execution and use ``fetchmany(ACTIVE_TASK_PAGE_SIZE)``. Other consumers may
-    iterate it fully for their already-unbounded projections.
+    An active task is open work, so a read of the active tasks costs the open work
+    and never the settled history. Callers that need only the first eligible task
+    retain this single SQL execution and use ``fetchmany(ACTIVE_TASK_PAGE_SIZE)``.
     """
-    return db.execute(_ORDERED_CURSOR_SQL, (plan_id, int(active_tasks_only)))
+    return db.execute(_open_cte(db) + _ORDERED_CURSOR_TAIL_SQL, (plan_id, plan_id, int(active_tasks_only)))
 
 
 def _warn_stranded(rows) -> None:
@@ -125,7 +149,7 @@ def ordered_nodes_with_paths(db, plan_id: str) -> list[tuple[object, tuple[str, 
 #: The open nodes and their ancestors in plan order, each with the two facts
 #: a reader cannot get from the open rows alone: whether the node is itself
 #: open, and whether any child of it is in work (settled children count).
-_OPEN_ORDERED_SQL = _OPEN_ORDERED_CTE_SQL + f"""SELECT node.*, ordered.ancestor_path,
+_OPEN_ORDERED_TAIL_SQL = f"""SELECT node.*, ordered.ancestor_path,
            ordered.stranded,
            ({node_states.open_sql("node")}) AS is_open,
            ({node_states.has_child_in_work_sql("node")}) AS has_child_in_work
@@ -143,7 +167,7 @@ def open_nodes_with_paths(db, plan_id: str) -> list[tuple[Any, tuple[str, ...]]]
     parent whose children all settled is still a parent. A node under a
     retired ancestor is out of the work and is not returned.
     """
-    rows = fetch_all(db, _OPEN_ORDERED_SQL, (plan_id,))
+    rows = fetch_all(db, _open_cte(db) + _OPEN_ORDERED_TAIL_SQL, (plan_id, plan_id))
     _warn_stranded(rows)
     paths = {str(row["id"]): tuple(json.loads(str(row["ancestor_path"]))) for row in rows}
     by_id = {str(row["id"]): row for row in rows}

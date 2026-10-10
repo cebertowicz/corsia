@@ -18,6 +18,7 @@ import sqlite3
 
 from infra.plan_aggregates_schema import (
     NODE_AGGREGATE_COLUMNS, NODE_AGGREGATE_INDEXES, NODE_UPDATE_TRIGGER_SQL, PLAN_AGGREGATE_COLUMNS,
+    TOUCH_INDEXES,
 )
 
 
@@ -50,7 +51,7 @@ def prepare(conn: sqlite3.Connection) -> None:
         "UPDATE plan_nodes SET own_last_changed=COALESCE("
         "(SELECT MAX(created_at) FROM plan_node_events e WHERE e.node_id=plan_nodes.id), updated_at)"
     )
-    for statement in NODE_AGGREGATE_INDEXES.values():
+    for statement in (*NODE_AGGREGATE_INDEXES.values(), *TOUCH_INDEXES.values()):
         conn.execute(statement)
 
 

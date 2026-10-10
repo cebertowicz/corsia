@@ -39,6 +39,8 @@ class Scale:
     history_container: str
     worker_step: str
     open_ids: list[str] = field(default_factory=list)
+    #: The settled-node count the plan was built with.
+    size: int = 0
 
 
 def _schema() -> sqlite3.Connection:
@@ -255,4 +257,21 @@ def build(settled: int) -> Scale:
             "plan_usage_role,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", usage,
         )
     db.commit()
-    return Scale(db, plan_id, open_leaf, open_container, history_container, worker_step, open_ids)
+    return Scale(db, plan_id, open_leaf, open_container, history_container, worker_step, open_ids, settled)
+
+
+def add_ready_branch(scale: Scale, count: int, tag: str) -> str:
+    """A phase in review whose ``count`` children are all accepted: the verdict on it reads them."""
+    db = scale.db
+    phase = service.add_node(
+        scale.plan_id, kind="phase", title=f"Ready {tag}", acceptance_criteria="done", db=db,
+    ).id
+    service.transition_node(phase, "active", db=db)
+    rows = [
+        _node_row(f"rb{tag}{i:07d}", scale.plan_id, phase, i, "task", "accepted", phase)
+        for i in range(count)
+    ]
+    with raw_plan_seed(db):
+        db.executemany(_INSERT_NODE, rows)
+    mutations.request_review(phase, evidence="proven", actor_id="owner", db=db)
+    return phase

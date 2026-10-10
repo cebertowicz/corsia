@@ -198,6 +198,18 @@ def ready(connection: sqlite3.Connection) -> bool:
     return found
 
 
+def open_siblings_sql(connection: sqlite3.Connection, alias: str = "plan_nodes") -> str:
+    """The sibling rows a position names: the plan's open work, through ``idx_plan_nodes_open``.
+
+    Order among siblings is only ever read among open rows (the pane lists the rest by when
+    they folded), so a reorder or an insert renumbers these and leaves settled siblings'
+    stored keys alone. Below the aggregates schema every unarchived sibling counts.
+    """
+    if ready(connection):
+        return node_states.listed_open_sql(alias)
+    return node_states.unarchived_sql(alias)
+
+
 def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
     """Re-derive ``node_id`` and push what changed to every ancestor and the plan.
 

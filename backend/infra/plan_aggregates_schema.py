@@ -93,7 +93,9 @@ NODE_UPDATE_TRIGGER_SQL = f"""
 #: container by its latest unarchived child, and the fourth finds the folded rows that
 #: changed in a plan since a cutoff (the recent window of a read) without reading the plan.
 #: It is partial on ``folded = 1`` so a read of open rows never prefers it to the open index.
-#: The fifth holds only the failed rows assigned to the user, by when they last changed, so the
+#: The fifth holds only the pending parents whose children have all settled (stale containers,
+#: which the fold hides but a verdict or a close over their ancestor still counts as unsettled),
+#: and the sixth only the failed rows assigned to the user, by when they last changed, so the
 #: chat list finds the failures it asks about without reading the plan's other history.
 NODE_AGGREGATE_INDEXES: dict[str, str] = {
     "idx_plan_nodes_open": (
@@ -114,6 +116,10 @@ NODE_AGGREGATE_INDEXES: dict[str, str] = {
         "CREATE INDEX IF NOT EXISTS idx_plan_nodes_recent "
         "ON plan_nodes(plan_id, own_last_changed) WHERE archived_at IS NULL AND folded = 1"
     ),
+    "idx_plan_nodes_stale": (
+        "CREATE INDEX IF NOT EXISTS idx_plan_nodes_stale ON plan_nodes(plan_id) "
+        "WHERE archived_at IS NULL AND folded = 1 AND state = 'pending'"
+    ),
     "idx_plan_nodes_user_failed": (
         "CREATE INDEX IF NOT EXISTS idx_plan_nodes_user_failed "
         "ON plan_nodes(plan_id, own_last_changed) "
@@ -122,6 +128,29 @@ NODE_AGGREGATE_INDEXES: dict[str, str] = {
 }
 
 NODE_AGGREGATE_INDEXES_SQL = ";\n    ".join(NODE_AGGREGATE_INDEXES.values()) + ";"
+
+#: Every plan write asks, under the writer lock, which plans it touched
+#: (``plans.status_context.touched_plans``): the node, event and attempt rows written since the
+#: transaction began, across the whole instance. These let that ask read the recent rows, so a
+#: write costs what it wrote and not the settled history of every plan (#149 S2w).
+TOUCH_INDEXES: dict[str, str] = {
+    "idx_plan_nodes_updated": (
+        "CREATE INDEX IF NOT EXISTS idx_plan_nodes_updated ON plan_nodes(updated_at)"
+    ),
+    "idx_plan_node_events_created": (
+        "CREATE INDEX IF NOT EXISTS idx_plan_node_events_created ON plan_node_events(created_at)"
+    ),
+    "idx_plan_node_attempts_selected": (
+        "CREATE INDEX IF NOT EXISTS idx_plan_node_attempts_selected "
+        "ON plan_node_attempts(selected_at)"
+    ),
+    "idx_plan_node_attempts_released": (
+        "CREATE INDEX IF NOT EXISTS idx_plan_node_attempts_released "
+        "ON plan_node_attempts(released_at) WHERE released_at IS NOT NULL"
+    ),
+}
+
+TOUCH_INDEXES_SQL = ";\n    ".join(TOUCH_INDEXES.values()) + ";"
 
 
 def column_ddl(columns: tuple[tuple[str, str], ...]) -> str:

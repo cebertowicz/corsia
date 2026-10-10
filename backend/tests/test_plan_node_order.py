@@ -76,9 +76,9 @@ def test_depth_first_of_no_rows_is_empty(db):
     assert node_order.ordered_nodes_with_paths(db, plan.id) == []
 
 
-def test_order_cursor_never_projects_node_bodies():
+def test_order_cursor_never_projects_node_bodies(db):
     """The hot ordered projection excludes prose even after recursion completes."""
-    sql = node_order._ORDERED_CURSOR_SQL
+    sql = node_order._open_cte(db) + node_order._ORDERED_CURSOR_TAIL_SQL
 
     assert "SELECT * FROM plan_nodes" not in sql
     assert "node.*" not in sql

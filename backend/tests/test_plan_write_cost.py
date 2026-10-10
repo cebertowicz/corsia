@@ -366,7 +366,7 @@ def test_rollup_reuses_rows_without_changing_nested_rejected_or_stranded_status(
     optimized = status_context.projection(db, row, actor=ACTOR, clock="2026-10-04T00:00:00+00:00")
     original = projections._plan_state
 
-    def without_supplied_rows(connection, plan_id, memo, *, plan=None, nodes=None):
+    def without_supplied_rows(connection, plan_id, memo, *, plan=None, nodes=None, **_tree):
         return original(connection, plan_id, memo)
 
     monkeypatch.setattr(projections, "_plan_state", without_supplied_rows)

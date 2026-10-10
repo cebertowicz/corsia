@@ -41,6 +41,12 @@ def _next_order(
     plan_id: str,
     parent_id: str | None,
 ) -> int:
+    """The key after every unarchived sibling: a new node goes last, settled siblings included.
+
+    One backward step of ``idx_plan_nodes_tree`` from the end, so it costs nothing in the
+    history; the settled siblings keep the keys they were given, and the new node must
+    not tie with one of them.
+    """
     row = connection.execute(
         "SELECT COALESCE(MAX(order_key) + 1, 0) AS order_key FROM plan_nodes "
         "WHERE plan_id=? AND parent_id IS ? AND archived_at IS NULL",
@@ -110,7 +116,12 @@ def _open_order_slot(
     parent_id: str | None,
     order_key: int | None,
 ) -> int:
-    """Resolve the new node's position, shifting later siblings down for it.
+    """Resolve the new node's position, shifting later open siblings down for it.
+
+    ``order_key`` names a position among the open siblings, as ``reorder`` does: the
+    new node takes the stored key of the open sibling it displaces, and that sibling
+    and every later open one shift down. Settled siblings keep their keys, because
+    only the order among open rows is ever read.
 
     Returns:
         The order key the new node should occupy.
@@ -118,18 +129,27 @@ def _open_order_slot(
     Raises:
         PlanInputError: The requested order key is negative.
     """
-    if order_key is None:
-        order_key = _next_order(connection, plan_id, parent_id)
-    if order_key < 0:
+    if order_key is not None and order_key < 0:
         raise service.PlanInputError("order key must be non-negative")
+    open_siblings = aggregates.open_siblings_sql(connection)
+    key = None
+    if order_key is not None:
+        displaced = connection.execute(
+            "SELECT order_key FROM plan_nodes WHERE plan_id=? AND parent_id IS ? "
+            f"AND {open_siblings} ORDER BY order_key,id LIMIT 1 OFFSET ?",
+            (plan_id, parent_id, order_key),
+        ).fetchone()
+        key = None if displaced is None else int(displaced["order_key"])
+    if key is None:
+        key = _next_order(connection, plan_id, parent_id)
     writer_context.execute(
         # An insert shifts its siblings' order, which is not their change:
         # their revisions stay put (see service.touch_node).
         connection, "UPDATE plan_nodes SET order_key=order_key+1 WHERE plan_id=? AND parent_id IS ? "
-        "AND order_key>=? AND archived_at IS NULL",
-        (plan_id, parent_id, order_key),
+        f"AND order_key>=? AND {open_siblings}",
+        (plan_id, parent_id, key),
     )
-    return order_key
+    return key
 
 
 def _insert_node_row(

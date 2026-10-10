@@ -22,10 +22,10 @@ def rewind_plan_aggregates(db: sqlite3.Connection) -> None:
     pre-102 database is, so step 101 -> 102 builds them from the rows.
     """
     from infra.plan_aggregates_schema import (
-        NODE_AGGREGATE_COLUMNS, NODE_AGGREGATE_INDEXES, PLAN_AGGREGATE_COLUMNS,
+        NODE_AGGREGATE_COLUMNS, NODE_AGGREGATE_INDEXES, PLAN_AGGREGATE_COLUMNS, TOUCH_INDEXES,
     )
 
-    for index in NODE_AGGREGATE_INDEXES:
+    for index in (*NODE_AGGREGATE_INDEXES, *TOUCH_INDEXES):
         db.execute(f"DROP INDEX IF EXISTS {index}")
     for table, columns in (("plan_nodes", NODE_AGGREGATE_COLUMNS), ("plans", PLAN_AGGREGATE_COLUMNS)):
         present = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}

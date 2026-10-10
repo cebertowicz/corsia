@@ -122,7 +122,7 @@ def test_every_node_column_is_either_before_the_aggregates_or_one_of_them() -> N
     assert not before & NODE_AGGREGATE_NAMES
     assert columns == before | NODE_AGGREGATE_NAMES, columns ^ (before | NODE_AGGREGATE_NAMES)
     assert {name for name, _ in NODE_AGGREGATE_COLUMNS} == NODE_AGGREGATE_NAMES
-    assert len(NODE_AGGREGATE_INDEXES) == 5
+    assert len(NODE_AGGREGATE_INDEXES) == 6
     assert len(PLAN_AGGREGATE_COLUMNS) == 10
 
 

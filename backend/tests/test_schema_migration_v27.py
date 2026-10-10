@@ -112,9 +112,11 @@ def test_migrating_admits_closed_and_preserves_every_row() -> None:
         # added or narrowed (#731), which a migration to 27 cannot carry. The table
         # itself gained later workflow fields, so this v27 regression checks its own
         # state transition without pinning later columns out of the current schema.
-        from infra.plan_aggregates_schema import NODE_AGGREGATE_INDEXES
+        from infra.plan_aggregates_schema import NODE_AGGREGATE_INDEXES, TOUCH_INDEXES
 
-        skipped = {"plan_nodes", "bump_plan_revision_node_update", *NODE_AGGREGATE_INDEXES}
+        skipped = {
+            "plan_nodes", "bump_plan_revision_node_update", *NODE_AGGREGATE_INDEXES, *TOUCH_INDEXES,
+        }
         fresh_objects = _plan_nodes_objects(fresh)
         migrated_objects = _plan_nodes_objects(migrated)
         assert {

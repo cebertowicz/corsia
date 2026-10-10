@@ -158,8 +158,9 @@ def append_status(db, plan_id: str, summary: str, revision: int) -> None:
 
 def _project(db, plan_row, *, actor, clock: str) -> dict[str, Any]:
     # The thin status shows no cost, and a digest may build it under the writer
-    # lock, where the cost roll-up held that lock for seconds (#2489).
-    facts = status._full_facts(db, plan_row, actor, clock, costs=False)
+    # lock, where the cost roll-up held that lock for seconds (#2489). It reads the
+    # open work, so a write to a plan with long history owes the same short digest.
+    facts = status._facts(db, plan_row, actor, clock)
     overview = status._overview(db, plan_row, facts)
     thin: dict[str, Any] = {
         "plan": overview["plan"],
