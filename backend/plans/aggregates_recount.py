@@ -1,6 +1,6 @@
 """Recount for the plan-aggregates design: what today's code shows, by recount.
 
-The independent check the stored aggregates must equal: the 104 -> 105 migration
+The independent check the stored aggregates must equal: the 105 -> 106 migration
 asserts it before it commits, and the tests use it as their oracle
 (``tests/plan_aggregates_oracle.py`` re-exports it). Given one plan's rows (and the ids of nodes
 that carry a ``review_rejected`` event), ``recount`` returns for every node and

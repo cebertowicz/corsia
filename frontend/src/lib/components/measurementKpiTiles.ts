@@ -2,7 +2,7 @@ import { humanTokens } from '$lib/format';
 import type { Kpi, KpiTokenFigure } from '$lib/stores/keyFigures';
 import type { MeasurementCost } from '$lib/stores/measurementCost';
 import type { PanelState, SeriesWindows } from '$lib/stores/measurement';
-import { periodName, type MeasurementPeriod } from '$lib/stores/measurementPeriod';
+import { periodName } from '$lib/stores/measurementPeriod';
 import { costView } from './measurementCostRate';
 import { periodChange, periodView, sizeView } from './measurementPeriodView';
 import { percentChange, versusPrevious } from './measurementSize';
@@ -19,9 +19,9 @@ export interface KpiTile {
 const group = (value: number) => value.toLocaleString('en-US');
 const money = (value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 
-/** "Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)": the window, its n, and the change the section headline below reads for the same measure. */
-export function windowLine(period: MeasurementPeriod, latest: { n: number }, change: string): string {
-	return `${periodName(period.latest)}, n ${group(latest.n)}, ${change}`;
+/** "Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)": the dates behind the figure, its n, and the change the section headline below reads for the same measure. */
+export function windowLine(dates: string, latest: { n: number }, change: string): string {
+	return `${dates}, n ${group(latest.n)}, ${change}`;
 }
 
 /** The top row's windowed measures: the section panel each one reads and its series, so a tile is the figure its headline shows. */
@@ -35,16 +35,16 @@ export const KPI_MEASURES = {
  * The figure, n and change a tile prints are the ones its section headline prints, from the same view and rule: the served pooled
  * window, and a previous window the measure covers only in part reads new.
  */
-function headlineFigure(id: keyof typeof KPI_MEASURES, panel: PanelState, window: SeriesWindows): { value: number | null; n: number; change: string } {
+function headlineFigure(id: keyof typeof KPI_MEASURES, panel: PanelState, window: SeriesWindows): { value: number | null; n: number; change: string; dates: string } {
 	const view = id === 'work' ? sizeView(panel.rows, panel.period, window) : periodView(panel.rows, KPI_MEASURES[id].series, 1, panel.period, window);
-	return { value: view.current.value, n: view.current.n, change: periodChange(view, true) };
+	return { value: view.current.value, n: view.current.n, change: periodChange(view, true), dates: view.nowText };
 }
 
 function seriesTile(id: keyof typeof KPI_MEASURES, label: string, panel: PanelState | undefined, value: (v: number) => string): KpiTile | null {
 	const window: SeriesWindows | undefined = panel?.windows?.[KPI_MEASURES[id].series];
 	if (!panel?.period || !window) return null;
 	const figure = headlineFigure(id, panel, window);
-	return { id, label, value: figure.value === null ? '–' : value(figure.value), sub: windowLine(panel.period, figure, figure.change) };
+	return { id, label, value: figure.value === null ? '–' : value(figure.value), sub: windowLine(figure.dates || periodName(panel.period.latest), figure, figure.change) };
 }
 
 /** The four measures the sections below headline, from the panels' own windows blocks and the cost payload. */
@@ -60,7 +60,7 @@ export function measureTiles(panels: Record<string, PanelState>, cost: Measureme
 	if (cost && costPeriod) {
 		const view = costView({ ...cost, period: costPeriod });
 		const rate = view ? view.current.perHour : null;
-		tiles.cost = { id: 'cost', label: 'Cost per hour of delivered work', value: rate === null ? '–' : money(rate), sub: windowLine(costPeriod, { n: view?.current.sized ?? 0 }, view?.change ?? 'n/a') };
+		tiles.cost = { id: 'cost', label: 'Cost per hour of delivered work', value: rate === null ? '–' : money(rate), sub: windowLine(periodName(costPeriod.latest), { n: view?.current.sized ?? 0 }, view?.change ?? 'n/a') };
 	}
 	return tiles;
 }

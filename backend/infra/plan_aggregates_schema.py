@@ -1,7 +1,7 @@
 """Stored subtree aggregates of structured-plan nodes (#731).
 
 One definition of the columns, indexes and the narrowed revision trigger, shared
-by the fresh-install schema (`infra.plan_schema`) and the 104 -> 105 migration, so
+by the fresh-install schema (`infra.plan_schema`) and the 105 -> 106 migration, so
 the two cannot diverge. `plans.aggregates` is the only writer of these columns
 (`sent_back` aside, which `plans.service.touch_node` sets with the transition).
 

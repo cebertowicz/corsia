@@ -90,20 +90,32 @@ def failure_asks_user_sql(alias: str) -> str:
     )
 
 
-def blocked_user_task_sql(alias: str) -> str:
-    """The ``plan_nodes`` row ``alias`` is the user's own task, blocked now, as SQL.
+def open_user_block_sql(hold: str) -> str:
+    """The ``plan_node_holds`` row ``hold`` is an open ``blocked`` hold the user owns, as SQL."""
+    return f"{hold}.kind='blocked' AND {hold}.owner_kind='user' AND {hold}.cleared_at IS NULL"
 
-    ``failure_asks_user_sql`` for a node held by an open ``blocked`` hold: it
-    is blocked right now, assigned to the user, in work and outside a retired
-    branch. Focus splits a work block on such a card. This is not "blocked on
-    the user" (an open hold with ``owner_kind='user'``, plans/user_ask.py): an
-    agent's task blocked on the user carries an ask artifact the Attention dock
-    already shows, so its card stays a line inside the work block.
+
+def blocked_on_user_sql(alias: str, placed_hold: str) -> str:
+    """The ``plan_nodes`` row ``alias`` is blocked on the user right now, as SQL.
+
+    Focus splits a work block on such a card. Two ways a task is blocked on
+    the user, both in work and outside a retired branch: the user's own task
+    (``assignee='user'``) with any open ``blocked`` hold, and any task,
+    whoever it is assigned to, while the open user-owned ``blocked`` hold named
+    by ``placed_hold`` (an SQL expression for one hold id) is open. That second
+    hold is an agent's user ask (``plans/user_ask.py``) or a legacy hold with no
+    ask artifact. A task an agent holds on itself, a thread, an external party
+    or a system cause is not blocked on the user, unless the user also owns
+    the task. The ask has no other default-view surface: the Attention card
+    that once showed it lost its producer when ``external_reviews`` was
+    removed.
     """
     return (
-        f"EXISTS (SELECT 1 FROM plan_node_holds hold WHERE hold.node_id={alias}.id"
+        f"({alias}.assignee='user'"
+        f" AND EXISTS (SELECT 1 FROM plan_node_holds hold WHERE hold.node_id={alias}.id"
         f" AND hold.kind='blocked' AND hold.cleared_at IS NULL)"
-        f" AND {alias}.assignee='user'"
+        f" OR EXISTS (SELECT 1 FROM plan_node_holds hold WHERE hold.node_id={alias}.id"
+        f" AND hold.id={placed_hold} AND {open_user_block_sql('hold')}))"
         f" AND {in_work_sql(alias)} AND {outside_retired_branch_sql(alias)}"
     )
 

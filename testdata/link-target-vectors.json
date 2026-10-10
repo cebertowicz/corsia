@@ -1,0 +1,22 @@
+{
+  "roots": ["/workspace", "/other"],
+  "cases": [
+    {"href": "shared/linked.md", "expected": "/workspace/shared/linked.md"},
+    {"href": "./shared/../shared/linked.md", "expected": "/workspace/shared/linked.md"},
+    {"href": "/workspace/shared/linked.md", "expected": "/workspace/shared/linked.md"},
+    {"href": "/other/notes.md", "expected": "/other/notes.md"},
+    {"href": "/workspace", "expected": "/workspace"},
+    {"href": "shared/linked.md#section", "expected": "/workspace/shared/linked.md"},
+    {"href": "shared/linked.md?v=2", "expected": "/workspace/shared/linked.md"},
+    {"href": "shared/my%20notes.md", "expected": "/workspace/shared/my notes.md"},
+    {"href": "../escape.md", "expected": null},
+    {"href": "shared/../../escape.md", "expected": null},
+    {"href": "/elsewhere/file.md", "expected": null},
+    {"href": "/workspace/../etc/passwd", "expected": null},
+    {"href": "/workspacefoo/file.md", "expected": null},
+    {"href": "bad%zz.md", "expected": null},
+    {"href": "bad%E0%A4%A.md", "expected": null},
+    {"href": "#only-a-fragment", "expected": null},
+    {"href": "", "expected": null}
+  ]
+}

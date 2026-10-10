@@ -1,6 +1,6 @@
 """The recount oracle of the plan-aggregates design.
 
-It lives in ``plans.aggregates_recount`` because the 104 -> 105 migration asserts
+It lives in ``plans.aggregates_recount`` because the 105 -> 106 migration asserts
 it before it commits; the tests import it from here.
 """
 

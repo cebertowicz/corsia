@@ -60,6 +60,9 @@ export interface Message {
 	delivering_reason?: string | null;
 	delivery_blocked_since?: string | null;
 	next_attempt_at?: string | null;
+	/** Artifact cards the server computed for this message when it was read (display rows only). */
+	cards?: import('../api/messageCards').MessageCard[];
+	cards_more?: number;
 }
 
 function validDeliveryRevision(value: unknown): number | null {

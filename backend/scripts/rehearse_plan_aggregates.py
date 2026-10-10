@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Rehearse schema 104 -> 105 (stored plan aggregates, #731) on a copy of a database.
+"""Rehearse schema 105 -> 106 (stored plan aggregates, #731) on a copy of a database.
 
     rehearse_plan_aggregates.py --db PATH [--no-copy]
 
 ``PATH`` is opened read-only and copied into a private temporary directory; the
 migration runs on the copy and the copy is deleted, so the named database is
-never written. It may be at any schema up to 104: the older steps run on the
+never written. It may be at any schema up to 105: the older steps run on the
 copy first and are reported as ``ladder seconds``; ``migration seconds`` is the
-104 -> 105 step alone. ``--no-copy`` skips the copy for a file the caller already
+105 -> 106 step alone. ``--no-copy`` skips the copy for a file the caller already
 made disposable (a 7 GB production file); it is then migrated in place. Output is aggregate counts only,
 never a row, id, title or path.
 
@@ -25,7 +25,7 @@ What it reports:
   existing data predates the refusals.
 
 Exit status: 0 when every must-be-zero figure is 0, 1 otherwise, 2 when the
-database is newer than schema 104.
+database is newer than schema 105.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from infra.database_migrations import MigrationError, migrate_to_current  # noqa: E402
 from plans import public  # noqa: E402
 
-_BEFORE = 104  # the schema this rehearses leaving; the ladder up to it runs untimed
+_BEFORE = 105  # the schema this rehearses leaving; the ladder up to it runs untimed
 _SETTLED = "('accepted','accepted_with_followup','failed','closed')"
 _OPEN = "('pending','active','review_requested')"
 
@@ -61,7 +61,7 @@ def _count(db: sqlite3.Connection, sql: str) -> int:
 
 
 def shapes_before(db: sqlite3.Connection) -> dict[str, int]:
-    """The data shapes the refusals stop producing; read at schema 104, before the step."""
+    """The data shapes the refusals stop producing; read at schema 105, before the step."""
     return {
         "failed nodes with open descendants": _count(db, _BELOW + f"""
             SELECT COUNT(DISTINCT n.id) FROM plan_nodes n
@@ -90,7 +90,7 @@ def containerness_differs(db: sqlite3.Connection) -> int:
 
 
 def _measure(db: sqlite3.Connection, version: int) -> tuple[dict[str, int | float], int]:
-    """Run the ladder to 104 untimed, then time 104 -> 105 alone and check the result."""
+    """Run the ladder to 105 untimed, then time 105 -> 106 alone and check the result."""
     report: dict[str, int | float] = {"schema version": version}
     started = time.perf_counter()
     try:
@@ -157,7 +157,7 @@ def rehearse(source: Path, *, no_copy: bool = False) -> tuple[dict[str, int | fl
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--db", required=True, type=Path, help="database at schema 104 or older")
+    parser.add_argument("--db", required=True, type=Path, help="database at schema 105 or older")
     parser.add_argument(
         "--no-copy", action="store_true",
         help="run directly on --db, which the caller says is a disposable copy (it is migrated in place)",

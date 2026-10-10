@@ -41,6 +41,9 @@ describe('weekly outcome rates', () => {
 		expect(view.previous).toBeNull();
 		expect(periodChange(view)).toBe('new');
 		expect(view.nowText).toBe('Aug 10 to Sep 6');
+		// A window the server pooled only in part (a break left one week) is named by the dates it pooled, not the 4 weeks around them.
+		const narrowed: SeriesWindows = { latest: { value: 2, n: 20, from: periodAt(3), to: '2026-09-06' }, previous: { value: null, n: 0 } };
+		expect(periodView(rows, SERIES, 1, narrowed).nowText).toBe('Aug 31 to Sep 6');
 		// A scale converts the served figure into the reader's unit; with no served window there is no figure and no pool of our own.
 		expect(periodView(rows, SERIES, 60, win([2.5, 105], [null, 0])).current.value).toBe(150);
 		expect(periodView(rows, SERIES).current).toEqual({ value: null, n: 0, periods: [0, 1, 2, 3].map(periodAt) });

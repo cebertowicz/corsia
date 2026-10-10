@@ -1,6 +1,6 @@
 """Compute a plan's stored aggregates from scratch, bottom-up (#731).
 
-The same figures ``plans.aggregates.apply`` keeps incrementally: the 104 -> 105
+The same figures ``plans.aggregates.apply`` keeps incrementally: the 105 -> 106
 migration backfill, and the helper a fixture uses after seeding raw rows. It
 calls ``aggregates.refresh``, the hook's own per-node step, so the two cannot
 classify differently; ``plans.aggregates_recount`` is what proves the result.

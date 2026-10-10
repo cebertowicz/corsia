@@ -56,10 +56,14 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 	});
 }
 
-/** What the viewer header shows about the listed comments: how many lost their text, and the live placement reload state. */
+/**
+ * What the viewer header shows about the listed comments: how many lost their text, and the live placement reload state.
+ * The count is the list's 'Text changed' group, so a resolved thread is never in it: a decided suggestion is resolved,
+ * and Accept replaced its quote by design.
+ */
 export function commentSurfaceStatus(comments: DocComment[]) {
 	return {
-		orphanedCount: comments.filter((comment) => comment.orphaned).length,
+		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),
 		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};

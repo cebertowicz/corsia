@@ -28,7 +28,7 @@ from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
 
-SCHEMA_VERSION = 105
+SCHEMA_VERSION = 106
 #: The artifact-identity table on its own, so a focused fixture can load the
 #: real definition instead of hand-copying one that then drifts. The full schema
 #: below embeds this same text, so the two cannot diverge.

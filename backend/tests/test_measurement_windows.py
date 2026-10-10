@@ -76,10 +76,11 @@ async def test_windows_pool_each_side_from_its_raw_counts_and_apply_the_minimum_
     _seed({"2026-10-03": 10, "2026-10-05": 15, "2026-09-28": 12})
 
     served = await _series("outcomes,first_try_acceptance")
-    assert served["windows"]["outcomes"] == {"latest": {"value": 25, "n": 25}, "previous": {"value": 12, "n": 12}}
+    assert served["windows"]["outcomes"] == {"latest": {"value": 25, "n": 25, "from": "2026-10-02", "to": "2026-10-08"},
+                                          "previous": {"value": 12, "n": 12, "from": "2026-09-25", "to": "2026-10-01"}}
     first_try = served["windows"]["first_try_acceptance"]
-    assert first_try["latest"] == {"value": 1.0, "n": 25}
-    assert first_try["previous"] == {"value": None, "n": 12}, "under the minimum the value is withheld but n is reported"
+    assert first_try["latest"] == {"value": 1.0, "n": 25, "from": "2026-10-02", "to": "2026-10-08"}
+    assert first_try["previous"] == {"value": None, "n": 12, "from": "2026-09-25", "to": "2026-10-01"}, "under the minimum the value is withheld but n is reported"
 
 
 @pytest.mark.asyncio
@@ -90,7 +91,8 @@ async def test_windows_follow_the_grain_four_periods_against_the_four_before(iso
     _seed({"2026-10-03": 5, "2026-09-15": 7, "2026-09-07": 3, "2026-09-06": 2, "2026-08-20": 4})
 
     served = await _series("outcomes", grain="weeks")
-    assert served["windows"]["outcomes"] == {"latest": {"value": 15, "n": 15}, "previous": {"value": 6, "n": 6}}
+    assert served["windows"]["outcomes"] == {"latest": {"value": 15, "n": 15, "from": "2026-09-07", "to": "2026-10-04"},
+                                          "previous": {"value": 6, "n": 6, "from": "2026-08-10", "to": "2026-09-06"}}
 
 
 @pytest.mark.asyncio
@@ -100,7 +102,8 @@ async def test_a_window_reaching_before_the_instrument_pools_only_the_periods_it
     _seed({"2026-09-12": 30, "2026-09-16": 20})
 
     served = await _series("first_try_acceptance")
-    assert served["windows"]["first_try_acceptance"]["latest"] == {"value": 1.0, "n": 20}
+    # It names the dates it pooled, not the window it reached into.
+    assert served["windows"]["first_try_acceptance"]["latest"] == {"value": 1.0, "n": 20, "from": "2026-09-14", "to": "2026-09-19"}
 
 
 @pytest.mark.asyncio
@@ -118,7 +121,8 @@ async def test_every_available_series_serves_both_windows_on_both_grains(isolate
         assert set(figures) == {"latest", "previous"}
         # A size window also serves the counts behind its rate, so no reader re-pools them.
         keys = {"value", "n", "size"} if series == "estimated_human_hours_per_active_hour" else {"value", "n"}
-        assert all(set(side) == keys for side in figures.values())
+        # A side that pooled any period also names its dates.
+        assert all(set(side) - {"from", "to"} == keys for side in figures.values())
 
 
 def _size_row(period: str, value: float | None, *, n: int = 30, raw: float | None = None, comparable: bool = True) -> dict:
@@ -137,3 +141,19 @@ def test_a_size_window_pools_only_the_run_the_chart_draws():
     # A run with no figure at all pools nothing.
     assert size_window_periods([_size_row("2026-09-28", None, n=0), _size_row("2026-10-05", None, n=0)]) == set()
     assert size_window_periods([]) == set()
+
+
+def test_a_window_names_only_the_periods_it_pooled(monkeypatch):
+    from api.measurement_windows import series_windows
+    from core.measurement_scope import resolve_grain
+
+    monkeypatch.setattr("core.measurement_scope._now", lambda: NOW)
+    grain = resolve_grain("days", "UTC")
+    # A comparability break leaves the size run one day long: the 7-day window pools 10-08 alone and says so.
+    sources = {"2026-10-07": {"outcomes": 50, "usable": 50, "estimated_hours": 90.0, "active_hours": 3.0},
+               "2026-10-08": {"outcomes": 181, "usable": 181, "estimated_hours": 400.0, "active_hours": 2.0}}
+    windows = series_windows("estimated_human_hours_per_active_hour", grain, sources, row=lambda *_: {},
+                             measured=lambda *_: True, periods={"2026-10-08"}, size_minimum_n=20)
+    assert (windows["latest"]["from"], windows["latest"]["to"], windows["latest"]["n"]) == ("2026-10-08", "2026-10-08", 181)
+    # A window that pooled nothing names no dates.
+    assert "from" not in windows["previous"] and "to" not in windows["previous"]

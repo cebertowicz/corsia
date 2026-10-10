@@ -286,3 +286,80 @@ async def test_cc_admitted_bash_cancellation_converges_on_process_owner_cleanup(
     assert owner.live_count() == 0
     assert owner.running_records() == ()
     await owner.shutdown()
+
+
+class _Levels:
+    """Record the level each runtime-owner Stop outcome is logged at."""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def info(self, message: str) -> None:
+        self.records.append(("INFO", str(message)))
+
+    def warning(self, message: str) -> None:
+        self.records.append(("WARNING", str(message)))
+
+    def error(self, message: str) -> None:
+        self.records.append(("ERROR", str(message)))
+
+    def exception(self, message: str) -> None:
+        self.records.append(("ERROR", str(message)))
+
+    @property
+    def errors(self) -> list[str]:
+        return [message for level, message in self.records if level == "ERROR"]
+
+
+@pytest.mark.asyncio
+async def test_retirement_pass_after_turn_end_is_not_a_stop_failure(
+    monkeypatch,
+) -> None:
+    """Stop's second pass over an ended Turn must not report a Stop failure.
+
+    ``_retire_stop_owners`` hands ``stop_runtimes`` the handle it just read
+    from ``state._active_turns``, so the object-identity guard there cannot
+    reject it: the pass re-runs teardown on a Turn that already ended, and the
+    process owner's already-cancelled cleanup re-raises inside Stop's frame.
+    """
+    from core.native_turn_control import TurnCancelEvent
+    from core.turn_core import TurnIdentity
+    from host_access import processes
+    from infra import state
+    from subagents import cc_runtime, codex_runtime
+    from ws import stop_runtime
+
+    sid = "retired-native-session"
+    identity = TurnIdentity("retired-turn", 4)
+    cancel_event = TurnCancelEvent()
+    cancel_event.bind_turn_identity(identity)
+    monkeypatch.setattr(state, "_active_turns", {sid: cancel_event})
+    monkeypatch.setattr(state, "_active_llm_tasks", {})
+    monkeypatch.setattr(state, "_active_warm_tasks", {})
+    for runtime in (cc_runtime, codex_runtime):
+        monkeypatch.setattr(runtime, "has_pending_or_live", lambda _sid: False)
+
+    class _AlreadyCancelledCleanup:
+        """ProcessOwner._shield_cleanup after its cleanup task was cancelled."""
+
+        async def terminate_turn(self, *_args, **_kwargs):
+            cleanup = asyncio.ensure_future(asyncio.sleep(30))
+            await asyncio.sleep(0)
+            cleanup.cancel()
+            await asyncio.sleep(0)
+            return cleanup.result()
+
+    monkeypatch.setattr(processes, "PROCESS_OWNER", _AlreadyCancelledCleanup())
+    log = _Levels()
+
+    stopped = await asyncio.wait_for(stop_runtime.stop_runtimes(
+        sid,
+        state._active_turns.get(sid),
+        state._active_llm_tasks.get(sid),
+        identity.turn_id,
+        lambda *_args, **_kwargs: None,
+        log=log,
+    ), timeout=1.0)
+
+    assert stopped is True  # the guard could not reject a handle read from its own registry
+    assert log.errors == []

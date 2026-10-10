@@ -89,8 +89,13 @@ from plans.activity_projection import (
     read_project as read_activity_project,
     read_workspace as read_activity_workspace,
 )
-from plans.user_ask import cleared as ask_cleared
-from plans.node_states import blocked_user_task_sql, failure_asks_user_sql
+from plans.user_ask import (
+    ask_holds,
+    cleared as ask_cleared,
+    placed_ask_hold_sql,
+    user_ask_hold_sql,
+)
+from plans.node_states import blocked_on_user_sql, failure_asks_user_sql, open_user_block_sql
 from plans.folded_reads import read_folded, read_path as read_folded_path
 from plans.operator_node_read import read_node as read_operator_node
 from plans.operator_chat_state import THREAD_STATE_LIMIT, read_thread_states
