@@ -257,4 +257,52 @@ describe('Focus review boundary', () => {
 			expect(host.querySelectorAll('.plan-limit-paused')).toHaveLength(1);
 		} finally { restoreTurnState(threadId, previous); }
 	});
+
+	describe('artifact cards', () => {
+		const askCard = { kind: 'ask', artifact_id: 'a1', title: 'Launch plan', type: 'document', icon: 'file-text', name: null,
+			path: 'launch-plan.md', available: true, opens: true, hold_id: 'h1', state: 'needs_review' };
+		// The reference to the same file under the Turn's closing text, covered by that ask.
+		const refCard = { ...askCard, kind: 'artifact', hold_id: undefined, state: undefined, covered_by_ask: ['h1'] };
+		const message = (id: string, cards: unknown[], content = 'Please review the plan.') => ({
+			kind: 'message' as const, id, showActivity: false, showContent: true,
+			message: { id, thread_id: 'thread-1', role: 'assistant', content, created_at: '2026-10-10T10:00:00', metadata: {}, cards } });
+		const update = (blockedAsksUser: boolean) => ({ kind: 'update' as const, id: 'update-1', card: {
+			id: 1, thread_id: 'thread-1', kind: 'blocked' as const, node_id: 'n1', title: 'Ship the export', after_seq: 1,
+			created_at: '2026-10-10T10:00:01', node_exists: true, asks_user: true, blocked_asks_user: blockedAsksUser, ask: askCard } });
+		const props = (entries: unknown[]) => ({ entries, expandedTools: new Set(), expandedReasoning: new Set(),
+			onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
+			threadId: 'thread-1', renderedStreaming: false, historyComplete: true });
+		const render = (entries: unknown[]) => {
+			component = mount(TranscriptContent, { target: host, props: props(entries) as never });
+			flushSync();
+		};
+		const tileKinds = () => [...host.querySelectorAll<HTMLElement>('.tile')].map((tile) => tile.dataset.cardKind);
+
+		it('homes the ask card on its blocked update row in every round state, so it does not move when answered', () => {
+			render([message('m1', [askCard]), update(true)]);
+			expect(tileKinds()).toEqual(['ask']);
+			expect(host.querySelector('.update-ask .tile')).not.toBeNull();
+			unmount(component!);
+
+			render([message('m1', [askCard]), update(false)]);
+			expect(tileKinds()).toEqual(['ask']);
+			expect(host.querySelector('.update-ask .tile')).not.toBeNull();
+		});
+
+		it('with Focus off shows exactly one card for the reviewed document: the ask card', () => {
+			render([message('step', [askCard], ''), update(true), message('final', [refCard])]);
+			expect(tileKinds()).toEqual(['ask']);
+			unmount(component!);
+
+			render([message('step', [askCard], ''), message('final', [refCard])]);
+			expect(tileKinds()).toEqual(['ask']);
+		});
+
+		it('with Focus on and the ask host collapsed shows exactly one card, the reference on the message', () => {
+			const collapsed = { kind: 'fold' as const, id: 'run:turn-1', turnIds: ['turn-1'], live: false, items: [message('step', [askCard], '')] };
+			render([collapsed, message('final', [refCard])]);
+			expect(tileKinds()).toEqual(['artifact']);
+			expect(host.querySelector('.tile')?.getAttribute('aria-label')).toContain('Launch plan');
+		});
+	});
 });

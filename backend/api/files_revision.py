@@ -21,16 +21,10 @@ from core.workspace_context_sources import is_workspace_context_path
 from registry import models as registry_models
 from registry import service as registry_service
 from registry.file_types import image_media_type
+from registry.path_access import path_allowed
 from registry.doc_freshness import artifact_freshness
 
 router = APIRouter(prefix="/api/files", tags=["files"])
-
-
-def _path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
-    return (
-        any(path == b or b in path.parents for b in bases)
-        or is_workspace_context_path(path, config.WORKSPACE, db=db)
-    )
 
 
 def _writable(path: Path, bases: list[Path], *, db=None) -> bool:
@@ -132,7 +126,7 @@ def _find_candidate(path: str, artifact_id: str | None, user_id: str, bases: lis
         candidate = Path(path).expanduser().resolve()
     except OSError:
         return None
-    if not _path_allowed(candidate, bases, db=db):
+    if not path_allowed(candidate, bases, db=db):
         raise HTTPException(400, "Path is outside this scope's roots")
     if not candidate.is_file():
         return None
@@ -161,6 +155,6 @@ def _artifact_path(row: dict, bases: list[Path], db) -> Path | None:
         candidate = Path(str(raw)).expanduser().resolve()
     except OSError:
         return None
-    if not candidate.is_file() or not _path_allowed(candidate, bases, db=db):
+    if not candidate.is_file() or not path_allowed(candidate, bases, db=db):
         return None
     return candidate
