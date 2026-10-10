@@ -3,7 +3,6 @@
 	import MeasurementBarChart from './MeasurementBarChart.svelte';
 	import { SIZE_SERIES, grainChart, hoursPerOutcome, minutesPerOutcome } from './measurementSize';
 	import { periodChange, sizeView, type RateWindow } from './measurementPeriodView';
-	import { periodName } from '$lib/stores/measurementPeriod';
 
 	let { state, onRetry }: { state: PanelState; onRetry: () => void } = $props();
 
@@ -35,7 +34,7 @@
 	const size = $derived(latest?.size ?? null);
 	const current = $derived(view.current);
 	const rate = $derived(current.value);
-	const nowText = $derived(state.period && view.periods.length ? periodName(state.period.latest) : '');
+	const nowText = $derived(view.periods.length ? view.nowText : '');
 	const chart = $derived(grainChart(state.period, view.points, state.averagePeriods));
 	/** "+206% vs Sep 21 to Sep 27"; with no previous window, or one the series covers only in part, it reads new. */
 	const vsPrevious = (figure: (w: RateWindow) => number | null, withPreviousN = false) => periodChange(view, withPreviousN, figure);
