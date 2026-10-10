@@ -309,4 +309,5 @@ def test_the_read_names_the_newest_ask_and_the_other_askers(db):
     assert state["ask_reason"] == "Check my sources too"
     assert state["asker"]["name"] == "Research"
     assert state["other_askers"] == ["Style"]
+    assert state["other_asks"] == [{"name": "Style", "reason": "Please read: Review the proposal"}]
     assert state["other_request_count"] == 1

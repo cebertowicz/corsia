@@ -91,9 +91,14 @@ def test_request_changes_without_feedback_or_note_is_refused_with_a_code(integra
 
     assert refused.status_code == 422
     assert refused.json()["detail"]["code"] == "note_required"
-    assert _clear(
+    sent = _clear(
         integration_client, artifact, verdict="changes_requested", note="Cut section 3.",
-    ).status_code == 200
+    )
+    assert sent.status_code == 200
+    assert sent.json()["review"] == {
+        "verdict": "changes_requested", "note": "Cut section 3.",
+        "feedback_counts": {"comments": 0, "suggestions": 0, "edits": 0},
+    }
 
 
 def test_a_second_answer_is_stale_and_clears_nothing(integration_client):

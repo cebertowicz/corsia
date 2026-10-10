@@ -46,6 +46,8 @@ class AttentionResult:
     artifact_archived: bool = False        # closeout NEVER archives the artifact
     subscription_archived: bool = False    # closeout NEVER archives a subscription
     defer_condition: dict | None = None
+    #: The recorded review verdict, its note and the round's counts, once answered.
+    review: dict | None = None
 
 
 def _identity_row(artifact_id: str, db) -> dict:
@@ -208,7 +210,8 @@ def _clear_attention(
     return AttentionResult(
         artifact_id=artifact_id, outcome=outcome, attention_state=new_state,
         cleared_levels=tuple(levels), artifact_archived=False,
-        subscription_archived=False, defer_condition=defer_condition)
+        subscription_archived=False, defer_condition=defer_condition,
+        review=answer.payload() if answer else None)
 
 
 def validate_defer_condition(condition: dict | None) -> dict:

@@ -56,7 +56,7 @@
     "frontend/src/lib/ws/handlers.ts": 365,
     "frontend/src/lib/ws/handlersTurns.ts": 478,
     "frontend/src/routes/+page.svelte": 499,
-    "frontend/src/routes/_design/+page.svelte": 659
+    "frontend/src/routes/_design/+page.svelte": 648
   },
   "function_limits": {
     "backend/api/delegation.py::create_thread": 154,

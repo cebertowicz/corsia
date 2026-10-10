@@ -136,11 +136,12 @@ def round_state(db, artifact_id: str) -> dict:
     counts = round_counts(db, artifact_id, holds[0]["raised_at"] if holds else None)
     newest = holds[0] if holds else None
     seen = {newest["asker_id"]} if newest else set()
-    others = []
+    others, other_asks = [], []
     for hold in holds[1:]:
         if hold["asker_id"] not in seen:
             seen.add(hold["asker_id"])
             others.append(hold["asker_name"] or str(hold["asker_id"]))
+            other_asks.append({"name": others[-1], "reason": hold["reason"]})
     return {
         "ask_raised": newest is not None,
         "ask_reason": newest["reason"] if newest else None,
@@ -150,6 +151,7 @@ def round_state(db, artifact_id: str) -> dict:
             if newest else None
         ),
         "other_askers": others,
+        "other_asks": other_asks,
         "other_request_count": len(holds) - 1 if holds else 0,
         "round_feedback_count": sum(counts.values()),
         "round_feedback_counts": counts,
