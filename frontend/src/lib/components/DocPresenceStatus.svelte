@@ -130,6 +130,7 @@
 			key: comment.id, threadId: frame.thread_id, name: agent?.name ?? frame.agent, color: agent?.color ?? agentColor(frame.thread_id),
 			from: anchor.from, to: anchor.to,
 			sweepMs: selectSweepMs(anchor.to - anchor.from), holdMs: commentHoldMs(comment.text.length),
+			callId: frame.call_id ?? null, insert: comment.replacement ?? null,
 		});
 	}
 

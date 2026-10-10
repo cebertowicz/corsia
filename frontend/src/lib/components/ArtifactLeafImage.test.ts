@@ -152,6 +152,20 @@ describe('artifact leaf renderer choice', () => {
 		expect(host.querySelector('.image-viewer')).toBeNull();
 	});
 
+	it('gives a tab the backend calls an image the image glyph, and a text tab the document glyph whatever its name', async () => {
+		openArtifactTab(THREAD, { artifactId: 'art-1', path: '/ws/shot.png', title: 'shot.png' });
+		await settle();
+		const glyph = (title: string) => [...host.querySelectorAll('.tab')].find((t) => t.textContent?.includes(title))!.querySelector('.tab-ico')!;
+		expect(glyph('shot.png').querySelector('circle')).not.toBeNull();
+
+		// Named like an image but opened as text: only the backend's answer picks the image glyph.
+		mocks.fetchContent.mockResolvedValue(DOC);
+		openArtifactTab(THREAD, { artifactId: 'art-2', path: '/ws/notes.md', title: 'notes.md' });
+		await settle();
+		expect(glyph('notes.md').querySelector('circle')).toBeNull();
+		expect(glyph('shot.png').querySelector('circle')).not.toBeNull();
+	});
+
 	it('switches a tab to the image viewer when the text open is refused as an image, storing nothing on the tab', async () => {
 		openArtifactTab(THREAD, { artifactId: 'art-1', path: '/ws/legacy.png', title: 'legacy.png' });
 		await settle();

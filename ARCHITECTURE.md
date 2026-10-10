@@ -97,8 +97,8 @@ transition that changes eligibility reconciles the plan in the same transaction
 (`plans.admission.reconcile_plan`), so the next eligible task is selected
 without a manual start or another Turn. A delegated step's wait is read from
 its worker, so the worker's side reconciles the delegator: every worker-plan
-reconciliation and the worker's Turn end (`plans/delegated_selection.py`,
-#2168). The step taking its slot back is state; the parent hears about its
+reconciliation and the worker's Turn end (`plans/delegated_selection.py`).
+The step taking its slot back is state; the parent hears about its
 worker only through the notification matrix. A closing mutation (request_review,
 fail, accept, accept_with_follow_up, archive_node) may start one task the caller
 names through the same activate/start writers, after its own release and before
@@ -109,7 +109,7 @@ call that actually started under the executor's valid selection, so an
 in-flight effect keeps an owner: its open row keeps that attempt's id for
 attribution when the call settles. It never holds the slot: parking a task
 releases its attempt at once, even mid-call, so a lost settlement cannot
-strand the executor (#2705). Plans' own tools (tool
+strand the executor. Plans' own tools (tool
 catalog category `plans`) record no dispatch, because their plan effect commits
 in the same write. A dispatch never selects, binds or refuses a call — Plans is
 not a tool-boundary authorization, and each tool still passes its own

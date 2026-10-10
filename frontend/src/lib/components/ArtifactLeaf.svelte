@@ -50,6 +50,7 @@
 	// is shown by whichever viewer the next load finds it needs.
 	let imageTabs = $state<string[]>([]);
 	const imageKey = (instanceId: string) => `${threadId}\u0000${instanceId}`;
+	const imageTabIds = $derived(new Set(workspace.tabs.filter((t) => imageTabs.includes(imageKey(t.instanceId))).map((t) => t.instanceId)));
 	const showable = $derived<DocViewerTarget | null>(
 		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? targetForTab(activeTab) : null
 	);
@@ -169,7 +170,11 @@
 	<button class="rail" onclick={expand} aria-label="Expand artifact panel ({workspace.tabs.length} open)">
 		{#each workspace.tabs as t (t.instanceId)}
 			<span class="rail-ico" class:active={t.instanceId === workspace.activeTabId} class:err={t.status === 'error' || t.status === 'unavailable'}>
-				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+				{#if imageTabIds.has(t.instanceId)}
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="m21 16-5-5-8 9" /></svg>
+				{:else}
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+				{/if}
 				{#if isTabChanged(t)}<span class="rail-dot" aria-hidden="true"></span>{/if}
 			</span>
 		{/each}
@@ -181,6 +186,7 @@
 			<ArtifactTabStrip
 				tabs={workspace.tabs}
 				activeKey={workspace.activeTabId}
+				{imageTabIds}
 				onSelect={selectTab}
 				onClose={requestCloseTab}
 				onCollapse={collapse}
