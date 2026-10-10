@@ -135,7 +135,7 @@ the F-verdict state and exactly the same production failure:
 
 The harness reports `stopped` as converging at every kill point. It does not.
 That is a false green produced by the seam, in the scenario the STATE file cites
-as covering the #1018 shape.
+as covering the wedged-thread-on-explicit-Stop shape.
 
 **Recommendation.** Do not patch a name — patch the *thing*. Wrap the connection
 factory at its single source: have the seam replace `infra.database._make_connection`

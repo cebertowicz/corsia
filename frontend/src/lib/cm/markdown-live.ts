@@ -4,6 +4,7 @@ import { StateField, type EditorState, type Extension, type Range } from '@codem
 import type { SyntaxNodeRef } from '@lezer/common';
 import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
+import { markdownImages, renderableImage } from './markdown-image';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -143,6 +144,10 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 					case 'Link':
 						decos.push(Decoration.mark({ class: 'cm-md-link' }).range(node.from, node.to));
 						break;
+					case 'Image':
+						if (renderableImage(view.state, node.node)) return false; // hidden and drawn by `markdown-image.ts`
+						decos.push(Decoration.mark({ class: 'cm-md-link' }).range(node.from, node.to)); // a web URL shows as a link, never fetched
+						break;
 					case 'LinkMark':
 					case 'URL':
 						hide(node.from, node.to);
@@ -251,5 +256,6 @@ const markdownMermaidDecorations = syntaxDecorationField(buildMermaidDecorations
 export const markdownLivePreview: Extension = [
 	markdownInlinePreview,
 	markdownTableDecorations,
-	markdownMermaidDecorations
+	markdownMermaidDecorations,
+	markdownImages
 ];

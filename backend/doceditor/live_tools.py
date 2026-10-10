@@ -28,6 +28,12 @@ def find_live(path: Path):
     return None
 
 
+def find_live_artifact(artifact_id: str):
+    """The open live document of one artifact, if any; no database, safe on the pump."""
+    manager = get_documents()
+    return manager.documents.get(artifact_id) if manager is not None else None
+
+
 def _refused_store(path: Path) -> str | None:
     """Refuse a plain write to a document whose store last refused to open."""
     manager = get_documents()

@@ -5,13 +5,19 @@ from __future__ import annotations
 import json
 import re
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 from contextlib import contextmanager
+from dataclasses import dataclass
 from collections.abc import Iterator
 from pathlib import Path
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
+_READER = Path(__file__).with_name("reviewer_read.py")
+_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+_MIN_RUN_NAME = 16
 
 
 class ExactSourceError(RuntimeError):
@@ -21,12 +27,13 @@ class ExactSourceError(RuntimeError):
 def claude_exact_source_controls(
     git_dir: str, base_sha: str, head_sha: str,
 ) -> tuple[list[str], dict[str, str]]:
-    """Return Claude's narrow exact-source tool and Git environment controls."""
-    _require_sha(base_sha, "base_sha")
-    _require_sha(head_sha, "head_sha")
-    resolved = str(Path(git_dir).resolve())
-    git = f"git --git-dir={shlex.quote(resolved)}"
-    revision_range = f"{base_sha}...{head_sha}"
+    """Return Claude's narrow exact-source tool and Git environment controls.
+
+    The only command the model may run is ``reviewer_read.py`` with its object
+    store and revisions fixed by the rule prefix. Raw Git is never allowed: a
+    wildcard after a Git command would let the model add Git options.
+    """
+    reader = reader_command(git_dir, base_sha, head_sha)
     args = [
         "--restricted",
         "--safe-mode",
@@ -35,12 +42,12 @@ def claude_exact_source_controls(
         "--permission-mode", "dontAsk",
         "--tools", "Bash",
         "--allowedTools",
-        f"Bash({git} diff --no-ext-diff --no-textconv --stat {revision_range})",
-        f"Bash({git} diff --no-ext-diff --no-textconv --name-only {revision_range})",
-        f"Bash({git} diff --no-ext-diff --no-textconv --find-renames {revision_range} *)",
-        f"Bash({git} show {head_sha}:*)",
-        f"Bash({git} grep -n -F -e * {head_sha} -- *)",
-        "--add-dir", resolved,
+        f"Bash({reader} stat)",
+        f"Bash({reader} names)",
+        f"Bash({reader} diff)",
+        f"Bash({reader} diff *)",
+        f"Bash({reader} show *)",
+        f"Bash({reader} grep *)",
     ]
     env = {
         "GIT_CONFIG_NOSYSTEM": "1",
@@ -50,12 +57,137 @@ def claude_exact_source_controls(
     return args, env
 
 
+def reader_command(git_dir: str, base_sha: str, head_sha: str) -> str:
+    """Return the fixed shell prefix of every exact-source read."""
+    _require_sha(base_sha, "base_sha")
+    _require_sha(head_sha, "head_sha")
+    resolved = str(Path(git_dir).resolve())
+    parts = [sys.executable, "-I", str(_READER), resolved, base_sha, head_sha]
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+@dataclass(frozen=True)
+class ConfigStateScope:
+    """The Claude config paths a reviewer run may write, besides its own dirs.
+
+    ``root`` is the effective config directory, ``global_file`` the global
+    config file, and ``run_name`` the unique basename of the run's working
+    directory. The CLI names its per-working-directory state folder after that
+    path with every non-alphanumeric character replaced by ``-``, so the run's
+    folder is the one whose name ends with ``run_name``.
+    """
+
+    root: Path
+    global_file: Path
+    run_name: str
+    allow_global_file: bool = False
+
+
+def claude_config_state_scope(env: dict[str, str], run_dir: str) -> ConfigStateScope:
+    """Resolve the config paths for a launch environment and run directory.
+
+    ``CLAUDE_CONFIG_DIR`` is absent for the default account, whose root is
+    ``~/.claude`` and whose global file is ``~/.claude.json``; a custom root
+    keeps the global file inside it.
+    """
+    custom = (env.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if custom:
+        root = Path(custom).expanduser().resolve()
+        global_file = root / ".claude.json"
+    else:
+        home = Path(env.get("HOME") or Path.home()).expanduser()
+        root = (home / ".claude").resolve()
+        global_file = (home / ".claude.json").resolve()
+    run_name = Path(run_dir).name
+    if len(run_name) < _MIN_RUN_NAME or not run_name.isascii():
+        raise ExactSourceError("reviewer run directory name is not unique enough")
+    return ConfigStateScope(root=root, global_file=global_file, run_name=run_name)
+
+
+def _reject_control_chars(path: str) -> str:
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in path):
+        raise ExactSourceError("reviewer write path contains a control character")
+    return path
+
+
+def _sb_string(path: str) -> str:
+    escaped = _reject_control_chars(path).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _sb_regex_path(path: str) -> str:
+    if '"' in _reject_control_chars(path):
+        raise ExactSourceError("reviewer write path contains a double quote")
+    return re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", path)
+
+
+def _sb_regex_name(name: str) -> str:
+    """Match ``name`` the way the CLI folds a path component into a folder name."""
+    return "".join(ch if ch.isalnum() else "[^A-Za-z0-9]" for ch in name)
+
+
+def render_write_profile(
+    writable_dirs: list[str], config_state: ConfigStateScope | None = None,
+) -> str:
+    """Render the Seatbelt profile: deny writes, then allow the listed scopes."""
+    allowed = " ".join(
+        f"(subpath {_sb_string(str(Path(path).resolve()))})" for path in writable_dirs
+    )
+    rules = [
+        f"(allow file-write* {allowed} (literal \"/dev/null\") (literal \"/dev/tty\")"
+        " (regex #\"^/dev/fd/\") (regex #\"^/dev/ttys\"))"
+    ]
+    if config_state is not None:
+        root = _sb_regex_path(str(config_state.root))
+        folder = f"[^/]*-{_sb_regex_name(config_state.run_name)}"
+        rules.append(f'(allow file-write* (regex #"^{root}/projects/{folder}(/.*)?$"))')
+        if config_state.allow_global_file:
+            global_file = _sb_regex_path(str(config_state.global_file))
+            rules.append(f'(allow file-write* (regex #"^{global_file}(\\.[^/]*)?$"))')
+    return "(version 1)(allow default)(deny file-write*)" + "".join(rules)
+
+
+def write_confined(
+    cmd: list[str], writable_dirs: list[str],
+    config_state: ConfigStateScope | None = None,
+) -> list[str]:
+    """Wrap a reviewer CLI so it can write only inside ``writable_dirs``.
+
+    With ``config_state`` it may also write its own run's folder under the
+    config root's ``projects`` directory, and the global config file only when
+    that scope allows it. Fails closed: without macOS sandbox-exec the reviewer
+    does not run.
+    """
+    if sys.platform != "darwin" or not Path(_SANDBOX_EXEC).is_file():
+        raise ExactSourceError("reviewer write confinement requires macOS sandbox-exec")
+    return [_SANDBOX_EXEC, "-p", render_write_profile(writable_dirs, config_state), *cmd]
+
+
+def discard_config_state(config_state: ConfigStateScope) -> None:
+    """Remove the run's folders left under the config root's ``projects``."""
+    projects = config_state.root / "projects"
+    suffix = "-" + re.sub(r"[^A-Za-z0-9]", "-", config_state.run_name)
+    try:
+        leftovers = [
+            entry for entry in projects.iterdir()
+            if entry.is_dir() and not entry.is_symlink() and entry.name.endswith(suffix)
+        ]
+    except OSError:
+        return
+    for entry in leftovers:
+        shutil.rmtree(entry, ignore_errors=True)
+
+
 def codex_exact_source_controls(review_dir: str, git_dir: str) -> list[str]:
     """Confine Codex shell reads to runtime files and this source store."""
     filesystem = {
         ":minimal": "read",
         str(Path(review_dir).resolve()): "read",
         str(Path(git_dir).resolve()): "read",
+        # The exact-source reader and the interpreter that runs it.
+        str(_READER.parent.resolve()): "read",
+        str(Path(sys.prefix).resolve()): "read",
+        str(Path(sys.base_prefix).resolve()): "read",
     }
     inline_table = "{" + ",".join(
         f"{json.dumps(path)}={json.dumps(access)}"
@@ -127,16 +259,18 @@ def _prepare_source(repo_dir: str, base_sha: str, head_sha: str) -> tuple[str, s
     if ancestry.returncode or not ancestry.stdout.strip():
         raise ExactSourceError("exact reviewed base/head ancestry is unavailable")
 
-    git = f"git --git-dir={shlex.quote(git_dir)}"
+    reader = reader_command(git_dir, base_sha, head_sha)
     instructions = f"""\
-Read only the immutable reviewed change {base_sha}...{head_sha}. Start with:
-- {git} diff --no-ext-diff --no-textconv --stat {base_sha}...{head_sha}
-- {git} diff --no-ext-diff --no-textconv --name-only {base_sha}...{head_sha}
-- {git} diff --no-ext-diff --no-textconv --find-renames {base_sha}...{head_sha}
-Read exact files with `{git} show {head_sha}:<path>` and search the exact tree
-with `{git} grep -n -F -e <pattern> {head_sha} -- <pathspec>`.
+Read only the immutable reviewed change {base_sha}...{head_sha}, and only through
+this reader (the one command you may run). Start with:
+- {reader} stat
+- {reader} names
+- {reader} diff
+Limit the diff with `{reader} diff <path> ...`, read one file at the head with
+`{reader} show <path>`, and search the head tree with
+`{reader} grep <fixed-string> [<pathspec> ...]` (quote the pattern).
 The working directory is intentionally not a checkout. Never use bare `cat`,
-`rg`, or working-tree files as evidence; they cannot represent this revision.
+`rg`, `git`, or working-tree files as evidence; they cannot represent this revision.
 """
     return instructions, git_dir
 

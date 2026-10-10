@@ -614,7 +614,7 @@ def test_no_window_is_written_when_the_default_is_in_force(isolated_db):
                 backend,source,enabled,available,context_window,created_at,updated_at)
                VALUES ('default-only','native','omlx','default-only',
                        'omlx@srv/default-only','Default Only','network',
-                       'discovered',1,1,1_000_000,'t','t')"""
+                       'discovered',1,1,1000000,'t','t')"""
         )
         db.commit()
         row = db.execute("SELECT * FROM models WHERE id = 'default-only'").fetchone()

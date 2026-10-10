@@ -71,6 +71,10 @@ export const docTheme = EditorView.theme({
 	// The diagram widget's spacing is beside the shared .mermaid-diagram rule in app.css.
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
 	'.cm-md-table .table-wrap': { margin: '0' },
+	// An image sits at its own size, scaled down to the column and never up; padding, not margin, as above.
+	'.cm-md-image': { padding: '0.4em 0' },
+	'.cm-md-image img': { display: 'block', maxWidth: '100%', height: 'auto' },
+	'.cm-md-image-note': { color: 'var(--text-tertiary)' },
 
 	'.cm-comment-anchor': {
 		backgroundColor: 'color-mix(in srgb, var(--amber) 13%, transparent)',

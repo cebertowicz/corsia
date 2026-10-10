@@ -48,7 +48,9 @@ def _repo_pair(tmp_path: Path, branch: str = "main") -> tuple[Path, Path]:
 def _push_extra_commit(remote: Path, tmp_path: Path, branch: str, name: str) -> None:
     """Push one more commit to ``remote`` from a throwaway clone another agent owns."""
     other = tmp_path / name
-    _git(["clone", "-q", str(remote), str(other)], cwd=tmp_path)
+    # Name the branch: the bare remote's HEAD follows the host's
+    # init.defaultBranch, which need not be the branch pushed.
+    _git(["clone", "-q", "-b", branch, str(remote), str(other)], cwd=tmp_path)
     (other / "f.txt").write_text(f"{name}\n")
     _git(["commit", "-q", "-am", name], cwd=other)
     _git(["push", "-q", "origin", branch], cwd=other)

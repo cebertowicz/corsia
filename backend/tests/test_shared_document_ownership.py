@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 import time
 
@@ -114,6 +115,19 @@ def _event_types(db, artifact_id: str) -> list[str]:
             (artifact_id,),
         ).fetchall()
     ]
+
+
+def _shell_write(path: Path, text: str, started_ns: int) -> None:
+    """Write as a shell command that started at ``started_ns`` would.
+
+    Linux stamps mtimes from a coarse kernel clock that can trail
+    ``time.time_ns()`` by a tick, so a write made just after ``started_ns`` can
+    read as older than it; a command's own write never predates its start.
+    """
+    path.write_text(text, encoding="utf-8")
+    stat = path.stat()
+    if stat.st_mtime_ns < started_ns:
+        os.utime(path, ns=(stat.st_atime_ns, started_ns))
 
 
 def test_acting_owner_resolves_agents_workers_user_and_plain_chat(ownership_scope):
@@ -474,7 +488,7 @@ def test_shell_bypass_detects_foreign_but_not_owner_or_sanctioned_write(ownershi
     first = _write(scope, "shell.md", "first\n")
     target = scope["category"] / "shell.md"
     started = time.time_ns()
-    target.write_text("shell edit\n", encoding="utf-8")
+    _shell_write(target, "shell edit\n", started)
     notices = detect_shell_shared_writes(
         scope["other"], "project-alpha", "printf edit > shared/documents/shell.md", started,
         scope["root"],
@@ -534,7 +548,7 @@ async def test_shell_detection_takes_the_writer_only_to_record_a_bypass(
     ) == []
     assert taken == []
 
-    target.write_text("foreign edit\n", encoding="utf-8")
+    _shell_write(target, "foreign edit\n", started)
     assert len(detection.detect_shell_shared_writes(
         scope["other"], "project-alpha", "cd shared/documents && printf x >> quiet.md", started, root,
     )) == 1

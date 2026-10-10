@@ -11,9 +11,9 @@ export interface RatePeriod { period: string; value: number | null; n: number; /
 export interface RateWindow { value: number | null; n: number; periods: string[]; size?: WindowSize }
 
 /** The served latest and previous windows, and the dates that name them. */
-export interface WindowPair { current: RateWindow; previous: RateWindow | null; prevText: string; previousExpected: number }
+export interface WindowPair { current: RateWindow; previous: RateWindow | null; nowText: string; prevText: string; previousExpected: number }
 
-export interface PeriodView extends WindowPair { periods: RatePeriod[]; points: BarPoint[]; nowText: string }
+export interface PeriodView extends WindowPair { periods: RatePeriod[]; points: BarPoint[] }
 
 /**
  * Completed, comparable periods of one series, from the first with a value on. The server marks a period partial while
@@ -58,6 +58,8 @@ export function windowPair(drawn: string[], period?: MeasurementPeriod, windows?
 	const cur = period ? drawn.filter((key) => inSpan(key, period.latest)) : [], prev = period ? drawn.filter((key) => inSpan(key, period.previous)) : [];
 	return {
 		current: served(windows?.latest, cur, scale), previous: prev.length && windows?.previous ? served(windows.previous, prev, scale) : null,
+		// The latest figure is named by the dates the server pooled for it, never by a wider window it did not pool.
+		nowText: period ? periodName(windows?.latest?.from && windows.latest.to ? { from: windows.latest.from, to: windows.latest.to } : period.latest) : '',
 		prevText: period && prev.length ? periodName(period.previous) : '',
 		// With no served period there is no previous window to cover, so nothing reads new for covering it in part.
 		previousExpected: period ? spanPeriods(period, period.previous) : 0,
@@ -68,11 +70,8 @@ export function windowPair(drawn: string[], period?: MeasurementPeriod, windows?
 export function periodView(rows: MeasurementRow[], series: string, scale = 1, period?: MeasurementPeriod, windows?: SeriesWindows): PeriodView {
 	const daily = period?.grain === 'days';
 	const periods = ratePeriods(rows, series, scale, daily);
-	return {
-		periods, points: ratePoints(daily ? dropTrailingEmptyDays(periods) : periods),
-		...windowPair(periods.filter((w) => !w.partial).map((w) => w.period), period, windows, scale),
-		nowText: period && periods.length ? periodName(period.latest) : '',
-	};
+	const pair = windowPair(periods.filter((w) => !w.partial).map((w) => w.period), period, windows, scale);
+	return { periods, points: ratePoints(daily ? dropTrailingEmptyDays(periods) : periods), ...pair, nowText: periods.length ? pair.nowText : '' };
 }
 
 export interface SizeView extends WindowPair { periods: PeriodSize[]; points: BarPoint[] }

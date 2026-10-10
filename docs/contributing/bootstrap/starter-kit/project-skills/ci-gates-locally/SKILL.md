@@ -14,7 +14,7 @@ Install the pre-push gate with `git config core.hooksPath .githooks`.
 
 ## Run before pushing, not after
 
-Push is confirmation, not discovery. A branch that has not passed every blocking gate locally is not ready to push. Upstream CI runs on the maintainers' self-hosted runners with limited capacity; every avoidable red run costs them runner time and attention.
+Push is confirmation, not discovery. A branch that has not passed every blocking gate locally is not ready to push. Upstream CI runs on GitHub-hosted runners whose minutes the maintainers pay for; every avoidable red run costs them money and attention.
 
 ## The gates
 
