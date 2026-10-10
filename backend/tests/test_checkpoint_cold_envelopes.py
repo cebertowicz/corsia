@@ -221,14 +221,14 @@ def test_cc_cold_env_enforces_output_cap_without_changing_warm_env(
 
 def test_cc_declared_context_limit_cannot_be_installed_as_checkpoint() -> None:
     from core import checkpoint_cc_fork as cc
-    from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED
+    from core.checkpoint_types import CHECKPOINT_CONTEXT_TRUNCATED, ProviderCheckpointRejected
 
     too_long = json.dumps({
         "type": "result", "is_error": True, "result": "Prompt is too long",
     }).encode()
-    result = cc._result(too_long)
-    assert result.raw_body == ""  # Provider error prose is never checkpoint content.
-    assert result.diagnostic == CHECKPOINT_CONTEXT_TRUNCATED
+    # Provider error prose is never checkpoint content, and no body fails named.
+    with pytest.raises(ProviderCheckpointRejected, match=CHECKPOINT_CONTEXT_TRUNCATED):
+        cc._result(too_long)
 
     unrelated = json.dumps({
         "type": "result", "is_error": True, "result": "usable checkpoint",
