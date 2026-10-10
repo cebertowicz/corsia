@@ -68,11 +68,15 @@ function isNode(v: unknown): boolean {
 	return Array.isArray(v.user_actions) && isStrArray(v.attention_path);
 }
 
+const isFoldLevel = (v: unknown): boolean =>
+	isObject(v) && isStrOrNull(v.parent_id) && isNum(v.done) && isNum(v.failed) && isNum(v.closed) && isNum(v.more);
+
 function isPlanEntry(v: unknown): boolean {
 	if (!isObject(v) || !isObject(v.plan) || !isStr(v.plan.id) || !isStr(v.plan.state) || !isNum(v.plan.revision)) return false;
 	if (!isObject(v.owner) || !isObject(v.progress) || !isPlanProgress(v.progress)) return false;
 	if (!isObject(v.progress.distribution) || !isDisplay(v.display) || !isOversize(v.oversize)) return false;
 	if (!isStrArray(v.current_node_ids) || !isStrArray(v.next_node_ids)) return false;
+	if (!Array.isArray(v.folds) || !v.folds.every(isFoldLevel) || !isNum(v.root_count)) return false;
 	return Array.isArray(v.nodes) && v.nodes.every(isNode);
 }
 

@@ -2,20 +2,22 @@ import type { OperatorNode } from '$lib/api/plans';
 import { isScheduledMember, scheduledClusters } from './planScheduled';
 import type { ScheduledView } from './planDisplay';
 import { waitEndsAtMs } from './planWaits';
+import type { FoldLevelView } from './planFoldLevels';
 
 /**
  * Where folded work sits in `PlanTree`: the pure per-level rules.
  *
- * The server marks a node `folded` the moment its branch has nothing open
- * left (`backend/plans/node_states.py`, the same rule the agent's full read
- * uses); the fold wave is where the user sees it go.
+ * The server decides what is folded and how many rows each level has folded
+ * (`backend/plans/open_folds.py`); this file only places what it sends. The
+ * fold wave is where the user sees a row go.
  * Each level of the tree renders its still-open rows first, in plan order, so
  * its top row is always the current or next item; its finished rows (done,
  * failed or closed, and not blocked by an open descendant) sink to the bottom
  * of that same level, newest settled first; its folded rows page open below
  * those, also newest first; and one "N completed" row closes the level. That
- * row opens in pages of `FOLD_PAGE`. Folding and sinking move rows; ratios
- * come from the server, which counts only branches still in play.
+ * row opens in pages of `FOLD_PAGE` (`planFoldLevels`, `foldHistory`). Folding
+ * and sinking move rows; ratios come from the server, which counts only
+ * branches still in play.
  *
  * Timed waits order soonest-ending first after the level's other open rows.
  * Only finished work folds: an open task is never behind the fold row's check.
@@ -30,7 +32,7 @@ export const ROOT_LEVEL = '';
 export type PlanTreeItem =
 	/** `nest` indents a row under its level's Scheduled row; `view` says how it words its time. */
 	| { kind: 'node'; key: string; node: OperatorNode; nest?: number; view?: ScheduledView }
-	| { kind: 'fold'; key: string; level: string; depth: number; folded: OperatorNode[]; shown: number }
+	| { kind: 'fold'; key: string; level: string; depth: number; view: FoldLevelView; shown: number }
 	/** A level's quietly scheduled tasks (one or more), opened or closed as one. */
 	| { kind: 'scheduled'; key: string; level: string; depth: number; members: OperatorNode[]; open: boolean }
 	/** Members of an open Scheduled row that share one moment, under one time line. */
@@ -80,39 +82,19 @@ export function openBlockedIds(byId: Map<string, OperatorNode>): Set<string> {
 	return blocked;
 }
 
-/** Each level's folded rows within the rendered depth, newest settled first. */
-export function foldedByLevel(
-	nodes: OperatorNode[],
-	byId: Map<string, OperatorNode>,
-	maxDepth: number,
-): Map<string, OperatorNode[]> {
-	const levels = new Map<string, OperatorNode[]>();
-	for (const node of nodes) {
-		if (!node.folded || node.depth > maxDepth) continue;
-		const level = levelOf(node, byId);
-		const siblings = levels.get(level);
-		if (siblings) siblings.push(node);
-		else levels.set(level, [node]);
-	}
-	for (const folded of levels.values()) folded.sort((a, b) => settledAt(b) - settledAt(a));
-	return levels;
-}
-
 /** Page each level open just far enough to show every folded row on `path`; nothing folds back. */
 export function revealFoldedPath(
-	nodes: OperatorNode[],
+	levels: Map<string, FoldLevelView>,
 	byId: Map<string, OperatorNode>,
-	maxDepth: number,
 	path: string[],
 	revealed: Record<string, number>,
 ): Record<string, number> {
-	const levels = foldedByLevel(nodes, byId, maxDepth);
 	const next = { ...revealed };
 	for (const nodeId of path) {
 		const node = byId.get(nodeId);
 		if (!node?.folded) continue;
 		const level = levelOf(node, byId);
-		const position = levels.get(level)?.findIndex((candidate) => candidate.id === nodeId) ?? -1;
+		const position = levels.get(level)?.rows.findIndex((candidate) => candidate.id === nodeId) ?? -1;
 		if (position >= 0) next[level] = Math.max(next[level] ?? 0, position + 1);
 	}
 	return next;
@@ -120,12 +102,12 @@ export function revealFoldedPath(
 
 /** The folded rows the user has paged open: the first `revealed[level]` of each level. */
 export function revealedIds(
-	levels: Map<string, OperatorNode[]>,
+	levels: Map<string, FoldLevelView>,
 	revealed: Record<string, number>,
 ): Set<string> {
 	const ids = new Set<string>();
-	for (const [level, folded] of levels) {
-		for (const node of folded.slice(0, revealed[level] ?? 0)) ids.add(node.id);
+	for (const [level, view] of levels) {
+		for (const node of view.rows.slice(0, revealed[level] ?? 0)) ids.add(node.id);
 	}
 	return ids;
 }
@@ -150,7 +132,7 @@ export interface ArrangeInput {
 	/** Rendered rows in canonical plan order, after every visibility filter. */
 	visible: OperatorNode[];
 	byId: Map<string, OperatorNode>;
-	levels: Map<string, OperatorNode[]>;
+	levels: Map<string, FoldLevelView>;
 	/** Whether a level's children are on screen: its parent is rendered and open. */
 	isLevelOpen: (level: string) => boolean;
 	/** Terminal nodes an open descendant keeps out of the finished group (`openBlockedIds`). */
@@ -193,7 +175,7 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 	const emit = (level: string) => {
 		const rows = children.get(level) ?? [];
 		const quiet = quietIn(level);
-		const order = new Map((levels.get(level) ?? []).map((node, index) => [node.id, index]));
+		const order = new Map((levels.get(level)?.rows ?? []).map((node, index) => [node.id, index]));
 		const unfolded = rows.filter((node) => !order.has(node.id));
 		const settled = (node: OperatorNode) => isFinished(node) && !openBlocked.has(node.id);
 		const byEnd = (a: OperatorNode, b: OperatorNode) => (waitEndsAtMs(a) ?? Infinity) - (waitEndsAtMs(b) ?? Infinity);
@@ -244,12 +226,9 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 			}
 		}
 		for (const node of [...finished, ...revealed]) push(node);
-		const folded = levels.get(level) ?? [];
-		if (folded.length > 0 && input.isLevelOpen(level)) {
-			items.push({
-				kind: 'fold', key: `fold:${level}`, level,
-				depth: folded[0].depth, folded, shown: revealed.length,
-			});
+		const view = levels.get(level);
+		if (view && input.isLevelOpen(level)) {
+			items.push({ kind: 'fold', key: `fold:${level}`, level, depth: view.depth, view, shown: revealed.length });
 		}
 	};
 	emit(ROOT_LEVEL);
@@ -262,22 +241,4 @@ export function arrangeItems(input: ArrangeInput): PlanTreeItem[] {
 		emit(node.id);
 	}
 	return items;
-}
-
-/** What a fold row says: its finished work by outcome, completed first. */
-export function foldLabel(folded: OperatorNode[]): string {
-	const completed = folded.filter((node) => node.display.tone_key === 'complete').length;
-	const failed = folded.filter((node) => node.display.tone_key === 'failed').length;
-	const other = folded.length - completed - failed;
-	const parts = [
-		completed > 0 || folded.length === 0 ? `${completed} completed` : null,
-		failed > 0 ? `${failed} failed` : null,
-		other > 0 ? `${other} closed` : null,
-	];
-	return parts.filter((part) => part !== null).join(', ');
-}
-
-/** Whether a fold row may wear the done mark: only when all of it completed. */
-export function foldAllCompleted(folded: OperatorNode[]): boolean {
-	return folded.every((node) => node.display.tone_key === 'complete');
 }

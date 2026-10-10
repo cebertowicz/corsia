@@ -6,6 +6,7 @@ import type {
 	OperatorPlanLabelKey,
 	OperatorToneKey,
 } from '$lib/api/plans';
+import { foldsOf } from './planFolds';
 
 const EMPTY_AMOUNT: OperatorCostAmount = {
 	tokens: { known: null, unknown_rows: 0 },
@@ -116,10 +117,12 @@ export function operatorNode(over: Partial<OperatorNode> = {}): OperatorNode {
 }
 
 export function withPlanContract(
-	entry: Omit<OperatorPlanEntry, 'display' | 'progress' | 'oversize'> & {
+	entry: Omit<OperatorPlanEntry, 'display' | 'progress' | 'oversize' | 'folds' | 'root_count'> & {
 		progress: Omit<OperatorPlanEntry['progress'], 'distribution'>;
 		display?: OperatorPlanEntry['display'];
 		oversize?: OperatorPlanEntry['oversize'];
+		folds?: OperatorPlanEntry['folds'];
+		root_count?: number;
 	},
 ): OperatorPlanEntry {
 	return {
@@ -127,5 +130,7 @@ export function withPlanContract(
 		progress: { ...entry.progress, distribution: { ...EMPTY_DISTRIBUTION } },
 		display: entry.display ?? planDisplay(),
 		oversize: entry.oversize ?? null,
+		folds: entry.folds ?? foldsOf(entry.nodes),
+		root_count: entry.root_count ?? entry.nodes.filter((node) => node.parent_id === null).length,
 	};
 }

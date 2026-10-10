@@ -1,34 +1,41 @@
 /**
  * How finished rows move in `PlanTree`: holding what is new since the user
  * last looked at the plan in the pane, and the fold wave that carries rows
- * into their level's count. The pure rules and the animation itself live in
- * `foldWave.ts`; this owns the tree's motion state. Call both during
- * component initialisation.
+ * into their level's count. Which rows are new is the server's word: a pane
+ * read lists the folded rows since the user's last look (`plans.open_tree`'s
+ * fold window), and the client holds those open until it has shown them. The
+ * animation itself lives in `foldWave.ts`; this owns the tree's motion state.
+ * Call both during component initialisation.
  */
 import type { OperatorNode } from '$lib/api/plans';
 import {
-	captureFold, heldRows, newlyFolded, newlyMatching, playFold, prefersReducedMotion, type FoldSnapshot,
+	captureFold, newlyFolded, newlyMatching, playFold, prefersReducedMotion, type FoldSnapshot,
 } from './foldWave';
 
-/** One pane view of a plan: every folded row settled after `seenThrough` is new to the user. */
+/** One pane view of a plan: the folded rows the pane has already shown fold (the rest are new to the user). */
 export interface PaneView {
-	seenThrough: string | null;
+	released: ReadonlySet<string>;
+}
+
+const NONE: ReadonlySet<string> = new Set();
+
+/** The folded rows a read lists that this view has not yet shown fold: new to the user, held open. */
+export function heldIds(nodes: OperatorNode[], view: PaneView | null): Set<string> {
+	if (view === null) return new Set();
+	return new Set(nodes.filter((node) => node.folded && !view.released.has(node.id)).map((node) => node.id));
 }
 
 /**
- * The tree's input with the pane's held rows unfolded (`foldWave.heldRows`);
- * when the pane advances `seenThrough` they fold in the ordinary wave.
- * Without a pane view (an Activity card, a drill-down) the tree shows the
- * server's folds.
+ * The tree's input with the pane's held rows unfolded; when the pane releases
+ * them they fold in the ordinary wave. Without a pane view (an Activity card,
+ * a drill-down) the tree shows the server's folds as they are.
  */
 export function createPaneHold(getNodes: () => OperatorNode[], getView: () => PaneView | null) {
-	const nodes = $derived.by(() => {
-		const view = getView();
-		const held = view === null ? null : heldRows(getNodes(), view.seenThrough);
-		if (held === null || held.size === 0) return getNodes();
-		return getNodes().map((node) => (held.has(node.id) ? { ...node, folded: false } : node));
-	});
-	return { get nodes() { return nodes; } };
+	const held = $derived(heldIds(getNodes(), getView()));
+	const nodes = $derived(
+		held.size === 0 ? getNodes() : getNodes().map((node) => (held.has(node.id) ? { ...node, folded: false } : node)),
+	);
+	return { get nodes() { return nodes; }, get held(): ReadonlySet<string> { return held.size === 0 ? NONE : held; } };
 }
 
 export interface FoldWaveInput {

@@ -57,6 +57,8 @@ function envelope(
         oversize: null,
         current_node_ids: ["step-1"],
         next_node_ids: [],
+        folds: [],
+        root_count: 1,
         nodes: [operatorNode({
           id: "step-1",
           title: `Step for ${threadId}`,
@@ -228,12 +230,15 @@ describe("ThreadPlanPane", () => {
     expect(host.textContent).not.toContain("0/0");
   });
 
+  /** Two finished steps the read does not list: the server counts them and keeps them in its history. */
+  const TWO_FINISHED = [{ parent_id: null, done: 2, failed: 0, closed: 0, more: 2 }];
+
   it("an all-finished plan says nothing is open, shows no count, and folds its work (FW7)", async () => {
     const finished = envelope("t1", { done: 0, total: 0, open: 0, liveness: "idle" });
     finished.plans[0].current_node_ids = [];
-    finished.plans[0].nodes = ["a", "b"].map((id) => operatorNode({
-      id, title: `Finished ${id}`, state: "accepted", folded: true,
-    }));
+    finished.plans[0].nodes = [];
+    finished.plans[0].folds = TWO_FINISHED;
+    finished.plans[0].root_count = 2;
     mockFetch(200, finished, { ETag: '"r1"' });
     component = mount(ThreadPlanPane, { target: host, props: { threadId: "t1" } });
     await settle();
@@ -246,10 +251,8 @@ describe("ThreadPlanPane", () => {
 
   it("a flat plan with finished work counts what is left, never 0 of N (#2190 review)", async () => {
     const flat = envelope("t1", { done: 0, total: 1, open: 1, liveness: "advancing" });
-    flat.plans[0].nodes = [
-      ...["a", "b"].map((id) => operatorNode({ id, title: `Finished ${id}`, state: "accepted", folded: true })),
-      ...flat.plans[0].nodes,
-    ];
+    flat.plans[0].folds = TWO_FINISHED;
+    flat.plans[0].root_count = 3;
     mockFetch(200, flat, { ETag: '"r1"' });
     component = mountWithHead("t1");
     await settle();
@@ -721,6 +724,8 @@ describe("ThreadPlanPane", () => {
                 current_node_ids: [],
                 next_node_ids: [],
                 nodes: [operatorNode({ id: "c1", title: childTitle })],
+                folds: [],
+                root_count: 1,
               },
             ],
           },
@@ -903,6 +908,8 @@ function childEnvelope(title: string): OperatorEnvelope {
         current_node_ids: [],
         next_node_ids: [],
         nodes: [operatorNode({ id: "c1", title })],
+        folds: [],
+        root_count: 1,
       },
     ],
   } as unknown as OperatorEnvelope;

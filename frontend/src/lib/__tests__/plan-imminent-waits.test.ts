@@ -5,6 +5,7 @@ import type { OperatorNode } from '$lib/api/plans';
 import { nodeSubline } from '$lib/components/plans/planDisplay';
 import { waitCountdown } from '$lib/components/plans/planWaits';
 import { node } from './fixtures/planTreeNode';
+import { withFolds } from './fixtures/planFolds';
 
 /**
  * W11 + W12: a wait that ends soon stands out (soonest first, a countdown inside
@@ -76,7 +77,7 @@ describe('waits that end soonest come first within their level', () => {
 			node({ id: 'plain', title: 'Plain task' }),
 			wait('in two hours', 120),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['Plain task', 'in ten minutes', 'in two hours', 'in three hours']);
 	});
@@ -95,7 +96,7 @@ describe('waits that end soonest come first within their level', () => {
 			wait('in ten minutes', 10),
 			node({ id: 'plain', title: 'Plain task' }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['Plain task', 'in ten minutes', 'on an event', 'after a dependency']);
 	});
@@ -108,7 +109,7 @@ describe('waits that end soonest come first within their level', () => {
 			wait('in ten minutes', 10),
 			node({ id: 'queued', title: 'Queued task', status_reason: 'Not started' }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['Queued task', 'in ten minutes', 'on an event']);
 	});
@@ -119,7 +120,7 @@ describe('waits that end soonest come first within their level', () => {
 			wait('late', 300, false, { parent_id: 'phase', depth: 1 }),
 			wait('soon', 30, false, { parent_id: 'phase', depth: 1 }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes, currentNodeIds: ['soon'] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['soon'] }) });
 		await settle();
 		expect(rendered()).toEqual(['Phase', 'soon', 'late']);
 	});
@@ -151,7 +152,7 @@ describe('a wait ending within the hour counts down', () => {
 	});
 
 	it('shows on the rendered row and ticks down as the minutes pass', async () => {
-		component = mount(PlanTree, { target: host, props: { nodes: [wait('soon', 12, true)] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [wait('soon', 12, true)] }) });
 		await settle();
 		expect(row('soon').querySelector('.row-subline')?.textContent).toContain('ends in 12 min');
 		vi.advanceTimersByTime(5 * MIN);
@@ -168,7 +169,7 @@ describe('only finished work folds: a wait days away stays a row', () => {
 			wait('two days', 48 * 60),
 			node({ id: 'plain', title: 'Plain task' }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['Plain task', 'soon', 'two days', 'a week']);
 		expect(host.querySelectorAll('.fold-row').length).toBe(0);
@@ -179,7 +180,7 @@ describe('only finished work folds: a wait days away stays a row', () => {
 			wait('a week', 7 * 24 * 60),
 			node({ id: 'done', title: 'Done', state: 'accepted', folded: true, last_transition_at: new Date(NOW.getTime() - 30 * 60 * MIN).toISOString() }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['a week', '[1 completed]']);
 	});
@@ -187,7 +188,7 @@ describe('only finished work folds: a wait days away stays a row', () => {
 
 describe('a scheduled task wears a snooze clock; other waits keep another mark', () => {
 	it('draws an SVG snooze clock for a task scheduled until a date', async () => {
-		component = mount(PlanTree, { target: host, props: { nodes: [wait('sched', 120, true)] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [wait('sched', 120, true)] }) });
 		await settle();
 		const icon = row('sched').querySelector('.state-icon');
 		expect(icon?.querySelector('svg.snooze-clock')).toBeTruthy();
@@ -195,7 +196,7 @@ describe('a scheduled task wears a snooze clock; other waits keep another mark',
 
 	it('keeps the plain wait mark for an event, dependency or review wait', async () => {
 		const nodes = [wait('event', null), wait('timed watch', 120)];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		for (const id of ['event', 'timed watch']) {
 			const icon = row(id).querySelector('.state-icon');

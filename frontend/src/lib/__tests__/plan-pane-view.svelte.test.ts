@@ -81,23 +81,23 @@ describe('createPaneView', () => {
 		touch();
 		const v = view(envelope([DONE]), Date.now() + 1);
 		wait(PAUSE_MS - 1);
-		expect(v.handle.view.seenThrough).toBeNull();
+		expect(v.handle.view.released.has('done')).toBe(false);
 		expect(fetchMock).not.toHaveBeenCalled();
 		wait(1);
-		expect(v.handle.view.seenThrough).toBe(AS_OF);
+		expect(v.handle.view.released.has('done')).toBe(true);
 		expect(reports()).toEqual([{ url: `/api/plans/operator/threads/${v.threadId}/seen`, body: { seen_through: AS_OF } }]);
 	});
 
 	it('does not fold or report while an open, visible pane has no one at it', () => {
 		const v = view(envelope([DONE]), Date.now() + 1);
 		wait(IDLE_MS * 2);
-		expect(v.handle.view.seenThrough).toBeNull();
+		expect(v.handle.view.released.has('done')).toBe(false);
 		expect(fetchMock).not.toHaveBeenCalled();
 		touch();
 		wait(PAUSE_MS - 1);
 		expect(fetchMock).not.toHaveBeenCalled();
 		wait(1);
-		expect(v.handle.view.seenThrough).toBe(AS_OF);
+		expect(v.handle.view.released.has('done')).toBe(true);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
@@ -105,13 +105,13 @@ describe('createPaneView', () => {
 		touch();
 		const v = view(envelope([DONE]), Date.now() + 1);
 		wait(PAUSE_MS);
-		expect(v.handle.view.seenThrough).toBe(AS_OF);
+		expect(v.handle.view.released.has('done')).toBe(true);
 		wait(IDLE_MS);
 		const late = node({ id: 'late', state: 'accepted', folded: true, last_transition_at: '2026-09-24T12:03:00Z' });
 		v.state.payload = envelope([DONE, late], { as_of: LATER, seen_through: AS_OF });
 		flushSync();
 		wait(PAUSE_MS * 2);
-		expect(v.handle.view.seenThrough).toBe(AS_OF);
+		expect(v.handle.view.released.has('late')).toBe(false);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
@@ -127,7 +127,7 @@ describe('createPaneView', () => {
 		wait(PAUSE_MS - 1);
 		expect(fetchMock).not.toHaveBeenCalled();
 		wait(1);
-		expect(v.handle.view.seenThrough).toBe(AS_OF);
+		expect(v.handle.view.released.has('done')).toBe(true);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
@@ -135,13 +135,13 @@ describe('createPaneView', () => {
 		touch();
 		const v = view(envelope([DONE]), Date.now() - 60_000);
 		wait(PAUSE_MS);
-		expect(v.handle.view.seenThrough).toBeNull();
+		expect(v.handle.view.released.has('done')).toBe(false);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it('reports nothing when the mark already covers every finished row', () => {
+	it('reports nothing when the read lists no folded row the view has not shown', () => {
 		touch();
-		view(envelope([DONE], { seen_through: AS_OF }), Date.now() + 1);
+		view(envelope([]), Date.now() + 1);
 		wait(PAUSE_MS * 2);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
@@ -153,9 +153,9 @@ describe('createPaneView', () => {
 		const late = node({ id: 'late', state: 'accepted', folded: true, last_transition_at: '2026-09-24T12:03:00Z' });
 		v.state.payload = envelope([DONE, late], { as_of: LATER, seen_through: AS_OF });
 		flushSync();
-		expect(v.handle.view.seenThrough).toBe(AS_OF);
+		expect(v.handle.view.released.has('late')).toBe(false);
 		wait(PAUSE_MS);
-		expect(v.handle.view.seenThrough).toBe(LATER);
+		expect(v.handle.view.released.has('late')).toBe(true);
 		expect(reports().map((report) => report.body)).toEqual([{ seen_through: AS_OF }, { seen_through: LATER }]);
 	});
 });

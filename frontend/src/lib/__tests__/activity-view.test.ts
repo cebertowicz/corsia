@@ -24,6 +24,7 @@ import type {
 import { PROMOTION_QUIET_WINDOW_MS } from '$lib/activityHome';
 import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from './fixtures/operatorPlan';
 import { blockedPlanTree } from './fixtures/blockedPlanTree';
+import { planFoldFields } from './fixtures/planFolds';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -126,7 +127,7 @@ function fullEntry(
 		oversize: null,
 		current_node_ids: currentNodeIds,
 		next_node_ids: nextNodeIds,
-		nodes,
+		nodes, ...planFoldFields(nodes),
 	};
 }
 
