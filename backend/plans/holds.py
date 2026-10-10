@@ -66,8 +66,9 @@ def place_hold(
     """Append one cause and release its selected attempt; the caller reconciles.
 
     ``raised_in`` names where an agent raised a user ask (``turn_id``,
-    ``tool_invocation_id``, ``provider_call_id``); it rides in the ``hold_placed``
-    payload so the chat can show the ask on the step that raised it.
+    ``tool_invocation_id``, ``provider_call_id``); it rides nested under
+    ``raised_in`` in the ``hold_placed`` payload, so no key can shadow the event's
+    own fields, and the chat shows the ask on the step that raised it.
 
     Returns:
         The task row as it was before the cause was placed.
@@ -114,7 +115,7 @@ def place_hold(
             "reason_key": reason_key,
             "owner_kind": owner_kind,
             "owner_id": owner_id,
-            **(raised_in or {}),
+            **({"raised_in": dict(raised_in)} if raised_in else {}),
         },
     )
     service.touch_node(db, node_id, at=now)

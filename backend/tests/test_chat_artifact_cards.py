@@ -136,7 +136,8 @@ def test_the_call_ids_reach_the_hold_so_an_earlier_step_keeps_its_card(db):
     ).fetchone()["payload_json"])
     page = _page(db)
 
-    assert (payload["tool_invocation_id"], payload["provider_call_id"]) == ("inv-1", "prov-1")
+    assert payload["raised_in"] == {"turn_id": "turn-1", "tool_invocation_id": "inv-1", "provider_call_id": "prov-1"}
+    assert "turn_id" not in payload
     assert [i for i in ("m1", "m2") if page[i].get("cards")] == ["m1"]
 
 

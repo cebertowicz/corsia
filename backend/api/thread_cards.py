@@ -111,15 +111,15 @@ def _ask_cards_by_message(
     asked: dict[str, dict[str, list[str]]] = {}
     placed: list[tuple[str, str, str]] = []  # (message id, hold id, ask artifact id)
     for update in updates:
-        payload = _loads(update["payload_json"])
-        ids = [payload[k] for k in ("tool_invocation_id", "provider_call_id") if payload.get(k)]
+        raised_in = _loads(_loads(update["payload_json"]).get("raised_in"))
+        ids = [raised_in[k] for k in ("tool_invocation_id", "provider_call_id") if raised_in.get(k)]
         if ids:
             message_id = next((by_call[i] for i in ids if i in by_call), None)
-        elif payload.get("turn_id"):
-            message_id = _turn_step(db, thread_id, payload["turn_id"], update["created_at"])
+        elif raised_in.get("turn_id"):
+            message_id = _turn_step(db, thread_id, raised_in["turn_id"], update["created_at"])
         else:
             message_id = None
-        turn = payload.get("turn_id") or turn_of.get(message_id)
+        turn = raised_in.get("turn_id") or turn_of.get(message_id)
         if turn:
             asked.setdefault(turn, {}).setdefault(update["artifact_id"], []).append(update["hold_id"])
         if message_id is not None and message_id in in_page:
