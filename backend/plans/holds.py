@@ -161,9 +161,13 @@ def clear(
 
 def clear_write(
     node_id: str, hold_id: str, *, expected_kind: str, actor_id: str | None,
-    provenance: str, db,
+    provenance: str, db, detail: dict | None = None,
 ) -> None:
-    """Clear exactly one cause and record it; the caller reconciles, if needed."""
+    """Clear exactly one cause and record it; the caller reconciles, if needed.
+
+    ``detail`` rides in the append-only clearance event beside the hold id, for
+    what the clearing decided (a review verdict).
+    """
     hold = db.execute(
         """SELECT * FROM plan_node_holds
            WHERE id=? AND node_id=? AND kind=? AND cleared_at IS NULL""",
@@ -178,7 +182,7 @@ def clear_write(
         actor_id=actor_id,
         provenance=provenance,
         payload={
-            "hold_id": hold_id, "kind": expected_kind,
+            "hold_id": hold_id, "kind": expected_kind, **(detail or {}),
         },
     )
     now = service._now()

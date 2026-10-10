@@ -28,7 +28,7 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
-from plans import public
+from plans import public, review_answer, user_ask
 from registry import artifact_record as AR
 from registry import attention
 
@@ -76,6 +76,21 @@ async def _authorize(artifact_id: str, user: dict) -> None:
         raise HTTPException(status_code=404, detail="artifact not found")
     if not accessible:
         raise HTTPException(status_code=403, detail="forbidden")
+
+
+def _review_bar(artifact_id: str) -> dict | None:
+    """The review bar's read for a document or image, or None for any other type."""
+    db = get_db()
+    try:
+        row = AR.identity_row_for(artifact_id, db=db)
+        if row is None or row["type"] not in user_ask.ASKABLE_TYPES:
+            return None
+        return {
+            "artifact_id": artifact_id, "artifact_type": row["type"],
+            **review_answer.round_state(db, str(row["id"])),
+        }
+    finally:
+        db.close()
 
 
 def _summarize(item: dict) -> dict:
@@ -205,8 +220,15 @@ async def get_rollup(parent_thread_id: str, user: dict = Depends(require_user)):
 @router.get("/{artifact_id}/review")
 async def get_review(artifact_id: str, user: dict = Depends(require_user),
                      profile_id: str | None = None):
-    """The Artifact Review Profile result for a card (S5a)."""
+    """The Artifact Review Profile result for a card (S5a).
+
+    A document or image has no profile: its read is the review bar's, the newest
+    raised ask and the round's feedback (DCOL-FR12.4).
+    """
     await _authorize(artifact_id, user)
+    bar = await run_in_db(lambda: _review_bar(artifact_id))
+    if bar is not None:
+        return bar
     try:
         result = await run_in_db(
             lambda: run_review_profile(artifact_id, profile_id=profile_id))
@@ -222,7 +244,8 @@ class ClearBody(BaseModel):
     outcome: str
     condition: dict | None = None
     reason: str | None = None
-
+    verdict: str | None = None
+    note: str | None = None
 
 
 @router.post("/{artifact_id}/clear")
@@ -233,8 +256,13 @@ async def post_clear(artifact_id: str, body: ClearBody):
     try:
         result = await run_in_db(lambda: attention.clear_attention(
             artifact_id, outcome=body.outcome, condition=body.condition,
-            reason=body.reason,
+            reason=body.reason, verdict=body.verdict, note=body.note,
         ))
+    except review_answer.AnswerRefused as exc:
+        status = 409 if exc.code == "ask_stale" else 422
+        raise HTTPException(
+            status_code=status, detail={"code": exc.code, "message": str(exc)},
+        ) from exc
     except attention.AttentionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return asdict(result)

@@ -33,6 +33,8 @@ _ENDS_ASK = {
     "retire": "retired",
 }
 _PROVENANCE = "user.ask_cleared"
+#: What an agent may ask the user to review: the viewers that carry a review bar.
+ASKABLE_TYPES = ("document", "image")
 
 
 def is_user_block(operation: str, params) -> bool:
@@ -79,9 +81,9 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
         raise service.PlanInputError(
             "a decision is not blocked on; raise it, and it holds its task by itself"
         )
-    if identity["type"] != "document" or identity["state"] != "active":
+    if identity["type"] not in ASKABLE_TYPES or identity["state"] != "active":
         raise service.PlanInputError(
-            "ask_artifact_id must name an active registered document"
+            "ask_artifact_id must name an active registered document or image"
         )
     return ask.strip()
 
@@ -97,24 +99,28 @@ def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenan
     attention.raise_attention(artifact_id, db=db)
 
 
-def cleared(artifact_id: str, outcome: str, *, db=None) -> int:
+def cleared(artifact_id: str, outcome: str, *, db=None, answer=None) -> int:
     """Release the tasks this ask held once its attention lifecycle ends.
 
     Returns how many holds cleared. Idempotent: a second clear finds none.
     ``defer`` remains open. Artifact retirement also ends the ask, but its
-    notice must not claim that the user acted.
+    notice must not claim that the user acted. ``answer`` is the user's review
+    verdict (``review_answer.Answer``), which the notice and the clearance
+    event carry.
     """
     if outcome not in _ENDS_ASK:
         return 0
     with service._connection(db) as connection, service._write(connection):
         return _release(
             connection, artifact_id, _ENDS_ASK[outcome],
-            retired=outcome == "retire",
+            retired=outcome == "retire", answer=answer,
         )
 
 
-def _release(db, artifact_id: str, done: str, *, retired: bool = False) -> int:
-    from plans import admission, holds, plan_wake
+def _release(
+    db, artifact_id: str, done: str, *, retired: bool = False, answer=None,
+) -> int:
+    from plans import admission, holds, plan_wake, review_answer
     from plans.plan_events import append_owner_event
     from plans.user_steering import CHANGE_KIND
 
@@ -135,6 +141,7 @@ def _release(db, artifact_id: str, done: str, *, retired: bool = False) -> int:
         holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",
             actor_id=None, provenance=_PROVENANCE, db=db,
+            detail=answer.payload() if answer else None,
         )
         cause = db.execute(
             """SELECT id, created_at FROM plan_node_events
@@ -146,6 +153,9 @@ def _release(db, artifact_id: str, done: str, *, retired: bool = False) -> int:
             f'Your ask "{ask}" became unavailable, so {row["kind"]} '
             f'"{row["title"]}" no longer waits on it: pick it up.'
             if retired else
+            review_answer.release_summary(
+                answer, ask=ask, kind=row["kind"], title=row["title"],
+            ) if answer else
             f'The user {done} "{ask}", so {row["kind"]} '
             f'"{row["title"]}" no longer waits on them: pick it up.'
         )

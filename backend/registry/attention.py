@@ -125,13 +125,22 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
 
 def clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
-    reason: str | None = None, db=None,
+    reason: str | None = None, verdict: str | None = None, note: str | None = None,
+    db=None,
 ) -> AttentionResult:
-    """Clear attention through one of the public user/system outcomes."""
+    """Clear attention through one of the public user/system outcomes.
+
+    A review ``verdict`` (with its optional ``note``) rides only on ``answer``.
+    """
     if outcome not in CLEAR_OUTCOMES:
         raise AttentionError(f"unknown clearing outcome {outcome!r}")
+    if (verdict is not None or note is not None) and outcome != "answer":
+        raise AttentionError("a verdict or note goes only with the answer outcome")
+    if note is not None and verdict is None:
+        raise AttentionError("a note needs a verdict")
     return _clear_attention(
-        artifact_id, outcome=outcome, condition=condition, reason=reason, db=db,
+        artifact_id, outcome=outcome, condition=condition, reason=reason,
+        verdict=verdict, note=note, db=db,
     )
 
 
@@ -144,7 +153,8 @@ def retire_attention(artifact_id: str, *, db=None) -> AttentionResult:
 
 def _clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
-    reason: str | None = None, db=None,
+    reason: str | None = None, verdict: str | None = None, note: str | None = None,
+    db=None,
 ) -> AttentionResult:
     """Own the one atomic attention closeout for public clear and retirement.
 
@@ -159,6 +169,13 @@ def _clear_attention(
         record = AR.register_or_resolve(identity, db=_db)
         levels = sorted({s.thread for s in record.subscribers})
 
+        answer = None
+        if verdict is not None:
+            # Before the state flips: a stale ask refuses, and the round's feedback
+            # reaches its owner in this same write.
+            from plans import review_answer
+
+            answer = review_answer.answer(_db, str(row["id"]), verdict, note)
         defer_condition = None
         if outcome == "defer":
             defer_condition = validate_defer_condition(condition)
@@ -181,7 +198,7 @@ def _clear_attention(
         # ordinary artifacts and decisions, and ``defer`` keeps the hold.
         from plans import public as plans_public
 
-        plans_public.ask_cleared(str(row["id"]), outcome, db=_db)
+        plans_public.ask_cleared(str(row["id"]), outcome, db=_db, answer=answer)
     if db is None or not db.in_transaction:
         emit_product_event(
             "artifact_attention", "cleared",
