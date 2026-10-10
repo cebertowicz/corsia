@@ -25,23 +25,27 @@ def _summed(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def window_figure(metric: str, window: Window, sources: dict[str, dict[str, Any]], *,
                   row: Callable[..., dict[str, Any]], measured: Callable[[str, str], bool],
-                  periods: set[str] | None = None, size_minimum_n: int | None = None) -> dict[str, Any]:
+                  periods: set[str] | None = None, size_minimum_n: int | None = None,
+                  period_end: Callable[[str], str] | None = None) -> dict[str, Any]:
     """One window's ``{value, n}``: the periods the instrument existed in, pooled.
 
     ``periods`` narrows the window to the periods the series itself serves (a series that
     starts at its first observed period has no earlier one to pool). ``size_minimum_n`` is
-    set for the size-rated series, whose rate is estimated hours over active hours.
+    set for the size-rated series, whose rate is estimated hours over active hours. With
+    ``period_end``, a window that pooled any period also serves the dates it pooled as
+    ``from`` and ``to``, so a reader names what stands behind the figure, never more.
     """
     kept = [period for period in window.periods
             if measured(metric, period) and (periods is None or period in periods)]
     pooled = _summed([sources[period] for period in kept if period in sources])
+    span = {"from": kept[0], "to": period_end(kept[-1])} if kept and period_end else {}
     if size_minimum_n is not None:
-        return pooled_size_window(pooled, bool(kept), size_minimum_n)
+        return {**pooled_size_window(pooled, bool(kept), size_minimum_n), **span}
     served = row(metric, kept[-1] if kept else window.last, pooled if kept else {})
-    return {"value": served["value"], "n": served["n"]}
+    return {"value": served["value"], "n": served["n"], **span}
 
 
 def series_windows(metric: str, grain: Grain, sources: dict[str, dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
     """The latest window and the one before it, for one served series id."""
-    return {"latest": window_figure(metric, grain.latest, sources, **kwargs),
-            "previous": window_figure(metric, grain.previous, sources, **kwargs)}
+    return {"latest": window_figure(metric, grain.latest, sources, period_end=grain.period_end, **kwargs),
+            "previous": window_figure(metric, grain.previous, sources, period_end=grain.period_end, **kwargs)}

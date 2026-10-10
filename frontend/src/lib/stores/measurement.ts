@@ -112,7 +112,8 @@ function decodeMinimumN(value: unknown): Record<string, number> | undefined {
 
 /** The counts the server pooled behind a size window's rate: the window's own coverage, never re-pooled from rows. */
 export type WindowSize = { outcomes: number; sized: number; excluded: number; estimated_hours: number; active_hours: number };
-export type WindowFigure = { value: number | null; n: number; size?: WindowSize };
+/** `from` and `to` are the dates the server pooled, served when it pooled any: narrower than the window when a series starts or breaks inside it. */
+export type WindowFigure = { value: number | null; n: number; size?: WindowSize; from?: string; to?: string };
 export type SeriesWindows = { latest: WindowFigure; previous: WindowFigure };
 
 export const measurementScope = writable<MeasurementScope>({ project: 'all', agent: null });
