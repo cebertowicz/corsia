@@ -78,6 +78,19 @@ test.describe('@flow:artifact-image @surface:documents image artifacts open as i
 			await expect(image).toBeVisible();
 			await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
 
+			// The image tab carries the image glyph, in the strip and in the collapsed rail.
+			const imageTab = page.getByRole('tab', { name: new RegExp(name) });
+			if (width > 768) await expect(imageTab.locator('.tab-ico circle')).toHaveCount(1);
+			if (width > 768 && kind.ext === 'png') {
+				await saveEvidenceScreenshot(page, testInfo, 'artifact-image-tab-strip-1440', { fullPage: false });
+				await page.getByRole('button', { name: 'Collapse artifact panel' }).click();
+				const rail = page.getByRole('button', { name: /Expand artifact panel/ });
+				await expect(rail.locator('.rail-ico circle')).toHaveCount(1);
+				await saveEvidenceScreenshot(page, testInfo, 'artifact-image-tab-rail-1440', { fullPage: false });
+				await rail.click();
+				await expect(image).toBeVisible();
+			}
+
 			// Fits the canvas and is never drawn larger than the file itself.
 			const natural = await image.evaluate((el: HTMLImageElement) => el.naturalWidth);
 			const box = (await image.boundingBox())!;

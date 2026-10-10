@@ -15,20 +15,19 @@ permissions:
 jobs:
   docs-drift:
     name: Documentation drift check (citations + private-name scan)
-    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
-    # job to a hosted runner needs the repository owner's explicit approval.
-    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Keep the hosted-runner view on the Mac: the maintainers' workspace and
-    # git identity exist on this host, and the checks below are calibrated
-    # for a runner that has neither.
+    # The checks below are calibrated for a runner with neither the
+    # maintainers' workspace nor a git identity.
     env:
       GIT_CONFIG_GLOBAL: /dev/null
       GIT_CONFIG_NOSYSTEM: '1'
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/mac-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       # Check 1 (starter-kit copies vs workspace sources) needs the
       # maintainers' private workspace, which does not exist on a CI

@@ -80,7 +80,6 @@
     "backend/llm/isolated_structured.py::_validate_codex_response": 147,
     "backend/llm/isolated_structured.py::_validate_raw_codex_message": 150,
     "backend/llm/providers/anthropic.py::_parse_response": 81,
-    "backend/llm/providers/openai_streaming.py::_streaming_responses_completion": 86,
     "backend/registry/durable_writes.py::_publish_bytes": 128,
     "backend/registry/durable_writes.py::_validated_intent_paths": 94,
     "backend/registry/ownership.py::rehome_artifact": 96,
