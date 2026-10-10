@@ -87,7 +87,12 @@ export function sizeView(rows: MeasurementRow[], period?: MeasurementPeriod, win
  * `figure` reads another measure from the same two windows; `minimum` is the series' served minimum n where it has one.
  */
 export function periodChange(view: WindowPair, withPreviousN = false, figure: (w: RateWindow) => number | null = (w) => w.value, minimum?: number): string {
+	const { previous } = view;
+	return versusPrevious(changeOnly(view, figure, minimum), previous ? view.prevText : null, withPreviousN && previous ? previous.n : undefined);
+}
+
+/** The change alone ("-69%", "new", "low n"), without the window it is against, for a line that names no windows. */
+export function changeOnly(view: WindowPair, figure: (w: RateWindow) => number | null = (w) => w.value, minimum?: number): string {
 	const { current, previous } = view;
-	const change = changeText(figure(current), previous ? figure(previous) : null, current.n, previous?.n ?? 0, !!previous && previous.periods.length < view.previousExpected, minimum);
-	return versusPrevious(change, previous ? view.prevText : null, withPreviousN && previous ? previous.n : undefined);
+	return changeText(figure(current), previous ? figure(previous) : null, current.n, previous?.n ?? 0, !!previous && previous.periods.length < view.previousExpected, minimum);
 }

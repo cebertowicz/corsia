@@ -74,6 +74,15 @@ describe('MeasurementWhereToLook', () => {
 		expect(host.querySelector('.stat')?.textContent?.trim()).toBe('Sep 28 to Oct 4 against Sep 21 to Sep 27, worst change first');
 	});
 
+	it('leaves out an Improved list with no rows, as the render does, and shows it once it has some', () => {
+		render(state());
+		expect([...host.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Largest changes for the worse']);
+		expect(host.textContent).not.toContain('Improved');
+		unmount(component!); host.remove();
+		render(state({ improved: [row({ change: 0.25 })] }));
+		expect([...host.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Largest changes for the worse', 'Improved']);
+	});
+
 	it('shows an en dash in Overall for a scope row, never zero or blank', () => {
 		render(state({ worse: [row({ subject: { id: 'all', name: 'All work', kind: 'scope' }, overall: null })] }));
 		const cells = [...host.querySelectorAll('tbody td.n')].map((cell) => cell.textContent);

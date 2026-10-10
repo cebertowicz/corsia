@@ -92,10 +92,10 @@ describe.each(['days', 'weeks'] as const)('the cost change follows the one parti
 	it('reads new when the series began inside the previous window, even with a previous figure, as the outcome rates do', () => {
 		const began = served(period.previous.to);
 		const view = costView({ series: began, latest, previous, period });
-		expect(view?.change).toBe('new');
+		expect(view?.change).toMatch(/^new( vs .+)?$/);
 		const rate = periodView(began.map((w) => ({ ...base, period: w.period, series: 'first_try_acceptance', value: 0.3, n: 40 })), 'first_try_acceptance', 1, period,
 			{ latest: { value: 0.6, n: 40 }, previous: { value: 0.3, n: 40 } });
-		expect(periodChange(rate)).toBe(view?.change);
+		expect(periodChange(rate, true)).toBe(view?.change);
 	});
 
 	it('compares a previous window the series covers in full', () => {

@@ -116,8 +116,8 @@ describe('MeasurementSizeHeadline', () => {
 		const el = mountRows(Array.from({ length: 6 }, (_, i) => at(i + 2, i < 2 ? 40 : 60, { data_start: periodAt(2) })), {
 			latest: win(60, 120, { estimated_hours: 96, active_hours: 1.6 }), previous: win(40, 60, { estimated_hours: 32, active_hours: 0.8 }),
 		});
-		expect(el.querySelector('.stat')?.textContent).toBe('60 h of work per hour you spend, Sep 7 to Oct 4, n 120, new');
-		expect([...el.querySelectorAll('.why .kc')].map((n) => n.textContent)).toEqual(['new', 'new']);
+		expect(el.querySelector('.stat')?.textContent).toBe('60 h of work per hour you spend, Sep 7 to Oct 4, n 120, new vs Aug 10 to Sep 6 (n 60)');
+		expect([...el.querySelectorAll('.why .kc')].map((n) => n.textContent)).toEqual(['new vs Aug 10 to Sep 6', 'new vs Aug 10 to Sep 6']);
 	});
 
 	it('prints no rate and n/a when the served window is under the minimum, with its n', () => {

@@ -28,6 +28,8 @@
 			{#if state.period}{periodName(state.period.latest)} against {periodName(state.period.previous)}, worst change first{/if}
 		</p>
 		{#each lists as list}
+			<!-- An empty Improved list is left out; only the worse list says when nothing is in it. -->
+			{#if list.id === 'worse' || rows(list.id).length}
 			<h3 class:gap={list.id === 'improved'}>{list.title}</h3>
 			{#if rows(list.id).length}
 				<div class="tb-wrap">
@@ -52,6 +54,7 @@
 				</div>
 			{:else}
 				<p class="empty">{list.empty}</p>
+			{/if}
 			{/if}
 		{/each}
 		{#if state.error}<p class="error" role="alert">{state.error}<button onclick={onRetry}>Retry</button></p>
