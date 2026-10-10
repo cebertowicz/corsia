@@ -20,6 +20,7 @@ from host_access.refusal_messages import (
 )
 from infra.project_repo_policy import RepoPolicy
 from tools.host_access_external import external_agent_sandbox_rules
+from tools.base_git_paths import base_branch_selector_paths, base_git_control_paths, base_git_identity_paths
 from tools.host_path_policy import current_protected_host_path_policy
 from tools.repo_worktree_guidance import branch_pinned_worktree_guidance
 from tools.shell_argv import command_tokens, direct_argv
@@ -620,47 +621,6 @@ def _direct_git_command(
     return None
 
 
-def _base_git_identity_paths(repo: Path) -> list[Path]:
-    """Return base-checkout Git files a linked worktree must never mutate."""
-    git_dir = repo.resolve(strict=False) / ".git"
-    protected = [
-        git_dir / "HEAD",
-        git_dir / "index",
-        git_dir / "logs" / "HEAD",
-    ]
-    try:
-        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
-    except OSError:
-        return protected
-    prefix = "ref: refs/heads/"
-    if not head.startswith(prefix):
-        return protected
-    branch = head.removeprefix(prefix)
-    branch_path = Path(branch)
-    if not branch or branch_path.is_absolute() or ".." in branch_path.parts:
-        return protected
-    ref = git_dir / "refs" / "heads" / branch
-    log = git_dir / "logs" / "refs" / "heads" / branch
-    return [*protected, ref, Path(f"{ref}.lock"), log, Path(f"{log}.lock")]
-
-
-def _base_branch_selector_paths(repo: Path) -> list[Path]:
-    """Return metadata that selects the branch attached to the base checkout."""
-    git_dir = repo.resolve(strict=False) / ".git"
-    return [git_dir / "HEAD", git_dir / "HEAD.lock"]
-
-
-def _base_git_control_paths(repo: Path) -> list[Path]:
-    """Return shared Git controls no agent command may rewrite."""
-    git_dir = repo.resolve(strict=False) / ".git"
-    return [
-        git_dir / "config",
-        git_dir / "config.lock",
-        git_dir / "packed-refs",
-        git_dir / "packed-refs.lock",
-    ]
-
-
 def _git_dir_grant(repo: Path) -> str:
     """Return the scoped allow rule for a repository's ``.git`` metadata."""
     return (
@@ -827,16 +787,16 @@ def pinned_repo_sandbox_profile(
         )
     for policy in policies:
         repo = policy.path.resolve(strict=False)
-        protected = _base_git_control_paths(repo)
+        protected = base_git_control_paths(repo)
         if repo == worktree_add_control_repo:
             # Git uses this transient lock while populating a linked worktree,
             # even when packed-refs itself is unchanged. The data file remains
             # denied; omitting only its lock avoids false failure diagnostics.
             protected.remove(repo / ".git" / "packed-refs.lock")
         if policy.protect_base_checkout and repo not in controlled_identity_write:
-            protected.extend(_base_git_identity_paths(repo))
+            protected.extend(base_git_identity_paths(repo))
         elif policy.branch_pinned or repo in controlled_identity_write:
-            protected.extend(_base_branch_selector_paths(repo))
+            protected.extend(base_branch_selector_paths(repo))
         rules.extend(
             f'(deny file-write* (literal "{_sandbox_path(path)}"))'
             for path in protected
@@ -1030,6 +990,7 @@ def safehouse_argv(
     agent_account: AgentAccountView | None = None,
     gws_home: Path | None = None,
     thread_id: str | None = None,
+    policies: list[RepoPolicy] | None = None,
 ) -> list[str]:
     """Build one direct Safehouse argv from the spawn's account view."""
     canonical_cwd = Path(cwd).expanduser().resolve(strict=False)
@@ -1045,9 +1006,9 @@ def safehouse_argv(
         # untrusted below, so that file is not live lease authority.
         argv.append("--allow-workdir-config-writes")
     else:
-        if rw := ":".join(map(str, _canonical_paths([*get_sandbox_add_dirs_rw(thread_id), *([gws_home] if gws_home else [])]))):
+        if rw := ":".join(map(str, _canonical_paths([*get_sandbox_add_dirs_rw(thread_id, policies=policies), *([gws_home] if gws_home else [])]))):
             argv.append(f"--add-dirs={rw}")
-        read_only = [*get_allowed_dirs_ro(), *agent_account_ro_dirs(agent_account)]
+        read_only = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account)]
         if ro := ":".join(map(str, _canonical_paths(read_only))):
             argv.append(f"--add-dirs-ro={ro}")
     argv.extend(

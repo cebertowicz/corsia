@@ -285,8 +285,8 @@ def test_shell_login_cannot_write_home_ro_grant(agent, tmp_path, monkeypatch):
     safehouse = tmp_path / "safehouse"
     safehouse.write_text("")
     monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: str(safehouse))
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path / "rw"])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path / "rw"])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     argv = shell_guard.safehouse_argv("true", tmp_path, tmp_path / "p.sb", agent_account=view)
     home = str(Path(view.home).resolve())
     assert f"--add-dirs-ro={home}" in argv
@@ -460,8 +460,8 @@ def test_spawn_env_grant_and_deny_from_one_view(agent, tmp_path, monkeypatch):
     safehouse = tmp_path / "safehouse"
     safehouse.write_text("")
     monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: str(safehouse))
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     monkeypatch.setattr(github_agent, "view", lambda db=None: pytest.fail("a spawn reads its view once"))
     argv = shell_guard.safehouse_argv("true", tmp_path, tmp_path / "p.sb", agent_account=view)
     rules = shell_guard._terminal_boundary_profile(tmp_path / "p.sb", tmp_path, leased=False, agent_account=view)
