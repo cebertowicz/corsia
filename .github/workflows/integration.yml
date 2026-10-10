@@ -54,9 +54,20 @@ jobs:
           python-version: '3.11'
 
       - name: Install Safehouse
+        run: scripts/install-ci-safehouse
+
+      # The stock-CLI receipt proofs drive the real Claude and Codex CLIs
+      # against loopback peers; pin the versions they are tested with.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install stock agent CLIs
         run: |
-          brew install eugene1g/safehouse/agent-safehouse
-          safehouse --version
+          set -e
+          npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.160.0
+          claude --version
+          codex --version
 
       - name: Install backend deps
         run: |
@@ -95,7 +106,7 @@ jobs:
           cd backend
           ../.venv/bin/python -m pytest -m "integration" \
             --ignore=tests/test_host_access_reviewer_live_inference.py \
-            --tb=short -q \
+            --tb=short -q -rs \
             -x
 
       - name: Run bounded live Haiku reviewer proof

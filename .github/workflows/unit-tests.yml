@@ -46,6 +46,10 @@ jobs:
 
       - name: Install deps
         run: |
+          # The search tests assert real ripgrep semantics.
+          sudo apt-get update --quiet
+          sudo apt-get install --yes --no-install-recommends ripgrep
+          rg --version
           uv venv --python 3.11 --managed-python --seed .venv
           .venv/bin/python -c 'import sqlite3, sys; print(sys.version.split()[0], "SQLite", sqlite3.sqlite_version)'
           .venv/bin/pip install --upgrade pip
@@ -274,9 +278,7 @@ jobs:
 
       # The jailed-export cases require the real Safehouse sandbox.
       - name: Install Safehouse
-        run: |
-          brew install eugene1g/safehouse/agent-safehouse
-          safehouse --version
+        run: scripts/install-ci-safehouse
 
       - name: Install deps
         run: |

@@ -60,7 +60,7 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert "actions/setup-python" not in backend_job
     assert "CORSIA_BACKUP_FREE_FLOOR_BYTES:" in backend_job
     assert "python-version: '3.11'" in macos_job
-    assert "brew install eugene1g/safehouse/agent-safehouse" in macos_job
+    assert "scripts/install-ci-safehouse" in macos_job
     assert "PYTHONUNBUFFERED: '1'" in workflow
     assert "CORSIA_TEST_MODE: '1'" in workflow
     assert 'local isolated_root="$CI_TEST_ROOT/corsia-ci-backend/${shard}"' in workflow
@@ -145,7 +145,7 @@ def test_every_workflow_uses_its_hosted_runner() -> None:
         assert LINUX_RUNNER not in workflow, filename
 
     integration = (workflow_root / "integration.yml").read_text()
-    assert "brew install eugene1g/safehouse/agent-safehouse" in integration
+    assert "scripts/install-ci-safehouse" in integration
     assert "CORSIA_REQUIRE_SAFEHOUSE: '1'" in integration
 
 
