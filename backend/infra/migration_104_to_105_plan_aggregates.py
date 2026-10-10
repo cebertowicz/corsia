@@ -1,4 +1,4 @@
-"""Schema 103 -> 104: stored subtree aggregates on plan nodes and plans (#731).
+"""Schema 104 -> 105: stored subtree aggregates on plan nodes and plans (#731).
 
 Adds the aggregate columns and their indexes, narrows the plan revision trigger so
 aggregate writes cannot bump a plan, backfills ``sent_back`` from the
@@ -75,7 +75,7 @@ def _revisions(conn: sqlite3.Connection) -> dict[str, tuple[int, str]]:
     return {row[0]: (row[1], row[2]) for row in conn.execute("SELECT id, revision, updated_at FROM plans")}
 
 
-def migrate_103_to_104(conn: sqlite3.Connection) -> None:
+def migrate_104_to_105(conn: sqlite3.Connection) -> None:
     """Create the aggregates a fresh schema has, then prove them against a recount."""
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {"plans", "plan_nodes"} <= tables:

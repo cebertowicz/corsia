@@ -1,4 +1,4 @@
-"""The document route for streamed file-tool input: an agent's edit, shown while it is written.
+"""The document route for streamed tool input: an agent's edit, comment or suggestion, shown while it is written.
 
 One provisional-argument contract for every harness: ``start`` names a call,
 ``update`` adds a fragment of its JSON input, ``end`` closes it for any reason.
@@ -17,7 +17,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from doceditor.document_scope import MAX_TEXT_BYTES
 from doceditor.live_preview_args import ArgScanner
@@ -28,20 +28,26 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-PREVIEW_TOOLS = frozenset({"edit_file", "multi_edit", "write_file"})
+COMMENT_TOOL = "doc_comment_create"
+PREVIEW_TOOLS = frozenset({"edit_file", "multi_edit", "write_file", COMMENT_TOOL})
 #: Broadcasts per call are coalesced to at most one per this interval.
 FLUSH_SECONDS = 0.05
 _ENDED_KEPT = 4096
 
 
 def preview_tool(name: object) -> str | None:
-    """The previewed file tool a provider tool name calls, if any."""
+    """The previewed tool a provider tool name calls, if any.
+
+    The ``tool_call`` wrapper is previewed too: which tool it calls is only
+    known once its ``name`` has streamed, so the route resolves it then.
+    """
     from tools.catalog import normalize_tool_name
+    from tools.tool_surface import TOOL_CALL
 
     if not isinstance(name, str):
         return None
     tool = normalize_tool_name(name)
-    return tool if tool in PREVIEW_TOOLS else None
+    return tool if tool in PREVIEW_TOOLS or tool == TOOL_CALL else None
 
 
 @dataclass
@@ -52,6 +58,7 @@ class _Call:
     tool: str
     workspace: Path | None
     scanner: ArgScanner = field(default_factory=ArgScanner)
+    workspace_for: Callable[[str], Path | None] | None = None
     size: int = 0
     entry: LiveEntry | None = None
     name: str | None = None
@@ -70,12 +77,20 @@ class PreviewRoute:
         self.loop: asyncio.AbstractEventLoop | None = None
 
     def start(self, call_id: object, *, thread_id: str, turn_id: str | None, tool: str,
-              workspace: Path | None) -> None:
-        """Open a call; a repeated or already-ended id is ignored."""
+              workspace: Path | None, workspace_for: Callable[[str], Path | None] | None = None) -> None:
+        """Open a call; a repeated or already-ended id is ignored.
+
+        A ``tool_call`` wrapper opens as the wrapper and becomes the tool it names once that
+        name is read; ``workspace_for`` gives that tool's workspace when the caller has no other.
+        """
+        from tools.tool_surface import TOOL_CALL
+
         if not isinstance(call_id, str) or not call_id or call_id in self.calls or call_id in self.ended:
             return
         self.loop = asyncio.get_running_loop()
-        self.calls[call_id] = _Call(call_id, thread_id, turn_id, tool, workspace)
+        scanner = ArgScanner(nested="arguments") if tool == TOOL_CALL else ArgScanner()
+        self.calls[call_id] = _Call(call_id, thread_id, turn_id, tool, workspace, scanner=scanner,
+                                    workspace_for=workspace_for)
 
     def update(self, call_id: object, fragment: object) -> None:
         """Feed one input fragment; parsing is incremental and the broadcast is deferred."""
@@ -95,11 +110,33 @@ class PreviewRoute:
         if call.scanner.failed:
             self.end(call.call_id, "malformed")
             return
-        path = call.scanner.string("path")
-        if call.entry is None and not call.resolving and path is not None and path.complete:
+        if not self._unwrap(call):
+            return
+        target = _target(call)
+        if call.entry is None and not call.resolving and target is not None:
             call.resolving = True
-            asyncio.get_running_loop().create_task(self._resolve(call, path.text()), name=f"preview-resolve:{call.call_id}")
+            resolve = self._resolve_comment(call, *target) if call.tool == COMMENT_TOOL else self._resolve(call, target[1])
+            asyncio.get_running_loop().create_task(resolve, name=f"preview-resolve:{call.call_id}")
         self._schedule(call)
+
+    def _unwrap(self, call: _Call) -> bool:
+        """Turn a wrapper call into the tool its streamed ``name`` selects; False while it cannot be drawn yet."""
+        from tools.catalog import normalize_tool_name
+        from tools.tool_surface import TOOL_CALL
+
+        if call.tool != TOOL_CALL:
+            return True
+        name = call.scanner.outer.get("name")
+        if name is None or not name.complete:
+            return False
+        tool = normalize_tool_name(name.text())
+        if tool not in PREVIEW_TOOLS:
+            self.end(call.call_id, "unpreviewed")
+            return False
+        call.tool = tool
+        if call.workspace is None and call.workspace_for is not None:
+            call.workspace = call.workspace_for(tool)
+        return True
 
     def end(self, call_id: object, outcome: str) -> None:
         """Close a call for good: its preview is removed, and later frames for it are ignored."""
@@ -126,7 +163,6 @@ class PreviewRoute:
             call.timer = asyncio.get_running_loop().call_later(FLUSH_SECONDS, self._flush, call.call_id)
 
     async def _resolve(self, call: _Call, path: str) -> None:
-        from doceditor.agent_name import agent_display_name
         from doceditor.live_publication_record import WriteActor
         from doceditor.live_tools import find_live
         from infra.db_async import run_in_db
@@ -149,6 +185,25 @@ class PreviewRoute:
         except Exception:
             log.warning("Preview target resolution failed; the settled write shows instead", exc_info=True)
             return
+        self._attach(call, entry, thread)
+
+    async def _resolve_comment(self, call: _Call, key: str, value: str) -> None:
+        from doceditor.live_preview_comments import resolve_comment_entry
+        from infra.db_async import run_in_db
+
+        try:
+            entry, thread = await run_in_db(resolve_comment_entry, call.thread_id, call.workspace, key, value)
+        except (PermissionError, ValueError):
+            self.end(call.call_id, "refused")
+            return
+        except Exception:
+            log.warning("Preview target resolution failed; the settled comment shows instead", exc_info=True)
+            return
+        self._attach(call, entry, thread)
+
+    def _attach(self, call: _Call, entry: LiveEntry | None, thread) -> None:
+        from doceditor.agent_name import agent_display_name
+
         if entry is None or self.calls.get(call.call_id) is not call:
             return  # not a live document, or the call ended while this ran
         call.entry = entry
@@ -162,14 +217,29 @@ class PreviewRoute:
         call.timer = None
         live = call.entry.live
         text = live.text
-        slots = project_slots(call.tool, call.scanner, text, call.slots)
+        if call.tool == COMMENT_TOOL:
+            from doceditor.live_preview_comments import project_comment
+
+            kind, slots = project_comment(call.scanner, live, text, call.slots)
+        else:
+            kind, slots = "edit", project_slots(call.tool, call.scanner, text, call.slots)
         if not slots:
             return
         from doceditor.live_text import text_digest
 
         call.shown = True
         _send(call.entry, {"type": "doc_preview", "call_id": call.call_id, "thread_id": call.thread_id,
-                           "name": call.name, "digest": text_digest(text), "slots": slots})
+                           "name": call.name, "kind": kind, "digest": text_digest(text), "slots": slots})
+
+
+def _target(call: _Call) -> tuple[str, str] | None:
+    """The complete argument naming the call's document: a file tool's path, or a comment's target."""
+    if call.tool == COMMENT_TOOL:
+        from doceditor.live_preview_comments import comment_target
+
+        return comment_target(call.scanner)
+    path = call.scanner.string("path")
+    return ("path", path.text()) if path is not None and path.complete else None
 
 
 def _send(entry, frame: dict) -> None:

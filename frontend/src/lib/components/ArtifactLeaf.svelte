@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import DocViewer from './DocViewer.svelte';
+	import ImageViewer from './ImageViewer.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
@@ -43,12 +44,23 @@
 		};
 	}
 
-	const target = $derived<DocViewerTarget | null>(
+	// Every tab opens in the document viewer. A file the backend says is an image
+	// is switched to the image viewer for as long as this leaf is mounted; nothing
+	// about it is stored on the tab, so a file replaced by one of the other kind
+	// is shown by whichever viewer the next load finds it needs.
+	let imageTabs = $state<string[]>([]);
+	const imageKey = (instanceId: string) => `${threadId}\u0000${instanceId}`;
+	const imageTabIds = $derived(new Set(workspace.tabs.filter((t) => imageTabs.includes(imageKey(t.instanceId))).map((t) => t.instanceId)));
+	const showable = $derived<DocViewerTarget | null>(
 		activeTab?.kind === 'document' && threadId && activeTab.status !== 'unavailable' ? targetForTab(activeTab) : null
 	);
+	const showsImage = $derived(showable !== null && !!activeTab && imageTabs.includes(imageKey(activeTab.instanceId)));
+	const target = $derived(showsImage ? null : showable);
+	const imageTarget = $derived(showsImage ? showable : null);
 	const activeStale = $derived(activeTab ? isTabChanged(activeTab) : false);
 
 	let viewer = $state<DocViewer | undefined>(undefined);
+	let imageViewer = $state<ImageViewer | undefined>(undefined);
 
 	// One timing sample per artifact this leaf actually brings on screen (#2280).
 	// Keyed on the tab instance, not on re-renders, so a reactive re-run can only
@@ -100,7 +112,19 @@
 	function onLeafInput() {
 		if (threadId) setActiveSurface(threadId, 'artifact');
 	}
+	// Forget this thread's image tabs that were closed.
+	$effect(() => {
+		const open = new Set(workspace.tabs.map((t) => imageKey(t.instanceId)));
+		const prefix = `${threadId}\u0000`;
+		const kept = imageTabs.filter((k) => !k.startsWith(prefix) || open.has(k));
+		if (kept.length !== imageTabs.length) imageTabs = kept;
+	});
 	function onSignal(signal: TabLoadSignal) {
+		if (signal.renderer) {
+			const key = imageKey(signal.instanceId);
+			const others = imageTabs.filter((k) => k !== key);
+			imageTabs = signal.renderer === 'image' ? [...others, key] : others;
+		}
 		if (threadId) applyTabLoadSignal(threadId, signal);
 		if (signal.status === 'ready') {
 			// The viewer has its content; the DOM update lands on the next tick.
@@ -146,7 +170,11 @@
 	<button class="rail" onclick={expand} aria-label="Expand artifact panel ({workspace.tabs.length} open)">
 		{#each workspace.tabs as t (t.instanceId)}
 			<span class="rail-ico" class:active={t.instanceId === workspace.activeTabId} class:err={t.status === 'error' || t.status === 'unavailable'}>
-				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+				{#if imageTabIds.has(t.instanceId)}
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="m21 16-5-5-8 9" /></svg>
+				{:else}
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+				{/if}
 				{#if isTabChanged(t)}<span class="rail-dot" aria-hidden="true"></span>{/if}
 			</span>
 		{/each}
@@ -158,12 +186,13 @@
 			<ArtifactTabStrip
 				tabs={workspace.tabs}
 				activeKey={workspace.activeTabId}
+				{imageTabIds}
 				onSelect={selectTab}
 				onClose={requestCloseTab}
 				onCollapse={collapse}
 			/>
 		{/if}
-		<div class="leaf-body" class:document-canvas={!!target}>
+		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget}>
 			{#if activeTab?.kind === 'subagent' && activeTab.threadId}
 				<SubagentConversationLeaf threadId={activeTab.threadId} {onOpenLightbox} />
 				{:else if activeTab?.kind === 'legacy-discussion' && activeTab.artifactId}
@@ -175,6 +204,14 @@
 					<span>It was deleted, moved out of this scope, or unregistered.</span>
 					<button type="button" onclick={() => requestCloseTab(activeTab.instanceId)}>Close tab</button>
 				</div>
+			{:else if imageTarget}
+				<ImageViewer
+					bind:this={imageViewer}
+					target={imageTarget}
+					{onSignal}
+					stale={activeStale}
+					onReload={() => imageViewer?.reload()}
+				/>
 			{:else if target}
 				<!-- DocViewer owns Escape precedence (comment draft, then selection),
 				     so handing it onClose keeps that order intact in compact. -->
@@ -227,6 +264,7 @@
 	.leaf.compact { flex: 1; border-left: none; }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
 	.leaf-body.document-canvas { overflow: hidden; container: doc-canvas / inline-size; }
+	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
 
 	.gone {
 		display: flex; flex-direction: column; align-items: flex-start; gap: 6px;

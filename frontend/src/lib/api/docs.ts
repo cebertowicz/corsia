@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { DocOpenError, docOpenRefusal } from '$lib/docOpenRefusal';
+import { docOpenFailure } from '$lib/docOpenRefusal';
 import { token } from '$lib/stores/auth';
 import type { PaneData } from './artifactPane';
 import type { ArtifactRow, DocContent, DocRevision } from './docTypes';
@@ -17,8 +17,8 @@ export async function ok(res: Response) {
 		const detail = await res.text().catch(() => '');
 		let parsed: unknown;
 		try { parsed = JSON.parse(detail)?.detail; } catch { /* Non-JSON failures keep the HTTP status below. */ }
-		const refusal = docOpenRefusal(parsed);
-		if (refusal) throw new DocOpenError(refusal);
+		const refusal = docOpenFailure(parsed);
+		if (refusal) throw refusal;
 		throw new Error(`${res.status} ${detail.slice(0, 200)}`);
 	}
 	return res.json();

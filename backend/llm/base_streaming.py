@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 import json_repair
 from loguru import logger
 
 from llm.stream_idle import ProviderStreamStalled, ProviderStreamTruncated, await_with_idle_bound, bounded_stream, cut_off_response, output_reached_turn
+from llm.tool_input_stream import abandoning_unreturned, forward_tool_input, forwarded_ids
+
+if TYPE_CHECKING:
+    from llm.router import LLMResponse, ToolCallRequest
 
 
 def _carries_output(chunk: Any) -> bool:
@@ -67,6 +71,7 @@ async def _drain_stream(
     response: Any, model: str, api_base: str | None,
     on_reasoning_chunk: Any, on_content_chunk: Any,
     on_tool_call_chunk: Any, on_response_started: Any,
+    tool_calls_by_idx: dict[int, dict],
 ) -> _StreamDrainResult:
     """Consume the provider stream, dispatching deltas; it is closed on exit.
 
@@ -78,7 +83,6 @@ async def _drain_stream(
     first_delta_ns: int | None = None
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
-    tool_calls_by_idx: dict[int, dict] = {}
     emitted_tool_indices: set[int] = set()
     finish_reason = "stop"
     usage: dict[str, Any] = {}
@@ -139,6 +143,20 @@ async def streaming_completion(
     *,
     acompletion_fn: Callable[..., Any],
 ) -> "LLMResponse":
+    """Stream one call; a call whose input streamed but was not returned is abandoned here, the one place that knows."""
+    tool_calls_by_idx: dict[int, dict] = {}
+    return await abandoning_unreturned(
+        _streaming_attempt(kwargs, model, on_reasoning_chunk, on_content_chunk, on_tool_call_chunk,
+                           on_response_started, acompletion_fn, tool_calls_by_idx),
+        lambda: forwarded_ids(tool_calls_by_idx),
+    )
+
+
+async def _streaming_attempt(
+    kwargs: dict[str, Any], model: str, on_reasoning_chunk: Any, on_content_chunk: Any,
+    on_tool_call_chunk: Any, on_response_started: Any, acompletion_fn: Callable[..., Any],
+    tool_calls_by_idx: dict[int, dict],
+) -> "LLMResponse":
     from llm.router import LLMResponse
 
     kwargs["stream"] = True
@@ -150,6 +168,7 @@ async def streaming_completion(
     drained = await _drain_stream(
         response, model, kwargs.get("api_base"),
         on_reasoning_chunk, on_content_chunk, on_tool_call_chunk, on_response_started,
+        tool_calls_by_idx,
     )
 
     if drained.cut_off is not None:
@@ -239,6 +258,7 @@ async def _consume_tool_call_deltas(
                 tool_calls_by_idx[idx]["name"] = tc_delta.function.name
         if getattr(tc_delta.function, "arguments", None):
             tool_calls_by_idx[idx]["arguments"] += tc_delta.function.arguments
+        forward_tool_input(tool_calls_by_idx[idx])
 
         if on_tool_call_chunk and idx not in emitted_tool_indices:
             tc = tool_calls_by_idx[idx]
