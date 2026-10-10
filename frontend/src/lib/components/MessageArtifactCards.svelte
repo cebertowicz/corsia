@@ -2,7 +2,7 @@
 	// The artifacts a message or a blocked update row carries, as a row of tiles.
 	// A tile opens its artifact in the canvas; it has no answer buttons, because the
 	// review bar in the opened document is the one place to answer an ask.
-	import { CARD_STATE_LABELS, feedbackLine, type MessageCard } from '$lib/api/messageCards';
+	import { CARD_STATE_LABELS, feedbackLine, visibleCards, type MessageCard } from '$lib/api/messageCards';
 	import { imageContentUrl } from '$lib/artifactImage';
 	import { token } from '$lib/stores/auth';
 	import { openArtifactTab } from '$lib/stores/artifactWorkspace';
@@ -15,6 +15,7 @@
 		more = 0,
 		threadId,
 		hiddenHolds,
+		renderedAsks,
 	}: {
 		cards: MessageCard[];
 		/** Cards past the cap; the last tile opens the artifact pane. */
@@ -22,9 +23,11 @@
 		threadId: string | null | undefined;
 		/** Holds whose card renders on their blocked update row instead. */
 		hiddenHolds?: ReadonlySet<string>;
+		/** Holds whose ask card is on screen somewhere else in the transcript. */
+		renderedAsks?: ReadonlySet<string>;
 	} = $props();
 
-	const shown = $derived(cards.filter((card) => !(card.hold_id && hiddenHolds?.has(card.hold_id))));
+	const shown = $derived(visibleCards(cards, hiddenHolds, renderedAsks));
 
 	const stateLabel = (card: MessageCard): string | null =>
 		card.state ? CARD_STATE_LABELS[card.state] : card.available ? null : CARD_STATE_LABELS.unavailable;

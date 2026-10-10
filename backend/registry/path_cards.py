@@ -16,7 +16,7 @@ looked at, so a long message costs a bounded number of lookups.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -86,16 +86,17 @@ def targets(text: str) -> list[str]:
 
 
 def reference_cards(
-    db, text: str, bases: Sequence[Path], user_id: str, *, skip: Collection[str] = frozenset(),
+    db, text: str, bases: Sequence[Path], user_id: str, *, covered: Mapping[str, Collection[str]] | None = None,
 ) -> tuple[list[dict], int]:
     """Cards for the registered artifacts ``text`` names, and how many more past the cap.
 
-    ``skip`` holds artifact ids already shown as an ask card in the same message:
-    an artifact is one card, and the ask is the one that carries state.
+    ``covered`` maps an artifact id to the holds whose ask card covers it: the card is
+    kept and marked ``covered_by_ask``, so the client shows it only when none of those
+    ask cards is on screen. The server never drops the reviewed document.
     """
     roots = [str(base) for base in bases]
     cards: list[dict] = []
-    seen: set[str] = set(skip)
+    seen: set[str] = set()
     for target in targets(text):
         path = workspace_path(target, roots)
         if path is None:
@@ -106,5 +107,7 @@ def reference_cards(
         card = reference_card(db, found.artifact, user_id)
         if card is not None:
             seen.add(card["artifact_id"])
+            if covered and covered.get(card["artifact_id"]):
+                card["covered_by_ask"] = sorted(covered[card["artifact_id"]])
             cards.append(card)
     return cards[:MAX_CARDS], max(0, len(cards) - MAX_CARDS)

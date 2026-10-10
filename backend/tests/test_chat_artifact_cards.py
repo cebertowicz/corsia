@@ -454,8 +454,12 @@ def test_a_message_past_the_cap_shows_eight_cards_and_the_count_of_the_rest(db, 
     assert (len(cards), more) == (MAX_CARDS, 3)
 
 
-def test_an_asked_artifact_is_one_card_in_its_turn_not_an_ask_and_a_reference(db, ws, monkeypatch):
-    """The ask rides the tool step; the turn's closing text naming the same file adds no second card."""
+def _marked(cards) -> list[tuple[str, str, list[str]]]:
+    return [(c["kind"], c["title"], c.get("covered_by_ask", [])) for c in cards]
+
+
+def test_an_asked_artifact_is_covered_by_its_ask_in_its_turn_and_never_dropped(db, ws, monkeypatch):
+    """The ask rides the tool step; the turn's closing text keeps its reference, marked as covered by that ask."""
     plan_id, node_id = _node(db)
     ask = _registered(db, ws, "design.md")
     _registered(db, ws, "other.md")
@@ -469,12 +473,13 @@ def test_an_asked_artifact_is_one_card_in_its_turn_not_an_ask_and_a_reference(db
 
     page = _page(db)
 
-    assert [(c["kind"], c["title"]) for c in page["m2"]["cards"]] == [("ask", "design.md")]
-    assert [(c["kind"], c["title"]) for c in page["m3"]["cards"]] == [("artifact", "other.md")]
-    assert [(c["kind"], c["title"]) for c in page["m5"]["cards"]] == [("artifact", "design.md")]
+    hold = page["m2"]["cards"][0]["hold_id"]
+    assert _marked(page["m2"]["cards"]) == [("ask", "design.md", [])]
+    assert _marked(page["m3"]["cards"]) == [("artifact", "design.md", [hold]), ("artifact", "other.md", [])]
+    assert _marked(page["m5"]["cards"]) == [("artifact", "design.md", [])]
 
 
-def test_the_turn_dedup_holds_for_a_cleared_ask(db, ws, monkeypatch):
+def test_the_cover_holds_for_a_cleared_ask(db, ws, monkeypatch):
     from registry.attention import clear_attention
 
     plan_id, node_id = _node(db)
@@ -489,10 +494,11 @@ def test_the_turn_dedup_holds_for_a_cleared_ask(db, ws, monkeypatch):
     page = _page(db)
 
     cards = [c for row in page.values() for c in row.get("cards", [])]
-    assert [(c["kind"], c["title"]) for c in cards] == [("ask", "design.md")]
+    hold = next(c["hold_id"] for c in cards if c["kind"] == "ask")
+    assert _marked(cards) == [("ask", "design.md", []), ("artifact", "design.md", [hold])]
 
 
-def test_an_artifact_an_ask_and_a_reference_both_name_shows_once_as_the_ask(db, ws, monkeypatch):
+def test_a_reference_on_the_asks_own_message_is_marked_covered_by_it(db, ws, monkeypatch):
     plan_id, node_id = _node(db)
     ask = _registered(db, ws, "design.md")
     _message(db, 1, calls=("prov-1",), turn="turn-1", text="[design](design.md) and [other](other.md)")
@@ -504,7 +510,10 @@ def test_an_artifact_an_ask_and_a_reference_both_name_shows_once_as_the_ask(db, 
     monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
     attach_cards(db, "owner", "user", thread, display)
 
-    assert [(c["kind"], c["title"]) for c in display[0]["cards"]] == [("ask", "design.md"), ("artifact", "other.md")]
+    hold = display[0]["cards"][0]["hold_id"]
+    assert _marked(display[0]["cards"]) == [
+        ("ask", "design.md", []), ("artifact", "design.md", [hold]), ("artifact", "other.md", []),
+    ]
 
 
 def test_a_reference_card_carries_the_artifact_type_the_canvas_uses_for_images(db, ws):

@@ -185,10 +185,11 @@ describe('UpdateCard ask row', () => {
 		expect(host.querySelector('.update-ask .tile')?.getAttribute('aria-label')).toContain('Needs your review');
 	});
 
-	it('shows no ask once the block no longer asks for the user', () => {
-		mountCard({ ...blocked, blocked_asks_user: false });
+	it('keeps the ask under its row once answered, with its new round state', () => {
+		mountCard({ ...blocked, blocked_asks_user: false, ask: ask({ state: 'answered' }) });
 
-		expect(host.querySelector('.update-ask')).toBeNull();
+		expect(host.querySelector('.update-card')!.nextElementSibling?.classList.contains('update-ask')).toBe(true);
+		expect(host.querySelector('.update-ask .tile')?.getAttribute('aria-label')).toContain('Answered');
 	});
 
 	it('shows no ask on a row that recorded none', () => {

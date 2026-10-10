@@ -68,8 +68,18 @@
 	const stubPauses = $derived(stubPauseTurns(renderedEntries, pauses, turnSummaries));
 	// A hold's ask card has one home: its blocked update row while that row is on screen, else its message.
 	const homedHolds = $derived(new Set(renderedEntries.flatMap((entry) =>
-		entry.kind === 'update' && entry.card.kind === 'blocked' && entry.card.blocked_asks_user && entry.card.ask?.hold_id
+		entry.kind === 'update' && entry.card.kind === 'blocked' && entry.card.ask?.hold_id
 			? [entry.card.ask.hold_id] : [])));
+	// Every ask card on screen: on its update row, or on a message the transcript shows (a collapsed run's are not).
+	const renderedAsks = $derived.by(() => {
+		const holds = new Set(homedHolds);
+		renderedEntries.forEach((entry, index) => {
+			const items = entry.kind === 'message' ? [entry] : entry.kind === 'fold'
+				&& isRunExpanded(runTokens(renderedEntries, index, historyComplete), expandedFolds) ? entry.items : [];
+			for (const item of items) for (const card of item.message.cards ?? []) if (card.hold_id) holds.add(card.hold_id);
+		});
+		return holds;
+	});
 	const visibleSources = $derived.by(() => {
 		const ids = new Set<string>();
 		renderedEntries.forEach((entry, index) => {
@@ -126,6 +136,7 @@
 				showActivity={entry.showActivity}
 				showContent={entry.showContent}
 				hiddenHolds={homedHolds}
+				{renderedAsks}
 				onToggleToolBlock={onToggleToolBlock}
 				onToggleReasoning={onToggleReasoning}
 				onLoadToolResult={onLoadToolResult ? (toolCallId) => onLoadToolResult(msg.id, toolCallId) : undefined}

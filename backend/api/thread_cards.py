@@ -14,10 +14,13 @@ before they were recorded) attaches to the latest step of its Turn that
 existed when the hold was placed. A step outside the page gets nothing from this
 page: its own page reads its asks.
 
-An artifact asked in a Turn is one card in that Turn: it suppresses its reference
-card on every message of the Turn, wherever the ask card renders and whatever round
-state it reads. An ask raised on an earlier page of a Turn is not seen from a later
-page, so a Turn that crosses a page boundary can show the reference there.
+An artifact asked in a Turn is one card in that Turn, wherever the ask card renders
+and whatever round state it reads. This module is the one dedup owner: a reference
+card for an asked artifact is kept and marked ``covered_by_ask`` with the holds that
+cover it, and the client shows it only when none of those ask cards is on screen
+(its host row is collapsed, or on another page). The reviewed document is never
+dropped. An ask raised on an earlier page of a Turn is not seen from a later page,
+so there the reference is unmarked: it shows, and may repeat the earlier ask card.
 """
 
 from __future__ import annotations
@@ -93,8 +96,8 @@ def _turn_step(db, thread_id: str, turn_id: str, placed_at: str) -> str | None:
 
 def _ask_cards_by_message(
     db, thread_id: str, rows: list[dict],
-) -> tuple[dict[str, list[dict]], dict[str, set[str]]]:
-    """Ask cards by message id, and the artifact ids asked in each Turn, wherever the card renders."""
+) -> tuple[dict[str, list[dict]], dict[str, dict[str, list[str]]]]:
+    """Ask cards by message id, and the holds that asked each artifact in each Turn, wherever the card renders."""
     assistants = [r for r in rows if r.get("role") == "assistant"]
     updates = _page_updates(db, thread_id, rows) if assistants else []
     if not updates:
@@ -105,7 +108,7 @@ def _ask_cards_by_message(
             by_call.setdefault(call_id, row["id"])
     in_page = {r["id"] for r in assistants}
     turn_of = {r["id"]: _loads(r.get("metadata")).get("turn_id") for r in assistants}
-    asked: dict[str, set[str]] = {}
+    asked: dict[str, dict[str, list[str]]] = {}
     placed: list[tuple[str, str, str]] = []  # (message id, hold id, ask artifact id)
     for update in updates:
         payload = _loads(update["payload_json"])
@@ -118,7 +121,7 @@ def _ask_cards_by_message(
             message_id = None
         turn = payload.get("turn_id") or turn_of.get(message_id)
         if turn:
-            asked.setdefault(turn, set()).add(update["artifact_id"])
+            asked.setdefault(turn, {}).setdefault(update["artifact_id"], []).append(update["hold_id"])
         if message_id is not None and message_id in in_page:
             placed.append((message_id, update["hold_id"], update["artifact_id"]))
     live = ask_cards(db, {hold_id: artifact_id for _, hold_id, artifact_id in placed})
@@ -144,12 +147,13 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
         if isinstance(text, str) and text:
             if bases is None:
                 bases = scope_bases(thread_row["project_id"], db)
-            # An artifact asked in a Turn is one card there: the ask, never a reference too.
+            # An artifact asked in a Turn is covered by that ask: the reference is marked, never dropped.
             turn_id = _loads(row.get("metadata")).get("turn_id")
-            skip = asked_in_turn.get(turn_id, set()) if isinstance(turn_id, str) else set()
-            refs, more = reference_cards(
-                db, text, bases, user_id, skip=skip | {c["artifact_id"] for c in cards},
-            )
+            asked_here = asked_in_turn.get(turn_id, {}) if isinstance(turn_id, str) else {}
+            covered = {artifact: set(holds) for artifact, holds in asked_here.items()}
+            for card in cards:
+                covered.setdefault(card["artifact_id"], set()).add(card["hold_id"])
+            refs, more = reference_cards(db, text, bases, user_id, covered=covered)
             cards.extend(refs)
         if cards:
             row["cards"] = cards

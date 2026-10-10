@@ -15,6 +15,7 @@
 		showActivity = true,
 		showContent = true,
 		hiddenHolds,
+		renderedAsks,
 	}: {
 		msg: any;
 		expandedTools: Set<string>;
@@ -26,6 +27,8 @@
 		showContent?: boolean;
 		/** Holds whose ask card renders on their blocked update row instead. */
 		hiddenHolds?: ReadonlySet<string>;
+		/** Holds whose ask card is on screen elsewhere in the transcript. */
+		renderedAsks?: ReadonlySet<string>;
 	} = $props();
 
 	const activityTools = $derived.by(() => {
@@ -145,7 +148,7 @@
 	{/if}
 
 	{#if msg.cards?.length || msg.cards_more}
-		<MessageArtifactCards cards={msg.cards ?? []} more={msg.cards_more ?? 0} threadId={msg.thread_id} {hiddenHolds} />
+		<MessageArtifactCards cards={msg.cards ?? []} more={msg.cards_more ?? 0} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />
 	{/if}
 
 		<div class="msg-footer">

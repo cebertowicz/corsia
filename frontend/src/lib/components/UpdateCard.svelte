@@ -21,8 +21,9 @@
 	const outcome = $derived(OUTCOMES[card.kind] ?? card.kind);
 	// A renamed or deleted item keeps its historical title as plain text.
 	const opens = $derived(card.node_exists && Boolean(card.node_id));
-	// The ask is shown here, under its row, only while the block asks for the user; once answered the row is a line and the message carries the card.
-	const ask = $derived(card.kind === 'blocked' && card.blocked_asks_user ? card.ask ?? null : null);
+	// The ask card is homed under its row in every round state, so it does not move when answered. Focus
+	// tucks an answered block into a line instead of a row: the card then shows on its message.
+	const ask = $derived(card.kind === 'blocked' ? card.ask ?? null : null);
 
 	function openPlanNode(): void {
 		emitProductEvent('update_card', 'plan_open');

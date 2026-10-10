@@ -12,6 +12,8 @@ export interface MessageCard {
 	/** The artifact pane can open it in the canvas. */
 	opens: boolean;
 	hold_id?: string;
+	/** A reference card for a file an ask in this Turn covers: the holds whose ask cards cover it. */
+	covered_by_ask?: string[];
 	state?: MessageCardState;
 	feedback?: { comments?: number; suggestions?: number; edits?: number };
 }
@@ -39,4 +41,18 @@ export function feedbackLine(feedback: MessageCard['feedback']): string | null {
 		part(feedback?.comments, 'comment'), part(feedback?.suggestions, 'suggestion'), part(feedback?.edits, 'edit'),
 	].filter((value): value is string => value !== null);
 	return parts.length ? parts.join(', ') : null;
+}
+
+/**
+ * The cards of one message that show. An ask card whose blocked update row is on screen shows
+ * there, not here. A reference card covered by asks shows only when none of those ask cards is on
+ * screen (its host row is collapsed or on another page), so the reviewed document is visible in
+ * both Focus modes and never twice. `rendered` is the holds the transcript shows elsewhere.
+ */
+export function visibleCards(
+	cards: readonly MessageCard[], homed?: ReadonlySet<string>, rendered?: ReadonlySet<string>,
+): MessageCard[] {
+	const here = cards.filter((card) => !(card.hold_id && homed?.has(card.hold_id)));
+	const onScreen = new Set([...rendered ?? [], ...homed ?? [], ...here.flatMap((card) => card.hold_id ?? [])]);
+	return here.filter((card) => !card.covered_by_ask?.some((hold) => onScreen.has(hold)));
 }
