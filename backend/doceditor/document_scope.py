@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 from core.project_context import resolve_project_paths
@@ -68,3 +69,8 @@ def path_write_allowed(path: Path, bases: list[Path]) -> bool:
 def revision(raw: bytes) -> str:
     """Opaque revision derived solely from the document's current bytes."""
     return hashlib.sha256(raw).hexdigest()
+
+
+def stat_revision(st: os.stat_result) -> str:
+    """Opaque revision of a file too large to hash on every probe, from its size and modification time alone."""
+    return f"stat-{st.st_size}-{st.st_mtime_ns}"
