@@ -65,25 +65,9 @@ async def _invoke(
                 + index
             ),
         )
-    from core.placement_review import review_block
+    from core.placement_review import attach_review
 
-    try:
-        review = await run_in_db(
-            review_block, request.checkpoint_id, request.thread_id,
-        )
-    except Exception:
-        # The review is an addition to the checkpoint, never a reason to fail it.
-        from loguru import logger
-
-        logger.exception(
-            "placement.review_skipped thread={} checkpoint={} reason=review-error",
-            request.thread_id, request.checkpoint_id,
-        )
-        review = None
-    if review is not None:
-        request = replace(
-            request, instruction=request.instruction + "\n\n" + review,
-        )
+    request = await attach_review(request)
     request = await bind_usage(request)
     if request.target.harness == "native":
         from core.checkpoint_native_fork import invoke_checkpoint
