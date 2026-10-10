@@ -61,6 +61,7 @@ function isNode(v: unknown): boolean {
 	if (typeof v.folded !== 'boolean' || !isStr(v.last_transition_at)) return false;
 	if (!isObject(v.executor) || !isStr(v.executor.label) || !isExecution(v.execution) || !isDisplay(v.display)) return false;
 	if (v.status_reason !== undefined && !isStrOrNull(v.status_reason)) return false;
+	if (!isStrOrNull(v.scheduled_until)) return false;
 	if (!isChild(v.child) || !isReview(v.review) || !(v.branch_progress === null || isProgress(v.branch_progress))) return false;
 	if (!isCommitmentCost(v.commitment_cost) || !isNodeCost(v.node_cost) || !isInitiative(v.initiative)) return false;
 	if (!isNum(v.requirements_revision) || !isEvidence(v.evidence)) return false;

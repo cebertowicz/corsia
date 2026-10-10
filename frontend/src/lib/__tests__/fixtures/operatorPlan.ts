@@ -103,6 +103,7 @@ export function operatorNode(over: Partial<OperatorNode> = {}): OperatorNode {
 		initiative: null,
 		status_reason: null,
 		branch_progress: null,
+		scheduled_until: null,
 		attention_path: [],
 		completion: null,
 		child: null,

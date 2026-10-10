@@ -235,6 +235,8 @@ export interface OperatorNode {
 	/** Lineage total, on every task of a lineage of two or more; null elsewhere. */
 	initiative: OperatorInitiative | null;
 	branch_progress: { done: number; total: number } | null;
+	/** When the work under this node, all of it quietly set aside by its agent, next comes due (ISO); null if any open work is not. */
+	scheduled_until: string | null;
 	attention_path: string[];
 	completion: OperatorCompletion | null;
 	child: OperatorChildSummary | null;

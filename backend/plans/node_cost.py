@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from infra.packed_rows import fetch_all
-from plans import hierarchy, node_waiting, service
+from plans import hierarchy, node_time, node_waiting, service
 from plans.status_time import parse as _parse
 
 #: Every ``active_turns.status`` the schema allows; ``_add`` keeps only these.
@@ -142,8 +142,12 @@ def _own_failures(connection, node_ids: list[str]) -> dict[str, int]:
     return {str(row["node_id"]): int(row["count"]) for row in rows}
 
 
-def _own_execution(connection, node_ids: list[str], now: datetime) -> dict[str, dict]:
+def _own_execution(
+    connection, node_ids: list[str], now: datetime,
+) -> tuple[dict[str, dict], dict[str, list]]:
     """Sum each node's durable Turn intervals; count what cannot be measured.
+
+    Also returns each node's merged intervals (epoch seconds) for the roll-up.
 
     A Turn still running counts up to the clock. A Turn that ended before it
     started, or that is terminal with no end, is an unknown Turn -- counted,
@@ -156,6 +160,7 @@ def _own_execution(connection, node_ids: list[str], now: datetime) -> dict[str, 
         node_ids,
     )
     facts: dict[str, dict] = {}
+    found: dict[str, list] = defaultdict(list)
     for row in rows:
         node_id = str(row["plan_node_id"])
         fact = facts.setdefault(
@@ -169,7 +174,8 @@ def _own_execution(connection, node_ids: list[str], now: datetime) -> dict[str, 
             fact["unknown_turns"] += 1
             continue
         fact["seconds"] += int((end - start).total_seconds())
-    return facts
+        found[node_id].append((start.timestamp(), end.timestamp()))
+    return facts, {node_id: node_waiting.union(items) for node_id, items in found.items()}
 
 
 def own_many(node_ids, *, db=None, now: datetime | None = None) -> dict[str, dict]:
@@ -178,16 +184,24 @@ def own_many(node_ids, *, db=None, now: datetime | None = None) -> dict[str, dic
     The count is fixed per call (``node_waiting`` adds its own handful), never
     per node; only chunking a very wide id list adds queries.
     """
+    return own_many_timed(node_ids, db=db, now=now)[0]
+
+
+def own_many_timed(
+    node_ids, *, db=None, now: datetime | None = None,
+) -> tuple[dict[str, dict], dict[str, node_time.Span]]:
+    """``own_many`` plus each node's own time intervals, from the same reads."""
     ids = sorted({str(value) for value in node_ids})
     if not ids:
-        return {}
+        return {}, {}
     clock = now or datetime.now(timezone.utc)
     with service._connection(db) as connection:
         usage = _own_usage(connection, ids)
         failures = _own_failures(connection, ids)
-        execution = _own_execution(connection, ids, clock)
-        waiting = node_waiting.own_waiting(connection, ids, clock, _rows_in)
+        execution, working = _own_execution(connection, ids, clock)
+        waiting = node_waiting.own_waiting_intervals(connection, ids, clock, _rows_in)
     result: dict[str, dict] = {}
+    spans: dict[str, node_time.Span] = {}
     for node_id in ids:
         own = _empty_own()
         found = usage.get(node_id)
@@ -198,9 +212,14 @@ def own_many(node_ids, *, db=None, now: datetime | None = None) -> dict[str, dic
         exec_found = execution.get(node_id)
         if exec_found is not None:
             own["execution"] = exec_found
-        own["waiting"] = {"seconds": waiting.get(node_id, 0)}
+        own["waiting"] = {
+            "seconds": int(sum(end - start for start, end in waiting.get(node_id, []))),
+        }
         result[node_id] = own
-    return result
+        spans[node_id] = {
+            "working": working.get(node_id, []), "waiting": waiting.get(node_id, []),
+        }
+    return result, spans
 
 
 #: The node columns the cost projections read.
@@ -231,8 +250,16 @@ def _attached_children(connection, plan_ids: list[str]) -> dict[str, str]:
     return {node_id: child_plan_id for child_plan_id, node_id in owners.items()}
 
 
-def _rollup_one_plan(rows: list[dict], own: dict, attached: dict, child_totals: dict) -> dict[str, dict]:
+def _rollup_one_plan(
+    rows: list[dict], own: dict, attached: dict, child_totals: dict,
+    spans: dict, child_spans: dict,
+) -> tuple[dict[str, dict], node_time.Span]:
     """Roll one plan's nodes up in a single pass, every child before its parent.
+
+    Tokens, cost and Turn counts sum. Working and Waiting are wall clock, so
+    each node's rolled seconds come from the union of its subtree's intervals
+    (``node_time``), never from adding its children's seconds. Returns the
+    rolled costs and the merged span of the plan's top-level nodes.
 
     A node's parent is fixed at creation and must already exist in the same
     plan (``node_creation._validate_parent``), so the rows are a forest.
@@ -250,14 +277,24 @@ def _rollup_one_plan(rows: list[dict], own: dict, attached: dict, child_totals: 
         order.append(node_id)
         stack.extend(children[node_id])
     rolled: dict[str, dict] = {}
+    carried: dict[str, node_time.Span] = {}
     for node_id in reversed(order):
         total = dict(own.get(node_id, _empty_own()))
+        parts = [spans.get(node_id, node_time.empty())]
         for child_id in children[node_id]:
             total = _add(total, rolled[child_id])
+            parts.append(carried[child_id])
         if node_id in attached:
             total = _add(total, child_totals.get(attached[node_id], _empty_own()))
-        rolled[node_id] = total
-    return rolled
+            parts.append(child_spans.get(attached[node_id], node_time.empty()))
+        carried[node_id] = node_time.merge(parts)
+        working, waiting = node_time.seconds(carried[node_id])
+        rolled[node_id] = {
+            **total,
+            "execution": {**total["execution"], "seconds": working},
+            "waiting": {"seconds": waiting},
+        }
+    return rolled, node_time.merge([carried[node_id] for node_id in children[None]])
 
 
 def project_many(plan_ids, *, db=None, now: datetime | None = None) -> dict[str, dict[str, dict]]:
@@ -287,28 +324,31 @@ def project_with_initiatives(
     with service._connection(db) as connection:
         tree = [str(row["id"]) for row in hierarchy.descendants(connection, ids)]
         loaded = _load_plans(connection, tree, clock)
-        found = _lineage_totals(connection, loaded, clock) if initiatives else {}
-    nodes_by_plan, own, attached = loaded
-    by_plan = _roll_plans(tree, nodes_by_plan, own, attached)
+        found = _lineage_totals(connection, loaded[:3], clock) if initiatives else {}
+    nodes_by_plan, own, attached, spans = loaded
+    by_plan = _roll_plans(tree, nodes_by_plan, own, attached, spans)
     return by_plan, {
         row["id"]: found.get(row["id"])
         for plan_id in tree for row in nodes_by_plan[plan_id]
     } if initiatives else {}
 
 
-def _load_plans(connection, tree: list[str], clock) -> tuple[dict, dict, dict]:
-    """Nodes, own costs and attachments for these plans, in batch reads."""
+def _load_plans(connection, tree: list[str], clock) -> tuple[dict, dict, dict, dict]:
+    """Nodes, own costs, attachments and own time spans, in batch reads."""
     nodes_by_plan = _plan_nodes(connection, tree)
-    own = own_many(
+    own, spans = own_many_timed(
         [row["id"] for rows in nodes_by_plan.values() for row in rows],
         db=connection, now=clock,
     )
-    return nodes_by_plan, own, _attached_children(connection, tree)
+    return nodes_by_plan, own, _attached_children(connection, tree), spans
 
 
-def _roll_plans(tree: list[str], nodes_by_plan: dict, own: dict, attached: dict) -> dict:
+def _roll_plans(
+    tree: list[str], nodes_by_plan: dict, own: dict, attached: dict, spans: dict,
+) -> dict:
     by_plan: dict[str, dict[str, dict]] = {}
     totals: dict[str, dict] = {}
+    plan_spans: dict[str, node_time.Span] = {}
     # Each plan is rolled only after the child plans its steps carry. An
     # explicit stack keeps delegation depth off the interpreter stack.
     stack = [(plan_id, False) for plan_id in tree]
@@ -322,8 +362,9 @@ def _roll_plans(tree: list[str], nodes_by_plan: dict, own: dict, attached: dict)
             stack.append((plan_id, True))
             stack.extend((child_id, False) for child_id in carried)
             continue
-        rolled = _rollup_one_plan(
+        rolled, plan_spans[plan_id] = _rollup_one_plan(
             rows, own, attached, {child_id: totals[child_id] for child_id in carried},
+            spans, plan_spans,
         )
         by_plan[plan_id] = {
             node_id: {"own": _settled(own.get(node_id, _empty_own())),

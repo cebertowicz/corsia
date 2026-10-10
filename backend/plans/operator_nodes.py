@@ -7,9 +7,11 @@ queries or mutates plan state.
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime
 
 import plans.operator_node_state as node_state
 import plans.operator_plan_display as plan_header
+import plans.operator_scheduled as scheduled_work
 import plans.rollup as rollup
 import plans.service as service
 import plans.user_steering as user_steering
@@ -96,6 +98,7 @@ def _present_node(
         "node_cost": state["node_cost"],
         "initiative": state["initiative"],
         "branch_progress": None,
+        "scheduled_until": None,
         "attention_path": attention_path,
         "completion": completion,
         "child": _child_summary(node["child_plan"], node["spawned_thread_id"]),
@@ -160,8 +163,14 @@ def distribution_from_buckets(
 
 def _branch_summary(
     nodes: list[dict],
-) -> tuple[dict[str, dict[str, int]], dict[str, bool], dict[str, bool]]:
-    """Count every presented node's leaves once, bottom-up in canonical order."""
+) -> tuple[dict[str, dict[str, int]], dict[str, bool], dict[str, bool], dict[str, str | None]]:
+    """Count every presented node's leaves once, bottom-up in canonical order.
+
+    The same pass rolls up what is quietly scheduled: ``scheduled`` maps each
+    node to the soonest end among the agent-scheduled waits beneath it (its own
+    included), but only when ALL of its open work is such waiting and nothing
+    on it or beneath it needs a person; otherwise ``None``.
+    """
     ids = {node["id"] for node in nodes}
     work = work_ids(nodes)
     children: dict[str, list[str]] = {}
@@ -171,22 +180,45 @@ def _branch_summary(
     counts: dict[str, dict[str, int]] = {}
     needs_user: dict[str, bool] = {}
     working: dict[str, bool] = {}
+    # Per node: some open work beneath is not scheduled, and the soonest scheduled end.
+    unscheduled: dict[str, bool] = {}
+    soonest: dict[str, datetime | None] = {}
     for node in reversed(nodes):
         own = dict.fromkeys(node_state.DISTRIBUTION_KEYS, 0)
         child_ids = children.get(node["id"], [])
+        loose = False
+        ends: list[datetime] = []
         if not child_ids and node["id"] in work:
-            own[node_state.leaf_bucket(node)] = 1
+            bucket = node_state.leaf_bucket(node)
+            own[bucket] = 1
+            if bucket in node_state.OPEN_KEYS:
+                end = scheduled_work.scheduled_leaf_end(node)
+                loose = end is None
+                ends = [] if end is None else [end]
+        elif child_ids:
+            has_wait, end = scheduled_work.own_wait(node)
+            loose = not scheduled_work.needs_no_one(node) or (has_wait and end is None)
+            ends = [] if end is None else [end]
         for child_id in child_ids:
             for key, value in counts[child_id].items():
                 own[key] += value
+            loose = loose or unscheduled[child_id]
+            if (child_end := soonest[child_id]) is not None:
+                ends.append(child_end)
         counts[node["id"]] = own
+        unscheduled[node["id"]] = loose
+        soonest[node["id"]] = min(ends) if ends else None
         needs_user[node["id"]] = node["requires_user_action"] or any(
             needs_user[child_id] for child_id in child_ids
         )
         working[node["id"]] = (
             not child_ids and node["display"]["label_key"] == "working"
         ) or any(working[child_id] for child_id in child_ids)
-    return counts, needs_user, working
+    scheduled = {
+        node_id: None if unscheduled[node_id] or end is None else end.isoformat()
+        for node_id, end in soonest.items()
+    }
+    return counts, needs_user, working, scheduled
 
 
 _BRANCH_FINISHED = {
@@ -225,12 +257,13 @@ def _apply_branches(nodes: list[dict], raw: list[dict]) -> dict[str, int]:
     Only a container (``node_states.is_container``) reads as its leaves. Raw
     lifecycle ``state`` is never changed, so actions still read the node itself.
     """
-    counts, needs_user, working = _branch_summary(nodes)
+    counts, needs_user, working, scheduled = _branch_summary(nodes)
     fold = folded_ids(raw)
     parents = parent_ids(nodes)
     ids = {node["id"] for node in nodes}
     for node, row in zip(nodes, raw):
         node["folded"] = node["id"] in fold
+        node["scheduled_until"] = scheduled[node["id"]]
         if node["id"] not in parents:
             node["status_reason"] = node["status_reason"] or _queued_reason(node)
             continue

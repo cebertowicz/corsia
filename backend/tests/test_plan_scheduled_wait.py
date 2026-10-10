@@ -97,6 +97,36 @@ def test_an_agent_schedules_a_task_months_out_with_a_reason(db):
     )
 
 
+def _reschedule(db, plan, node, *, due: str, reason: str):
+    return _schedule(
+        db, plan, node, reason=reason, condition={"type": "deadline", "value": due},
+    )
+
+
+@pytest.mark.parametrize(("first_days", "second_days"), [(10, 40), (40, 10)], ids=["later", "earlier"])
+def test_rescheduling_replaces_the_old_schedule_even_while_it_is_in_the_future(
+    db, first_days, second_days,
+):
+    """#903: a task has one schedule. The old one is retired, past or future."""
+    plan, node = _task(db)
+    first = _reschedule(db, plan, node, due=_due(days=first_days), reason="First reason")
+    old_id = first["watch"]["id"]
+    second_due = _due(days=second_days)
+
+    second = _reschedule(db, plan, node, due=second_due, reason="Second reason")
+
+    [watch] = _armed(db, node.id)
+    assert watch["id"] == second["watch"]["id"] != old_id
+    assert datetime.fromisoformat(watch["condition_value"]) == datetime.fromisoformat(second_due)
+    assert second["superseded_watch_ids"] == [old_id]
+    assert db.execute(
+        "SELECT status FROM expected_event_watches WHERE id=?", (old_id,),
+    ).fetchone()["status"] == "resolved"
+    [cause] = admission.project(node.id, db=db)["causes"]
+    assert cause["scheduled_reason"] == "Second reason"
+    assert "First reason" not in cause["reason"]
+
+
 def test_the_row_says_the_date_then_why(db):
     plan, node = _task(db)
     due = _due(days=2)

@@ -19,7 +19,7 @@ import { CHILD_AVAILABLE, node as treeNode } from './fixtures/planTreeNode';
 /**
  * Every place the plan tree mounts must gather scheduled work: the thread pane,
  * the drill view, the Activity plan row and a nested subagent plan. The group is
- * built inside the tree from the nodes and the shared minute clock, so a mount
+ * built inside the tree from the nodes' `scheduled_until` and the shared minute clock, so a mount
  * needs to pass nothing else; these prove each one does.
  */
 
@@ -33,6 +33,7 @@ let head: Record<string, unknown> | null = null;
 /** A task its agent scheduled until `hours` from the real now. */
 function scheduled<T extends OperatorNode>(base: T, hours: number): T {
 	base.display = { label_key: 'waiting', tone_key: 'waiting' };
+	base.scheduled_until = new Date(Date.now() + hours * HOUR).toISOString();
 	base.execution = {
 		...base.execution,
 		condition: 'waiting',
@@ -113,7 +114,7 @@ describe('the thread pane', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => respond(threadEnvelope(nodes, 3))));
 		mountPane();
 		await settle();
-		expect(titles()).toEqual(['Open work', '{Scheduled · 2}']);
+		expect(titles()).toEqual(['Open work', '{Scheduled}']);
 	});
 
 	it('never says "Nothing open" while the only open work is scheduled, and still counts it', async () => {
@@ -121,7 +122,7 @@ describe('the thread pane', () => {
 		mountPane();
 		await settle();
 		expect(host.textContent).not.toContain('Nothing open');
-		expect(titles()).toEqual(['{Scheduled · 2}']);
+		expect(titles()).toEqual(['{Scheduled}']);
 		expect(host.querySelector('.progress')?.textContent).toBe('2 left');
 	});
 
@@ -129,6 +130,7 @@ describe('the thread pane', () => {
 		const paused = ['A', 'B'].map((id) => {
 			const row = op(id, 48);
 			row.execution = { ...row.execution, condition: 'paused', causes: [] };
+			row.scheduled_until = null;
 			return row;
 		});
 		vi.stubGlobal('fetch', vi.fn(async () => respond(threadEnvelope(paused, 2, 'paused'))));
@@ -147,7 +149,7 @@ describe('the drill view', () => {
 		];
 		component = mount(PlanDrillView, { target: host, props: { nodes, rootId: 'root', onBack: () => {} } });
 		flushSync();
-		expect(titles()).toContain('{Scheduled · 2}');
+		expect(titles()).toContain('{Scheduled}');
 		expect(titles()).not.toContain('A');
 	});
 });
@@ -165,7 +167,7 @@ describe('a nested subagent plan', () => {
 			},
 		});
 		flushSync();
-		expect(titles()).toEqual(['Delegated step', '{Scheduled · 2}']);
+		expect(titles()).toEqual(['Delegated step', '{Scheduled}']);
 		expect(host.querySelector('.child-tree .scheduled-row')?.getAttribute('data-depth')).toBe('1');
 	});
 });
@@ -192,6 +194,6 @@ describe('the Activity plan row', () => {
 		await settle();
 		(host.querySelector('.row-summary[aria-label="Expand Plan for thread-a"]') as HTMLButtonElement).click();
 		await settle();
-		expect(titles()).toEqual(['Open work', '{Scheduled · 2}']);
+		expect(titles()).toEqual(['Open work', '{Scheduled}']);
 	});
 });

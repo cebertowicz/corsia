@@ -298,7 +298,7 @@
 				style={`--depth:${depthOffset + item.depth}`} data-depth={depthOffset + item.depth}
 				aria-level={depthOffset + item.depth + 1}
 			>
-				<span class="row-body"><PlanGroupFace count={item.members.length} /></span>
+				<span class="row-body"><PlanGroupFace /></span>
 				<PlanLevelToggle
 					single shown={item.open ? item.members.length : 0} total={item.members.length} noun="scheduled tasks"
 					controls={item.members.map((member) => rowId(member.id)).join(' ')}

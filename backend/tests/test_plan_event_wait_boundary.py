@@ -95,6 +95,53 @@ def test_the_named_event_on_the_bound_artifact_ends_the_wait(isolated_db):
         db.close()
 
 
+def test_rescheduling_a_task_keeps_its_artifact_bound_event_wait(isolated_db):
+    """#903: a new schedule retires old schedules only, never a wait on a PR."""
+    from datetime import datetime, timedelta, timezone
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        actor = _owner(db)
+        register_pr(REPO, 7, "owner")
+        plan, node = _watching(
+            db, actor, external_id=pr_external_id(REPO, 7), event=OPENED,
+        )
+        pr_watch = db.execute(
+            "SELECT id FROM expected_event_watches WHERE plan_node_id=?", (node.id,),
+        ).fetchone()["id"]
+
+        def schedule(days: int):
+            result = mutate(
+                plan.id, "arm_watch",
+                {
+                    "node_id": node.id, "reason": "Come back",
+                    "condition": {"type": "deadline", "value": (
+                        datetime.now(timezone.utc) + timedelta(days=days)
+                    ).replace(microsecond=0).isoformat()},
+                    "expected_revision": service._node_row(db, node.id)["revision"],
+                },
+                actor=actor, provenance="test.event_wait",
+                mutation_id=uuid.uuid4().hex, db=db,
+            ).result
+            db.commit()
+            return result
+
+        first = schedule(10)["watch"]["id"]
+        second = schedule(20)
+
+        statuses = {
+            row["id"]: row["status"] for row in db.execute(
+                "SELECT id,status FROM expected_event_watches WHERE plan_node_id=?",
+                (node.id,),
+            )
+        }
+        assert statuses == {pr_watch: "armed", first: "resolved", second["watch"]["id"]: "armed"}
+        assert second["superseded_watch_ids"] == [first]
+    finally:
+        db.close()
+
+
 def test_an_unrelated_event_and_another_integrations_artifact_do_not_end_it(
     isolated_db,
 ):
