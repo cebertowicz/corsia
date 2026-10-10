@@ -4,6 +4,7 @@
 	import type { UpdateCard } from '$lib/api/threadUpdates';
 	import { focusPlanNode } from '$lib/planNodeFocus';
 	import { emitProductEvent } from '$lib/product_events';
+	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
 
 	const OUTCOMES: Record<UpdateCard['kind'], string> = {
@@ -20,6 +21,8 @@
 	const outcome = $derived(OUTCOMES[card.kind] ?? card.kind);
 	// A renamed or deleted item keeps its historical title as plain text.
 	const opens = $derived(card.node_exists && Boolean(card.node_id));
+	// The ask is shown here, under its row, only while the block asks for the user; once answered the row is a line and the message carries the card.
+	const ask = $derived(card.kind === 'blocked' && card.blocked_asks_user ? card.ask ?? null : null);
 
 	function openPlanNode(): void {
 		emitProductEvent('update_card', 'plan_open');
@@ -27,7 +30,7 @@
 	}
 </script>
 
-<div class="update-card {card.kind}" data-update-id={card.id}>
+<div class="update-card {card.kind}" class:with-ask={ask} data-update-id={card.id}>
 	{#if opens}
 		<button type="button" class="title" onclick={openPlanNode}>{title}</button>
 	{:else}
@@ -40,6 +43,9 @@
 		<span class="earlier">{earlier} earlier</span>
 	{/if}
 </div>
+{#if ask}
+	<div class="update-ask"><MessageArtifactCards cards={[ask]} threadId={card.thread_id} /></div>
+{/if}
 
 <style>
 	.update-card {
@@ -55,6 +61,8 @@
 		font-size: var(--text-footnote);
 		color: var(--text-secondary);
 	}
+	.update-card.with-ask { margin-bottom: 0; }
+	.update-ask { max-width: 760px; margin: 0 auto 12px; }
 	.title {
 		min-width: 0;
 		overflow: hidden;

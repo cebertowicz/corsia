@@ -14,6 +14,14 @@ import plans.service as service
 import plans.watch_operations as watch_operations
 
 
+def _raised_in(actor) -> dict[str, str]:
+    """Where this call ran: its Turn and the ids its tool call is known by."""
+    ids = list(actor.call_ids)
+    found = {"turn_id": actor.turn_id, "tool_invocation_id": ids[0] if ids else None,
+             "provider_call_id": ids[1] if len(ids) > 1 else None}
+    return {key: value for key, value in found.items() if value}
+
+
 def after_transition(
     node_id: str, reason: str, common: dict, *, executor: str | None = None,
 ) -> dict:
@@ -119,6 +127,8 @@ def _park_write(plan_id: str, operation: str, params: dict[str, Any], actor, com
             # A user ask is the specific owner of this hold. Reusing owner_id
             # ties its clearance to this ask even if the task waits again later.
             owner_id=ask if ask is not None else params.get("owner_id"),
+            # Where a user ask was raised, so chat shows the ask on that step.
+            raised_in=_raised_in(actor) if ask is not None else None,
             **fields.expected(params), **common,
         )
         if ask is not None:

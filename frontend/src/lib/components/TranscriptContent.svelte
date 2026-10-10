@@ -66,6 +66,10 @@
 		? { threadId: boundThreadId, phase: boundTurn.phase, turnId: boundTurn.turnId } : undefined));
 	const renderedEntries = $derived(pausePresentation.entries);
 	const stubPauses = $derived(stubPauseTurns(renderedEntries, pauses, turnSummaries));
+	// A hold's ask card has one home: its blocked update row while that row is on screen, else its message.
+	const homedHolds = $derived(new Set(renderedEntries.flatMap((entry) =>
+		entry.kind === 'update' && entry.card.kind === 'blocked' && entry.card.blocked_asks_user && entry.card.ask?.hold_id
+			? [entry.card.ask.hold_id] : [])));
 	const visibleSources = $derived.by(() => {
 		const ids = new Set<string>();
 		renderedEntries.forEach((entry, index) => {
@@ -121,6 +125,7 @@
 				{expandedReasoning}
 				showActivity={entry.showActivity}
 				showContent={entry.showContent}
+				hiddenHolds={homedHolds}
 				onToggleToolBlock={onToggleToolBlock}
 				onToggleReasoning={onToggleReasoning}
 				onLoadToolResult={onLoadToolResult ? (toolCallId) => onLoadToolResult(msg.id, toolCallId) : undefined}

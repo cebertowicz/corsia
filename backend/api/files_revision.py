@@ -19,17 +19,10 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from core.workspace_context_sources import is_workspace_context_path
 from registry import models as registry_models
-from registry import service as registry_service
+from registry.path_access import lookup_file, path_allowed
 from registry.doc_freshness import artifact_freshness
 
 router = APIRouter(prefix="/api/files", tags=["files"])
-
-
-def _path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
-    return (
-        any(path == b or b in path.parents for b in bases)
-        or is_workspace_context_path(path, config.WORKSPACE, db=db)
-    )
 
 
 def _writable(path: Path, bases: list[Path], *, db=None) -> bool:
@@ -90,15 +83,12 @@ async def revision(
                     return _unavailable()
                 resolved_artifact_id = art["id"]
             else:
-                try:
-                    candidate = Path(path).expanduser().resolve()
-                except OSError:
-                    candidate = None
-                if candidate is not None and not _path_allowed(candidate, bases, db=db):
+                found = lookup_file(path, bases, db=db)
+                candidate, art = found.path, found.artifact
+                if candidate is not None and not found.allowed:
                     raise HTTPException(400, "Path is outside this scope's roots")
-                if candidate is None or not candidate.is_file():
+                if candidate is None or not found.is_file:
                     return _unavailable()
-                art = registry_service.resolve_file_identity(str(candidate), db=db)
                 resolved_artifact_id = (art or {}).get("id")
             st = candidate.stat()
             if st.st_size > MAX_TEXT_BYTES:
@@ -138,6 +128,6 @@ def _artifact_path(row: dict, bases: list[Path], db) -> Path | None:
         candidate = Path(str(raw)).expanduser().resolve()
     except OSError:
         return None
-    if not candidate.is_file() or not _path_allowed(candidate, bases, db=db):
+    if not candidate.is_file() or not path_allowed(candidate, bases, db=db):
         return None
     return candidate

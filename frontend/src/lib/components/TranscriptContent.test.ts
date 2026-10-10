@@ -257,4 +257,30 @@ describe('Focus review boundary', () => {
 			expect(host.querySelectorAll('.plan-limit-paused')).toHaveLength(1);
 		} finally { restoreTurnState(threadId, previous); }
 	});
+
+	it('shows one ask card per hold: on its blocked update row while that row is on screen, else on the message', () => {
+		const askCard = { kind: 'ask', artifact_id: 'a1', title: 'Launch plan', type: 'document', icon: 'file-text', name: null,
+			path: 'launch-plan.md', available: true, opens: true, hold_id: 'h1', state: 'needs_review' };
+		const message = { kind: 'message' as const, id: 'm1', showActivity: false, showContent: true,
+			message: { id: 'm1', thread_id: 'thread-1', role: 'assistant', content: 'Please review the plan.', created_at: '2026-10-10T10:00:00', metadata: {}, cards: [askCard] } };
+		const update = (blockedAsksUser: boolean) => ({ kind: 'update' as const, id: 'update-1', card: {
+			id: 1, thread_id: 'thread-1', kind: 'blocked' as const, node_id: 'n1', title: 'Ship the export', after_seq: 1,
+			created_at: '2026-10-10T10:00:01', node_exists: true, asks_user: true, blocked_asks_user: blockedAsksUser, ask: askCard } });
+		const props = (entries: unknown[]) => ({ entries, expandedTools: new Set(), expandedReasoning: new Set(),
+			onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
+			threadId: 'thread-1', renderedStreaming: false, historyComplete: true });
+
+		component = mount(TranscriptContent, { target: host, props: props([message, update(true)]) as never });
+		flushSync();
+		expect(host.querySelectorAll('.tile')).toHaveLength(1);
+		expect(host.querySelector('.update-ask .tile')).not.toBeNull();
+		unmount(component);
+
+		// The block was answered: the row is a line again and the message carries the card.
+		component = mount(TranscriptContent, { target: host, props: props([message, update(false)]) as never });
+		flushSync();
+		expect(host.querySelectorAll('.tile')).toHaveLength(1);
+		expect(host.querySelector('.update-ask')).toBeNull();
+		expect(host.querySelector('.msg-footer')?.previousElementSibling?.classList.contains('cards')).toBe(true);
+	});
 });

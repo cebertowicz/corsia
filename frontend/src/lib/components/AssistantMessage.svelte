@@ -2,6 +2,7 @@
 	import { renderMarkdown } from '$lib/markdown';
 	import { formatTime } from '$lib/time';
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
+	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
 	let {
@@ -13,6 +14,7 @@
 		onLoadToolResult,
 		showActivity = true,
 		showContent = true,
+		hiddenHolds,
 	}: {
 		msg: any;
 		expandedTools: Set<string>;
@@ -22,6 +24,8 @@
 		onLoadToolResult?: (toolCallId: string) => void;
 		showActivity?: boolean;
 		showContent?: boolean;
+		/** Holds whose ask card renders on their blocked update row instead. */
+		hiddenHolds?: ReadonlySet<string>;
 	} = $props();
 
 	const activityTools = $derived.by(() => {
@@ -138,6 +142,10 @@
 			{@html renderMarkdown(msg.content)}
 		{/if}
 	</div>
+	{/if}
+
+	{#if msg.cards?.length || msg.cards_more}
+		<MessageArtifactCards cards={msg.cards ?? []} more={msg.cards_more ?? 0} threadId={msg.thread_id} {hiddenHolds} />
 	{/if}
 
 		<div class="msg-footer">
