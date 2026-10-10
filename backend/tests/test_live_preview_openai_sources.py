@@ -90,6 +90,34 @@ async def test_litellm_keeps_a_returned_call(sink):
     assert sink.text("call-1") == ARGS and sink.abandoned == []
 
 
+async def test_litellm_restreams_a_call_whose_id_changes_after_input_went_out(sink):
+    from llm.base_streaming import _consume_tool_call_deltas
+    from llm.tool_input_stream import forwarded_ids
+
+    calls, emitted = {}, set()
+    # Some OpenAI-compatible servers resend an id on a later chunk, and not always the same one.
+    deltas = [chat_delta(0, call_id="call-a", name="doc_comment_create", arguments=ARGS[:8]),
+              chat_delta(0, call_id="call-b", arguments=ARGS[8:16]), chat_delta(0, arguments=ARGS[16:])]
+    for delta in deltas:
+        await _consume_tool_call_deltas([delta], calls, emitted, None)
+    assert sink.abandoned == ["call-a"]
+    assert sink.text("call-b") == ARGS
+    assert forwarded_ids(calls) == ["call-b"]
+
+
+async def test_a_cancelled_attempt_abandons_the_calls_it_streamed(sink):
+    import asyncio
+
+    from llm.tool_input_stream import abandoning_unreturned
+
+    async def stopped():
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await abandoning_unreturned(stopped(), lambda: ["call-1"])
+    assert sink.abandoned == ["call-1"]
+
+
 def responses_events(call_id, index, name, args, *, size=6):
     added = SimpleNamespace(type="response.output_item.added", output_index=index,
                             item=SimpleNamespace(type="function_call", call_id=call_id, id=f"fc_{index}", name=name, arguments=""))

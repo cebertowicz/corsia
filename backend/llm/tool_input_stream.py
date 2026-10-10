@@ -55,27 +55,36 @@ def forward_tool_input(call: dict) -> None:
 
     For adapters that assemble a call in a dict (``id``, ``name``, ``arguments``):
     nothing is sent until the call's id and name are both known, then the whole
-    backlog goes at once; ``sent`` records how much has gone.
+    backlog goes at once; ``sent`` records how much has gone, under ``sent_as``.
+    Some servers resend a different id on a later chunk: the preview under the
+    old id is abandoned and the whole backlog goes again under the new one.
     """
-    arguments, sent = call.get("arguments") or "", call.get("sent", 0)
-    if call.get("id") and call.get("name") and isinstance(arguments, str) and len(arguments) > sent:
-        send_tool_input(call["id"], call["name"], arguments[sent:])
-        call["sent"] = len(arguments)
+    call_id, arguments = call.get("id"), call.get("arguments") or ""
+    if not call_id or not call.get("name") or not isinstance(arguments, str):
+        return
+    if call.get("sent_as") not in (None, call_id):
+        abandon_tool_input([call["sent_as"]])
+        call["sent"], call["sent_as"] = 0, None
+    sent = call.get("sent", 0)
+    if len(arguments) > sent:
+        send_tool_input(call_id, call["name"], arguments[sent:])
+        call["sent"], call["sent_as"] = len(arguments), call_id
 
 
 def forwarded_ids(calls: dict[int, dict]) -> list[str]:
-    """The ids of the assembled calls ``forward_tool_input`` has sent input for."""
-    return [call["id"] for call in calls.values() if call.get("sent")]
+    """The ids the assembled calls' input is currently streamed under; a replaced id was already abandoned."""
+    return [call["sent_as"] for call in calls.values() if call.get("sent_as")]
 
 
 async def abandoning_unreturned(attempt: Awaitable[LLMResponse], streamed: Callable[[], Iterable[object]]) -> LLMResponse:
     """Await one provider attempt; abandon every streamed call it failed, was cut off before, or did not return.
 
     ``streamed`` is read after the attempt, so it sees every call the attempt streamed.
+    A Stop cancels the attempt, so cancellation abandons too, at once rather than at Turn end.
     """
     try:
         response = await attempt
-    except Exception:
+    except BaseException:
         abandon_tool_input(streamed())
         raise
     returned = {call.id for call in response.tool_calls}
