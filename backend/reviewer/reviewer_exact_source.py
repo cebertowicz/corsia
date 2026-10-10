@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -74,12 +75,15 @@ class ConfigStateScope:
     config file, and ``run_name`` the unique basename of the run's working
     directory. The CLI names its per-working-directory state folder after that
     path with every non-alphanumeric character replaced by ``-``, so the run's
-    folder is the one whose name ends with ``run_name``.
+    folder is the one whose name ends with ``run_name``. ``temp_root`` is the
+    CLI's own temp directory (``/tmp/claude-<uid>``, not ``TMPDIR``), where its
+    Bash tool makes a folder named the same way before running any command.
     """
 
     root: Path
     global_file: Path
     run_name: str
+    temp_root: Path
     allow_global_file: bool = False
 
 
@@ -101,7 +105,10 @@ def claude_config_state_scope(env: dict[str, str], run_dir: str) -> ConfigStateS
     run_name = Path(run_dir).name
     if len(run_name) < _MIN_RUN_NAME or not run_name.isascii():
         raise ExactSourceError("reviewer run directory name is not unique enough")
-    return ConfigStateScope(root=root, global_file=global_file, run_name=run_name)
+    temp_root = Path("/tmp").resolve() / f"claude-{os.getuid()}"
+    return ConfigStateScope(
+        root=root, global_file=global_file, run_name=run_name, temp_root=temp_root,
+    )
 
 
 def _reject_control_chars(path: str) -> str:
@@ -141,6 +148,11 @@ def render_write_profile(
         root = _sb_regex_path(str(config_state.root))
         folder = f"[^/]*-{_sb_regex_name(config_state.run_name)}"
         rules.append(f'(allow file-write* (regex #"^{root}/projects/{folder}(/.*)?$"))')
+        temp_root = str(config_state.temp_root)
+        rules.append(
+            f"(allow file-write* (literal {_sb_string(temp_root)})"
+            f' (regex #"^{_sb_regex_path(temp_root)}/{folder}(/.*)?$"))'
+        )
         if config_state.allow_global_file:
             global_file = _sb_regex_path(str(config_state.global_file))
             rules.append(f'(allow file-write* (regex #"^{global_file}(\\.[^/]*)?$"))')
@@ -164,18 +176,18 @@ def write_confined(
 
 
 def discard_config_state(config_state: ConfigStateScope) -> None:
-    """Remove the run's folders left under the config root's ``projects``."""
-    projects = config_state.root / "projects"
+    """Remove the run's folders left under ``projects`` and the CLI temp root."""
     suffix = "-" + re.sub(r"[^A-Za-z0-9]", "-", config_state.run_name)
-    try:
-        leftovers = [
-            entry for entry in projects.iterdir()
-            if entry.is_dir() and not entry.is_symlink() and entry.name.endswith(suffix)
-        ]
-    except OSError:
-        return
-    for entry in leftovers:
-        shutil.rmtree(entry, ignore_errors=True)
+    for parent in (config_state.root / "projects", config_state.temp_root):
+        try:
+            leftovers = [
+                entry for entry in parent.iterdir()
+                if entry.is_dir() and not entry.is_symlink() and entry.name.endswith(suffix)
+            ]
+        except OSError:
+            continue
+        for entry in leftovers:
+            shutil.rmtree(entry, ignore_errors=True)
 
 
 def codex_exact_source_controls(review_dir: str, git_dir: str) -> list[str]:
