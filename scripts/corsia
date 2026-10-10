@@ -1,0 +1,539 @@
+#!/bin/bash
+# Usage: corsia [start|stop|restart|status|logs|local setup] [--force]
+
+set -e
+
+# This script operates exactly the checkout it lives in. The physical script
+# location (a `corsia` symlink in PATH points at one checkout) decides the
+# backend, interpreter, env file, and launchd service, so a copy running from a
+# worktree cannot address another checkout's instance. A CORSIA_DIR that names
+# a different checkout is a request this script cannot honor and refuses.
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SCRIPT_SOURCE" ]; do
+    SOURCE_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+    SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+    [[ "$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="$SOURCE_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+CHECKOUT_DIR="$(dirname "$SCRIPT_DIR")"
+if ! declare -p _CORSIA_SCRIPT_DIR > /dev/null 2>&1; then
+    readonly _CORSIA_SCRIPT_DIR="$SCRIPT_DIR"
+    readonly _CORSIA_CHECKOUT_DIR="$CHECKOUT_DIR"
+    readonly _CORSIA_ORIGINAL_HOME="$HOME"
+    _canonical_checkout="$HOME/.corsia"
+    _canonical_checkout_real="$(
+        cd -P "$_canonical_checkout" 2>/dev/null && pwd
+    )" || _canonical_checkout_real="$_canonical_checkout"
+    readonly _CORSIA_CANONICAL_CHECKOUT="$_canonical_checkout_real"
+    readonly _CORSIA_REQUEST_PYTHON="${CORSIA_PYTHON:-}"
+    readonly _CORSIA_REQUEST_ENV_FILE="${CORSIA_ENV_FILE:-}"
+elif [ "$SCRIPT_DIR" != "$_CORSIA_SCRIPT_DIR" ]; then
+    echo "Refusing to re-source CORSIA lifecycle code from a different checkout." >&2
+    if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+        return 1
+    fi
+    exit 1
+fi
+
+is_canonical_checkout() {
+    [ "$_CORSIA_CHECKOUT_DIR" = "$_CORSIA_CANONICAL_CHECKOUT" ]
+}
+
+is_mutating_lifecycle_command() {
+    case "${1:-status}" in
+        start|stop|restart|prepare-redeploy|restart-prepared|discard-prepared|redeploy|ensure-current-release)
+            return 0
+            ;;
+        service)
+            case "${2:-status}" in
+                install|uninstall|start|stop|restart) return 0 ;;
+            esac
+            ;;
+    esac
+    return 1
+}
+
+if [ -n "${CORSIA_DIR:-}" ] \
+    && [ "$(cd -P "$CORSIA_DIR" 2>/dev/null && pwd)" != "$CHECKOUT_DIR" ]; then
+    echo "CORSIA_DIR=$CORSIA_DIR is not this script's checkout ($CHECKOUT_DIR). This script only operates its own checkout: unset CORSIA_DIR, or run $CORSIA_DIR/scripts/corsia." >&2
+    exit 1
+fi
+CORSIA_DIR="$_CORSIA_CHECKOUT_DIR"
+BACKEND_DIR="$CORSIA_DIR/backend"
+PYTHON="${_CORSIA_REQUEST_PYTHON:-$CORSIA_DIR/.venv/bin/python}"
+# The first-run bootstrap file is machine-wide; infra.config reads this path.
+BOOTSTRAP_CONFIG="$_CORSIA_ORIGINAL_HOME/.corsia/config.json"
+
+ENV_FILE="${_CORSIA_REQUEST_ENV_FILE:-$CORSIA_DIR/.env}"
+if ! declare -p _CORSIA_REQUEST_BACKEND_PORT > /dev/null 2>&1; then
+    readonly _CORSIA_REQUEST_BACKEND_PORT="${CORSIA_RESTART_BACKEND_PORT:-}"
+fi
+if ! declare -p _CORSIA_REQUEST_OPERATION_ID > /dev/null 2>&1; then
+    readonly _CORSIA_REQUEST_OPERATION_ID="${CORSIA_RESTART_OPERATION_ID:-}"
+fi
+if ! declare -p _CORSIA_REQUEST_CALLER_TOKEN > /dev/null 2>&1; then
+    readonly _CORSIA_REQUEST_CALLER_TOKEN="${CORSIA_RESTART_CALLER_TOKEN:-}"
+fi
+[ -f "$ENV_FILE" ] && source "$ENV_FILE"
+# Checkout identity is immutable across .env loading and same-process re-entry.
+# The env file configures this checkout; it cannot redefine which checkout or
+# machine bootstrap this script represents.
+HOME="$_CORSIA_ORIGINAL_HOME"
+SCRIPT_DIR="$_CORSIA_SCRIPT_DIR"
+CHECKOUT_DIR="$_CORSIA_CHECKOUT_DIR"
+CORSIA_DIR="$CHECKOUT_DIR"
+BACKEND_DIR="$CORSIA_DIR/backend"
+PYTHON="${_CORSIA_REQUEST_PYTHON:-$CORSIA_DIR/.venv/bin/python}"
+BOOTSTRAP_CONFIG="$HOME/.corsia/config.json"
+ENV_FILE="${_CORSIA_REQUEST_ENV_FILE:-$CORSIA_DIR/.env}"
+if [ -n "$_CORSIA_REQUEST_PYTHON" ]; then
+    export CORSIA_PYTHON="$_CORSIA_REQUEST_PYTHON"
+else
+    unset CORSIA_PYTHON
+fi
+if [ -n "$_CORSIA_REQUEST_ENV_FILE" ]; then
+    export CORSIA_ENV_FILE="$_CORSIA_REQUEST_ENV_FILE"
+else
+    unset CORSIA_ENV_FILE
+fi
+unset CORSIA_RESTART_CALLER_TOKEN CORSIA_RESTART_CURL
+export -n CORSIA_TOKEN
+if [ -n "$_CORSIA_REQUEST_BACKEND_PORT" ]; then
+    export CORSIA_RESTART_BACKEND_PORT="$_CORSIA_REQUEST_BACKEND_PORT"
+else
+    unset CORSIA_RESTART_BACKEND_PORT
+fi
+if [ -n "$_CORSIA_REQUEST_OPERATION_ID" ]; then
+    export CORSIA_RESTART_OPERATION_ID="$_CORSIA_REQUEST_OPERATION_ID"
+else
+    unset CORSIA_RESTART_OPERATION_ID
+fi
+# Held equal to infra.default_port by tests/test_default_port.py.
+DEFAULT_BACKEND_PORT=1956
+BACKEND_PORT_EXPLICIT=false
+if [ -n "${CORSIA_RESTART_BACKEND_PORT:-}" ]; then
+    BACKEND_PORT="$CORSIA_RESTART_BACKEND_PORT"
+    BACKEND_PORT_EXPLICIT=true
+elif [ -n "${BACKEND_PORT:-}" ]; then
+    BACKEND_PORT_EXPLICIT=true
+else
+    BACKEND_PORT=$DEFAULT_BACKEND_PORT
+fi
+case "$BACKEND_PORT" in
+    *[!0-9]*|"")
+        echo "Invalid BACKEND_PORT: $BACKEND_PORT (expected an integer from 1 to 65535)" >&2
+        exit 1
+        ;;
+esac
+while [ "${BACKEND_PORT#0}" != "$BACKEND_PORT" ]; do
+    BACKEND_PORT="${BACKEND_PORT#0}"
+done
+[ -n "$BACKEND_PORT" ] || BACKEND_PORT=0
+if [ "${#BACKEND_PORT}" -gt 5 ] \
+    || [ "$BACKEND_PORT" -lt 1 ] || [ "$BACKEND_PORT" -gt 65535 ]; then
+    echo "Invalid BACKEND_PORT: $BACKEND_PORT (expected an integer from 1 to 65535)" >&2
+    exit 1
+fi
+if [ -n "${CORSIA_RESTART_BACKEND_PORT:-}" ]; then
+    export CORSIA_RESTART_BACKEND_PORT="$BACKEND_PORT"
+fi
+
+# The machine bootstrap selects production's workspace and state. Only the
+# canonical checkout may inherit it: every other checkout must name its own
+# complete runtime identity before infra.config is imported or a port is
+# touched. The default port remains the production reservation.
+explicit_roots_are_isolated() {
+    local result
+    if ! result=$("$PYTHON" -c '
+import sys
+import unicodedata
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+from infra.platform_paths import load_bootstrap
+
+try:
+    production = load_bootstrap(Path(sys.argv[2]))
+except FileNotFoundError:
+    print("isolated")
+    raise SystemExit(0)
+selected_workspace = Path(sys.argv[3]).expanduser().resolve()
+selected_state = Path(sys.argv[4]).expanduser().resolve()
+
+
+def _folded_parts(path):
+    return tuple(
+        unicodedata.normalize("NFD", part).casefold()
+        for part in path.parts
+    )
+
+
+def _prefix(left, right):
+    return len(left) <= len(right) and right[: len(left)] == left
+
+
+def _filesystem_lineage(path):
+    current = path
+    tail = ()
+    while True:
+        try:
+            stat = current.stat()
+        except FileNotFoundError:
+            pass
+        else:
+            yield (stat.st_dev, stat.st_ino), tail
+        parent = current.parent
+        if parent == current:
+            break
+        tail = (
+            unicodedata.normalize("NFD", current.name).casefold(),
+            *tail,
+        )
+        current = parent
+
+
+def overlaps(left, right):
+    if left == right or left.is_relative_to(right) or right.is_relative_to(left):
+        return True
+    left_folded = _folded_parts(left)
+    right_folded = _folded_parts(right)
+    if _prefix(left_folded, right_folded) or _prefix(right_folded, left_folded):
+        return True
+    for left_anchor, left_tail in _filesystem_lineage(left):
+        for right_anchor, right_tail in _filesystem_lineage(right):
+            if left_anchor == right_anchor and (
+                _prefix(left_tail, right_tail) or _prefix(right_tail, left_tail)
+            ):
+                return True
+    return False
+
+
+selected_roots = (selected_workspace, selected_state)
+production_roots = (production.workspace.root, production.state_root)
+if any(
+    overlaps(selected, prod)
+    for selected in selected_roots
+    for prod in production_roots
+):
+    print("shared")
+else:
+    print("isolated")
+' "$BACKEND_DIR" "$BOOTSTRAP_CONFIG" "$CORSIA_WORKSPACE" "$CORSIA_STATE_DIR"); then
+        echo "Lifecycle mutation refused: could not verify isolated roots against the production bootstrap." >&2
+        return 1
+    fi
+    if [ "$result" != isolated ]; then
+        echo "Lifecycle mutation from noncanonical checkout $CHECKOUT_DIR cannot use a workspace or state root from the production bootstrap." >&2
+        return 1
+    fi
+}
+
+require_checkout_runtime_identity() {
+    is_canonical_checkout && return 0
+    if [ -z "${CORSIA_WORKSPACE:-}" ] || [ -z "${CORSIA_STATE_DIR:-}" ]; then
+        echo "Lifecycle mutation from noncanonical checkout $CHECKOUT_DIR requires explicit CORSIA_WORKSPACE and CORSIA_STATE_DIR; refusing the machine bootstrap identity." >&2
+        if [ ! -f "$BOOTSTRAP_CONFIG" ]; then
+            echo "First-time setup is only available from $HOME/.corsia. Install CORSIA there and run $HOME/.corsia/scripts/corsia start, or set isolated roots for this checkout." >&2
+        fi
+        return 1
+    fi
+    if [ "$BACKEND_PORT_EXPLICIT" != true ] || [ "$BACKEND_PORT" -eq "$DEFAULT_BACKEND_PORT" ]; then
+        echo "Lifecycle mutation from noncanonical checkout $CHECKOUT_DIR requires an explicit BACKEND_PORT other than $DEFAULT_BACKEND_PORT." >&2
+        return 1
+    fi
+    explicit_roots_are_isolated
+}
+
+# Accounts and the lifecycle credential: sourced here because first-run setup
+# below is the first thing that uses it.
+source "$SCRIPT_DIR/corsia.d/accounts.sh"
+
+# Load the machine bootstrap only from its canonical checkout. Noncanonical
+# lifecycle calls first consume this checkout's .env, then prove their complete
+# isolated identity before any backend config import or port effect.
+if [ ! -f "$BOOTSTRAP_CONFIG" ] && [ -z "${CORSIA_WORKSPACE:-}" ] \
+    && is_canonical_checkout && [ "${1:-}" != "service" ]; then
+    # scripts/install.sh numbers its steps; this block is steps 4 and 5.
+    if [ "${CORSIA_INSTALL_FLOW:-}" = 1 ]; then
+        INSTALL_STEP_5="5/8  "
+        printf '4/8  '
+    else
+        echo "CORSIA workspace not configured. Running first-time setup..."
+    fi
+    cd "$BACKEND_DIR" && "$PYTHON" -m cli init
+    [ -f "$BOOTSTRAP_CONFIG" ] || { echo "Setup failed or cancelled."; exit 1; }
+    ensure_first_account || { echo "Setup failed or cancelled."; exit 1; }
+fi
+if is_mutating_lifecycle_command "$@"; then
+    require_checkout_runtime_identity || exit 1
+fi
+
+# Mutating lifecycle commands resolve the exact identity through the same owner
+# the backend imports. Read-only status and logs do not need database identity.
+resolve_runtime_identity() {
+    local output line identity="" extra
+    if ! output=$("$PYTHON" -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+from infra.config import STATE_ROOT, WORKSPACE
+print("__CORSIA_RUNTIME_IDENTITY__", WORKSPACE, STATE_ROOT, sep="\t")
+' "$BACKEND_DIR"); then
+        echo "Could not resolve CORSIA workspace and state identity" >&2
+        return 1
+    fi
+    while IFS= read -r line; do
+        case "$line" in
+            "__CORSIA_RUNTIME_IDENTITY__"$'\t'*)
+                [ -z "$identity" ] || {
+                    echo "CORSIA runtime identity was emitted more than once" >&2
+                    return 1
+                }
+                identity="${line#*$'\t'}"
+                ;;
+        esac
+    done <<< "$output"
+    IFS=$'\t' read -r CORSIA_WORKSPACE CORSIA_STATE_DIR extra <<< "$identity"
+    if [ -z "$CORSIA_WORKSPACE" ] || [ -z "$CORSIA_STATE_DIR" ] || [ -n "$extra" ]; then
+        echo "CORSIA workspace and state identity must resolve exactly once" >&2
+        return 1
+    fi
+    export CORSIA_WORKSPACE CORSIA_STATE_DIR
+}
+
+# Preserve the backend-authenticated caller across updated-script re-entry.
+if [ -n "$_CORSIA_REQUEST_CALLER_TOKEN" ]; then
+    CORSIA_TOKEN="$_CORSIA_REQUEST_CALLER_TOKEN"
+elif needs_service_token "$@"; then
+    CORSIA_TOKEN="${CORSIA_TOKEN:-$(mint_service_token || echo "")}"
+fi
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+ok() { echo -e "  ${GREEN}✅ $1${NC}"; }
+warn() { echo -e "  ${YELLOW}⚠️  $1${NC}"; }
+fail() { echo -e "  ${RED}❌ $1${NC}"; }
+
+status() {
+    echo "CORSIA Status"
+    echo ""
+
+    if is_backend_running; then
+        ok "CORSIA backend :$BACKEND_PORT"
+    else
+        fail "CORSIA backend not running"
+    fi
+
+    echo ""
+    print_endpoints
+}
+
+source "$SCRIPT_DIR/corsia.d/runtime.sh"
+source "$SCRIPT_DIR/corsia.d/service.sh"
+source "$SCRIPT_DIR/corsia.d/delegate.sh"
+
+FORCE=false
+# Read by the lifecycle functions in the sourced files above, which shellcheck
+# cannot follow from here.
+# shellcheck disable=SC2034
+for arg in "$@"; do [ "$arg" = "--force" ] && FORCE=true; done
+
+if is_mutating_lifecycle_command "$@"; then
+    resolve_runtime_identity || exit 1
+elif [ "${1:-status}" = logs ]; then
+    [ -n "${BACKEND_LOG:-}" ] || resolve_runtime_identity || exit 1
+fi
+# The backend log lives with this instance's state, so two checkouts on one
+# machine never write, truncate, or tail the same file.
+if [ -z "${BACKEND_LOG:-}" ] && [ -n "${CORSIA_STATE_DIR:-}" ]; then
+    BACKEND_LOG="$CORSIA_STATE_DIR/backend.log"
+fi
+
+case "${1:-status}" in
+    ensure-current-release)
+        require_no_extra_lifecycle_args ensure-current-release "${@:2}" || exit 1
+        ensure_current_frontend_release
+        ;;
+    start)
+        OPEN_AFTER_START=false
+        start_args=()
+        for arg in "${@:2}"; do
+            case "$arg" in
+                --open) OPEN_AFTER_START=true ;;
+                *) start_args+=("$arg") ;;
+            esac
+        done
+        require_no_extra_lifecycle_args start "${start_args[@]}" || exit 1
+        if [ "${CORSIA_INSTALL_FLOW:-}" = 1 ]; then
+            echo "7/8  Starting…"
+        else
+            echo "Starting CORSIA..."
+        fi
+        start_server
+        print_endpoints
+        [ "$OPEN_AFTER_START" = false ] || open_after_start
+        ;;
+    open)
+        require_no_extra_lifecycle_args open "${@:2}" || exit 1
+        open_browser
+        ;;
+    stop)
+        require_no_extra_lifecycle_args stop "${@:2}" || exit 1
+        echo "Stopping CORSIA..."
+        if service_managed; then
+            service_stop   # drains internally
+        else
+            stop_direct_backend
+        fi
+        ;;
+    restart)
+        require_no_extra_lifecycle_args restart "${@:2}" || exit 1
+        echo "Restarting CORSIA..."
+        run_owned_restart_lifecycle restart_current_release
+        ;;
+    prepare-redeploy)
+        # Synchronous pre-restart phase used by the Settings restart action so a
+        # pull, dependency, or build failure can be returned to the user.
+        prepare_redeploy
+        ;;
+    restart-prepared)
+        run_owned_restart_lifecycle restart_prepared
+        ;;
+    discard-prepared)
+        discard_redeploy_build "$(serving_checkout_root)"
+        ;;
+    redeploy)
+        # Sanctioned self-redeploy of THIS instance: pull --ff-only current branch,
+        # check dependencies, build, then use the safe drain/bounce lifecycle.
+        run_owned_restart_lifecycle redeploy_self
+        ;;
+    status) status ;;
+    service)
+        case "${2:-status}" in
+            install|uninstall|start|stop|restart)
+                [ -z "${3:-}" ] || { fail "Unexpected instance selector: $3"; exit 1; }
+                "service_$2"
+                ;;
+            status)
+                [ -z "${3:-}" ] || { fail "Unexpected instance selector: $3"; exit 1; }
+                service_status
+                ;;
+            *)       fail "Unknown: service $2. Use: install|uninstall|start|stop|restart|status"; exit 1 ;;
+        esac
+        ;;
+    delegate)
+        shift
+        ensure_delegate_token "$@"
+        export CORSIA_API_TOKEN_FILE="$API_TOKEN_FILE"
+        exec "$PYTHON" "$BACKEND_DIR/scripts/delegate_cli.py" "$@"
+        ;;
+    doc)
+        shift
+        ensure_delegate_token "$@"
+        export CORSIA_API_TOKEN_FILE="$API_TOKEN_FILE"
+        exec "$PYTHON" "$BACKEND_DIR/scripts/doc_cli.py" "$@"
+        ;;
+    context)
+        shift
+        ensure_delegate_token "$@"
+        export CORSIA_API_TOKEN_FILE="$API_TOKEN_FILE"
+        exec "$PYTHON" "$BACKEND_DIR/scripts/context_cli.py" "$@"
+        ;;
+    providers)
+        shift
+        ensure_delegate_token "$@"
+        export CORSIA_API_TOKEN_FILE="$API_TOKEN_FILE"
+        exec "$PYTHON" "$BACKEND_DIR/scripts/providers_cli.py" "$@"
+        ;;
+    perf)
+        ensure_delegate_token "$@"
+        export CORSIA_API_TOKEN_FILE="$API_TOKEN_FILE"
+        cd "$BACKEND_DIR" || exit 1
+        exec "$PYTHON" -m cli "$@"
+        ;;
+    user|token)
+        cd "$BACKEND_DIR" || exit 1
+        exec "$PYTHON" -m cli "$@"
+        ;;
+    local)
+        shift
+        case "${1:-}" in
+            setup)
+                shift
+                case " $* " in
+                    # Installer only: no server runs yet, so no token either.
+                    *" --before-start "*)
+                        [ "${CORSIA_INSTALL_FLOW:-}" != 1 ] || echo "6/8  Checking model sources"
+                        (cd "$BACKEND_DIR" && BACKEND_PORT="$BACKEND_PORT" \
+                            "$PYTHON" -m cli local setup "$@")
+                        ;;
+                    *) run_local_setup_cli "$@" ;;
+                esac
+                exit $?
+                ;;
+            *)
+                cd "$BACKEND_DIR" || exit 1
+                exec "$PYTHON" -m cli local "$@"
+                ;;
+        esac
+        ;;
+    sources)
+        shift
+        run_sources_cli "$@"
+        exit $?
+        ;;
+    conductor)
+        shift
+        run_conductor_cli "$@"
+        exit $?
+        ;;
+    setup)
+        # Record the choice, then a bare restart: it re-renders the service
+        # definition before any drain, so a refusal leaves the old one serving.
+        case "${2:-}" in
+            local|server) ;;
+            *) fail "Usage: corsia setup local|server"; exit 1 ;;
+        esac
+        [ -z "${3:-}" ] || { fail "Unexpected argument '$3'. Usage: corsia setup local|server"; exit 1; }
+        is_canonical_checkout || { fail "corsia setup changes the machine install; run it from $HOME/.corsia"; exit 1; }
+        (cd "$BACKEND_DIR" && "$PYTHON" -m cli setup "$2") || exit 1
+        exec "$SCRIPT_DIR/corsia" restart
+        ;;
+    logs)
+        case "${2:-backend}" in
+            backend)   tail -f "$BACKEND_LOG" ;;
+            *)         echo "Usage: corsia logs [backend]" ;;
+        esac
+        ;;
+    *)
+        echo "Usage: corsia <command> [--force]"
+        echo ""
+        echo "Commands:"
+        echo "  start [--open]      Start CORSIA (--open: model sources, then the browser)"
+        echo "  open                Open the local CORSIA app"
+        echo "  stop                Stop CORSIA (drains first unless --force)"
+        echo "  restart             Restart CORSIA"
+        echo "  redeploy            Pull --ff-only + build + bounce THIS instance's serving checkout"
+        echo "  status              Show CORSIA status"
+        echo "  logs                Tail the backend log"
+        echo "  delegate <sub>      Delegation: create-thread|task|send|set-model|status"
+        echo "  context <sub>       CTX bootloader: attach|create"
+        echo "  providers <sub>     Providers and models: list|models|add|edit|remove|test|window|..."
+        echo "  perf <sub>          Historical latency reports: routes|tools"
+        echo "  user <sub>          Accounts: add|passwd|list"
+        echo "  token <sub>         API tokens: create|list|revoke|service"
+        echo "  sources [recheck]   Which model sources are ready, one fix each"
+        echo "  setup local|server  This computer only, or reachable from other devices"
+        echo ""
+        echo "Launchd service (this checkout's durable instance):"
+        echo "  service install              Render + install $(service_label) for this checkout"
+        echo "  service start|stop           Use or preserve the installed service definition"
+        echo "  service restart              Refresh the definition, then bounce the service"
+        echo "  service status               Show plist, loaded process, and health"
+        echo "  service uninstall            Boot out + remove the plist"
+        echo "  While installed, plain start/stop/restart route through launchd automatically."
+        echo "  A second checkout pins its own label with CORSIA_SERVICE_LABEL in its .env."
+        ;;
+esac

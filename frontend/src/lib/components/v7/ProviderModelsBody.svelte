@@ -1,0 +1,396 @@
+<script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
+	import { token } from '$lib/stores/auth';
+	import { get } from 'svelte/store';
+	import {
+		providerModels,
+		loadProviderModelsFor,
+		pollJobsFor,
+		loadModel,
+		unloadModel,
+		modelsForProvider,
+		markModelOptimistic,
+		cancelJob,
+		type ProviderModel,
+	} from '$lib/stores/providerModels';
+	import { loadModels, workspaceModels as catalogModels } from '$lib/stores/models';
+	import { chatPickerWarning } from './modelWarning';
+	import { omlxAdminUrl } from '$lib/stores/providerModelUtils';
+	import type { HostProvider } from '$lib/stores/providersV7';
+	import ModelRow from './ModelRow.svelte';
+	import PreLoadCheckModal from './PreLoadCheckModal.svelte';
+	import ModelDetailsModal from './ModelDetailsModal.svelte';
+
+	interface Props {
+		provider: HostProvider;
+		isLocal?: boolean;
+	}
+
+	const { provider, isLocal = false }: Props = $props();
+
+	type PreloadInfo = {
+		modelName: string;
+		estimatedGb: number;
+		freeGb: number;
+		afterLoadGb: number;
+		safeReserveGb: number;
+		warning: string;
+		onConfirm: () => Promise<void>;
+	};
+	let preloadInfo = $state<PreloadInfo | null>(null);
+	let detailsFor = $state<ProviderModel | null>(null);
+
+	const POLL_ACTIVE_MS = 250;
+	const POLL_IDLE_MS = 5000;
+	const POLL_QUIET_TIMEOUT_MS = 30_000;
+	let pollHandle: ReturnType<typeof setTimeout> | null = null;
+	let lastActiveAt = Date.now();
+	let polling = false;
+
+	let showAllAvailable = $state(false);
+	let actionError = $state('');
+
+	const pmState = $derived(modelsForProvider($providerModels, provider.raw, provider.server));
+	const models = $derived(pmState.models);
+
+	const grouped = $derived.by(() => {
+		const loaded: ProviderModel[] = [];
+		const loading: ProviderModel[] = [];
+		const available: ProviderModel[] = [];
+		for (const m of models) {
+			if (m.state === 'loaded') loaded.push(m);
+			else if (m.state === 'loading' || m.state === 'cache_warming' || m.state === 'queued') loading.push(m);
+			else available.push(m);
+		}
+		return { loaded, loading, available };
+	});
+
+	const isHarness = $derived(provider.type === 'harness');
+	const availableInitialShow = 5;
+	const visibleAvailable = $derived(
+		showAllAvailable ? grouped.available : grouped.available.slice(0, availableInitialShow),
+	);
+	const hiddenAvailableCount = $derived(grouped.available.length - visibleAvailable.length);
+
+	// A registered endpoint, cloud API or CLI runs its own models: nothing loads, a model is on or off.
+	const isExternal = $derived(provider.server?.kind === 'external');
+	const adminUrl = $derived(provider.name === 'omlx' ? omlxAdminUrl(provider.server?.mgmt_base) : undefined);
+	const catalogOnly = $derived(provider.type === 'cloud' || isExternal || isHarness);
+	// A harness section names the switch, not picker delivery; the row warning says when the picker can't offer it.
+	const loadedLabel = $derived(isHarness ? 'Shown' : catalogOnly ? 'Active' : 'Loaded');
+	const availableLabel = $derived(isHarness ? 'Hidden' : 'Available');
+	// The switch's name says what it does here: nothing loads unless a local engine runs the model.
+	const toggleLabels = $derived<[string, string]>(
+		isHarness ? ['Hide from picker', 'Show in picker'] : catalogOnly ? ['Turn off', 'Turn on'] : ['Unload', 'Load'],
+	);
+
+	function _hasTransitionalModel(): boolean {
+		for (const m of models) {
+			if (m.state === 'loading' || m.state === 'cache_warming' || m.state === 'queued') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	async function _pollTick() {
+		if (!polling) return;
+		await pollJobsFor(provider.raw, provider.server);
+		const active = _hasTransitionalModel();
+		if (active) lastActiveAt = Date.now();
+		const quietFor = Date.now() - lastActiveAt;
+		if (quietFor > POLL_QUIET_TIMEOUT_MS) {
+			polling = false;
+			pollHandle = null;
+			return;
+		}
+		const next = active ? POLL_ACTIVE_MS : POLL_IDLE_MS;
+		pollHandle = setTimeout(_pollTick, next);
+	}
+
+	function _ensurePolling() {
+		if (polling) return;
+		polling = true;
+		lastActiveAt = Date.now();
+		pollHandle = setTimeout(_pollTick, POLL_ACTIVE_MS);
+	}
+
+	onMount(async () => {
+		await loadProviderModelsFor(provider.raw, provider.server);
+		if (!catalogOnly) {
+			pollJobsFor(provider.raw, provider.server);
+			_ensurePolling();
+		}
+	});
+
+	onDestroy(() => {
+		polling = false;
+		if (pollHandle) clearTimeout(pollHandle);
+	});
+
+	// A saved checkpoint window can make a row usable; show the new window at once.
+	async function _windowChanged() {
+		await loadProviderModelsFor(provider.raw, provider.server);
+		loadModels();
+		if (detailsFor) detailsFor = models.find((m) => m.id === detailsFor?.id) ?? detailsFor;
+	}
+
+	async function _doLoad(m: ProviderModel) {
+		const r = await loadModel(provider.raw, provider.server, m.id, m.dbId);
+		if (!r.ok) {
+			actionError = r.message ?? 'Failed';
+			return;
+		}
+		await loadProviderModelsFor(provider.raw, provider.server);
+		loadModels();
+	}
+
+	async function _doUnload(m: ProviderModel) {
+		const r = await unloadModel(provider.raw, provider.server, m.id, m.dbId);
+		if (!r.ok) {
+			actionError = r.message ?? 'Failed';
+			return;
+		}
+		await loadProviderModelsFor(provider.raw, provider.server);
+		loadModels();
+	}
+
+	async function _checkAndLoad(m: ProviderModel) {
+		const estimatedGb = m.sizeBytes ? m.sizeBytes / (1024 ** 3) : 0;
+		if (!isLocal || estimatedGb <= 0) {
+			await _doLoad(m);
+			return;
+		}
+		try {
+			const t = get(token) || '';
+			const res = await fetch(`/api/system/host-resources/check-load?token=${t}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ estimated_gb: estimatedGb, provider: provider.name }),
+			});
+			const data = await res.json();
+			if (data.ok || data.remote) {
+				await _doLoad(m);
+				return;
+			}
+			preloadInfo = {
+				modelName: m.name,
+				estimatedGb,
+				freeGb: data.free_gb ?? 0,
+				afterLoadGb: data.after_load_gb ?? 0,
+				safeReserveGb: data.safe_reserve_gb ?? 0,
+				warning: data.warning ?? 'Loading may exceed safe memory.',
+				onConfirm: async () => {
+					preloadInfo = null;
+					await _doLoad(m);
+				},
+			};
+		} catch {
+			await _doLoad(m);
+		}
+	}
+
+	async function handleToggleModel(m: ProviderModel) {
+		actionError = '';
+		if (m.state === 'loaded') {
+			markModelOptimistic(provider.raw, provider.server, m.id, 'default');
+			await _doUnload(m);
+		} else {
+			const nextState = catalogOnly ? 'loaded' : 'loading';
+			markModelOptimistic(provider.raw, provider.server, m.id, nextState);
+			if (nextState === 'loading') _ensurePolling();
+			await _checkAndLoad(m);
+		}
+	}
+
+	async function handleCancel(m: ProviderModel) {
+		actionError = '';
+		if (!m.jobId) {
+			markModelOptimistic(provider.raw, provider.server, m.id, 'default');
+			return;
+		}
+		markModelOptimistic(provider.raw, provider.server, m.id, 'default');
+		const r = await cancelJob(provider.server, m.jobId);
+		if (!r.ok) actionError = r.message ?? 'Cancel failed';
+		await loadProviderModelsFor(provider.raw, provider.server);
+	}
+
+	async function handleRetry(m: ProviderModel) {
+		actionError = '';
+		await _checkAndLoad(m);
+	}
+</script>
+
+{#if preloadInfo}
+	<PreLoadCheckModal
+		modelName={preloadInfo.modelName}
+		estimatedGb={preloadInfo.estimatedGb}
+		freeGb={preloadInfo.freeGb}
+		afterLoadGb={preloadInfo.afterLoadGb}
+		safeReserveGb={preloadInfo.safeReserveGb}
+		warning={preloadInfo.warning}
+		onConfirm={preloadInfo.onConfirm}
+		onCancel={() => preloadInfo = null}
+	/>
+{/if}
+
+{#if detailsFor}
+	<ModelDetailsModal
+		model={detailsFor}
+		providerLabel={provider.label}
+		providerName={provider.name}
+		serverId={provider.server?.id}
+		external={isExternal}
+		labelEditable={isHarness}
+			omlxAdminUrl={adminUrl}
+		onChanged={_windowChanged}
+		onClose={() => detailsFor = null}
+	/>
+{/if}
+
+{#if pmState.loading && models.length === 0}
+	<div class="phase-stub">Loading models…</div>
+{:else if pmState.lastError}
+	<div class="phase-stub err">Failed to load models: {pmState.lastError}</div>
+{:else if models.length === 0}
+	<div class="phase-stub">
+		{#if provider.name === 'omlx'}
+			oMLX hasn't registered any models yet. Drop weights into
+			<code>~/.omlx/&lt;model-id&gt;</code> and click <em>Reload models</em>.
+		{:else if isExternal}
+			This endpoint hasn't listed any models. Some providers never list them (Alibaba's
+			Token Plan and Coding Plan): add their model IDs in the provider settings. Otherwise,
+			check its URL and key there.
+		{:else if isHarness}
+			{provider.label} hasn't reported any models. Check that its CLI is installed and signed in.
+		{:else if provider.type === 'cloud'}
+			No models exposed by this provider yet. Try <em>Refresh models</em> in the provider settings.
+		{:else}
+			No models discovered yet. Check the provider's logs.
+		{/if}
+	</div>
+{:else}
+	{#if actionError}
+		<div class="row-msg">{actionError}</div>
+	{/if}
+
+	{#if grouped.loaded.length > 0}
+		<div class="section loaded">
+			<span class="section-label">{loadedLabel}</span>
+			<span class="section-rule"></span>
+		</div>
+		{#each grouped.loaded as m (m.id)}
+			<ModelRow
+				name={m.name}
+				state={m.state}
+				meta={m.meta}
+				caps={m.caps}
+				warning={chatPickerWarning($catalogModels, m.dbId, isExternal)}
+				toggleOn={true}
+				{toggleLabels}
+				onToggle={() => handleToggleModel(m)}
+				onInfo={() => detailsFor = m}
+			/>
+		{/each}
+	{/if}
+
+	{#if grouped.loading.length > 0}
+		<div class="section loading">
+			<span class="section-label">Loading</span>
+			<span class="section-rule"></span>
+		</div>
+		{#each grouped.loading as m (m.id)}
+			<ModelRow
+				name={m.name}
+				state={m.state}
+				meta={m.meta}
+				caps={m.caps}
+				progress={m.progress}
+				onCancel={() => handleCancel(m)}
+			/>
+		{/each}
+	{/if}
+
+	{#if grouped.available.length > 0}
+		<div class="section">
+			<span class="section-label">{availableLabel}</span>
+			<span class="section-rule"></span>
+		</div>
+		{#each visibleAvailable as m (m.id)}
+			<ModelRow
+				name={m.name}
+				state={m.state}
+				meta={m.meta}
+				caps={m.caps}
+				toggleOn={false}
+				{toggleLabels}
+				onToggle={() => handleToggleModel(m)}
+				onInfo={() => detailsFor = m}
+				onRetry={m.state === 'error' ? () => handleRetry(m) : undefined}
+			/>
+		{/each}
+		{#if hiddenAvailableCount > 0}
+			<button type="button" class="show-more" onclick={() => showAllAvailable = true}>
+				Show {hiddenAvailableCount} {visibleAvailable.length === 0 ? 'available' : 'more'}
+			</button>
+		{:else if showAllAvailable && grouped.available.length > availableInitialShow}
+			<button type="button" class="show-more" onclick={() => showAllAvailable = false}>
+				Show fewer
+			</button>
+		{/if}
+	{/if}
+{/if}
+
+<style>
+	.section {
+		display: flex; align-items: center; gap: 8px;
+		padding: 14px 18px 8px;
+	}
+	.section-label {
+		font-size: var(--text-caption); font-weight: 700; letter-spacing: 0.12em;
+		color: var(--text-tertiary); text-transform: uppercase;
+	}
+	.section-rule {
+		flex: 1; height: 1px;
+		background: linear-gradient(90deg, var(--border-subtle) 30%, transparent);
+	}
+	.section.loaded .section-label  { color: var(--violet-text); }
+	.section.loading .section-label { color: var(--amber); }
+
+	.show-more {
+		display: block; width: 100%;
+		text-align: center;
+		color: var(--text-tertiary);
+		font-size: var(--text-footnote);
+		padding: 10px;
+		border-top: 1px solid var(--border-subtle);
+		background: transparent;
+		border-left: 0; border-right: 0; border-bottom: 0;
+		cursor: pointer;
+		font-family: inherit;
+		transition: all var(--dur-tight) var(--ease-snap);
+	}
+	.show-more:hover { color: var(--text-secondary); background: var(--bg-secondary); }
+
+	.phase-stub {
+		padding: 14px 18px;
+		font-size: var(--text-footnote);
+		color: var(--text-tertiary);
+	}
+
+	@media (max-width: 480px) {
+		.section { padding: 10px 12px 6px; }
+		.phase-stub { padding: 10px 12px; }
+	}
+	.phase-stub.err { color: var(--red); }
+
+	.row-msg {
+		margin: 8px 18px;
+		padding: 6px 10px;
+		font-size: var(--text-footnote);
+		color: var(--red);
+		background: var(--red-bg);
+		border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+		border-radius: var(--radius-xs);
+	}
+</style>

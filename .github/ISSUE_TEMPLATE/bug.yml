@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a bug or correctness issue
+title: "[bug] <one-line summary>"
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What's wrong
+      description: One paragraph. What did you expect, what did you observe.
+      placeholder: "Cache-warm payload prefix diverges from real-send payload on the second turn..."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro
+      description: Steps, scenario YAML id, or a link to a failing run / trace.
+      placeholder: |
+        1. Send a turn with model `qwen3.6-35B-A3B`
+        2. Run scenario `cache-C02-strict-prefix-warm`
+        3. Observe hit_rate_per_turn = 0.18, expected ≥ 0.90
+    validations:
+      required: true
+  - type: input
+    id: capability
+    attributes:
+      label: Capability or area (if known)
+      description: Name the user-facing capability or code area. Leave blank if unsure.
+      placeholder: context composition
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity (suggested)
+      options:
+        - critical (data loss, prod down, security)
+        - high (incorrect output, regression on a measured KPI)
+        - medium (degraded UX, workaround exists)
+        - low (cosmetic, minor)
+      default: 1
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Logs, OTel trace IDs, related current PRD/AC, hypothesis.

@@ -1,0 +1,20 @@
+# Test-only dependencies, installed on top of requirements.txt.
+#
+# Single owner for this set. Every workflow that runs or type-checks
+# backend/tests/ installs this file rather than repeating the list:
+# unit-tests.yml, integration.yml, evals.yml, and lint.yml.
+#
+# lint.yml needs it because mypy type-checks backend/tests/. Without these,
+# pytest resolves to Any under ignore_missing_imports, mypy cannot see that
+# pytest.fail is NoReturn, and it reports missing returns in helpers that
+# never return -- errors no diff introduced and no local run reproduces.
+#
+# Only packages that are NOT already runtime dependencies belong here. Pillow
+# is deliberately absent: requirements.txt pins pillow==12.2.0 and is installed
+# before this file in every one of those workflows, so declaring it again would
+# be a second owner that could drift from the pinned runtime version.
+#
+# Unpinned to match the behaviour these workflows already had; runtime pins
+# live in requirements.txt and requirements.lock.
+pytest
+pytest-asyncio

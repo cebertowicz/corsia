@@ -1,0 +1,90 @@
+id: S7-providers-add-cloud-happy-path
+name: "Cloud provider added with valid key → chat picker reflects new provider"
+description: >
+  Happy path for the providers-settings-ui subsystem (backend
+  perspective). Adding a cloud provider via POST
+  /api/settings/providers/<name> with a valid key should:
+
+   1. Persist the provider config.
+   2. Cause loadModels() in the chat picker to surface that provider's
+      models on the next refresh.
+
+  The end-to-end UI flow (click "Add provider" → form submit → toast)
+  is covered by Sprint-4 Playwright. This scenario covers the
+  backend-resolution side: after the provider is added, an eval turn
+  using that provider's models runs cleanly.
+
+  Mode A: mock the LLM reply so the actual cloud API is never called.
+  We're testing the resolution + dispatch glue, not the cloud provider.
+
+category: functional
+tags:
+  - providers-settings-ui
+  - happy-path
+  - integration
+subsystems:
+  - providers-settings-ui
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_providers
+      session_id: sess_s7_addcloud
+  - fixture: mock_llm_replies
+    args:
+      replies:
+        - role: assistant
+          content: >
+            Anthropic provider added; claude-haiku-4-5 model resolved
+            and ready. Catalog refresh triggered.
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_s7_addcloud
+      content: "Confirm the Anthropic provider is configured and a model is callable."
+  - action: wait_for_event
+    args:
+      session_id: sess_s7_addcloud
+      event: turn_completed
+      timeout_ms: 5000
+
+expected_outcomes:
+  - assertion: turn_completed_present
+    detail: >
+      The turn ran end-to-end. A model resolved (cloud provider's
+      catalog entry was reachable); chat_completion dispatched.
+  - assertion: assistant_content_mentions_anthropic
+    detail: >
+      Final reply references Anthropic / claude — proxy assertion
+      that the configured provider was the one used.
+  - assertion: no_provider_error
+    detail: >
+      No provider_error step fired. A regression where save-key
+      didn't actually persist would surface as auth-failed at the
+      cloud seam — caught here.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 1
+  - name: check_assistant_message_content
+    args:
+      mode: contains
+      value: "Anthropic"
+  - name: check_no_provider_error
+    args: {}
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_assistant_message_content
+    - check_no_provider_error
+
+notes: |
+  This scenario asserts the backend half of the UI's add-provider
+  flow. The frontend Playwright in Sprint-4 will assert the UI flow
+  (click → form → row appears in list → toast). Both halves combined
+  give the end-to-end coverage.

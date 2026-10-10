@@ -1,0 +1,43 @@
+name: Eval proposal
+description: Propose a new canonical scenario (Mode A or Mode B) or a scorer
+title: "[eval] <scenario or scorer name>"
+labels: ["eval-proposal"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Canonical scenario (Mode A — mocked LLM)
+        - Canonical scenario (Mode B — real local oMLX)
+        - New scorer
+        - Other (explain below)
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: What question does this answer
+      description: A scenario must answer a specific question. What does this one prove or measure?
+      placeholder: "When the model returns a tool_use stop reason with no tool_calls, does the loop exit cleanly without hanging?"
+    validations:
+      required: true
+  - type: textarea
+    id: yaml-or-spec
+    attributes:
+      label: Draft YAML or scorer spec
+      description: Paste the scenario YAML (or scorer body) here, or link to a file in a fork / draft PR.
+      render: yaml
+    validations:
+      required: true
+  - type: input
+    id: capabilities
+    attributes:
+      label: Capabilities covered
+      description: Comma-separated user-facing capabilities or code areas.
+      placeholder: context composition, model routing
+  - type: textarea
+    id: trace
+    attributes:
+      label: OTel trace or evidence (if proposer-derived)
+      description: Trace ID or attached file. Leave blank if manual.

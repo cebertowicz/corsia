@@ -1,0 +1,13 @@
+# Auto-merge configuration.
+#
+# Default OFF. Steve merges manually when checks are green.
+# Flip to true when comfortable — single-file PR, no code changes.
+#
+# stage_1: auto-merge feature -> dev when Stage 1 checks pass
+# stage_2: auto-merge dev -> main when Stage 2 checks pass. Main
+# promotions must merge with a merge commit, never squash, so release
+# lineage stays connected across dev/main.
+
+auto_merge:
+  stage_1: false
+  stage_2: false

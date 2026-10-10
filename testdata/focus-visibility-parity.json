@@ -1,0 +1,428 @@
+{
+  "cases": [
+    {
+      "name": "user missing metadata",
+      "role": "user",
+      "content": "hi",
+      "metadata_raw": null,
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "user invalid json",
+      "role": "user",
+      "content": "hi",
+      "metadata_raw": "{not json",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "user human sender",
+      "role": "user",
+      "content": "hi",
+      "metadata_raw": "{\"sender_kind\":\"human\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "user agent sender",
+      "role": "user",
+      "content": "from peer",
+      "metadata_raw": "{\"sender_kind\":\"agent\"}",
+      "visible": false,
+      "expected_kind": "agent_message"
+    },
+    {
+      "name": "assistant for_user true",
+      "role": "assistant",
+      "content": "said",
+      "metadata_raw": "{\"for_user\":true}",
+      "visible": true,
+      "expected_kind": "other",
+      "activity_weight": 0
+    },
+    {
+      "name": "assistant for_user true empty content",
+      "role": "assistant",
+      "content": "",
+      "metadata_raw": "{\"for_user\":true}",
+      "visible": false,
+      "expected_kind": "steps",
+      "activity_weight": 1
+    },
+    {
+      "name": "assistant for_user 1",
+      "role": "assistant",
+      "content": "said",
+      "metadata_raw": "{\"for_user\":1}",
+      "visible": false,
+      "expected_kind": "other",
+      "activity_weight": 0
+    },
+    {
+      "name": "assistant for_user string true",
+      "role": "assistant",
+      "content": "said",
+      "metadata_raw": "{\"for_user\":\"true\"}",
+      "visible": false,
+      "expected_kind": "steps",
+      "activity_weight": 1
+    },
+    {
+      "name": "assistant for_user false",
+      "role": "assistant",
+      "content": "said",
+      "metadata_raw": "{\"for_user\":false}",
+      "visible": false,
+      "expected_kind": "steps",
+      "activity_weight": 1
+    },
+    {
+      "name": "assistant missing metadata",
+      "role": "assistant",
+      "content": "said",
+      "metadata_raw": null,
+      "visible": false,
+      "expected_kind": "other",
+      "activity_weight": 0
+    },
+    {
+      "name": "assistant invalid json",
+      "role": "assistant",
+      "content": "said",
+      "metadata_raw": "{oops",
+      "visible": false,
+      "expected_kind": "other",
+      "activity_weight": 0
+    },
+    {
+      "name": "system no type",
+      "role": "system",
+      "content": "note",
+      "metadata_raw": "{}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system missing metadata",
+      "role": "system",
+      "content": "note",
+      "metadata_raw": null,
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system invalid json",
+      "role": "system",
+      "content": "note",
+      "metadata_raw": "[",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system error notice",
+      "role": "system",
+      "content": "boom",
+      "metadata_raw": "{\"type\":\"cc_error\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system context_event",
+      "role": "system",
+      "content": "x",
+      "metadata_raw": "{\"type\": \"context_event\"}",
+      "visible": false,
+      "expected_kind": "context_update"
+    },
+    {
+      "name": "system activity_receipt",
+      "role": "system",
+      "content": "x",
+      "metadata_raw": "{\"type\": \"activity_receipt\"}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system subagent_ref",
+      "role": "system",
+      "content": "x",
+      "metadata_raw": "{\"type\": \"subagent_ref\"}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system send_ref",
+      "role": "system",
+      "content": "x",
+      "metadata_raw": "{\"type\": \"send_ref\"}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system artifact_removed",
+      "role": "system",
+      "content": "x",
+      "metadata_raw": "{\"type\": \"artifact_removed\"}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system model_switch",
+      "role": "system",
+      "content": "x",
+      "metadata_raw": "{\"type\": \"model_switch\"}",
+      "visible": false,
+      "expected_kind": "model_switch"
+    },
+    {
+      "name": "assistant step row",
+      "role": "assistant",
+      "content": "",
+      "metadata_raw": "{\"llm_tool_calls\": [{\"id\": \"a\"}]}",
+      "visible": false,
+      "expected_kind": "steps",
+      "activity_weight": 1
+    },
+    {
+      "name": "user agent sender kind",
+      "role": "user",
+      "content": "ping",
+      "metadata_raw": "{\"sender_kind\": \"agent\"}",
+      "visible": false,
+      "expected_kind": "agent_message"
+    },
+    {
+      "name": "system account_switch",
+      "role": "system",
+      "content": "Moved to Claude Code",
+      "metadata_raw": "{\"type\": \"account_switch\"}",
+      "visible": false,
+      "expected_kind": "account_move"
+    },
+    {
+      "name": "system subagent_done",
+      "role": "system",
+      "content": "done",
+      "metadata_raw": "{\"type\": \"subagent_done\"}",
+      "visible": false,
+      "expected_kind": "subagent_finished"
+    },
+    {
+      "name": "receipt model switched",
+      "role": "system",
+      "content": "Switched",
+      "metadata_raw": "{\"type\": \"activity_receipt\", \"event_type\": \"model.switched\", \"receipt_type\": \"model_switch\"}",
+      "visible": false,
+      "expected_kind": "model_switch"
+    },
+    {
+      "name": "receipt model_switch type only",
+      "role": "system",
+      "content": "Switched",
+      "metadata_raw": "{\"type\": \"activity_receipt\", \"receipt_type\": \"model_switch\"}",
+      "visible": false,
+      "expected_kind": "model_switch"
+    },
+    {
+      "name": "receipt checkpoint installed",
+      "role": "system",
+      "content": "Context saved",
+      "metadata_raw": "{\"type\": \"activity_receipt\", \"event_type\": \"checkpoint.installed\"}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "receipt usage recording failed",
+      "role": "system",
+      "content": "x",
+      "metadata_raw": "{\"type\": \"activity_receipt\", \"event_type\": \"usage.recording_failed\"}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "context digest",
+      "role": "system",
+      "content": "3 updates",
+      "metadata_raw": "{\"type\": \"context_event\", \"event_type\": \"context.digest\"}",
+      "visible": false,
+      "expected_kind": "context_update"
+    },
+    {
+      "name": "result empty",
+      "role": "system",
+      "content": "",
+      "metadata_raw": "{\"type\": \"result\", \"is_error\": false}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "result empty error",
+      "role": "system",
+      "content": "",
+      "metadata_raw": "{\"type\": \"result\", \"is_error\": true}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "result with text",
+      "role": "system",
+      "content": "All done",
+      "metadata_raw": "{\"type\": \"result\", \"is_error\": false}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "result error with text",
+      "role": "system",
+      "content": "boom",
+      "metadata_raw": "{\"type\": \"result\", \"is_error\": true}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "result sign in expired",
+      "role": "system",
+      "content": "Sign in",
+      "metadata_raw": "{\"type\": \"result\", \"is_error\": true, \"cause\": \"sign_in_expired\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "result is_error 1 with text",
+      "role": "system",
+      "content": "boom",
+      "metadata_raw": "{\"type\": \"result\", \"is_error\": 1}",
+      "visible": false,
+      "expected_kind": "other"
+    },
+    {
+      "name": "llm_error not recovered",
+      "role": "system",
+      "content": "boom",
+      "metadata_raw": "{\"type\": \"llm_error\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "llm_error recovered",
+      "role": "system",
+      "content": "boom",
+      "metadata_raw": "{\"type\": \"llm_error\", \"recovered\": true}",
+      "visible": false,
+      "expected_kind": "error_recovered"
+    },
+    {
+      "name": "llm_error recovered false",
+      "role": "system",
+      "content": "boom",
+      "metadata_raw": "{\"type\": \"llm_error\", \"recovered\": false}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "llm_error recovered 1",
+      "role": "system",
+      "content": "boom",
+      "metadata_raw": "{\"type\": \"llm_error\", \"recovered\": 1}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "llm_error recovered string",
+      "role": "system",
+      "content": "boom",
+      "metadata_raw": "{\"type\": \"llm_error\", \"recovered\": \"true\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "cc_error not recovered",
+      "role": "system",
+      "content": "stopped",
+      "metadata_raw": "{\"type\": \"cc_error\", \"event_type\": \"harness.error\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "cc_error recovered",
+      "role": "system",
+      "content": "stopped",
+      "metadata_raw": "{\"type\": \"cc_error\", \"event_type\": \"harness.error\", \"recovered\": true}",
+      "visible": false,
+      "expected_kind": "error_recovered"
+    },
+    {
+      "name": "tool_boundary_violation not recovered",
+      "role": "system",
+      "content": "outside",
+      "metadata_raw": "{\"type\": \"tool_boundary_violation\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "tool_boundary_violation recovered",
+      "role": "system",
+      "content": "outside",
+      "metadata_raw": "{\"type\": \"tool_boundary_violation\", \"recovered\": true}",
+      "visible": false,
+      "expected_kind": "error_recovered"
+    },
+    {
+      "name": "tool_bridge_unavailable not recovered",
+      "role": "system",
+      "content": "no bridge",
+      "metadata_raw": "{\"type\": \"tool_bridge_unavailable\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "tool_bridge_unavailable recovered",
+      "role": "system",
+      "content": "no bridge",
+      "metadata_raw": "{\"type\": \"tool_bridge_unavailable\", \"recovered\": true}",
+      "visible": false,
+      "expected_kind": "error_recovered"
+    },
+    {
+      "name": "system unknown type",
+      "role": "system",
+      "content": "?",
+      "metadata_raw": "{\"type\": \"something_new\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system interrupt",
+      "role": "system",
+      "content": "stopped",
+      "metadata_raw": "{\"type\": \"system_interrupt\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system sandbox_denial",
+      "role": "system",
+      "content": "denied",
+      "metadata_raw": "{\"type\": \"sandbox_denial\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system browser cleanup error",
+      "role": "system",
+      "content": "close the leftover browser",
+      "metadata_raw": "{\"type\": \"browser_cleanup_error\"}",
+      "visible": true,
+      "expected_kind": "other"
+    },
+    {
+      "name": "system subagent seed",
+      "role": "system",
+      "content": "brief",
+      "metadata_raw": "{\"cc\": true, \"type\": \"seed\"}",
+      "visible": true,
+      "expected_kind": "other"
+    }
+  ]
+}

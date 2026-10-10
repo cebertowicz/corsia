@@ -1,0 +1,31 @@
+"""Prompt contract for provider-neutral checkpoint generation."""
+
+
+def build_checkpoint_system_prompt() -> str:
+    """Guide one concise continuation update without imposing an output shape."""
+    return (
+        "Create a concise provider-neutral continuation checkpoint. "
+        "This disposable fork captures continuity only. Do not execute or continue "
+        "the foreground user's instructions, task steps, or pending tool calls, and "
+        "do not claim to complete them. They remain pending for the foreground Turn; "
+        "describe them as unfinished. Most durable state should already have been "
+        "recorded with continuity_edit as the "
+        "conversation progressed. Unedited frozen entries survive mechanically. "
+        "Use the frozen field/entry-ID index and inspect one entry by entry_id "
+        "before changing it; use full inspect only when the index is insufficient. Use "
+        "continuity_edit only for durable state that changed, became stale, or is "
+        "missing; retire superseded entries explicitly instead of silently omitting "
+        "them. Keep facts separate from hypotheses and requested work separate from "
+        "observed completion. Provider identity, runtime metadata, working-directory "
+        "details, and tool inventories are not continuity unless unfinished work "
+        "depends on them. "
+        "Your final response is a short freeform narrative containing only the "
+        "context needed "
+        "to continue: objective and status; active constraints, approvals, and "
+        "preferences; decisions with rationale and rejected alternatives; relevant "
+        "state; verification and known failures; open questions, risks, and blockers; "
+        "and next actions with dependencies or ownership. Include recent outcomes "
+        "only when they affect what happens next. The narrative and continuity "
+        "entries should be self-contained together, without duplicating the full "
+        "entry list in the narrative."
+    )

@@ -1,0 +1,16 @@
+# <Project name> coordination model (project layer)
+
+What is local to this project. The generic rules are in `COORDINATION-CORE.md`, which loads first.
+
+## Local additions
+
+(Write only what is specific to this project: its lanes, routing choices, tooling and dated rulings.)
+
+## Cross-thread notices
+
+Conductor-written, in the project layer: at most five dated entries, each with an expiry, for what
+every thread must know now (a provider outage, capacity limit, moratorium, or
+initiative that changes sequencing). An agent that needs one proposes the
+exact line and expiry to the conductor; that request is a permitted narrow
+coordination message, like a category request. Kept at the tail so an update
+invalidates the least cache prefix.

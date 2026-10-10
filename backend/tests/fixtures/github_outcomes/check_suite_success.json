@@ -1,0 +1,22 @@
+{
+ "event": "check_suite",
+ "payload": {
+  "action": "completed",
+  "check_suite": {
+   "app": {
+    "slug": "github-actions"
+   },
+   "conclusion": "success",
+   "head_branch": "train/providers-inference",
+   "head_sha": "5500d7dc06eca5834bbe6d4815717293c1ea450a",
+   "id": 99658627543,
+   "pull_requests": [],
+   "status": "completed",
+   "updated_at": "2026-10-01T00:19:46Z"
+  },
+  "repository": {
+   "default_branch": "main",
+   "full_name": "cebertowicz/maestro"
+  }
+ }
+}

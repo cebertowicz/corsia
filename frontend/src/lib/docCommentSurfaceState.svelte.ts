@@ -1,0 +1,59 @@
+import { get } from 'svelte/store';
+import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
+import { cancelCommentCapture } from '$lib/stores/commentDraft';
+import { focusedDocComment } from '$lib/stores/docCommentFocus';
+
+/** What a card is anchored to; the popover owns the union. */
+export type CommentAnchor = NonNullable<PopoverAnchor>;
+
+export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
+
+/** One owner for the canvas's anchored thread/draft and whole-document list. */
+export function createCommentSurfaceState(restoreEditor: () => void, draftScope?: () => string) {
+	let state = $state<CommentSurfaceState>(null);
+	let anchor = $state<CommentAnchor | null>(null);
+	let restoreFocus = $state<() => void>(restoreEditor);
+	/** The suggestion under the pointer: it and its card take the focus tint without a click. */
+	let hovered = $state<string | null>(null);
+	function close() {
+		state = null;
+		cancelCommentCapture(draftScope?.());
+	}
+	function openDraft(rect: CommentAnchor) {
+		anchor = rect;
+		state = { kind: 'draft' };
+	}
+	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false) {
+		// The drawer is nonmodal: a caret landing in commented text (a click, or
+		// Escape collapsing a selection) keeps it open rather than swapping it
+		// for that comment's popover. Pressing a suggestion in the editor still
+		// focuses its card there.
+		if (state?.kind === 'list' && !viaSuggestion) return false;
+		const changed = get(focusedDocComment) !== id;
+		if (state?.kind === 'list') { focusedDocComment.set(id); return changed; }
+		focusedDocComment.set(id);
+		state = { kind: 'thread', id };
+		anchor = rect;
+		restoreFocus = restoreEditor;
+		return changed;
+	}
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) {
+		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'list' };
+		if (ids.length === 1) focusedDocComment.set(ids[0]);
+		anchor = reading ?? opener;
+		restoreFocus = () => opener.focus();
+	}
+	function openList(opener: HTMLElement) {
+		if (state?.kind === 'list') { close(); return; }
+		state = { kind: 'list' };
+		anchor = opener;
+		restoreFocus = () => opener.focus();
+	}
+	return {
+		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; },
+		get anchor() { return anchor; }, set anchor(value: CommentAnchor | null) { anchor = value; },
+		get restoreFocus() { return restoreFocus; },
+		get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
+		close, openDraft, focusComment, focusMarker, openList,
+	};
+}

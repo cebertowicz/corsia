@@ -1,0 +1,35 @@
+{
+ "event": "pull_request",
+ "payload": {
+  "action": "closed",
+  "number": 2803,
+  "pull_request": {
+   "base": {
+    "ref": "dev",
+    "sha": "06cf5d521d49937e3f5d3b865a615a8dfbb8ed52"
+   },
+   "body": "Owner thread ID: 297ca040\nFixes #2795\nIntroduced by #2795",
+   "closed_at": "2026-09-28T19:24:21Z",
+   "created_at": "2026-09-28T17:35:54Z",
+   "draft": false,
+   "head": {
+    "ref": "bugs/2795-codex-receipt-teardown-budget",
+    "sha": "e7ce5f993d43b01fd506c18a0a1d8c7171f6f405"
+   },
+   "merge_commit_sha": "9520ac51279e369635f10a316ff2242ba2032aab",
+   "merged": true,
+   "merged_at": "2026-09-28T19:24:21Z",
+   "number": 2803,
+   "state": "closed",
+   "title": "[Bugs] Make Codex receipt teardown load-tolerant (#2795)",
+   "updated_at": "2026-09-28T19:24:21Z",
+   "user": {
+    "login": "fixture-user"
+   }
+  },
+  "repository": {
+   "default_branch": "main",
+   "full_name": "cebertowicz/maestro"
+  }
+ }
+}

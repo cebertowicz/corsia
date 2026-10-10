@@ -1,0 +1,45 @@
+{
+ "event": "pull_request",
+ "payload": {
+  "action": "edited",
+  "changes": {
+   "base": {
+    "ref": {
+     "from": "dev"
+    },
+    "sha": {
+     "from": "dev"
+    }
+   }
+  },
+  "number": 2778,
+  "pull_request": {
+   "base": {
+    "ref": "train/context-memory",
+    "sha": "653f86b5fe94a8979bec430cf2d899ffe1616330"
+   },
+   "body": "Owner thread ID: 2dddc476",
+   "closed_at": "2026-09-28T19:28:31Z",
+   "created_at": "2026-09-28T14:59:55Z",
+   "draft": false,
+   "head": {
+    "ref": "cm/2520-recall-hint",
+    "sha": "8cb4babfaa0958faca5a1de1d66407b6b7935f58"
+   },
+   "merge_commit_sha": "431f8682470161820d768995580977b507456808",
+   "merged": true,
+   "merged_at": "2026-09-28T19:28:31Z",
+   "number": 2778,
+   "state": "closed",
+   "title": "[Context & Memory] Node-start recall names the read it promises, not the node (#2520)",
+   "updated_at": "2026-09-28T19:28:31Z",
+   "user": {
+    "login": "fixture-user"
+   }
+  },
+  "repository": {
+   "default_branch": "main",
+   "full_name": "cebertowicz/maestro"
+  }
+ }
+}

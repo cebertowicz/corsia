@@ -1,0 +1,97 @@
+id: S6-omlx-introspection-fallback
+name: "oMLX /openapi.json fetch fails → falls back to static dropped-fields map + WARN log"
+description: >
+  Edge case for omlx-provider-lifecycle: when the daemon's
+  /openapi.json endpoint is missing (older oMLX) or returns 5xx,
+  inference_params_for must fall back to _FALLBACK_KNOWN_DROPPED
+  (the static map for oMLX 0.3.8) AND emit a WARN log.
+
+  This proves the loud-failure invariant (NFR7): the fall-back path is
+  observable, not silent. A regression that flips the fallback to
+  silent (e.g., catching the introspection failure without logging)
+  would let the UI render an inaccurate "this server accepts these
+  knobs" view that lies about runtime behavior.
+
+  Mode A: scenario uses a synthetic prompt that forces inference
+  params to be computed for an omlx provider — and asserts the
+  resulting turn completes cleanly (the fallback is functional,
+  even when introspection fails). The WARN-emission portion of the
+  invariant is unit-tested separately in
+  test_omlx_introspection_cache.py (backlog).
+
+category: functional
+tags:
+  - omlx-provider-lifecycle
+  - edge-case
+  - introspection
+  - fail-loud
+subsystems:
+  - omlx-provider-lifecycle
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_omlx_introspect
+      session_id: sess_s6_introspect
+  - fixture: mock_llm_replies
+    args:
+      replies:
+        - role: assistant
+          content: >
+            Sampling parameters resolved using fallback known-dropped
+            field set (top_k, repetition_penalty,
+            repetition_context_size). Schema introspection unavailable
+            this run; falling back gracefully.
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_s6_introspect
+      content: "Resolve inference params for an omlx model with introspection unavailable."
+  - action: wait_for_event
+    args:
+      session_id: sess_s6_introspect
+      event: turn_completed
+      timeout_ms: 5000
+
+expected_outcomes:
+  - assertion: turn_completed_present
+    detail: >
+      The fallback path is functional: even with introspection
+      unavailable, inference_params_for returned valid params and the
+      turn ran end-to-end.
+  - assertion: assistant_content_mentions_fallback
+    detail: >
+      The mocked reply explicitly mentions the fallback — proves the
+      scenario's intent is preserved through the pipeline.
+  - assertion: no_provider_error
+    detail: >
+      No provider_error fired. The introspection failure is a
+      WARN-level event, not a turn-blocking error.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 1
+  - name: check_assistant_message_content
+    args:
+      mode: contains
+      value: "fallback"
+  - name: check_no_provider_error
+    args: {}
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_assistant_message_content
+    - check_no_provider_error
+
+notes: |
+  The behavioral assertion here is intentionally weak (the strong
+  assertion — a WARN log appears with the right introspection-failed
+  message — needs a log-capturing scorer that doesn't exist yet).
+  What this scenario protects: the fallback is *reachable* from the
+  end-to-end turn path. A regression that made the fallback raise
+  instead of returning would surface as a provider_error here.

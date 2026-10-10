@@ -1,0 +1,74 @@
+version: 1
+status: seed-catalog
+notes:
+  - This is the starting inventory for end-to-end and visual coverage.
+  - Each surface should eventually include fixtures, user journeys, API effects, WebSocket effects, and screenshot baselines.
+surfaces:
+  - id: auth.login
+    owner_paths:
+      - frontend/src/lib/components/LoginScreen.svelte
+      - frontend/src/lib/stores/auth.ts
+      - backend/infra/auth.py
+    behaviors:
+      - token entry accepts a known user token
+      - invalid token clears local auth and surfaces an error
+      - URL token parameter signs in and removes token from the visible URL
+    tests:
+      - frontend/e2e/corsia-smoke.spec.ts
+      - frontend/e2e/corsia-visual.spec.ts
+  - id: shell.navigation
+    owner_paths:
+      - frontend/src/routes/+page.svelte
+      - frontend/src/lib/components/Sidebar.svelte
+      - frontend/src/lib/components/ChatHeader.svelte
+      - frontend/src/lib/components/AppShellBar.svelte
+    behaviors:
+      - sidebar opens and collapses without losing active view state
+      - new chat returns to an empty chat surface
+      - settings and project views preserve common shell controls
+    tests:
+      - frontend/e2e/corsia-smoke.spec.ts
+  - id: chat.empty_and_session
+    owner_paths:
+      - frontend/src/lib/components/ChatPanel.svelte
+      - frontend/src/lib/components/InputBar.svelte
+      - frontend/src/lib/components/MessageList.svelte
+      - frontend/src/lib/stores/sessions.ts
+      - backend/api/threads.py
+      - backend/api/thread_messages.py
+    behaviors:
+      - empty chat has a visible composer
+      - session creation persists in the backend
+      - selecting a session hydrates paginated message history
+      - active streaming buffers survive session switches
+    tests:
+      - frontend/e2e/corsia-smoke.spec.ts
+      - backend/tests/test_ws_session_snapshot.py
+      - backend/tests/test_turn_buffers.py
+  - id: settings.providers
+    owner_paths:
+      - frontend/src/lib/components/SettingsView.svelte
+      - frontend/src/lib/components/ProviderManager.svelte
+      - frontend/src/lib/components/v7
+      - frontend/src/lib/stores/providers.ts
+      - frontend/src/lib/stores/providersV7.ts
+      - backend/api/providers.py
+      - backend/api/models.py
+    behaviors:
+      - settings opens from the sidebar
+      - provider/model state loads without blocking the shell
+      - provider mutations surface errors instead of silently failing
+    tests:
+      - frontend/e2e/corsia-smoke.spec.ts
+      - frontend/src/lib/stores/__tests__/providersV7.test.ts
+  - id: visual.design_system
+    owner_paths:
+      - frontend/src/app.css
+      - frontend/DESIGN-SYSTEM.md
+      - frontend/src/lib/components/ui
+    behaviors:
+      - design tokens drive surface color, radius, spacing, and focus states
+      - visual diffs are intentional and reviewed against design-system rules
+      - desktop and mobile screenshots avoid clipping, overlap, and cramped text
+    tests:
+      - frontend/e2e/corsia-visual.spec.ts

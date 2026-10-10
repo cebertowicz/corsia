@@ -1,0 +1,128 @@
+id: cache-C08-two-models-alternating
+name: "Two-model run-pressure interleaving — A · B · A returns, A's hot cache survives"
+description: >
+  Measures hot-cache eviction interference + shared-resource contention when
+  two models are both LOADED and both actively generating, in interleaved
+  bursts. Different from C06 (model-load pressure) and C09 (simultaneous
+  generation).
+
+  Three cycles:
+    - 5 turns on A (one conversation, continuity preserved)
+    - 5 turns on B (one conversation, continuity preserved)
+    - 5 turns on A (continuation of the FIRST A conversation — turns 6-10)
+
+  Assertion: when we return to A's conversation, turns 6-10 still hit cache
+  at ≥ 0.85. If B's run-time activity caused A's blocks to be evicted from
+  hot cache, the return turns would show a sharp dip (or SSD-restore
+  profile). 0.85 (rather than C03's 0.90) allows for some natural pressure
+  while still catching real eviction.
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-C (C05 vs C08
+      vs C06 distinction matrix)
+    - oMLX scheduler / _global_mlx_executor architecture (single-threaded
+      executor; cross-model work serializes — slow but doesn't necessarily
+      evict)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - multi-model
+  - run-pressure
+  - regression-sentinel
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_a: "qwen-3.6-35b-a3b"
+  model_b: "qwen-3.6-27b-instruct"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  expected_a_return_hit_rate_minimum: 0.85
+
+pre_conditions:
+  - fixture: omlx_loaded_models
+    args:
+      models:
+        - "qwen-3.6-35b-a3b"
+        - "qwen-3.6-27b-instruct"
+      pin: false
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c08_a
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c08_b
+
+steps:
+  - action: run_seeded_dialog
+    args:
+      session_id: sess_c08_a
+      model: "qwen-3.6-35b-a3b"
+      length: 5
+      timeout_ms_per_turn: 60000
+  - action: run_seeded_dialog
+    args:
+      session_id: sess_c08_b
+      model: "qwen-3.6-27b-instruct"
+      length: 5
+      timeout_ms_per_turn: 90000
+  - action: run_seeded_dialog
+    args:
+      session_id: sess_c08_a
+      model: "qwen-3.6-35b-a3b"
+      length: 5
+      starting_turn: 6
+      timeout_ms_per_turn: 60000
+
+expected_outcomes:
+  - assertion: a_return_hit_rate_held
+    detail: >
+      A's turns 6-10 (after B's 5-turn interlude) hit cache at
+      cached_tokens / (prompt_tokens − new_user_tokens) ≥ 0.85.
+  - assertion: no_eviction_collapse
+    detail: >
+      Turn 6 (the immediate return) is the worst case — not turn 10 — i.e.
+      whatever eviction happened during B's run was a one-shot event,
+      after which A re-warmed naturally as expected.
+  - assertion: no_provider_error
+    detail: Neither model errored across the three runs.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 15
+  - name: check_no_provider_error
+    args: {}
+  - name: check_per_turn_hit_rate_above
+    args:
+      session_id: sess_c08_a
+      turn_range: [6, 10]
+      min_ratio: 0.85
+      slack_tokens: 20
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_per_turn_hit_rate_above
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Scorer: check_per_turn_hit_rate_above with session_id filter (needed
+      so the same scorer can target a specific conversation rather than
+      collapsing across all turn_completed events in the run)
+
+  If C08 fails but C05 (isolated) passes for both models, the regression
+  is specifically in cross-model run-time interaction. Likely culprits to
+  investigate next:
+    - oMLX's hot-cache LRU policy under multi-model load
+    - SSD write-queue saturation (Phase 0 FINDINGS flagged this side-bug)
+    - Shared block pool pressure (initial_cache_blocks setting; could be
+      worth raising if profiling shows dynamic-allocation overhead during B's run)

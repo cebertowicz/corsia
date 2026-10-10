@@ -1,0 +1,28 @@
+# Pre-commit hook configuration for CORSIA.
+#
+# Install: `pre-commit install` (one-time, after cloning).
+# Bypass:  `git commit --no-verify` (use sparingly).
+#
+# Default severity: `error` blocks; `warning` reports without blocking.
+# To get warnings as errors locally for paydown work, run:
+#   PYTHONPATH=tools python -m antipatterns --staged --severity warning
+
+repos:
+  - repo: local
+    hooks:
+      - id: antipatterns
+        name: antipatterns (proactive lint-class checks)
+        # PYTHONPATH=tools resolves the package at tools/antipatterns/
+        # without an editable install. bash -c wrapper because the
+        # pre-commit version installed here doesn't honor a top-level
+        # `env:` key on local hooks.
+        entry: bash -c 'PYTHONPATH=tools python3 -m antipatterns --staged --severity error --repo-root .'
+        language: system
+        pass_filenames: false
+        types_or: [python, ts, svelte]
+
+      - id: large-files
+        name: large files (block files over 500 KB)
+        entry: python3 scripts/check_large_files.py
+        language: system
+        pass_filenames: true

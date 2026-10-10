@@ -1,0 +1,62 @@
+name: Native browser contract
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'backend/host_access/browser_*.py'
+      - 'backend/host_access/processes.py'
+      - 'backend/tests/*browser*.py'
+      - 'backend/requirements.lock'
+      - '.github/workflows/browser-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-native:
+    name: Native browser lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: backend
+      CORSIA_TEST_MODE: '1'
+      CORSIA_ANALYTICS_DISABLE: '1'
+      CORSIA_NATIVE_BROWSER_TEST: '1'
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install isolated pinned dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r backend/requirements.lock
+          npm install --prefix "$RUNNER_TEMP/browser-cli" --no-audit --no-fund agent-browser@0.31.2
+          native_bin="$RUNNER_TEMP/browser-cli/node_modules/agent-browser/bin/agent-browser-linux-x64"
+          test -x "$native_bin"
+          "$native_bin" --version
+          chrome_bin="$(command -v google-chrome)"
+          test -x "$chrome_bin"
+          "$chrome_bin" --version
+          {
+            echo "CORSIA_NATIVE_BROWSER_BINARY=$native_bin"
+            echo "CORSIA_NATIVE_CHROME_BINARY=$chrome_bin"
+            echo "CORSIA_WORKSPACE=$RUNNER_TEMP/browser-workspace"
+            echo "CORSIA_STATE_DIR=$RUNNER_TEMP/browser-state"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/browser-workspace/.corsia" "$RUNNER_TEMP/browser-state"
+      - name: Verify actual native owner and Unix peer contract
+        run: |
+          .venv/bin/python -m pytest -c backend/pytest.ini \
+            backend/tests/test_browser_native.py backend/tests/test_browser_real_socket.py \
+            -m integration -vv --tb=short -o faulthandler_timeout=60

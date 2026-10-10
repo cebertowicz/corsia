@@ -1,0 +1,210 @@
+"""Connector records and conditional tool registration."""
+
+from __future__ import annotations
+
+import logging
+import re
+import sqlite3
+from collections.abc import Callable, Sequence
+from typing import Any
+
+from connections.account_readiness import AccountReadiness
+
+log = logging.getLogger(__name__)
+
+
+def read_account_readiness(thread_ids: Sequence[str], *, db: sqlite3.Connection) -> dict[str, AccountReadiness]:
+    """Read stored account eligibility for authorized thread batches without effects."""
+    from connections.account_policy import read_account_readiness as read
+
+    return read(thread_ids, db=db)
+
+
+def register_if_available(
+    registry, provider: str, tool_factory: Callable[[], Any], *, db=None
+) -> bool:
+    """Register ``tool_factory()`` iff the connector is available."""
+    from connections.models import connection_available
+
+    if connection_available(provider, db=db):
+        registry.register(tool_factory())
+        return True
+    return False
+
+
+def _gh_status(binary: str) -> tuple[bool | None, str | None]:
+    """The person's own ``gh`` sign-in and login; (None, None) if the probe itself failed.
+
+    Run in the backend's own environment (``connections.github_signin``). Raises
+    ``GhUpdateRequired`` when this ``gh`` is too old to report its sign-in.
+    """
+    from connections.github_signin import gh_status
+
+    return gh_status(binary)
+
+
+_NOT_LOGGED_IN = re.compile(
+    r"not logged in|not signed in|log ?in required|please (?:log|sign) ?in", re.I,
+)
+
+
+def _codex_sign_in_state(binary: str) -> str:
+    """Classify ``codex login status`` as ready, needs_auth or unverified.
+
+    Exit 0 is ready. A non-zero exit whose output says nobody is logged in is
+    needs_auth. A timeout, an OSError or any other failure proves nothing about
+    the login, so it is unverified (#1912), never needs_auth.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [binary, "login", "status"], capture_output=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        log.debug("codex auth check failed: %s", e)
+        return "unverified"
+    if result.returncode == 0:
+        return "ready"
+    output = (result.stdout + result.stderr).decode("utf-8", "replace")
+    return "needs_auth" if _NOT_LOGGED_IN.search(output) else "unverified"
+
+
+_BINARY_CANDIDATES = {
+    "claude-code": ("claude", ["~/.local/bin/claude", "/opt/homebrew/bin/claude",
+                               "/usr/local/bin/claude"]),
+    "github": ("gh", ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "~/.local/bin/gh"]),
+    "codex": ("codex", ["/opt/homebrew/bin/codex", "/usr/local/bin/codex",
+                        "~/.local/bin/codex"]),
+}
+
+
+def resolve_builtin_binary(provider: str, *, db=None) -> tuple[dict, str | None]:
+    """A built-in CLI's stored config and its executable, or None if missing.
+
+    A configured binary wins; otherwise PATH, then the known install locations.
+    """
+    from connections.models import get_connection
+
+    cfg = (get_connection(provider, db=db) or {}).get("config") or {}
+    return cfg, binary_from_config(provider, cfg)
+
+
+def binary_from_config(provider: str, cfg: dict) -> str | None:
+    """A built-in CLI's executable for an already-read connection config, or None if missing."""
+    import os
+    import shutil
+
+    name, candidates = _BINARY_CANDIDATES[provider]
+    manual = cfg.get("binary")
+    if manual and os.path.isfile(manual) and os.access(manual, os.X_OK):
+        return manual
+    found = shutil.which(name)
+    if found:
+        return found
+    for c in candidates:
+        p = os.path.expanduser(c)
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None  # None -> not_installed
+
+
+def seed_builtin_connections(*, db=None) -> int:
+    """Detect installed CLI connectors on PATH and upsert their records.
+
+    Claude Code stays usable here whenever its binary exists: its sign-in needs
+    the async control probe, which runs at startup and on recheck
+    (``connections.source_state``). Codex is classified now.
+    """
+    from connections.models import (
+        SOURCE_CHECK_KEY,
+        ConnectionStatus,
+        ConnectionType,
+        get_connection,
+        upsert_connection,
+    )
+    from connections.source_state import resolve_check
+
+    claude_cfg, claude_bin = resolve_builtin_binary("claude-code", db=db)
+    previous = get_connection("claude-code", db=db) or {}
+    claude_status = ConnectionStatus.AVAILABLE if claude_bin else ConnectionStatus.NOT_INSTALLED
+    if (claude_bin and claude_cfg.get(SOURCE_CHECK_KEY)
+            and previous.get("status") != ConnectionStatus.NOT_INSTALLED.value):
+        # Keep the last probe's verdict until this start's probe replaces it.
+        claude_status = ConnectionStatus(previous["status"])
+    if not claude_bin:
+        claude_cfg = {k: v for k, v in claude_cfg.items() if k != SOURCE_CHECK_KEY}
+    upsert_connection(
+        type=ConnectionType.CLI,
+        provider="claude-code",
+        config={"permission_mode": "bypassPermissions", **claude_cfg,
+                "binary": claude_bin or "claude"},
+        status=claude_status,
+        db=db,
+    )
+
+    refresh_github_connection(db=db)
+
+    codex_cfg, codex_bin = resolve_builtin_binary("codex", db=db)
+    codex_state = _codex_sign_in_state(codex_bin) if codex_bin else "not_installed"
+    codex_status, codex_check = resolve_check(
+        get_connection("codex", db=db), codex_state, None,
+    )
+    upsert_connection(
+        type=ConnectionType.CLI,
+        provider="codex",
+        config={**codex_cfg, SOURCE_CHECK_KEY: codex_check, "binary": codex_bin or "codex"},
+        status=codex_status,
+        db=db,
+    )
+
+    log.info("Seeded built-in connections: claude-code, github, codex")
+    return 3
+
+
+def refresh_github_connection(*, db=None, keep_row_on_failed_probe: bool = False) -> bool:
+    """Probe the resolved ``gh`` and store GitHub's row; False if the probe failed.
+
+    Startup stores a failed probe as needs_auth. The model-source recheck keeps
+    the last stored row instead and reports itself incomplete.
+    """
+    from connections.github_signin import UPDATE_GH_REASON, GhUpdateRequired
+    from connections.models import (
+        SOURCE_CHECK_KEY,
+        ConnectionStatus,
+        ConnectionType,
+        get_connection,
+        upsert_connection,
+    )
+    from connections.source_state import UNVERIFIED, resolve_check
+
+    gh_cfg, gh_bin = resolve_builtin_binary("github", db=db)
+    gh_cfg = {k: v for k, v in gh_cfg.items() if k != SOURCE_CHECK_KEY}
+    update_needed = False
+    try:
+        authed, login = _gh_status(gh_bin) if gh_bin else (False, None)
+    except GhUpdateRequired:
+        authed, login, update_needed = None, None, True
+    if authed is None and not update_needed and keep_row_on_failed_probe:
+        return False
+    if update_needed:
+        # This gh cannot say whether the person is signed in: ask for the update,
+        # never "not signed in".
+        gh_status, gh_cfg[SOURCE_CHECK_KEY] = resolve_check(
+            get_connection("github", db=db), UNVERIFIED, UPDATE_GH_REASON,
+        )
+    elif not gh_bin:
+        gh_status = ConnectionStatus.NOT_INSTALLED
+    elif authed:
+        gh_status = ConnectionStatus.AVAILABLE
+    else:
+        gh_status = ConnectionStatus.NEEDS_AUTH
+    upsert_connection(
+        type=ConnectionType.CLI,
+        provider="github",
+        # Only a definite login replaces the stored one: the agents' account compares against it.
+        config={**gh_cfg, "binary": gh_bin or "gh", **({"login": login} if authed and login else {})},
+        status=gh_status,
+        db=db,
+    )
+    return authed is not None or update_needed

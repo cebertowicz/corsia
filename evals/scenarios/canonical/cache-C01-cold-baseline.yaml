@@ -1,0 +1,89 @@
+id: cache-C01-cold-baseline
+name: "Cold cache baseline — fresh-loaded model, single short message, record prefill floor"
+description: >
+  Establishes the irreducible prefill-latency floor per model. Fresh model
+  load (no prior conversation in scope), single short user message, record
+  prefill_ms, prefill_tps, and the resulting cached_tokens count
+  (expected ≈ 0).
+
+  This scenario does NOT pass/fail on a numeric threshold — it RECORDS the
+  floor so subsequent scenarios (C02-C07) can be interpreted relative to
+  it. A 14-second prefill on a fresh load is not a bug; it's the model's
+  dense-prefill characteristic. This scenario captures it precisely.
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-A
+    - working/2026-05-11-provider-discovery-cleanup/diagnostics/FINDINGS.md
+      (direct curl 0% cache; production /api/eval/turn path required)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - baseline
+  - omlx
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-27b-instruct"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  observational: true
+
+pre_conditions:
+  - fixture: omlx_fresh_load
+    args:
+      model: "qwen-3.6-27b-instruct"
+      pin: true
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c01_cold
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_c01_cold
+      content: "Say hi in one short sentence."
+  - action: wait_for_event
+    args:
+      session_id: sess_c01_cold
+      event: turn_completed
+      timeout_ms: 60000
+
+expected_outcomes:
+  - assertion: turn_completed_emitted
+    detail: Sanity — turn completed without provider error.
+  - assertion: prefill_floor_recorded
+    detail: >
+      prefill_ms, prefill_tps, prompt_tokens, and cached_tokens captured
+      to scenario output (no threshold; documentation pass).
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 1
+  - name: check_no_provider_error
+    args: {}
+  - name: check_prefill_floor_recorded
+    args:
+      model: "qwen-3.6-27b-instruct"
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Fixture: omlx_fresh_load (force model unload + reload to clear hot cache)
+    - Scorer: check_prefill_floor_recorded (reads usage.prompt_tokens_details.cached_tokens
+      and turn_completed metadata.prefill_ms; appends to scenario output JSON;
+      no pass/fail)
+
+  Re-run this scenario for each model in the catalog to populate per-model
+  floor baselines that downstream scenarios compare against.

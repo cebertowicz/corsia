@@ -1,0 +1,5 @@
+20000-0p7pct-idle-prod       cap= 12000 pages/rep=  3 scanned/page=   6667 walk ms mean=  29.0 p95=  31.5 page ms p95=  51.7  ms/row=0.0043
+20000-2pct-idle-prod         cap= 12000 pages/rep=  9 scanned/page=   2222 walk ms mean=   9.8 p95=  11.4 page ms p95=  18.6  ms/row=0.0044
+58000-0p7pct-idle-prod       cap= 12000 pages/rep=  9 scanned/page=   6444 walk ms mean=  28.7 p95=  32.6 page ms p95=  55.0  ms/row=0.0044
+58000-2pct-idle-prod         cap= 12000 pages/rep= 12 scanned/page=   2496 walk ms mean=  11.2 p95=  11.4 page ms p95=  19.0  ms/row=0.0045
+58000-0p7pct-working-prod    cap= 12000 pages/rep=  9 scanned/page=   6444 walk ms mean=  28.3 p95=  32.0 page ms p95=  51.8  ms/row=0.0044

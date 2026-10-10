@@ -1,0 +1,527 @@
+"""A blocker anyone but the user clears is a wait that ends at a deadline.
+
+- ``block_node`` for a thread, the system or an outside party arms a deadline
+  watch, 24 hours out by default, and places no hold.
+- Its condition may only be a deadline, and no later than 7 days out.
+- The reply tells the agent what its blocker became and the ways out.
+- The row leads with the deadline, then the reason.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+import json
+import sqlite3
+import uuid
+
+import pytest
+
+from infra.schema import SCHEMA_SQL
+from plans import admission, blocked_wait, service
+from plans.boundary import PlanActor, mutate
+
+OWNER = PlanActor("owner", "user", "project")
+
+
+@pytest.fixture
+def db():
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.executescript(SCHEMA_SQL)
+    connection.execute(
+        "INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project','Project','t','t')"
+    )
+    connection.execute(
+        """INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at)
+           VALUES ('owner','user','project','test/model','t','t')"""
+    )
+    connection.commit()
+    yield connection
+    connection.close()
+
+
+def _blocked(db, **extra) -> tuple[str, dict]:
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Ship", acceptance_criteria="Shipped", db=db,
+    )
+    db.commit()
+    params = {
+        "node_id": node.id, "reason_key": "awaiting_ci", "reason": "CI disk is full",
+        "owner_kind": "external", "owner_id": None,
+        "expected_revision": service._node_row(db, node.id)["revision"], **extra,
+    }
+    result = mutate(
+        plan.id, "block_node", params, actor=OWNER, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    ).result
+    db.commit()
+    return node.id, result
+
+
+def _armed(db, node_id: str) -> list[sqlite3.Row]:
+    return db.execute(
+        """SELECT id, condition_type, condition_value FROM expected_event_watches
+           WHERE plan_node_id=? AND status='armed'""",
+        (node_id,),
+    ).fetchall()
+
+
+def _open_holds(db, node_id: str) -> int:
+    return db.execute(
+        "SELECT COUNT(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL",
+        (node_id,),
+    ).fetchone()[0]
+
+
+def _document_ask(db, external_id: str) -> str:
+    from registry import models
+
+    models.register_artifact(
+        integration="workspace", type="document", external_id=external_id,
+        parent_thread_id="owner", title="Read the proposal", db=db,
+    )
+    return str(db.execute(
+        "SELECT id FROM artifact_identities WHERE integration='workspace' "
+        "AND type='document' AND external_id=?", (external_id,),
+    ).fetchone()["id"])
+
+
+def test_an_external_blocker_is_a_24_hour_wait_and_no_hold(db):
+    before = datetime.now(timezone.utc)
+
+    node_id, result = _blocked(db)
+
+    [watch] = _armed(db, node_id)
+    due = datetime.fromisoformat(watch["condition_value"])
+    assert watch["condition_type"] == "deadline"
+    assert before + timedelta(hours=24) <= due <= datetime.now(timezone.utc) + timedelta(hours=24)
+    assert _open_holds(db, node_id) == 0
+    projected = admission.project(node_id, db=db)
+    assert projected["condition"] == "waiting"
+    until = due.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    assert [cause["reason"] for cause in projected["causes"]] == [
+        f"Until {until} · CI disk is full",
+    ]
+    # The reply names what happened, when the wait ends, and every way out.
+    assert result["wait"] == blocked_wait.explain(
+        type("Watch", (), {"id": watch["id"], "condition": {"value": watch["condition_value"]}}),
+    )
+    for way_out in ("resolve the task", "block_node again", "raise a decision", "close it", "resolve_watch"):
+        assert way_out in result["wait"]
+
+
+def test_a_named_deadline_within_7_days_is_kept(db):
+    due = (datetime.now(timezone.utc) + timedelta(days=6)).replace(microsecond=0).isoformat()
+
+    node_id, _result = _blocked(db, condition={"type": "deadline", "value": due})
+
+    [watch] = _armed(db, node_id)
+    assert datetime.fromisoformat(watch["condition_value"]) == datetime.fromisoformat(due)
+
+
+def test_a_deadline_past_7_days_is_refused(db):
+    due = (datetime.now(timezone.utc) + timedelta(days=7, minutes=5)).isoformat()
+
+    with pytest.raises(service.PlanInputError, match="within 7 days"):
+        _blocked(db, condition={"type": "deadline", "value": due})
+
+
+@pytest.mark.parametrize("condition", [
+    {"type": "event", "value": "ci.complete"},
+    {"type": "milestone", "value": "release"},
+])
+def test_a_wait_that_is_not_a_deadline_is_refused(db, condition):
+    with pytest.raises(service.PlanInputError, match="must be a deadline"):
+        _blocked(db, condition=condition)
+
+
+def test_an_agent_cannot_block_on_the_user_without_an_actionable_ask(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Sign", acceptance_criteria="Signed", db=db,
+    )
+    db.commit()
+
+    with pytest.raises(service.PlanInputError, match="ask_artifact_id"):
+        mutate(
+            plan.id, "block_node", {
+                "node_id": node.id, "reason_key": "sign_off", "reason": "The user signs",
+                "owner_kind": "user", "owner_id": None,
+                "expected_revision": service._node_row(db, node.id)["revision"],
+            }, actor=OWNER, provenance="test.blocked_wait",
+            mutation_id=uuid.uuid4().hex, db=db,
+        )
+
+    assert _open_holds(db, node.id) == 0
+
+
+def test_an_agent_user_ask_must_be_an_active_document(db):
+    from registry import models
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    models.register_artifact(
+        integration="workspace", type="code", external_id="proposal.py",
+        parent_thread_id="owner", title="Not a review document", db=db,
+    )
+    ask = str(db.execute(
+        "SELECT id FROM artifact_identities WHERE integration='workspace' "
+        "AND type='code' AND external_id='proposal.py'",
+    ).fetchone()["id"])
+    db.commit()
+
+    with pytest.raises(service.PlanInputError, match="active registered document"):
+        mutate(
+            plan.id, "block_node", {
+                "node_id": node.id, "reason_key": "review", "reason": "Review it",
+                "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+                "expected_revision": service._node_row(db, node.id)["revision"],
+            }, actor=OWNER, provenance="test.blocked_wait",
+            mutation_id=uuid.uuid4().hex, db=db,
+        )
+
+    assert _open_holds(db, node.id) == 0
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        ({"condition": {"type": "deadline", "value": "2099-01-01T00:00:00+00:00"}}, "condition"),
+        ({"owner_id": "someone-else"}, "owner_id"),
+    ],
+)
+def test_an_agent_user_ask_refuses_fields_the_ask_owns(db, extra, message):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    ask = _document_ask(db, "proposal.md")
+    db.commit()
+
+    with pytest.raises(service.PlanInputError, match=message):
+        mutate(
+            plan.id, "block_node", {
+                "node_id": node.id, "reason_key": "review", "reason": "Review it",
+                "owner_kind": "user", "ask_artifact_id": ask,
+                "expected_revision": service._node_row(db, node.id)["revision"],
+                **extra,
+            }, actor=OWNER, provenance="test.blocked_wait",
+            mutation_id=uuid.uuid4().hex, db=db,
+        )
+
+    assert _open_holds(db, node.id) == 0
+
+
+def test_a_document_ask_holds_the_task_until_the_user_acts(db):
+    from plans import operator_projection, user_ask
+    from registry import attention
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    ask = _document_ask(db, "proposal.md")
+    db.commit()
+
+    mutate(
+        plan.id, "block_node", {
+            "node_id": node.id, "reason_key": "review", "reason": "Review the proposal",
+            "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=OWNER, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    hold = db.execute(
+        "SELECT * FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
+    ).fetchone()
+    assert hold["owner_id"] == ask
+    assert db.execute(
+        "SELECT role FROM plan_node_artifact_links WHERE node_id=? AND artifact_id=?",
+        (node.id, ask),
+    ).fetchone()["role"] == "attention"
+    assert attention.get_attention_state(ask, db=db) == "raised"
+    assert admission.project(node.id, db=db)["condition"] == "blocked"
+    shown = operator_projection.read_thread("owner", actor=USER, db=db)["plans"][0]["nodes"][0]
+    assert shown["artifacts"][0]["attention_state"] == "raised"
+    assert shown["requires_user_action"] is True
+
+    attention.clear_attention(ask, outcome="acknowledge", db=db)
+    assert user_ask.cleared(ask, "acknowledge", db=db) == 0  # idempotent public hook
+    assert _open_holds(db, node.id) == 0
+    assert admission.project(node.id, db=db)["condition"] != "blocked"
+    shown = operator_projection.read_thread("owner", actor=USER, db=db)["plans"][0]["nodes"][0]
+    assert shown["requires_user_action"] is False
+    assert shown["display"]["label_key"] == "waiting"
+    assert shown["status_reason"] == "Not started"
+    assert shown["artifacts"][0]["attention_state"] == "cleared"
+
+
+def test_retiring_a_document_ask_releases_its_hold_through_attention(db):
+    from registry import attention, models
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    ask = _document_ask(db, "retired.md")
+    db.commit()
+    mutate(
+        plan.id, "block_node", {
+            "node_id": node.id, "reason_key": "review", "reason": "Review it",
+            "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=OWNER, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    models.retire(ask, db=db)
+
+    assert attention.get_attention_state(ask, db=db) == "cleared"
+    assert _open_holds(db, node.id) == 0
+    assert admission.project(node.id, db=db)["condition"] != "blocked"
+    event = db.execute(
+        "SELECT content FROM messages WHERE thread_id='owner' ORDER BY seq DESC LIMIT 1",
+    ).fetchone()
+    assert "became unavailable" in event["content"]
+    assert "The user" not in event["content"]
+    closeout = db.execute(
+        "SELECT details_json FROM context_change_journal "
+        "WHERE change_kind='artifact.attention_cleared' ORDER BY seq DESC LIMIT 1",
+    ).fetchone()
+    assert json.loads(closeout["details_json"])["provenance"]["outcome"] == "retire"
+
+
+def test_a_user_cannot_spoof_artifact_retirement_with_free_text(db):
+    from registry import attention
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    ask = _document_ask(db, "user-dismissed.md")
+    db.commit()
+    mutate(
+        plan.id, "block_node", {
+            "node_id": node.id, "reason_key": "review", "reason": "Review it",
+            "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=OWNER, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    attention.clear_attention(
+        ask, outcome="dismiss", reason="artifact retired", db=db,
+    )
+
+    event = db.execute(
+        "SELECT content FROM messages WHERE thread_id='owner' ORDER BY seq DESC LIMIT 1",
+    ).fetchone()
+    assert 'The user dismissed "Read the proposal"' in event["content"]
+    assert "became unavailable" not in event["content"]
+
+
+def test_deferring_a_document_ask_keeps_its_hold(db):
+    from registry import attention
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    ask = _document_ask(db, "deferred.md")
+    db.commit()
+    mutate(
+        plan.id, "block_node", {
+            "node_id": node.id, "reason_key": "review", "reason": "Review it",
+            "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=OWNER, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    attention.clear_attention(
+        ask, outcome="defer",
+        condition={"type": "deadline", "value": "2026-10-01T16:00:00+00:00"}, db=db,
+    )
+
+    assert attention.get_attention_state(ask, db=db) == "deferred"
+    assert _open_holds(db, node.id) == 1
+    assert admission.project(node.id, db=db)["condition"] == "blocked"
+
+
+def test_clearing_an_old_ask_does_not_clear_a_later_hold(db):
+    from plans import user_ask
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    first = _document_ask(db, "first.md")
+    second = _document_ask(db, "second.md")
+    db.commit()
+
+    def block(ask: str) -> None:
+        mutate(
+            plan.id, "block_node", {
+                "node_id": node.id, "reason_key": "review", "reason": "Review it",
+                "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+                "expected_revision": service._node_row(db, node.id)["revision"],
+            }, actor=OWNER, provenance="test.blocked_wait",
+            mutation_id=uuid.uuid4().hex, db=db,
+        )
+
+    block(first)
+    assert user_ask.cleared(first, "answer", db=db) == 1
+    block(second)
+
+    assert user_ask.cleared(first, "answer", db=db) == 0
+    active = db.execute(
+        "SELECT owner_id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL",
+        (node.id,),
+    ).fetchone()
+    assert active["owner_id"] == second
+
+
+USER = PlanActor(None, "user", "project", kind="user")
+
+
+def test_the_user_can_place_their_own_hold_without_an_ask(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Sign", acceptance_criteria="Signed", db=db,
+    )
+    db.commit()
+
+    mutate(
+        plan.id, "block_node", {
+            "node_id": node.id, "reason_key": "sign_off", "reason": "I will sign",
+            "owner_kind": "user", "owner_id": None,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=USER, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    assert _open_holds(db, node.id) == 1
+    assert _armed(db, node.id) == []
+
+
+def _block_as(db, plan_id: str, node_id: str, actor: PlanActor):
+    return mutate(
+        plan_id, "block_node", {
+            "node_id": node_id, "reason_key": "awaiting_ci", "reason": "CI disk is full",
+            "owner_kind": "external", "owner_id": None,
+            "expected_revision": service._node_row(db, node_id)["revision"],
+        }, actor=actor, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+
+def test_only_the_plans_own_agent_arms_a_blocker_wait(db):
+    """The user's own call is refused in blocker words, not watch words."""
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Ship", acceptance_criteria="Shipped", db=db,
+    )
+    db.commit()
+
+    with pytest.raises(PermissionError) as refusal:
+        _block_as(db, plan.id, node.id, USER)
+
+    assert str(refusal.value) == blocked_wait.OWNER_ONLY_REFUSAL
+    assert _armed(db, node.id) == [] and _open_holds(db, node.id) == 0
+
+
+def _as_owner(db, plan_id: str, operation: str, params: dict):
+    result = mutate(
+        plan_id, operation, params, actor=OWNER, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    ).result
+    db.commit()
+    return result
+
+
+def test_the_owner_clears_a_wait_the_schema_step_armed_then_accepts(db):
+    """#2969: a wait armed with no arming actor is still its owner's to clear.
+
+    The schema step that moved old blockers armed their waits as nobody, and
+    resolve_watch refused the owner for not being that nobody, so finished
+    work could not be accepted until the wait ran out.
+    """
+    from plans import holds
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Ship", acceptance_criteria="Shipped", db=db,
+    )
+    db.commit()
+    _as_owner(db, plan.id, "start", {
+        "node_id": node.id, "expected_revision": service._node_row(db, node.id)["revision"],
+    })
+    holds.place_hold(
+        node.id, kind="blocked", reason_key="legacy", reason="CI disk is full",
+        owner_kind="external", owner_id=None,
+        expected_revision=service._node_row(db, node.id)["revision"],
+        actor_id="owner", provenance="tool.plans", db=db,
+    )
+    hold = db.execute(
+        "SELECT * FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
+    ).fetchone()
+    deadline = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    blocked_wait.convert_hold(db, hold, deadline=deadline, provenance="migration.57_to_58")
+    db.commit()
+    [watch_id] = [row[0] for row in db.execute(
+        "SELECT id FROM expected_event_watches WHERE plan_node_id=? AND status='armed'"
+        " AND armed_by_actor_id IS NULL", (node.id,),
+    )]
+
+    _as_owner(db, plan.id, "resolve_watch", {
+        "node_id": node.id, "watch_id": watch_id,
+        "expected_revision": service._node_row(db, node.id)["revision"],
+    })
+    _as_owner(db, plan.id, "accept", {
+        "node_id": node.id, "evidence": "Shipped", "verification_result": "passed",
+        "expected_revision": service._node_row(db, node.id)["revision"],
+    })
+
+    assert service._node_row(db, node.id)["state"] == "accepted"
+
+
+def test_the_owner_clears_a_scheduled_wait_the_58_to_59_step_armed_then_accepts(db):
+    """#3032: the pause-to-schedule schema step arms waits as nobody too.
+
+    Same shape as #2969, through ``scheduled_wait.schedule_task``: the owner
+    releases the wait and then accepts the finished work.
+    """
+    from plans import scheduled_wait
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Ship", acceptance_criteria="Shipped", db=db,
+    )
+    db.commit()
+    scheduled_wait.schedule_task(
+        db, node.id, reason="Moved from a pause",
+        deadline=(datetime.now(timezone.utc) + timedelta(days=6)).isoformat(),
+        provenance="migration.58_to_59",
+    )
+    db.commit()
+    [watch_id] = [row[0] for row in db.execute(
+        "SELECT id FROM expected_event_watches WHERE plan_node_id=? AND status='armed'"
+        " AND armed_by_actor_id IS NULL", (node.id,),
+    )]
+    _as_owner(db, plan.id, "start", {
+        "node_id": node.id, "expected_revision": service._node_row(db, node.id)["revision"],
+    })
+    _as_owner(db, plan.id, "resolve_watch", {
+        "node_id": node.id, "watch_id": watch_id,
+        "expected_revision": service._node_row(db, node.id)["revision"],
+    })
+    _as_owner(db, plan.id, "accept", {
+        "node_id": node.id, "evidence": "Shipped", "verification_result": "passed",
+        "expected_revision": service._node_row(db, node.id)["revision"],
+    })
+    assert service._node_row(db, node.id)["state"] == "accepted"

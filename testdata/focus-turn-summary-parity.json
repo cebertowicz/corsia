@@ -1,0 +1,46 @@
+{
+  "turn": {
+    "id": "turn-summary",
+    "thread_id": "sess-pg",
+    "status": "completed",
+    "started_at": "2026-06-12T00:00:00Z",
+    "ended_at": "2026-06-12T00:04:00Z"
+  },
+  "messages": [
+    {
+      "id": "steer",
+      "role": "user",
+      "content": "continue",
+      "created_at": "2026-06-12T00:00:0000",
+      "seq": 1,
+      "metadata": {}
+    },
+    {
+      "id": "parallel",
+      "role": "assistant",
+      "content": "",
+      "created_at": "2026-06-12T00:00:0001",
+      "seq": 2,
+      "metadata": {
+        "turn_id": "turn-summary",
+        "reasoning": "check sources",
+        "llm_tool_calls": [
+          { "id": "a", "function": { "name": "Read", "arguments": "{}" } },
+          { "id": "b", "function": { "name": "Grep", "arguments": "{}" } }
+        ]
+      }
+    },
+    {
+      "id": "final",
+      "role": "assistant",
+      "content": "Done",
+      "created_at": "2026-06-12T00:00:0002",
+      "seq": 3,
+      "metadata": { "turn_id": "turn-summary", "for_user": true }
+    }
+  ],
+  "expected": {
+    "activity_count": 3,
+    "label": "Worked · 3 steps · 4 min"
+  }
+}

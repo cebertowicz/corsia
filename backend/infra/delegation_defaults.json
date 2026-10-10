@@ -1,0 +1,8 @@
+{
+  "_comment": "Delegation seed data only. Delegated-thread creation requires an explicit nonblank model and never reads defaults. `delisted_models` drives migrate_delisted_models() so retired model ids are scrubbed from legacy settings. `effort_defaults` sets per-runtime reasoning-effort defaults; operators may override via the `delegation` settings row.",
+  "effort_defaults": {
+    "cc": "high",
+    "codex": "high"
+  },
+  "delisted_models": ["claude-code/fable", "fable", "claude-fable-5", "anthropic/claude-fable-5"]
+}

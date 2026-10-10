@@ -1,0 +1,44 @@
+fastapi==0.137.0
+starlette==1.3.1
+anyio==4.13.0
+uvicorn==0.49.0
+uvloop==0.22.1
+httptools==0.8.0
+watchfiles==1.2.0
+# uvloop + httptools + watchfiles: uvicorn[standard] extras for fast async
+# event loop and HTTP parsing in production (auto-detected by uvicorn).
+websockets==16.0
+python-multipart==0.0.32
+# Runtime image validation and provider-safe media projection.
+pillow==12.2.0
+# HEIC/HEIF decoding: Apple devices hand the browser a HEIC from the
+# ordinary photo picker, and plain Pillow cannot open it. Optional at
+# runtime - CORSIA degrades to a named decline without it.
+pillow-heif==1.7.0
+litellm @ git+https://github.com/BerriAI/litellm.git@e1fc955464bf493c15aef08f98e0e22bdf24d4cf
+# Direct vendor SDKs cover first-party OpenAI/Anthropic paths. litellm still
+# handles the long tail and OpenAI-compatible local/network providers.
+anthropic==0.100.0
+openai==2.30.0
+loguru==0.7.3
+httpx==0.28.1
+cryptography==48.0.0
+packaging==26.0
+readability-lxml==0.8.4.1
+json-repair==0.60.1
+mcp==1.27.2
+markdownify==1.2.2
+python-frontmatter==1.3.0
+# Yjs-compatible live document state and relative positions.
+pycrdt==0.14.8
+psutil==7.2.2
+# Inspect AI is the runner / scorer-host; OTel is the in-process tracer used
+# by the seam-latency scorer and null-tool protocol.
+inspect-ai==0.3.239
+opentelemetry-api==1.42.1
+opentelemetry-sdk==1.42.1
+# Product analytics uses a local DuckDB store behind the thin emit wrapper in
+# backend/infra/product_events.py.
+duckdb==1.5.3
+# scipy.stats.ttest_ind drives analytics.before_after / distribution_compare.
+scipy==1.17.1

@@ -1,0 +1,89 @@
+id: cache-warm-baseline
+name: "Mode-B smoke — warm-pattern oMLX 3-turn cache-hit sanity check"
+description: >
+  Mode B end-to-end smoke. Three back-to-back POSTs through
+  /api/eval/turn against a loaded oMLX warm-pattern model. Each turn
+  starts a fresh eval session — the only shared prefix is the stable
+  system prompt block. After turn 1 (cold-cache baseline), turns 2 and
+  3 should hit ≥ 90% of the prompt tokens from oMLX's strict-prefix
+  cache.
+
+  This scenario validates the entire Mode B path end-to-end:
+    1. YamlScenarioSolver.runs Mode B (multi-turn POST loop)
+    2. Backend turns_steps.py emits cached_tokens / prefill_new_tokens
+       on the llm_call span
+    3. Backend context_builder.py emits system_prompt_hash on the
+       context_build span
+    4. Eval endpoint serializes spans into the response payload
+    5. Solver extracts per-turn attrs into ScenarioResult.turn_attrs
+    6. Scorers read turn_attrs and grade hit-rate, prompt stability,
+       and TTFT bounds
+
+  If this scenario goes green, the live-data path is intact. If it fails,
+  the failure is informative: the scorers' metadata pinpoints which span
+  attribute is missing, which turn drifted, or which TTFT exploded.
+
+  Cross-references:
+    - sprints/2026-05-13-quality-foundation-sprint-04/prompts/slice-06-mode-b-solver.md
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - smoke
+  - regression-sentinel
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+setup:
+  # Warm-pattern model (MoE) for cache-friendly inference. Both the 27B
+  # dense and 35B-A3B MoE variants are loaded in the dev rig; the MoE
+  # variant has cleaner cache semantics (see ADR notes on the 27B
+  # GatedDeltaNet reconstruction issue).
+  model: "omlx@ns-f378151a51/Qwen3.6-35B-A3B-MLX-8bit"
+  warm_pattern: true
+
+metadata:
+  # The solver passes ``setup.model`` as ``metadata.model`` to the eval
+  # endpoint. The fallback model under test is the loaded oMLX warm-
+  # pattern model when this is omitted.
+  model_under_test: "omlx@ns-f378151a51/Qwen3.6-35B-A3B-MLX-8bit"
+  block_size_tokens: 2048
+
+turns:
+  - role: user
+    content: "First message — populate the cache. Reply with one short sentence."
+  - role: user
+    content: "Second message — should be a cache hit. Reply with one short sentence."
+  - role: user
+    content: "Third message — also a hit. Reply with one short sentence."
+
+scorers:
+  - name: hit_rate_per_turn
+    args:
+      bound: 0.90
+  - name: system_prompt_stable
+  - name: ttft_under
+    args:
+      bound: 1500   # generous warm-cache budget; the 35B-A3B's TTFT
+                    # under warm-prefix typically lands well under this.
+
+notes: |
+  Mode B nondeterminism — the scorers assert BOUNDS, not exact values.
+  Cross-run variance in TTFT and per-turn cached_tokens is
+  expected and acceptable; flakes on these bounds indicate a real
+  regression (cache invalidation, system-prompt drift, or instrumentation
+  loss), not noise.
+
+  Cost: oMLX is free. This scenario must NEVER be switched to a cloud
+  provider — the cache invariants under test are oMLX-specific.
+
+  Failure modes this catches:
+    - system_prompt drifts between turns (timestamp injection, random
+      memory shuffling, non-deterministic context assembly)
+    - oMLX cache eviction between back-to-back turns
+    - Streaming off → ttft_ms missing → ttft_under skip path
+    - Span instrumentation broken → turn_attrs empty → all scorers
+      fail loudly with "no Mode B data"

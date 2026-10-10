@@ -1,0 +1,46 @@
+id: workflow-full-session
+name: "Full session from scratch — 3-turn dialog against real local oMLX"
+description: >
+  Drives a 3-turn dialog against the configured local oMLX model. The user
+  asks a small open-ended question, follows up for clarification, then
+  asks for a 1-sentence summary. The agent should answer concisely, keep
+  context across turns, and produce a final summary that reflects the
+  earlier exchange.
+
+  Mode B — real LLM round trip required. The strict-prefix cache should
+  hit on turns 2-3, but the judge does not score on cache; it scores on
+  whether the dialog held up substantively.
+
+category: workflow
+tags:
+  - workflow
+  - mode-b
+  - omlx
+  - full-session
+subsystems:
+  - chat-turns
+  - omlx-provider-lifecycle
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-27b-instruct"
+  observational: false
+
+turns:
+  - role: user
+    content: "Give me one practical reason to learn how prefix caching works in modern LLM serving."
+  - role: user
+    content: "Now restate that reason for an engineer who's never deployed an LLM."
+  - role: user
+    content: "Summarize the whole exchange in one sentence."
+
+pass_if:
+  all_of:
+    - workflow_quality
+
+notes: |
+  The workflow_quality scorer is attached at the Task level (see
+  backend/eval/workflow_tasks/task_full_session.py) — not declared here —
+  so the Inspect AI eval log carries the canonical Score. The Task is
+  Mode B; turn_attrs land in state.store but the rubric for this task
+  scores content correctness, not cache discipline.

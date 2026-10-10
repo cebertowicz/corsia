@@ -1,0 +1,76 @@
+__pycache__/
+*.pyc
+*.pem
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.db.bad*
+*.db.corrupt*
+*.duckdb
+*.duckdb.wal
+# Protect backup directory from git clean -fdx by tracking the sentinel
+!backend/backups/.gitkeep
+*_dump.sql
+frontend/dist/
+frontend/node_modules
+frontend/.svelte-kit/
+frontend/playwright-report/
+frontend/test-results/
+# Generated each build by frontend/scripts/generate-build-info.mjs
+frontend/src/lib/build-info.json
+frontend/static/build-info.json
+.svelte-kit/
+node_modules
+# venv lives at the canonical CORSIA repo root (~/.corsia/.venv); worktrees
+# may have a symlink to it for tooling that hardcodes ../.venv/bin/python
+# (e.g. frontend/playwright.config.ts). Symlinks are user-specific; never commit.
+.venv
+.venv/
+.check-pr-mypy-venv/
+.check-pr-mypy-venv.bootstrap.*/
+archive/
+models/
+.DS_Store
+.idea/
+workspace/
+# Claude Code state is per-user. Ignore known local state without hiding the
+# whole directory, so an explicitly authorized future project asset remains
+# visible to git.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+.claude/**/__pycache__/
+.claude/**/*.pyc
+.pip-audit-cache/
+# Service env file — contains API keys, must not be committed
+.env
+.pip-audit-cache/
+# First-run bootstrap — per-machine workspace path
+config.json
+.worktrees/
+.qa/e2e-workspace/
+.qa/e2e-state/
+.qa/runs/
+# scripts/e2e-local pins CORSIA_E2E_WORKSPACE to <repo>/frontend/.qa/...
+# (matches playwright.config.ts's relative-path defaultWorkspace lookup);
+# the legacy top-level `.qa/` patterns above remain for historical entries.
+frontend/.qa/
+desktop/src-tauri/target/
+desktop/src-tauri/Cargo.lock
+desktop/src-tauri/gen/
+
+# Retired local PostHog runtime residue can remain in pre-OSS self-hosting
+# checkouts. Keep secrets and generated trees ignored until machine cleanup.
+infra/posthog/.env
+infra/posthog/compose/
+infra/posthog/docker/
+infra/posthog/posthog/
+infra/posthog/products/
+infra/posthog/share/
+
+# Inspect AI logs when --log-dir points into this checkout
+evals/runs/
+
+# Local disposable test roots (workspaces, state, migration backups)
+.qa/

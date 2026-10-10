@@ -1,0 +1,7 @@
+uploads/
+config.local.json
+corsia.db
+corsia.db.backup
+corsia_corrupted.db
+__pycache__/
+*.pyc

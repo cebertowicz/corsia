@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Executable entry point for the documentation drift check (issue #1888).
+
+See ``scripts/check_docs_drift/`` for the implementation, split into one
+module per check to stay inside the repo's file-size limits.
+
+Usage:
+    scripts/check-docs-drift [--workspace PATH] [--internal-names-file PATH]
+        [--owner-identity-file PATH] [--owner-profile PATH] [--json] [--json-out PATH]
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from check_docs_drift.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

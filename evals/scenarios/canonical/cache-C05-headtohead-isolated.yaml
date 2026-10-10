@@ -1,0 +1,107 @@
+id: cache-C05-headtohead-isolated
+name: "Head-to-head isolated baselines — same 20-turn script on each model serially"
+description: >
+  Documents per-model performance baselines under ideal conditions: one
+  model, one conversation, no concurrent work. Runs the same 20-turn
+  script on model A (e.g. qwen-3.6-27b-instruct), then independently on
+  model B (e.g. qwen-3.6-35b-a3b). Captures per-model prefill_tps, decode_tps,
+  TTFT distribution, and steady-state hit rate.
+
+  Observational. No pass/fail on numeric thresholds — the scenario's job is
+  to populate the reference baselines that C08, C09, and C11 compare against
+  to quantify interference cost.
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-C
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §3 (dense vs MoE
+      prefill_tps measured at ~280 vs ~1100 tok/s on this hardware)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - baseline
+  - multi-model
+  - observational
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  models_under_test:
+    - "qwen-3.6-27b-instruct"
+    - "qwen-3.6-35b-a3b"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  observational: true
+
+pre_conditions:
+  - fixture: omlx_loaded_models
+    args:
+      models:
+        - "qwen-3.6-27b-instruct"
+        - "qwen-3.6-35b-a3b"
+      pin: true
+  - fixture: cache_health_dialog_seed
+    args:
+      seed_id: c05_isolated_baseline
+      length: 20
+      prompt_template: cache_steady_state
+
+steps:
+  - action: run_seeded_dialog_per_model
+    args:
+      model_a: "qwen-3.6-27b-instruct"
+      model_b: "qwen-3.6-35b-a3b"
+      length: 20
+      sequencing: serial
+      timeout_ms_per_turn: 90000
+
+expected_outcomes:
+  - assertion: per_model_baselines_recorded
+    detail: >
+      Per-model prefill_ms, prefill_tps, decode_tps, ttft_ms, and per-turn
+      cached_tokens / prompt_tokens captured to scenario output. No threshold.
+  - assertion: per_model_hit_rate_90
+    detail: >
+      Each model independently achieves the C03 contract — turn 2-20 hit
+      rate ≥ 0.90. Catches the case where a model passes C03 in isolation
+      but C05 reveals a regression that's specific to this scenario harness.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 40
+  - name: check_no_provider_error
+    args: {}
+  - name: check_prefill_floor_recorded
+    args:
+      models:
+        - "qwen-3.6-27b-instruct"
+        - "qwen-3.6-35b-a3b"
+  - name: check_per_turn_hit_rate_above
+    args:
+      turn_range: [2, 20]
+      min_ratio: 0.90
+      slack_tokens: 20
+      per_model: true
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Fixture: omlx_loaded_models (multi-model pin variant)
+    - Solver action: run_seeded_dialog_per_model (drives the same script
+      against model A then model B serially — gates the second run on the
+      first completing cleanly)
+    - Scorer: check_per_turn_hit_rate_above with per_model: true flag —
+      groups assertions by model in the result rather than collapsing.
+
+  C05's per-model floors feed directly into C08 and C09 — those scenarios
+  reference C05's recorded baselines to compute "TTFT inflation under load."
+  C05 must run BEFORE C08/C09 in any test rotation.

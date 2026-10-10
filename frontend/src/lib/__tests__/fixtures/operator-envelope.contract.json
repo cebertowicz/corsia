@@ -1,0 +1,753 @@
+{
+ "as_of": "2026-10-08T12:22:36.021437+00:00",
+ "attention": {
+  "awaiting_count": 0
+ },
+ "contract_version": 2,
+ "plans": [
+  {
+   "current_node_ids": [
+    "17f7b44c80304bc5be87ed42d3423fa5",
+    "122e82a9631c4120ab098d81f9eb494e",
+    "4221420c7d384c3fbfd2852f7702e78a",
+    "39c372230c0c48a1a42f36eaffa13318"
+   ],
+   "display": {
+    "label_key": "working",
+    "tone_key": "active"
+   },
+   "next_node_ids": [],
+   "nodes": [
+    {
+     "acceptance_criteria": "Delivered",
+     "artifacts": [],
+     "assignee": null,
+     "attention_path": [],
+     "branch_progress": {
+      "done": 0,
+      "total": 2
+     },
+     "child": null,
+     "commitment_cost": {
+      "attempts": {
+       "correction": 0,
+       "delegated": 2,
+       "failed": 0,
+       "total": 2
+      },
+      "commitment_id": "22e674686dd6434fb4174094947752ef",
+      "elapsed_seconds": {
+       "known": 0,
+       "status": "in_progress"
+      },
+      "model_cost_usd": {
+       "known": 0,
+       "unknown_rows": 0
+      },
+      "tokens": {
+       "known": 0,
+       "unknown_rows": 0
+      },
+      "usage_recording_failures": 0,
+      "user_effort": {
+       "known_plan_actions": 0,
+       "status": "partial"
+      }
+     },
+     "commitment_id": "22e674686dd6434fb4174094947752ef",
+     "completion": null,
+     "depth": 0,
+     "description": null,
+     "discussion_artifact_id": null,
+     "display": {
+      "label_key": "working",
+      "tone_key": "active"
+     },
+     "evidence": null,
+     "execution": {
+      "attempt_count": 0,
+      "attempts": [],
+      "causes": [],
+      "condition": "ready",
+      "conflict": null,
+      "friction_count": 0,
+      "primary_reason": null,
+      "revision_round": 0,
+      "selection": null
+     },
+     "executor": {
+      "label": "Plan owner",
+      "thread_id": "owner"
+     },
+     "folded": false,
+     "held_by": null,
+     "id": "22e674686dd6434fb4174094947752ef",
+     "initiative": null,
+     "kind": "phase",
+     "last_transition_at": "2026-10-08T12:22:36.009016+00:00",
+     "node_cost": {
+      "own": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      },
+      "rolled": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      }
+     },
+     "parent_id": null,
+     "requirements_revision": 1,
+     "requires_user_action": false,
+     "review": null,
+     "revision": 1,
+     "state": "pending",
+     "status_reason": null,
+     "title": "Delivery",
+     "unmet_dependencies": [],
+     "updated_at": "2026-10-08T12:22:35.981819+00:00",
+     "user_actions": [
+      "mark_done",
+      "close_node"
+     ]
+    },
+    {
+     "acceptance_criteria": "Running is proven",
+     "artifacts": [],
+     "assignee": null,
+     "attention_path": [],
+     "branch_progress": null,
+     "child": null,
+     "commitment_cost": null,
+     "commitment_id": "22e674686dd6434fb4174094947752ef",
+     "completion": null,
+     "depth": 1,
+     "description": null,
+     "discussion_artifact_id": null,
+     "display": {
+      "label_key": "working",
+      "tone_key": "active"
+     },
+     "evidence": null,
+     "execution": {
+      "attempt_count": 1,
+      "attempts": [
+       {
+        "executor": {
+         "label": "Plan owner",
+         "thread_id": "owner"
+        },
+        "id": "044142254aff485e9432d41eb43cc76e",
+        "ordinal": 1,
+        "release_reason": null,
+        "released_at": null,
+        "requirements_revision": 1,
+        "selected_at": "2026-10-08T12:22:36.009358+00:00"
+       }
+      ],
+      "causes": [],
+      "condition": "running",
+      "conflict": null,
+      "friction_count": 0,
+      "primary_reason": null,
+      "revision_round": 0,
+      "selection": {
+       "attempt_id": "044142254aff485e9432d41eb43cc76e",
+       "attempt_ordinal": 1,
+       "executor_thread_id": "owner",
+       "in_flight_dispatch_count": 0,
+       "requirements_revision": 1,
+       "turn_active": false
+      }
+     },
+     "executor": {
+      "label": "Plan owner",
+      "thread_id": "owner"
+     },
+     "folded": false,
+     "held_by": null,
+     "id": "17f7b44c80304bc5be87ed42d3423fa5",
+     "initiative": null,
+     "kind": "task",
+     "last_transition_at": "2026-10-08T12:22:36.009016+00:00",
+     "node_cost": {
+      "own": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      },
+      "rolled": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      }
+     },
+     "parent_id": "22e674686dd6434fb4174094947752ef",
+     "requirements_revision": 1,
+     "requires_user_action": false,
+     "review": null,
+     "revision": 2,
+     "state": "active",
+     "status_reason": null,
+     "title": "Running",
+     "unmet_dependencies": [],
+     "updated_at": "2026-10-08T12:22:36.008996+00:00",
+     "user_actions": [
+      "mark_done",
+      "pause_node",
+      "close_node"
+     ]
+    },
+    {
+     "acceptance_criteria": "Waiting is proven",
+     "artifacts": [],
+     "assignee": null,
+     "attention_path": [],
+     "branch_progress": null,
+     "child": null,
+     "commitment_cost": null,
+     "commitment_id": "22e674686dd6434fb4174094947752ef",
+     "completion": null,
+     "depth": 1,
+     "description": null,
+     "discussion_artifact_id": null,
+     "display": {
+      "label_key": "waiting",
+      "tone_key": "waiting"
+     },
+     "evidence": null,
+     "execution": {
+      "attempt_count": 1,
+      "attempts": [
+       {
+        "executor": {
+         "label": "Plan owner",
+         "thread_id": "owner"
+        },
+        "id": "e2f795e08c9d4f928ada5debaaf384b7",
+        "ordinal": 1,
+        "release_reason": "watch_armed",
+        "released_at": "2026-10-08T12:22:36.001154+00:00",
+        "requirements_revision": 1,
+        "selected_at": "2026-10-08T12:22:35.993570+00:00"
+       }
+      ],
+      "causes": [
+       {
+        "blocked_wait": false,
+        "created_at": "2026-10-08T12:22:36.000683+00:00",
+        "ends_at": "2026-10-09T12:22:36.000485+00:00",
+        "kind": "waiting",
+        "owner_id": null,
+        "owner_kind": "external",
+        "reason": "Waiting for ci.complete until 2026-10-09T12:22:36.000485+00:00",
+        "reason_key": "deadline",
+        "watch_id": "81f2deaf-ba3"
+       }
+      ],
+      "condition": "waiting",
+      "conflict": null,
+      "friction_count": 0,
+      "primary_reason": "Waiting for ci.complete until 2026-10-09T12:22:36.000485+00:00",
+      "revision_round": 0,
+      "selection": null
+     },
+     "executor": {
+      "label": "Plan owner",
+      "thread_id": "owner"
+     },
+     "folded": false,
+     "held_by": null,
+     "id": "122e82a9631c4120ab098d81f9eb494e",
+     "initiative": null,
+     "kind": "task",
+     "last_transition_at": "2026-10-08T12:22:36.001202+00:00",
+     "node_cost": {
+      "own": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      },
+      "rolled": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      }
+     },
+     "parent_id": "22e674686dd6434fb4174094947752ef",
+     "requirements_revision": 1,
+     "requires_user_action": false,
+     "review": null,
+     "revision": 2,
+     "state": "active",
+     "status_reason": "Waiting for ci.complete until 2026-10-09T12:22:36.000485+00:00",
+     "title": "Waiting",
+     "unmet_dependencies": [],
+     "updated_at": "2026-10-08T12:22:35.992991+00:00",
+     "user_actions": [
+      "mark_done",
+      "pause_node",
+      "close_node"
+     ]
+    },
+    {
+     "acceptance_criteria": "Review is proven",
+     "artifacts": [],
+     "assignee": null,
+     "attention_path": [],
+     "branch_progress": null,
+     "child": null,
+     "commitment_cost": {
+      "attempts": {
+       "correction": 0,
+       "delegated": 0,
+       "failed": 0,
+       "total": 0
+      },
+      "commitment_id": "4221420c7d384c3fbfd2852f7702e78a",
+      "elapsed_seconds": {
+       "known": 0,
+       "status": "in_progress"
+      },
+      "model_cost_usd": {
+       "known": 0,
+       "unknown_rows": 0
+      },
+      "tokens": {
+       "known": 0,
+       "unknown_rows": 0
+      },
+      "usage_recording_failures": 0,
+      "user_effort": {
+       "known_plan_actions": 0,
+       "status": "partial"
+      }
+     },
+     "commitment_id": "4221420c7d384c3fbfd2852f7702e78a",
+     "completion": null,
+     "depth": 0,
+     "description": null,
+     "discussion_artifact_id": null,
+     "display": {
+      "label_key": "working",
+      "tone_key": "active"
+     },
+     "evidence": {
+      "artifact_ids": [],
+      "evidence": "Focused checks passed.",
+      "requirements_revision": 1
+     },
+     "execution": {
+      "attempt_count": 0,
+      "attempts": [],
+      "causes": [],
+      "condition": "review",
+      "conflict": null,
+      "friction_count": 0,
+      "primary_reason": null,
+      "revision_round": 0,
+      "selection": null
+     },
+     "executor": {
+      "label": "Plan owner",
+      "thread_id": "owner"
+     },
+     "folded": false,
+     "held_by": null,
+     "id": "4221420c7d384c3fbfd2852f7702e78a",
+     "initiative": null,
+     "kind": "task",
+     "last_transition_at": "2026-10-08T12:22:36.009887+00:00",
+     "node_cost": {
+      "own": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      },
+      "rolled": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      }
+     },
+     "parent_id": null,
+     "requirements_revision": 1,
+     "requires_user_action": false,
+     "review": {
+      "actor": {
+       "id": "owner",
+       "kind": "thread",
+       "label": "Plan owner"
+      },
+      "kind": "parent_agent",
+      "label": "Awaiting the agent's review"
+     },
+     "revision": 3,
+     "state": "review_requested",
+     "status_reason": null,
+     "title": "Review",
+     "unmet_dependencies": [],
+     "updated_at": "2026-10-08T12:22:36.009871+00:00",
+     "user_actions": [
+      "mark_done",
+      "pause_node",
+      "close_node"
+     ]
+    },
+    {
+     "acceptance_criteria": "Delegated is proven",
+     "artifacts": [],
+     "assignee": null,
+     "attention_path": [],
+     "branch_progress": null,
+     "child": {
+      "available": true,
+      "plan_id": "2f2d7628d566425c987642e671f94988",
+      "progress": {
+       "done": 0,
+       "liveness": "idle",
+       "open": 1,
+       "total": 1
+      },
+      "thread_id": "worker"
+     },
+     "commitment_cost": {
+      "attempts": {
+       "correction": 0,
+       "delegated": 0,
+       "failed": 0,
+       "total": 0
+      },
+      "commitment_id": "39c372230c0c48a1a42f36eaffa13318",
+      "elapsed_seconds": {
+       "known": 0,
+       "status": "in_progress"
+      },
+      "model_cost_usd": {
+       "known": 0,
+       "unknown_rows": 0
+      },
+      "tokens": {
+       "known": 0,
+       "unknown_rows": 0
+      },
+      "usage_recording_failures": 0,
+      "user_effort": {
+       "known_plan_actions": 0,
+       "status": "partial"
+      }
+     },
+     "commitment_id": "39c372230c0c48a1a42f36eaffa13318",
+     "completion": null,
+     "depth": 0,
+     "description": null,
+     "discussion_artifact_id": null,
+     "display": {
+      "label_key": "waiting",
+      "tone_key": "waiting"
+     },
+     "evidence": null,
+     "execution": {
+      "attempt_count": 0,
+      "attempts": [],
+      "causes": [
+       {
+        "child_active": false,
+        "child_thread_id": "worker",
+        "created_at": "2026-10-08T12:22:36.014571+00:00",
+        "kind": "waiting",
+        "owner_id": "worker",
+        "owner_kind": "thread",
+        "reason": "Waiting for the delegated child to take up its open steps",
+        "reason_key": "delegated_child"
+       }
+      ],
+      "condition": "waiting",
+      "conflict": null,
+      "friction_count": 0,
+      "primary_reason": "Waiting for the delegated child to take up its open steps",
+      "revision_round": 0,
+      "selection": null
+     },
+     "executor": {
+      "label": "Plan owner",
+      "thread_id": "owner"
+     },
+     "folded": false,
+     "held_by": null,
+     "id": "39c372230c0c48a1a42f36eaffa13318",
+     "initiative": null,
+     "kind": "task",
+     "last_transition_at": "2026-10-08T12:22:36.014571+00:00",
+     "node_cost": {
+      "own": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      },
+      "rolled": {
+       "execution": {
+        "seconds": 0,
+        "turns": {
+         "cancelled": 0,
+         "completed": 0,
+         "error": 0,
+         "running": 0,
+         "waiting_retry": 0
+        },
+        "unknown_turns": 0
+       },
+       "model_cost_usd": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "tokens": {
+        "known": 0,
+        "unknown_rows": 0
+       },
+       "usage_recording_failures": 0,
+       "waiting": {
+        "seconds": 0
+       }
+      }
+     },
+     "parent_id": null,
+     "requirements_revision": 1,
+     "requires_user_action": false,
+     "review": null,
+     "revision": 3,
+     "state": "active",
+     "status_reason": "Waiting for the delegated child to take up its open steps",
+     "title": "Delegated",
+     "unmet_dependencies": [],
+     "updated_at": "2026-10-08T12:22:36.014205+00:00",
+     "user_actions": [
+      "mark_done",
+      "pause_node",
+      "close_node"
+     ]
+    }
+   ],
+   "oversize": null,
+   "owner": {
+    "label": "Plan owner",
+    "project_id": "project",
+    "thread_id": "owner"
+   },
+   "plan": {
+    "id": "e483d68695b5408d84171370ccf8fe4d",
+    "owner_id": "owner",
+    "owner_kind": "thread",
+    "parent_plan_id": "841eeaf89ead46319739a9bd87a03df8",
+    "revision": 12,
+    "state": "active",
+    "updated_at": "2026-10-08T12:22:36.014205+00:00"
+   },
+   "progress": {
+    "distribution": {
+     "active": 1,
+     "blocked": 0,
+     "done": 0,
+     "failed": 0,
+     "paused": 0,
+     "pending_ready": 0,
+     "review_human": 0,
+     "review_parent_agent": 1,
+     "waiting": 2
+    },
+    "done": 0,
+    "liveness": "needs-review",
+    "open": 4,
+    "total": 4
+   }
+  }
+ ],
+ "revision_token": "2305f5ba8b0f81a333f12d3c56fc5087e6a5045f0477a4c7f6a13cd6501d1349",
+ "seen_through": null,
+ "target": {
+  "id": "owner",
+  "kind": "thread",
+  "label": "Plan owner"
+ }
+}

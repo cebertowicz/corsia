@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CORSIA Dev",
+  "identifier": "com.cebertowicz.corsia.dev",
+  "bundle": {
+    "targets": ["app"],
+    "icon": [
+      "icons/light/icon.icns",
+      "icons/light/32x32.png",
+      "icons/light/128x128.png",
+      "icons/light/128x128@2x.png"
+    ]
+  }
+}

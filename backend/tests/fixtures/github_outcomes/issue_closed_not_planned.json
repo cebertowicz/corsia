@@ -1,0 +1,28 @@
+{
+ "event": "issues",
+ "payload": {
+  "action": "closed",
+  "issue": {
+   "closed_at": "2026-09-30T23:29:29Z",
+   "created_at": "2026-09-30T20:15:13Z",
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "lane:experience"
+    },
+    {
+     "name": "p1"
+    }
+   ],
+   "number": 3266,
+   "state": "closed",
+   "state_reason": "not_planned"
+  },
+  "repository": {
+   "default_branch": "main",
+   "full_name": "cebertowicz/maestro"
+  }
+ }
+}

@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# scripts/check-pr — run the local code gates before pushing a PR.
+#
+# Usage:
+#   bash scripts/check-pr                  # local gates; targeted tests are separate
+#   bash scripts/check-pr --fast           # compatibility alias for local gates
+#   CI=true bash scripts/check-pr --full-backend  # explicit CI-only full suite
+
+set -euo pipefail
+
+export CORSIA_ANALYTICS_DISABLE="${CORSIA_ANALYTICS_DISABLE:-1}"
+
+# The workspace profile is automatic; a token file is an explicit override.
+# All three resolve before CORSIA_WORKSPACE becomes a scratch directory.
+OWNER_WORKSPACE="${CORSIA_WORKSPACE:-$HOME/corsia}"
+OWNER_IDENTITY_FILE="${CORSIA_OWNER_IDENTITY_FILE:-}"
+OWNER_PROFILE="${CORSIA_OWNER_PROFILE:-${OWNER_WORKSPACE}/USER.md}"
+# .owner-identity is no longer read from here. It is reported once, below, and
+# never read automatically.
+RETIRED_TOKEN_FILE="${OWNER_WORKSPACE}/.owner-identity"
+
+CHECKPR_TEMP_DIR="$(mktemp -d -t corsia-checkpr-XXXXXX)"
+MYPY_LOCK_OWNED=""
+MYPY_BOOTSTRAP_DIR=""
+export CORSIA_WORKSPACE="$CHECKPR_TEMP_DIR/workspace"
+export CORSIA_STATE_DIR="$CHECKPR_TEMP_DIR/state"
+mkdir -p "$CORSIA_WORKSPACE/.corsia" "$CORSIA_STATE_DIR"
+cleanup() {
+  if [ -n "$MYPY_BOOTSTRAP_DIR" ]; then
+    rm -rf "$MYPY_BOOTSTRAP_DIR"
+  fi
+  if [ -n "$MYPY_LOCK_OWNED" ]; then
+    rmdir "$MYPY_LOCK_OWNED" 2>/dev/null || true
+  fi
+  rm -rf "$CHECKPR_TEMP_DIR"
+}
+trap cleanup EXIT
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "$REPO_ROOT"
+
+COMMON_GIT_DIR="$(git rev-parse --git-common-dir)"
+case "$COMMON_GIT_DIR" in
+  /*) CANONICAL_GIT_DIR="$COMMON_GIT_DIR" ;;
+  *)  CANONICAL_GIT_DIR="${REPO_ROOT}/${COMMON_GIT_DIR}" ;;
+esac
+CANONICAL_REPO_ROOT="$(cd "$(dirname "$CANONICAL_GIT_DIR")" && pwd)"
+if [ -n "${CHECK_PR_PYTHON:-}" ]; then
+  VENV_PY="$CHECK_PR_PYTHON"
+  if [ ! -x "$VENV_PY" ]; then
+    printf '\033[31mFAIL: CHECK_PR_PYTHON is not executable: %s. Set it to a Python executable or unset it to use default resolution.\033[0m\n' "$VENV_PY" >&2
+    exit 1
+  fi
+else
+  VENV_PY="${CANONICAL_REPO_ROOT}/.venv/bin/python"
+  if [ ! -x "$VENV_PY" ]; then
+    if [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+      VENV_PY="${REPO_ROOT}/.venv/bin/python"
+    else
+      VENV_PY="$(command -v python3)"
+    fi
+  fi
+fi
+
+case "${1:-}" in
+  ""|--fast) FULL_BACKEND=0 ;;
+  --full-backend) FULL_BACKEND=1 ;;
+  *) printf 'usage: %s [--fast|--full-backend]\n' "$0" >&2; exit 2 ;;
+esac
+if [ "$#" -gt 1 ]; then
+  printf 'usage: %s [--fast|--full-backend]\n' "$0" >&2
+  exit 2
+fi
+
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+header() { printf '\n\033[1;36m=== %s ===\033[0m\n' "$*"; }
+
+fail() { red "FAIL: $*"; exit 1; }
+
+if [ "$FULL_BACKEND" = "1" ] && [ "${CI:-}" != "true" ]; then
+  fail "--full-backend is CI-only; run the affected backend tests locally"
+fi
+
+# One notice for the retired implicit default: a token file left at the old
+# location is NOT read any more, so say where to point it instead of silently
+# scanning a narrower token set. The file's contents are never read here.
+if [ -z "$OWNER_IDENTITY_FILE" ] && [ -f "$RETIRED_TOKEN_FILE" ]; then
+  yellow "Note: ${RETIRED_TOKEN_FILE} is no longer read automatically. To keep using it: CORSIA_OWNER_IDENTITY_FILE=${RETIRED_TOKEN_FILE} bash scripts/check-pr"
+fi
+
+header "0/6 actionlint (GHA workflow validation)"
+if command -v actionlint >/dev/null 2>&1; then
+  if ls .github/workflows/*.yml >/dev/null 2>&1; then
+    actionlint .github/workflows/*.yml || fail "actionlint reported workflow issues — see output above"
+    green "actionlint: workflows valid"
+  else
+    yellow "no .github/workflows/*.yml present — skipping"
+  fi
+else
+  yellow "actionlint not installed; skipping workflow validation. Install: brew install actionlint"
+fi
+
+header "1/6 file-size ratchet"
+"$VENV_PY" scripts/file_size_limits.py || fail "file-size ratchet failed — see output above"
+green "file-size ratchet: recorded limits satisfied"
+
+header "2/6 antipatterns (severity=error, whole repo)"
+PYTHONPATH=tools "$VENV_PY" -m antipatterns \
+  --all --severity error --repo-root . \
+  || fail "antipatterns errors present in repository — see output above"
+green "antipatterns: no errors in repository"
+
+header "3/6 mypy (regression gate)"
+MYPY_VENV="$REPO_ROOT/.check-pr-mypy-venv"
+MYPY_PY="$MYPY_VENV/bin/python"
+if [ ! -x "$MYPY_PY" ]; then
+  MYPY_LOCK_DIR="$MYPY_VENV.lock"
+  MYPY_LOCK_WAIT=0
+  until mkdir "$MYPY_LOCK_DIR" 2>/dev/null; do
+    sleep 1
+    MYPY_LOCK_WAIT=$((MYPY_LOCK_WAIT + 1))
+    if [ "$MYPY_LOCK_WAIT" -ge 300 ]; then
+      fail "timed out waiting for the pinned mypy environment lock: $MYPY_LOCK_DIR. Confirm no check-pr process owns it, then remove the stale lock and rerun."
+    fi
+  done
+  MYPY_LOCK_OWNED="$MYPY_LOCK_DIR"
+  if [ ! -x "$MYPY_PY" ]; then
+    if [ -e "$MYPY_VENV" ]; then
+      fail "pinned mypy environment is incomplete: $MYPY_VENV. Remove it, then rerun check-pr to recreate it."
+    fi
+    MYPY_BOOTSTRAP_DIR="$(mktemp -d "${MYPY_VENV}.bootstrap.XXXXXX")" \
+      || fail "could not create a staging directory for the pinned mypy environment at $MYPY_VENV"
+    MYPY_BOOTSTRAP_PY="$MYPY_BOOTSTRAP_DIR/bin/python"
+    "$VENV_PY" -m venv "$MYPY_BOOTSTRAP_DIR" \
+      || fail "could not create the pinned mypy environment. Set CHECK_PR_PYTHON to a Python with venv support or unset it to use default resolution."
+    "$MYPY_BOOTSTRAP_PY" -m pip install --quiet 'mypy==2.3.0' \
+      || fail "could not install mypy==2.3.0; install with: $MYPY_BOOTSTRAP_PY -m pip install 'mypy==2.3.0'"
+    MYPY_VERSION="$("$MYPY_BOOTSTRAP_PY" -m mypy --version 2>/dev/null || true)"
+    case "$MYPY_VERSION" in
+      "mypy 2.3.0"*) ;;
+      *) fail "mypy==2.3.0 did not install in the staging environment; retry with: $MYPY_BOOTSTRAP_PY -m pip install 'mypy==2.3.0'" ;;
+    esac
+    mv "$MYPY_BOOTSTRAP_DIR" "$MYPY_VENV" \
+      || fail "could not publish the pinned mypy environment at $MYPY_VENV; rerun check-pr"
+    MYPY_BOOTSTRAP_DIR=""
+  fi
+  rmdir "$MYPY_LOCK_OWNED" || fail "could not release the pinned mypy environment lock: $MYPY_LOCK_OWNED"
+  MYPY_LOCK_OWNED=""
+fi
+MYPY_VERSION="$("$MYPY_PY" -m mypy --version 2>/dev/null || true)"
+case "$MYPY_VERSION" in
+  "mypy 2.3.0"*) ;;
+  *) fail "mypy==2.3.0 is required in $MYPY_VENV; install with: $MYPY_PY -m pip install 'mypy==2.3.0'" ;;
+esac
+"$MYPY_PY" -m mypy --python-executable "$VENV_PY" backend/ 2>&1 | tee "$CHECKPR_TEMP_DIR/mypy-backend.txt" || true
+"$MYPY_PY" -m mypy --python-executable "$VENV_PY" tools/ 2>&1 | tee "$CHECKPR_TEMP_DIR/mypy-tools.txt" || true
+"$VENV_PY" scripts/mypy_error_limits.py \
+  backend="$CHECKPR_TEMP_DIR/mypy-backend.txt" \
+  tools="$CHECKPR_TEMP_DIR/mypy-tools.txt" \
+  || fail "mypy error limits exceeded — see output above"
+green "mypy: error counts within recorded limits"
+
+header "4/6 tools pytest"
+"$VENV_PY" -m pytest tools/ --tb=line -q || fail "tools tests failed"
+
+header "5/6 docs drift"
+# CI's checkout has no git identity, so blank the repo-local one too: a
+# commit identity such as a bot or the product's own name is not the owner's.
+# The owner comes from the explicit identity file or workspace profile only.
+if [ -n "$OWNER_IDENTITY_FILE" ]; then
+  [ -f "$OWNER_IDENTITY_FILE" ] || fail "CORSIA_OWNER_IDENTITY_FILE is not a readable file: $OWNER_IDENTITY_FILE"
+  OWNER_IDENTITY_ARGS=(--owner-identity-file "$OWNER_IDENTITY_FILE")
+  OWNER_IDENTITY_SOURCE="explicit owner identity file"
+elif [ -f "$OWNER_PROFILE" ]; then
+  OWNER_IDENTITY_ARGS=(--owner-profile "$OWNER_PROFILE" --allow-missing-owner-identity)
+  OWNER_IDENTITY_SOURCE="workspace user profile"
+else
+  OWNER_IDENTITY_ARGS=(--allow-missing-owner-identity)
+  OWNER_IDENTITY_SOURCE=""
+fi
+CORSIA_WORKSPACE="$CHECKPR_TEMP_DIR/no-workspace" \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  GIT_CONFIG_COUNT=2 \
+  GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0= \
+  GIT_CONFIG_KEY_1=user.email GIT_CONFIG_VALUE_1= \
+  "$VENV_PY" scripts/check-docs-drift \
+  --allow-missing-workspace \
+  --json-out "$CHECKPR_TEMP_DIR/docs-drift.json" \
+  "${OWNER_IDENTITY_ARGS[@]}" \
+  | tee "$CHECKPR_TEMP_DIR/docs-drift.txt" \
+  || fail "documentation drift check failed — see output above"
+OWNER_IDENTITY_SKIP_REASON="$("$VENV_PY" -c 'import json, sys; payload = json.load(open(sys.argv[1], encoding="utf-8")); private = payload.get("private_names"); assert isinstance(private, dict) and "owner_identity_skipped_reason" in private; print(private["owner_identity_skipped_reason"] or "")' "$CHECKPR_TEMP_DIR/docs-drift.json")" \
+  || fail "docs drift JSON result lacks private_names.owner_identity_skipped_reason"
+# Coverage is reported per token KIND, so a source that resolved only contact
+# literals can never be read as a completed owner-name check.
+OWNER_IDENTITY_KINDS="$("$VENV_PY" -c 'import json, sys; payload = json.load(open(sys.argv[1], encoding="utf-8")); private = payload.get("private_names"); assert isinstance(private, dict) and "owner_identity_kinds" in private; print(" ".join(private["owner_identity_kinds"]))' "$CHECKPR_TEMP_DIR/docs-drift.json")" \
+  || fail "docs drift JSON result lacks private_names.owner_identity_kinds"
+OWNER_IDENTITY_PERSON_REASON="$("$VENV_PY" -c 'import json, sys; payload = json.load(open(sys.argv[1], encoding="utf-8")); private = payload.get("private_names"); assert isinstance(private, dict) and "owner_identity_kind_reasons" in private; print(private["owner_identity_kind_reasons"].get("person", ""))' "$CHECKPR_TEMP_DIR/docs-drift.json")" \
+  || fail "docs drift JSON result lacks private_names.owner_identity_kind_reasons"
+OWNER_IDENTITY_SCANNED=0
+OWNER_IDENTITY_PERSON_SCANNED=0
+if [ -z "$OWNER_IDENTITY_SKIP_REASON" ]; then
+  OWNER_IDENTITY_SCANNED=1
+fi
+case " $OWNER_IDENTITY_KINDS " in
+  *" person "*) OWNER_IDENTITY_PERSON_SCANNED=1 ;;
+esac
+if [ "$OWNER_IDENTITY_SCANNED" = "1" ]; then
+  green "docs drift: citations, home-path and owner-identity scans passed from $OWNER_IDENTITY_SOURCE (owner-identity kinds: $OWNER_IDENTITY_KINDS)"
+else
+  green "docs drift: CI-equivalent citations and home-path scan passed"
+  yellow "owner identity NOT scanned (owner-identity kinds: ${OWNER_IDENTITY_KINDS:-none}): $OWNER_IDENTITY_SKIP_REASON"
+fi
+
+# The closing summary must never present a complete gate over a scan that did
+# not run (PS7). Whether a run may skip the scan is policy the caller sets --
+# the file's presence decides here, never an inference about the checkout
+# (PS4/PS5).
+report_owner_identity_scan() {
+  if [ "$OWNER_IDENTITY_PERSON_SCANNED" = "1" ]; then
+    green "Local gates passed, owner-identity scan included the owner-name check from $OWNER_IDENTITY_SOURCE (kinds: $OWNER_IDENTITY_KINDS)."
+  elif [ "$OWNER_IDENTITY_SCANNED" = "1" ]; then
+    red "Local gates passed WITHOUT the owner-name scan: $OWNER_IDENTITY_SOURCE resolved only these kinds: $OWNER_IDENTITY_KINDS."
+    if [ -n "$OWNER_IDENTITY_PERSON_REASON" ]; then
+      yellow "$OWNER_IDENTITY_PERSON_REASON"
+    fi
+    if [ -f "$OWNER_PROFILE" ]; then
+      yellow "Fix USER.md so its Name field is a plain person-name phrase (one to five name words), or pass the name explicitly with CORSIA_OWNER_IDENTITY_FILE."
+    else
+      yellow 'Provide USER.md in ${CORSIA_WORKSPACE:-$HOME/corsia}, or set CORSIA_OWNER_IDENTITY_FILE.'
+    fi
+  else
+    red "Local gates passed WITHOUT the owner-identity scan: nothing checked the public files for the owner's name, email, or phone."
+    if [ -f "$OWNER_PROFILE" ]; then
+      yellow "Fix USER.md so its Name field or Contact email/phone yields tokens."
+    else
+      yellow 'Provide USER.md in ${CORSIA_WORKSPACE:-$HOME/corsia}, or set CORSIA_OWNER_IDENTITY_FILE.'
+    fi
+  fi
+}
+
+if [ "$FULL_BACKEND" != "1" ]; then
+  yellow "6/6 backend pytest — CI-OWNED"
+  report_owner_identity_scan
+  green "Run targeted tests from the actual change blast radius before push."
+  exit 0
+fi
+
+header "6/6 backend pytest"
+(
+  cd backend
+  "$VENV_PY" -m pytest tests/ --tb=line -q
+) || fail "backend tests failed"
+
+echo
+report_owner_identity_scan
+green "Complete the PR handoff and review checklist before push."

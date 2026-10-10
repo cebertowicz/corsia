@@ -1,0 +1,37 @@
+#!/bin/bash
+# Assign the fixed E2E port pair reserved for this ci-integration runner slot.
+set -euo pipefail
+
+if [ -z "${GITHUB_ENV:-}" ]; then
+  echo "::error::GITHUB_ENV is required to export E2E ports" >&2
+  exit 1
+fi
+
+case "${RUNNER_NAME:-}" in
+  mac-studio-corsia-runner-1) slot=1 ;;
+  mac-studio-corsia-runner-2) slot=2 ;;
+  mac-studio-corsia-runner-3) slot=3 ;;
+  mac-studio-corsia-runner-4) slot=4 ;;
+  *)
+    echo "::error::Unexpected ci-integration runner '${RUNNER_NAME:-unset}'; refusing to choose E2E ports" >&2
+    exit 1
+    ;;
+esac
+
+backend_port=$((32000 + 2 * (slot - 1)))
+frontend_port=$((backend_port + 1))
+for port in "$backend_port" "$frontend_port"; do
+  if probe=$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>&1); then
+    echo "::error::Assigned E2E port :$port is already listening (PID(s): $probe); refusing before e2e-local cleanup" >&2
+    exit 1
+  else
+    lsof_status=$?
+    if [ "$lsof_status" -ne 1 ] || [ -n "$probe" ]; then
+      echo "::error::Could not inspect assigned E2E port :$port (lsof exit $lsof_status): $probe" >&2
+      exit 1
+    fi
+  fi
+done
+
+printf 'CORSIA_E2E_BACKEND_PORT=%s\n' "$backend_port" >> "$GITHUB_ENV"
+printf 'CORSIA_E2E_FRONTEND_PORT=%s\n' "$frontend_port" >> "$GITHUB_ENV"

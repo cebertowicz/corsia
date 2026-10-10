@@ -1,0 +1,67 @@
+"""Result and error shaping for local setup, free of flight state."""
+
+from __future__ import annotations
+
+import subprocess
+
+import httpx
+from fastapi import HTTPException
+
+from llm.local_profiles import setup_command
+
+
+def local_setup_error(message: str, profile_id: str) -> dict:
+    return {
+        "ok": False,
+        "message": message,
+        "next_action": f"Run `{setup_command(profile_id)}` again after fixing this, or add a subscription/API key.",
+    }
+
+
+def task_from_payload(payload: object, task_id: str) -> dict | None:
+    if isinstance(payload, dict):
+        candidates = payload.get("tasks") or payload.get("data") or []
+    else:
+        candidates = payload
+    if not isinstance(candidates, list):
+        return None
+    return next((task for task in candidates
+                 if isinstance(task, dict) and task.get("task_id") == task_id), None)
+
+
+def failure_message(exc: Exception) -> str:
+    """A cause the CLI and sources panel can show for any setup failure."""
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+    if isinstance(exc, ValueError):
+        return "oMLX returned an unreadable response."
+    if isinstance(exc, (OSError, subprocess.SubprocessError, httpx.HTTPError, RuntimeError)):
+        return str(exc)
+    return f"Local model setup failed unexpectedly ({type(exc).__name__}); see the backend log."
+
+
+class DownloadProgress:
+    """When a download line is due: each new ``STEP`` percent and, when set, every ``SECONDS``.
+
+    The line shows the step (the app's stage text) unless ``SECONDS`` is set
+    (the installer's terminal), when it shows the exact percent so a timed
+    repeat still moves.
+    """
+
+    STEP = 10
+    SECONDS: float | None = None
+
+    def __init__(self, now: float) -> None:
+        self.step, self.seconds, self.reported_at = self.STEP, self.SECONDS, now
+        self.reported_step: int | None = None
+
+    def due(self, downloaded: object, total: object, now: float) -> int | None:
+        if not (isinstance(downloaded, (int, float)) and isinstance(total, (int, float)) and total):
+            return None
+        percent = min(100, max(0, int(downloaded / total * 100)))
+        step = percent // self.step * self.step
+        timed = self.seconds is not None and now - self.reported_at >= self.seconds
+        if not ((step and step != self.reported_step) or timed):
+            return None
+        self.reported_step, self.reported_at = step, now
+        return percent if self.seconds is not None else step

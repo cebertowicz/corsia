@@ -1,0 +1,24 @@
+{
+ "event": "workflow_run",
+ "payload": {
+  "action": "completed",
+  "repository": {
+   "default_branch": "main",
+   "full_name": "cebertowicz/maestro"
+  },
+  "workflow_run": {
+   "conclusion": "success",
+   "event": "pull_request",
+   "head_branch": "dev",
+   "head_sha": "8c8e5e6158fd806ab7055ce1970351809e00ac4c",
+   "id": 36838920821,
+   "pull_requests": [],
+   "run_attempt": 1,
+   "run_number": 1319,
+   "run_started_at": "2026-10-01T08:51:06Z",
+   "status": "completed",
+   "updated_at": "2026-10-01T08:52:56Z",
+   "workflow_id": 360875774
+  }
+ }
+}

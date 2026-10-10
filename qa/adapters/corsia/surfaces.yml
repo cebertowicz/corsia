@@ -1,0 +1,126 @@
+version: 1
+status: seed-catalog
+notes:
+  - CORSIA-specific adapter catalog for the generic QA core.
+  - Each surface should eventually include fixtures, user journeys, API effects, WebSocket effects, and screenshot baselines.
+surfaces:
+  - id: auth.login
+    title: Login and Auth Gate
+    routes:
+      - /
+    owner_paths:
+      - frontend/src/lib/components/LoginScreen.svelte
+      - frontend/src/lib/stores/auth.ts
+      - backend/infra/auth.py
+    behaviors:
+      - token entry accepts a known user token
+      - invalid token clears local auth and surfaces an error
+      - URL token parameter signs in and removes token from the visible URL
+    tests:
+      - frontend/e2e/corsia-smoke.spec.ts
+      - frontend/e2e/corsia-visual.spec.ts
+  - id: shell.navigation
+    title: App Shell and Navigation
+    routes:
+      - /
+    owner_paths:
+      - frontend/src/routes/+page.svelte
+      - frontend/src/lib/components/Sidebar.svelte
+      - frontend/src/lib/components/ChatHeader.svelte
+      - frontend/src/lib/components/AppShellBar.svelte
+    behaviors:
+      - sidebar opens and collapses without losing active view state
+      - new chat returns to an empty chat surface
+      - settings and project views preserve common shell controls
+    tests:
+      - frontend/e2e/corsia-smoke.spec.ts
+  - id: chat.empty_and_session
+    title: Chat Empty State, Session List, and Session API
+    routes:
+      - /
+    owner_paths:
+      - frontend/src/lib/components/ChatPanel.svelte
+      - frontend/src/lib/components/InputBar.svelte
+      - frontend/src/lib/components/MessageList.svelte
+      - frontend/src/lib/stores/sessions.ts
+      - backend/api/threads.py
+      - backend/api/thread_messages.py
+    behaviors:
+      - empty chat has a visible composer
+      - session creation persists in the backend
+      - selecting a session hydrates paginated message history
+      - active streaming buffers survive session switches
+    tests:
+      - frontend/e2e/corsia-smoke.spec.ts
+      - backend/tests/test_ws_session_snapshot.py
+      - backend/tests/test_turn_buffers.py
+  - id: chat.streaming
+    title: WebSocket Streaming and Active Turn Recovery
+    routes:
+      - /
+    owner_paths:
+      - frontend/src/lib/ws
+      - frontend/src/lib/components/LiveToolActivity.svelte
+      - frontend/src/lib/components/AssistantMessage.svelte
+      - backend/ws
+      - backend/core/turns.py
+    behaviors:
+      - streamed assistant text appears in order
+      - reasoning and tool-call blocks remain attached to the correct session
+      - active-turn snapshots recover after page reload
+      - failed or empty responses surface visible errors
+    tests:
+      - backend/tests/test_ws_session_snapshot.py
+      - backend/tests/test_turn_buffers.py
+      - frontend/src/lib/__tests__/ws-thread-isolation.test.ts
+  - id: settings.providers
+    title: Settings, Providers, and Models
+    routes:
+      - /
+    owner_paths:
+      - frontend/src/lib/components/SettingsView.svelte
+      - frontend/src/lib/components/ProviderManager.svelte
+      - frontend/src/lib/components/v7
+      - frontend/src/lib/stores/providers.ts
+      - frontend/src/lib/stores/providersV7.ts
+      - backend/api/providers.py
+      - backend/api/models.py
+    behaviors:
+      - settings opens from the sidebar
+      - provider/model state loads without blocking the shell
+      - provider mutations surface errors instead of silently failing
+      - local and network providers remain grouped by host correctly
+    tests:
+      - frontend/e2e/corsia-smoke.spec.ts
+      - frontend/src/lib/stores/__tests__/providersV7.test.ts
+  - id: costs.system
+    title: Cost Dashboard and System Settings
+    routes:
+      - /
+    owner_paths:
+      - frontend/src/lib/components/CostDashboard.svelte
+      - frontend/src/lib/components/SettingsSystem.svelte
+      - backend/api/costs.py
+      - backend/api/system.py
+    behaviors:
+      - cost summaries and budget bars render empty/loading/error states explicitly
+      - system restart/drain/destructive controls require confirmation
+      - local model host-resource warnings are visible before risky actions
+    tests: []
+  - id: visual.design_system
+    title: Visual Design System
+    routes:
+      - /_design
+      - /
+    owner_paths:
+      - frontend/src/app.css
+      - frontend/DESIGN-SYSTEM.md
+      - frontend/src/lib/components/ui
+      - frontend/src/routes/_design/+page.svelte
+    behaviors:
+      - design tokens drive surface color, radius, spacing, and focus states
+      - visual diffs are intentional and reviewed against design-system rules
+      - desktop and mobile screenshots avoid clipping, overlap, and cramped text
+      - primitives remain the source of truth for buttons, fields, modal, section, message, icon button, and state pill
+    tests:
+      - frontend/e2e/corsia-visual.spec.ts

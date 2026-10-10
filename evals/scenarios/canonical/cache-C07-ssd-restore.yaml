@@ -1,0 +1,135 @@
+id: cache-C07-ssd-restore
+name: "SSD-tier rehydration — evict A's blocks from hot cache, return to A, verify SSD restore"
+description: >
+  Validates that the paged_ssd_cache tier actually rehydrates previously
+  computed blocks rather than recomputing them from scratch. Sequence:
+
+    1. Run a conversation on A; the resulting blocks are indexed in hot
+       cache + flushed to SSD (paged tier)
+    2. Force eviction of A's blocks from hot cache (heuristic: load enough
+       other content to push A out, or invoke the diagnostic eviction
+       endpoint if Sprint 4 exposes one)
+    3. Return to A — turn N+1 should still hit cache ≥ 0.80 of full-block
+       prefix, served from SSD restore
+
+  IMPORTANT — sub-block awareness: per oMLX's "Sub-block Cache" admin note,
+  requests below one full block are cached in memory/paged cache but NOT
+  indexed for SSD blocks. The conversation's TAIL (latest user message +
+  assistant reply) is typically sub-block and will NOT SSD-restore — it
+  re-prefills fresh. The 0.80 threshold below applies to the FULL-BLOCK
+  portion of the prefix, not the whole prompt.
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-D
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §3 (185 GB SSD
+      cache budget; ssd_cache_dir at ~/.omlx/cache)
+    - oMLX admin dashboard "Sub-block Cache" note (block-size dependent)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - ssd-tier
+  - lifecycle
+  - sub-block-aware
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-35b-a3b"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  expected_full_block_restore_minimum: 0.80
+  sub_block_excluded_from_threshold: true
+
+pre_conditions:
+  - fixture: omlx_loaded_model
+    args:
+      model: "qwen-3.6-35b-a3b"
+      pin: false
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c07_ssd
+
+steps:
+  - action: run_seeded_dialog
+    args:
+      session_id: sess_c07_ssd
+      model: "qwen-3.6-35b-a3b"
+      length: 10
+      timeout_ms_per_turn: 90000
+  - action: omlx_force_eviction
+    args:
+      target_model: "qwen-3.6-35b-a3b"
+      method: hot_cache_only
+      timeout_ms: 60000
+  - action: user_send
+    args:
+      session_id: sess_c07_ssd
+      content: "Continue: summarize what we've discussed so far."
+  - action: wait_for_event
+    args:
+      session_id: sess_c07_ssd
+      event: turn_completed
+      timeout_ms: 120000
+
+expected_outcomes:
+  - assertion: full_block_restore_above_threshold
+    detail: >
+      Of the FULL-BLOCK portion of turn 11's prompt (i.e. tokens belonging
+      to indexed blocks of 2048+ tokens), ≥ 0.80 of those tokens come from
+      cache (cached_tokens ≥ full_block_token_count × 0.80). Sub-block tail
+      tokens are excluded from this computation.
+  - assertion: ssd_restore_observed
+    detail: >
+      The turn shows clear evidence of SSD rehydration (e.g. an
+      ssd_restore event, or a prefill_ms profile that's notably faster
+      than C01's cold floor but slower than C03's hot reuse).
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 11
+  - name: check_no_provider_error
+    args: {}
+  - name: check_per_turn_hit_rate_above
+    args:
+      turn: 11
+      min_ratio: 0.80
+      slack_tokens: 20
+      full_block_only: true
+  - name: check_ssd_restore_observed
+    args:
+      turn: 11
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_per_turn_hit_rate_above
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Solver action: omlx_force_eviction (mechanism TBD — Sprint 4 needs to
+      expose either: an oMLX admin endpoint that flushes hot cache for a
+      model, or a heuristic that loads enough decoy content to push A out
+      via natural LRU)
+    - Scorer: check_per_turn_hit_rate_above with full_block_only: true flag
+      — computes the ratio against full_block_token_count rather than
+      (prompt_tokens − new_user_tokens). Requires that the turn-N usage
+      response include sub-block accounting (Sprint 4 / oMLX must surface
+      this distinction if not already in prompt_tokens_details)
+    - Scorer: check_ssd_restore_observed (looks for ssd_restore event or
+      prefill_ms profile that matches SSD rehydration signature)
+
+  Sub-block exclusion rationale: per oMLX admin dashboard "Sub-block Cache"
+  note — requests below one full block live only in memory/paged cache,
+  never indexed in SSD. The tail of any conversation is sub-block by
+  definition. Including it in the threshold would penalize correct
+  behavior. If Sprint 4 finds that prompt_tokens_details doesn't expose
+  full vs sub-block separately, the scorer needs to compute it from the
+  prompt itself (prompt_tokens // block_size = full_block_count).

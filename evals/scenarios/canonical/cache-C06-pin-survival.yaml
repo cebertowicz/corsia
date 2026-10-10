@@ -1,0 +1,119 @@
+id: cache-C06-pin-survival
+name: "Pin survival under model-load pressure — A pinned, load B, return to A"
+description: >
+  Validates the pin invariant under model-LOAD pressure (distinct from C08's
+  model-RUN pressure). Sequence:
+
+    1. Load + pin model A
+    2. Run a 5-turn conversation on A (warms hot cache)
+    3. Load model B (forces memory + hot-cache pressure on the host)
+    4. Return to A, run 5 more turns on the same conversation
+
+  Assertion: A's per-turn hit rate on turns 6-10 is ≥ 0.90. Pinning was
+  supposed to prevent B's arrival from displacing A's hot blocks. If turns
+  6-10 dip, the pin invariant is broken under this pressure.
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-D
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §3 (paged_ssd_cache
+      with 185 GB budget; pin status verified via /api/status)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - pin-invariant
+  - multi-model
+  - lifecycle
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_a: "qwen-3.6-35b-a3b"
+  model_b: "qwen-3.6-27b-instruct"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  expected_post_load_hit_rate_minimum: 0.90
+
+pre_conditions:
+  - fixture: omlx_loaded_model
+    args:
+      model: "qwen-3.6-35b-a3b"
+      pin: true
+  - fixture: omlx_unloaded_model
+    args:
+      model: "qwen-3.6-27b-instruct"
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c06_pin
+
+steps:
+  - action: run_seeded_dialog
+    args:
+      session_id: sess_c06_pin
+      model: "qwen-3.6-35b-a3b"
+      length: 5
+      timeout_ms_per_turn: 60000
+  - action: omlx_load_model
+    args:
+      model: "qwen-3.6-27b-instruct"
+      pin: false
+      timeout_ms: 120000
+  - action: run_seeded_dialog
+    args:
+      session_id: sess_c06_pin
+      model: "qwen-3.6-35b-a3b"
+      length: 5
+      starting_turn: 6
+      timeout_ms_per_turn: 60000
+
+expected_outcomes:
+  - assertion: post_load_hit_rate_held
+    detail: >
+      Turns 6-10 on model A have cached_tokens / (prompt_tokens − new_user_tokens) ≥ 0.90.
+      Pin protected A's hot blocks from B's arrival.
+  - assertion: no_provider_error_during_load
+    detail: >
+      The model-load step did not destabilize A's running conversation.
+  - assertion: model_b_loaded_successfully
+    detail: >
+      A model_loaded event fired for B within the timeout.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 10
+  - name: check_event_present
+    args:
+      event_kind: model_loaded
+      min_count: 1
+  - name: check_no_provider_error
+    args: {}
+  - name: check_per_turn_hit_rate_above
+    args:
+      turn_range: [6, 10]
+      min_ratio: 0.90
+      slack_tokens: 20
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_per_turn_hit_rate_above
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Fixture: omlx_unloaded_model (ensure target model is not currently loaded)
+    - Solver action: omlx_load_model (POST /api/network-servers/{sid}/load
+      and wait for model_loaded event before continuing)
+    - Solver action: run_seeded_dialog with starting_turn arg (so the second
+      run continues turn numbering from 6 rather than restarting at 1)
+
+  C06 vs C08: C06 measures hot-cache survival under model-LOAD pressure
+  (B materializes). C08 measures hot-cache survival under model-RUN pressure
+  (B already loaded, both generating). Different pressures, different code
+  paths in oMLX's scheduler.

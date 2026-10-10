@@ -1,0 +1,79 @@
+name: Code health
+
+on:
+  pull_request:
+    branches: [main, dev]
+    # Not named/wired as a required check, and deliberately so: this repo is
+    # private without the plan tier that unlocks branch protection (the API
+    # returns 403), so "required" has no GitHub-enforced meaning here anyway
+    # -- the merge gate reads statusCheckRollup instead. If that changes, this
+    # paths filter would need to go first: a PR touching none of these paths
+    # never runs this job, so a required check gated on it would wait forever
+    # on a check that never reports.
+    # '**.py' rather than '**/*.py': in GitHub's filter syntax the '**/'
+    # form requires at least one directory separator, so a file added at the
+    # repository root would not match and the gate would silently skip it.
+    paths:
+      - '**.py'
+      - '**.ts'
+      - '**.svelte'
+      - 'quality/file-size-limits.json'
+      - '.github/workflows/code-health.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: code-health-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  file-sizes:
+    name: File size ratchet
+    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
+    # job to a hosted runner needs the repository owner's explicit approval.
+    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/mac-python
+
+      - name: Test the ratchet itself
+        # scripts/tests/ is outside backend/, so the "Unit tests (L1)" job's
+        # `cd backend && pytest` (rootdir=backend/pytest.ini) never collects
+        # it -- confirmed empirically, not assumed: that exact invocation
+        # collects 0 tests from this path. Without this step, the 21 tests
+        # guarding the one mechanism this whole decomposition backlog leans
+        # on would never execute.
+        run: |
+          set -e
+          python -m venv "$RUNNER_TEMP/ratchet-test-venv"
+          "$RUNNER_TEMP/ratchet-test-venv/bin/pip" install --quiet pytest
+          "$RUNNER_TEMP/ratchet-test-venv/bin/python" -m pytest scripts/tests/ -q
+
+      - name: No file grows past its recorded size
+        # GitHub's default shell for `run:` is `bash -e {0}` -- errexit ON by
+        # default, from the shell invocation itself, not from anything below.
+        # `shell: bash {0}` (no `-e`) is what actually lets a failing check
+        # fall through to the summary write instead of aborting the step
+        # right there; a `set -e` or `set +e` line in the script body would
+        # have no effect on that default, since it is already the active shell.
+        shell: bash {0}
+        run: |
+          set -o pipefail
+          # 2>&1: the script's failure list goes to stderr, and that failure
+          # detail -- which file went over -- is the entire reason this
+          # summary exists. stdout-only would carry the shrink/drop lines on
+          # a pass, and nothing useful on the failure this is meant to show.
+          python scripts/file_size_limits.py 2>&1 | tee "$RUNNER_TEMP/file-sizes.txt"
+          rc=$?
+          {
+            echo "## File size ratchet (issue #1030)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/file-sizes.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"

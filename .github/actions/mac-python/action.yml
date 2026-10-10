@@ -1,0 +1,20 @@
+name: Mac runner Python 3.11
+description: >
+  Put the Mac Studio runners' Homebrew python3.11 on PATH as `python`, the
+  same shim the backend L1 job uses. actions/setup-python is for hosted
+  runners; the self-hosted Macs already carry the interpreter.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -e
+        export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+        echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+        echo "/usr/local/bin" >> "$GITHUB_PATH"
+        PY_BIN="$(command -v python3.11 || true)"
+        if [ -z "$PY_BIN" ]; then echo "::error::python3.11 not found"; exit 1; fi
+        mkdir -p "$RUNNER_TEMP/python-shim/bin"
+        ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
+        ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python3"
+        echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"

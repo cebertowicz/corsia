@@ -1,0 +1,94 @@
+"""Every user-facing string of a new install's setup decisions, in one module.
+
+The conductor raises these decisions unchanged; the model never writes or edits
+one. Braces are filled by ``setup_decisions``. Changing a word here changes the
+decision, and ``test_setup_decisions`` asserts each string exactly.
+
+A decision exists only for a real tradeoff or an approval the asker can act on;
+everything else the conductor asks in chat.
+"""
+
+from __future__ import annotations
+
+# FIND_PROJECTS option A authorizes reading session folders (onboarding.project_discovery).
+# The consent hash binds the rendered title, context and option A label, so a changed word
+# here needs a new consent review.
+
+# --- task "Set up your first agent or project" ------------------------------------
+
+FIND_PROJECTS = {
+    "title": "Look for the projects you already work on?",
+    "context": (
+        "I can find the projects you work on in {apps}. I read only the folder each session "
+        "started in (the start of each session file), never your conversations, and propose "
+        "which folders belong together as one project. You approve each project before I create "
+        "it. That folder list goes to the model I run on. Nothing changes in {apps}."
+    ),
+    "tradeoff": (
+        "Your folder names go to the model I run on. Describing the project yourself sends "
+        "nothing, and takes a sentence or a folder path from you."
+    ),
+    "options": (
+        ("Find my projects", "I'll propose your projects for you to approve."),
+        ("I'll describe it", "Tell me the folder or a sentence about the work."),
+    ),
+    "rationale": "It starts from the work you already do, and nothing is created until you approve it.",
+}
+
+# --- task "Configuration checks": oMLX setting ----------------------
+
+OMLX = {
+    "title": "Change one oMLX setting for CORSIA?",
+    "context": (
+        "Your oMLX runs the local models on this Mac. It's set to work on {current} requests at "
+        "once. At {recommended}, oMLX finishes one request before it starts the next, so each one "
+        "gets the model's full speed and memory instead of sharing them. I'd change only this "
+        "one setting."
+    ),
+    "tradeoff": (
+        "Requests that arrive together, from CORSIA's agents or from other apps that use your "
+        "oMLX, will wait their turn instead of running alongside each other. You can change it "
+        "back in oMLX's settings at any time."
+    ),
+    "yes_label": "Change it to {recommended}",
+    "yes_detail": "I'll apply it now and tell you if oMLX needs a restart.",
+    "no_label": "Leave it at {current}",
+    "no_detail": "CORSIA still works; requests that arrive together share the model.",
+    "rationale": (
+        "It matches how CORSIA sets up an oMLX it installs. Choose B if other apps use your oMLX "
+        "all day."
+    ),
+}
+
+# --- task "Set up GitHub" ----------------------------------------------------------
+
+# {sign_up_with} is the agents' address, or ASK_FOR_ADDRESS when the saved email is not
+# Gmail: on option A the conductor then asks in chat for an address.
+ASK_FOR_ADDRESS = "the address you give me in chat"
+
+GITHUB = {
+    "title": "How should your agents post on GitHub?",
+    "context": (
+        "Agents use GitHub to file issues and feature requests, comment, and send pull requests: "
+        "on your own repositories, and on CORSIA's when it falls short and I can fix it. They can "
+        "post as you, using your GitHub sign-in, or from their own account, so their posts stay "
+        "separate from yours. GitHub allows each person one extra machine account for this."
+    ),
+    "tradeoff": (
+        "Posting as you takes one sign-in, and everything agents post shows your name. Their own "
+        "account takes a few minutes in a browser you can watch: I fill in the sign-up with "
+        "{sign_up_with}, and you type the password and any verification code."
+    ),
+    "options": (
+        ("Their own account",
+         "I open the browser and fill in the sign-up. You type the password and any code."),
+        ("Post as me",
+         "I sign the GitHub CLI in to your account. You approve that sign-in in your browser."),
+        ("Not now", "Ask me any time."),
+    ),
+    "rationale": "You can always tell what you wrote from what an agent wrote.",
+}
+
+# --- task settlement the conductor applies without asking ---------------------
+
+WEB_SEARCH_WORKS = "Web search already works."

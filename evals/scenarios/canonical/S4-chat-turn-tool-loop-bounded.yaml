@@ -1,0 +1,107 @@
+id: S4-chat-turn-tool-loop-bounded
+name: "Multi-tool chat turn — agent calls null_probe twice, then emits final text"
+description: >
+  Edge case for chat-turns: a turn that does a small tool loop. The
+  mocked LLM emits two iterations of tool_calls (each calling
+  null_probe), then a final content reply. The loop body must:
+
+   - Process iteration 1: tool calls dispatched, tool_result appended,
+     loop continues.
+   - Process iteration 2: same.
+   - Process iteration 3: no tool_calls — final_content → turn_complete.
+
+  The iteration count must be bounded (3) — chat-turns NFR is
+  `iteration_count` is observable via the OTel span attribute. The
+  scorer asserts the iteration count window so a regression that
+  silently inflated iteration count (loop body running an extra pass)
+  would fail.
+
+  This pairs with Sprint-1 E4 (loop detection halt) but is not a halt
+  scenario — it's a normal-bounded multi-iteration scenario.
+
+category: functional
+tags:
+  - chat-turns
+  - tool-loop
+  - regression-sentinel
+subsystems:
+  - chat-turns
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_chat
+      session_id: sess_s4_toolloop
+  - fixture: mock_llm_replies
+    args:
+      replies:
+        - role: assistant
+          tool_calls:
+            - {name: null_probe, args: {probe_id: "p1"}}
+        - role: assistant
+          tool_calls:
+            - {name: null_probe, args: {probe_id: "p2"}}
+        - role: assistant
+          content: "Done — called null_probe twice."
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_s4_toolloop
+      content: "Call null_probe twice, then say done."
+  - action: wait_for_event
+    args:
+      session_id: sess_s4_toolloop
+      event: turn_completed
+      timeout_ms: 8000
+
+expected_outcomes:
+  - assertion: turn_completed_emitted
+    detail: >
+      The turn reached the final-content branch and exited cleanly.
+  - assertion: iteration_count_bounded
+    detail: >
+      The OTel span attribute corsia.turn.iteration_count == 3
+      (two tool-call iterations + one final-content iteration).
+      Verifies the loop body advanced exactly three times — a
+      regression that double-counted or skipped an iteration would
+      surface here.
+  - assertion: history_contains_null_probe
+    detail: >
+      The session history (or the tool_call event stream) records two
+      `null_probe` invocations. Verifies tool dispatch went through.
+  - assertion: no_provider_error
+    detail: >
+      No provider_error / error step fired.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 1
+  - name: check_event_iteration_window
+    args:
+      event_kind: tool_complete
+      iteration_min: 0
+      iteration_max: 3
+  - name: check_history_contains
+    args:
+      mode: contains
+      value: "null_probe"
+      roles: ["tool"]
+  - name: check_no_provider_error
+    args: {}
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_event_iteration_window
+    - check_history_contains
+    - check_no_provider_error
+
+notes: |
+  Bounded-loop sentinel. Iteration count is the load-bearing assertion;
+  the rest are framing. If a refactor changes the loop accounting
+  (e.g., counting iterations from 0 instead of 1, or off-by-one on
+  the tool-result re-entry), this scenario flips.

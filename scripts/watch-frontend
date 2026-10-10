@@ -1,0 +1,22 @@
+#!/bin/bash
+# Watch frontend source files and rebuild on change.
+# Usage: watch-frontend (or: corsia watch)
+#
+# Uses chokidar-cli to watch src/ and static/ for changes,
+# debounces 500ms, then runs vite build.
+
+set -e
+
+FRONTEND_DIR="$HOME/.corsia/frontend"
+cd "$FRONTEND_DIR"
+
+echo "👀 Watching frontend source for changes..."
+echo "   src/**/*.{svelte,ts,js,css,html}"
+echo "   static/**"
+echo ""
+
+npx chokidar-cli \
+  'src/**/*.svelte' 'src/**/*.ts' 'src/**/*.js' 'src/**/*.css' 'src/**/*.html' \
+  'static/**' \
+  --debounce 500 \
+  --command 'echo "🔨 Rebuilding..."; npm run build 2>&1 | tail -3; echo "✅ Built at $(date +%H:%M:%S)"'

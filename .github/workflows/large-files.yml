@@ -1,0 +1,43 @@
+name: Large files (blocking)
+
+# No path filter on purpose: a large blob is unwanted anywhere in the tree.
+# Light check on any Mac runner, without a backend-l1 or ci-integration label.
+on:
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: large-files-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  large-files:
+    name: No file over 500 KB
+    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
+    # job to a hosted runner needs the repository owner's explicit approval.
+    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/mac-python
+
+      - name: Guard script tests
+        run: |
+          python -m venv "$RUNNER_TEMP/large-files-venv"
+          "$RUNNER_TEMP/large-files-venv/bin/pip" install --quiet pytest
+          "$RUNNER_TEMP/large-files-venv/bin/python" -m pytest scripts/tests/test_check_large_files.py -q
+
+      - name: Added or modified files stay under the limit
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/check_large_files.py --base "origin/${{ github.base_ref }}"
+
+      - name: Whole tree stays under the limit
+        if: github.event_name != 'pull_request'
+        run: python3 scripts/check_large_files.py --all

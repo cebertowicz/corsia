@@ -1,0 +1,76 @@
+name: Docs drift
+
+on:
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: docs-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docs-drift:
+    name: Documentation drift check (citations + private-name scan)
+    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
+    # job to a hosted runner needs the repository owner's explicit approval.
+    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    timeout-minutes: 10
+    # Keep the hosted-runner view on the Mac: the maintainers' workspace and
+    # git identity exist on this host, and the checks below are calibrated
+    # for a runner that has neither.
+    env:
+      GIT_CONFIG_GLOBAL: /dev/null
+      GIT_CONFIG_NOSYSTEM: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/mac-python
+
+      # Check 1 (starter-kit copies vs workspace sources) needs the
+      # maintainers' private workspace, which does not exist on a CI
+      # runner -- --allow-missing-workspace treats that as an accepted
+      # skip instead of a failure, same as an outside contributor's plain
+      # clone. It stays a release-runbook precondition instead, run where
+      # the workspace is actually present.
+      #
+      # --allow-missing-owner-identity: a CI runner has no configured owner
+      # identity, so the owner-identity leak sub-check cannot run here. The
+      # skip is accepted but never reported as complete: the report's verdict
+      # line names the sub-check that did not run, and a local check-pr says
+      # the same in its closing summary. Scanning for the owner's name and
+      # email is a workspace-side and release-runbook step, run where an
+      # identity is configured; the home-directory-path sub-check still runs
+      # unconditionally here.
+      - name: Run citation and private-name-scan checks
+        run: |
+          set -o pipefail
+          export CORSIA_WORKSPACE="$RUNNER_TEMP/no-maintainer-workspace"
+          python scripts/check-docs-drift \
+            --allow-missing-workspace \
+            --allow-missing-owner-identity \
+            | tee "$RUNNER_TEMP/docs-drift.txt"
+          rc=$?
+          {
+            echo "## Documentation drift check (issue #1888)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/docs-drift.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      # System tier closure (issue #939): every declared System skill
+      # dependency must ship in the tier, and none may be contributor-only.
+      # Needs no workspace, so it has no skip flag.
+      - name: Run System tier closure check
+        run: python scripts/check_system_closure.py
+
+      # The manifest also declares docs/coordination-models/**, which
+      # unit-tests.yml never triggers on; an edit there that skips
+      # regenerating the manifest stops projecting the published models.
+      - name: Run System manifest freshness check
+        run: python scripts/generate_system_manifest.py --check

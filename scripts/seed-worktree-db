@@ -1,0 +1,645 @@
+#!/usr/bin/env python3
+"""Seed a worktree DB for local eval/e2e smoke runs.
+
+Usage:
+  seed-worktree-db <state-root> --workspace <selected-workspace>
+
+Every row this script writes is synthetic or built directly from explicit
+caller-provided configuration (below). It never reads a production database
+and never reads the real CORSIA bootstrap config (~/.corsia/config.json) —
+it only *checks that config's existence*, to refuse accidentally seeding
+synthetic rows into a real production state root. When that check can't be
+verified at all (a sandbox denies even the stat, or an existing bootstrap
+fails to parse), it refuses to guess and fails loud instead — see
+CORSIA_SEED_CONFIRM_NOT_PROD below, which the sanctioned callers
+(scripts/e2e-local, scripts/eval-local) set for you automatically since
+their state-root is always their own disposable path.
+
+Inputs (env vars, all optional unless noted):
+
+  CORSIA_E2E_MODEL
+      Required for a real (non-mock) run. "<provider>/<model_id>" of the
+      agent default model, e.g. "anthropic/claude-haiku-4-5". Actual LLM
+      calls resolve its provider's real API key from the invoking shell env
+      (e.g. ANTHROPIC_API_KEY) — runtime dispatch falls back to that. The
+      *catalog* considers a cloud provider "active" (and so lists its
+      models at all) only when the target DB's `providers` setting itself
+      has a non-empty apiKey for it, regardless of provider — set
+      CORSIA_SEED_PROVIDER_API_KEY (any non-empty value works for this
+      purpose) whenever a caller needs CORSIA_E2E_MODEL's model to
+      actually show up in the seeded catalog.
+
+  CORSIA_SEED_PROVIDER_API_KEY
+      API key seeded into the target `providers` setting for
+      CORSIA_E2E_MODEL's provider. Required for that provider's models
+      to be listed as active in the catalog at all; additionally needed for
+      *catalog discovery* itself on a non-anthropic provider (e.g. openai;
+      anthropic's discovery works from a static local table either way).
+
+  CORSIA_SEED_OMLX_ENDPOINT
+      Base URL of a real, reachable local oMLX server (e.g.
+      http://127.0.0.1:8000) to register as a synthetic, available network
+      server. Requires CORSIA_SEED_OMLX_MODEL_ID.
+
+  CORSIA_SEED_OMLX_MODEL_ID
+      The oMLX provider_model_id to seed as available on
+      CORSIA_SEED_OMLX_ENDPOINT. The resulting catalog model id is
+      deterministic — "omlx-seed-<model-id-slug>" — printed on success; pass
+      that exact string as CORSIA_SEED_REVIEWER_MODEL_ID to also use it as
+      the host-access reviewer model.
+
+  CORSIA_SEED_REVIEWER_MODEL_ID
+      Catalog model id written to agents.defaults.host_access_reviewer_model.
+
+  CORSIA_SEED_CONFIRM_NOT_PROD
+      Set to "1" to proceed when the real bootstrap config can't be
+      verified at all (sandbox-denied stat, or an existing-but-unparseable
+      bootstrap) instead of failing loud. Only set this when you generated
+      the <state-root> argument yourself as a disposable path — it is an
+      explicit caller attestation, not a check this script can perform.
+
+  CORSIA_SEED_MEASUREMENT_FIXTURE
+      Set to "1" to also seed the deterministic Measurement weekly fixture
+      (accepted plan nodes, decisions and token usage under the smoke
+      thread), so /api/measurement/series has representative data. Leave
+      unset for every other caller.
+
+With none of the CORSIA_SEED_* vars set, only empty settings scaffolding
+plus the minimal smoke project/session rows are seeded.
+"""
+
+import json
+import os
+import sqlite3
+import sys
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlsplit
+
+# Mirrors backend/infra/config.py's BOOTSTRAP_CONFIG_PATH constant. Computing
+# the Path here does not stat anything, so this is safe at import time even
+# under a sandbox that hard-denies the real home directory.
+_HOME_BOOTSTRAP_PATH = Path.home() / ".corsia" / "config.json"
+
+
+def _import_backend_module(module_path: str):
+    """Import a backend module, inserting backend/ onto sys.path once."""
+    script_dir = Path(__file__).resolve().parent
+    backend_dir = script_dir.parent / "backend"
+    if not (backend_dir / "llm" / "catalog.py").exists():
+        raise SystemExit(
+            f"Cannot locate backend modules at {backend_dir}. "
+            "This script requires the repo's backend/ to be present."
+        )
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+    import importlib
+
+    return importlib.import_module(module_path)
+
+
+def _home_bootstrap_status() -> bool | None:
+    """Whether ~/.corsia/config.json exists: True/False, or None if a
+    sandbox denies even a stat of it (pathlib's ``exists()`` only swallows
+    ENOENT-class errnos, not EPERM). Never used to read production data —
+    only to decide whether the distinct-target guard below has anything to
+    compare against."""
+    try:
+        return _HOME_BOOTSTRAP_PATH.exists()
+    except PermissionError:
+        return None
+
+
+def _resolve_prod_state_root() -> Path | None:
+    """The real prod state root when it's conclusively known, or None when
+    the bootstrap plainly doesn't exist.
+
+    Raises RuntimeError/OSError/ValueError when verification is impossible
+    (sandbox-denied stat, or an existing bootstrap that fails to parse) —
+    the caller must not treat "unverifiable" the same as "safe"."""
+    status = _home_bootstrap_status()
+    if status is False:
+        return None
+    if status is None:
+        raise RuntimeError("a sandbox denies even a stat of it")
+    platform_paths = _import_backend_module("infra.platform_paths")
+    return platform_paths.load_bootstrap(_HOME_BOOTSTRAP_PATH).state_root
+
+
+def _require_not_prod_state(target_db: Path) -> None:
+    """Refuse to seed synthetic rows into the real production database.
+
+    When the real bootstrap can't be verified at all — a sandbox-denied
+    stat, or one that exists but fails to parse — this refuses to proceed
+    unless the caller explicitly asserts the target isn't production via
+    CORSIA_SEED_CONFIRM_NOT_PROD=1. It never silently assumes safety just
+    because verification was impossible. Sanctioned callers that always
+    generate their own disposable state-root (scripts/e2e-local,
+    scripts/eval-local) set that confirmation themselves."""
+    resolved_target = target_db.expanduser().resolve()
+    try:
+        prod_state_root = _resolve_prod_state_root()
+    except (RuntimeError, OSError, ValueError) as e:
+        if os.environ.get("CORSIA_SEED_CONFIRM_NOT_PROD") == "1":
+            return
+        raise SystemExit(
+            f"Refusing to seed: cannot verify '{resolved_target}' isn't the "
+            f"real production database — {_HOME_BOOTSTRAP_PATH} could not "
+            f"be verified ({e}). Set CORSIA_SEED_CONFIRM_NOT_PROD=1 only "
+            "when the caller already generated this state-root itself as "
+            "a disposable path (scripts/e2e-local and scripts/eval-local "
+            "do this automatically)."
+        )
+    if prod_state_root is None:
+        return
+    prod_db = prod_state_root / "corsia.db"
+    same_file = prod_db == resolved_target
+    if not same_file and prod_db.exists() and resolved_target.exists():
+        try:
+            same_file = prod_db.samefile(resolved_target)
+        except OSError:
+            same_file = False
+    if same_file:
+        raise SystemExit(
+            "Refusing to seed synthetic rows into the production CORSIA DB: "
+            f"{resolved_target}"
+        )
+
+
+def now_utc() -> str:
+    """Return the current UTC time in the seed script's database format."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _classify_host(host: str) -> str:
+    """Reuse the backend's own loopback/LAN/tailscale/public classification
+    instead of duplicating its IP-range logic here."""
+    network_endpoints = _import_backend_module("llm.network_endpoints")
+    return network_endpoints.classify_host(host)
+
+
+def _seeded_data_owner(wt: sqlite3.Connection) -> str:
+    """Return the account the seeded thread should belong to, or exit.
+
+    Threads are scoped by owner, so a seeded thread owned by a name nobody
+    signs in as is invisible to the harness that asked for it. The sanctioned
+    callers provision their disposable account before seeding, so the oldest
+    account in this database is that account. A database without one cannot
+    be seeded usefully, so seeding refuses instead of guessing an owner.
+    """
+    has_accounts = wt.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+    ).fetchone()
+    row = has_accounts and wt.execute(
+        "SELECT id FROM users ORDER BY created_at LIMIT 1"
+    ).fetchone()
+    if not row:
+        print(
+            "ERROR: the target database has no account to own the seeded data. "
+            "Create one first (`corsia user add`, or the harness's own "
+            "provisioning), then seed.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return row["id"]
+
+
+def _seed_default_settings(wt: sqlite3.Connection) -> None:
+    """Ensure providers/agents settings rows exist so downstream reads are
+    deterministic, without ever reading them from a production database."""
+    now = now_utc()
+    for key, default in (("providers", {}), ("agents", {"defaults": {}})):
+        existing = wt.execute("SELECT 1 FROM settings WHERE key = ?", (key,)).fetchone()
+        if not existing:
+            wt.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, json.dumps(default), now),
+            )
+
+
+def _seed_provider_api_key(wt: sqlite3.Connection, e2e_model: str | None) -> None:
+    """Seed an explicit caller-provided API key for CORSIA_E2E_MODEL's
+    provider, when catalog discovery needs one. Never read from prod."""
+    api_key = os.environ.get("CORSIA_SEED_PROVIDER_API_KEY")
+    if not api_key or not e2e_model or "/" not in e2e_model:
+        return
+    provider, _, _ = e2e_model.partition("/")
+    row = wt.execute("SELECT value FROM settings WHERE key = 'providers'").fetchone()
+    providers = (json.loads(row["value"]) if row else {}) or {}
+    providers.setdefault(provider, {})["apiKey"] = api_key
+    wt.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('providers', ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        (json.dumps(providers), now_utc()),
+    )
+
+
+def _seed_reviewer_model(wt: sqlite3.Connection) -> None:
+    """Set agents.defaults.host_access_reviewer_model from explicit input."""
+    reviewer_id = os.environ.get("CORSIA_SEED_REVIEWER_MODEL_ID")
+    if not reviewer_id:
+        return
+    row = wt.execute("SELECT value FROM settings WHERE key = 'agents'").fetchone()
+    agents = (json.loads(row["value"]) if row else {}) or {}
+    agents.setdefault("defaults", {})["host_access_reviewer_model"] = reviewer_id
+    wt.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('agents', ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        (json.dumps(agents), now_utc()),
+    )
+
+
+def _seed_omlx_network_model(wt: sqlite3.Connection) -> str | None:
+    """Register a real, caller-specified oMLX endpoint as a synthetic,
+    available network server + model row. Returns the catalog model id, or
+    None when the oMLX env inputs are not set."""
+    endpoint = os.environ.get("CORSIA_SEED_OMLX_ENDPOINT")
+    model_id = os.environ.get("CORSIA_SEED_OMLX_MODEL_ID")
+    if not endpoint and not model_id:
+        return None
+    if not endpoint or not model_id:
+        raise SystemExit(
+            "CORSIA_SEED_OMLX_ENDPOINT and CORSIA_SEED_OMLX_MODEL_ID must "
+            "be set together."
+        )
+
+    parsed = urlsplit(endpoint)
+    host = parsed.hostname
+    port = parsed.port
+    if not host or not port:
+        raise SystemExit(
+            f"CORSIA_SEED_OMLX_ENDPOINT='{endpoint}' must include an "
+            "explicit host and port, e.g. http://127.0.0.1:8000."
+        )
+
+    now = now_utc()
+    model_slug = "".join(c if c.isalnum() else "-" for c in model_id.lower()).strip("-")
+    server_id = f"omlx-seed-{model_slug}"
+    catalog_id = f"omlx-seed-{model_slug}"
+    litellm_model = f"omlx@{server_id}/{model_id}"
+
+    wt.execute(
+        """INSERT INTO network_servers
+               (id, provider, kind, instance_id, instance_name, port, status,
+                source, metadata_json, last_seen_at, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(provider, instance_id) DO UPDATE SET
+               status = excluded.status, port = excluded.port,
+               last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at""",
+        (server_id, "omlx", "managed", server_id, server_id, port, "online",
+         "e2e-seed", "{}", now, now, now),
+    )
+    endpoint_id = f"ep-{server_id}"
+    wt.execute(
+        """INSERT INTO network_server_endpoints
+               (id, server_id, host, kind, last_ok_at, last_latency_ms,
+                created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?)
+           ON CONFLICT(server_id, host) DO UPDATE SET
+               last_ok_at = excluded.last_ok_at, updated_at = excluded.updated_at""",
+        (endpoint_id, server_id, host, _classify_host(host), now, 1, now, now),
+    )
+    wt.execute(
+        """INSERT INTO models
+               (id, harness, provider, provider_model_id, litellm_model,
+                display_name, description, backend, source, enabled,
+                available, supports_tools, default_temperature,
+                default_max_tokens, metadata_json, discovered_at,
+                last_seen_at, created_at, updated_at)
+           VALUES (?,'native',?,?,?,?,?,'network','e2e-seed',1,1,1,NULL,NULL,
+                   ?,?,?,?,?)
+           ON CONFLICT(provider, provider_model_id) DO UPDATE SET
+               available = 1, litellm_model = excluded.litellm_model,
+               updated_at = excluded.updated_at""",
+        (catalog_id, "omlx", model_id, litellm_model, model_id,
+         "MLX (e2e-seeded)", json.dumps({"server_id": server_id}), now, now, now, now),
+    )
+    return catalog_id
+
+
+def _sync_e2e_model_to_catalog(
+    selected_workspace: Path,
+    state_root: Path,
+    target_db: Path,
+) -> None:
+    """Ensure CORSIA_E2E_MODEL has a target catalog row when set."""
+    e2e_model = os.environ.get("CORSIA_E2E_MODEL")
+    if not e2e_model:
+        return
+
+    if "/" not in e2e_model:
+        print(
+            f"WARNING: CORSIA_E2E_MODEL='{e2e_model}' has no provider prefix; "
+            "expected '<provider>/<model_id>'. Skipping catalog sync."
+        )
+        return
+    provider, _, model_id = e2e_model.partition("/")
+
+    conn = sqlite3.connect(str(target_db))
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT value FROM settings WHERE key = 'providers'").fetchone()
+    conn.close()
+    api_key = ""
+    if row:
+        try:
+            providers = json.loads(row["value"]) or {}
+            api_key = (providers.get(provider) or {}).get("apiKey") or ""
+        except Exception as e:
+            raise SystemExit(
+                f"Worktree providers setting is malformed JSON: {e}"
+            )
+
+    if not api_key and provider != "anthropic":
+        print(
+            f"WARNING: no '{provider}' apiKey in target providers settings; "
+            f"can't run cloud discovery for CORSIA_E2E_MODEL={e2e_model}. "
+            "Catalog sync skipped; downstream model lookup will fail loudly."
+        )
+        return
+
+    os.environ["CORSIA_WORKSPACE"] = str(selected_workspace.resolve())
+    os.environ["CORSIA_STATE_DIR"] = str(state_root.resolve())
+
+    print(
+        f"Syncing CORSIA_E2E_MODEL ({e2e_model}) into worktree catalog "
+        f"via discover_cloud_models..."
+    )
+    try:
+        import asyncio
+        catalog = _import_backend_module("llm.catalog")
+        discover_cloud_models = catalog.discover_cloud_models
+    except Exception as e:
+        raise SystemExit(f"Failed to import discover_cloud_models: {e}")
+
+    try:
+        result = asyncio.run(discover_cloud_models(provider, api_key))
+    except Exception as e:
+        raise SystemExit(f"discover_cloud_models({provider}) raised: {e}")
+
+    if not result.get("ok"):
+        raise SystemExit(
+            f"discover_cloud_models({provider}) failed: "
+            f"{result.get('error', 'unknown error')}"
+        )
+
+    target_meta: dict | None = None
+    for m in result.get("models", []):
+        if m.get("id") == model_id:
+            target_meta = m
+            break
+    if not target_meta:
+        raise SystemExit(
+            f"discover_cloud_models({provider}) ran but '{model_id}' was "
+            f"absent from the returned `models` list. Check that "
+            f"litellm.model_cost / provider /v1/models actually surfaces "
+            f"this model."
+        )
+
+    short_id = f"{provider}-{model_id}"
+    litellm_model = f"{provider}/{model_id}"
+    now = now_utc()
+    metadata = json.dumps({
+        "input_cost_per_1m": target_meta.get("input_cost_per_1m", 0),
+        "output_cost_per_1m": target_meta.get("output_cost_per_1m", 0),
+    })
+
+    conn = sqlite3.connect(str(target_db))
+    conn.row_factory = sqlite3.Row
+    existing = conn.execute(
+        "SELECT id FROM models WHERE provider = ? AND provider_model_id = ?",
+        (provider, model_id),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE models SET available = 1, litellm_model = ?, updated_at = ? "
+            "WHERE id = ?",
+            (litellm_model, now, existing["id"]),
+        )
+        action = "updated"
+    else:
+        conn.execute(
+            """INSERT INTO models
+               (id, provider, provider_model_id, litellm_model, display_name,
+                backend, source, enabled, available, context_window,
+                supports_vision, supports_tools, supports_reasoning,
+                default_temperature, default_max_tokens,
+                metadata_json, discovered_at, last_seen_at, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,1,1,?,?,?,?,NULL,NULL,?,?,?,?,?)""",
+            (
+                short_id, provider, model_id, litellm_model,
+                target_meta.get("display_name", model_id),
+                "api", "cloud_discovered",
+                target_meta.get("context_window"),
+                int(target_meta.get("supports_vision", False)),
+                int(target_meta.get("supports_tools", True)),
+                int(target_meta.get("supports_reasoning", False)),
+                metadata, now, now, now, now,
+            ),
+        )
+        action = "inserted"
+    conn.commit()
+
+    target = conn.execute(
+        "SELECT id, provider, provider_model_id, litellm_model FROM models "
+        "WHERE provider = ? AND provider_model_id = ?",
+        (provider, model_id),
+    ).fetchone()
+    conn.close()
+    if not target:
+        raise SystemExit(
+            f"Catalog row for {e2e_model} still missing after direct "
+            f"{action}. This shouldn't happen — check schema for missing "
+            f"NOT-NULL constraints."
+        )
+
+    print(
+        f"Catalog row {action}: provider={target['provider']} "
+        f"model_id={target['provider_model_id']} "
+        f"litellm_model={target['litellm_model']}"
+    )
+
+
+# Deterministic weekly Measurement fixture: (settlement Wednesday, outcomes,
+# first-try outcomes, answered decisions, took-recommendation, answered-other,
+# total tokens). Week 2026-09-07 is deliberately below every minimum-n.
+_MEASUREMENT_WEEKS = (
+    ("2026-09-09", 12, 9, 4, 1, 2, 1_500_000),
+    ("2026-09-16", 100, 70, 100, 31, 65, 18_000_000),
+    ("2026-09-23", 762, 594, 100, 43, 40, 114_300_000),
+)
+# Human messages per settlement week, ten minutes apart (a gap the active-time
+# rule counts in full), so the Attention estimate has both activity and >= 20
+# settled outcomes and its proxy state is reachable. Week 2026-09-07 has none.
+_MEASUREMENT_ACTIVE_MESSAGES = {"2026-09-16": 60, "2026-09-23": 120}
+_MEASUREMENT_PLAN_ID = "measurement-fixture-plan"
+
+
+def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
+    """Seed weekly outcomes, decisions and token usage under one thread.
+
+    Rows are written straight to the tables /api/measurement/series reads,
+    with ids derived from the week and index, so a second run adds nothing.
+    """
+    if wt.execute("SELECT 1 FROM plans WHERE id = ?", (_MEASUREMENT_PLAN_ID,)).fetchone():
+        print("Measurement fixture already exists")
+        return
+    stamp = "2026-09-01T00:00:00Z"
+    wt.execute(
+        "INSERT INTO plans (id, owner_kind, owner_id, state, created_at, updated_at) "
+        "VALUES (?, 'thread', ?, 'active', ?, ?)",
+        (_MEASUREMENT_PLAN_ID, thread_id, stamp, stamp),
+    )
+    for week, outcomes, first_try, answered, took, other, tokens in _MEASUREMENT_WEEKS:
+        for index in range(outcomes):
+            node_id = f"measurement-fixture-{week}-{index}"
+            accepted_at = f"{week}T12:{index % 60:02d}:00Z"
+            wt.execute(
+                "INSERT INTO plan_nodes (id, plan_id, order_key, kind, title, "
+                "acceptance_criteria, state, commitment_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'task', ?, 'Fixture outcome', 'accepted', ?, ?, ?)",
+                (node_id, _MEASUREMENT_PLAN_ID, index, f"Fixture outcome {week} {index}",
+                 node_id, stamp, accepted_at),
+            )
+            wt.execute(
+                "INSERT INTO plan_node_events (id, node_id, provenance, event, "
+                "prior_state, new_state, created_at) "
+                "VALUES (?, ?, 'measurement-fixture', 'accepted', 'review_requested', "
+                "'accepted', ?)",
+                (f"{node_id}-accepted", node_id, accepted_at),
+            )
+            if index < first_try:
+                continue
+            # Later outcomes were reworked: a second attempt after a rejection.
+            for ordinal in (1, 2):
+                wt.execute(
+                    "INSERT INTO plan_node_attempts (id, plan_id, node_id, "
+                    "executor_thread_id, requirements_revision, attempt_ordinal, "
+                    "provenance, selected_at, released_at, release_reason) "
+                    "VALUES (?, ?, ?, ?, 1, ?, 'measurement-fixture', ?, ?, 'settled')",
+                    (f"{node_id}-attempt-{ordinal}", _MEASUREMENT_PLAN_ID, node_id,
+                     thread_id, ordinal, stamp, accepted_at),
+                )
+            wt.execute(
+                "INSERT INTO plan_node_events (id, node_id, provenance, event, created_at) "
+                "VALUES (?, ?, 'measurement-fixture', 'review_rejected', ?)",
+                (f"{node_id}-rejected", node_id, f"{week}T11:00:00Z"),
+            )
+        for index in range(answered):
+            option = "recommended" if index < took else "other" if index < took + other else "alternative"
+            metadata = {"plan_decision": {
+                "thread_id": thread_id, "state": "answered",
+                "raised_at": f"{week}T09:00:00Z", "answered_at": f"{week}T10:00:00Z",
+                "recommendation": "recommended", "answer": {"option_id": option},
+            }}
+            wt.execute(
+                "INSERT INTO artifact_identities (id, integration, type, external_id, "
+                "metadata, created_at, updated_at) VALUES (?, 'local', 'plan-decision', ?, ?, ?, ?)",
+                (f"measurement-fixture-decision-{week}-{index}",
+                 f"measurement-fixture-decision-{week}-{index}", json.dumps(metadata),
+                 stamp, stamp),
+            )
+        per_row = tokens // outcomes
+        for index in range(outcomes):
+            wt.execute(
+                "INSERT INTO llm_usage (id, thread_id, model, total_tokens, cost_usd, "
+                "created_at) VALUES (?, ?, 'measurement-fixture', ?, 0.01, ?)",
+                (f"measurement-fixture-usage-{week}-{index}", thread_id, per_row,
+                 f"{week}T13:00:00Z"),
+            )
+        for index in range(_MEASUREMENT_ACTIVE_MESSAGES.get(week, 0)):
+            sent_at = datetime.fromisoformat(f"{week}T14:00:00") + timedelta(minutes=10 * index)
+            wt.execute(
+                "INSERT INTO messages (id, thread_id, role, content, metadata, created_at) "
+                "VALUES (?, ?, 'user', 'Fixture human message', '{}', ?)",
+                (f"measurement-fixture-message-{week}-{index}", thread_id,
+                 sent_at.strftime("%Y-%m-%dT%H:%M:%SZ")),
+            )
+    print("Seeded Measurement weekly fixture")
+
+
+def main():
+    """Seed one isolated target state DB from synthetic + explicit inputs."""
+    if sys.argv[1:] in (["--help"], ["-h"]):
+        print(__doc__)
+        return
+    if len(sys.argv) != 4 or sys.argv[2] != "--workspace":
+        print(
+            f"Usage: {sys.argv[0]} <state-root> "
+            "--workspace <selected-workspace>"
+        )
+        sys.exit(1)
+
+    state_root = Path(sys.argv[1]).expanduser().resolve()
+    selected_workspace = Path(sys.argv[3]).expanduser().resolve()
+    target_db = state_root / "corsia.db"
+    _require_not_prod_state(target_db)
+
+    if not target_db.exists():
+        print(f"ERROR: Target DB not found at {target_db}")
+        print("Start the worktree server once first to create the schema.")
+        sys.exit(1)
+
+    wt = sqlite3.connect(str(target_db))
+    wt.row_factory = sqlite3.Row
+    owner = _seeded_data_owner(wt)
+
+    _seed_default_settings(wt)
+    _seed_provider_api_key(wt, os.environ.get("CORSIA_E2E_MODEL"))
+    omlx_catalog_id = _seed_omlx_network_model(wt)
+    _seed_reviewer_model(wt)
+    wt.commit()
+    if omlx_catalog_id:
+        print(f"Seeded synthetic oMLX network model: {omlx_catalog_id}")
+
+    project_id = str(uuid.uuid4())
+    ts = now_utc()
+
+    existing = wt.execute(
+        "SELECT id FROM projects WHERE name = 'Test Project'"
+    ).fetchone()
+
+    if existing:
+        project_id = existing["id"]
+        print(f"Test project already exists: {project_id[:8]}")
+    else:
+        wt.execute(
+            "INSERT INTO projects (id, name, description, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, "Test Project", "Smoke test project for worktree testing", "active", ts, ts),
+        )
+        print(f"Created test project: {project_id[:8]}")
+
+    session_id = str(uuid.uuid4())
+    existing_session = wt.execute(
+        "SELECT id FROM threads WHERE title = 'Smoke Test'"
+    ).fetchone()
+
+    if existing_session:
+        session_id = existing_session["id"]
+        print(f"Test session already exists: {session_id[:8]}")
+    else:
+        wt.execute(
+            "INSERT INTO threads (id, user_id, title, model, project_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session_id, owner, "Smoke Test", None, project_id, ts, ts),
+        )
+        print(f"Created test session: {session_id[:8]}")
+
+    if os.environ.get("CORSIA_SEED_MEASUREMENT_FIXTURE") == "1":
+        _seed_measurement_fixture(wt, session_id)
+
+    wt.commit()
+    wt.close()
+
+    _sync_e2e_model_to_catalog(
+        selected_workspace,
+        state_root,
+        target_db,
+    )
+
+    print("Done. Target DB is ready for testing.")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,22 @@
+{
+ "event": "check_suite",
+ "payload": {
+  "action": "completed",
+  "check_suite": {
+   "app": {
+    "slug": "github-actions"
+   },
+   "conclusion": "failure",
+   "head_branch": "context/checkpoint-retrieval",
+   "head_sha": "e9b82d4da082e0563aee92de31680eafd3445b43",
+   "id": 92362424864,
+   "pull_requests": [],
+   "status": "completed",
+   "updated_at": "2026-09-07T07:15:39Z"
+  },
+  "repository": {
+   "default_branch": "main",
+   "full_name": "cebertowicz/maestro"
+  }
+ }
+}

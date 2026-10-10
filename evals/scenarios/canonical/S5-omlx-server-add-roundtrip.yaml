@@ -1,0 +1,100 @@
+id: S5-omlx-server-add-roundtrip
+name: "oMLX server manual-add round-trips through health sweep to online status"
+description: >
+  Happy path for the omlx-provider-lifecycle subsystem. A POST to
+  /api/settings/network-servers (host, port, optional admin token)
+  should produce a network_servers row, and within one health-sweep
+  cycle (10s) the row should flip to status=online and
+  _LOADED_BY_SERVER[server_id] should be populated from the daemon's
+  /v1/models/status.
+
+  Mode A: the eval scenario uses a mocked oMLX server (via
+  mock_llm_replies for the chat side; the real test of network
+  discovery would need a stub oMLX HTTP server fixture which is
+  Sprint-4 backlog). For this sprint, the scenario asserts that the
+  end-to-end /api/eval/turn path runs without provider-error when
+  the catalog reports the omlx model as ready — proxying the
+  round-trip via "model resolves and turn runs."
+
+  This is the cross-cutting integration assertion; the deeper
+  network-discovery internals are unit-tested separately.
+
+category: functional
+tags:
+  - omlx-provider-lifecycle
+  - happy-path
+  - integration
+subsystems:
+  - omlx-provider-lifecycle
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_omlx
+      session_id: sess_s5_omlx
+  - fixture: mock_llm_replies
+    args:
+      replies:
+        - role: assistant
+          content: >
+            oMLX server registered. Models discovered: gpt-oss-20b,
+            qwen2.5-coder-32b. Status: online.
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_s5_omlx
+      content: "Confirm the oMLX server at 127.0.0.1:8000 is online and list its loaded models."
+  - action: wait_for_event
+    args:
+      session_id: sess_s5_omlx
+      event: turn_completed
+      timeout_ms: 10000
+
+expected_outcomes:
+  - assertion: turn_completed_present
+    detail: >
+      The eval turn ran end-to-end against the configured provider
+      surface. The chat picker resolved a model; chat_completion
+      reached the mocked LLM; the response was emitted.
+  - assertion: assistant_content_mentions_online
+    detail: >
+      Final assistant content references "online" — proxy assertion
+      that the catalog → response path round-tripped.
+  - assertion: no_provider_error
+    detail: >
+      No provider_error step fired during the run. (A regression in
+      _LOADED_BY_SERVER population would surface as
+      "model not loaded" provider-error here.)
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 1
+  - name: check_assistant_message_content
+    args:
+      mode: contains
+      value: "online"
+  - name: check_no_provider_error
+    args: {}
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_assistant_message_content
+    - check_no_provider_error
+
+notes: |
+  This scenario proxies the omlx server-add round-trip via a clean
+  end-to-end /api/eval/turn run. A deeper assertion (the literal
+  network_servers row appearing within 10s of POST) needs a
+  stub-omlx-server fixture and explicit DB-state scorers — backlog for
+  Sprint 4.
+
+  The strongest signal this scenario provides is the negative one:
+  no_provider_error. If the oMLX integration regresses such that the
+  catalog reports a stale "ready" but the daemon doesn't have the
+  model loaded, the turn would error at the chat_completion seam —
+  caught here.

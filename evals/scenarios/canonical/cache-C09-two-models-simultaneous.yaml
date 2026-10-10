@@ -1,0 +1,139 @@
+id: cache-C09-two-models-simultaneous
+name: "Two-model simultaneous generation — quantify TTFT and decode_tps inflation"
+description: >
+  Fires a 30k-prompt turn on model A and model B at the same wall-clock
+  moment. Compares each model's TTFT and decode_tps to its C05 isolated
+  baseline. Quantifies the "concurrent generation feels slow" hypothesis
+  numerically.
+
+  Expectation under the current oMLX architecture (single-threaded
+  _global_mlx_executor): one model's wall_ms inflates 5-14× when another
+  is generating concurrently. This scenario captures the inflation factor
+  precisely so it can be tracked over time. If upstream oMLX migrates to
+  per-engine streams (mlx-lm PR #1090 path), this scenario's inflation
+  drops dramatically — and we'd see the improvement here first.
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-C
+    - working/2026-05-11-provider-discovery-cleanup/upstream-issue-draft.md
+      (cross-model serialization root cause)
+category: perf
+tags:
+  - cache
+  - mode-b
+  - multi-model
+  - concurrent
+  - infrastructure-bound
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_a: "qwen-3.6-35b-a3b"
+  model_b: "qwen-3.6-27b-instruct"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  expected_ttft_inflation_max: 14.0
+  documents_known_serialization: true
+
+pre_conditions:
+  - fixture: omlx_loaded_models
+    args:
+      models:
+        - "qwen-3.6-35b-a3b"
+        - "qwen-3.6-27b-instruct"
+      pin: false
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c09_a
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c09_b
+  - fixture: c05_baselines_available
+    args:
+      models:
+        - "qwen-3.6-35b-a3b"
+        - "qwen-3.6-27b-instruct"
+
+steps:
+  - action: warm_session_prefix
+    args:
+      session_id: sess_c09_a
+      model: "qwen-3.6-35b-a3b"
+      target_prompt_tokens: 30000
+  - action: warm_session_prefix
+    args:
+      session_id: sess_c09_b
+      model: "qwen-3.6-27b-instruct"
+      target_prompt_tokens: 30000
+  - action: fire_concurrent_turns
+    args:
+      sessions:
+        - session_id: sess_c09_a
+          model: "qwen-3.6-35b-a3b"
+          content: "Continue with one detailed paragraph."
+        - session_id: sess_c09_b
+          model: "qwen-3.6-27b-instruct"
+          content: "Continue with one detailed paragraph."
+      timeout_ms: 180000
+
+expected_outcomes:
+  - assertion: ttft_inflation_recorded
+    detail: >
+      Each model's TTFT under concurrent load is compared to C05's isolated
+      baseline. The ratio (concurrent_ttft / isolated_ttft) is recorded to
+      scenario output for each model. No pass/fail on the ratio itself in
+      the current architecture — this scenario currently DOCUMENTS the
+      serialization cost rather than failing on it.
+  - assertion: ttft_inflation_under_cap
+    detail: >
+      Inflation factor ≤ 14.0× for each model. Serves as a regression sentinel —
+      if a future oMLX change makes it worse (or much better) than today's
+      known 5-14× envelope, this scorer flips.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 2
+  - name: check_no_provider_error
+    args: {}
+  - name: check_ttft_inflation_recorded
+    args:
+      reference_scenario: cache-C05-headtohead-isolated
+      per_model: true
+  - name: check_ttft_inflation_below_threshold
+    args:
+      reference_scenario: cache-C05-headtohead-isolated
+      max_ratio: 14.0
+      per_model: true
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_ttft_inflation_below_threshold
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Fixture: c05_baselines_available (validates that C05 has run in this
+      test suite invocation, or reads cached baselines from a known path)
+    - Solver action: warm_session_prefix (drives a session up to a target
+      prompt token count without measuring; gets both sessions to a
+      comparable starting prompt size before the concurrent fire)
+    - Solver action: fire_concurrent_turns (fires N user_send actions in
+      parallel via asyncio.gather, then waits for all turn_completed events)
+    - Scorer: check_ttft_inflation_recorded (observational — reads ttft_ms
+      and prefill_ms from each turn, looks up corresponding C05 baseline,
+      computes ratio, appends to output)
+    - Scorer: check_ttft_inflation_below_threshold (pass/fail variant for
+      regression detection)
+
+  When upstream oMLX adopts mlx-lm PR #1090 (per-engine streams via
+  mx.new_thread_local_stream), this scenario's expected_ttft_inflation_max
+  should drop substantially (from 14.0 to ~1.5 — solo speed maintained).
+  The cap update is a meaningful CORSIA-side acceptance test of upstream
+  fixes.

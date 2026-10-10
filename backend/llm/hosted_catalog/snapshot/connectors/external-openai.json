@@ -1,0 +1,10 @@
+{
+  "id": "external-openai",
+  "kind": "inference-provider",
+  "type": "external",
+  "display_name": "External (OpenAI-compatible)",
+  "dialect": "openai",
+  "auth": { "scheme": "bearer", "user_supplied": true },
+  "endpoint": { "user_supplied": true, "default_base": null },
+  "load_control": "observe-only"
+}

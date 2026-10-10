@@ -1,0 +1,48 @@
+{
+  "provider": "openai",
+  "families": [
+    {
+      "match_prefixes": ["o1", "o3"],
+      "config": {
+        "type": "effort_levels",
+        "values": ["low", "medium", "high"],
+        "default": "medium",
+        "rejects_temperature": true
+      }
+    },
+    {
+      "match_prefixes": ["gpt-5.5"],
+      "config": {
+        "type": "effort_levels",
+        "values": ["minimal", "low", "medium", "high", "xhigh"],
+        "default": "medium",
+        "rejects_temperature": true
+      }
+    },
+    {
+      "match_prefixes": ["gpt-5.4"],
+      "config": {
+        "type": "effort_levels",
+        "values": ["minimal", "low", "medium", "high", "xhigh"],
+        "default": "medium"
+      }
+    },
+    {
+      "match_prefixes": ["gpt-5-nano"],
+      "config": {
+        "type": "effort_levels",
+        "values": ["minimal", "low", "medium", "high"],
+        "default": "medium",
+        "rejects_temperature": true
+      }
+    },
+    {
+      "match_prefixes": ["gpt-5"],
+      "config": {
+        "type": "effort_levels",
+        "values": ["minimal", "low", "medium", "high"],
+        "default": "medium"
+      }
+    }
+  ]
+}

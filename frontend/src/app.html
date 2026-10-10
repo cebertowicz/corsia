@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-shell="">
+<head>
+	<meta charset="utf-8" />
+	<script>
+		if (window.__TAURI_INTERNALS__ || window.__TAURI__) {
+			document.documentElement.dataset.shell = 'tauri';
+			window.addEventListener('keydown', (e) => {
+				if ((e.metaKey || e.ctrlKey) && (e.key === 'r' || e.key === 'R')) {
+					e.preventDefault();
+					const u = new URL(window.location.href);
+					u.searchParams.set('_r', String(Date.now()));
+					window.location.replace(u.toString());
+				}
+			}, true);
+		}
+	</script>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+	<meta name="mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+	<meta name="theme-color" content="#0a0a0b" id="theme-color-meta" />
+	<link rel="manifest" href="/manifest.json" />
+	<link rel="icon" type="image/png" sizes="192x192" href="/icons/corsia-192.png" />
+	<link rel="icon" type="image/png" sizes="512x512" href="/icons/corsia-512.png" />
+	<link rel="apple-touch-icon" sizes="180x180" href="/icons/corsia-apple-touch-180.png" />
+	<title>CORSIA</title>
+	<script>
+		document.addEventListener('touchstart', function () {}, { passive: true });
+
+		(function () {
+			const COLORS = { dark: '#0a0a0b', light: '#ffffff' };
+			const themeMeta = document.getElementById('theme-color-meta');
+			function apply() {
+				const t = document.documentElement.dataset.theme || 'dark';
+				if (themeMeta && COLORS[t]) themeMeta.setAttribute('content', COLORS[t]);
+			}
+			apply();
+			new MutationObserver(apply).observe(document.documentElement, {
+				attributes: true, attributeFilter: ['data-theme'],
+			});
+
+			window.addEventListener('pageshow', function (e) {
+				if (!e.persisted) return;
+				const cur = themeMeta && themeMeta.getAttribute('content');
+				if (themeMeta && cur) {
+					themeMeta.setAttribute('content', '#000000');
+					requestAnimationFrame(() => themeMeta.setAttribute('content', cur));
+				}
+				document.documentElement.setAttribute('data-resuming', '1');
+				requestAnimationFrame(() => requestAnimationFrame(() => {
+					document.documentElement.removeAttribute('data-resuming');
+				}));
+			});
+		})();
+	</script>
+	%sveltekit.head%
+</head>
+<body>
+	%sveltekit.body%
+	<script>
+		if ('serviceWorker' in navigator) {
+			navigator.serviceWorker.getRegistrations().then(regs => {
+				regs.forEach(r => r.unregister());
+			});
+		}
+	</script>
+</body>
+</html>

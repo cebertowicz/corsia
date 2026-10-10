@@ -1,0 +1,30 @@
+{
+  "$schema": "./qa/core/config.schema.json",
+  "version": 1,
+  "projectName": "CORSIA",
+  "adapter": "corsia",
+  "paths": {
+    "artifacts": ".qa/runs",
+    "impactMap": "qa/adapters/corsia/impact-map.json",
+    "surfaceCatalog": "qa/adapters/corsia/surfaces.yml",
+    "reviewPrompt": "qa/adapters/corsia/ux-review-prompt.md",
+    "toolCandidates": "qa/adapters/corsia/tool-candidates.json",
+    "designSystem": "frontend/DESIGN-SYSTEM.md"
+  },
+  "artifactInputs": [
+    "frontend/test-results",
+    "frontend/playwright-report"
+  ],
+  "catalog": {
+    "routes": ["frontend/src/routes"],
+    "components": ["frontend/src/lib/components"],
+    "api": ["backend/api", "backend/ws"]
+  },
+  "llm": {
+    "baseUrlEnv": "QA_LLM_BASE_URL",
+    "apiKeyEnv": "QA_LLM_API_KEY",
+    "modelEnv": "QA_LLM_MODEL",
+    "defaultModel": "local-vision",
+    "maxImages": 8
+  }
+}

@@ -1,0 +1,146 @@
+id: cache-C11-one-model-two-convs-parallel
+name: "One model, two sibling conversations parallel — within-model scheduler + cache contention"
+description: >
+  Same setup as C10 (one model, two distinct conversations with different
+  prefix histories), but turns fire in PARALLEL. Both X and Y send their
+  turn N at the same wall-clock moment; the eval harness waits for both
+  turn_completed events before issuing turn N+1 in each.
+
+  Measures the combined effect of:
+    1. Hot-cache contention (the C10 question)
+    2. oMLX's batched-engine behavior when two same-model requests overlap
+    3. Per-conversation TTFT under in-flight concurrency
+
+  Both per-turn hit rates and TTFT-inflation-vs-single-conversation are
+  scored. The single-conversation baseline comes from C05 (the same model
+  generating in isolation).
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-B
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7
+      (anti-overlap matrix: C10 vs C11 vs C09)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - multi-conversation
+  - within-model
+  - concurrent
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-35b-a3b"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  conversations: 2
+  turns_per_conversation: 10
+  expected_per_conversation_hit_rate_minimum: 0.85
+  expected_ttft_inflation_max_vs_c05: 3.0
+
+pre_conditions:
+  - fixture: omlx_loaded_model
+    args:
+      model: "qwen-3.6-35b-a3b"
+      pin: true
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c11_x
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c11_y
+  - fixture: distinct_prefix_seed
+    args:
+      session_id: sess_c11_x
+      seed_id: c11_x_history_seed
+      seed_turns: 3
+  - fixture: distinct_prefix_seed
+    args:
+      session_id: sess_c11_y
+      seed_id: c11_y_history_seed
+      seed_turns: 3
+  - fixture: c05_baselines_available
+    args:
+      models:
+        - "qwen-3.6-35b-a3b"
+
+steps:
+  - action: run_interleaved_dialog_pair
+    args:
+      sessions:
+        - session_id: sess_c11_x
+          model: "qwen-3.6-35b-a3b"
+        - session_id: sess_c11_y
+          model: "qwen-3.6-35b-a3b"
+      turns_per_session: 10
+      sequencing: parallel
+      timeout_ms_per_turn: 90000
+
+expected_outcomes:
+  - assertion: per_conversation_hit_rate_held
+    detail: >
+      For each conversation independently, turns 2-10 hit cache at
+      cached_tokens / (prompt_tokens − new_user_tokens) ≥ 0.85.
+  - assertion: ttft_inflation_under_cap
+    detail: >
+      Per-conversation TTFT under parallel load is at most 3.0× the C05
+      single-conversation TTFT baseline for the same model. (Same-model
+      parallel inflation is expected to be milder than cross-model
+      inflation — same Metal stream, batched-engine can share work.)
+  - assertion: no_provider_error
+    detail: Neither conversation errored.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 20
+  - name: check_no_provider_error
+    args: {}
+  - name: check_per_turn_hit_rate_above
+    args:
+      session_id: sess_c11_x
+      turn_range: [2, 10]
+      min_ratio: 0.85
+      slack_tokens: 20
+  - name: check_per_turn_hit_rate_above
+    args:
+      session_id: sess_c11_y
+      turn_range: [2, 10]
+      min_ratio: 0.85
+      slack_tokens: 20
+  - name: check_ttft_inflation_below_threshold
+    args:
+      reference_scenario: cache-C05-headtohead-isolated
+      reference_model: "qwen-3.6-35b-a3b"
+      max_ratio: 3.0
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_per_turn_hit_rate_above
+    - check_ttft_inflation_below_threshold
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Solver action: run_interleaved_dialog_pair with sequencing: parallel
+      (fires per-turn user_send actions in parallel via asyncio.gather,
+      waits for both turn_completed events, then advances to the next turn)
+    - Scorer: check_ttft_inflation_below_threshold (already needed for
+      C09; same scorer, different reference_scenario)
+
+  Interpretation matrix:
+    - C10 pass, C11 pass: same-model parallel is well-behaved end-to-end.
+    - C10 pass, C11 fail (hit rates OK, TTFT high): scheduler/batched-engine
+      bottleneck; cache itself is fine.
+    - C10 pass, C11 fail (hit rates fall): parallel issuance is causing
+      blocks to get re-prefilled because the index lookup races the indexing
+      step. Surface in oMLX with a repro.
+    - C10 fail: address before C11 — within-model contention is the upstream
+      problem.

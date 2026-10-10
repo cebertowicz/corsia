@@ -1,0 +1,84 @@
+name: corsia-default
+version: 0
+status: unpublished
+summary: Generic coordination rules, charter and safety templates, additive role files, pinned starter-kit references and declared KPIs for a conductor plus at most one owner role
+parameters:  # filled by the conductor from the interview (conductor-bootstrap section 2); fills lists the template placeholders each answer feeds
+  - {id: project_name, ask: "What is the project called?", fills: [project_name]}
+  - {id: owner_name, ask: "Who decides direction for this project?", fills: [owner_name]}
+  - {id: purpose, ask: "What outcome, for whom, why now, and what are the long-horizon goals?", fills: [purpose, long_horizon_goals]}
+  - {id: objectives, ask: "What are the two or three objectives for the next horizon, how would we know, and which wins when they compete?", fills: [objective_1, objective_2, tie_break_rule]}
+  - {id: decision_rights, ask: "What does the owner decide, what may agents decide alone, what is the owner's position, and what may no agent commit the owner to or speak for?", fills: [owner_position, owner_decides, agents_decide_alone, commitment_limits]}
+  - {id: standing_risks, ask: "What must never happen?", fills: [additional_invariant]}
+  - {id: isolation, ask: "Which live surfaces must never be edited directly (with examples), where is work developed and from what source, how does it reach the live surface, and which real data must tests never touch (with the disposable substitute, the approved procedure to change it, and the system of record)?", fills: [live_surfaces, live_surface_examples, working_copy, source_of_truth, promotion_route, real_data, disposable_data, real_data_procedure, system_of_record]}
+  - {id: non_goals, ask: "What is explicitly not this project?", fills: [non_goals]}
+  - {id: canonical_sources, ask: "Where does truth live today (repositories, documents, systems, people)?", fills: [canonical_sources]}
+  - {id: tolerances, ask: "How much error, rework, delay and spend can this project tolerate, and which items are zero tolerance?", fills: [error_tolerance, rework_tolerance, delay_tolerance, spend_tolerance, zero_tolerance_items]}
+files:  # ref: true is a starter-kit file pinned by repo-relative path, never copied into the package
+  - kind: charter-template
+    path: context/PROJECT.md.tmpl
+    bytes: 2121
+    sha256: 4db0e4b21c16398f8cd2726eb35ed63aa4af9c73340e7eaea5523ef9ebdff685
+  - kind: rules
+    path: context/COORDINATION-CORE.md
+    bytes: 9042
+    sha256: be73e915d07392cdde9cb166f8c10632128ac8274096ca156c04df7405e1fc9b
+  - kind: project-layer-template
+    path: context/COORDINATION-MODEL.md.tmpl
+    bytes: 740
+    sha256: 7fac89244083b32fe527608a2b319cac70b1f5a7c97f83f9e0d344fff2e3c10c
+  - kind: safety-template
+    path: context/SAFETY-INVARIANTS.md.tmpl
+    bytes: 1862
+    sha256: e7905c770022a0e5f0c1daf49efb43313674695933f9b1286494747173d85fde
+  - kind: role-context
+    path: context/roles/agent/05-waiting-is-work.md
+    bytes: 730
+    sha256: 3bcd71f5920ff0e817193a536bcf27a56246aac9b7837c0c4774add9117c5c58
+  - kind: role-context
+    path: context/roles/conductor/05-roster-design.md
+    bytes: 812
+    sha256: 3bff6d1f27574b6082e14c4cbee914e1e937b8b6fcc9a19f742a03506a01265f
+  - kind: responsibility-template
+    path: docs/contributing/bootstrap/starter-kit/templates/RESPONSIBILITY.md
+    ref: true
+    bytes: 4580
+    sha256: 1ca79f669304f24f60c13235a91b8d9c7edf0f35d125b9f4f21117d012fafc6f
+  - kind: responsibility-standard
+    path: docs/contributing/bootstrap/starter-kit/shared/standards/RESPONSIBILITY-STANDARD.md
+    ref: true
+    bytes: 3492
+    sha256: 1afe075f552a1ab4a3930e73308cdf7d5e4654aa416bba91495136225a27f06e
+  - kind: routing
+    path: docs/contributing/bootstrap/starter-kit/context/SPAWN-POLICY.md
+    ref: true
+    bytes: 4534
+    sha256: 9121f7c87f5ae8e4922a6bd99d2eb505a4f97a624f214dc4b342cfed2f0be192
+starter_roster:  # default; max applies to the starter roster; later roles go through conductor-bootstrap roster design
+  - {role: conductor, required: true}
+  - {role: owner, required: false, max: 1, template: responsibility-template}
+scheduled_jobs: []
+kpis:  # targets are left per project; each metric id is defined in backend/api/measurement.py REGISTRY
+  - id: first_try_acceptance
+    definition: Share of outcomes accepted on their first submission
+    metric: first_try_acceptance
+  - id: rejections_per_outcome
+    definition: Rejections per accepted outcome (the correction rate)
+    metric: rejections_per_outcome
+  - id: fresh_tokens_per_outcome
+    definition: Fresh model tokens (cache re-reads excluded) per accepted outcome, including the tokens of worker threads spawned to deliver it (the cost measure; dollars are unavailable because dollar_trend is available=False)
+    metric: fresh_tokens_per_outcome
+  - id: asks_per_outcome
+    definition: Decisions raised to the owner per accepted outcome (attention)
+    metric: asks_per_outcome
+  - id: active_hours_per_outcome
+    definition: Owner active hours per accepted outcome (attention)
+    metric: active_hours_per_outcome
+tests:  # repo-relative bundled tests; run by the tools pytest gate
+  - tools/test_corsia_default_package.py
+notes:
+  - "COORDINATION-CORE.md is the installed context/COORDINATION-CORE.md without its first line (the origin header)."
+  - "The cite to shared/standards/llm-anti-patterns.md #10 in COORDINATION-CORE.md points to an optional file that this version does not ship."
+  - "A ref entry pins the starter-kit file's bytes and sha256 on the branch that carries this package, so an edit to that file makes the pin visibly stale."
+  - "The pinned SPAWN-POLICY.md is selector-free (tier placeholders only) and is filled from the live /api/models at install."
+  - "The bundled tests guard the package's structure (placeholder coverage, pins, manifest shape); what still keeps the package unpublished is the behavioral evals of the model itself, which do not exist yet."
+  - "Follow-ups not in this version: standards with an update path, optional/, evals/ (the behavioral evals), repository setup, install script, version stamping and requires_corsia."

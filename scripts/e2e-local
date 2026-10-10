@@ -1,0 +1,406 @@
+#!/usr/bin/env bash
+# scripts/e2e-local — run the Playwright E2E suite locally.
+#
+# Usage:
+#   bash scripts/e2e-local                          # real mode (full suite)
+#   CORSIA_E2E_MOCK=1 bash scripts/e2e-local       # mock mode (CI path)
+#   bash scripts/e2e-local --visual                  # visual regression only
+#   bash scripts/e2e-local --reuse                   # reuse existing servers
+#   bash scripts/e2e-local --grep <pat>              # subset matching pat
+#
+# Real mode never reads a production database or the real CORSIA bootstrap
+# config (see scripts/seed-worktree-db --help for its full synthetic-seeding
+# input list). Backend interpreter resolution (first match wins):
+#   CORSIA_E2E_PYTHON=/path/to/python  # explicit override
+# This script exports the resolved interpreter to Playwright as
+# CORSIA_E2E_BACKEND_PYTHON. Invoking Playwright directly (without this
+# script) honours either name.
+#   $VIRTUAL_ENV/bin/python              # invoking shell's active venv
+#   <this repo root>/.venv/bin/python    # worktree-local venv
+#   <canonical clone>/.venv/bin/python   # original, still-supported default
+#
+set -euo pipefail
+
+MOCK_MODE="${CORSIA_E2E_MOCK:-0}"
+
+if [ "$MOCK_MODE" = "1" ]; then
+  export CORSIA_E2E_MODEL="mock/test-model"
+elif [ -z "${CORSIA_E2E_MODEL:-}" ]; then
+  echo "ERROR: e2e-local real mode requires CORSIA_E2E_MODEL to be set" >&2
+  echo "       (e.g. export CORSIA_E2E_MODEL=<provider>/<model>). No" >&2
+  echo "       hardcoded default model is used. Or run with CORSIA_E2E_MOCK=1." >&2
+  exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+COMMON_GIT_DIR="$(cd "$REPO_ROOT" && git rev-parse --git-common-dir)"
+case "$COMMON_GIT_DIR" in
+  /*) CANONICAL_GIT_DIR="$COMMON_GIT_DIR" ;;
+  *)  CANONICAL_GIT_DIR="${REPO_ROOT}/${COMMON_GIT_DIR}" ;;
+esac
+CANONICAL_REPO_ROOT="$(cd "$(dirname "$CANONICAL_GIT_DIR")" && pwd)"
+
+# Resolve the backend Python from the invoking environment so this runs
+# unchanged from a linked worktree, not just the canonical clone: an explicit
+# override wins, then the invoking shell's active venv, then a worktree-local
+# venv, then the canonical clone's venv (the original, still-supported path).
+if [ -n "${CORSIA_E2E_PYTHON:-}" ]; then
+  VENV_PY="$CORSIA_E2E_PYTHON"
+  if [ ! -x "$VENV_PY" ]; then
+    echo "FATAL: CORSIA_E2E_PYTHON=$VENV_PY is not executable." >&2
+    exit 1
+  fi
+elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
+  VENV_PY="${VIRTUAL_ENV}/bin/python"
+elif [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+  VENV_PY="${REPO_ROOT}/.venv/bin/python"
+elif [ -x "${CANONICAL_REPO_ROOT}/.venv/bin/python" ]; then
+  VENV_PY="${CANONICAL_REPO_ROOT}/.venv/bin/python"
+else
+  echo "FATAL: no Python venv found. Set CORSIA_E2E_PYTHON, activate one," >&2
+  echo "       or install backend deps at ${REPO_ROOT}/.venv first." >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+
+# Account creation and token minting live in one place; reuse it rather
+# than re-deriving how a credential comes into existence.
+PYTHON="$VENV_PY"
+BACKEND_DIR="${REPO_ROOT}/backend"
+# shellcheck source=corsia.d/accounts.sh
+. "${SCRIPT_DIR}/corsia.d/accounts.sh"
+
+# The roots are this script's in-repo defaults unless the caller names its own
+# (CORSIA_E2E_* are the names frontend/playwright.config.ts honours, so the
+# value propagates). prepare_roots below decides what may be deleted or created.
+DEFAULT_WORKSPACE="${REPO_ROOT}/frontend/.qa/e2e-workspace"
+DEFAULT_STATE_ROOT="${REPO_ROOT}/frontend/.qa/e2e-state"
+WORKSPACE="${CORSIA_E2E_WORKSPACE:-$DEFAULT_WORKSPACE}"
+STATE_ROOT="${CORSIA_E2E_STATE_DIR:-$DEFAULT_STATE_ROOT}"
+WORKSPACE_DB="${STATE_ROOT}/corsia.db"
+BOOT_PORT="${CORSIA_E2E_BACKEND_PORT:-3110}"
+# Keep the boot log inside the repo rather than $TMPDIR: it stays with the run
+# that produced it, and it does not depend on a temp directory an agent
+# execution context may not be allowed to write.
+BOOT_LOG_DIR="${REPO_ROOT}/frontend/.qa"
+BOOT_LOG="${BOOT_LOG_DIR}/e2e-boot.log"
+
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+header() { printf '\n\033[1;36m=== %s ===\033[0m\n' "$*"; }
+
+# The API token the Playwright suite signs in with. Nothing ships with a
+# credential, so this disposable install provisions its own; minted once
+# per run whichever mode got us here, and gone when the workspace is.
+E2E_API_TOKEN=""
+E2E_SESSION_TOKEN=""
+provision_e2e_account() {
+  [ -n "$E2E_API_TOKEN" ] && return 0
+  E2E_API_TOKEN=$(
+    export CORSIA_TEST_MODE=1 CORSIA_WORKSPACE="$WORKSPACE" \
+           CORSIA_STATE_DIR="$STATE_ROOT"
+    seed_disposable_account e2e e2e-local
+  ) || { red "FATAL: could not provision the e2e account."; exit 1; }
+  if [ -z "$E2E_API_TOKEN" ]; then
+    red "FATAL: e2e account provisioned but no token was minted."
+    exit 1
+  fi
+  E2E_SESSION_TOKEN="$(
+    cd "$BACKEND_DIR" && \
+      CORSIA_TEST_MODE=1 CORSIA_WORKSPACE="$WORKSPACE" CORSIA_STATE_DIR="$STATE_ROOT" \
+        "$VENV_PY" -c '
+from infra.accounts import issue_token
+print(issue_token("e2e", kind="session", label="e2e-browser")[0])
+'
+  )" || { red "FATAL: could not mint an e2e browser session."; exit 1; }
+  if [ -z "$E2E_SESSION_TOKEN" ]; then
+    red "FATAL: e2e account provisioned but no browser session was minted."
+    exit 1
+  fi
+  green "provisioned a disposable e2e account, API token, and browser session"
+}
+
+refuse() { red "FATAL: refusing $*"; exit 1; }
+
+physical_path() {
+  "$VENV_PY" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"
+}
+
+# A root is deleted only when it is this script's own default, reached without
+# a symlink. A root the caller names is never deleted: it must be absent or an
+# empty directory, and one that cannot be read is not taken for empty.
+check_root() {
+  local root="$1" default="$2" entries
+  case "$root" in
+    /*) ;;
+    *) refuse "the relative root '$root'; pass an absolute path" ;;
+  esac
+  if [ -L "$root" ]; then
+    refuse "the symlinked root '$root'"
+  fi
+  [ "$root" = "$default" ] && return 0
+  [ -e "$root" ] || return 0
+  if [ ! -d "$root" ]; then
+    refuse "the root '$root': it is not a directory"
+  fi
+  if ! entries="$(ls -A "$root" 2>/dev/null)"; then
+    refuse "the root '$root': it cannot be read, so it cannot be shown to be empty"
+  fi
+  if [ -n "$entries" ]; then
+    refuse "the root '$root': it has content, and a caller-supplied root is never deleted. Pass a fresh path, or --reuse to run against it"
+  fi
+}
+
+# Decides everything before anything is touched: both roots are checked
+# together, then the backend's own path guard is asked with the environment
+# the boot uses, so a root it rejects is never created. Only a run that passes
+# owns the port, so listener discovery and the exit cleanup start after it.
+prepare_roots() {
+  local qa physical_repo workspace state
+  qa="$(physical_path "$BOOT_LOG_DIR")"
+  physical_repo="$(physical_path "$REPO_ROOT")"
+  if [ "$qa" != "${physical_repo}/frontend/.qa" ]; then
+    refuse "to write under '$BOOT_LOG_DIR': it leads outside this checkout, to '$qa'"
+  fi
+  check_root "$WORKSPACE" "$DEFAULT_WORKSPACE"
+  check_root "$STATE_ROOT" "$DEFAULT_STATE_ROOT"
+  workspace="$(physical_path "$WORKSPACE")"
+  state="$(physical_path "$STATE_ROOT")"
+  case "${workspace}/" in
+    "${state}/"*) refuse "overlapping roots: workspace '$WORKSPACE' is the state root '$STATE_ROOT' or inside it" ;;
+  esac
+  case "${state}/" in
+    "${workspace}/"*) refuse "overlapping roots: state root '$STATE_ROOT' is inside workspace '$WORKSPACE'" ;;
+  esac
+  ( cd "${REPO_ROOT}/backend" && \
+    env CORSIA_TEST_MODE=1 CORSIA_WORKSPACE="$WORKSPACE" \
+      CORSIA_STATE_DIR="$STATE_ROOT" "$VENV_PY" -c 'import infra.config' ) \
+    || refuse "these roots: the backend path guard rejected them (reason above)"
+
+  trap cleanup EXIT
+  STALE_PIDS=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
+  if [ -n "$STALE_PIDS" ]; then
+    yellow "killing stale backend(s) on :${BOOT_PORT} — $STALE_PIDS"
+    echo "$STALE_PIDS" | xargs kill 2>/dev/null || true
+    sleep 1
+  fi
+  if [ "$WORKSPACE" = "$DEFAULT_WORKSPACE" ]; then rm -rf "$WORKSPACE"; fi
+  if [ "$STATE_ROOT" = "$DEFAULT_STATE_ROOT" ]; then rm -rf "$STATE_ROOT"; fi
+  mkdir -p "$WORKSPACE" "$STATE_ROOT" "$BOOT_LOG_DIR"
+}
+
+cleanup() {
+  STALE=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
+  if [ -n "$STALE" ]; then
+    echo "$STALE" | xargs kill 2>/dev/null || true
+    sleep 1
+  fi
+  # The boot log is deliberately NOT deleted: when boot fails it is the only
+  # record of why. It is gitignored and overwritten by the next run.
+  if [ -s "$BOOT_LOG" ]; then
+    echo "backend boot log: $BOOT_LOG"
+  fi
+}
+boot_backend() {
+  local workspace="$1"
+  local log_file="$2"
+  ( cd "${REPO_ROOT}/backend" && \
+    env CORSIA_TEST_MODE=1 CORSIA_WORKSPACE="$workspace" \
+      CORSIA_STATE_DIR="$STATE_ROOT" "$VENV_PY" -m uvicorn main:app \
+      --host 127.0.0.1 --port $BOOT_PORT > "$log_file" 2>&1 ) &
+  BOOT_PID=$!
+}
+
+kill_backend() {
+  if [ -n "${BOOT_PID:-}" ] && kill -0 "$BOOT_PID" 2>/dev/null; then
+    kill "$BOOT_PID" 2>/dev/null || true
+    wait "$BOOT_PID" 2>/dev/null || true
+  fi
+  STALE=$(lsof -ti:$BOOT_PORT 2>/dev/null || true)
+  if [ -n "$STALE" ]; then
+    echo "$STALE" | xargs kill 2>/dev/null || true
+  fi
+  BOOT_PID=""
+  sleep 1
+}
+
+REUSE=0
+GREP_ARG=""
+VISUAL=0
+EXTRA_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --reuse)   REUSE=1; shift ;;
+    --visual)  VISUAL=1; shift ;;
+    --grep)    GREP_ARG="$2"; shift 2 ;;
+    *)         EXTRA_ARGS+=("$1"); shift ;;
+  esac
+done
+
+if [ "$MOCK_MODE" = "1" ]; then
+  header "MOCK MODE — all LLM responses are seeded mocks"
+
+  if [ "$REUSE" = "0" ]; then
+    header "1/2 prep workspace at ${WORKSPACE}"
+    prepare_roots
+
+    # Same guard as real mode below: lsof is sandbox-denied in agent sessions,
+    # so the sweep above can silently see nothing. Mock mode is the documented
+    # CI path, so it must not quietly test against a foreign listener either.
+    if curl -sf "http://127.0.0.1:${BOOT_PORT}/api/health" > /dev/null 2>&1; then
+      red "FATAL: something is already answering on :${BOOT_PORT} before boot — stale listener; kill it and rerun"
+      exit 1
+    fi
+    green "workspace ready at $WORKSPACE"
+  else
+    header "1/2 SKIPPED (--reuse)"
+  fi
+
+else
+  if [ "$REUSE" = "0" ]; then
+    header "1/3 prep workspace at ${WORKSPACE}"
+    prepare_roots
+
+    # lsof is sandbox-denied in agent sessions, so the stale-PID sweep above
+    # can silently see nothing. A health probe answering BEFORE we boot is
+    # proof of a foreign listener — fail loud instead of testing against it.
+    if curl -sf "http://127.0.0.1:${BOOT_PORT}/api/health" > /dev/null 2>&1; then
+      red "FATAL: something is already answering on :${BOOT_PORT} before boot — stale listener; kill it and rerun"
+      exit 1
+    fi
+
+    yellow "booting backend on :${BOOT_PORT} to initialize schema (~5s)..."
+    boot_backend "$WORKSPACE" "$BOOT_LOG"
+    HEALTHY=0
+    for i in {1..30}; do
+      if ! kill -0 "$BOOT_PID" 2>/dev/null; then
+        break  # our child died; health from anyone else is a lie
+      fi
+      if curl -sf "http://127.0.0.1:${BOOT_PORT}/api/health" > /dev/null 2>&1; then
+        HEALTHY=1
+        green "backend healthy after ${i}s."
+        break
+      fi
+      sleep 1
+    done
+    kill_backend
+    if [ "$HEALTHY" = "0" ]; then
+      cp "$BOOT_LOG" "${REPO_ROOT}/frontend/.qa/e2e-boot-failure.log" 2>/dev/null || true
+      red "FATAL: backend never became healthy (or died). Log preserved at frontend/.qa/e2e-boot-failure.log"
+      tail -20 "$BOOT_LOG"
+      exit 1
+    fi
+
+    if [ ! -f "$WORKSPACE_DB" ]; then
+      cp "$BOOT_LOG" "${REPO_ROOT}/frontend/.qa/e2e-boot-failure.log" 2>/dev/null || true
+      red "FATAL: backend ran but DB not at $WORKSPACE_DB. Log preserved at frontend/.qa/e2e-boot-failure.log"
+      exit 1
+    fi
+
+    # Before seeding, not after: the seeded thread is owned by this install's
+    # account, so that account has to exist for the suite to see it.
+    provision_e2e_account
+
+    header "2/3 seed synthetic settings + catalog"
+    # STATE_ROOT is this script's own default, or a caller root prepare_roots
+    # found empty and the backend path guard accepted — safe to self-attest for
+    # seed-worktree-db's sandboxed-bootstrap confirmation gate. The WORKSPACE/STATE
+    # roots must also reach the seed process itself: its imports resolve
+    # infra.config, which under a sandbox-denied home requires both.
+    CORSIA_SEED_CONFIRM_NOT_PROD=1 \
+      CORSIA_WORKSPACE="$WORKSPACE" \
+      CORSIA_STATE_DIR="$STATE_ROOT" \
+      "$VENV_PY" "${SCRIPT_DIR}/seed-worktree-db" "$STATE_ROOT" \
+      --workspace "$WORKSPACE" || exit 1
+
+    yellow "rebooting to populate catalog from seeded providers..."
+    boot_backend "$WORKSPACE" "$BOOT_LOG"
+    for i in {1..30}; do
+      if curl -sf "http://127.0.0.1:${BOOT_PORT}/api/health" > /dev/null 2>&1; then break; fi
+      sleep 1
+    done
+
+    PICKED_MODEL=""
+    for attempt in {1..10}; do
+      PICKED_MODEL=$(curl -s "http://127.0.0.1:${BOOT_PORT}/api/models?token=${E2E_API_TOKEN}" | "$VENV_PY" -c "
+import json, sys
+data = json.load(sys.stdin)
+api_models = [m for m in data.get('models', []) if m.get('backend') == 'api']
+print(api_models[0]['litellm_model'] if api_models else '')
+" 2>/dev/null)
+      [ -n "$PICKED_MODEL" ] && break
+      sleep 1
+    done
+    kill_backend
+
+    if [ -z "$PICKED_MODEL" ]; then
+      red "FATAL: no cloud model in catalog after seed. Check that CORSIA_E2E_MODEL is"
+      red "an anthropic/openai model, and (for a non-anthropic provider) that"
+      red "CORSIA_SEED_PROVIDER_API_KEY is set to a valid key."
+      exit 1
+    fi
+    green "picked test model: $PICKED_MODEL (used explicitly for created test threads)"
+    export CORSIA_E2E_MODEL="$PICKED_MODEL"
+  else
+    header "1-2/3 SKIPPED (--reuse) — using existing workspace at $WORKSPACE"
+    if [ ! -f "$WORKSPACE_DB" ]; then
+      red "FATAL: --reuse but no workspace DB. Run without --reuse first."
+      exit 1
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Hand off to Playwright
+# ---------------------------------------------------------------------------
+# Covers mock mode and --reuse, which skip the branch that provisions above.
+provision_e2e_account
+
+header "run Playwright suite"
+cd "${REPO_ROOT}/frontend"
+
+if [ ! -d "node_modules/@playwright" ] || [ ! -x "node_modules/.bin/playwright" ]; then
+  red "Playwright is not installed in ${REPO_ROOT}/frontend."
+  yellow "One-time setup (~30s):"
+  yellow "  cd ${REPO_ROOT}/frontend"
+  yellow "  npm install"
+  yellow "  npx playwright install chromium"
+  exit 1
+fi
+
+NPM_SCRIPT="e2e"
+[ "$VISUAL" = "1" ] && NPM_SCRIPT="e2e:visual"
+
+PLAYWRIGHT_ENV=()
+if [ "$REUSE" = "1" ]; then
+  PLAYWRIGHT_ENV+=(CORSIA_E2E_REUSE=1)
+fi
+if [ "$MOCK_MODE" = "1" ]; then
+  PLAYWRIGHT_ENV+=(CORSIA_E2E_MOCK=1)
+fi
+PLAYWRIGHT_ENV+=(CORSIA_E2E_WORKSPACE="$WORKSPACE")
+PLAYWRIGHT_ENV+=(CORSIA_E2E_STATE_DIR="$STATE_ROOT")
+PLAYWRIGHT_ENV+=(CORSIA_E2E_BACKEND_PYTHON="$VENV_PY")
+PLAYWRIGHT_ENV+=(CORSIA_E2E_SESSION_TOKEN="$E2E_SESSION_TOKEN")
+PLAYWRIGHT_ENV+=(CORSIA_E2E_TOKEN="$E2E_API_TOKEN")
+
+CMD_ARGS=()
+if [ -n "$GREP_ARG" ]; then
+  CMD_ARGS+=(-- --grep "$GREP_ARG")
+fi
+if [ "${#EXTRA_ARGS[@]}" -gt 0 ]; then
+  CMD_ARGS+=("${EXTRA_ARGS[@]}")
+fi
+
+env "${PLAYWRIGHT_ENV[@]}" npm run "$NPM_SCRIPT" ${CMD_ARGS[@]+"${CMD_ARGS[@]}"}
+RC=$?
+
+if [ $RC -eq 0 ]; then
+  green "e2e-local: all flows green. Report at frontend/playwright-report/index.html"
+else
+  red "e2e-local: failures present. Report at frontend/playwright-report/index.html"
+  exit $RC
+fi

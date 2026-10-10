@@ -1,0 +1,153 @@
+"""Presence follows the selected scope: project-level visits only for a project-only query."""
+
+from __future__ import annotations
+
+import inspect
+
+import pytest
+
+USER = {"id": "steve"}
+LEGACY_WEEK_FROM = "2026-09-14"
+LEGACY_WEEK_TO = "2026-09-21"
+
+
+def _seed_thread(db, thread_id: str, *, project_id: str | None = None,
+                 parent_id: str | None = None, agent: bool = False) -> None:
+    db.execute(
+        "INSERT INTO threads (id,user_id,title,project_id,parent_thread_id,agent_enabled,agent_status,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,?,?,'2026-09-01T00:00:00Z','2026-09-01T00:00:00Z')",
+        (thread_id, "steve", thread_id, project_id, parent_id, int(agent), "active"),
+    )
+
+
+def _seed_visit(db, surface: str, *, thread_id: str | None = None, project_id: str | None = None) -> None:
+    db.execute(
+        "INSERT INTO presence_visits (user_id,surface,thread_id,project_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+        "VALUES ('steve',?,?,?,'2026-09-21T12:00:00Z','2026-09-21T13:00:00Z',3600,1,'hidden')",
+        (surface, thread_id, project_id),
+    )
+
+
+def _seeded() -> None:
+    """One hour of presence in each shape a scope can reach, inside project one."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        for project_id in ("one", "two"):
+            db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,'t','t')", (project_id, project_id))
+        _seed_thread(db, "agent-a", project_id="one", agent=True)
+        _seed_thread(db, "agent-a-child", parent_id="agent-a")
+        _seed_thread(db, "agent-b", project_id="one", agent=True)
+        _seed_thread(db, "agent-c", project_id="two", agent=True)
+        _seed_visit(db, "own-thread", thread_id="agent-a")
+        _seed_visit(db, "own-child-thread", thread_id="agent-a-child")
+        _seed_visit(db, "peer-agent-thread", thread_id="agent-b")
+        _seed_visit(db, "project-level", project_id="one")
+        _seed_visit(db, "other-project-thread", thread_id="agent-c")
+        _seed_visit(db, "other-project-level", project_id="two")
+        db.commit()
+    finally:
+        db.close()
+
+
+def _composite_surface(measurement_series) -> bool:
+    """Whether the handler addresses one scope with the composite project/agent/grain surface."""
+    parameters = inspect.signature(measurement_series).parameters
+    return {"project", "agent", "grain"} <= set(parameters)
+
+
+async def _hours(measurement_series, *, project: str = "all", agent: str | None = None) -> float:
+    """Total presence hours one composite scope selects, at the family the panel reads.
+
+    Read through the family rather than ``/series`` on purpose: the presence
+    instrument began 2026-09-29, the served spine ends at the last completed period, and
+    a window-level request therefore correctly returns none of these synthetic visits
+    until that period completes. What this file owns is which visits a scope selects --
+    the same predicate the panel reads through -- so the window is named here instead.
+    """
+    assert _composite_surface(measurement_series), (
+        "presence scope is only a testable contract once one request carries project, agent and grain"
+    )
+    from api.measurement_queries import prepare_outcome_periods
+    from infra.database import get_db
+    from tests.test_measurement_api import _family_in_range, _grained
+
+    params = {
+        "user_id": USER["id"],
+        "scope_project": project,
+        "scope_agent": agent or None,
+        "from": LEGACY_WEEK_FROM,
+        "to": LEGACY_WEEK_TO,
+    }
+    db = get_db()
+    try:
+        prepare_outcome_periods(db, _grained(params))
+        return sum(row["value"] or 0 for row in _family_in_range(db, "presence", params))
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_project_only_scope_keeps_project_level_presence(isolated_db):
+    """The baseline a project-only query must keep: its own closure plus project-level visits."""
+    from api.measurement import measurement_series
+
+    _seeded()
+    assert await _hours(measurement_series, project="one") == 4.0
+
+
+@pytest.mark.asyncio
+async def test_agent_scope_counts_only_the_selected_agent_closure(isolated_db):
+    """A selected agent never inherits another agent's or unassigned project presence."""
+    from api.measurement import measurement_series
+
+    _seeded()
+    assert await _hours(measurement_series, agent="agent-a") == 2.0
+
+
+@pytest.mark.asyncio
+async def test_project_and_agent_together_keep_the_exact_agent_closure(isolated_db):
+    """Naming an agent's own project must not change that agent's answer.
+
+    Pre-fix, the presence predicate took its project alternative for any named
+    project, so this same request returned 3.0h: the agent's own 2.0h closure
+    plus the visit recorded against the project with no thread. The same agent
+    answered two different numbers depending on whether its own project was
+    named, while project-only (4.0h), agent-only (2.0h) and workspace+agent
+    (2.0h) stayed correct, which is why a scope-only test missed it.
+    """
+    from api.measurement import measurement_series
+
+    _seeded()
+    assert await _hours(measurement_series, project="one", agent="agent-a") == 2.0
+
+
+@pytest.mark.asyncio
+async def test_workspace_scope_with_an_agent_excludes_project_level_presence(isolated_db):
+    from api.measurement import measurement_series
+
+    _seeded()
+    assert await _hours(measurement_series, project="all", agent="agent-a") == 2.0
+
+
+@pytest.mark.asyncio
+async def test_exclusive_scope_surface_answered_only_the_agent(isolated_db):
+    """Why the composite case was invisible before: the old surface had no project to name.
+
+    A caller that wanted one agent inside one project could only name the agent,
+    and the project was dropped without complaint, so the wrong-hours case could
+    not be requested at all.
+    """
+    from api.measurement import measurement_series
+
+    if _composite_surface(measurement_series):
+        pytest.skip("the exclusive scope surface this records is retired on this branch")
+
+    _seeded()
+    response = await measurement_series(
+        ids="time_on_platform_h", from_=LEGACY_WEEK_FROM, to=LEGACY_WEEK_TO,
+        scope="agent", scope_id="agent-a", project="one", grain="weeks", timezone_name="UTC", user=USER,
+    )
+    hours = sum(row["value"] or 0 for row in response["rows"] if row["series"] == "time_on_platform_h")
+    assert hours == 2.0

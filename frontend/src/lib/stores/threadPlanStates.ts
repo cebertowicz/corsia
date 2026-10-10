@@ -1,0 +1,156 @@
+/**
+ * The chat list's plan state per thread (#2220). The server derives every
+ * state by the plan header's rule; this store only holds the last reading.
+ *
+ * One batched read covers the listed threads. It is refreshed for the threads a
+ * `plans_changed`, `thread_updates_changed` or `host_access_changed` nudge
+ * names (the update dot's seen state, an access request), and in full on
+ * reconnect and on sign-in. Nothing re-reads on a timer except the one set for
+ * the next overdue wait, which re-reads only the threads whose wait came due.
+ * A failed read keeps the last reading, and the next
+ * trigger retries.
+ */
+import { get, writable } from 'svelte/store';
+import { readThreadPlanStates, type ThreadPlanStateEntry } from '$lib/api/plans';
+import { on } from '$lib/ws';
+import { token } from './auth';
+import { connectionState } from './connection';
+import type { PlansChangedMessage } from './planKeys';
+
+export const threadPlanStates = writable<Record<string, ThreadPlanStateEntry>>({});
+
+let listed = new Set<string>();
+let seq = 0;
+/** The newest read that has written each thread, so a slow older read never overwrites it. */
+const appliedSeq = new Map<string, number>();
+let stopAmbient: (() => void) | null = null;
+let overdueTimer: ReturnType<typeof setTimeout> | null = null;
+/** Under the server's per-read cap, and short enough for any URL limit. */
+const CHUNK = 100;
+const MIN_OVERDUE_RELOAD_MS = 5_000;
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+function scheduleNextOverdue(states: Record<string, ThreadPlanStateEntry>): void {
+	if (overdueTimer !== null) clearTimeout(overdueTimer);
+	overdueTimer = null;
+	let armedFor: string | null = null;
+	let next = Number.POSITIVE_INFINITY;
+	for (const [id, entry] of Object.entries(states)) {
+		const at = listed.has(id) && entry.next_overdue_at ? Date.parse(entry.next_overdue_at) : Number.NaN;
+		if (at < next) {
+			armedFor = id;
+			next = at;
+		}
+	}
+	if (armedFor === null) return;
+	const armed = armedFor;
+	const delay = Math.min(MAX_TIMEOUT_MS, Math.max(MIN_OVERDUE_RELOAD_MS, next - Date.now()));
+	overdueTimer = setTimeout(() => {
+		overdueTimer = null;
+		const cutoff = Math.max(next, Date.now());
+		const due = Object.entries(states)
+			.filter(([id, entry]) => listed.has(id) && typeof entry.next_overdue_at === 'string'
+				&& Date.parse(entry.next_overdue_at) <= cutoff)
+			.map(([id]) => id);
+		// Nothing listed is due only when the armed thread left the list; its read re-arms the timer.
+		void load(due.length > 0 ? due : [armed]);
+	}, delay);
+}
+
+threadPlanStates.subscribe(scheduleNextOverdue);
+
+async function load(ids: string[]): Promise<void> {
+	for (let start = 0; start < ids.length; start += CHUNK) {
+		await loadChunk(ids.slice(start, start + CHUNK));
+	}
+}
+
+async function loadChunk(ids: string[]): Promise<void> {
+	const bearer = get(token);
+	if (!bearer || ids.length === 0) return;
+	const mine = ++seq;
+	const states = await readThreadPlanStates(bearer, ids);
+	if (states === null) return;
+	threadPlanStates.update((current) => {
+		const next = { ...current };
+		for (const id of ids) {
+			if ((appliedSeq.get(id) ?? 0) > mine) continue;
+			appliedSeq.set(id, mine);
+			if (states[id]) next[id] = states[id];
+			else delete next[id];
+		}
+		return next;
+	});
+}
+
+/** The listed threads a nudge's `thread_ids` names; anything else is ignored. */
+function namedListed(value: unknown): string[] {
+	const named = Array.isArray(value) ? value : [];
+	return [...new Set(named.filter((id): id is string => typeof id === 'string' && listed.has(id)))];
+}
+
+function startAmbient(): () => void {
+	const offNudge = on('plans_changed', (message: PlansChangedMessage) => {
+		const named = message.plans
+			.filter((change) => change.owner.kind === 'thread' && listed.has(change.owner.id))
+			.map((change) => change.owner.id);
+		void load([...new Set(named)]);
+	});
+	// An update, a visit or a Mark read/unread changes only the named threads' dots.
+	const offUpdatesNudge = on('thread_updates_changed', (message: { thread_ids?: unknown }) => {
+		void load(namedListed(message?.thread_ids));
+	});
+	// A lease is not a plan mutation, but its awaiting-user state shares the
+	// same batched row projection. Re-read the threads its nudge names; a nudge
+	// naming none (the server could not resolve them) re-reads every listed row.
+	const offHostAccessNudge = on('host_access_changed', (message: { thread_ids?: unknown }) => {
+		void load(message?.thread_ids === undefined ? [...listed] : namedListed(message.thread_ids));
+	});
+	let wasConnected = get(connectionState) === 'connected';
+	const offConnection = connectionState.subscribe((state) => {
+		const connected = state === 'connected';
+		if (connected && !wasConnected) void load([...listed]);
+		wasConnected = connected;
+	});
+	let lastToken = get(token);
+	const offToken = token.subscribe((value) => {
+		if (value === lastToken) return;
+		lastToken = value;
+		void load([...listed]);
+	});
+	return () => {
+		offNudge();
+		offUpdatesNudge();
+		offHostAccessNudge();
+		offConnection();
+		offToken();
+	};
+}
+
+/** Follow the chat list's threads; only threads new to the list are read at once. */
+export function watchThreadPlanStates(threadIds: string[]): void {
+	const added = threadIds.filter((id) => !listed.has(id));
+	listed = new Set(threadIds);
+	stopAmbient ??= startAmbient();
+	void load(added);
+}
+
+/** Re-read named listed threads now, e.g. after this device marked one read or unread. */
+export function reloadThreadPlanStates(threadIds: string[]): void {
+	void load(threadIds.filter((id) => listed.has(id)));
+}
+
+export function stopThreadPlanStates(): void {
+	stopAmbient?.();
+	stopAmbient = null;
+	if (overdueTimer !== null) clearTimeout(overdueTimer);
+	overdueTimer = null;
+	listed = new Set();
+}
+
+export function resetThreadPlanStatesForTests(): void {
+	stopThreadPlanStates();
+	seq = 0;
+	appliedSeq.clear();
+	threadPlanStates.set({});
+}

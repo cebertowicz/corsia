@@ -1,0 +1,37 @@
+<!-- origin: corsia-default coordination model, version 0 (unpublished), template for context/SAFETY-INVARIANTS.md -->
+
+# <project_name> safety invariants
+
+<!-- Project-specific hard boundaries. Changing one requires <owner_name>'s
+explicit approval. Filled invariants are proposals until <owner_name> approves
+them at hand-off, and are listed under **Open with the owner** until then. Fill every <placeholder> with this project's specifics, or
+delete an invariant the project cannot violate. Exact commands, ports and
+lifecycles belong in the applicable runbook or skill, not here. -->
+
+## Live-surface isolation
+
+- <live_surfaces> are where the work is used or served, never where it is
+  developed: never edit, switch, repoint or experiment directly on one.
+  Examples: <live_surface_examples> (a running service, a published document,
+  a live mailing list, a shared account).
+- Work happens on a separate <working_copy> made from <source_of_truth>, and
+  reaches the live surface only through <promotion_route>.
+- Before a build, restart, publish, send or promotion, or a claim about what is
+  live, resolve the exact target and its current version; a name, port or
+  label alone is not proof.
+
+## Data isolation
+
+- Tests, drills, rehearsals and experiments never use <real_data>, such as
+  production records, real recipients, real customers or real accounts. They
+  use <disposable_data>.
+- Before anything that can write, resolve the destination explicitly; an unset
+  target that could fall back to the real one is unsafe.
+- An authorized change to real data follows <real_data_procedure>: approval,
+  backup, verification and rollback.
+- Configure the project through its source files and supported surfaces; never
+  edit <system_of_record> directly to force a setting.
+
+## Project-specific invariants
+
+- <additional_invariant, or delete this section>

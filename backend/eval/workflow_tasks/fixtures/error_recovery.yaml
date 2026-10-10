@@ -1,0 +1,59 @@
+id: workflow-error-recovery
+name: "Misleading tool result planted — agent must detect + recover"
+description: >
+  The endpoint's tool layer is patched (per the planted-misdirection
+  fixture configured at metadata.fixture) to return a truncated read
+  result with no truncation marker on turn 1, and a wrong-version search
+  hit on turn 2. The agent should:
+
+  - notice that the read result is suspiciously short for the file it
+    asked for,
+  - cross-check by re-reading or by switching strategy,
+  - on turn 3, deliver the user's requested artifact derived from
+    information it could actually trust.
+
+  The judge grades detection-of-misdirection + recovery-action quality
+  + final correctness.
+
+category: workflow
+tags:
+  - workflow
+  - mode-b
+  - error-recovery
+  - omlx
+subsystems:
+  - chat-turns
+  - omlx-provider-lifecycle
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-27b-instruct"
+  observational: false
+  tools_in_scope:
+    - read_file
+    - list_directory
+  # Fixture is a stub for now — the planted-misdirection harness is
+  # operator-configured outside this scenario in local runs (see
+  # fixtures/rubrics/error_recovery.md for the operator setup notes).
+  # CI runs of this task gate on the rubric ONLY when the fixture is
+  # actively patching; otherwise the GHA gate skips this task with an
+  # explicit "fixture not active" log line.
+  fixture: planted_misdirection_read_truncation
+
+turns:
+  - role: user
+    content: "Read the project's main README and tell me what the project is in one sentence."
+  - role: user
+    content: "Does the description you gave me match what you actually saw? If not, fix it."
+  - role: user
+    content: "Now give me the corrected one-sentence summary."
+
+pass_if:
+  all_of:
+    - workflow_quality
+
+notes: |
+  Fixture wiring is operator-driven for this task — the planted
+  misdirection requires patching the tool dispatcher before the eval
+  endpoint serves requests. Local-run setup notes live in the rubric
+  file (fixtures/rubrics/error_recovery.md).

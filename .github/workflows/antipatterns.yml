@@ -1,0 +1,55 @@
+name: Anti-patterns (blocking)
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'tools/**'
+      - 'scripts/**'
+      - 'infra/**'
+      - '.github/workflows/antipatterns.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: antipatterns-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  antipatterns:
+    name: Anti-pattern detector (error-severity, blocking)
+    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
+    # job to a hosted runner needs the repository owner's explicit approval.
+    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    timeout-minutes: 10
+    env:
+      CORSIA_ANALYTICS_DISABLE: '1'
+    steps:
+      - name: Prepare isolated workspace
+        run: |
+          set -e
+          echo "CORSIA_WORKSPACE=$RUNNER_TEMP/corsia-ci-workspace" >> "$GITHUB_ENV"
+          echo "CORSIA_STATE_DIR=$RUNNER_TEMP/corsia-ci-state" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
+
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/mac-python
+
+      - name: Run full error-severity antipattern gate (whole repo, blocking)
+        run: |
+          set -o pipefail
+          PYTHONPATH=tools python -m antipatterns \
+            --all --severity error --repo-root . \
+            | tee "$RUNNER_TEMP/antipatterns.txt"
+          {
+            echo "## Full error-severity antipattern gate (blocking, issue #326)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/antipatterns.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,274 @@
+"""Workflow prompts resolved outside the Plans write boundary."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any
+
+from core.skill_validation import FRONTMATTER_KEY
+from core.skills_registry import resolve_effective_skills
+from infra import config
+from infra.database import get_db
+from infra.db_async import run_in_db, run_off_db
+from infra.guidance_git import GitFault, file_version, workspace_repository
+from infra.system_package import system_package_dir
+from plans.public import PlanInputError
+
+
+@dataclass(frozen=True)
+class Workflow:
+    """The prompt-relevant subset of one effective workflow skill."""
+
+    required_steps: tuple[str, ...]
+    version: str | None = None
+    skill: Any = None
+
+
+_PROMPTING_OPERATIONS = frozenset({"add", "insert", "accept", "accept_with_follow_up", "fail", "close_node"})
+
+
+async def operation_workflows(actor, operation: str, params: dict[str, Any]) -> dict[str, Workflow]:
+    """The workflows a plan mutation prompts from; a creation's referenced version is read off the DB."""
+
+    if operation not in _PROMPTING_OPERATIONS:
+        return {}
+
+    def resolve() -> dict[str, Workflow]:
+        db = get_db()
+        try:
+            return effective_workflows(actor, db)
+        finally:
+            db.close()
+
+    workflows = await run_in_db(resolve)
+    if operation in {"add", "insert"}:
+        workflows = await run_off_db(with_referenced_version, params, workflows)
+    return workflows
+
+
+def effective_workflows(actor, db) -> dict[str, Workflow]:
+    """Resolve effective skills, including the System tier, before a plan write.
+
+    Versions stay unresolved: :func:`with_referenced_version` reads the one a
+    creation names, off the database connection.
+    """
+
+    if actor.thread_id is None:
+        return {}
+    resolution = resolve_effective_skills(
+        thread_id=actor.thread_id,
+        project_id=actor.project_id,
+        workspace=config.WORKSPACE,
+        db=db,
+    )
+    workflows: dict[str, Workflow] = {}
+    for skill in resolution.included:
+        corsia = skill.metadata.get(FRONTMATTER_KEY)
+        workflow = corsia.get("workflow") if isinstance(corsia, dict) else None
+        steps = workflow.get("steps") if isinstance(workflow, dict) else None
+        if not isinstance(steps, list):
+            continue
+        required = tuple(
+            step["id"]
+            for step in steps
+            if isinstance(step, dict)
+            and step.get("required") is True
+            and isinstance(step.get("id"), str)
+        )
+        workflows[skill.name] = Workflow(required_steps=required, skill=skill)
+    return workflows
+
+
+def with_referenced_version(
+    params: dict[str, Any], workflows: dict[str, Workflow],
+) -> dict[str, Workflow]:
+    """Blocking. Resolve the version of only the workflow ``params`` references.
+
+    Run it off the database connection: an editable skill's version costs Git
+    subprocesses. A creation without a known ``workflow_ref`` runs no Git.
+    """
+
+    reference = params.get("workflow_ref")
+    name = reference.strip() if isinstance(reference, str) else ""
+    workflow = workflows.get(name)
+    if workflow is None or workflow.skill is None:
+        return workflows
+    return {**workflows, name: replace(workflow, version=_workflow_version(workflow.skill))}
+
+
+def validate_creation_reference(params: dict[str, Any], workflows: dict[str, Workflow]) -> None:
+    """Require a supplied workflow reference to name an effective workflow skill."""
+
+    reference = params.get("workflow_ref")
+    if reference is None or not isinstance(reference, str):
+        return
+    if reference.strip() not in workflows:
+        available = ", ".join(sorted(workflows)) or "none; omit workflow_ref"
+        raise PlanInputError(
+            f"workflow_ref {reference!r} is not an effective workflow skill; "
+            f"effective workflow refs: {available}"
+        )
+
+
+def creation_version(params: dict[str, Any], workflows: dict[str, Workflow]) -> str | None:
+    """Resolve the persisted workflow version from the named effective skill."""
+
+    reference = params.get("workflow_ref")
+    if not isinstance(reference, str):
+        return None
+    workflow = workflows.get(reference.strip())
+    return None if workflow is None else workflow.version
+
+
+def append_add_notice(result: dict, db, workflows: dict[str, Workflow]) -> None:
+    """Prompt, without blocking, for required workflow steps absent from a run."""
+
+    node = result.get("node")
+    if not isinstance(node, dict):
+        return
+    reference = node.get("workflow_ref")
+    workflow = workflows.get(reference) if isinstance(reference, str) else None
+    if workflow is not None and workflow.version is None:
+        _append_notice(result, "Workflow version unavailable; recorded null.")
+    phase = _phase_for_node(db, str(node["id"]))
+    missing = _missing_required_steps(db, phase, workflows)
+    if missing is None:
+        _append_notice(result, _unavailable_workflow_notice(phase))
+    elif missing:
+        _append_notice(
+            result, "Required steps not in this run: " + ", ".join(missing) + "."
+        )
+
+
+def append_close_notice(
+    result: dict,
+    *,
+    node_id: str,
+    db,
+    workflows: dict[str, Workflow],
+) -> None:
+    """Prompt when a run's final task closes before a required step exists."""
+
+    phase = _phase_for_node(db, node_id)
+    if phase is None or not _run_tasks_are_terminal(db, str(phase["id"])):
+        return
+    missing = _missing_required_steps(db, phase, workflows)
+    if missing is None:
+        result["notice"] = _unavailable_workflow_notice(phase)
+    elif missing:
+        result["notice"] = " ".join(
+            f"Required step {step} has no task in this run." for step in missing
+        )
+
+
+def _phase_for_node(db, node_id: str):
+    node = db.execute(
+        "SELECT id,kind,parent_id,workflow_ref FROM plan_nodes WHERE id=?", (node_id,)
+    ).fetchone()
+    if node is None:
+        return None
+    if node["kind"] == "phase":
+        return node
+    if node["parent_id"] is None:
+        return None
+    phase = db.execute(
+        "SELECT id,kind,parent_id,workflow_ref FROM plan_nodes WHERE id=?",
+        (node["parent_id"],),
+    ).fetchone()
+    return phase if phase is not None and phase["kind"] == "phase" else None
+
+
+def _missing_required_steps(
+    db, phase, workflows: dict[str, Workflow],
+) -> tuple[str, ...] | None:
+    """Return missing steps from the currently delivered skill, if available.
+
+    These notices follow the currently delivered skill; recorded workflow fields
+    govern task and phase reporting.
+    """
+
+    if phase is None or not isinstance(phase["workflow_ref"], str):
+        return ()
+    workflow = workflows.get(phase["workflow_ref"])
+    if workflow is None:
+        return None
+    planned = {
+        row["workflow_step"]
+        for row in db.execute(
+            "SELECT workflow_step FROM plan_nodes WHERE parent_id=? "
+            "AND archived_at IS NULL AND kind='task' AND workflow_ref=?",
+            (phase["id"], phase["workflow_ref"]),
+        ).fetchall()
+        if isinstance(row["workflow_step"], str)
+    }
+    return tuple(step for step in workflow.required_steps if step not in planned)
+
+
+def _unavailable_workflow_notice(phase) -> str:
+    return (
+        f"Workflow {phase['workflow_ref']} is no longer available; "
+        "required steps not checked."
+    )
+
+
+def _run_tasks_are_terminal(db, phase_id: str) -> bool:
+    rows = db.execute(
+        "SELECT state,archived_at FROM plan_nodes WHERE parent_id=? AND kind='task'",
+        (phase_id,),
+    ).fetchall()
+    return bool(rows) and all(
+        row["archived_at"] is not None
+        or row["state"] in {"accepted", "accepted_with_followup", "failed", "closed"}
+        for row in rows
+    )
+
+
+def _workflow_version(skill) -> str | None:
+    """Return the immutable version for one effective workflow skill."""
+
+    return (
+        _system_workflow_version(skill)
+        if skill.scope == "system"
+        else _editable_workflow_version(skill.path)
+    )
+
+
+def _editable_workflow_version(path) -> str | None:
+    """Return the last Git commit for one editable skill, marking local edits.
+
+    Any Git fault records null (never a clean SHA), through the guidance runner.
+    """
+
+    repo, _why = workspace_repository(Path(config.WORKSPACE))
+    if repo is None:
+        return None
+    try:
+        return file_version(repo, Path(path))
+    except (GitFault, ValueError):
+        return None
+
+
+def _system_workflow_version(skill) -> str | None:
+    """Return the System source id plus manifest-recorded raw file digest."""
+
+    from core.system_tier import system_tier_manifest
+
+    relative = f"skills/{skill.name}/SKILL.md"
+    if not (system_package_dir() / relative).is_file():
+        return None
+    try:
+        manifest = system_tier_manifest()
+    except (OSError, ValueError):
+        return None
+    entry = next((item for item in manifest.files if item.path == relative), None)
+    if entry is None or any(item.path == relative for item in manifest.mismatches):
+        return None
+    return f"system:{relative}:{manifest.version}:{entry.sha256}"
+
+
+def _append_notice(result: dict, notice: str) -> None:
+    """Add one visible line without discarding another creation notice."""
+
+    existing = result.get("notice")
+    result["notice"] = f"{existing}\n{notice}" if existing else notice

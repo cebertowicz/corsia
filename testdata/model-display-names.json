@@ -1,0 +1,14 @@
+{
+  "description": "One rule, two implementations: backend/subagents/model_display_name.py external_model_display_name and frontend/src/lib/modelDisplayName.ts. The input is a model id.",
+  "cases": [
+    { "name": "Claude id with a version", "value": "claude-opus-5-5", "expected": "Claude Opus 5.5" },
+    { "name": "Claude id with a provider prefix", "value": "claude-code/claude-opus-5-5", "expected": "Claude Opus 5.5" },
+    { "name": "Claude id with a trailing date", "value": "claude-haiku-4-5-20251001", "expected": "Claude Haiku 4.5" },
+    { "name": "Claude id with one version digit and a date", "value": "claude-sonnet-4-20250514", "expected": "Claude Sonnet 4" },
+    { "name": "Claude id with the version before the family", "value": "claude-3-5-sonnet-20241022", "expected": "Claude 3.5 Sonnet" },
+    { "name": "GPT id", "value": "gpt-6.1-sol", "expected": "GPT-6.1 sol" },
+    { "name": "GPT id with a provider prefix", "value": "codex/gpt-5.6-luna", "expected": "GPT-5.6 luna" },
+    { "name": "GPT codex id", "value": "gpt-5-codex", "expected": "GPT-5 Codex" },
+    { "name": "unknown model id", "value": "some-unknown-model", "expected": "Some Unknown Model" }
+  ]
+}

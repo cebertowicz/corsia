@@ -1,0 +1,80 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
+import { openPlanAsk, returnToPlanNode } from '$lib/planLeafReturn';
+import { registerNodeFocus, registerPlanSurface } from '$lib/planNodeFocus';
+import { activeThreadId } from '$lib/stores/threads';
+import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
+import type { OperatorArtifactLink } from '$lib/api/plans';
+
+describe('returnToPlanNode', () => {
+	const cleanups: Array<() => void> = [];
+	let show: ReturnType<typeof vi.fn<(threadId: string) => boolean>>;
+	let focus: ReturnType<typeof vi.fn<(nodeId: string, stepId: string | null) => void>>;
+
+	beforeEach(() => {
+		activeThreadId.set('t1');
+		show = vi.fn((_threadId: string) => true);
+		focus = vi.fn((_nodeId: string, _stepId: string | null) => {});
+		cleanups.push(registerPlanSurface(show), registerNodeFocus('t1', focus));
+	});
+
+	afterEach(() => {
+		for (const off of cleanups.splice(0)) off();
+	});
+
+	it('hands the originating node to the active thread’s plan pane through the shared focus path', async () => {
+		await returnToPlanNode({ sourceNodeId: 'node-1' });
+
+		expect(show).toHaveBeenCalledWith('t1');
+		expect(focus).toHaveBeenCalledOnce();
+		expect(focus).toHaveBeenCalledWith('node-1', null);
+	});
+
+	it('carries the owning step of a nested subagent-plan node from the tab source', async () => {
+		await returnToPlanNode({ sourceNodeId: 'sub', sourceStepId: 'spawn' });
+
+		expect(focus).toHaveBeenCalledWith('sub', 'spawn');
+	});
+
+	it('does nothing without an originating node', async () => {
+		await returnToPlanNode(null);
+
+		expect(show).not.toHaveBeenCalled();
+		expect(focus).not.toHaveBeenCalled();
+	});
+
+	it('does nothing without an active thread', async () => {
+		activeThreadId.set(null);
+		await returnToPlanNode({ sourceNodeId: 'node-1' });
+
+		expect(show).not.toHaveBeenCalled();
+	});
+});
+
+describe('openPlanAsk', () => {
+	const artifact = (over: Partial<OperatorArtifactLink> = {}): OperatorArtifactLink => ({
+		id: 'artifact-1', role: 'attention', integration: 'corsia', type: 'document',
+		external_id: 'document-1', title: 'Review brief', path: '/brief.md', state: 'active', attention_state: 'raised',
+		...over,
+	});
+
+	beforeEach(() => threadWorkspaces.set({}));
+
+	it('opens a document in the artifact surface', () => {
+		const openDecision = vi.fn();
+		openPlanAsk('t1', artifact(), 'Fallback title', openDecision);
+
+		expect(openDecision).not.toHaveBeenCalled();
+		expect(get(threadWorkspaces).t1.tabs[0]).toMatchObject({
+			artifactId: 'artifact-1', path: '/brief.md', title: 'Review brief',
+		});
+	});
+
+	it('opens a decision in the canonical attention surface, never as a document', () => {
+		const openDecision = vi.fn();
+		openPlanAsk('t1', artifact({ type: 'plan-decision', path: null }), 'Choose model', openDecision);
+
+		expect(openDecision).toHaveBeenCalledOnce();
+		expect(get(threadWorkspaces).t1).toBeUndefined();
+	});
+});

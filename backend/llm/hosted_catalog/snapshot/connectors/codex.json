@@ -1,0 +1,22 @@
+{
+  "id": "codex",
+  "kind": "agent-runtime",
+  "type": "external",
+  "display_name": "Codex",
+  "dialect": "codex",
+  "auth": { "scheme": "managed", "user_supplied": false },
+  "endpoint": { "user_supplied": false, "default_base": null },
+  "load_control": "observe-only",
+  "capabilities": {
+    "supports_vision": true,
+    "supports_tools": true,
+    "supports_reasoning": true,
+    "reasoning_config": {
+      "type": "effort_levels",
+      "values": ["none", "minimal", "low", "medium", "high", "xhigh"],
+      "default": "high"
+    },
+    "default_temperature": null,
+    "default_max_tokens": null
+  }
+}

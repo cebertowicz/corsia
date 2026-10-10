@@ -1,0 +1,27 @@
+[tool.ruff]
+# Paths relative to repo root that ruff scans.
+# tools/ contains CI helpers; backend/ is the app.
+include = ["backend/**/*.py", "tools/**/*.py"]
+
+[tool.ruff.lint]
+# E9: syntax errors (runtime-fatal)
+# F:  pyflakes (logic errors, missing names, bad f-strings)
+# Noisy rules suppressed until a dedicated cleanup sprint:
+#   F401 – unused imports  (162 occurrences, large body of intentional re-exports)
+#   F811 – redefined-while-unused  (278, many in __init__ re-export files)
+#   F821 – undefined name  (15, several are forward refs / TYPE_CHECKING guards)
+#   F841 – unused variable  (17, mostly intermediate debug binds)
+select = ["E9", "F"]
+ignore = ["F401", "F811", "F821", "F841"]
+
+[tool.mypy]
+# Lenient baseline — the gate captures type-check regressions in new code
+# without requiring the ~289 pre-existing errors to be resolved first.
+python_version = "3.11"
+ignore_missing_imports = true
+# Needed because backend/ has both backend/conftest.py and backend/tests/conftest.py;
+# explicit_package_bases disambiguates them by path rather than module name.
+explicit_package_bases = true
+# tools/qh-query has a hyphenated directory name (invalid Python package identifier).
+exclude = ["tools/qh-query/"]
+# Explicit per-package overrides can be added here as modules are hardened.

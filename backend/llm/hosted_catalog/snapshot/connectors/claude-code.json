@@ -1,0 +1,22 @@
+{
+  "id": "claude-code",
+  "kind": "agent-runtime",
+  "type": "external",
+  "display_name": "Claude Code",
+  "dialect": "claude-code",
+  "auth": { "scheme": "managed", "user_supplied": false },
+  "endpoint": { "user_supplied": false, "default_base": null },
+  "load_control": "observe-only",
+  "capabilities": {
+    "supports_vision": true,
+    "supports_tools": true,
+    "supports_reasoning": true,
+    "reasoning_config": {
+      "type": "effort_levels",
+      "values": ["low", "medium", "high", "xhigh", "max"],
+      "default": "high"
+    },
+    "default_temperature": null,
+    "default_max_tokens": null
+  }
+}

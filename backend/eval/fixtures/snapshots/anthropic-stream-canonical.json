@@ -1,0 +1,21 @@
+{
+  "_comment": "Canonical Anthropic streaming response snapshot. Used by scripts/verify-mock-fidelity to assert the mock engine produces structurally-equivalent output. Update this file deliberately (PR-reviewed) when Anthropic changes their streaming format.",
+  "prompt": "Say exactly: Hello world",
+  "model": "anthropic/claude-haiku-4-5",
+  "chunk_sequence": [
+    {"type": "reasoning", "has_content": true},
+    {"type": "reasoning", "has_content": true},
+    {"type": "content", "has_content": true},
+    {"type": "content", "has_content": true},
+    {"type": "finish", "finish_reason": "stop"}
+  ],
+  "properties": {
+    "has_reasoning_chunks": true,
+    "has_content_chunks": true,
+    "has_finish_chunk": true,
+    "finish_reason": "stop",
+    "reasoning_before_content": true,
+    "chunk_count_min": 3,
+    "chunk_count_max": 10
+  }
+}

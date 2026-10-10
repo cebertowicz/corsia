@@ -1,0 +1,49 @@
+id: workflow-multi-turn-with-tools
+name: "Multi-turn dialog requiring tool use per turn"
+description: >
+  Three-turn dialog where each user message demands a tool invocation
+  (read, list, write). The agent should pick the right tool for each
+  turn, pass sane arguments, recover from any tool error, and finish
+  with the requested artifact written.
+
+  Mode B — real LLM round trip. Tools available are the canonical
+  CORSIA tool set declared via metadata.tools_in_scope; the agent
+  must select among them based on the turn.
+
+category: workflow
+tags:
+  - workflow
+  - mode-b
+  - tools
+  - omlx
+subsystems:
+  - chat-turns
+  - omlx-provider-lifecycle
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-27b-instruct"
+  observational: false
+  tools_in_scope:
+    - read_file
+    - list_directory
+    - write_file
+
+turns:
+  - role: user
+    content: "List the files in the current working directory."
+  - role: user
+    content: "Read the file you'd expect to contain a project's top-level description (e.g. README)."
+  - role: user
+    content: "Write a 2-sentence summary of what you just read to a file called WORKFLOW-EVAL-SUMMARY.txt."
+
+pass_if:
+  all_of:
+    - workflow_quality
+
+notes: |
+  The judge grades on tool selection, argument quality, error-recovery
+  posture (when a list returns nothing useful, did the agent fall back
+  sensibly?), and whether the final write actually happened with content
+  derived from the read. See fixtures/rubrics/multi_turn_with_tools.md
+  for the rubric the judge uses.

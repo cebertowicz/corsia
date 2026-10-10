@@ -1,0 +1,35 @@
+{
+ "event": "pull_request",
+ "payload": {
+  "action": "reopened",
+  "number": 3315,
+  "pull_request": {
+   "base": {
+    "ref": "dev",
+    "sha": "0b8fe3953ae5f627b3af0fd44e5af57bfbd59257"
+   },
+   "body": "",
+   "closed_at": null,
+   "created_at": "2026-10-01T00:41:31Z",
+   "draft": false,
+   "head": {
+    "ref": "si/outcome-events-table",
+    "sha": "bc836becd671c9ea721dc3bd0a4f1add8ea9aa0c"
+   },
+   "merge_commit_sha": "a7a11b1d6ab275f046d8985bab5cdc9a56bea032",
+   "merged": false,
+   "merged_at": null,
+   "number": 3315,
+   "state": "open",
+   "title": "[Self-Improvement Infrastructure] outcome_events table and write primitive",
+   "updated_at": "2026-10-01T01:09:30Z",
+   "user": {
+    "login": "fixture-user"
+   }
+  },
+  "repository": {
+   "default_branch": "main",
+   "full_name": "cebertowicz/maestro"
+  }
+ }
+}

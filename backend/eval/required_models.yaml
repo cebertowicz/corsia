@@ -1,0 +1,15 @@
+# Required loaded models for L3 integration tests.
+#
+# At test-suite start, the runner queries oMLX and fails immediately with
+# the diff (required vs loaded) if any required model isn't loaded. No
+# auto-loading. No silent skip. No fallback to cloud.
+#
+# Update this file when the required model set changes. Each entry:
+#   id: the oMLX model identifier
+#   quant: required quantization (e.g., mxfp8)
+#   reason: why this model is required for L3
+
+models:
+  - id: "qwen-3.6-35b-a3b"
+    quant: "mxfp8"
+    reason: "Production chat default; exercises streaming, tool use, reasoning"

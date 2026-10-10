@@ -1,0 +1,73 @@
+<script lang="ts">
+	interface Props {
+		checked: boolean;
+		onchange: (next: boolean) => void;
+		ariaLabel?: string;
+		disabled?: boolean;
+		size?: 'sm' | 'md';
+	}
+
+	const { checked, onchange, ariaLabel, disabled = false, size = 'md' }: Props = $props();
+
+	function handle() {
+		if (disabled) return;
+		onchange(!checked);
+	}
+</script>
+
+<button
+	type="button"
+	class="tg {size}"
+	class:on={checked}
+	{disabled}
+	aria-pressed={checked}
+	aria-label={ariaLabel}
+	onclick={handle}
+></button>
+
+<style>
+	.tg {
+		--w: 30px;
+		--h: 17px;
+		--knob: 12px;
+		width: var(--w); height: var(--h);
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-pill);
+		position: relative;
+		cursor: pointer;
+		padding: 0;
+		transition: all var(--dur-tight) var(--ease-snap);
+	}
+	.tg.md {
+		--w: 34px;
+		--h: 19px;
+		--knob: 14px;
+	}
+	.tg::after {
+		content: '';
+		position: absolute;
+		width: var(--knob); height: var(--knob);
+		border-radius: var(--radius-circle);
+		background: linear-gradient(180deg, #d8d8e0, #b8b8c0);
+		top: 50%; left: 1.5px;
+		transform: translateY(-50%);
+		transition: all var(--dur-tight) var(--ease-snap);
+	}
+	.tg.on {
+		background: linear-gradient(180deg, var(--violet-2, var(--violet)), var(--violet));
+		border-color: var(--violet);
+	}
+	.tg.on::after {
+		left: calc(var(--w) - var(--knob) - 2.5px);
+		background: linear-gradient(180deg, #ffffff, #f0f0f5);
+	}
+	.tg:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.tg:focus-visible {
+		outline: 2px solid var(--violet);
+		outline-offset: 2px;
+	}
+</style>

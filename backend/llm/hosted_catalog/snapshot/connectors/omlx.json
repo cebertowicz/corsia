@@ -1,0 +1,10 @@
+{
+  "id": "omlx",
+  "kind": "inference-provider",
+  "type": "managed",
+  "display_name": "oMLX",
+  "dialect": "openai",
+  "auth": { "scheme": "managed", "user_supplied": false },
+  "endpoint": { "user_supplied": false, "default_base": null },
+  "load_control": "managed"
+}

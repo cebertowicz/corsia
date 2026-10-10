@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Usage:
+#   bash scripts/apply-branch-protection
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+CONFIG="${REPO_ROOT}/infra/github/branch-protection.json"
+
+if [ ! -f "$CONFIG" ]; then
+  echo "FATAL: branch protection config not found at $CONFIG" >&2
+  exit 1
+fi
+
+REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
+if [ -z "$REPO" ]; then
+  echo "FATAL: could not detect repo. Ensure gh is authenticated and you're in the repo." >&2
+  exit 1
+fi
+
+echo "Applying branch protection to $REPO..."
+echo ""
+
+apply_protection() {
+  local branch="$1"
+  local config_json
+
+  config_json=$(python3 -c "
+import json, sys
+with open('$CONFIG') as f:
+    config = json.load(f)
+branch_config = config.get('$branch')
+if not branch_config:
+    print('SKIP: no config for $branch', file=sys.stderr)
+    sys.exit(1)
+for key in list(branch_config.keys()):
+    if key.startswith('_'):
+        del branch_config[key]
+for key, val in branch_config.items():
+    if isinstance(val, dict):
+        for k in list(val.keys()):
+            if k.startswith('_'):
+                del val[k]
+print(json.dumps(branch_config))
+" 2>&1)
+
+  if [ $? -ne 0 ]; then
+    echo "$config_json"
+    return
+  fi
+
+  echo "=== Protecting $branch ==="
+  echo "$config_json" | python3 -m json.tool
+  echo ""
+
+  gh api \
+    --method PUT \
+    "repos/${REPO}/branches/${branch}/protection" \
+    --input - <<< "$config_json"
+
+  echo "  -> $branch protection applied"
+  echo ""
+}
+
+echo "Checking if dev branch exists on remote..."
+if gh api "repos/${REPO}/branches/dev" --jq .name > /dev/null 2>&1; then
+  echo "  dev branch exists"
+else
+  echo "  dev branch does not exist — creating from main HEAD..."
+  MAIN_SHA=$(gh api "repos/${REPO}/git/ref/heads/main" --jq .object.sha)
+  gh api \
+    --method POST \
+    "repos/${REPO}/git/refs" \
+    -f "ref=refs/heads/dev" \
+    -f "sha=${MAIN_SHA}"
+  echo "  dev branch created from main ($MAIN_SHA)"
+fi
+echo ""
+
+apply_protection "main"
+apply_protection "dev"
+
+echo "Done. Branch protection is now active."
+echo ""
+echo "IMPORTANT: From now on:"
+echo "  - Direct pushes to main and dev are blocked"
+echo "  - main only accepts PRs from dev"
+echo "  - dev only accepts PRs from feature/* branches"
+echo "  - Use feature branches for all work"

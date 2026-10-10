@@ -1,0 +1,33 @@
+import { get, writable } from 'svelte/store';
+import type { CommentSelection } from './commentSelection';
+import type { DocViewerTarget } from '$lib/docViewerTarget';
+
+export interface CommentDraft {
+	from: number;
+	to: number;
+	text: string;
+	top: number;
+	body?: string;
+	scope?: string;
+	selection?: CommentSelection;
+	identity?: object;
+	request?: AbortController;
+	sequence?: number;
+}
+
+export const commentDraft = writable<CommentDraft | null>(null);
+
+export function commentDraftScope(target: DocViewerTarget | null): string {
+	return target ? `${target.instanceId}|${target.path}|${target.threadId ?? ''}|${target.projectId ?? ''}` : '';
+}
+export function cancelCommentCapture(scope?: string): void {
+	const draft = get(commentDraft);
+	if (scope === undefined || draft?.scope === undefined || draft.scope === scope) draft?.request?.abort();
+}
+export function discardCommentDraft(scope?: string): void {
+	cancelCommentCapture(scope);
+	commentDraft.update(draft => scope === undefined || draft?.scope === undefined || draft.scope === scope ? null : draft);
+}
+export function setCommentBody(body: string, scope?: string): void {
+	commentDraft.update(draft => draft && (scope === undefined || draft.scope === scope) ? { ...draft, body } : draft);
+}

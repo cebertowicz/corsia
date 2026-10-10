@@ -1,0 +1,70 @@
+name: LLM evals (L4)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'evals/**'
+      - 'scripts/eval-local'
+      - 'requirements*.txt'
+      - '.github/workflows/evals.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cache-evals:
+    name: Cache evals (local oMLX, advisory)
+    runs-on: [self-hosted, macOS, ARM64, mac-studio, ci-integration]
+    timeout-minutes: 30
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CORSIA_ANALYTICS_DISABLE: '1'
+      CORSIA_PROD_WORKSPACE: ${{ vars.CORSIA_PROD_WORKSPACE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare isolated workspace
+        run: |
+          set -e
+          echo "CORSIA_WORKSPACE=$RUNNER_TEMP/corsia-ci-workspace" >> "$GITHUB_ENV"
+          echo "CORSIA_STATE_DIR=$RUNNER_TEMP/corsia-ci-state" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
+
+      - name: Set up Python (system)
+        run: |
+          set -e
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          PY_BIN="$(command -v python3.11 || true)"
+          if [ -z "$PY_BIN" ]; then
+            echo "::error::python3.11 not found on PATH"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/python-shim/bin"
+          ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
+          echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"
+          "$PY_BIN" --version
+
+      - name: Install backend deps
+        run: |
+          set -e
+          if [ ! -x .venv/bin/python ]; then
+            python -m venv .venv
+          fi
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install -r backend/requirements-test.txt
+
+      - name: Run cache evals on local oMLX (advisory)
+        run: |
+          bash scripts/eval-local --glob 'cache-C*' cache-warm-baseline || \
+            echo "::warning::Cache evals did not fully pass — advisory while the harness is built (#251). Not gating."

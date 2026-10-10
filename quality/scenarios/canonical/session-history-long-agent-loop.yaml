@@ -1,0 +1,156 @@
+id: session-history-long-agent-loop
+name: "Session-history rebuild — long agent-loop session anchored at most-recent user"
+description: >
+  Regression scenario for the 2026-05-08 production bug: long
+  tool-heavy work-stream sessions collapsing to empty history because
+  the naive `messages[-window:]` slice contained zero user-role
+  messages. `_trim_to_window` MUST backward-anchor to the most-recent
+  user-role message and return a non-empty list rooted at a user
+  message.
+
+  Failure mode this scenario locks down: returning `[]` for a
+  non-empty session (with user messages somewhere in history) is the
+  bug. `agent_singleton` / `rebuild_messages_from_db` cannot lose the
+  entire conversation just because the agent has been chewing on tools
+  for many iterations.
+
+  Synthesizes a 1008-message session: 8 alternating user+assistant
+  messages, then 1000 consecutive assistant + tool-result messages
+  simulating a tool-heavy agent loop. The naive last-100 slice would
+  contain zero user messages → naive `[-100:]` returns the slice as-is
+  → `_trim_to_window` (pre-fix) returned `[]`. Post-fix: walks
+  backward, anchors at the most-recent user message (index 6 in this
+  shape) and returns `messages[6:]`.
+
+  Mode: pytest-style direct invocation against the orchestration
+  function; the DB is seeded with the synthetic session.
+
+category: functional
+tags:
+  - core-session-history
+  - regression
+  - long-session
+  - production-bug-fix
+  - regression-sentinel
+subsystems:
+  - core-session-history
+  - core-message-format
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_history
+      session_id: sess_long_agent_loop
+  - fixture: seed_synthetic_messages
+    args:
+      session_id: sess_long_agent_loop
+      shape:
+        - role: user
+          content: "I want to refactor the kill-tasks subsystem."
+        - role: assistant
+          content: "Got it — let me explore the codebase first."
+        - role: user
+          content: "Start with the tool registry."
+        - role: assistant
+          content: "Looking now."
+        - role: user
+          content: "What did you find?"
+        - role: assistant
+          content: "Here's the breakdown..."
+        - role: user
+          content: "Begin the refactor."
+        # then 1000 consecutive assistant+tool rows simulating an
+        # extended agent loop with no user interleave:
+        - repeat:
+            count: 500
+            template:
+              - role: assistant
+                content: ""
+                metadata:
+                  llm_tool_calls:
+                    - id: "tc_repeat"
+                      function:
+                        name: "read_file"
+                        arguments: '{"path": "backend/core/agent.py"}'
+              - role: tool
+                content: "<tool result content>"
+                metadata:
+                  tool_call_id: "tc_repeat"
+                  name: "read_file"
+
+steps:
+  - action: rebuild_messages_from_db
+    args:
+      session_id: sess_long_agent_loop
+      memory_window: 100
+
+expected_outcomes:
+  - assertion: result_is_non_empty
+    detail: >
+      `rebuild_messages_from_db` MUST return a non-empty list for this
+      1008-message session. Returning `[]` is the production bug being
+      regression-tested.
+  - assertion: first_message_is_user
+    detail: >
+      The first message in the returned list MUST have `role=user` —
+      the backward-anchor expansion walks back to the most-recent
+      user-role message (index 6, "Begin the refactor.") and returns
+      from there.
+  - assertion: tool_pairing_intact
+    detail: >
+      Every assistant `tool_call.id` in the returned list MUST have a
+      matching `role=tool` message with the same `tool_call_id`, OR a
+      synthetic `[Tool execution was interrupted]` stub. No dangling
+      tool calls (would crash the LLM call downstream).
+  - assertion: window_size_reasonable
+    detail: >
+      Returned list length is in [1, 1008]. Should be ≤ 100 +
+      backward-expansion margin under normal operation, but the exact
+      size depends on the backward-anchor walk; the invariant is
+      non-empty + user-rooted, not a tight bound.
+
+scorers:
+  - name: check_non_empty
+    args:
+      result_var: rebuilt_messages
+      min_length: 1
+  - name: check_first_role
+    args:
+      result_var: rebuilt_messages
+      expected_role: user
+  - name: check_tool_pairing
+    args:
+      result_var: rebuilt_messages
+  - name: check_length_bounded
+    args:
+      result_var: rebuilt_messages
+      max_length: 1008
+      min_length: 1
+
+pass_if:
+  all_of:
+    - check_non_empty
+    - check_first_role
+    - check_tool_pairing
+    - check_length_bounded
+
+notes: |
+  Cross-cite the `_trim_to_window` docstring in
+  `backend/core/thread_history.py` — the fix landed at
+  178c687 ("fix(core): `_trim_to_window` returning [] on user-less
+  message tail (Slice 5 item 3)") on 2026-05-08, verified against
+  the 350-msg and 1008-msg production sessions cited in the
+  docstring.
+
+  This scenario locks the regression: if a future refactor removes the
+  backward-anchor branch that preserves a valid first message and intact tool
+  pairing, this scenario surfaces it immediately.
+
+  Scorer `check_tool_pairing` exists in scorer-registry as
+  `null_tool_paired` or similar; map at runtime. The synthetic shape
+  uses a single repeating `tc_repeat` tool_call_id, so the LLM-side
+  would see many tool messages with the same id — for THIS scenario
+  the goal is only that pairing is INTACT post-trim, not that the
+  pairing makes semantic sense for an LLM call. The semantic
+  correctness lives in `chat-turns` E2E tests.

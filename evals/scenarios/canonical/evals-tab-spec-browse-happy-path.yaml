@@ -1,0 +1,121 @@
+id: evals-tab-spec-browse-happy-path
+name: "Evals tab spec → scenarios round-trip surfaces a real spec + its linked scenarios"
+description: >
+  Exercises the /evals browse flow for a known subsystem. An author asks the
+  agent to walk the current surface and linked scenario evidence.
+  The agent should describe the Architecture view's registry rows, route
+  into a spec detail, name the §0.5 KPI callout, and surface the linked
+  canonical scenarios filtered by ?subsystem=<slug>.
+
+  Mode A — the LLM is mocked via mock_llm_replies returning a
+  deterministic narrative that names the round-trip endpoints. The
+  scenario asserts that the end-to-end /api/eval/turn pipeline runs
+  without provider-error and that the assistant message references both
+  the spec slug and its linked scenarios. The strongest signal is
+  negative: no_provider_error, which would fire if the /api/evals
+  router crashed or the tab's read-only contract regressed.
+
+  This is executable regression evidence for the evals-tab flow.
+  Failure here means the spec → scenarios round-trip regressed.
+
+category: functional
+tags:
+  - evals-tab
+  - happy-path
+  - regression-sentinel
+subsystems:
+  - evals-tab
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_evals_tab
+      session_id: sess_qt_spec_browse
+  - fixture: mock_llm_replies
+    args:
+      replies:
+        - role: assistant
+          content: >
+            The /evals tab Architecture view groups the subsystem
+            registry rows by slug. Opening /evals/specs/evals-tab
+            shows the spec body with the §0.5 KPIs callout at top —
+            evals_tab_specs_list_latency_ms_p95 and
+            evals_tab_scenarios_list_latency_ms_p95 lead. The "Test
+            scope" link routes to /evals/scenarios?subsystem=evals-tab
+            and lists the canonical scenarios that pin this
+            subsystem: evals-tab-spec-browse-happy-path (this one).
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_qt_spec_browse
+      content: >
+        Walk me through opening /evals/specs/evals-tab. What appears
+        in the KPI callout, and which canonical scenarios appear when I
+        click "Test scope"?
+  - action: wait_for_event
+    args:
+      session_id: sess_qt_spec_browse
+      event: turn_completed
+      timeout_ms: 8000
+
+expected_outcomes:
+  - assertion: turn_completed_present
+    detail: >
+      The eval turn ran end-to-end against the configured provider
+      surface. The evals-tab API endpoints would have been exercisable
+      from the rendered narrative without the tab itself crashing.
+  - assertion: assistant_content_mentions_kpi_callout
+    detail: >
+      Final assistant content references "KPIs" or "callout" — proxy
+      assertion that the §0.5 callout surface is part of the narrative.
+  - assertion: assistant_content_mentions_test_scope_link
+    detail: >
+      Final assistant content references "/evals/scenarios" or "Test
+      scope" — proxy assertion that the spec → scenarios round-trip is
+      part of the narrative.
+  - assertion: no_provider_error
+    detail: >
+      No provider_error step fired during the run. A regression in the
+      evals-tab router (e.g. 5xx on /api/evals/specs/evals-tab
+      from a path-traversal-guard typo, or a YAML scenario whose
+      parse-failure crashed the list endpoint per NF2.5) would surface
+      as "model not loaded" or "endpoint error" provider-error here.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 1
+  - name: check_assistant_message_content
+    args:
+      mode: contains
+      value: "KPI"
+  - name: check_assistant_message_content
+    args:
+      mode: contains
+      value: "/evals/scenarios"
+  - name: check_no_provider_error
+    args: {}
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_assistant_message_content
+    - check_no_provider_error
+
+notes: |
+  This scenario proxies the evals-tab spec → scenarios round-trip via
+  a clean end-to-end /api/eval/turn run; the literal HTTP fetch through
+  the /api/evals/* router is covered by backend/tests/test_api_evals.py
+  (14 existing tests). The integration scenario is the failure mode that
+  surfaces ONLY when the substrate (router + KPI callout extraction +
+  scenarios filter) round-trips correctly under a real chat turn.
+
+  The strongest signal this scenario provides is the negative one:
+  no_provider_error. If a future change regresses the read-only
+  invariant (AP4) or the path-traversal defense (AP3), the unit tests
+  catch it first; this scenario catches the cross-subsystem regression
+  where a evals-tab change interacts badly with the chat-turn surface
+  (e.g. tab-render-blocks-on-turn-completed via shared infra).

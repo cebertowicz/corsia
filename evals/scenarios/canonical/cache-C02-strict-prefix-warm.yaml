@@ -1,0 +1,112 @@
+id: cache-C02-strict-prefix-warm
+name: "Strict-prefix warm reuse — identical payload back-to-back hits ~100% cache"
+description: >
+  Validates the strict-prefix cache invariant in the production code path
+  (POST /api/eval/turn). Two identical user messages sent back-to-back in
+  the same session. Turn 2 should hit cache on the entire shared prefix —
+  cached_tokens should equal prompt_tokens minus the new user message
+  tokens (plus a small per-template slack for added wrapping/headers).
+
+  This is the cleanest possible test of "did the cache work at all" in
+  production traffic. If C02 fails but direct curl against oMLX shows the
+  cache working, the bug is in CORSIA's prompt assembly (non-deterministic
+  context, time-injected fields, etc.) — not in oMLX.
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-A
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §2 (block-cache
+      semantics: chain-hash indexed at request-completion time)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - strict-prefix
+  - regression-sentinel
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-35b-a3b"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  expected_turn2_hit_rate_minimum: 0.95
+
+pre_conditions:
+  - fixture: omlx_loaded_model
+    args:
+      model: "qwen-3.6-35b-a3b"
+      pin: true
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c02_warm
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_c02_warm
+      content: "Summarize the second law of thermodynamics in two sentences."
+  - action: wait_for_event
+    args:
+      session_id: sess_c02_warm
+      event: turn_completed
+      timeout_ms: 60000
+  - action: user_send
+    args:
+      session_id: sess_c02_warm
+      content: "Summarize the second law of thermodynamics in two sentences."
+  - action: wait_for_event
+    args:
+      session_id: sess_c02_warm
+      event: turn_completed
+      timeout_ms: 30000
+
+expected_outcomes:
+  - assertion: turn2_hit_rate_above_threshold
+    detail: >
+      Turn 2's cached_tokens ≥ prompt_tokens − new_user_message_tokens − 20-token
+      slack. Equivalent to ~95%+ of the shared prefix being served from cache.
+  - assertion: turn2_ttft_well_below_turn1
+    detail: >
+      Turn 2 TTFT ≤ turn 1 TTFT × 0.3 (significant prefill avoidance).
+  - assertion: no_provider_error
+    detail: Neither turn errored.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 2
+  - name: check_no_provider_error
+    args: {}
+  - name: check_per_turn_hit_rate_above
+    args:
+      turn: 2
+      min_ratio: 0.95
+      slack_tokens: 20
+  - name: check_ttft_drop_after_turn_1
+    args:
+      factor: 0.3
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_per_turn_hit_rate_above
+    - check_ttft_drop_after_turn_1
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Fixture: omlx_loaded_model (ensure model is loaded + pinned, do NOT
+      force unload — different from C01)
+    - Scorer: check_per_turn_hit_rate_above (reads usage.prompt_tokens_details.cached_tokens
+      from the turn N response; computes ratio vs (prompt_tokens − new_user_tokens − slack))
+    - Scorer: check_ttft_drop_after_turn_1 (reads ttft_ms from turn metadata;
+      compares turn N against turn 1)
+
+  Falsification target: if CORSIA injects time/date/random tokens into the
+  system prompt between turns, C02 fails even though oMLX is working
+  correctly. C02 is the cheapest detector for that whole class of bug.

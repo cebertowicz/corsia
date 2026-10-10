@@ -1,0 +1,288 @@
+name: Unit tests (L1)
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'requirements*.txt'
+      - 'frontend/package*.json'
+      - '.github/workflows/unit-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: unit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend unit tests
+    runs-on: [self-hosted, macOS, ARM64, mac-studio, backend-l1]
+    timeout-minutes: 15
+    env:
+      CORSIA_ANALYTICS_DISABLE: '1'
+      CORSIA_CONTRACT_SUITE: '1'
+      CORSIA_TEST_MODE: '1'
+      PYTHONPATH: backend
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        run: |
+          set -e
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          PY_BIN="$(command -v python3.11 || true)"
+          if [ -z "$PY_BIN" ]; then echo "::error::python3.11 not found"; exit 1; fi
+          mkdir -p "$RUNNER_TEMP/python-shim/bin"
+          ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
+          echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"
+
+      - name: Install deps
+        run: |
+          if [ ! -x .venv/bin/python ]; then python -m venv .venv; fi
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install -r backend/requirements-test.txt
+
+      - name: Mount test RAM disk
+        # Each SQLite-backed test builds its schema with ~240 commits, and every
+        # commit flushes to the SSD. Twelve concurrent shards (four L1 jobs x
+        # three) queue those flushes behind each other and behind the serving
+        # app on the same disk, which more than doubled the suite's wall time
+        # under load. Test state needs no durability, so keep it in memory.
+        # A failure here falls back to RUNNER_TEMP rather than failing the job.
+        # The volume is remounted under the user temp directory: sandboxed git
+        # tests cannot resolve a path through /Volumes.
+        run: |
+          set -uo pipefail
+          volume="ci-l1-${RUNNER_NAME// /-}"
+          tmp_parent="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"
+          # mount(8) lists the resolved /private/var path, not TMPDIR's /var.
+          tmp_parent="$(cd "$tmp_parent" 2>/dev/null && pwd -P || echo "${tmp_parent%/}")"
+          mount_point="$tmp_parent/$volume"
+          # A runner runs one job at a time, so a volume with its name is a
+          # leftover from a job that died before its detach step.
+          for leftover in "/Volumes/$volume" "$mount_point"; do
+            if mount | grep -qF " on $leftover ("; then
+              hdiutil detach "$leftover" -force >/dev/null 2>&1 || true
+            fi
+          done
+          root="$RUNNER_TEMP"
+          device="$(hdiutil attach -nobrowse -nomount ram://33554432 2>/dev/null | awk 'NR==1{print $1}')"
+          node=""
+          if [ -n "$device" ] && diskutil erasevolume APFS "$volume" "$device" >/dev/null 2>&1; then
+            node="$(df "/Volumes/$volume" | awk 'NR==2{print $1}')"
+          fi
+          if [ -n "$node" ] && mkdir -p "$mount_point" \
+            && diskutil unmount "$node" >/dev/null \
+            && diskutil mount -mountPoint "$mount_point" "$node" >/dev/null; then
+            root="$mount_point"
+            # Spotlight would otherwise index every test database written here.
+            touch "$root/.metadata_never_index" 2>/dev/null || true
+            echo "CI_RAMDISK_DEVICE=$device" >> "$GITHUB_ENV"
+          else
+            [ -n "$device" ] && hdiutil detach "$device" -force >/dev/null 2>&1
+            echo "::warning::RAM disk unavailable; backend test state stays on disk"
+          fi
+          echo "CI_TEST_ROOT=$root" >> "$GITHUB_ENV"
+          echo "Backend test state root: $root"
+
+      - name: Run backend tests
+        run: |
+          set -uo pipefail
+
+          pids=()
+          names=()
+          run_backend_shard() {
+            local shard="$1"
+            shift
+          local isolated_root="$CI_TEST_ROOT/corsia-ci-backend/${shard}"
+            (
+              set -e
+              export CORSIA_WORKSPACE="$isolated_root/workspace"
+              export CORSIA_STATE_DIR="$isolated_root/state"
+              mkdir -p "$CORSIA_WORKSPACE/.corsia" "$CORSIA_STATE_DIR"
+              .venv/bin/python -c "from infra.database import init_db; init_db()"
+              .venv/bin/python -m pytest -c backend/pytest.ini "$@" \
+                -m "not integration and not cloud_required" \
+                --tb=short -vv -o faulthandler_timeout=60 \
+                --basetemp="$isolated_root/pytest" \
+                -o tmp_path_retention_policy=failed \
+                --durations=50 --durations-min=0.25 \
+                --junitxml="$RUNNER_TEMP/backend-junit-${shard}.xml"
+            ) > "$RUNNER_TEMP/backend-${shard}.log" 2>&1 &
+            pids+=("$!")
+            names+=("$shard")
+          }
+
+          # One CI job owns all concurrency. The three-worker cap is measured
+          # for this Mac; worktree agents remain targeted-test only.
+          # The letter split keeps the three shards' summed test time within
+          # a few percent of each other (measured from the junit reports); a
+          # lopsided shard is what pushes the job past its timeout under load.
+          run_backend_shard core-cgr backend/tests/test_[cgr]*.py
+          run_backend_shard remainder backend/tests \
+            '--ignore-glob=backend/tests/test_[cgr]*.py' \
+            '--ignore-glob=backend/tests/test_[aehilsuw]*.py'
+          run_backend_shard core-aehilsuw backend/tests/test_[aehilsuw]*.py
+
+          status=0
+          for index in "${!pids[@]}"; do
+            if ! wait "${pids[$index]}"; then
+              status=1
+            fi
+            echo "::group::Backend shard ${names[$index]}"
+            cat "$RUNNER_TEMP/backend-${names[$index]}.log"
+            touch "$RUNNER_TEMP/backend-${names[$index]}.log.printed"
+            echo "::endgroup::"
+          done
+          exit "$status"
+
+      - name: Summarize backend test shards
+        if: always()
+        continue-on-error: true
+        run: |
+          .venv/bin/python - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          runner_temp = Path(os.environ["RUNNER_TEMP"])
+          shards = [
+              path.stem.removeprefix("backend-")
+              for path in sorted(runner_temp.glob("backend-*.log"))
+          ]
+          rows = []
+          incomplete_logs = []
+          for shard in shards:
+              report = runner_temp / f"backend-junit-{shard}.xml"
+              try:
+                  xml_root = ET.parse(report).getroot()
+              except (OSError, ET.ParseError) as error:
+                  status = f"unavailable ({type(error).__name__})"
+                  rows.append({"shard": shard, "status": status})
+                  incomplete_logs.append((shard, status))
+                  continue
+              suites = (
+                  [xml_root]
+                  if xml_root.tag == "testsuite"
+                  else list(xml_root.findall("testsuite"))
+              )
+              if not suites:
+                  status = "invalid report"
+                  rows.append({"shard": shard, "status": status})
+                  incomplete_logs.append((shard, status))
+                  continue
+              counts = {
+                  key: sum(int(suite.get(key, 0)) for suite in suites)
+                  for key in ("tests", "skipped", "failures", "errors")
+              }
+              counts.update(
+                  shard=shard,
+                  status="complete",
+                  passed=counts["tests"] - counts["skipped"]
+                  - counts["failures"] - counts["errors"],
+              )
+              rows.append(counts)
+
+          for shard, status in incomplete_logs:
+              log = runner_temp / f"backend-{shard}.log"
+              if log.with_suffix(".log.printed").exists():
+                  continue
+              print(
+                  f"::group::Incomplete backend shard {shard} log "
+                  f"({status}; log follows)"
+              )
+              try:
+                  print(log.read_text(errors="replace"), end="")
+              except OSError as error:
+                  print(f"::warning::Unable to read {log.name}: {error}")
+              print("::endgroup::")
+
+          complete_rows = [row for row in rows if row["status"] == "complete"]
+          totals = {
+              key: sum(row[key] for row in complete_rows)
+              for key in ("tests", "passed", "skipped", "failures", "errors")
+          }
+          lines = [
+              "### Backend test shards",
+              "",
+              "| Shard | Status | Tests | Passed | Skipped | Failed | Errors |",
+              "|---|---|---:|---:|---:|---:|---:|",
+          ]
+          if not rows:
+              lines.append("| _(none discovered)_ | no shard logs | - | - | - | - | - |")
+          lines.extend(
+              f"| `{row['shard']}` | {row['status']} | {row.get('tests', '-')} | "
+              f"{row.get('passed', '-')} | {row.get('skipped', '-')} | "
+              f"{row.get('failures', '-')} | {row.get('errors', '-')} |"
+              for row in rows
+          )
+          lines.append(
+              f"| **Aggregate** | **{len(complete_rows)}/{len(shards)} reports** | "
+              f"**{totals['tests']}** | **{totals['passed']}** | "
+              f"**{totals['skipped']}** | **{totals['failures']}** | "
+              f"**{totals['errors']}** |"
+          )
+
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as summary:
+              summary.write("\n".join(lines) + "\n")
+
+          print(
+              "Backend aggregate: "
+              f"{totals['tests']} tests, {totals['passed']} passed, "
+              f"{totals['skipped']} skipped, {totals['failures']} failed, "
+              f"{totals['errors']} errors from "
+              f"{len(complete_rows)}/{len(shards)} reports"
+          )
+          PY
+
+      - name: Upload backend timing report
+        if: always()
+        # Diagnostics only: a failed upload must not turn a passing job red.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/backend-junit-*.xml
+            ${{ runner.temp }}/backend-*.log
+          if-no-files-found: warn
+
+      - name: Detach test RAM disk
+        if: always() && env.CI_RAMDISK_DEVICE != ''
+        continue-on-error: true
+        run: hdiutil detach "$CI_RAMDISK_DEVICE" -force
+
+  frontend:
+    name: Frontend unit tests
+    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
+    # job to a hosted runner needs the repository owner's explicit approval.
+    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Active LTS; the frontend declares no engines constraint.
+          node-version: '24'
+
+      - name: Install deps + run tests
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run test
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Type check (svelte-check) — ADVISORY during calibration
+        working-directory: frontend
+        continue-on-error: true
+        run: npm run check

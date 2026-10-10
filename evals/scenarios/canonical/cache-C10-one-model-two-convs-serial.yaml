@@ -1,0 +1,130 @@
+id: cache-C10-one-model-two-convs-serial
+name: "One model, two sibling conversations alternating serially — within-model cache contention"
+description: >
+  Same model, two distinct conversations (X and Y) with different prefix
+  histories. Turns alternate serially: turn 1 on X, turn 1 on Y, turn 2
+  on X, turn 2 on Y, ... ten turns each. Measures whether the existence
+  of conversation Y's blocks in the hot cache pushes X's blocks out (and
+  vice versa).
+
+  Distinct from C11 (same setup but conversations PARALLEL — that adds
+  the scheduler + batched-engine factor). C10 isolates pure hot-cache
+  contention: only one request in flight at any given moment, but two
+  distinct cache lines competing for hot-tier space.
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-B
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7
+      (anti-overlap matrix: C10 vs C11)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - multi-conversation
+  - within-model
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-35b-a3b"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  conversations: 2
+  turns_per_conversation: 10
+  expected_per_conversation_hit_rate_minimum: 0.85
+
+pre_conditions:
+  - fixture: omlx_loaded_model
+    args:
+      model: "qwen-3.6-35b-a3b"
+      pin: true
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c10_x
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c10_y
+  - fixture: distinct_prefix_seed
+    args:
+      session_id: sess_c10_x
+      seed_id: c10_x_history_seed
+      seed_turns: 3
+  - fixture: distinct_prefix_seed
+    args:
+      session_id: sess_c10_y
+      seed_id: c10_y_history_seed
+      seed_turns: 3
+
+steps:
+  - action: run_interleaved_dialog_pair
+    args:
+      sessions:
+        - session_id: sess_c10_x
+          model: "qwen-3.6-35b-a3b"
+        - session_id: sess_c10_y
+          model: "qwen-3.6-35b-a3b"
+      turns_per_session: 10
+      sequencing: alternating_serial
+      timeout_ms_per_turn: 60000
+
+expected_outcomes:
+  - assertion: per_conversation_hit_rate_above_threshold
+    detail: >
+      For each conversation independently, turns 2-10 hit cache at
+      cached_tokens / (prompt_tokens − new_user_tokens) ≥ 0.85.
+      Y's existence in the hot cache does not push X's blocks out (and
+      vice versa) within this window.
+  - assertion: hit_rate_does_not_drift_down
+    detail: >
+      Each conversation's later turns are not systematically lower than
+      its earlier turns (rules out a slow drift caused by accumulating
+      sibling pressure).
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 20
+  - name: check_no_provider_error
+    args: {}
+  - name: check_per_turn_hit_rate_above
+    args:
+      session_id: sess_c10_x
+      turn_range: [2, 10]
+      min_ratio: 0.85
+      slack_tokens: 20
+  - name: check_per_turn_hit_rate_above
+    args:
+      session_id: sess_c10_y
+      turn_range: [2, 10]
+      min_ratio: 0.85
+      slack_tokens: 20
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_per_turn_hit_rate_above
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Fixture: distinct_prefix_seed (warms each session with N seeded turns
+      from a distinct script so X and Y have genuinely different prefix
+      histories — not just "two sessions of the same conversation")
+    - Solver action: run_interleaved_dialog_pair (drives turns alternating
+      X·Y·X·Y... serially, waiting for turn_completed before moving on)
+
+  C10 vs C11 distinction:
+    - C10 = ALTERNATING SERIAL — only one request in flight at a time.
+      Isolates hot-cache contention between sibling cache lines.
+    - C11 = PARALLEL — both requests in flight simultaneously. Adds
+      scheduler + batched-engine concurrency factor on top of cache
+      contention.
+  If C10 passes and C11 fails, the regression is in concurrent execution,
+  not cache contention. If both fail, the cache contention itself is the
+  culprit.

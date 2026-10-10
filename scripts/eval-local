@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# scripts/eval-local — boot an isolated CORSIA backend and run YAML eval
+# scenarios against its /api/eval/turn endpoint.
+#
+# Usage:
+#   bash scripts/eval-local cache-C01-cold-baseline [more-scenario-ids...]
+#   bash scripts/eval-local --glob 'cache-C*' cache-warm-baseline
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+COMMON_GIT_DIR="$(cd "$REPO_ROOT" && git rev-parse --git-common-dir)"
+case "$COMMON_GIT_DIR" in
+  /*) CANONICAL_GIT_DIR="$COMMON_GIT_DIR" ;;
+  *)  CANONICAL_GIT_DIR="${REPO_ROOT}/${COMMON_GIT_DIR}" ;;
+esac
+CANONICAL_REPO_ROOT="$(cd "$(dirname "$CANONICAL_GIT_DIR")" && pwd)"
+
+# Resolve the backend Python the same way scripts/e2e-local does, so this
+# also runs unchanged from a linked worktree.
+if [ -n "${CORSIA_E2E_PYTHON:-}" ]; then
+  VENV_PY="$CORSIA_E2E_PYTHON"
+  if [ ! -x "$VENV_PY" ]; then
+    echo "FATAL: CORSIA_E2E_PYTHON=$VENV_PY is not executable." >&2
+    exit 1
+  fi
+elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x "${VIRTUAL_ENV}/bin/python" ]; then
+  VENV_PY="${VIRTUAL_ENV}/bin/python"
+elif [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+  VENV_PY="${REPO_ROOT}/.venv/bin/python"
+elif [ -x "${CANONICAL_REPO_ROOT}/.venv/bin/python" ]; then
+  VENV_PY="${CANONICAL_REPO_ROOT}/.venv/bin/python"
+else
+  echo "FATAL: no Python venv found. Set CORSIA_E2E_PYTHON, activate one," >&2
+  echo "       or install backend deps at ${REPO_ROOT}/.venv first." >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+
+# Account creation and token minting live in one place; reuse it rather
+# than re-deriving how a credential comes into existence.
+PYTHON="$VENV_PY"
+BACKEND_DIR="${REPO_ROOT}/backend"
+# shellcheck source=corsia.d/accounts.sh
+. "${SCRIPT_DIR}/corsia.d/accounts.sh"
+
+BOOT_PORT="${CORSIA_EVAL_BOOT_PORT:-3120}"
+WORKSPACE="$(mktemp -d -t corsia-eval-ws-XXXXXX)"
+STATE_ROOT="$(mktemp -d -t corsia-eval-state-XXXXXX)"
+WORKSPACE_DB="${STATE_ROOT}/corsia.db"
+BOOT_LOG="$(mktemp -t corsia-eval-boot.XXXXXX)"
+BOOT_PID=""
+
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+header() { printf '\n\033[1;36m=== %s ===\033[0m\n' "$*"; }
+
+cleanup() {
+  if [ -n "$BOOT_PID" ] && kill -0 "$BOOT_PID" 2>/dev/null; then
+    kill "$BOOT_PID" 2>/dev/null || true
+    wait "$BOOT_PID" 2>/dev/null || true
+  fi
+  STALE=$(lsof -ti:"$BOOT_PORT" 2>/dev/null || true)
+  if [ -n "$STALE" ]; then
+    echo "$STALE" | xargs kill 2>/dev/null || true
+  fi
+  rm -rf "$WORKSPACE" "$STATE_ROOT" "$BOOT_LOG"
+}
+trap cleanup EXIT
+
+boot_backend() {
+  ( cd "${REPO_ROOT}/backend" && \
+    env CORSIA_TEST_MODE=1 CORSIA_WORKSPACE="$WORKSPACE" \
+      CORSIA_STATE_DIR="$STATE_ROOT" "$VENV_PY" -m uvicorn main:app \
+      --host 127.0.0.1 --port "$BOOT_PORT" > "$BOOT_LOG" 2>&1 ) &
+  BOOT_PID=$!
+}
+
+wait_healthy() {
+  for _ in $(seq 1 30); do
+    if curl -sf "http://127.0.0.1:${BOOT_PORT}/api/health" > /dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+kill_backend() {
+  if [ -n "$BOOT_PID" ] && kill -0 "$BOOT_PID" 2>/dev/null; then
+    kill "$BOOT_PID" 2>/dev/null || true
+    wait "$BOOT_PID" 2>/dev/null || true
+  fi
+  BOOT_PID=""
+  sleep 1
+}
+
+SCENARIO_IDS=()
+CANONICAL_DIR="${REPO_ROOT}/evals/scenarios/canonical"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --glob)
+      pattern="$2"; shift 2
+      for f in "$CANONICAL_DIR"/$pattern.yaml; do
+        [ -e "$f" ] || continue
+        SCENARIO_IDS+=("$(basename "$f" .yaml)")
+      done
+      ;;
+    *)
+      SCENARIO_IDS+=("$1"); shift
+      ;;
+  esac
+done
+
+if [ "${#SCENARIO_IDS[@]}" -eq 0 ]; then
+  red "FATAL: no scenarios specified. Pass scenario ids or --glob <pattern>."
+  exit 1
+fi
+
+header "1/3 boot backend on :${BOOT_PORT} to initialize schema"
+boot_backend
+if ! wait_healthy; then
+  red "FATAL: backend never became healthy. Logs:"
+  tail -30 "$BOOT_LOG"
+  exit 1
+fi
+kill_backend
+if [ ! -f "$WORKSPACE_DB" ]; then
+  red "FATAL: backend ran but DB not at $WORKSPACE_DB"
+  exit 1
+fi
+
+# Nothing ships with a credential, so this disposable install gets its own.
+# Done while the backend is down, against the schema its first boot created.
+CORSIA_EVAL_TOKEN=$(
+  export CORSIA_TEST_MODE=1 CORSIA_WORKSPACE="$WORKSPACE" \
+         CORSIA_STATE_DIR="$STATE_ROOT"
+  seed_disposable_account eval eval-local
+) || { red "FATAL: could not provision the eval account."; exit 1; }
+if [ -z "$CORSIA_EVAL_TOKEN" ]; then
+  red "FATAL: eval account provisioned but no token was minted."
+  exit 1
+fi
+export CORSIA_EVAL_TOKEN
+green "provisioned a disposable eval account and token"
+
+header "2/3 seed synthetic settings + reboot for catalog discovery"
+# STATE_ROOT above is always this script's own mktemp-generated disposable
+# path, never caller input — safe to self-attest for seed-worktree-db's
+# sandboxed-bootstrap confirmation gate.
+CORSIA_SEED_CONFIRM_NOT_PROD=1 \
+  "$VENV_PY" "${SCRIPT_DIR}/seed-worktree-db" "$STATE_ROOT" \
+  --workspace "$WORKSPACE" || exit 1
+boot_backend
+if ! wait_healthy; then
+  red "FATAL: backend never became healthy after seed. Logs:"
+  tail -30 "$BOOT_LOG"
+  exit 1
+fi
+
+LOCAL_COUNT=$(curl -s "http://127.0.0.1:${BOOT_PORT}/api/models?token=${CORSIA_EVAL_TOKEN}" | "$VENV_PY" -c "
+import json, sys
+data = json.load(sys.stdin)
+local = [m for m in data.get('models', []) if m.get('backend') != 'api']
+print(len(local))
+" 2>/dev/null || echo 0)
+if [ "$LOCAL_COUNT" = "0" ]; then
+  red "FATAL: no local (oMLX) models in catalog after seed. Set"
+  red "CORSIA_SEED_OMLX_ENDPOINT and CORSIA_SEED_OMLX_MODEL_ID to a real,"
+  red "reachable oMLX server before running (see scripts/seed-worktree-db --help)."
+  exit 1
+fi
+green "catalog has ${LOCAL_COUNT} local model(s)"
+
+header "3/3 run ${#SCENARIO_IDS[@]} scenario(s)"
+export CORSIA_EVAL_ENDPOINT="http://127.0.0.1:${BOOT_PORT}/api/eval/turn"
+
+FAILED=()
+for sid in "${SCENARIO_IDS[@]}"; do
+  echo
+  yellow "--- scenario: ${sid} ---"
+  if ( cd "$REPO_ROOT" && \
+       PYTHONPATH=backend "$VENV_PY" -m eval.run --scenario "$sid" ); then
+    green "PASS: ${sid}"
+  else
+    red "NON-PASS: ${sid} (see summary above)"
+    FAILED+=("$sid")
+  fi
+done
+
+kill_backend
+
+echo
+if [ "${#FAILED[@]}" -gt 0 ]; then
+  red "FAILED scenarios (${#FAILED[@]}/${#SCENARIO_IDS[@]}): ${FAILED[*]}"
+  exit 1
+fi
+green "All ${#SCENARIO_IDS[@]} scenario(s) passed."

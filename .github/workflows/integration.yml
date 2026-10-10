@@ -1,0 +1,112 @@
+name: Integration tests (L3)
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'backend/**'
+      - 'requirements*.txt'
+      - '.github/workflows/integration.yml'
+  workflow_dispatch:
+    inputs:
+      live_reviewer:
+        description: 'Run the bounded real Haiku reviewer proof instead of routine L3'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: ${{ inputs.live_reviewer && 'Live host reviewer proof (Haiku)' || 'Integration tests (L3)' }}
+    runs-on: [self-hosted, macOS, ARM64, mac-studio, ci-integration]
+    timeout-minutes: ${{ inputs.live_reviewer && 30 || 15 }}
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CORSIA_ANALYTICS_DISABLE: '1'
+      CORSIA_CONTRACT_SUITE: '1'
+      CORSIA_REQUIRE_SAFEHOUSE: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare isolated workspace
+        run: |
+          set -e
+          echo "CORSIA_WORKSPACE=$RUNNER_TEMP/corsia-ci-workspace" >> "$GITHUB_ENV"
+          echo "CORSIA_STATE_DIR=$RUNNER_TEMP/corsia-ci-state" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
+
+      - name: Set up Python (system)
+        run: |
+          set -e
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          PY_BIN="$(command -v python3.11 || true)"
+          if [ -z "$PY_BIN" ]; then
+            echo "::error::python3.11 not found on PATH"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/python-shim/bin"
+          ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
+          echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"
+          "$PY_BIN" --version
+
+      - name: Install backend deps
+        run: |
+          set -e
+          if [ ! -x .venv/bin/python ]; then
+            python -m venv .venv
+          fi
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install -r backend/requirements-test.txt
+
+      - name: Check required models loaded
+        run: |
+          set -e
+          cd backend
+          ../.venv/bin/python -c "
+          import yaml, sys
+          from pathlib import Path
+          req_file = Path('eval/required_models.yaml')
+          if not req_file.exists():
+              print('No required_models.yaml — skipping model check')
+              sys.exit(0)
+          required = yaml.safe_load(req_file.read_text())
+          if not required or not required.get('models'):
+              print('No models declared in required_models.yaml')
+              sys.exit(0)
+          for m in required['models']:
+              print(f\"  required: {m['id']} ({m.get('reason', 'no reason')})\" )
+          print(f\"Validated {len(required['models'])} required model(s)\")
+          "
+
+      - name: Run integration tests
+        if: ${{ !inputs.live_reviewer }}
+        run: |
+          set -e
+          cd backend
+          ../.venv/bin/python -m pytest -m "integration" \
+            --ignore=tests/test_host_access_reviewer_live_inference.py \
+            --tb=short -q \
+            -x
+
+      - name: Run bounded live Haiku reviewer proof
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_reviewer }}
+        run: |
+          set -e
+          CORSIA_WORKSPACE="$(mktemp -d "$RUNNER_TEMP/reviewer-workspace.XXXXXX")"
+          CORSIA_STATE_DIR="$(mktemp -d "$RUNNER_TEMP/reviewer-state.XXXXXX")"
+          export CORSIA_WORKSPACE CORSIA_STATE_DIR
+          export CORSIA_TEST_MODE=1
+          cd backend
+          ../.venv/bin/python -m pytest tests/test_host_access_reviewer_live_inference.py \
+            --tb=short -q

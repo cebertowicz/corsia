@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "notes": [
+    "This matrix is intentionally advisory. Run `node qa/core/cli.mjs eval-tools --online` to verify docs are reachable, then do the required local spikes before adopting any external tool."
+  ],
+  "tools": [
+    {
+      "id": "autonoma",
+      "name": "Autonoma",
+      "license": "Vendor describes it as open source / BSL 1.1; verify repository license before adoption.",
+      "fit": "Closest match to the requested product shape: AI-generated end-to-end tests, self-healing execution, browser/mobile scope, and codebase-informed planning.",
+      "recommendation": "Evaluate before rebuilding similar functionality. Do not adopt until self-hosting, local-model routing, artifact export, and license posture are proven.",
+      "urls": [
+        "https://getautonoma.com/",
+        "https://docs.autonoma.app/introduction",
+        "https://docs.agent.autonoma.app/"
+      ],
+      "risks": [
+        "May assume hosted platform workflows or GitHub App integration.",
+        "May still require hosted AI configuration unless self-hosted local model support is validated.",
+        "BSL is source-available, not OSI open source; legal/usage fit must be confirmed."
+      ],
+      "required_spike": [
+        "Self-host locally against CORSIA with no paid service and no cloud API key.",
+        "Point it at a local OpenAI-compatible model and run a small auth/settings flow.",
+        "Confirm it can export durable local reports and artifacts that future coding agents can read.",
+        "Compare generated coverage against `qa/adapters/corsia/surfaces.yml`."
+      ]
+    },
+    {
+      "id": "agent-browser",
+      "name": "Vercel agent-browser",
+      "license": "Verify repository license before adoption.",
+      "fit": "Good agent-facing browser control layer for snapshots, screenshots, console/error inspection, traces, and screenshot diffs.",
+      "recommendation": "Use as an exploration/debug adapter around deterministic Playwright tests, not as the sole regression engine.",
+      "urls": [
+        "https://github.com/vercel-labs/agent-browser"
+      ],
+      "risks": [
+        "Does not by itself generate and maintain a comprehensive test suite.",
+        "Natural-language browser control still depends heavily on model discipline."
+      ],
+      "required_spike": [
+        "Open a local CORSIA E2E server and capture accessibility snapshots plus annotated screenshots.",
+        "Check whether screenshot diff output can feed `qa review` cleanly.",
+        "Measure latency with Qwen 35B-class local model in a 5-step flow."
+      ]
+    },
+    {
+      "id": "browser-use",
+      "name": "Browser Use",
+      "license": "Verify repository license before adoption.",
+      "fit": "Useful autonomous browser-task framework with OpenAI-compatible and local provider options.",
+      "recommendation": "Evaluate for exploratory QA and coverage discovery, but keep deterministic regression testing in Playwright.",
+      "urls": [
+        "https://docs.browser-use.com/supported-models"
+      ],
+      "risks": [
+        "Docs warn that many Qwen models can emit incorrect action schemas without concrete examples.",
+        "Repeated regression tests should not depend on an LLM choosing every click."
+      ],
+      "required_spike": [
+        "Run a local Qwen-compatible endpoint through Browser Use with strict action-schema examples.",
+        "Verify failures produce useful artifacts and not just chat transcripts.",
+        "Compare flake rate against direct Playwright tests for the same CORSIA flow."
+      ]
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "license": "Apache-2.0.",
+      "fit": "Best deterministic execution layer for browser automation, traces, screenshots, visual comparisons, and accessibility snapshots.",
+      "recommendation": "Use as the stable pass/fail substrate regardless of which AI layer is adopted.",
+      "urls": [
+        "https://playwright.dev/docs/test-snapshots",
+        "https://playwright.dev/docs/aria-snapshots",
+        "https://playwright.dev/docs/trace-viewer"
+      ],
+      "risks": [
+        "Visual baselines vary across OS/browser/rendering environments unless pinned.",
+        "Does not generate or maintain tests by itself."
+      ],
+      "required_spike": [
+        "Keep CORSIA smoke tests green in isolated workspace.",
+        "Add visual and ARIA baselines for the design-system route and app shell.",
+        "Feed Playwright artifacts into `qa review`."
+      ]
+    }
+  ]
+}

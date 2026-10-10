@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# .githooks/pre-push — reject pushes from local main or dev checkouts.
+#
+# Defense-in-depth: GitHub branch protection blocks direct pushes server-side,
+# but this hook catches mistakes locally before they hit the remote. Pushes
+# are only allowed from feature branches.
+#
+# Preferred installation: git config core.hooksPath .githooks
+# (or symlink .githooks/pre-push to .git/hooks/pre-push)
+
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "detached")
+
+case "$BRANCH" in
+  main|dev)
+    echo ""
+    echo "ERROR: Direct push from '$BRANCH' is not allowed."
+    echo ""
+    echo "The branch model requires all work to go through feature branches:"
+    echo "  feature/* -> dev (via PR)"
+    echo "  dev -> main (via PR)"
+    echo ""
+    echo "Create a feature branch first:"
+    echo "  git checkout -b feature/your-change"
+    echo "  git push -u origin feature/your-change"
+    echo ""
+    exit 1
+    ;;
+esac
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+CHECK_PR="$REPO_ROOT/scripts/check-pr"
+
+if [ ! -f "$CHECK_PR" ]; then
+  exit 0
+fi
+
+CHECK_PR_STARTED=$(date +%s)
+"$CHECK_PR"
+CHECK_PR_RC=$?
+CHECK_PR_FINISHED=$(date +%s)
+CHECK_PR_SECS=$((CHECK_PR_FINISHED - CHECK_PR_STARTED))
+
+{
+  printf '%s %s rc=%s secs=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(git rev-parse HEAD)" \
+    "$CHECK_PR_RC" \
+    "$CHECK_PR_SECS" >> "${TMPDIR:-/tmp}/corsia-check-pr-push.log"
+} 2>/dev/null || :
+
+if [ "$CHECK_PR_RC" -ne 0 ]; then
+  printf '%s\n' 'push refused: scripts/check-pr failed; fix and re-push (see output above);' >&2
+  exit "$CHECK_PR_RC"
+fi

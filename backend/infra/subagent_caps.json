@@ -1,0 +1,6 @@
+{
+  "_comment": "Claude Code process caps (issues #301-M2, #2064). DATA, not code — each field is seeded into the `subagents` settings row at boot when absent (idempotent; never overwrites operator edits) and is user-changeable in the settings table. `max_concurrent_live` is the ceiling on Claude Code processes WORKING at once: working a Turn, running admitted tool work, settling a process exit, or mid-spawn/transition. Idle processes are not counted. At the cap a new delegation spawn fails loud (LiveSpawnCapExceeded -> HTTP 429 / tool error naming the working threads) rather than fanning out unbounded processes. `idle_retire_after_seconds` is how long a finished Claude Code process stays warm before the idle-retirement pass (subagents/cc_idle_retirement.py) closes it; the thread cold-resumes on its next input. `max_idle_live` bounds how many idle processes are kept warm; beyond it the pass retires the longest-idle eligible ones first. Per the model-religion / no-hardcoded-magic-in-code-paths discipline, the numbers live HERE, never as Python literals in a runtime code path.",
+  "max_concurrent_live": 8,
+  "idle_retire_after_seconds": 600,
+  "max_idle_live": 8
+}

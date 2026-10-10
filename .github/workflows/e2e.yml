@@ -1,0 +1,172 @@
+name: UI-E2E (L2 — mock)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'scripts/assign-e2e-runner-ports'
+      - 'scripts/e2e-local'
+      - 'scripts/verify-mock-fidelity'
+      - 'playwright.config.ts'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'JSON array of run indices (e.g. [0,1,2,3,4]); default [0] = single run.'
+        required: false
+        default: '[0]'
+      grep:
+        description: 'Optional Playwright test filter; empty runs the full suite.'
+        type: string
+        required: false
+        default: ''
+
+# Runner-slot ports isolate refs on the ci-integration pool. Superseded runs
+# on this ref can therefore cancel without affecting another ref's E2E owner.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright UI-E2E (mock)
+    runs-on: [self-hosted, macOS, ARM64, mac-studio, ci-integration]
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        run-index: ${{ fromJSON(github.event.inputs.runs || '[0]') }}
+
+    env:
+      CORSIA_E2E_MOCK: '1'
+      CORSIA_E2E_MODEL: 'mock/test-model'
+      CORSIA_E2E_TRIM_FIX: ${{ vars.CORSIA_E2E_TRIM_FIX || '0' }}
+      CORSIA_ANALYTICS_DISABLE: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assign isolated E2E ports
+        run: scripts/assign-e2e-runner-ports
+
+      - name: Prepare isolated workspace
+        run: |
+          set -e
+          echo "CORSIA_WORKSPACE=$RUNNER_TEMP/corsia-ci-workspace" >> "$GITHUB_ENV"
+          echo "CORSIA_STATE_DIR=$RUNNER_TEMP/corsia-ci-state" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
+
+      - name: Set up Python + Node (system)
+        run: |
+          set -e
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          PY_BIN="$(command -v python3.11)"
+          NODE_BIN="$(command -v node)"
+          mkdir -p "$RUNNER_TEMP/python-shim/bin"
+          ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
+          echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"
+          "$PY_BIN" --version
+          "$NODE_BIN" --version
+          "$(command -v npm)" --version
+
+      - name: Install backend deps (.venv)
+        run: |
+          set -e
+          python3.11 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run UI-E2E (mock mode via scripts/e2e-local)
+        env:
+          E2E_GREP: ${{ inputs.grep }}
+        run: |
+          if [ -n "$E2E_GREP" ]; then
+            bash scripts/e2e-local --grep "$E2E_GREP"
+          else
+            bash scripts/e2e-local
+          fi
+
+      - name: Upload browser cleanup screenshots
+        if: always()
+        # Diagnostics only: a failed upload must not turn a passing job red.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-cleanup-screenshots-${{ matrix.run-index }}
+          path: |
+            frontend/test-results/**/browser-cleanup-notices.png
+            frontend/test-results/*browser-cleanup-notice*/test-failed-*.png
+          if-no-files-found: ignore
+
+      - name: Upload evidence screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-screenshots-${{ matrix.run-index }}
+          path: |
+            frontend/test-results/**/*.png
+            !frontend/test-results/**/browser-cleanup-notices.png
+            !frontend/test-results/*browser-cleanup-notice*/test-failed-*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+
+  mock-fidelity:
+    name: Mock fidelity verification
+    runs-on: [self-hosted, macOS, ARM64, mac-studio, ci-integration]
+    timeout-minutes: 10
+    if: |
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request' && github.base_ref == 'main')
+    env:
+      CORSIA_ANALYTICS_DISABLE: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare isolated workspace
+        run: |
+          set -e
+          echo "CORSIA_WORKSPACE=$RUNNER_TEMP/corsia-ci-workspace" >> "$GITHUB_ENV"
+          echo "CORSIA_STATE_DIR=$RUNNER_TEMP/corsia-ci-state" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
+
+      - name: Set up Python
+        run: |
+          set -e
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          PY_BIN="$(command -v python3.11)"
+          mkdir -p "$RUNNER_TEMP/python-shim/bin"
+          ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
+          echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"
+
+      - name: Install backend deps
+        run: |
+          set -e
+          python3.11 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+
+      - name: Run mock-fidelity check
+        run: |
+          if [ ! -x scripts/verify-mock-fidelity ]; then
+            echo "::error::scripts/verify-mock-fidelity is missing — the mock-fidelity gate cannot run. Either ship the script or remove this job."
+            exit 1
+          fi
+          bash scripts/verify-mock-fidelity

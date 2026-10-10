@@ -1,0 +1,94 @@
+id: S8-providers-error-toast-on-bad-key
+name: "Cloud provider with bad key surfaces a clear error, not a silent failure"
+description: >
+  Edge case for providers-settings-ui (NFR2 — no silent UI failures).
+  When a chat turn dispatches against a provider whose key is bad
+  (revoked, expired, mistyped), the agent must NOT receive a silent
+  default — it must receive an explicit error so the UI can surface
+  it as a toast.
+
+  Mode A: the mocked LLM substrate emits an error response that
+  simulates an upstream auth failure ("invalid api key"). The eval
+  turn's run_turn_with_steps body must propagate the error to the
+  on_step callback, which the eval collector captures.
+
+  This scenario protects the loud-failure invariant against a
+  refactor that catches and swallows provider errors silently
+  (the frontend would then see "no models" or empty content with no
+  reason).
+
+category: functional
+tags:
+  - providers-settings-ui
+  - edge-case
+  - fail-loud
+  - error-surface
+subsystems:
+  - providers-settings-ui
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_providers_baderr
+      session_id: sess_s8_baderr
+  - fixture: mock_llm_replies
+    args:
+      replies:
+        # Simulated upstream auth failure — the mock returns an
+        # error-shaped reply that the loop body's
+        # `if response.finish_reason == "error"` branch handles.
+        - role: assistant
+          content: "Provider error: invalid_api_key — the configured key was rejected by the upstream API."
+          finish_reason: error
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_s8_baderr
+      content: "Send a test prompt to verify the provider key."
+  - action: wait_for_event
+    args:
+      session_id: sess_s8_baderr
+      event: error
+      timeout_ms: 5000
+
+expected_outcomes:
+  - assertion: error_step_emitted
+    detail: >
+      An `error` step fired carrying the failure message. The loop
+      body must NOT have swallowed the finish_reason=error and
+      proceeded; it must have emitted the error to on_step and broken
+      the loop.
+  - assertion: error_message_contains_invalid_api_key
+    detail: >
+      The error step's payload mentions "invalid_api_key" or a
+      semantically equivalent phrase — the failure is identifiable,
+      not opaque.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: error
+      min_count: 1
+  - name: check_assistant_message_content
+    args:
+      mode: contains
+      value: "invalid_api_key"
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_assistant_message_content
+
+notes: |
+  The cross-coverage with chat-turns AP1 (silent cancel/error drop) is
+  intentional. providers-settings-ui owns the user-visible promise
+  ("you'll see why your provider failed"); chat-turns owns the
+  mechanism (the `error` step is emitted). A regression that broke
+  the mechanism would also break this scenario's user promise.
+
+  When Sprint-4 Playwright lands, the companion UI-E2E
+  `playwright/providers-error-toast.spec.ts` asserts that the toast
+  actually appears — this scenario asserts the backend produces the
+  signal the toast renders from.

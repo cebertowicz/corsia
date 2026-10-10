@@ -1,0 +1,41 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { writable } from 'svelte/store';
+import { DocOpenError } from '$lib/docOpenRefusal';
+import { clearDraft, seedDraft } from '$lib/stores/docSaveQueue';
+import { loadViewerContent } from './docViewerLoading';
+
+const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), writeContent: vi.fn() }));
+vi.mock('$lib/api/docs', () => api);
+vi.mock('$lib/stores/liveDocuments', () => ({
+	openLiveDocument: vi.fn(), closeLiveDocument: vi.fn(), liveDocumentBindings: writable({}),
+}));
+vi.mock('$lib/stores/docComments', () => ({ flushPositions: vi.fn() }));
+
+const target = { instanceId: 'loading', path: '/documents/doc.md', name: 'doc.md', projectId: null, threadId: 'thread', artifactId: 'artifact' };
+const setupFailed = { code: 'setup_failed' as const, title: 'Setup failed', message: 'Document setup failed; open it again to retry' };
+
+afterEach(() => { clearDraft(target); vi.clearAllMocks(); });
+
+async function refusedBeforeAnySnapshot() {
+	api.fetchContent.mockRejectedValue(new DocOpenError(setupFailed));
+	const onSnapshot = vi.fn();
+	const error = await loadViewerContent({ target, isCurrent: () => true, onReady: vi.fn(), onSnapshot, onUnavailable: vi.fn() })
+		.then(() => null, (thrown: unknown) => thrown);
+	return { error, onSnapshot };
+}
+
+describe('a live open refused before the file snapshot arrives', () => {
+	it('with no draft clears the editor instead of leaving the previous document on screen, and keeps the server body', async () => {
+		const { error, onSnapshot } = await refusedBeforeAnySnapshot();
+		expect(onSnapshot).toHaveBeenCalledExactlyOnceWith('');
+		expect(error).toBeInstanceOf(DocOpenError);
+		expect(error).toMatchObject({ code: 'setup_failed', title: setupFailed.title, message: "Live editing couldn't start for this document." });
+	});
+
+	it('with a draft leaves the draft to the viewer and keeps the server body', async () => {
+		seedDraft(target, 'tab draft');
+		const { error, onSnapshot } = await refusedBeforeAnySnapshot();
+		expect(onSnapshot).not.toHaveBeenCalled();
+		expect(error).toMatchObject({ code: 'setup_failed', message: "Live editing couldn't start for this document." });
+	});
+});

@@ -1,0 +1,33 @@
+name: Discussion / open question
+description: Strategic call, architectural question, or "should we?" — not yet a bug or feature
+title: "[discuss] <one-line summary>"
+labels: ["discussion"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: The question
+      description: One paragraph. The decision that needs to be made, or the strategic call.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Background — what's been discussed, what's been ruled out, what's driving the question now.
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered (if any)
+      description: Possible answers + their tradeoffs. OK to leave blank if you want triage to enumerate.
+  - type: textarea
+    id: blocking
+    attributes:
+      label: What's blocked by this
+      description: Which initiatives / sprints / PRs are waiting on this resolution.
+  - type: markdown
+    attributes:
+      value: |
+        Resolved discussions often become **DECISIONS-LOG** entries. When this closes with a decision, link the DECISIONS-LOG entry number in the closing comment.

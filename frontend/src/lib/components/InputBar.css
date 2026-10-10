@@ -1,0 +1,454 @@
+.input-floater {
+	position: absolute; bottom: 0; left: 0; right: 0;
+	z-index: 10;
+	padding: 8px 16px 8px;
+	padding-bottom: calc(8px + var(--safe-bottom));
+	background: none;
+	flex-shrink: 0;
+	pointer-events: none;
+}
+.input-floater > * { pointer-events: auto; }
+.attachment-previews {
+	display: flex; flex-wrap: wrap; gap: 8px;
+	padding: 0 4px;
+}
+.attachment-chip {
+	display: flex; align-items: center; gap: 6px;
+	background: var(--bg-secondary); border: 1px solid var(--border);
+	border-radius: var(--radius-sm); padding: 4px 8px; max-width: 200px;
+}
+.attachment-thumb {
+	width: 32px; height: 32px; object-fit: cover;
+	border-radius: var(--radius-2xs); flex-shrink: 0;
+}
+.attachment-icon {
+	width: 32px; height: 32px; display: flex; align-items: center;
+	justify-content: center; background: var(--bg-tertiary);
+	border-radius: var(--radius-2xs); flex-shrink: 0; color: var(--text-secondary);
+}
+.attachment-name {
+	font-size: var(--text-footnote); color: var(--text-secondary);
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	min-width: 0; flex: 1;
+}
+.attachment-remove {
+	width: 18px; height: 18px; border-radius: var(--radius-circle);
+	background: var(--bg-hover); border: none;
+	color: var(--text-tertiary); cursor: pointer;
+	display: flex; align-items: center; justify-content: center;
+	flex-shrink: 0; transition: background var(--dur-tight), color var(--dur-tight);
+}
+.attachment-remove:hover { background: var(--red); color: white; }
+.upload-error {
+	max-width: 760px; margin: 0 auto 6px;
+	font-size: var(--text-footnote); color: #ef4444;
+	display: flex; align-items: center; justify-content: space-between;
+	background: rgba(239, 68, 68, 0.1); border-radius: var(--radius-xs); padding: 4px 10px;
+}
+.upload-error button {
+	background: none; border: none; color: #ef4444;
+	cursor: pointer; font-size: var(--text-footnote); padding: 0;
+}
+.vision-warning {
+	max-width: 760px; margin: 0 auto 6px;
+	font-size: var(--text-footnote); color: var(--yellow);
+	display: flex; align-items: flex-start; gap: 6px;
+	background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.2);
+	border-radius: var(--radius-xs); padding: 6px 10px;
+}
+.vision-warning svg { flex-shrink: 0; margin-top: 1px; }
+.input-chip {
+	max-width: 760px; margin: 0 auto;
+	display: flex; flex-direction: column; gap: 6px;
+	background: var(--glass-thin);
+	backdrop-filter: var(--glass-blur);
+	-webkit-backdrop-filter: var(--glass-blur);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-xl);
+	padding: 10px 12px 8px;
+	box-shadow: var(--glass-rim), var(--shadow-chip);
+	transition: border-color var(--dur-tight);
+}
+.input-chip:focus-within {
+	border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.input-chip .composer {
+	width: 100%; background: none; border: none;
+	color: var(--text-primary); font-size: var(--text-input);
+	font-family: inherit; line-height: 1.5;
+	outline: none;
+	min-height: 24px; max-height: 200px;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+	-webkit-user-select: text;
+	user-select: text;
+	padding: 4px 4px 0;
+}
+.input-chip .composer:empty::before {
+	content: attr(data-placeholder);
+	color: var(--text-tertiary);
+	pointer-events: none;
+}
+.action-row {
+	display: flex; align-items: center; gap: 8px;
+	padding: 0 4px;
+	/* Sized by its panel, not the viewport: an artifact-leaf composer is
+	   narrow on any screen. */
+	container: action-row / inline-size;
+}
+.action-spacer { flex: 1; }
+.row-chip {
+	display: inline-flex; align-items: center; gap: 3px;
+	padding: 4px 6px;
+	font-family: inherit;
+	background: none;
+	border: none;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	transition: background var(--dur-tight), color var(--dur-tight);
+	white-space: nowrap;
+}
+.row-chip:hover, .row-chip.open {
+	background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+}
+.row-chip .chevron {
+	flex-shrink: 0; opacity: 0.6;
+	transition: transform var(--dur-tight) ease;
+}
+.row-chip.open .chevron {
+	transform: rotate(180deg);
+}
+.model-chip {
+	font-size: var(--text-footnote); font-weight: 600;
+	letter-spacing: 0.02em;
+	color: var(--violet);
+	min-width: 0;
+}
+.model-chip.unloaded {
+	color: var(--amber);
+}
+.model-chip.unloaded:hover, .model-chip.unloaded.open {
+	color: var(--amber-2, var(--amber));
+	background: var(--amber-bg);
+}
+.effort-chip {
+	font-size: var(--text-caption); font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--sky);
+}
+.effort-chip:hover, .effort-chip.open {
+	color: var(--sky-2, var(--sky));
+	background: var(--sky-bg);
+}
+.context-chip {
+	font-size: var(--text-caption); font-weight: 600;
+	font-family: var(--font-mono);
+	color: var(--text-tertiary);
+}
+.context-chip:hover, .context-chip.open { color: var(--text-secondary); }
+.context-chip.warn { color: var(--amber); }
+.context-chip.crit { color: var(--red); }
+.ctx-ring { flex-shrink: 0; }
+.model-chip-name {
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.model-chip .chevron {
+	flex-shrink: 0; opacity: 0.7;
+}
+.cc-model-chip {
+	font-size: var(--text-footnote); font-weight: 600;
+	letter-spacing: 0.02em;
+	color: var(--teal);
+	max-width: 180px; min-width: 0;
+	cursor: default;
+}
+.cc-model-chip:hover { background: none; }
+.cc-glyph { flex-shrink: 0; font-size: var(--text-footnote); }
+/* The context chip gives way before the model name does (#2965). Flex shrinks in proportion to
+   flex-shrink times width, so the name chip's share must be near zero, not merely smaller, or it
+   takes a sliver of the deficit while the context chip still has room. The context chip takes
+   all of a short row's shrink until it is down to its ring; its label wraps to a second line the
+   fixed height clips, so the percent leaves whole, never half-cut. Once the context chip is at
+   its minimum the name takes the rest, ellipsized, as before. The sheet it opens still shows it. */
+.model-chip { flex-shrink: 0.001; }
+.context-chip {
+	flex: 0 1000 auto; min-width: 26px;
+	flex-wrap: wrap; height: 22px; overflow: hidden;
+}
+
+.plus-btn {
+	width: 32px; height: 32px; border-radius: var(--radius-circle);
+	background: none; border: none; color: var(--text-tertiary);
+	cursor: pointer; display: flex; align-items: center;
+	justify-content: center; flex-shrink: 0;
+	transition: color var(--dur-tight), background var(--dur-tight);
+}
+.plus-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+.plus-btn:disabled { opacity: 0.3; cursor: default; }
+.plus-btn.open { color: var(--accent); }
+.plus-btn.open .plus-icon { transform: rotate(45deg); }
+.plus-icon { transition: transform var(--dur-standard); }
+
+.action-sheet {
+	width: 100%; max-width: 760px; min-width: 0; box-sizing: border-box; margin: 0 auto 8px;
+	background: var(--glass-thin);
+	backdrop-filter: var(--glass-blur);
+	-webkit-backdrop-filter: var(--glass-blur);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-lg); overflow: hidden;
+	box-shadow: var(--glass-rim), 0 4px 16px rgba(0, 0, 0, 0.08);
+	animation: sheetIn var(--dur-tight) ease-out;
+}
+@keyframes sheetIn {
+	from { opacity: 0; transform: translateY(6px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+.sheet-item {
+	display: flex; align-items: center; gap: 10px;
+	padding: 10px 14px; cursor: pointer;
+	font-size: var(--text-callout); color: var(--text-secondary);
+	border: none; background: none; width: 100%; text-align: left;
+	transition: background var(--dur-tight);
+}
+.sheet-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sheet-item svg { flex-shrink: 0; opacity: 0.5; }
+.sheet-label { flex: 1; }
+
+.effort-seg {
+	display: flex; position: relative;
+	gap: 0; background: var(--bg-primary);
+	border-radius: var(--radius-sm); padding: 3px;
+	min-height: 32px;
+	touch-action: pan-y;
+}
+.effort-seg.drag-track { user-select: none; -webkit-user-select: none; }
+.seg-btn {
+	flex: 1; min-width: 0;
+	font-size: var(--text-footnote); font-weight: 600;
+	padding: 6px 8px;
+	border: none; cursor: pointer;
+	background: transparent; color: var(--text-tertiary);
+	font-family: inherit; line-height: 1.2;
+	position: relative; z-index: 1;
+	transition: color var(--dur-tight);
+	border-radius: var(--radius-xs);
+}
+.seg-btn:hover { color: var(--text-secondary); }
+.seg-btn.on { color: var(--text-primary); }
+.effort-thumb {
+	position: absolute;
+	top: 3px; bottom: 3px;
+	background: color-mix(in srgb, var(--violet) 22%, transparent);
+	border: 1px solid color-mix(in srgb, var(--violet) 35%, transparent);
+	border-radius: var(--radius-xs);
+	z-index: 0;
+	pointer-events: none;
+	transition: left var(--dur-standard) var(--ease-ios-sheet),
+	            width var(--dur-standard) var(--ease-ios-sheet);
+}
+.effort-seg.drag-active .effort-thumb { transition: none; }
+
+.sheet-section { padding: 12px 14px; }
+.sheet-section-label {
+	font-size: var(--text-caption); font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: color-mix(in srgb, var(--violet) 55%, var(--text-tertiary));
+	margin-bottom: 8px;
+}
+
+.model-list { display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow-y: auto; }
+.model-list-empty { padding: 14px 10px; font-size: var(--text-subhead); color: var(--text-muted); text-align: center; }
+.model-list-item {
+	display: flex; align-items: center; gap: 10px;
+	width: 100%; min-width: 0; box-sizing: border-box;
+	padding: 9px 10px;
+	font-family: inherit; font-size: var(--text-subhead);
+	background: none; border: none;
+	color: var(--text-primary);
+	cursor: pointer; text-align: left;
+	border-radius: var(--radius-xs);
+	transition: background var(--dur-tight);
+}
+.model-list-item:hover { background: var(--bg-hover); }
+.model-list-item:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+.model-list-item:disabled:hover { background: none; }
+.model-list-item.active {
+	color: var(--violet);
+	background: color-mix(in srgb, var(--violet) 10%, transparent);
+}
+.model-status-dot {
+	width: 7px; height: 7px; border-radius: var(--radius-circle); flex-shrink: 0;
+}
+.model-list-name {
+	flex: 1; min-width: 0;
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.model-caps {
+	display: inline-flex; align-items: center; gap: 6px;
+	flex-shrink: 0; color: var(--text-tertiary);
+}
+.cap-glyph { display: block; }
+.cc-mark { font-size: var(--text-footnote); color: var(--teal); }
+.model-list-item.active .check-glyph { color: var(--violet); flex-shrink: 0; }
+
+.mobile-attach-row {
+	display: flex; gap: 8px; padding: 8px;
+}
+.mobile-attach-btn {
+	flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
+	padding: 14px 8px; border-radius: var(--radius-sm);
+	background: var(--bg-tertiary); border: 1px solid var(--border);
+	color: var(--text-secondary); cursor: pointer;
+	font-size: var(--text-footnote); transition: all var(--dur-tight);
+}
+.mobile-attach-btn:active {
+	background: var(--bg-hover); color: var(--text-primary);
+	border-color: var(--text-tertiary);
+}
+.mobile-attach-btn svg { opacity: 0.6; }
+
+
+.send-btn {
+	width: 40px; height: 40px; border-radius: var(--radius-circle);
+	background: var(--violet); border: none; color: white;
+	cursor: pointer; display: flex; align-items: center;
+	justify-content: center; flex-shrink: 0;
+	transition: background var(--dur-tight), opacity var(--dur-tight), transform var(--dur-tight) ease;
+	/* `manipulation` still lets a hold with any drift become a pan, and a pan
+	   is a `pointercancel` — which is how iOS took the hold-to-queue gesture
+	   away before it ever armed (USER-REPORTS #1). Nothing on this 40px target
+	   should ever scroll or zoom the page. */
+	touch-action: none;
+	-webkit-touch-callout: none;
+	user-select: none; -webkit-user-select: none;
+	position: relative; overflow: hidden; isolation: isolate;
+}
+.send-btn:hover { background: color-mix(in srgb, var(--violet) 88%, white); }
+/* The hold fills the button while it is being made, so the user can see the
+   gesture landing instead of finding out after they let go. */
+.send-btn.queue-holding::before {
+	content: ''; position: absolute; inset: 0; z-index: -1;
+	background: var(--sky);
+	transform: scaleY(0); transform-origin: bottom;
+	animation: send-btn-queue-fill var(--queue-arm-ms, 400ms) linear forwards;
+}
+.send-btn.queue-armed { background: var(--sky); transform: scale(0.94); }
+.send-btn.queue-armed .send-glyph { animation: send-btn-queue-pop var(--dur-tight) ease-out; }
+@keyframes send-btn-queue-fill { to { transform: scaleY(1); } }
+@keyframes send-btn-queue-pop { from { transform: scale(0.6); opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) {
+	/* No progress animation, but the armed state itself still has to be seen. */
+	.send-btn.queue-holding::before { content: none; }
+	.send-btn.queue-armed .send-glyph { animation: none; }
+}
+.send-btn:disabled { opacity: 0.3; cursor: default; }
+.send-btn.stop-btn { background: var(--text-tertiary); }
+.send-btn.stop-btn:hover { background: var(--text-secondary); }
+/* Stop was asked for and this turn has not ended yet: the control says so
+   rather than looking identical to a Stop that did nothing. */
+.send-btn.stop-btn.stopping {
+	opacity: 0.6;
+	animation: send-btn-stopping 1.2s ease-in-out infinite;
+}
+@keyframes send-btn-stopping { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) {
+	.send-btn.stop-btn.stopping { animation: none; }
+}
+
+/* The queue, pinned to the top of the input box.
+   Sky is the deferred-work tone, and it is already the tone the hold-to-queue
+   gesture fills the Send button with above — so the gesture and the thing it
+   produces read as one act. Against the accent bubble a sent message wears in
+   the canvas, "waiting on the composer, sky, clocked" and "in the thread,
+   accent, delivered" are told apart at a glance and never by their captions. */
+.queued-stack {
+	max-width: 760px; margin: 0 auto 6px;
+	display: flex; flex-direction: column; gap: 4px;
+	list-style: none; padding: 0;
+	/* Past ~3 the queue scrolls rather than climbing the screen. The composer is
+	   the one thing a queue must never push off a phone. */
+	max-height: 7rem;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+.queued-chip {
+	display: flex; align-items: center; gap: 8px;
+	padding: 7px 10px 7px 12px;
+	background: var(--glass-thin);
+	backdrop-filter: var(--glass-blur);
+	-webkit-backdrop-filter: var(--glass-blur);
+	border: 1px solid var(--border-subtle);
+	border-left: 2px solid var(--sky);
+	border-radius: var(--radius);
+	box-shadow: var(--glass-rim);
+	animation: sheetIn var(--dur-tight) ease-out;
+}
+.queued-position {
+	flex-shrink: 0;
+	min-width: 16px; height: 16px; padding: 0 4px;
+	border-radius: var(--radius-pill);
+	background: var(--sky-bg); border: 1px solid var(--sky-line);
+	color: var(--sky);
+	font-family: var(--font-mono); font-size: var(--text-caption);
+	line-height: 14px; text-align: center;
+}
+.queued-glyph { flex-shrink: 0; color: var(--sky); opacity: 0.85; }
+.queued-text {
+	flex: 1; min-width: 0;
+	font-size: var(--text-subhead); color: var(--text-secondary);
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.queued-attach {
+	display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0;
+	color: var(--text-tertiary);
+	font-family: var(--font-mono); font-size: var(--text-caption);
+}
+.queued-remove {
+	width: 18px; height: 18px; border-radius: var(--radius-circle);
+	background: var(--bg-hover); border: none;
+	color: var(--text-tertiary); cursor: pointer;
+	display: flex; align-items: center; justify-content: center;
+	flex-shrink: 0; transition: background var(--dur-tight), color var(--dur-tight);
+}
+.queued-remove:hover:not(:disabled) { background: var(--red); color: white; }
+.queued-remove:disabled { opacity: 0.45; cursor: default; }
+
+@media (max-width: 768px) {
+	.input-floater {
+		position: fixed;
+		left: 0; right: 0;
+		bottom: var(--kb-toolbar-inset, 0px);
+		padding: 8px 12px var(--floater-bottom-pad, max(var(--safe-bottom, 0px), 4px));
+	}
+
+	.send-btn {
+		width: 44px;
+		height: 44px;
+	}
+
+	.plus-btn {
+		width: 44px;
+		height: 44px;
+	}
+	.plus-btn svg {
+		width: 20px;
+		height: 20px;
+	}
+
+	/* Two and a bit rows: enough to see the line, short enough that the third
+	   chip peeking is the affordance that says it scrolls. */
+	.queued-stack { max-height: 7.5rem; }
+	.queued-chip { padding: 4px 6px 4px 12px; min-height: 44px; }
+	/* A 44px target with no 44px lozenge: the circle would swamp a one-line
+	   chip, so the hit area grows and the mark only grows enough to be aimed at. */
+	.queued-remove { width: 44px; height: 44px; background: none; }
+	.queued-remove svg { width: 13px; height: 13px; }
+	.queued-remove:active:not(:disabled) { background: none; color: var(--red); }
+}

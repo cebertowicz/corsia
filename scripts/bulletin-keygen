@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+"""Generate an encrypted Ed25519 private key outside the repository."""
+from __future__ import annotations
+
+import base64
+import getpass
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+
+def _repository_root(repo: Path) -> Path:
+    result = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--show-toplevel"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(result.stdout.strip()).resolve()
+
+
+def _passphrase() -> bytes:
+    first = getpass.getpass("Private-key passphrase: ")
+    second = getpass.getpass("Confirm private-key passphrase: ")
+    if not first:
+        raise ValueError("a private-key passphrase is required")
+    if first != second:
+        raise ValueError("passphrases do not match")
+    return first.encode()
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: bulletin-keygen <private-key-path>", file=sys.stderr)
+        return 2
+    target = Path(sys.argv[1]).expanduser().resolve()
+    repo = Path(__file__).resolve().parents[1]
+    if target.is_relative_to(_repository_root(repo)):
+        print("refusing to write a bulletin private key inside the repository", file=sys.stderr)
+        return 2
+    if target.exists():
+        print("refusing to overwrite an existing private key", file=sys.stderr)
+        return 2
+    try:
+        passphrase = _passphrase()
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    target.parent.mkdir(parents=True, exist_ok=True)
+    private = Ed25519PrivateKey.generate()
+    encoded = private.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.BestAvailableEncryption(passphrase),
+    )
+    try:
+        descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        print("refusing to overwrite an existing private key", file=sys.stderr)
+        return 2
+    with os.fdopen(descriptor, "wb") as output:
+        output.write(encoded)
+    public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    print(base64.b64encode(public).decode())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

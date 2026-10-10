@@ -1,0 +1,35 @@
+name: Enhancement
+description: Polish or refinement of an existing capability (smoother animation, better error message, small UX improvement)
+title: "[enhancement] <one-line summary>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Enhancement vs Feature.** An *enhancement* is a small refinement to something that already exists — smoother animation, better error message, faster path, cleaner output. A *feature* is a new capability (typically multi-slice, possibly initiative-shaped). Not sure which? Pick *enhancement* if it would land in a single small PR, *feature* otherwise.
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you improve
+      description: The specific refinement. One paragraph.
+      placeholder: "Sidebar collapse animation jumps on the last frame — should ease out smoothly."
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The user-visible benefit. What gets better?
+    validations:
+      required: true
+  - type: input
+    id: capability
+    attributes:
+      label: Capability or area (if known)
+      description: Name the user-facing capability or code area. Leave blank if unsure.
+      placeholder: conversation sidebar
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope notes
+      description: Anything not to touch / related polish that's intentionally out of scope.

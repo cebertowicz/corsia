@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# scripts/verify-mock-fidelity — assert mock engine produces structurally
+# equivalent output to a real Anthropic stream.
+#
+# Usage:
+#   bash scripts/verify-mock-fidelity
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+COMMON_GIT_DIR="$(cd "$REPO_ROOT" && git rev-parse --git-common-dir)"
+case "$COMMON_GIT_DIR" in
+  /*) CANONICAL_GIT_DIR="$COMMON_GIT_DIR" ;;
+  *)  CANONICAL_GIT_DIR="${REPO_ROOT}/${COMMON_GIT_DIR}" ;;
+esac
+CANONICAL_REPO_ROOT="$(cd "$(dirname "$CANONICAL_GIT_DIR")" && pwd)"
+
+VENV_PY="${CANONICAL_REPO_ROOT}/.venv/bin/python"
+if [ ! -x "$VENV_PY" ]; then
+  echo "FATAL: no venv at ${CANONICAL_REPO_ROOT}/.venv" >&2
+  exit 1
+fi
+
+SNAPSHOT="${REPO_ROOT}/backend/eval/fixtures/snapshots/anthropic-stream-canonical.json"
+
+cd "${REPO_ROOT}/backend"
+
+"$VENV_PY" -c "
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+snapshot_path = Path('$SNAPSHOT')
+if not snapshot_path.exists():
+    print(f'FATAL: snapshot not found at {snapshot_path}')
+    sys.exit(1)
+
+snapshot = json.loads(snapshot_path.read_text())
+expected = snapshot['properties']
+expected_seq = snapshot['chunk_sequence']
+
+sys.path.insert(0, '.')
+from e2e_mock import _streaming_iter, _make_chunk
+
+async def verify():
+    reply = {
+        'content': 'Hello world',
+        'reasoning_content': 'Let me say hello world as requested.',
+        'finish_reason': 'stop',
+    }
+
+    chunks = []
+    async for chunk in _streaming_iter(reply):
+        c = chunk.choices[0]
+        delta = c.delta
+        if delta.reasoning_content is not None:
+            chunks.append({'type': 'reasoning', 'has_content': bool(delta.reasoning_content)})
+        elif delta.content is not None:
+            chunks.append({'type': 'content', 'has_content': bool(delta.content)})
+        elif c.finish_reason is not None:
+            chunks.append({'type': 'finish', 'finish_reason': c.finish_reason})
+
+    errors = []
+
+    has_reasoning = any(c['type'] == 'reasoning' for c in chunks)
+    if expected['has_reasoning_chunks'] and not has_reasoning:
+        errors.append('MISSING reasoning chunks')
+
+    has_content = any(c['type'] == 'content' for c in chunks)
+    if expected['has_content_chunks'] and not has_content:
+        errors.append('MISSING content chunks')
+
+    has_finish = any(c['type'] == 'finish' for c in chunks)
+    if expected['has_finish_chunk'] and not has_finish:
+        errors.append('MISSING finish chunk')
+
+    finish_chunks = [c for c in chunks if c['type'] == 'finish']
+    if finish_chunks and finish_chunks[-1].get('finish_reason') != expected['finish_reason']:
+        errors.append(f\"finish_reason mismatch: {finish_chunks[-1].get('finish_reason')} != {expected['finish_reason']}\")
+
+    if expected['reasoning_before_content']:
+        first_reasoning = next((i for i, c in enumerate(chunks) if c['type'] == 'reasoning'), -1)
+        first_content = next((i for i, c in enumerate(chunks) if c['type'] == 'content'), -1)
+        if first_reasoning >= 0 and first_content >= 0 and first_reasoning > first_content:
+            errors.append(f'reasoning chunks ({first_reasoning}) come AFTER content chunks ({first_content})')
+
+    if len(chunks) < expected['chunk_count_min']:
+        errors.append(f\"chunk count {len(chunks)} < min {expected['chunk_count_min']}\")
+    if len(chunks) > expected['chunk_count_max']:
+        errors.append(f\"chunk count {len(chunks)} > max {expected['chunk_count_max']}\")
+
+    mock_types = [c['type'] for c in chunks]
+    expected_types = [c['type'] for c in expected_seq]
+    if mock_types != expected_types:
+        errors.append(f'type sequence mismatch: mock={mock_types} expected={expected_types}')
+
+    if errors:
+        print('FAIL: mock fidelity check failed:')
+        for e in errors:
+            print(f'  - {e}')
+        print(f'\\nMock chunks: {json.dumps(chunks, indent=2)}')
+        print(f'Expected sequence: {json.dumps(expected_seq, indent=2)}')
+        sys.exit(1)
+    else:
+        print(f'PASS: mock fidelity verified ({len(chunks)} chunks, sequence matches snapshot)')
+
+asyncio.run(verify())
+"

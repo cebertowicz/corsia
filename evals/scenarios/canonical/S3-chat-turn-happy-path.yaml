@@ -1,0 +1,82 @@
+id: S3-chat-turn-happy-path
+name: "Single-message chat turn — assistant text response, no tools, no cancel"
+description: >
+  The minimum-viable chat turn: user sends a message, agent (mocked LLM)
+  emits a single content reply, turn completes. No tool calls, no
+  cancellation, no compaction.
+
+  This is the happy-path baseline for chat-turns. If this fails, the
+  whole multi-step loop is broken; everything else in the chat-turns
+  spec depends on this contract holding.
+
+  Mode A: mock_llm_replies returns a single content reply that the
+  loop body should treat as final_content and exit cleanly.
+
+category: functional
+tags:
+  - chat-turns
+  - happy-path
+  - regression-sentinel
+subsystems:
+  - chat-turns
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_chat
+      session_id: sess_s3_happy
+  - fixture: mock_llm_replies
+    args:
+      replies:
+        - role: assistant
+          content: "The capital of France is Paris."
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_s3_happy
+      content: "What is the capital of France?"
+  - action: wait_for_event
+    args:
+      session_id: sess_s3_happy
+      event: turn_completed
+      timeout_ms: 5000
+
+expected_outcomes:
+  - assertion: turn_completed_emitted
+    detail: >
+      The turn loop reached the final-content branch (no tool calls
+      means the assistant content was treated as the final response)
+      and emitted turn_completed.
+  - assertion: assistant_content_has_paris
+    detail: >
+      The final assistant message content contains "Paris" — the
+      mocked reply content propagated through the loop unchanged.
+  - assertion: no_provider_error
+    detail: >
+      No provider_error / error step fired during the run.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 1
+  - name: check_assistant_message_content
+    args:
+      mode: contains
+      value: "Paris"
+  - name: check_no_provider_error
+    args: {}
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_assistant_message_content
+    - check_no_provider_error
+
+notes: |
+  Smoke test for the chat-turns spine. The Sprint-1 E2/E4/E5/E6
+  scenarios are all variations on this pattern with extra moving parts;
+  this one isolates the simplest possible run so a regression in the
+  baseline is unambiguous.

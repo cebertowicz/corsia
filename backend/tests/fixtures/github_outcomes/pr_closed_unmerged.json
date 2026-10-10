@@ -1,0 +1,35 @@
+{
+ "event": "pull_request",
+ "payload": {
+  "action": "closed",
+  "number": 3248,
+  "pull_request": {
+   "base": {
+    "ref": "dev",
+    "sha": "f6509daea46e06d1a30c0aa627b10743844f88ac"
+   },
+   "body": "- #3157\n- #3168\n- #3175\n- #3221\n- #3226\n- #3234",
+   "closed_at": "2026-09-30T19:40:52Z",
+   "created_at": "2026-09-30T18:26:07Z",
+   "draft": false,
+   "head": {
+    "ref": "train/providers-inference-cut-3",
+    "sha": "a7288a9286e16a96ef50e082c125b21d797f4ddf"
+   },
+   "merge_commit_sha": null,
+   "merged": false,
+   "merged_at": null,
+   "number": 3248,
+   "state": "closed",
+   "title": "[Providers & Inference] Train cut 3: no turns on exhausted accounts, grouped model picker",
+   "updated_at": "2026-09-30T19:40:52Z",
+   "user": {
+    "login": "fixture-user"
+   }
+  },
+  "repository": {
+   "default_branch": "main",
+   "full_name": "cebertowicz/maestro"
+  }
+ }
+}

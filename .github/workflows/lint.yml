@@ -1,0 +1,84 @@
+name: Lint (ruff + mypy)
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'backend/**'
+      - 'tools/**'
+      - 'pyproject.toml'
+      - '.github/workflows/lint.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ruff:
+    name: ruff (advisory)
+    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
+    # job to a hosted runner needs the repository owner's explicit approval.
+    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    timeout-minutes: 5
+    # Advisory: findings are visible in the job log but the check conclusion is
+    # always success so the reviewer gate is never blocked by a lint issue.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/mac-python
+
+      - name: Install ruff
+        run: |
+          if [ ! -x .venv/bin/python ]; then python -m venv .venv; fi
+          .venv/bin/pip install --upgrade pip --quiet
+          .venv/bin/pip install ruff --quiet
+
+      - name: ruff check
+        run: .venv/bin/ruff check . || true
+
+  mypy:
+    name: mypy (regression gate)
+    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
+    # job to a hosted runner needs the repository owner's explicit approval.
+    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    timeout-minutes: 10
+    # The pre-existing backlog is tolerated via per-target error limits in
+    # quality/mypy-error-limits.json; the job fails only when a target
+    # reports more errors than its limit, so new code cannot add type
+    # errors. The full listings stay informational -- only the limit
+    # comparison decides the conclusion.
+    env:
+      CORSIA_ANALYTICS_DISABLE: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/mac-python
+
+      - name: Install deps + mypy
+        run: |
+          if [ ! -x .venv/bin/python ]; then python -m venv .venv; fi
+          .venv/bin/pip install --upgrade pip --quiet
+          .venv/bin/pip install -r backend/requirements.txt --quiet
+          # mypy type-checks backend/tests/, so this job needs the test
+          # dependencies too. The set is owned by backend/requirements-test.txt
+          # so lint and the test jobs cannot drift apart.
+          .venv/bin/pip install -r backend/requirements-test.txt --quiet
+          # The error-limit ratchet compares counts against limits calibrated
+          # on this exact mypy version; an unpinned checker moves the baseline
+          # and fails PRs for errors their diffs never introduced. Recalibrate
+          # quality/mypy-error-limits.json when bumping this pin.
+          .venv/bin/pip install 'mypy==2.3.0' --quiet
+
+      - name: mypy backend
+        run: .venv/bin/mypy backend/ 2>&1 | tee mypy-backend.txt || true
+
+      - name: mypy tools
+        run: .venv/bin/mypy tools/ 2>&1 | tee mypy-tools.txt || true
+
+      - name: Type-error limits
+        run: |
+          .venv/bin/python scripts/mypy_error_limits.py \
+            backend=mypy-backend.txt \
+            tools=mypy-tools.txt

@@ -1,0 +1,32 @@
+# Reviewer evaluation defaults and operator notes.
+#
+# Live production reviewer selection is NOT driven by this file. Runtime
+# selection resolves from CORSIA_REVIEWER_MODEL / CORSIA_REVIEWER_FALLBACK_MODEL
+# first, then agents.defaults.reviewer_model / reviewer_fallback_model in
+# settings.json. During the Claude Code weekly-limit outage, set the runtime
+# primary to codex/codex-auto-review after the Codex backend support is deployed.
+#
+# The historical CI-flow proposal remains in
+# docs/design/e2e-test-tiering-and-mock-infrastructure.md; it is not runtime or
+# gate authority.
+
+stage_1_local_reviewer:
+  enabled: true
+  # Dense 27B — preferred for code review quality at lower RAM cost
+  preferred_model: "qwen-3.6-27b-mxfp8"
+  # MoE 35B/3B-active — fallback iff preferred not loaded
+  fallback_model: "qwen-3.6-35b-a3b-mxfp8"
+  # Fail loud if neither loaded. No silent skip. No cloud fallback.
+  fail_if_neither_loaded: true
+  precision: mxfp8
+  prompt_template: "prompts/code_review_local.md"
+
+stage_2_cloud_reviewer:
+  enabled: true
+  # Uses Codex subscription auth; no API keys in env.
+  provider: codex_cli
+  model: "codex/codex-auto-review"
+  # No Claude Code fallback during weekly-limit outages.
+  fallback_model: null
+  fail_if_unavailable: true
+  prompt_template: "prompts/code_review_release.md"

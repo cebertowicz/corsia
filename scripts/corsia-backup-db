@@ -1,0 +1,85 @@
+#!/bin/bash
+# corsia-backup-db — Daily SQLite backup using .backup (atomic, WAL-safe)
+#
+# Usage: corsia-backup-db [--keep N]  (default: keep last 7 backups)
+#
+# 2026-03-31: Created after git-clean incident destroyed production database.
+
+set -euo pipefail
+
+# Resolve the operational DB from explicit state, then the canonical
+# bootstrap, with workspace-local state retained only for a legacy bootstrap.
+# Env-only operation uses the platform state root. A stale CORSIA_WORKSPACE
+# must never redirect backups away from the bootstrapped production state.
+DB_PATH="$(/usr/bin/python3 -c '
+import json
+import os
+import pathlib
+import sys
+
+state_override = os.environ.get("CORSIA_STATE_DIR")
+bootstrap = pathlib.Path.home() / ".corsia" / "config.json"
+workspace_override = os.environ.get("CORSIA_WORKSPACE")
+
+if state_override:
+    state_root = pathlib.Path(state_override).expanduser().resolve()
+elif bootstrap.is_file():
+    payload = json.loads(bootstrap.read_text(encoding="utf-8"))
+    workspace = payload.get("workspace")
+    if payload.get("version") == 2 and isinstance(workspace, dict):
+        state_root = pathlib.Path(payload["state_root"]).expanduser().resolve()
+    elif isinstance(workspace, str):
+        state_root = pathlib.Path(workspace).expanduser().resolve() / ".corsia"
+    else:
+        raise SystemExit("invalid CORSIA bootstrap")
+elif workspace_override:
+    home = pathlib.Path.home()
+    application_id = os.environ.get("CORSIA_APPLICATION_ID") or "com.cebertowicz.corsia"
+    if sys.platform == "darwin":
+        base = home / "Library" / "Application Support"
+    elif sys.platform.startswith("win"):
+        base = pathlib.Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local")
+    else:
+        base = pathlib.Path(os.environ.get("XDG_STATE_HOME") or home / ".local" / "state")
+    state_root = (base / application_id / "state").expanduser().resolve()
+else:
+    raise SystemExit("CORSIA runtime is not configured")
+
+print(state_root / "corsia.db")
+' 2>/dev/null || true)"
+if [ -z "$DB_PATH" ]; then
+    echo "ERROR: Failed to resolve the CORSIA database from the canonical runtime config." >&2
+    exit 1
+fi
+BACKUP_DIR="$HOME/backups/corsia"
+KEEP=${2:-7}
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+BACKUP_FILE="$BACKUP_DIR/corsia-${TIMESTAMP}.db"
+
+mkdir -p "$BACKUP_DIR"
+
+if [ ! -f "$DB_PATH" ]; then
+    echo "ERROR: Database not found at $DB_PATH" >&2
+    exit 1
+fi
+
+# SQLite .backup is atomic and works correctly with WAL mode
+sqlite3 "$DB_PATH" ".backup '$BACKUP_FILE'"
+
+# Verify the backup
+if sqlite3 "$BACKUP_FILE" "PRAGMA integrity_check;" | grep -q "^ok$"; then
+    SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+    echo "OK: Backup created at $BACKUP_FILE ($SIZE)"
+else
+    echo "ERROR: Backup failed integrity check" >&2
+    rm -f "$BACKUP_FILE"
+    exit 1
+fi
+
+# Prune old backups (keep last N). The digit anchor matches only the
+# timestamped names this script writes, so unrelated files are never pruned.
+cd "$BACKUP_DIR"
+ls -t corsia-[0-9]*.db 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do
+    rm -f "$old"
+    echo "Pruned: $old"
+done

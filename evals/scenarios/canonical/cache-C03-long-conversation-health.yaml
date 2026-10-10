@@ -1,0 +1,126 @@
+id: cache-C03-long-conversation-health
+name: "Long-conversation cache health — 20-turn dialog, hit rate ≥ 90% per turn"
+description: >
+  THE single most important cache scenario. A 20-turn dialog with no tool
+  calls and no memory writes. Asserts that:
+
+    1. Each turn 2-20 hits cache at ≥ 90% of the shared prefix
+    2. The system-prompt SHA-256 is byte-stable across all 20 turns
+    3. prefill_new_tokens is bounded by (new user message tokens + slack)
+    4. TTFT drops sharply after turn 1 and stays roughly flat
+
+  If C03 holds, the steady-state assumption CORSIA is built on is intact.
+  If C03 fails, the cause is one of: dynamic memory injection, non-deterministic
+  context assembly, sampling-param drift, or model-architecture instability
+  (e.g., the 27B GatedDeltaNet reconstruction issue — upstream omlx #1106).
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7-A (REQUIRED scenario)
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §2 (block-cache semantics)
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §7 27B caveat
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - required
+  - regression-sentinel
+  - multi-turn
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-35b-a3b"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  conversation_length: 20
+  expected_per_turn_hit_rate_minimum: 0.90
+
+pre_conditions:
+  - fixture: omlx_loaded_model
+    args:
+      model: "qwen-3.6-35b-a3b"
+      pin: true
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c03_long
+  - fixture: cache_health_dialog_seed
+    args:
+      session_id: sess_c03_long
+      length: 20
+      prompt_template: cache_steady_state
+
+steps:
+  - action: run_seeded_dialog
+    args:
+      session_id: sess_c03_long
+      timeout_ms_per_turn: 60000
+
+expected_outcomes:
+  - assertion: per_turn_hit_rate_90
+    detail: >
+      For each turn N in [2..20]: cached_tokens / (prompt_tokens − new_user_tokens) ≥ 0.90.
+  - assertion: system_prompt_byte_stable
+    detail: >
+      context.system_prompt_sha256 attribute is identical across all 20 turns.
+      Any drift is a non-deterministic-context bug.
+  - assertion: prefill_new_tokens_bounded
+    detail: >
+      prefill_new_tokens (= prompt_tokens − cached_tokens) is bounded by
+      (new user message tokens + 64-token slack) for each turn.
+  - assertion: ttft_drops_after_turn_1
+    detail: >
+      Turn 2 TTFT ≤ Turn 1 TTFT × 0.5; turns 3-20 TTFT remain within ±30%
+      of turn 2 (no creeping prefill).
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 20
+  - name: check_no_provider_error
+    args: {}
+  - name: check_per_turn_hit_rate_above
+    args:
+      turn_range: [2, 20]
+      min_ratio: 0.90
+      slack_tokens: 20
+  - name: check_system_prompt_sha256_stable
+    args:
+      turn_range: [1, 20]
+  - name: check_prefill_new_tokens_bounded
+    args:
+      turn_range: [2, 20]
+      slack_tokens: 64
+  - name: check_ttft_drop_after_turn_1
+    args:
+      factor: 0.5
+      max_drift_after_turn_2: 0.30
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_per_turn_hit_rate_above
+    - check_system_prompt_sha256_stable
+    - check_prefill_new_tokens_bounded
+    - check_ttft_drop_after_turn_1
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Fixture: cache_health_dialog_seed (deterministic 20-turn user-message
+      script; varies per turn but each new user message is ~50 tokens —
+      keeps the math clean)
+    - Solver: run_seeded_dialog (drives N turns through /api/eval/turn,
+      waiting for turn_completed between each; captures cached_tokens +
+      ttft_ms + system_prompt_sha256 per turn into scenario output)
+    - Scorers: check_per_turn_hit_rate_above (range form), check_system_prompt_sha256_stable,
+      check_prefill_new_tokens_bounded, check_ttft_drop_after_turn_1
+
+  27B caveat: when model_under_test = qwen-3.6-27b-instruct, expect intermittent
+  "block validation failed" recoveries (upstream omlx #1106). C03 against the
+  27B documents the behavior; the threshold may need to relax to 0.80 specifically
+  for the 27B until upstream fixes the GatedDeltaNet seq_len reconstruction issue.

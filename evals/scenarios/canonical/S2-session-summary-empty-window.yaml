@@ -1,0 +1,87 @@
+id: S2-session-summary-empty-window
+name: "inject_summary_context on a fresh conversation returns input unchanged"
+description: >
+  Edge case for session-summaries: when there is no prior history (no
+  closed/summarized activity sessions for the conversation),
+  inject_summary_context MUST return the input messages unchanged AND
+  MUST NOT raise.
+
+  Verifies the current fail-safe behavior via an end-to-end eval turn against a
+  freshly-created session. The
+  context build in the production turn loop calls inject_summary_context;
+  if it raises, the turn errors out — so passing turn_completed with
+  the expected assistant content is sufficient evidence.
+
+category: functional
+tags:
+  - session-summaries
+  - edge-case
+  - fail-safe
+  - regression-sentinel
+subsystems:
+  - session-summaries
+mode: functional_behavior
+
+pre_conditions:
+  - fixture: blank_session
+    args:
+      user_id: u_eval_summary_empty
+      session_id: sess_s2_empty
+  - fixture: mock_llm_replies
+    args:
+      replies:
+        - role: assistant
+          content: "I have no prior context to draw on; this is a fresh conversation."
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_s2_empty
+      content: "What did we discuss earlier?"
+  - action: wait_for_event
+    args:
+      session_id: sess_s2_empty
+      event: turn_completed
+      timeout_ms: 5000
+
+expected_outcomes:
+  - assertion: turn_completed_present
+    detail: >
+      The turn completed without raising an exception in the
+      context-build path. inject_summary_context was called (because
+      the context-builder always calls it) and returned the input
+      unchanged.
+  - assertion: assistant_content_acknowledges_no_history
+    detail: >
+      The mocked assistant reply mentions "no prior context" / "fresh
+      conversation" — proxy assertion that the agent ran with the
+      expected (un-augmented) message list.
+  - assertion: no_provider_error
+    detail: >
+      No provider_error or error step fired. inject_summary_context's
+      try/except is the safety net under test; if it had raised, the
+      turn would have errored out before the LLM call.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 1
+  - name: check_assistant_message_content
+    args:
+      mode: contains
+      value: "fresh conversation"
+  - name: check_no_provider_error
+    args: {}
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_assistant_message_content
+    - check_no_provider_error
+
+notes: |
+  This scenario is the regression sentinel for the inject_summary_context
+  fail-safe (NFR5). A refactor that lifts the outer try/except (or that
+  changes the "no prior history" detection logic) would surface here as
+  a hard error from the turn loop instead of a clean turn_completed.

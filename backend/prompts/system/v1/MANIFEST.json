@@ -1,0 +1,325 @@
+{
+  "files": [
+    {
+      "bytes": 3576,
+      "kind": "context",
+      "path": "context/10-INTENT-AUTHORITY.md",
+      "sha256": "38ff342f6bc8ea0db369b0ed061e7670a7e9d861f01f02b66e65c28a64b83081"
+    },
+    {
+      "bytes": 5617,
+      "kind": "context",
+      "path": "context/20-CONTEXT-WORK-STATE.md",
+      "sha256": "60f55e2ba3b07b3eed4da1976784b6f7db99b188a60b95631cc120760bf87221"
+    },
+    {
+      "bytes": 3478,
+      "kind": "context",
+      "path": "context/30-VERIFICATION-COMPLETION.md",
+      "sha256": "2ac0f6a1e66262f6c6e8272d48f236edee50fe95b5999fafed16dbb5daabc7a3"
+    },
+    {
+      "bytes": 1973,
+      "kind": "context",
+      "path": "context/40-HUMAN-AGENT-INTERFACE.md",
+      "sha256": "e77a2e5081ca38e0a8e4f6a9f189dd8eeb057e486592d74644fb114bdcdf0288"
+    },
+    {
+      "bytes": 862,
+      "kind": "context",
+      "path": "context/CORSIA-API-ACCESS.md",
+      "sha256": "9c44008c704c1f9650eb0dd2bcba7a560693c3d9ef50bd59b428c9d47b2eac5a"
+    },
+    {
+      "bytes": 1357,
+      "kind": "context",
+      "path": "context/HOST-ACCESS-BOUNDARY.md",
+      "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
+    },
+    {
+      "bytes": 2118,
+      "kind": "context",
+      "path": "context/SPAWN-POLICY.md",
+      "sha256": "e1e3eb13deff650b55ae30558962fcf57eef9ad2d227241c00751c2b9c0d26a0"
+    },
+    {
+      "bytes": 3269,
+      "kind": "context",
+      "path": "context/roles/agent/00-operating-contract.md",
+      "role": "agent",
+      "sha256": "6c620f0e212175046191a0d0cd2c12f9a07821a1d6f0831c09075b51c13a4827"
+    },
+    {
+      "bytes": 1712,
+      "kind": "context",
+      "path": "context/roles/conductor/00-operating-model.md",
+      "role": "conductor",
+      "sha256": "62db602d409d3f9682a4d6fb9e71333d5cebbe2b39f07b16f765f378e9fb61aa"
+    },
+    {
+      "bytes": 730,
+      "kind": "coordination-model",
+      "path": "coordination-models/INDEX.md",
+      "sha256": "cae34691760456a41ee4ded256d5dc646b95e88654e5a2014ac206243b4bdcfd"
+    },
+    {
+      "bytes": 807,
+      "kind": "coordination-model",
+      "path": "coordination-models/RESULTS.md",
+      "sha256": "9df2a5a0dde7b703026ee62c360aa0ff5b40225008ddfed546061ac26fff1b07"
+    },
+    {
+      "bytes": 9042,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/COORDINATION-CORE.md",
+      "sha256": "be73e915d07392cdde9cb166f8c10632128ac8274096ca156c04df7405e1fc9b"
+    },
+    {
+      "bytes": 740,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/COORDINATION-MODEL.md.tmpl",
+      "sha256": "7fac89244083b32fe527608a2b319cac70b1f5a7c97f83f9e0d344fff2e3c10c"
+    },
+    {
+      "bytes": 2121,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/PROJECT.md.tmpl",
+      "sha256": "4db0e4b21c16398f8cd2726eb35ed63aa4af9c73340e7eaea5523ef9ebdff685"
+    },
+    {
+      "bytes": 1862,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/SAFETY-INVARIANTS.md.tmpl",
+      "sha256": "e7905c770022a0e5f0c1daf49efb43313674695933f9b1286494747173d85fde"
+    },
+    {
+      "bytes": 730,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/roles/agent/05-waiting-is-work.md",
+      "sha256": "3bcd71f5920ff0e817193a536bcf27a56246aac9b7837c0c4774add9117c5c58"
+    },
+    {
+      "bytes": 812,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/context/roles/conductor/05-roster-design.md",
+      "sha256": "3bff6d1f27574b6082e14c4cbee914e1e937b8b6fcc9a19f742a03506a01265f"
+    },
+    {
+      "bytes": 6130,
+      "kind": "coordination-model",
+      "path": "coordination-models/corsia-default/manifest.yaml",
+      "sha256": "6753a202245e3798693dcb224fb10e554ed4a581ca6ed00dd5cc0f73712bcd04"
+    },
+    {
+      "bytes": 3582,
+      "kind": "skill",
+      "path": "skills/agent-experience/SKILL.md",
+      "sha256": "8a2151b612062edef0bb9b7a3e6efa536e8ddce3f827dfdfb30b51b55e81fc3f"
+    },
+    {
+      "bytes": 4760,
+      "kind": "skill",
+      "path": "skills/agent-team-decomposition/SKILL.md",
+      "sha256": "ba40df587f5fb1538f7e6c8901f86f8aa0a4a956d814886d3972dbc336bc75ac"
+    },
+    {
+      "bytes": 7570,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/SKILL.md",
+      "sha256": "60d5cb6df6d5afc25cc6822b15060b72211561354c0acc16df88808660f537b0"
+    },
+    {
+      "bytes": 4519,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/assets/gws-env.sh",
+      "sha256": "29b9f56a09d6ed5bdb416c1299adefce41e05ab4f4b30275ebd5c749abdb8701"
+    },
+    {
+      "bytes": 7707,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/assets/gws-reply-guard.py",
+      "sha256": "70daaac27a3bfded05fab13a8f86d30f55d8e9c0f28afdea741dcd432da7776f"
+    },
+    {
+      "bytes": 2366,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/references/assistant-email-check-skill.md",
+      "sha256": "fb12feb9c83579439606d7ea4699c0fe83128f78de7eeded14e960c7677ee012"
+    },
+    {
+      "bytes": 4314,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/references/assistant-google-setup-skill.md",
+      "sha256": "2bc7d1b45f2ad7c505ae1354dd07fb85e03edd229c95de7ca12e74778759227a"
+    },
+    {
+      "bytes": 3330,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/references/assistant-google-workspace-skill.md",
+      "sha256": "e73659e46ccd9f6f9dd83325ed8d035cd99b9c8cf6a45b4c96706d3756ac89a7"
+    },
+    {
+      "bytes": 2923,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/references/assistant-responsibility.md",
+      "sha256": "70e0c808a90fb100877c75b90ffa20d2024379edf6614582fdc11463efe2c092"
+    },
+    {
+      "bytes": 1334,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/references/docs-safe-write-skill.md",
+      "sha256": "ac8da4860deb1c8f2feb2af0a0233eeaba278e26e94c56bc1a293f59442de76a"
+    },
+    {
+      "bytes": 1549,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/references/google-cloud-setup.md",
+      "sha256": "8085fe78c552a4051c31daceb0b37021c2534a29fe13cfa46c5117e70b8ce99b"
+    },
+    {
+      "bytes": 1791,
+      "kind": "skill",
+      "path": "skills/assistant-onboarding/references/gws-reply-guardrail-spec.md",
+      "sha256": "439a391de2f259ea39ce913808296ca144440758f5fcb919581251036116d3a4"
+    },
+    {
+      "bytes": 3741,
+      "kind": "skill",
+      "path": "skills/backlog-intake/SKILL.md",
+      "sha256": "46dbae3937f7f532d33a216c4db64f3b85aeeecd606e3575841cfede0cede84e"
+    },
+    {
+      "bytes": 6438,
+      "kind": "skill",
+      "path": "skills/conductor-api/SKILL.md",
+      "sha256": "2a571fc9153884def19f29d511792e68706483001fe9f81e3db1740226824744"
+    },
+    {
+      "bytes": 8275,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/SKILL.md",
+      "sha256": "1fff21a2b8f5fe3f66eea0af0c5cd915420f64b7a12b6533575a74433fb3e92e"
+    },
+    {
+      "bytes": 2766,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/browser-person-steps.md",
+      "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
+    },
+    {
+      "bytes": 2707,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-agent.md",
+      "sha256": "af633cb3a16427eca25e3111641d67d9d2e8a6d03ca28a4493de4e787979dc01"
+    },
+    {
+      "bytes": 16998,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run.md",
+      "sha256": "c0a635510e7379742f7fa2bfa112529cc38103ecf15f607aaff3978d294a8ca4"
+    },
+    {
+      "bytes": 1850,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/local-model-offer.md",
+      "sha256": "aed6733730401efb48343bda0e876d0c9ab5cb75d2cd28a9492a8cb6ce350ee4"
+    },
+    {
+      "bytes": 694,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/omlx-setting.md",
+      "sha256": "30c746accd265006079ab9f1194a4c47b37569db8c6fa9b776c51182a9f7e304"
+    },
+    {
+      "bytes": 5776,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/project-import.md",
+      "sha256": "aeee1a3d852dd7898769c7229c3554d66e96232b1d0ed689179cc38c44267eb1"
+    },
+    {
+      "bytes": 9864,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/remote-access.md",
+      "sha256": "d2b7323916a52ab779f0e1bcd0051be0f607946868eb4366380a1e23e55c5425"
+    },
+    {
+      "bytes": 4766,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/system-overview.md",
+      "sha256": "f12676b8471d7453307900a4a6b8decba7048b51747d2f91b3c7d51dea8c24fd"
+    },
+    {
+      "bytes": 4875,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/web-search.md",
+      "sha256": "d78135b596e0c9c59849f67aa4aae3f50dc2836735cc948bb05eed65515758ec"
+    },
+    {
+      "bytes": 4458,
+      "kind": "skill",
+      "path": "skills/context-stewardship/SKILL.md",
+      "sha256": "85fd0ae0ac3fcf0913efb3eb794f847ab88a14ada4cabd2bc0b2ebf341e20281"
+    },
+    {
+      "bytes": 4113,
+      "kind": "skill",
+      "path": "skills/decide-or-raise/SKILL.md",
+      "sha256": "af9258a5cb11e5c3be6ca35c2df2344849194a16fb264364e095fd9e69296fbf"
+    },
+    {
+      "bytes": 4397,
+      "kind": "skill",
+      "path": "skills/decision-brief/SKILL.md",
+      "sha256": "c5002cd7aa1857ce6d7d4ed41aea4241a4396e0709130c9a0c0c9fc5a3503ce3"
+    },
+    {
+      "bytes": 5622,
+      "kind": "skill",
+      "path": "skills/engineering-standards/SKILL.md",
+      "sha256": "2909468bcf8b92791a37a5199e3c063f44e95cd03c389a9518c883528798a554"
+    },
+    {
+      "bytes": 3647,
+      "kind": "skill",
+      "path": "skills/github/SKILL.md",
+      "sha256": "90ef9c6a26a32624ec249125654b405263f95a4a09030245f0cfe43b4e4b8029"
+    },
+    {
+      "bytes": 5452,
+      "kind": "skill",
+      "path": "skills/github/references/agent-account.md",
+      "sha256": "f8715d21e9f62d330290536e4b51efbcc7c2d4859c4e4e7aa910d3bbdd9fea79"
+    },
+    {
+      "bytes": 5422,
+      "kind": "skill",
+      "path": "skills/memory-placement/SKILL.md",
+      "sha256": "677f6f335334084dcd3c1c2a356e37fb0837aad7e31ba02d15fc2225afa1533a"
+    },
+    {
+      "bytes": 3173,
+      "kind": "skill",
+      "path": "skills/prioritization/SKILL.md",
+      "sha256": "67f9a833d59fef4265319f9868527c4e5add276afa01c4c503d6cb6ae756feba"
+    },
+    {
+      "bytes": 3919,
+      "kind": "skill",
+      "path": "skills/product-thinking/SKILL.md",
+      "sha256": "dbe47f637e3a5b96f5550b6852a73da0b909238d8101cedda80f3fb3090f0868"
+    },
+    {
+      "bytes": 2861,
+      "kind": "skill",
+      "path": "skills/skill-creator/SKILL.md",
+      "sha256": "f96a968ba81f38933a4803514a3dc1b0006f617e4e2430b5cc97e506f6710eb5"
+    },
+    {
+      "bytes": 8349,
+      "kind": "skill",
+      "path": "skills/task-discipline/SKILL.md",
+      "sha256": "96e62f98da07745e83d15d9717952debfe70d62316185c52a9cbd8cf264a07f7"
+    }
+  ],
+  "version": "v1"
+}

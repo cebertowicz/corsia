@@ -1,0 +1,117 @@
+{
+  "$schema": "./impact-map.schema.json",
+  "version": 1,
+  "default": [
+    {
+      "id": "backend-unit",
+      "command": "cd backend && ../.venv/bin/python -m pytest tests -q",
+      "reason": "Fallback for backend changes without a narrower mapping."
+    },
+    {
+      "id": "frontend-unit",
+      "command": "cd frontend && npm test",
+      "reason": "Fallback for frontend source changes without a narrower mapping."
+    }
+  ],
+  "rules": [
+    {
+      "id": "qa-harness",
+      "globs": [
+        "qa/**",
+        "docs/qa-automation.md",
+        "frontend/e2e/**",
+        "frontend/playwright.config.ts",
+        "frontend/vite.config.ts",
+        "frontend/package.json",
+        "frontend/package-lock.json"
+      ],
+      "commands": [
+        "cd frontend && npm test",
+        "cd frontend && npm run e2e"
+      ]
+    },
+    {
+      "id": "auth-shell",
+      "globs": [
+        "frontend/src/lib/components/LoginScreen.svelte",
+        "frontend/src/lib/stores/auth.ts",
+        "frontend/src/lib/ws/**",
+        "backend/infra/auth.py",
+        "backend/ws/**"
+      ],
+      "commands": [
+        "cd frontend && npm run e2e -- --grep \"@surface:auth|@surface:navigation\""
+      ]
+    },
+    {
+      "id": "chat",
+      "globs": [
+        "frontend/src/lib/components/Chat*.svelte",
+        "frontend/src/lib/components/InputBar.svelte",
+        "frontend/src/lib/components/MessageList.svelte",
+        "frontend/src/lib/components/*Message*.svelte",
+        "frontend/src/lib/stores/sessions.ts",
+        "backend/api/threads.py",
+        "backend/api/thread_messages.py",
+        "backend/core/turns.py",
+        "backend/ws/**"
+      ],
+      "commands": [
+        "cd frontend && npm run e2e -- --grep \"@surface:chat\"",
+        "cd backend && ../.venv/bin/python -m pytest tests/test_ws_session_snapshot.py tests/test_turn_buffers.py -q"
+      ]
+    },
+    {
+      "id": "settings-providers",
+      "globs": [
+        "frontend/src/lib/components/Settings*.svelte",
+        "frontend/src/lib/components/ProviderManager.svelte",
+        "frontend/src/lib/components/v7/**",
+        "frontend/src/lib/stores/providers*.ts",
+        "backend/api/providers.py",
+        "backend/api/models.py",
+        "backend/llm/**"
+      ],
+      "commands": [
+        "cd frontend && npm run e2e -- --grep \"@surface:settings|@surface:api\"",
+        "cd frontend && npm test -- --run src/lib/stores/__tests__/providersV7.test.ts"
+      ]
+    },
+    {
+      "id": "projects",
+      "globs": [
+        "frontend/src/lib/components/Project*.svelte",
+        "frontend/src/lib/stores/project*.ts",
+        "backend/api/projects.py",
+        "backend/api/project_*.py"
+      ],
+      "commands": [
+        "cd frontend && npm run e2e -- --grep \"@surface:projects\"",
+        "cd backend && ../.venv/bin/python -m pytest tests/test_impact_hook.py -q"
+      ]
+    },
+    {
+      "id": "visual-system",
+      "globs": [
+        "frontend/src/app.css",
+        "frontend/DESIGN-SYSTEM.md",
+        "frontend/src/lib/components/ui/**",
+        "frontend/src/lib/components/**/*.svelte"
+      ],
+      "commands": [
+        "cd frontend && npm run e2e:visual"
+      ]
+    },
+    {
+      "id": "desktop-shell",
+      "globs": [
+        "desktop/**",
+        "frontend/static/manifest.json",
+        "frontend/static/sw.js"
+      ],
+      "commands": [
+        "cd frontend && npm run build"
+      ]
+    }
+  ]
+}

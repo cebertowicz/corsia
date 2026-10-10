@@ -1,0 +1,52 @@
+{
+  "_comment": "Branch protection rules for CORSIA. Applied by scripts/apply-branch-protection via gh api.",
+  "main": {
+    "required_pull_request_reviews": {
+      "required_approving_review_count": 0,
+      "dismiss_stale_reviews": false,
+      "require_code_owner_reviews": false
+    },
+    "required_status_checks": {
+      "strict": true,
+      "contexts": [
+        "Playwright UI-E2E (mock)",
+        "Prod build smoke test (no mock routes)",
+        "Integration tests (L3)",
+        "Cache evals (local oMLX)"
+      ]
+    },
+    "enforce_admins": false,
+    "restrictions": null,
+    "allow_force_pushes": false,
+    "allow_deletions": false,
+    "block_creations": false,
+    "required_linear_history": false,
+    "_notes": {
+      "source_branch_constraint": "Only dev can PR to main. Enforced by the Stage 2 workflow which asserts head_ref == dev. GitHub branch protection does not natively support source-branch restrictions on PRs, so the workflow gate is the enforcement mechanism.",
+      "direct_push_blocked": "required_pull_request_reviews with count=0 still requires a PR (no direct push)."
+    }
+  },
+  "dev": {
+    "required_pull_request_reviews": {
+      "required_approving_review_count": 0,
+      "dismiss_stale_reviews": false,
+      "require_code_owner_reviews": false
+    },
+    "required_status_checks": {
+      "strict": true,
+      "contexts": [
+        "Playwright UI-E2E (mock)",
+        "Prod build smoke test (no mock routes)"
+      ]
+    },
+    "enforce_admins": false,
+    "restrictions": null,
+    "allow_force_pushes": false,
+    "allow_deletions": false,
+    "block_creations": false,
+    "required_linear_history": false,
+    "_notes": {
+      "direct_push_blocked": "required_pull_request_reviews with count=0 still requires a PR. Agents MUST work on feature branches + PR to dev."
+    }
+  }
+}

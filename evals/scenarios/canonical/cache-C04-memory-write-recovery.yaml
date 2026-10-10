@@ -1,0 +1,149 @@
+id: cache-C04-memory-write-recovery
+name: "Memory-write cache recovery — turn 2 writes memory; turn 3 dips, turn 4 recovers"
+description: >
+  Falsifies the system-prompt-determinism theory of cache misses. The block
+  cache invalidates THAT block + all subsequent blocks for one request when
+  a mid-prompt byte changes, then re-indexes the new chain hash. So a
+  mid-conversation memory write should cost exactly one turn of partial
+  reprefill, not a persistent miss source.
+
+  4-turn conversation:
+    Turn 1: user message, fresh cache build
+    Turn 2: user message that calls update_context (writes to cross_context)
+    Turn 3: user message — partial reprefill expected (system prompt changed bytes)
+    Turn 4: user message — should hit cache normally again (new chain hash indexed)
+
+  Asserts: turn-3 hit rate dips (acceptable), turn-4 hit rate ≥ 90% (recovery).
+
+  Cross-references:
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §2 (block-cache
+      chain-hash semantics; one-shot invalidation + re-index)
+    - working/2026-05-11-provider-discovery-cleanup/PLAN.md §3 (data showed
+      cross_context updated only once in 7 days — refuted the persistent-miss
+      theory)
+
+category: perf
+tags:
+  - cache
+  - mode-b
+  - memory-write
+  - falsification
+subsystems:
+  - omlx-provider-lifecycle
+  - chat-turns
+mode: real_local
+
+metadata:
+  model_under_test: "qwen-3.6-35b-a3b"
+  block_size_tokens: 2048
+  initial_cache_blocks: 4096
+  expected_turn4_hit_rate_minimum: 0.90
+  expected_turn3_hit_rate_minimum: 0.40
+
+pre_conditions:
+  - fixture: omlx_loaded_model
+    args:
+      model: "qwen-3.6-35b-a3b"
+      pin: true
+  - fixture: blank_session
+    args:
+      user_id: u_eval_cache
+      session_id: sess_c04_memwrite
+
+steps:
+  - action: user_send
+    args:
+      session_id: sess_c04_memwrite
+      content: "What's the difference between TCP and UDP?"
+  - action: wait_for_event
+    args:
+      session_id: sess_c04_memwrite
+      event: turn_completed
+      timeout_ms: 60000
+  - action: user_send
+    args:
+      session_id: sess_c04_memwrite
+      content: >
+        Save a note in working memory that I'm currently studying networking
+        protocols, then explain DNS resolution at a high level.
+  - action: wait_for_event
+    args:
+      session_id: sess_c04_memwrite
+      event: turn_completed
+      timeout_ms: 60000
+  - action: assert_event_occurred
+    args:
+      session_id: sess_c04_memwrite
+      event_kind: cross_context_updated
+      since_step: 0
+  - action: user_send
+    args:
+      session_id: sess_c04_memwrite
+      content: "How does HTTPS differ from HTTP?"
+  - action: wait_for_event
+    args:
+      session_id: sess_c04_memwrite
+      event: turn_completed
+      timeout_ms: 60000
+  - action: user_send
+    args:
+      session_id: sess_c04_memwrite
+      content: "And what about HTTP/2 vs HTTP/3?"
+  - action: wait_for_event
+    args:
+      session_id: sess_c04_memwrite
+      event: turn_completed
+      timeout_ms: 60000
+
+expected_outcomes:
+  - assertion: turn3_hit_rate_dipped_but_not_zero
+    detail: >
+      Turn 3's cached_tokens > 0 (some prefix before the changed block still
+      hits) and < turn 2's. Specifically ≥ 0.40 of (prompt_tokens − new_user_tokens).
+  - assertion: turn4_hit_rate_recovered
+    detail: >
+      Turn 4's hit rate ≥ 0.90. The new chain-hash was indexed on turn 3,
+      turn 4 finds it normally.
+  - assertion: cross_context_write_observed
+    detail: A cross_context_updated event was emitted between turn 2 and turn 3.
+
+scorers:
+  - name: check_event_present
+    args:
+      event_kind: turn_completed
+      min_count: 4
+  - name: check_event_present
+    args:
+      event_kind: cross_context_updated
+      min_count: 1
+  - name: check_no_provider_error
+    args: {}
+  - name: check_per_turn_hit_rate_above
+    args:
+      turn: 3
+      min_ratio: 0.40
+      slack_tokens: 20
+  - name: check_per_turn_hit_rate_above
+    args:
+      turn: 4
+      min_ratio: 0.90
+      slack_tokens: 20
+
+pass_if:
+  all_of:
+    - check_event_present
+    - check_no_provider_error
+    - check_per_turn_hit_rate_above
+
+notes: |
+  Mode B / Sprint 4 wiring required:
+    - Same scorers as C03 (range form not needed; per-turn pinpoints suffice)
+    - Solver action: assert_event_occurred (already in scope for Sprint 4 solver
+      per Sprint 3 Slice 1 design — verify in datasets.py if not, add it)
+
+  This is the most diagnostically valuable scenario in the cache set. If C03
+  fails AND C04 turn-3 dips way below 0.40, then the system prompt is changing
+  many blocks per write — investigate which Tier of the context builder is
+  emitting volatile content. If C03 fails but C04 turn-4 still recovers, then
+  the per-turn miss is acceptable and the issue is purely that writes are
+  happening too often.

@@ -1,0 +1,978 @@
+{
+ "focus-cap5-page1": {
+  "has_more": true,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 19",
+    "created_at": "2026-06-12T00:00:19",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "u019",
+    "input_order": null,
+    "metadata": {},
+    "role": "user",
+    "seq": 19,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "from a peer",
+    "created_at": "2026-06-12T00:00:26",
+    "delivery_intent": null,
+    "delivery_state": "queued",
+    "focus_visible": false,
+    "id": "u026",
+    "input_order": 1,
+    "metadata": {
+     "sender_kind": "agent"
+    },
+    "role": "user",
+    "seq": null,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 25",
+    "created_at": "2026-06-12T00:00:25",
+    "delivery_intent": null,
+    "delivery_state": "queued",
+    "focus_visible": true,
+    "id": "u025",
+    "input_order": 2,
+    "metadata": {},
+    "role": "user",
+    "seq": null,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "u019",
+  "runs": [
+   {
+    "continues_older": false,
+    "count": 1,
+    "first_id": "w020",
+    "first_seq": 20,
+    "kind": "run",
+    "kinds": [
+     "steps"
+    ],
+    "last_id": "w020",
+    "last_seq": 20,
+    "turn_ids": [
+     "T2"
+    ],
+    "weight": 1
+   },
+   {
+    "continues_older": false,
+    "count": 3,
+    "first_id": "w021",
+    "first_seq": 21,
+    "kind": "run",
+    "kinds": [
+     "steps"
+    ],
+    "last_id": "w024",
+    "last_seq": 24,
+    "turn_ids": [
+     "T3"
+    ],
+    "weight": 3
+   }
+  ],
+  "turn_summaries": {
+   "T3": {
+    "activity_count": 3,
+    "ended_at": null,
+    "started_at": null,
+    "status": "running"
+   }
+  }
+ },
+ "focus-cap5-page2": {
+  "has_more": true,
+  "messages": [],
+  "oldest_id": "w014",
+  "runs": [
+   {
+    "continues_older": true,
+    "count": 5,
+    "first_id": "w014",
+    "first_seq": 14,
+    "kind": "run",
+    "kinds": [
+     "other",
+     "steps"
+    ],
+    "last_id": "w018",
+    "last_seq": 18,
+    "turn_ids": [
+     "T2"
+    ],
+    "weight": 3
+   }
+  ],
+  "turn_summaries": {}
+ },
+ "focus-cap5-page3": {
+  "has_more": true,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "said 13",
+    "created_at": "2026-06-12T00:00:13",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "s013",
+    "input_order": null,
+    "metadata": {
+     "for_user": true,
+     "turn_id": "T2"
+    },
+    "role": "assistant",
+    "seq": 13,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "s008",
+  "runs": [
+   {
+    "continues_older": true,
+    "count": 4,
+    "first_id": "s008",
+    "first_seq": 8,
+    "kind": "run",
+    "kinds": [
+     "agent_message",
+     "steps"
+    ],
+    "last_id": "w011",
+    "last_seq": 11,
+    "turn_ids": [
+     "T1"
+    ],
+    "weight": 3
+   }
+  ],
+  "turn_summaries": {}
+ },
+ "focus-cap5-page4": {
+  "has_more": true,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "said 2",
+    "created_at": "2026-06-12T00:00:02",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "s002",
+    "input_order": null,
+    "metadata": {
+     "for_user": true,
+     "turn_id": "T1"
+    },
+    "role": "assistant",
+    "seq": 2,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "notice",
+    "created_at": "2026-06-12T00:00:07",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "c007",
+    "input_order": null,
+    "metadata": {
+     "type": "error"
+    },
+    "role": "system",
+    "seq": 7,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "s002",
+  "runs": [
+   {
+    "continues_older": false,
+    "count": 3,
+    "first_id": "w003",
+    "first_seq": 3,
+    "kind": "run",
+    "kinds": [
+     "context_update",
+     "steps"
+    ],
+    "last_id": "c006",
+    "last_seq": 6,
+    "turn_ids": [
+     "T1"
+    ],
+    "weight": 2
+   }
+  ],
+  "turn_summaries": {}
+ },
+ "focus-limit3-page1": {
+  "has_more": true,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 19",
+    "created_at": "2026-06-12T00:00:19",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "u019",
+    "input_order": null,
+    "metadata": {},
+    "role": "user",
+    "seq": 19,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "from a peer",
+    "created_at": "2026-06-12T00:00:26",
+    "delivery_intent": null,
+    "delivery_state": "queued",
+    "focus_visible": false,
+    "id": "u026",
+    "input_order": 1,
+    "metadata": {
+     "sender_kind": "agent"
+    },
+    "role": "user",
+    "seq": null,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 25",
+    "created_at": "2026-06-12T00:00:25",
+    "delivery_intent": null,
+    "delivery_state": "queued",
+    "focus_visible": true,
+    "id": "u025",
+    "input_order": 2,
+    "metadata": {},
+    "role": "user",
+    "seq": null,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "u019",
+  "runs": [
+   {
+    "continues_older": false,
+    "count": 1,
+    "first_id": "w020",
+    "first_seq": 20,
+    "kind": "run",
+    "kinds": [
+     "steps"
+    ],
+    "last_id": "w020",
+    "last_seq": 20,
+    "turn_ids": [
+     "T2"
+    ],
+    "weight": 1
+   },
+   {
+    "continues_older": false,
+    "count": 3,
+    "first_id": "w021",
+    "first_seq": 21,
+    "kind": "run",
+    "kinds": [
+     "steps"
+    ],
+    "last_id": "w024",
+    "last_seq": 24,
+    "turn_ids": [
+     "T3"
+    ],
+    "weight": 3
+   }
+  ],
+  "turn_summaries": {
+   "T3": {
+    "activity_count": 3,
+    "ended_at": null,
+    "started_at": null,
+    "status": "running"
+   }
+  }
+ },
+ "focus-limit3-page2": {
+  "has_more": true,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "said 2",
+    "created_at": "2026-06-12T00:00:02",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "s002",
+    "input_order": null,
+    "metadata": {
+     "for_user": true,
+     "turn_id": "T1"
+    },
+    "role": "assistant",
+    "seq": 2,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "notice",
+    "created_at": "2026-06-12T00:00:07",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "c007",
+    "input_order": null,
+    "metadata": {
+     "type": "error"
+    },
+    "role": "system",
+    "seq": 7,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "said 13",
+    "created_at": "2026-06-12T00:00:13",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "s013",
+    "input_order": null,
+    "metadata": {
+     "for_user": true,
+     "turn_id": "T2"
+    },
+    "role": "assistant",
+    "seq": 13,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "s002",
+  "runs": [
+   {
+    "continues_older": false,
+    "count": 3,
+    "first_id": "w003",
+    "first_seq": 3,
+    "kind": "run",
+    "kinds": [
+     "context_update",
+     "steps"
+    ],
+    "last_id": "c006",
+    "last_seq": 6,
+    "turn_ids": [
+     "T1"
+    ],
+    "weight": 2
+   },
+   {
+    "continues_older": false,
+    "count": 4,
+    "first_id": "s008",
+    "first_seq": 8,
+    "kind": "run",
+    "kinds": [
+     "agent_message",
+     "steps"
+    ],
+    "last_id": "w011",
+    "last_seq": 11,
+    "turn_ids": [
+     "T1"
+    ],
+    "weight": 3
+   },
+   {
+    "continues_older": false,
+    "count": 5,
+    "first_id": "w014",
+    "first_seq": 14,
+    "kind": "run",
+    "kinds": [
+     "other",
+     "steps"
+    ],
+    "last_id": "w018",
+    "last_seq": 18,
+    "turn_ids": [
+     "T2"
+    ],
+    "weight": 3
+   }
+  ],
+  "turn_summaries": {}
+ },
+ "focus-limit3-page3": {
+  "has_more": false,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 1",
+    "created_at": "2026-06-12T00:00:01",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "u001",
+    "input_order": null,
+    "metadata": {},
+    "role": "user",
+    "seq": 1,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "u001",
+  "runs": [],
+  "turn_summaries": {}
+ },
+ "focus-limit3-page4": {
+  "has_more": false,
+  "messages": [],
+  "oldest_id": null,
+  "runs": [],
+  "turn_summaries": {}
+ },
+ "focus-limit50-page1": {
+  "has_more": false,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 1",
+    "created_at": "2026-06-12T00:00:01",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "u001",
+    "input_order": null,
+    "metadata": {},
+    "role": "user",
+    "seq": 1,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "said 2",
+    "created_at": "2026-06-12T00:00:02",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "s002",
+    "input_order": null,
+    "metadata": {
+     "for_user": true,
+     "turn_id": "T1"
+    },
+    "role": "assistant",
+    "seq": 2,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "notice",
+    "created_at": "2026-06-12T00:00:07",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "c007",
+    "input_order": null,
+    "metadata": {
+     "type": "error"
+    },
+    "role": "system",
+    "seq": 7,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "said 13",
+    "created_at": "2026-06-12T00:00:13",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "s013",
+    "input_order": null,
+    "metadata": {
+     "for_user": true,
+     "turn_id": "T2"
+    },
+    "role": "assistant",
+    "seq": 13,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 19",
+    "created_at": "2026-06-12T00:00:19",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "focus_visible": true,
+    "id": "u019",
+    "input_order": null,
+    "metadata": {},
+    "role": "user",
+    "seq": 19,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "from a peer",
+    "created_at": "2026-06-12T00:00:26",
+    "delivery_intent": null,
+    "delivery_state": "queued",
+    "focus_visible": false,
+    "id": "u026",
+    "input_order": 1,
+    "metadata": {
+     "sender_kind": "agent"
+    },
+    "role": "user",
+    "seq": null,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 25",
+    "created_at": "2026-06-12T00:00:25",
+    "delivery_intent": null,
+    "delivery_state": "queued",
+    "focus_visible": true,
+    "id": "u025",
+    "input_order": 2,
+    "metadata": {},
+    "role": "user",
+    "seq": null,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "u001",
+  "runs": [
+   {
+    "continues_older": false,
+    "count": 3,
+    "first_id": "w003",
+    "first_seq": 3,
+    "kind": "run",
+    "kinds": [
+     "context_update",
+     "steps"
+    ],
+    "last_id": "c006",
+    "last_seq": 6,
+    "turn_ids": [
+     "T1"
+    ],
+    "weight": 2
+   },
+   {
+    "continues_older": false,
+    "count": 4,
+    "first_id": "s008",
+    "first_seq": 8,
+    "kind": "run",
+    "kinds": [
+     "agent_message",
+     "steps"
+    ],
+    "last_id": "w011",
+    "last_seq": 11,
+    "turn_ids": [
+     "T1"
+    ],
+    "weight": 3
+   },
+   {
+    "continues_older": false,
+    "count": 5,
+    "first_id": "w014",
+    "first_seq": 14,
+    "kind": "run",
+    "kinds": [
+     "other",
+     "steps"
+    ],
+    "last_id": "w018",
+    "last_seq": 18,
+    "turn_ids": [
+     "T2"
+    ],
+    "weight": 3
+   },
+   {
+    "continues_older": false,
+    "count": 1,
+    "first_id": "w020",
+    "first_seq": 20,
+    "kind": "run",
+    "kinds": [
+     "steps"
+    ],
+    "last_id": "w020",
+    "last_seq": 20,
+    "turn_ids": [
+     "T2"
+    ],
+    "weight": 1
+   },
+   {
+    "continues_older": false,
+    "count": 3,
+    "first_id": "w021",
+    "first_seq": 21,
+    "kind": "run",
+    "kinds": [
+     "steps"
+    ],
+    "last_id": "w024",
+    "last_seq": 24,
+    "turn_ids": [
+     "T3"
+    ],
+    "weight": 3
+   }
+  ],
+  "turn_summaries": {
+   "T3": {
+    "activity_count": 3,
+    "ended_at": null,
+    "started_at": null,
+    "status": "running"
+   }
+  }
+ },
+ "plain-limit4-page1": {
+  "has_more": true,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 1,
+    "content": "",
+    "created_at": "2026-06-12T00:00:23",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "w023",
+    "input_order": null,
+    "metadata": {
+     "tool_calls": [
+      {
+       "args": "{}",
+       "hint": "Read",
+       "id": "c",
+       "name": "Read",
+       "object": "",
+       "phrase": "Reading",
+       "result_state": "absent"
+      }
+     ],
+     "turn_id": "T3"
+    },
+    "role": "assistant",
+    "seq": 23,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 1,
+    "content": "",
+    "created_at": "2026-06-12T00:00:24",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "w024",
+    "input_order": null,
+    "metadata": {
+     "tool_calls": [
+      {
+       "args": "{}",
+       "hint": "Read",
+       "id": "c",
+       "name": "Read",
+       "object": "",
+       "phrase": "Reading",
+       "result_state": "absent"
+      }
+     ],
+     "turn_id": "T3"
+    },
+    "role": "assistant",
+    "seq": 24,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 25",
+    "created_at": "2026-06-12T00:00:25",
+    "delivery_intent": null,
+    "delivery_state": "queued",
+    "id": "u025",
+    "input_order": 2,
+    "metadata": {},
+    "role": "user",
+    "seq": null,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "from a peer",
+    "created_at": "2026-06-12T00:00:26",
+    "delivery_intent": null,
+    "delivery_state": "queued",
+    "id": "u026",
+    "input_order": 1,
+    "metadata": {
+     "sender_kind": "agent"
+    },
+    "role": "user",
+    "seq": null,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "w023",
+  "turn_summaries": {
+   "T3": {
+    "activity_count": 3,
+    "ended_at": null,
+    "started_at": null,
+    "status": "running"
+   }
+  }
+ },
+ "plain-limit4-page2": {
+  "has_more": true,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 1,
+    "content": "",
+    "created_at": "2026-06-12T00:00:18",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "w018",
+    "input_order": null,
+    "metadata": {
+     "tool_calls": [
+      {
+       "args": "{}",
+       "hint": "Read",
+       "id": "c",
+       "name": "Read",
+       "object": "",
+       "phrase": "Reading",
+       "result_state": "absent"
+      }
+     ],
+     "turn_id": "T2"
+    },
+    "role": "assistant",
+    "seq": 18,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "human 19",
+    "created_at": "2026-06-12T00:00:19",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "u019",
+    "input_order": null,
+    "metadata": {},
+    "role": "user",
+    "seq": 19,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 1,
+    "content": "",
+    "created_at": "2026-06-12T00:00:20",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "w020",
+    "input_order": null,
+    "metadata": {
+     "tool_calls": [
+      {
+       "args": "{}",
+       "hint": "Read",
+       "id": "c",
+       "name": "Read",
+       "object": "",
+       "phrase": "Reading",
+       "result_state": "absent"
+      }
+     ],
+     "turn_id": "T2"
+    },
+    "role": "assistant",
+    "seq": 20,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 1,
+    "content": "",
+    "created_at": "2026-06-12T00:00:21",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "w021",
+    "input_order": null,
+    "metadata": {
+     "tool_calls": [
+      {
+       "args": "{}",
+       "hint": "Read",
+       "id": "c",
+       "name": "Read",
+       "object": "",
+       "phrase": "Reading",
+       "result_state": "absent"
+      }
+     ],
+     "turn_id": "T3"
+    },
+    "role": "assistant",
+    "seq": 21,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "w018",
+  "turn_summaries": {
+   "T3": {
+    "activity_count": 3,
+    "ended_at": null,
+    "started_at": null,
+    "status": "running"
+   }
+  }
+ },
+ "plain-limit4-page3": {
+  "has_more": true,
+  "messages": [
+   {
+    "active_turn_id": null,
+    "activity_weight": 1,
+    "content": "",
+    "created_at": "2026-06-12T00:00:14",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "w014",
+    "input_order": null,
+    "metadata": {
+     "tool_calls": [
+      {
+       "args": "{}",
+       "hint": "Read",
+       "id": "c",
+       "name": "Read",
+       "object": "",
+       "phrase": "Reading",
+       "result_state": "absent"
+      }
+     ],
+     "turn_id": "T2"
+    },
+    "role": "assistant",
+    "seq": 14,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "said 15",
+    "created_at": "2026-06-12T00:00:15",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "s015",
+    "input_order": null,
+    "metadata": {
+     "for_user": 1,
+     "turn_id": "T2"
+    },
+    "role": "assistant",
+    "seq": 15,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 1,
+    "content": "",
+    "created_at": "2026-06-12T00:00:16",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "w016",
+    "input_order": null,
+    "metadata": {
+     "tool_calls": [
+      {
+       "args": "{}",
+       "hint": "Read",
+       "id": "c",
+       "name": "Read",
+       "object": "",
+       "phrase": "Reading",
+       "result_state": "absent"
+      }
+     ],
+     "turn_id": "T2"
+    },
+    "role": "assistant",
+    "seq": 16,
+    "thread_id": "sess-focus"
+   },
+   {
+    "active_turn_id": null,
+    "activity_weight": 0,
+    "content": "x",
+    "created_at": "2026-06-12T00:00:30",
+    "delivery_intent": null,
+    "delivery_state": "delivered",
+    "id": "b017",
+    "input_order": null,
+    "metadata": "{not json",
+    "role": "assistant",
+    "seq": 17,
+    "thread_id": "sess-focus"
+   }
+  ],
+  "oldest_id": "w014",
+  "turn_summaries": {}
+ }
+}

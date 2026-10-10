@@ -1,0 +1,4 @@
+{
+  "snapshot_version": "0.1.0-cloud-reasoning",
+  "note": "First real data: cloud-model reasoning-shape tables (anthropic, openai) transcribed from the hardcoded backend tables and vendored into CORSIA via the hosted_catalog loader. Profile schema still provisional (keying TBD, HMC-OQ1); connectors + model-profiles not yet vendored."
+}

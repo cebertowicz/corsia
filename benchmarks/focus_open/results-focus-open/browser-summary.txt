@@ -1,0 +1,21 @@
+thread | focus | build | open requests | KB | first render ms | open-complete ms | page ms (first run) | visible rows in DOM
+20000-0p7pct-idle-prod | focus=true | base | 3 | 829 | 945 | 3065 | [869, 866, 855] | 2
+20000-0p7pct-idle-prod | focus=true | after | 1 | 255 | 163 | 636 | [76] | 50
+20000-0p7pct-idle-prod | focus=false | base | 1 | 258 | 964 | 1375 | [957] | 28
+20000-0p7pct-idle-prod | focus=false | after | 1 | 258 | 960 | 1369 | [883] | 28
+20000-2pct-idle-prod | focus=true | base | 2 | 513 | 1012 | 1922 | [932, 897] | 2
+20000-2pct-idle-prod | focus=true | after | 1 | 229 | 130 | 573 | [42] | 50
+20000-2pct-idle-prod | focus=false | base | 1 | 235 | 985 | 1329 | [918] | 23
+20000-2pct-idle-prod | focus=false | after | 1 | 235 | 972 | 1293 | [893] | 23
+58000-0p7pct-idle-prod | focus=true | base | 2 | 468 | 2874 | 5667 | [2813, 2799] | 2
+58000-0p7pct-idle-prod | focus=true | after | 1 | 235 | 164 | 1081 | [77] | 50
+58000-0p7pct-idle-prod | focus=false | base | 1 | 215 | 2821 | 3758 | [2705] | 23
+58000-0p7pct-idle-prod | focus=false | after | 1 | 215 | 2873 | 3782 | [2758] | 23
+58000-2pct-idle-prod | focus=true | base | 1 | 223 | 2479 | 3551 | [2404] | 1
+58000-2pct-idle-prod | focus=true | after | 1 | 258 | 123 | 1102 | [32] | 50
+58000-2pct-idle-prod | focus=false | base | 1 | 223 | 2838 | 3909 | [2368] | 27
+58000-2pct-idle-prod | focus=false | after | 1 | 223 | 2473 | 3387 | [2386] | 27
+58000-0p7pct-working-prod | focus=true | base | 2 | 571 | 6112 | 6145 | [3217, 3111] | 1
+58000-0p7pct-working-prod | focus=true | after | 1 | 222 | 165 | 1132 | [76] | 50
+58000-0p7pct-working-prod | focus=false | base | 1 | 327 | 3162 | 4026 | [3083] | 15
+58000-0p7pct-working-prod | focus=false | after | 1 | 327 | 3146 | 4026 | [3203] | 15
