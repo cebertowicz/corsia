@@ -20,6 +20,17 @@ _CC_SOURCE = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _unconfined_launch(monkeypatch):
+    """Run the mocked CLI unwrapped: these tests cover envelope handling, and
+    write confinement (macOS only) has its own coverage in
+    test_reviewer_exact_source.py."""
+    monkeypatch.setattr(
+        "reviewer.reviewer_backends.write_confined",
+        lambda cmd, writable_dirs, config_state=None: cmd,
+    )
+
+
 def _proc(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
     """Build a mocked subprocess result."""
     proc = MagicMock()
