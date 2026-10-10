@@ -19,7 +19,7 @@ RECENT_DAYS = 30
 
 
 def facts(
-    db, plan_row, actor, clock: str, *, detail_id: str | None = None,
+    db, plan_row, actor, clock: str, *, detail_id: str | None = None, costs: bool = True,
 ) -> dict[str, Any]:
     """The projection of the open work, its recent window and the node asked about.
 
@@ -36,7 +36,7 @@ def facts(
     projected = open_rollup.rollup_open(db, tree, memo)
     targets = operator_projection._review_targets([projected], actor, db=db, open_nodes=True)
     states = operator_node_state.project(
-        [projected], targets, db=db, now=_parse(clock), memo=memo,
+        [projected], targets, db=db, now=_parse(clock), costs=costs, memo=memo,
         detail_ids=frozenset(() if detail_id is None else (detail_id,)),
         titles=open_tree.PlanTitles(db, plan_id, tree.rows),
     )
