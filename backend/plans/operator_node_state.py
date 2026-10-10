@@ -242,12 +242,12 @@ def project(
     ``lean`` is for a reader that takes only the plan header's and the ask
     list's facts (``execution``, ``display``, ``requires_user_action``). It
     skips the reads behind the rest: ``executor.label``, ``evidence`` and
-    ``last_transition_at`` are None, a closed node's recorded reason is not in
+    ``last_transition_at`` are None, a settled node's recorded reason is not in
     ``status_reason``, and ``execution`` has no attempts and zero counts.
     """
     node_plans = [(node, item.plan) for item in projected for node in item.nodes]
     executor_by_node = {node["id"]: executor_of(node, plan) for node, plan in node_plans}
-    labels, history, attempt_counts, evidence, changed, closed_because = (
+    labels, history, attempt_counts, evidence, changed, settled_because = (
         facts.NO_DETAIL if lean else facts.detail(
             projected, node_plans, executor_by_node, limit=ATTEMPT_HISTORY_LIMIT, db=db,
             scoped=detail_ids is not None,
@@ -280,7 +280,7 @@ def project(
                 "executor": _executor(executor_id, node, labels),
                 "execution": execution,
                 "display": _display(node, execution, review, stopped=stopped),
-                "status_reason": closed_because.get(node["id"]) or _status_reason(
+                "status_reason": settled_because.get(node["id"]) or _status_reason(
                     execution, sequenced_after, stopped) or _sent_back(node),
                 "evidence": evidence.get(node["id"]),
                 # The commitment total is true only at its one root; every

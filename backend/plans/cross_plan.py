@@ -74,7 +74,7 @@ def conductor_task_settled(connection, node_id: str, *, outcome: str) -> None:
     if connection.execute("SELECT 1 FROM threads WHERE id=?", (recipient,)).fetchone() is None:
         return
     recipient_plan = service.ensure_plan("thread", recipient, db=connection)
-    reason = closure.close_reasons(connection, [node]).get(str(node_id))
+    reason = closure.settled_reasons(connection, [node]).get(str(node_id))
     evidence = review_evidence.latest(
         node_id, requirements_revision=int(node["requirements_revision"]), db=connection,
     )
@@ -210,7 +210,7 @@ def _tell_own_plan(connection, prerequisite, dependents) -> None:
     from prompts import plan_wakes as text
 
     outcome = "closed" if prerequisite["state"] == CLOSED else "failed"
-    reason = closure.close_reasons(connection, [prerequisite]).get(str(prerequisite["id"]))
+    reason = closure.settled_reasons(connection, [prerequisite]).get(str(prerequisite["id"]))
     for dependent in dependents:
         plan_id, recipient = str(dependent["plan_id"]), str(dependent["owner_id"])
         line = text.PREREQUISITE_OWN_PLAN_LINES[outcome].format(

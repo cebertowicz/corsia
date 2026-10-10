@@ -275,7 +275,7 @@ def _close_reason(db, leaf) -> str | None:
     """A closed step's whole content is why it closed; that is its evidence."""
     from plans import closure
 
-    return closure.close_reasons(db, [leaf]).get(str(leaf["id"]))
+    return closure.settled_reasons(db, [leaf]).get(str(leaf["id"]))
 
 
 def notify_revision(

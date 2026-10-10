@@ -203,8 +203,6 @@ def _authorize_and_dispatch(
             scheduled_wait.authorize(plan, actor)
         if operation in {"arm_watch", "resolve_watch"} or blocked_wait.is_wait(operation, params):
             _authorize_plan_watch(node, plan, actor, params)
-        if operation == "mark_done" and actor.kind == "thread" and node["assignee"] == "user":
-            raise PermissionError("only the user marks their assigned row done")
         if operation in {"add_dependency", "remove_dependency"}:
             _authorize_prerequisite(db, plan_id, params, actor)
     result = boundary_dispatch.dispatch(

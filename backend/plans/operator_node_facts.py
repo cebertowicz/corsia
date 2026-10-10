@@ -110,7 +110,7 @@ def id_chunks(ids: list[str] | None) -> list[list[str] | None]:
 def detail(
     projected, node_plans, executor_by_node, *, limit: int, db, scoped: bool = False,
 ) -> tuple:
-    """Executor labels, attempt history and counts, review evidence, last changes, close reasons.
+    """Executor labels, attempt history and counts, review evidence, last changes, settled reasons.
 
     ``scoped`` reads each fact for the projected nodes alone, not for every node of their
     plans: the projection is then the open work of a plan and the cost follows it. A
@@ -131,7 +131,7 @@ def detail(
     return (
         labels, history, counts,
         review_evidence.latest_by_node(plan_ids, db=db, node_ids=node_ids), changed,
-        closure.close_reasons(db, [node for node, _plan in node_plans]),
+        closure.settled_reasons(db, [node for node, _plan in node_plans], labels=labels),
     )
 
 
