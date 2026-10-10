@@ -340,7 +340,9 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # 8,760 -> 8,950: `size` publishes its one rubric at the field, because an agent adding an
 # ordinary node otherwise gets no scale and leaves size unset; one copy, not one per operation.
 # plan_decision 2,600 -> 3,000 (pick-any): `pick` and the list form of `recommendation` are published at the field, because an agent never told of them raises combination options instead.
-_PUBLISHED_BYTES = {"plan_update": 8_950, "plan_decision": 3_000}
+# plan_update 8,950 -> 9,051 (+101): `mark_done` also settles a step assigned to the user, so the line says
+# so, asks for evidence in plain words because the person reads it, and sends approvals to a decision.
+_PUBLISHED_BYTES = {"plan_update": 9_051, "plan_decision": 3_000}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():

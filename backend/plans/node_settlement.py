@@ -113,9 +113,15 @@ def lane_refusing(
     return lane
 
 
+#: What an agent's ``mark_done`` also learns: a plain step can be settled by the
+#: owner agent now, so an approval only the user may give belongs in a decision.
+_APPROVAL_NOTE = "; an approval belongs in a decision, never a plain step"
+
+
 def refusal_message(lane: str, operation: str) -> str:
     """Return the refusal text, for a caller that reports rather than raises."""
-    return _REFUSALS[lane].format(operation=operation)
+    note = _APPROVAL_NOTE if operation == "mark_done" else ""
+    return _REFUSALS[lane].format(operation=operation) + note
 
 
 def refuse(lane: str, operation: str) -> NoReturn:

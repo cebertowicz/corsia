@@ -179,7 +179,7 @@ def test_rejecting_a_step_creates_its_one_linked_revision(monkeypatch):
         # feedback preserved. Sent back is not failed: it reads as a closed row
         # whose reason says it was sent back, never red.
         assert _state(db, step.id) == "closed"
-        assert closure.close_reasons(db, [_node_row(db, step.id)]) == {
+        assert closure.settled_reasons(db, [_node_row(db, step.id)]) == {
             step.id: f"Sent back: {FEEDBACK}",
         }
         assert retired_display(_state(db, step.id))["tone_key"] != "failed"

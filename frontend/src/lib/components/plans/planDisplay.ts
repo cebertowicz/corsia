@@ -132,8 +132,11 @@ function scheduledLine(node: OperatorNode, now: Date, running: boolean, clock = 
 
 function finishedOutcome(node: OperatorNode): string {
 	switch (node.state) {
-		case 'accepted': return 'Done';
-		case 'accepted_with_followup': return 'Done · follow-up created';
+		case 'accepted': return node.status_reason ? `Done · ${node.status_reason}` : 'Done';
+		case 'accepted_with_followup':
+			return node.status_reason
+				? `Done · follow-up created · ${node.status_reason}`
+				: 'Done · follow-up created';
 		case 'failed': return 'Failed';
 		case 'closed': return node.status_reason ? `Won’t do: ${node.status_reason}` : 'Won’t do';
 		default: return 'Archived';

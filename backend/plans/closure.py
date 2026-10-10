@@ -80,27 +80,61 @@ def close_node(
         )
 
 
-def close_reasons(db, nodes) -> dict[str, str]:
-    """Why each closed node closed: the reason its close recorded, by node id.
+def settled_reasons(db, nodes, *, labels: dict[str, str] | None = None) -> dict[str, str]:
+    """What a settled node's row records about how it ended, by node id.
 
-    The one reader of the reason ``close_node`` writes, for the row that shows
-    it and the return that reports it. Takes node rows and reads only the
-    closed ones, so a read with nothing closed costs no query. Nodes that are
-    not closed, or closed without a readable reason, are absent.
+    The one reader of a settled row's recorded reason. A closed node's is the
+    reason ``close_node`` wrote. With ``labels`` (the pane, which shows who did
+    what), an accepted step assigned to the user that an agent marked done also
+    reads ``Marked by <label>``, from the thread that recorded the accept; a
+    step the user marked carries none, so the line shows only the exception.
+    ``labels`` maps thread ids to display titles and is read, never extended;
+    a thread it lacks is looked up once, with every other missing one.
+
+    Takes node rows and reads only the qualifying ones, so a read with nothing
+    to report costs no query. Other nodes, or ones with nothing readable, are
+    absent.
     """
-    ids = sorted({str(node["id"]) for node in nodes if node["state"] == service.CLOSED})
+    closed = {str(node["id"]) for node in nodes if node["state"] == service.CLOSED}
+    marked = set() if labels is None else {
+        str(node["id"]) for node in nodes
+        if node["state"] in service._ACCEPTED_STATES and node["assignee"] == "user"
+    }
+    ids = sorted(closed | marked)
     if not ids:
         return {}
-    marks = ",".join("?" for _ in ids)
+    from plans.boundary import is_user_audit_id
+
+    accepted = sorted(service._ACCEPTED_STATES)
     rows = db.execute(
-        f"""SELECT node_id,payload_json FROM plan_node_events
-            WHERE node_id IN ({marks}) AND event='state_transition' AND new_state=?
+        f"""SELECT node_id,new_state,payload_json FROM plan_node_events
+            WHERE node_id IN ({','.join('?' for _ in ids)}) AND event='state_transition'
+              AND new_state IN ({','.join('?' for _ in (service.CLOSED, *accepted))})
             ORDER BY created_at,rowid""",
-        (*ids, service.CLOSED),
+        (*ids, service.CLOSED, *accepted),
     ).fetchall()
     reasons: dict[str, str] = {}
+    markers: dict[str, str] = {}
     for row in rows:
-        reason = json.loads(row["payload_json"] or "null") or {}
-        if isinstance(reason, dict) and reason.get("reason"):
-            reasons[str(row["node_id"])] = str(reason["reason"])
+        node_id = str(row["node_id"])
+        payload = json.loads(row["payload_json"] or "null") or {}
+        if not isinstance(payload, dict):
+            continue
+        if row["new_state"] == service.CLOSED:
+            if node_id in closed and payload.get("reason"):
+                reasons[node_id] = str(payload["reason"])
+        elif node_id in marked:
+            markers.pop(node_id, None)
+            verifier = str(payload.get("verified_by") or "")
+            if verifier and not is_user_audit_id(verifier):
+                markers[node_id] = verifier
+    if markers:
+        known = dict(labels or {})
+        missing = {thread for thread in markers.values() if thread not in known}
+        if missing:
+            from plans.operator_node_facts import executor_labels
+
+            known.update(executor_labels(missing, db=db))
+        for node_id, thread in markers.items():
+            reasons[node_id] = f"Marked by {known.get(thread, 'an agent')}"
     return reasons
