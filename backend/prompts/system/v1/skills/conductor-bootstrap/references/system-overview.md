@@ -31,7 +31,7 @@ Do not assume these, and do not invent tools for them.
 - **Owner notification.** Registering an artifact or commenting on it does not wake every owner. Coordinate through durable work objects, and use a direct message only for urgent, authorized interrupts. A watch can miss.
 - **Cross-plan work.** Other actors' plans are not delivered or dependable. Depend only on nodes in your own plan.
 - **Presence.** A signal that a user was here or away is not proof of reading or approval.
-- **Background improvement.** There is no general background-fork loop. A placement review may sweep recorded continuity in top-level threads after a checkpoint; it cannot recover an unrecorded correction.
+- **Background improvement.** There is no general background-fork loop. A checkpoint's review offers a batch of a top-level thread's recorded continuity entries, oldest-reviewed first and sized to the room its fork has; every entry is written to a file, dropped, or kept with a reason in turn. It cannot recover an unrecorded correction.
 - **Improvement evidence.** Inspect exposed evaluation/versioning tools before designing an experiment. Record the exact candidate, before/after evidence and recovery path; do not assume automatic attribution or rollback for a content edit.
 - **Workflows and integrations.** Discover installed tools, MCP integrations, skills and supported workflow metadata before building another route. A catalog entry does not prove credentials, scope, connectivity or notification delivery.
 - **GitHub events.** Verify the configured event source and canonical PR registration. Webhooks and notification ingress have different coverage; do not infer delivery solely from access to GitHub.

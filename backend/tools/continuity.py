@@ -245,6 +245,13 @@ def _result_text(result: dict[str, Any], *, staged: bool) -> str:
     return f"Entry {entry_id} {verb}."
 
 
+_NEXT_ACTIONS_REFUSAL = (
+    "Error: next_actions takes no new entries; a next step belongs on the plan. "
+    "Use plan_update to add or change it. Drop a finished one here; "
+    "the narrative names the step in progress and the next action."
+)
+
+
 def _run(
     thread_id: str,
     operation: str,
@@ -252,6 +259,8 @@ def _run(
     checkpoint_id: str | None = None,
 ) -> str:
     """Apply one transaction, returning individual refusals as tool results."""
+    if operation == "add" and params.get("field") == "next_actions":
+        return _NEXT_ACTIONS_REFUSAL
     db = get_db()
     try:
         if checkpoint_id and operation == "place":

@@ -47,6 +47,9 @@ CONTINUITY_DDL = (
         )),
         placement_revision INTEGER,
         placement_detail TEXT,
+        -- When the checkpoint review last gave a verdict on this entry; the
+        -- rotating review queue orders by it (core/placement_review.py).
+        reviewed_at TEXT,
         PRIMARY KEY (thread_id, history_epoch, entry_id),
         CHECK (
             (state = 'active' AND retired_reason IS NULL)

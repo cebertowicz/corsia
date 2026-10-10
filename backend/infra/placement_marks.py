@@ -1,8 +1,8 @@
 """The checkpoint placement mark: the one record of where a lesson went.
 
-A checkpoint fork reviews a few unmarked lessons and marks each one; for a
-``selected`` one it also answers where it goes, and the mark's detail keeps
-that answer. The background worker (``core.placement_worker``) then places the
+A checkpoint fork reviews a rotating batch of saved entries and marks each
+one; for a ``selected`` one it also answers where it goes, and the mark's
+detail keeps that answer. The background worker (``core.placement_worker``) then places the
 selected ones mechanically. The mark is the handoff and the receipt at once, so
 there is no second store to drift from it: the worker's queue is simply the
 entries whose mark says ``selected`` at their current revision.
@@ -21,20 +21,32 @@ from typing import Any, Callable
 
 from loguru import logger
 
-#: The continuity fields a lesson lives in (durable-write requirements §5a).
-LEARNING_FIELDS = (
-    "approvals_and_preferences",
-    "active_constraints",
-    "decisions",
-    "rejected_alternatives",
-    "known_failures",
-)
+from infra.time import utc_now_iso
 
-#: At most this many entries in one checkpoint's review block.
-REVIEW_BATCH = 5
+#: The fields whose entries are lessons: written to a file and dropped, never
+#: kept. Every other field can be kept, with a stated reason.
+LESSON_FIELDS = ("decisions", "rejected_alternatives", "known_failures")
 
-#: At most this many entries waiting for the worker, workspace-wide. At the cap
-#: no review block is offered, so entries simply stay unmarked until later.
+#: What each field's entry is, for the review's per-kind log and wording.
+FIELD_KIND = {
+    **dict.fromkeys(LESSON_FIELDS, "lesson"),
+    **dict.fromkeys(("approvals_and_preferences", "active_constraints"), "user_rule"),
+    **dict.fromkeys(("blockers", "open_questions"), "open_item"),
+    **dict.fromkeys(
+        (
+            "facts", "verification", "relevant_state", "recently_completed",
+            "hypotheses", "next_actions",
+        ),
+        "work_state",
+    ),
+}
+
+#: The most entry text one checkpoint's review offers, in tokens counted with
+#: the estimator continuity accounting uses. The fork's room can cap it lower.
+REVIEW_BATCH_TOKENS = 6_000
+
+#: At most this many selected writes waiting for the worker, workspace-wide.
+#: At the cap the review is still offered, with the write verdict unavailable.
 OUTSTANDING_CAP = 32
 
 MARK_STATES = (
@@ -85,55 +97,27 @@ def set_mark(
     revision: int,
     detail: str | None = None,
 ) -> None:
+    """Record a verdict. It stamps the review time, so the entry goes to the back."""
     if state not in MARK_STATES:
         raise ValueError(f"unknown placement mark: {state!r}")
     conn.execute(
         "UPDATE continuity_entries SET placement_state=?,placement_revision=?,"
-        "placement_detail=? WHERE thread_id=? AND history_epoch=? AND entry_id=?",
-        (state, revision, detail, thread_id, history_epoch, entry_id),
+        "placement_detail=?,reviewed_at=? "
+        "WHERE thread_id=? AND history_epoch=? AND entry_id=?",
+        (state, revision, detail, utc_now_iso(), thread_id, history_epoch, entry_id),
     )
 
 
 def clear_mark(
     conn: sqlite3.Connection, *, thread_id: str, history_epoch: int, entry_id: int
 ) -> None:
-    """Return an entry to unmarked, so the next checkpoint considers it again."""
+    """Return an entry to unmarked and unreviewed: the next checkpoint offers it first."""
     conn.execute(
         "UPDATE continuity_entries SET placement_state=NULL,"
-        "placement_revision=NULL,placement_detail=NULL "
+        "placement_revision=NULL,placement_detail=NULL,reviewed_at=NULL "
         "WHERE thread_id=? AND history_epoch=? AND entry_id=?",
         (thread_id, history_epoch, entry_id),
     )
-
-
-def _marked_at(conn: sqlite3.Connection, thread_id: str, epoch: int) -> dict[int, int]:
-    rows = conn.execute(
-        "SELECT entry_id,placement_revision FROM continuity_entries "
-        "WHERE thread_id=? AND history_epoch=? AND placement_state IS NOT NULL",
-        (thread_id, epoch),
-    ).fetchall()
-    return {int(row[0]): int(row[1]) for row in rows if row[1] is not None}
-
-
-def review_candidates(
-    conn: sqlite3.Connection,
-    thread_id: str,
-    history_epoch: int,
-    frozen: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """The unmarked lessons in a checkpoint's frozen view, oldest first.
-
-    Read from the frozen snapshot so every candidate carries the exact revision
-    the fork's ``review`` call is validated against.
-    """
-    marked = _marked_at(conn, thread_id, history_epoch)
-    eligible = [
-        entry for entry in frozen
-        if entry["field"] in LEARNING_FIELDS
-        and marked.get(int(entry["entry_id"])) != int(entry["revision"])
-    ]
-    eligible.sort(key=lambda entry: int(entry["entry_id"]))
-    return eligible[:REVIEW_BATCH]
 
 
 def outstanding_count(conn: sqlite3.Connection) -> int:
@@ -180,6 +164,99 @@ def current_entry(
     ).fetchone()
 
 
+def kept_detail(source: str, reason: str | None) -> str:
+    """A keep's mark detail: the checkpoint that kept it and why, as JSON."""
+    return json.dumps(
+        {"checkpoint": source, "reason": reason}, ensure_ascii=False, sort_keys=True,
+    )
+
+
+def kept_reason(state: str | None, detail: str | None) -> str | None:
+    """Why a kept entry was kept, to show it when it is offered again.
+
+    Older keeps stored only the checkpoint ref as plain text and gave no reason.
+    """
+    if state != "reaffirmed" or not detail:
+        return None
+    try:
+        decoded = json.loads(detail)
+    except ValueError:
+        return None
+    reason = decoded.get("reason") if isinstance(decoded, dict) else None
+    return str(reason) if reason else None
+
+
+#: What a fork is told when a verdict is not open to an entry's kind.
+_QUEUE_FULL_REFUSAL = (
+    "the write queue is full, so verdict select is unavailable at this "
+    "checkpoint: give the entry another verdict, or leave it to be offered again"
+)
+_LESSON_KEPT_REFUSAL = (
+    "a lesson is never kept in continuity: write it where its reader looks "
+    "(verdict select), say it is already on disk (verdict already), or drop it "
+    "with a reason"
+)
+
+
+def _check_verdict(field: str, verdict: Any, params: dict[str, Any]) -> str:
+    """Refuse a verdict the entry's kind does not allow; return the kept reason."""
+    from infra.continuity_store import ContinuityError
+
+    if verdict not in REVIEW_VERDICTS:
+        raise ContinuityError(
+            f"review verdict must be one of {', '.join(REVIEW_VERDICTS)}"
+        )
+    reason = str(params.get("reason") or "").strip()
+    if verdict == "reaffirm":
+        if field in LESSON_FIELDS:
+            raise ContinuityError(_LESSON_KEPT_REFUSAL)
+        if not reason:
+            raise ContinuityError(
+                "verdict reaffirm requires reason: why this still belongs in "
+                "continuity, which is shown the next time it is offered"
+            )
+    elif reason:
+        raise ContinuityError("reason goes only with verdict reaffirm")
+    placement = params.get("placement")
+    if (
+        verdict == "select" and field in LESSON_FIELDS
+        and isinstance(placement, dict) and placement.get("q1") == "thread"
+    ):
+        raise ContinuityError(
+            "a lesson leaves continuity, so q1 thread would keep it here: answer "
+            "q1 agent, which writes it to this thread's own file"
+        )
+    return reason
+
+
+def stage_checkpoint_review(
+    db: sqlite3.Connection,
+    thread_id: str,
+    entries: dict[int, dict[str, Any]],
+    prior: list[sqlite3.Row],
+    params: dict[str, Any],
+    *,
+    insert: Callable[..., None],
+) -> dict[str, Any]:
+    """Stage a checkpoint verdict, checking the answer and the write queue against ``db``."""
+    import functools
+
+    from core.placement_answer import stage
+    from core.placement_receipt import verify
+
+    staged = sum(
+        1 for row in prior
+        if row["operation"] == "review"
+        and json.loads(str(row["body"])).get("verdict") == "select"
+    )
+    return stage_review(
+        entries, prior, params, insert=insert,
+        answer=functools.partial(stage, db, thread_id),
+        verify=functools.partial(verify, db, thread_id),
+        writes_left=OUTSTANDING_CAP - outstanding_count(db) - staged,
+    )
+
+
 def stage_review(
     entries: dict[int, dict[str, Any]],
     prior: list[sqlite3.Row],
@@ -188,8 +265,13 @@ def stage_review(
     insert: Callable[..., None],
     answer: Callable[[dict[str, Any], object, object], dict[str, Any]],
     verify: Callable[[str, str], str],
+    writes_left: int,
 ) -> dict[str, Any]:
-    """Stage one checkpoint verdict for an unchanged lesson in the frozen view.
+    """Stage one checkpoint verdict for an unchanged entry in the frozen view.
+
+    ``writes_left`` is how many more ``select`` verdicts the write queue takes
+    once those this checkpoint already staged are counted; at zero a ``select``
+    is refused here, where the fork can still give the entry another verdict.
 
     ``answer(entry, placement, room)`` checks a ``select`` verdict's
     placement answer and returns what the mark keeps, and
@@ -205,10 +287,6 @@ def stage_review(
             f"continuity entry {entry_id} is not in this checkpoint's review"
         )
     field = str(target["field"])
-    if field not in LEARNING_FIELDS:
-        raise ContinuityError(
-            f"review applies to {', '.join(LEARNING_FIELDS)}, not {field}"
-        )
     if any(
         int(row["entry_id"]) == entry_id and row["operation"] != "add"
         for row in prior
@@ -218,10 +296,9 @@ def stage_review(
             "in this checkpoint"
         )
     verdict = params.get("verdict")
-    if verdict not in REVIEW_VERDICTS:
-        raise ContinuityError(
-            f"review verdict must be one of {', '.join(REVIEW_VERDICTS)}"
-        )
+    reason = _check_verdict(field, verdict, params)
+    if verdict == "select" and writes_left <= 0:
+        raise ContinuityError(_QUEUE_FULL_REFUSAL)
     destination = str(params.get("destination") or "").strip()
     quote = str(params.get("quote") or "")
     if verdict == "already" and not (destination and quote.strip()):
@@ -238,7 +315,7 @@ def stage_review(
         destination = verify(destination, quote)
     body = json.dumps(
         {"verdict": verdict, "destination": destination or None,
-         "quote": quote or None, "answer": stored},
+         "quote": quote or None, "answer": stored, "reason": reason or None},
         sort_keys=True, separators=(",", ":"),
     )
     insert(
@@ -277,7 +354,7 @@ def apply_review(
     if verdict["verdict"] == "reaffirm":
         set_mark(
             conn, **common, entry_id=entry_id, state="reaffirmed",
-            revision=revision, detail=source,
+            revision=revision, detail=kept_detail(source, verdict.get("reason")),
         )
         return
     if verdict["verdict"] == "select":

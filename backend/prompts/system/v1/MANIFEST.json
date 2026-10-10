@@ -243,10 +243,10 @@
       "sha256": "d2b7323916a52ab779f0e1bcd0051be0f607946868eb4366380a1e23e55c5425"
     },
     {
-      "bytes": 4766,
+      "bytes": 4898,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/system-overview.md",
-      "sha256": "f12676b8471d7453307900a4a6b8decba7048b51747d2f91b3c7d51dea8c24fd"
+      "sha256": "586b814c75cde6491212911ba8c4af4c9131e726585fb2e587a639e000c3a566"
     },
     {
       "bytes": 4875,
@@ -291,10 +291,10 @@
       "sha256": "f8715d21e9f62d330290536e4b51efbcc7c2d4859c4e4e7aa910d3bbdd9fea79"
     },
     {
-      "bytes": 5422,
+      "bytes": 5925,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "677f6f335334084dcd3c1c2a356e37fb0837aad7e31ba02d15fc2225afa1533a"
+      "sha256": "8988ff538d7eb171b973f7afbb217d536dac87fa62c3c2e41370fdbfad66e4db"
     },
     {
       "bytes": 3173,
