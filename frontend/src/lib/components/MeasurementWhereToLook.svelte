@@ -76,7 +76,8 @@
 	.tb-wrap { min-width: 0; overflow-x: auto; }
 	.tb { width: 100%; border-collapse: collapse; color: var(--text-primary); font-size: var(--text-subhead); }
 	.tb th, .tb td { text-align: left; padding: 6px 4px; border-top: 1px solid var(--border-subtle); vertical-align: top; }
-	.tb td:first-child, .act { overflow-wrap: anywhere; }
+	/* A subject wraps between whole words only, as in r2.7; the column is at least as wide as its longest word. */
+	.act { overflow-wrap: anywhere; }
 	.tb td:first-child, .tb th:first-child { min-width: 10ch; }
 	.tb th { border-top: 0; vertical-align: bottom; color: var(--text-secondary); font-size: var(--text-footnote); font-weight: 700; }
 	.tb td.n, .tb th.n { text-align: right; font-variant-numeric: tabular-nums; }

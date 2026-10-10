@@ -103,7 +103,9 @@ describe('measurement table headers', () => {
 		}
 	});
 
-	it('keeps the break-anywhere rule for long agent names in the Minutes body', () => {
-		expect(midWordRules(minutesSource).map(([selector]) => selector)).toEqual(['tbody th']);
+	it('wraps agent names and subjects between words only, never mid-word, in the Minutes and Biggest changes tables', () => {
+		expect(midWordRules(minutesSource)).toEqual([]);
+		const subjectRules = midWordRules(changesSource).flatMap(([selector]) => selector.split(',')).map((part) => part.trim());
+		expect(subjectRules.filter((part) => /first-child|\bth\b|\btd\b/.test(part))).toEqual([]);
 	});
 });

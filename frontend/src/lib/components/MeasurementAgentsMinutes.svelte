@@ -54,10 +54,9 @@
 	h4 { margin: 20px 0 6px; color: var(--text-secondary); font-size: var(--text-footnote); letter-spacing: 0.05em; text-transform: uppercase; }
 	table { width: 100%; border-collapse: collapse; color: var(--text-primary); font-size: var(--text-subhead); }
 	th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border-subtle); vertical-align: baseline; }
-	/* A header wraps between whole words only; a long agent name may still break inside itself. */
+	/* Headers and agent names wrap between whole words only, as in r2.7: the Agent column is at least as wide as the longest name's longest word. */
 	thead th { font-size: var(--text-footnote); color: var(--text-secondary); font-weight: 600; vertical-align: bottom; }
 	tbody th, tbody td { font-weight: 400; }
-	tbody th { overflow-wrap: anywhere; }
 	.n { text-align: right; font-variant-numeric: tabular-nums; }
 	.unmeasured { color: var(--text-secondary); font-style: italic; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { tick } from 'svelte';
 import MeasurementKpiRow from './MeasurementKpiRow.svelte';
+import kpiRowSource from './MeasurementKpiRow.svelte?raw';
 import MeasurementSizeHeadline from './MeasurementSizeHeadline.svelte';
 import type { Kpi, KpiPeriod, KeyFiguresState } from '$lib/stores/keyFigures';
 import { measurementCost } from '$lib/stores/measurementCost';
@@ -181,5 +182,18 @@ describe('MeasurementKpiRow', () => {
 		host.querySelector<HTMLButtonElement>('[data-kpi="first-try"] .error button')!.click();
 		expect(String(fetched.mock.calls[0][0])).toContain('ids=first_try_acceptance');
 		vi.unstubAllGlobals();
+	});
+});
+
+describe('MeasurementKpiRow layout rules', () => {
+	const css = kpiRowSource.slice(kpiRowSource.indexOf('<style>')).replace(/\/\*[\s\S]*?\*\//g, '');
+
+	it('stretches the tiles of a row to one height and never breaks a Tokens label mid-word', () => {
+		expect(css).not.toMatch(/align-items:\s*start/);
+		expect(css).not.toMatch(/dt\s*\{[^}]*overflow-wrap/);
+	});
+
+	it('gives the Tokens tile its own track when the frame is wide, for one row of four parts', () => {
+		expect(css).toMatch(/@container \(min-width: 900px\) \{ \.kpis \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\) 270px; \} \}/);
 	});
 });

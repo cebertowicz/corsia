@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
+from api.measurement_registry import TOKENS_RECORDED_FROM
 from api.measurement_token_sql import TOKEN_FIGURE_SQL
 
 
@@ -29,10 +30,6 @@ _TOKEN_SQL = f"""
     GROUP BY period
 """
 
-
-# The stored UTC instant the token total counts as fully recorded from. A window that begins earlier was only
-# partly recorded, so a change against it reads new, never a percentage over a partial base.
-TOKENS_RECORDED_FROM = "2026-09-07"
 
 
 def _token_figure(row: dict[str, Any] | None, name: str) -> dict[str, int]:
