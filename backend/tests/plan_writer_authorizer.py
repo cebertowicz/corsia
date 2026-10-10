@@ -22,12 +22,14 @@ a connection that wrote during it is compared with the recount oracle.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 import weakref
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from typing import Any
+from urllib.parse import quote
 
 from plans import aggregates, writer_context
 from plans.aggregates_rebuild import rebuild
@@ -106,6 +108,8 @@ class _GuardedCursor(sqlite3.Cursor):
 
 _TRACKED: weakref.WeakKeyDictionary[sqlite3.Connection, int] = weakref.WeakKeyDictionary()
 _GUARDED: dict[type, type] = {}
+#: Per connection, the thread that opened it and the database file (None for memory or a URI).
+_OWNER: weakref.WeakKeyDictionary[sqlite3.Connection, tuple[int, str | None]] = weakref.WeakKeyDictionary()
 
 
 def _guarded(base: type) -> type:
@@ -133,6 +137,14 @@ def _guarded(base: type) -> type:
 _original_connect = sqlite3.connect
 
 
+def _file_path(args: tuple, kwargs: dict) -> str | None:
+    target = args[0] if args else kwargs.get("database")
+    if isinstance(target, (str, os.PathLike)) and not kwargs.get("uri"):
+        text = os.fspath(target)
+        return None if isinstance(text, bytes) or text in ("", ":memory:") else os.path.abspath(text)
+    return None
+
+
 def _connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
     base = kwargs.get("factory") or sqlite3.Connection
     if len(args) <= 5:
@@ -140,6 +152,7 @@ def _connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
     connection = _original_connect(*args, **kwargs)
     connection.set_authorizer(authorize)
     _TRACKED[connection] = 0
+    _OWNER[connection] = (threading.get_ident(), _file_path(args, kwargs))
     return connection
 
 
@@ -171,8 +184,30 @@ def raw_plan_seed(connection: sqlite3.Connection) -> Iterator[None]:
                 connection.row_factory = row_factory
 
 
+def _mismatches(connection: sqlite3.Connection) -> list[str]:
+    if not aggregates.ready(connection):
+        return []
+    row_factory = connection.row_factory
+    connection.row_factory = sqlite3.Row
+    try:
+        return [
+            f"{plan}: {name}"
+            for plan in [row[0] for row in connection.execute("SELECT id FROM plans")]
+            for name in stored_mismatches(connection, plan)
+        ]
+    finally:
+        connection.row_factory = row_factory
+
+
 def recount_changed_plans() -> list[str]:
-    """Mismatches of every plan on a connection that wrote since the last call."""
+    """Mismatches of every plan on a connection that wrote since the last call.
+
+    A connection another thread opened may be mid-statement there (a job still running
+    as the test ends), and a read on it from here can deadlock against that job's own
+    database lock until the busy timeout. Those are judged through a fresh read-only
+    connection to the committed file instead, and skipped when the file is busy or the
+    database has none.
+    """
     found: list[str] = []
     for connection in list(_TRACKED):
         try:
@@ -180,15 +215,13 @@ def recount_changed_plans() -> list[str]:
             if changes == _TRACKED.get(connection, 0):
                 continue
             _TRACKED[connection] = changes
-            if not aggregates.ready(connection):
-                continue
-            row_factory = connection.row_factory
-            connection.row_factory = sqlite3.Row
-            try:
-                for plan in [row[0] for row in connection.execute("SELECT id FROM plans")]:
-                    found.extend(f"{plan}: {name}" for name in stored_mismatches(connection, plan))
-            finally:
-                connection.row_factory = row_factory
+            owner, path = _OWNER.get(connection, (threading.get_ident(), None))
+            if owner == threading.get_ident():
+                found.extend(_mismatches(connection))
+            elif path is not None:
+                uri = f"file:{quote(path)}?mode=ro"
+                with closing(_original_connect(uri, uri=True, timeout=0, factory=_guarded(sqlite3.Connection))) as reader:
+                    found.extend(_mismatches(reader))
         except sqlite3.Error:
             continue  # closed, locked or without the plan tables: nothing to compare
     return found
