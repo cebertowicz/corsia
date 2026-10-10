@@ -7,9 +7,12 @@ called on the adapter's own stream loop. Unbound, nothing is sent.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from contextvars import ContextVar
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from llm.router import LLMResponse
 
 
 class ToolInputSink(Protocol):
@@ -45,6 +48,39 @@ def abandon_tool_input(call_ids: Iterable[object]) -> None:
                 sink.on_tool_abandoned(call_id)
             except Exception:
                 _sink_failed()
+
+
+def forward_tool_input(call: dict) -> None:
+    """Send what an accumulating call's ``arguments`` gained since its last send.
+
+    For adapters that assemble a call in a dict (``id``, ``name``, ``arguments``):
+    nothing is sent until the call's id and name are both known, then the whole
+    backlog goes at once; ``sent`` records how much has gone.
+    """
+    arguments, sent = call.get("arguments") or "", call.get("sent", 0)
+    if call.get("id") and call.get("name") and isinstance(arguments, str) and len(arguments) > sent:
+        send_tool_input(call["id"], call["name"], arguments[sent:])
+        call["sent"] = len(arguments)
+
+
+def forwarded_ids(calls: dict[int, dict]) -> list[str]:
+    """The ids of the assembled calls ``forward_tool_input`` has sent input for."""
+    return [call["id"] for call in calls.values() if call.get("sent")]
+
+
+async def abandoning_unreturned(attempt: Awaitable[LLMResponse], streamed: Callable[[], Iterable[object]]) -> LLMResponse:
+    """Await one provider attempt; abandon every streamed call it failed, was cut off before, or did not return.
+
+    ``streamed`` is read after the attempt, so it sees every call the attempt streamed.
+    """
+    try:
+        response = await attempt
+    except Exception:
+        abandon_tool_input(streamed())
+        raise
+    returned = {call.id for call in response.tool_calls}
+    abandon_tool_input(call_id for call_id in streamed() if call_id not in returned)
+    return response
 
 
 def _sink_failed() -> None:

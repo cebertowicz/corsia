@@ -77,7 +77,7 @@ async def _settle(
     result: str,
     *,
     metadata: dict | None = None,
-) -> None:
+) -> str:
     call_id = f"call-{uuid.uuid4().hex[:8]}"
     if harness == "native":
         handler = StepHandler(
@@ -102,7 +102,7 @@ async def _settle(
             "result": result,
             **(metadata or {}),
         })
-        return
+        return call_id
 
     db = get_db()
     raw_name = f"mcp__corsia__{name}" if harness == "claude" else name
@@ -118,6 +118,7 @@ async def _settle(
     else:
         db.close()
         await observe_codex_result(thread_id, result, result_metadata)
+    return call_id
 
 
 async def _activity(socket: _Socket) -> dict:
@@ -196,14 +197,16 @@ async def test_each_tool_kind_reaches_only_the_owners_socket(
     owner_socket, other_socket = _Socket(), _Socket()
     state._ws_user_clients["steve"] = [owner_socket]
     state._ws_user_clients["leksi"] = [other_socket]
-    await _settle(harness, thread_id, tool_name, args, result)
+    call_id = await _settle(harness, thread_id, tool_name, args, result)
     frame = await _activity(owner_socket)
     await asyncio.sleep(0)
 
     assert set(frame) == {
         "type", "artifact_id", "thread_id", "agent", "kind", "span",
-        "comment_id", "revision", "at",
+        "comment_id", "revision", "at", "call_id",
     }
+    # The browser hands a streamed preview over to the settled result by this id.
+    assert frame["call_id"] == call_id
     assert frame["type"] == "doc_activity"
     assert frame["artifact_id"] == artifact["id"]
     assert frame["thread_id"] == thread_id

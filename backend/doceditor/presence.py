@@ -195,8 +195,13 @@ def observe_document_activity(
     result_text: str,
     is_error: bool,
     db,
+    *,
+    call_id: str | None = None,
 ) -> DocumentActivity | None:
-    """Return one owner-routed frame without registering or publishing anything."""
+    """Return one owner-routed frame without registering or publishing anything.
+
+    ``call_id`` is the provider call the result settles; the browser hands that call's streamed preview over by it.
+    """
     canonical_name = normalize_tool_name(name)
     declared_kind = DOCUMENT_ACTIVITY_TOOLS.get(canonical_name)
     if declared_kind is None or _failed_result(result_text, is_error):
@@ -258,5 +263,6 @@ def observe_document_activity(
             "comment_id": comment_id,
             "revision": revision,
             "at": utc_now_iso(),
+            "call_id": call_id,
         },
     )
