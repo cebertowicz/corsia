@@ -7,6 +7,7 @@ vi.mock('$lib/planNodeFocus', () => ({ focusPlanNode: vi.fn(async () => {}) }));
 import MessageArtifactCards from './MessageArtifactCards.svelte';
 import type { MessageCard } from '$lib/api/messageCards';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
+import { token } from '$lib/stores/auth';
 import { paneOpen } from '$lib/stores/paneOpen';
 import UpdateCard from './UpdateCard.svelte';
 import type { UpdateCard as Card } from '$lib/api/threadUpdates';
@@ -100,6 +101,40 @@ describe('MessageArtifactCards', () => {
 		expect(tiles()[0].tagName).toBe('DIV');
 		expect(tiles()[0].classList.contains('gone')).toBe(false);
 		expect(tiles()[0].querySelector('.state')).toBeNull();
+	});
+
+	it('shows an image artifact as a lazy thumbnail from the raw file route, not the glyph', () => {
+		token.set('test-session');
+		render({ cards: [ask({ type: 'image', icon: 'image', name: 'shot.png', title: 'Shot', path: '/ws/shot.png' })] });
+
+		const img = tiles()[0].querySelector<HTMLImageElement>('img.thumb')!;
+		expect(img.getAttribute('loading')).toBe('lazy');
+		const url = new URL(img.getAttribute('src')!, 'http://localhost');
+		expect(url.pathname).toBe('/api/files/content');
+		expect(url.searchParams.get('path')).toBe('/ws/shot.png');
+		expect(url.searchParams.get('raw')).toBe('true');
+		expect(tiles()[0].querySelector('.ic')).toBeNull();
+	});
+
+	it('decides image-ness from the artifact type, never from the file name', () => {
+		render({ cards: [ask({ type: 'document', name: 'diagram.png', path: '/ws/diagram.png' })] });
+
+		expect(tiles()[0].querySelector('img')).toBeNull();
+		expect(tiles()[0].querySelector('.ic')).not.toBeNull();
+	});
+
+	it('falls back to the glyph when the thumbnail cannot load, and for a retired image', () => {
+		token.set('test-session');
+		render({ cards: [
+			ask({ type: 'image', icon: 'image', path: '/ws/a.png' }),
+			ask({ artifact_id: 'a2', hold_id: 'h2', type: 'image', icon: 'image', path: '/ws/b.png', available: false, opens: false }),
+		] });
+
+		expect(tiles()[1].querySelector('img')).toBeNull();
+		tiles()[0].querySelector('img')!.dispatchEvent(new Event('error'));
+		flushSync();
+		expect(tiles()[0].querySelector('img')).toBeNull();
+		expect(tiles()[0].querySelector('.ic')).not.toBeNull();
 	});
 
 	it('hides an ask whose hold is homed on a blocked update row', () => {

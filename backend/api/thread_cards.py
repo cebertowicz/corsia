@@ -145,7 +145,8 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
             if bases is None:
                 bases = scope_bases(thread_row["project_id"], db)
             # An artifact asked in a Turn is one card there: the ask, never a reference too.
-            skip = asked_in_turn.get(_loads(row.get("metadata")).get("turn_id"), set())
+            turn_id = _loads(row.get("metadata")).get("turn_id")
+            skip = asked_in_turn.get(turn_id, set()) if isinstance(turn_id, str) else set()
             refs, more = reference_cards(
                 db, text, bases, user_id, skip=skip | {c["artifact_id"] for c in cards},
             )

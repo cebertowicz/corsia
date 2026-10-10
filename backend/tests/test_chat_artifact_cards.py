@@ -505,3 +505,15 @@ def test_an_artifact_an_ask_and_a_reference_both_name_shows_once_as_the_ask(db, 
     attach_cards(db, "owner", "user", thread, display)
 
     assert [(c["kind"], c["title"]) for c in display[0]["cards"]] == [("ask", "design.md"), ("artifact", "other.md")]
+
+
+def test_a_reference_card_carries_the_artifact_type_the_canvas_uses_for_images(db, ws):
+    (ws / "shot.png").write_bytes(b"\x89PNG\r\n")
+    png = str(registry_service.register_write_strict("owner", str(ws / "shot.png"), title="Shot", db=db)["id"])
+    doc = _registered(db, ws, "plan.md")
+
+    cards, _ = reference_cards(db, "[a](shot.png) [b](plan.md)", [ws.resolve()], "user")
+
+    by_id = {c["artifact_id"]: c for c in cards}
+    assert (by_id[png]["type"], by_id[png]["icon"], by_id[png]["opens"]) == ("image", "image", True)
+    assert by_id[doc]["type"] != "image"

@@ -3,7 +3,10 @@
 	// A tile opens its artifact in the canvas; it has no answer buttons, because the
 	// review bar in the opened document is the one place to answer an ask.
 	import { CARD_STATE_LABELS, feedbackLine, type MessageCard } from '$lib/api/messageCards';
+	import { imageContentUrl } from '$lib/artifactImage';
+	import { token } from '$lib/stores/auth';
 	import { openArtifactTab } from '$lib/stores/artifactWorkspace';
+	import { uiScope } from '$lib/stores/uiScope';
 	import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
 	import ArtifactGlyph from './ArtifactGlyph.svelte';
 
@@ -28,6 +31,13 @@
 	// The file name repeats the title for a file titled by its name: omit it, comparing the full strings.
 	const secondary = (card: MessageCard): string | null =>
 		feedbackLine(card.feedback) ?? (card.name && card.name !== card.title ? card.name : null);
+	// Whether a file is an image is the backend's answer alone: its artifact type, as the canvas reads it.
+	// A thumbnail that fails to load falls back to the glyph.
+	let brokenThumbs = $state<ReadonlySet<string>>(new Set());
+	const thumbSrc = (card: MessageCard): string | null =>
+		card.type === 'image' && card.available && card.path && !brokenThumbs.has(card.artifact_id)
+			? imageContentUrl({ path: card.path, projectId: $uiScope?.id ?? null, token: $token ?? '' })
+			: null;
 	const typeWord = (card: MessageCard): string => (card.type ?? 'file').replace(/-/g, ' ');
 	const accessibleName = (card: MessageCard): string =>
 		[card.title, typeWord(card), stateLabel(card)].filter(Boolean).join(', ');
@@ -41,7 +51,17 @@
 </script>
 
 {#snippet face(card: MessageCard)}
-	<ArtifactGlyph icon={card.icon} />
+	{#if thumbSrc(card)}
+		<img
+			class="thumb"
+			src={thumbSrc(card)}
+			alt=""
+			loading="lazy"
+			onerror={() => (brokenThumbs = new Set(brokenThumbs).add(card.artifact_id))}
+		/>
+	{:else}
+		<ArtifactGlyph icon={card.icon} />
+	{/if}
 	<span class="text">
 		<span class="title">{card.title}</span>
 		{#if stateLabel(card)}
@@ -119,6 +139,14 @@
 	button.tile:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 	.tile.gone { border-style: dashed; color: var(--text-tertiary); }
 	.tile.more { width: auto; min-width: 0; align-self: center; font-size: var(--text-footnote); color: var(--text-secondary); }
+	.thumb {
+		flex: 0 0 auto;
+		width: 36px;
+		height: 36px;
+		border-radius: var(--radius-sm);
+		object-fit: cover;
+		background: var(--bg-tertiary);
+	}
 	.text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 	.title, .name, .state {
 		overflow: hidden;
