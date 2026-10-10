@@ -23,6 +23,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from core.corrections_recording import CORRECTION_EVENT, FACT_KEYS as CORRECTION_FACT_KEYS, LABELS, MAX_REASON_CHARS
 from core.size_rating import BASES, FACT_KEYS, SIZE_CLASSES, SIZE_EVENT
 from host_access.credential_sanitizer import contains_credential, sanitize_credential_data
 from infra.outcome_event_input import OutcomeInputRefusal
@@ -40,6 +41,7 @@ class AttributeSpec:
 
     kind: str
     values: frozenset[str] = frozenset()
+    max_chars: int = 0
 
     def accepts(self, value: Any) -> bool:
         """Whether ``value`` is a legal value for this attribute."""
@@ -54,6 +56,12 @@ class AttributeSpec:
         if self.kind == "id":
             return (
                 isinstance(value, str) and _ID_RE.fullmatch(value) is not None
+                and not contains_credential(value)
+            )
+        if self.kind == "text":
+            return (
+                isinstance(value, str) and bool(value.strip())
+                and len(value) <= self.max_chars and "\x00" not in value
                 and not contains_credential(value)
             )
         return isinstance(value, str) and value in self.values
@@ -77,6 +85,11 @@ def count_attr() -> AttributeSpec:
 def enum_attr(*values: str) -> AttributeSpec:
     """One of a fixed set of strings."""
     return AttributeSpec("enum", frozenset(values))
+
+
+def text_attr(max_chars: int) -> AttributeSpec:
+    """A bounded, credential-free text field for an explicitly registered fact."""
+    return AttributeSpec("text", max_chars=max_chars)
 
 
 # A bounded union of documented workflow triggers and observed API values, including
@@ -166,6 +179,13 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "node_revision": count_attr(),
         "basis": enum_attr(*BASES),
         "size_class": enum_attr(*SIZE_CLASSES),
+    },
+    # Independent correction classifications retain their short reason but no
+    # source message text. Every other field is an opaque id or closed enum.
+    CORRECTION_EVENT: {
+        **{key: id_attr() for key in CORRECTION_FACT_KEYS if key not in {"label", "reason"}},
+        "label": enum_attr(*LABELS),
+        "reason": text_attr(MAX_REASON_CHARS),
     },
     "github.issue.opened": {**_ISSUE_ATTRS},
     "github.issue.closed": {
