@@ -3123,3 +3123,209 @@ async def test_codex_stop_fails_loudly_when_transition_lock_stays_held(monkeypat
     finally:
         transition_lock.release()
         codex_runtime._LIVE.reset()
+
+
+def _noop_broadcast(*_args, **_kwargs) -> None:
+    return None
+
+
+class _StopLogLevels:
+    """Record which level Stop logs each runtime-owner outcome at."""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def info(self, message: str) -> None:
+        self.records.append(("INFO", str(message)))
+
+    def warning(self, message: str) -> None:
+        self.records.append(("WARNING", str(message)))
+
+    def error(self, message: str) -> None:
+        self.records.append(("ERROR", str(message)))
+
+    def exception(self, message: str) -> None:
+        self.records.append(("ERROR", str(message)))
+
+    @property
+    def errors(self) -> list[str]:
+        return [message for level, message in self.records if level == "ERROR"]
+
+
+def _no_harness_owners(monkeypatch) -> None:
+    from subagents import cc_runtime, codex_runtime
+
+    for runtime in (cc_runtime, codex_runtime):
+        monkeypatch.setattr(runtime, "has_pending_or_live", lambda _sid: False)
+
+
+def _native_handle(monkeypatch, sid: str):
+    """Register one exact Native cancellation handle and no other owner."""
+    from core.native_turn_control import TurnCancelEvent
+    from core.turn_core import TurnIdentity
+    from infra import state
+
+    identity = TurnIdentity(f"turn-{sid}", 1)
+    cancel_event = TurnCancelEvent()
+    cancel_event.bind_turn_identity(identity)
+    monkeypatch.setattr(state, "_active_turns", {sid: cancel_event})
+    monkeypatch.setattr(state, "_active_llm_tasks", {})
+    monkeypatch.setattr(state, "_active_turn_tasks", {})
+    monkeypatch.setattr(state, "_active_warm_tasks", {})
+    _no_harness_owners(monkeypatch)
+    return identity, cancel_event
+
+
+@pytest.mark.asyncio
+async def test_stop_task_cancellation_propagates_from_cc_owner(monkeypatch) -> None:
+    """A cancelled Stop keeps unwinding instead of being logged as an owner fault."""
+    from subagents import cc_runtime
+    from subagents.runtime_guard import join_task_through_cancellation
+    from ws import stop_runtime
+
+    async def _cc_stop(*_args, **_kwargs) -> bool:
+        """cc_stop.stop's own shape: absorb, finish the transition, re-raise."""
+        transition = asyncio.create_task(asyncio.sleep(0.05))
+        cancellation = await join_task_through_cancellation(transition)
+        transition.result()
+        if cancellation is not None:
+            raise cancellation
+        return True
+
+    _no_harness_owners(monkeypatch)
+    monkeypatch.setattr(cc_runtime, "has_pending_or_live", lambda _sid: True)
+    monkeypatch.setattr(cc_runtime, "stop", _cc_stop)
+    log = _StopLogLevels()
+
+    stop = asyncio.create_task(stop_runtime.stop_runtimes(
+        "sid-stop-cancel", None, None, "turn-stop-cancel",
+        _noop_broadcast, log=log,
+    ))
+    await asyncio.sleep(0)
+    stop.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(stop, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_stop_task_cancellation_propagates_from_native_owner(monkeypatch) -> None:
+    """The Native branch of Stop also refuses to swallow Stop's own cancellation."""
+    from core import native_turn_control
+    from ws import stop_runtime
+
+    sid = "sid-native-cancel"
+    identity, cancel_event = _native_handle(monkeypatch, sid)
+
+    async def _join_and_hang(*_args, **_kwargs) -> bool:
+        await asyncio.Future()
+        return True
+
+    monkeypatch.setattr(
+        native_turn_control, "cancel_and_join_native_turn", _join_and_hang,
+    )
+    log = _StopLogLevels()
+
+    stop = asyncio.create_task(stop_runtime.stop_runtimes(
+        sid, cancel_event, None, identity.turn_id, _noop_broadcast, log=log,
+    ))
+    await asyncio.sleep(0)
+    stop.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(stop, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_already_cancelled_teardown_is_not_logged_as_a_stop_failure(
+    monkeypatch,
+) -> None:
+    """A cancellation owned by already-cancelled teardown is an expected outcome."""
+    from host_access import processes
+    from ws import stop_runtime
+
+    sid = "sid-native-leak"
+    identity, cancel_event = _native_handle(monkeypatch, sid)
+
+    class _CleanedUpOwner:
+        """ProcessOwner._shield_cleanup's shape: its cleanup task was cancelled.
+
+        ``task.result()`` re-raises that cancellation in Stop's own frame, where
+        Stop's task carries no cancellation of its own.
+        """
+
+        async def terminate_turn(self, *_args, **_kwargs):
+            cleanup = asyncio.ensure_future(asyncio.sleep(30))
+            await asyncio.sleep(0)
+            cleanup.cancel()
+            await asyncio.sleep(0)
+            return cleanup.result()
+
+    monkeypatch.setattr(processes, "PROCESS_OWNER", _CleanedUpOwner())
+    log = _StopLogLevels()
+
+    stopped = await asyncio.wait_for(stop_runtime.stop_runtimes(
+        sid, cancel_event, None, identity.turn_id, _noop_broadcast, log=log,
+    ), timeout=1.0)
+
+    assert stopped is True
+    assert log.errors == []
+    assert any(
+        "Native turn teardown" in message for _level, message in log.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_terminal_owner_is_not_logged_as_a_stop_failure(
+    monkeypatch,
+) -> None:
+    """A Turn whose terminal Stop already committed is a settled Stop, not a fault."""
+    from core.turn_core import TurnTerminalOwnershipError
+    from host_access import processes
+    from ws import stop_runtime
+
+    sid = "sid-stale-owner"
+    identity, cancel_event = _native_handle(monkeypatch, sid)
+    cancel_event.completion.set_exception(TurnTerminalOwnershipError(
+        f"terminal owner rejected native turn {identity.turn_id}: already_terminal"
+    ))
+
+    class _QuietOwner:
+        async def terminate_turn(self, *_args, **_kwargs):
+            return ()
+
+    monkeypatch.setattr(processes, "PROCESS_OWNER", _QuietOwner())
+    log = _StopLogLevels()
+
+    stopped = await asyncio.wait_for(stop_runtime.stop_runtimes(
+        sid, cancel_event, None, identity.turn_id, _noop_broadcast, log=log,
+    ), timeout=1.0)
+
+    assert stopped is True
+    assert log.errors == []
+
+
+@pytest.mark.asyncio
+async def test_unexpected_teardown_failure_is_still_logged_as_error(
+    monkeypatch,
+) -> None:
+    """Classifying expected outcomes must not hide a genuine owner failure."""
+    from core import native_turn_control
+    from ws import stop_runtime
+
+    sid = "sid-real-failure"
+    identity, cancel_event = _native_handle(monkeypatch, sid)
+
+    async def _explode(*_args, **_kwargs) -> bool:
+        raise RuntimeError("provider transport exploded")
+
+    monkeypatch.setattr(native_turn_control, "cancel_and_join_native_turn", _explode)
+    log = _StopLogLevels()
+
+    stopped = await asyncio.wait_for(stop_runtime.stop_runtimes(
+        sid, cancel_event, None, identity.turn_id, _noop_broadcast, log=log,
+    ), timeout=1.0)
+
+    assert stopped is True
+    assert len(log.errors) == 1
+    assert "Native turn teardown" in log.errors[0]

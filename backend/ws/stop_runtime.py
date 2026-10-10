@@ -7,8 +7,49 @@ import asyncio
 from loguru import logger as default_logger
 
 from core.stop_causes import PlanLimitStop
-from core.turn_core import TerminalSettlement, TurnIdentity
+from core.turn_core import (
+    TerminalSettlement,
+    TurnIdentity,
+    TurnTerminalOwnershipError,
+)
 from infra import state
+
+# A terminal claimed by another owner means the Turn has ended, which is what
+# Stop came for; it is not a Stop failure.
+_EXPECTED_STOP_OUTCOMES = (TurnTerminalOwnershipError,)
+
+
+def _stop_is_being_cancelled() -> bool:
+    """Whether the running Stop, not the owner it asked to end, is cancelled.
+
+    A ``CancelledError`` reaching Stop has two very different owners, and only
+    ``Task.cancelling()`` tells them apart. A cancellation requested on this
+    task stays counted while it unwinds; a cancellation owned by work Stop
+    already cancelled arrives as an ordinary exception re-raised in this frame,
+    leaving the count at zero.
+    """
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+def _log_owner_failure(log, subject: str, sid: str, failure: BaseException) -> None:
+    """Record one runtime-owner Stop outcome at the level it actually deserves.
+
+    Stop's own cancellation keeps unwinding: swallowing it makes shutdown wait
+    on a Turn that already ended. A cancellation owned by work this Stop itself
+    cancelled, and a terminal another owner already claimed, are the outcomes
+    Stop asked for, so they are recorded and never re-raised as a Stop failure.
+    Anything else is a genuine owner failure and keeps its ERROR traceback.
+    """
+    if isinstance(failure, asyncio.CancelledError):
+        if _stop_is_being_cancelled():
+            raise failure
+        log.info(f"_do_stop: {subject} for {sid} was already cancelled")
+        return
+    if isinstance(failure, _EXPECTED_STOP_OUTCOMES):
+        log.info(f"_do_stop: {subject} for {sid}: {failure}")
+        return
+    log.exception(f"_do_stop: {subject} for {sid} raised")
 
 
 def _captured_native_identity(
@@ -62,18 +103,18 @@ async def _stop_captured_native(
             expected_turn=identity,
             replacement_requested=False,
         )
-    except BaseException as exc:
-        first_failure = first_failure or exc
-        log.exception(f"_do_stop: Native turn teardown raised for {sid}")
+    except BaseException as failure:
+        first_failure = first_failure or failure
+        _log_owner_failure(log, "Native turn teardown", sid, failure)
 
     from core.thread_warm import cancel_thread_warm
 
     if warm_task is not None:
         try:
             await cancel_thread_warm(sid, expected_task=warm_task)
-        except BaseException as exc:
-            first_failure = first_failure or exc
-            log.exception(f"_do_stop: warm cleanup raised for {sid}")
+        except BaseException as failure:
+            first_failure = first_failure or failure
+            _log_owner_failure(log, "warm cleanup", sid, failure)
     return True, first_failure
 
 
@@ -107,8 +148,8 @@ async def stop_runtimes(
             log.error(f"_do_stop: plan-limit Stop of {sid} reached a Native owner")
         if failure is not None and not stopped:
             log.error(f"_do_stop: Native owner of {sid} is not exact: {failure}")
-    except BaseException:
-        log.exception(f"_do_stop: Native stop raised for {sid}")
+    except BaseException as failure:
+        _log_owner_failure(log, "Native stop", sid, failure)
     for name, runtime in (("cc_runtime", cc_runtime), ("codex_runtime", codex_runtime)):
         if not runtime.has_pending_or_live(sid):
             continue
@@ -116,8 +157,8 @@ async def stop_runtimes(
             stopped = await runtime.stop(
                 sid, expected_turn_id=turn_id, broadcast=broadcast, **caused,
             ) or stopped
-        except BaseException:
-            log.exception(f"_do_stop: {name}.stop raised for {sid}")
+        except BaseException as failure:
+            _log_owner_failure(log, f"{name}.stop", sid, failure)
     return stopped
 
 
