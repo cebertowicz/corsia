@@ -30,5 +30,5 @@
 		padding: 6px 8px 6px calc(4px + var(--depth) * 22px); border-radius: var(--radius-xs); width: 100%;
 	}
 	.child-row { color: var(--text-secondary); }
-	.child-error { flex-wrap: wrap; color: var(--red); justify-content: space-between; }
+	.child-error { flex-wrap: wrap; color: var(--red-text); justify-content: space-between; }
 </style>

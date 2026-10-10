@@ -37,7 +37,7 @@
 		padding: var(--space-1) var(--space-2); border-left: 2px solid var(--border);
 		color: var(--text-secondary); font-size: var(--text-caption);
 	}
-	.history-details[role='alert'] { color: var(--red); }
+	.history-details[role='alert'] { color: var(--red-text); }
 	@media (max-width: 620px) {
 		.history-details { margin-left: calc(18px + var(--depth) * 12px); }
 	}

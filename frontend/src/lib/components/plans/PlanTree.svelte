@@ -389,7 +389,7 @@
 	}
 	.child-row { color: var(--text-secondary); }
 	/* A notice with a retry is prose, not a plan row: it may wrap. */
-	.child-error { flex-wrap: wrap; color: var(--red); justify-content: space-between; }
+	.child-error { flex-wrap: wrap; color: var(--red-text); justify-content: space-between; }
 	.child-stale { flex-wrap: wrap; color: var(--amber); justify-content: space-between; }
 	@media (max-width: 620px) {
 		.drill-row { min-height: 44px; }
