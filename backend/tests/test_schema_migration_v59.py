@@ -17,6 +17,7 @@ from infra.database_migrations import migrate_to_current
 from infra.plan_schema import HOLD_UPDATE_GUARD_SQL
 from infra.schema import SCHEMA_VERSION
 from plans import admission, holds, lifecycle, service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _ARCHIVED = "2026-09-20T10:00:00.000000+00:00"
 _MOVED = "Set aside before agents could pause"
@@ -85,10 +86,11 @@ def _legacy_db(path):
             "settled": _pause(db, ids["settled"], "owner", "Later"),
             "archived": _pause(db, ids["archived"], "owner", "Later"),
         }
-        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (ids["settled"],))
-        db.execute(
-            "UPDATE plan_nodes SET archived_at=? WHERE id=?", (_ARCHIVED, ids["archived"]),
-        )
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (ids["settled"],))
+            db.execute(
+                "UPDATE plan_nodes SET archived_at=? WHERE id=?", (_ARCHIVED, ids["archived"]),
+            )
         idle = service.ensure_plan("thread", "idle", db=db)
         ids["idle_first"] = _node(db, idle.id, "idle first")
         ids["idle_second"] = _node(db, idle.id, "idle second")
@@ -152,7 +154,7 @@ def _plan_state(db, plan_id: str) -> str:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 103
+    assert SCHEMA_VERSION == 104
 
 
 def test_only_the_agents_own_open_pauses_become_scheduled_tasks(tmp_path):

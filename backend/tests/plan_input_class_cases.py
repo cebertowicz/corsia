@@ -35,6 +35,7 @@ from tests.plan_scene import (  # noqa: F401 - shared plan fixtures
     raise_decision,
     scene,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _workflow_fields_before_migration(db, scene):
@@ -162,9 +163,10 @@ def _attach_over_another_worker(db, scene):
         "INSERT OR IGNORE INTO threads (id,user_id,model,created_at,updated_at) "
         "VALUES ('worker-a','user-1','test/model','t','t')"
     )
-    db.execute(
-        "UPDATE plan_nodes SET spawned_thread_id='worker-a' WHERE id=?", (scene.own,),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET spawned_thread_id='worker-a' WHERE id=?", (scene.own,),
+        )
     db.commit()
     return partial(
         _mutate, db, scene.plan_id, "attach_spawned_thread",
@@ -187,10 +189,11 @@ def _delegate_to(node: str | None = None, *, finish: bool = False, worker: bool 
                 "INSERT OR IGNORE INTO threads (id,user_id,model,created_at,updated_at) "
                 "VALUES ('worker-a','user-1','test/model','t','t')"
             )
-            db.execute(
-                "UPDATE plan_nodes SET spawned_thread_id='worker-a' WHERE id=?",
-                (scene.own,),
-            )
+            with raw_plan_seed(db):
+                db.execute(
+                    "UPDATE plan_nodes SET spawned_thread_id='worker-a' WHERE id=?",
+                    (scene.own,),
+                )
         db.commit()
         return partial(delegate_attach.choose, "root", node or scene.own, db=db)
 

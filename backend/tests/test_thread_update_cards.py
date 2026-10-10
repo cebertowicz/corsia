@@ -19,6 +19,7 @@ from infra import presence, thread_updates, visit_divider
 from infra.auth import require_user
 from plans import service
 from tests.presence_helpers import USER, add_reply, at, claim, new_thread, pdb, release
+from tests.plan_writer_authorizer import raw_plan_seed
 
 __all__ = ["pdb"]
 
@@ -64,7 +65,8 @@ def test_a_card_says_whether_its_plan_item_still_exists_and_keeps_its_title(pdb)
     kept, archived = _node(pdb, thread, "Kept"), _node(pdb, thread, "Gone")
     _card(pdb, thread, "e1", kept, at(1))
     _card(pdb, thread, "e2", archived, at(2))
-    pdb.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (archived,))
+    with raw_plan_seed(pdb):
+        pdb.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (archived,))
     pdb.commit()
 
     cards, has_more = thread_updates.read_newest_cards(pdb, thread, min_seq=0)

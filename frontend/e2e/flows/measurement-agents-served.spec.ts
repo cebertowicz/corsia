@@ -47,6 +47,7 @@ function seedAgentsPopulation(): void {
 	execFileSync(python, ['-c', [
 		'import datetime, sqlite3, sys',
 		'connection = sqlite3.connect(sys.argv[1])',
+		'connection.row_factory = sqlite3.Row',
 		'user = connection.execute("SELECT id FROM users ORDER BY created_at LIMIT 1").fetchone()',
 		'assert user is not None, "the disposable install has no user to own the agent"',
 		'today = datetime.date.today()',
@@ -63,9 +64,16 @@ function seedAgentsPopulation(): void {
 		'    node = f"{agent}-node-{index}"',
 		'    connection.execute(f"INSERT OR IGNORE INTO plan_nodes ({nodes}) VALUES (?,?,NULL,?,?,?,?,?,?,1,1,?,?,?)", (node, f"plan-{agent}", index, "task", "Measured task", "done", "accepted", f"commitment-{agent}", "standard", settled, settled))',
 		'    connection.execute(f"INSERT OR IGNORE INTO plan_node_events ({events}) VALUES (?,?,\'e2e\',\'accepted\',\'active\',\'accepted\',?)", (f"event-{node}", node, settled))',
+		'from plans.public import rebuild_plan_aggregates',
+		'rebuild_plan_aggregates(connection, f"plan-{agent}")',
 		'connection.commit()',
 		'print(f"seeded agent={agent} project={project} user={user[0]} week={monday}")',
-	].join('\n'), `${stateRoot}/corsia.db`], { stdio: ['ignore', 'inherit', 'inherit'] });
+	].join('\n'), `${stateRoot}/corsia.db`], {
+		stdio: ['ignore', 'inherit', 'inherit'],
+		// The rebuild below imports the backend, so run it the way the other e2e seeders do.
+		cwd: path.resolve('..'),
+		env: { ...process.env, PYTHONPATH: 'backend', CORSIA_TEST_MODE: '1', CORSIA_ANALYTICS_DISABLE: '1' },
+	});
 }
 
 /** Stub only the trend panels so this surface is the Agents table on its own. */

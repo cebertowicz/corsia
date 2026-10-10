@@ -158,15 +158,13 @@ async def _send_explicit_completion(
             "Error: completion intent is valid only from a delegated child to "
             "its registered parent during an active turn"
         )
-    from plans.public import has_open_structured_attachment
+    from plans.public import has_open_structured_attachment, plan_is_empty
+    from tools import completion_refusals
 
     if await run_in_db(has_open_structured_attachment, child_thread_id):
-        return (
-            "Error: your plan's return already delivers your result to the "
-            "parent; nothing was sent. Put the result in your step's review "
-            "evidence (register an artifact and name it there if it is long), "
-            "then stop"
-        )
+        if await run_in_db(plan_is_empty, child_thread_id):
+            return completion_refusals.PLANLESS
+        return completion_refusals.STEPS
     from infra.database import get_db
 
     def _parent() -> dict | None:

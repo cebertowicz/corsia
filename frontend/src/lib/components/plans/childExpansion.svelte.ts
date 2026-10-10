@@ -11,13 +11,16 @@
 import { planKeySet } from '$lib/stores/planQuery.svelte';
 import type { OperatorKey, PlanKey } from '$lib/stores/planKeys';
 import type { PlanLoadStatus } from '$lib/stores/plans.svelte';
-import type { OperatorNode } from '$lib/api/plans';
+import type { OperatorFoldLevel, OperatorNode } from '$lib/api/plans';
 
 /** A child plan as `PlanTree` renders it: the same tree, scoped by its plan id. */
 export interface ChildRowState {
 	status: PlanLoadStatus;
 	planId: string | null;
 	nodes: OperatorNode[];
+	folds: OperatorFoldLevel[];
+	/** The plan's top-level root count, folded roots included. */
+	rootCount: number;
 	currentNodeIds: string[];
 	nextNodeIds: string[];
 	errorMessage: string | null;
@@ -25,7 +28,7 @@ export interface ChildRowState {
 
 /** A child plan nobody has asked for yet: what a tree with no expansion owner reads. */
 export const EMPTY_CHILD_STATE: ChildRowState = {
-	status: 'idle', planId: null, nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null,
+	status: 'idle', planId: null, nodes: [], folds: [], rootCount: 0, currentNodeIds: [], nextNodeIds: [], errorMessage: null,
 };
 
 export function createChildExpansion(getHostKey?: () => PlanKey | null) {
@@ -47,6 +50,8 @@ export function createChildExpansion(getHostKey?: () => PlanKey | null) {
 				status: entry.status,
 				planId: plan?.plan.id ?? null,
 				nodes: plan?.nodes ?? [],
+				folds: plan?.folds ?? [],
+				rootCount: plan?.root_count ?? 0,
 				currentNodeIds: plan?.current_node_ids ?? [],
 				nextNodeIds: plan?.next_node_ids ?? [],
 				errorMessage: entry.errorMessage,

@@ -1,8 +1,7 @@
 """Full plan_read/plan_ensure: identity and hierarchy only, paged, revision-aware.
 
 ``mode='full'`` never carries node bodies (``plan_read(node_id=...)`` does), is
-cut into byte-capped pages in depth-first order with a cursor bound to the plan
-revision, and ``known_revision`` turns an unchanged read into a one-line reply.
+cut into byte-capped pages in depth-first order with a keyset cursor, and ``known_revision`` turns an unchanged read into a one-line reply.
 Reuses ``test_current_plan_delivery``'s ``db`` fixture and session/proxy helpers
 rather than duplicating them.
 """
@@ -99,26 +98,45 @@ def test_full_read_pages_by_bytes_in_depth_first_order(db):
     assert "cursor" not in pages[-1]
 
 
-def test_full_cursor_is_refused_stale_once_the_plan_revision_moves(db):
+def test_full_cursor_is_a_keyset_that_survives_the_plan_moving(db):
     plan = _large_plan(db)
-    cursor = read_current_plan(actor=ACTOR, db=db)["cursor"]
+    first = read_current_plan(actor=ACTOR, db=db)
+    served = [n["id"] for n in first["nodes"]]
+    assert "o" not in status_cursor.decode(first["cursor"], plan_id=plan.id, section=status_cursor.FULL)
 
-    service.add_node(plan.id, kind="task", title="Late addition", acceptance_criteria="Done", db=db)
+    # A row already served is settled and a new one lands past the cursor: neither shifts the
+    # rest of the read, which an offset would (skipping one row, repeating another).
+    service.transition_node(served[1], "closed", db=db)
+    late = service.add_node(plan.id, kind="task", title="Late addition", acceptance_criteria="Done", db=db)
     db.commit()
 
-    with pytest.raises(service.PlanError, match="stale") as refused:
-        read_current_plan(actor=ACTOR, cursor=cursor, db=db)
-    assert "mode='full'" in str(refused.value)
+    rest = _pages(lambda cursor: read_current_plan(actor=ACTOR, cursor=cursor or first["cursor"], db=db))
+    after = [n["id"] for page in rest for n in page["nodes"]]
+    assert not set(after) & set(served)
+    assert after[-1] == late.id
+    assert after == [i for i in _depth_first_ids(db, plan.id) if i not in served and i != served[1]]
+
+
+def test_a_keyset_cursor_past_every_row_reads_an_empty_page(db):
+    plan = _large_plan(db, phases=1, tasks=2)
+    cursor = read_current_plan(actor=ACTOR, db=db, cursor=None)
+    assert "cursor" not in cursor
+    ids = _depth_first_ids(db, plan.id)
+    for node_id in ids:
+        service.transition_node(node_id, "closed", db=db)
+    db.commit()
+    forged = status_cursor.encode({"v": 1, "p": plan.id, "s": status_cursor.FULL, "k": [0, [1, "zzz"]]})
+    page = read_current_plan(actor=ACTOR, cursor=forged, db=db)
+    assert page["nodes"] == [] and "cursor" not in page
 
 
 def test_a_status_forged_or_foreign_cursor_is_refused_by_the_full_read(db):
     plan = _large_plan(db, phases=12)
     status_cursor_value = read_current_status(actor=ACTOR, db=db)["current"]["cursor"]
     full_cursor = read_current_plan(actor=ACTOR, db=db)["cursor"]
-    beyond = status_cursor.decode(full_cursor, plan_id=plan.id, section=status_cursor.FULL)
-    beyond["o"] = 10_000
+    offset_style = {"v": 1, "p": plan.id, "s": status_cursor.FULL, "o": 3, "t": "7"}
 
-    for cursor in (status_cursor_value, "not-a-cursor", status_cursor.encode(beyond)):
+    for cursor in (status_cursor_value, "not-a-cursor", status_cursor.encode(offset_style)):
         with pytest.raises(service.PlanError, match="stale"):
             read_current_plan(actor=ACTOR, cursor=cursor, db=db)
     with pytest.raises(service.PlanError, match="stale"):

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
 import { node } from './fixtures/planTreeNode';
+import { withFolds } from './fixtures/planFolds';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -31,7 +32,7 @@ type Handler = (
 function mountTree(over: Partial<OperatorNode>, onUserAction?: Handler) {
 	component = mount(PlanTree, {
 		target: host,
-		props: { nodes: [node({ id: 'task', title: 'Write the report', ...over })], onUserAction },
+		props: withFolds({ nodes: [node({ id: 'task', title: 'Write the report', ...over })], onUserAction }),
 	});
 	flushSync();
 	return host.querySelector('.tree-row') as HTMLElement;

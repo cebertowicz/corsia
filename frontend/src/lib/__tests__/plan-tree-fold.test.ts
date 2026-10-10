@@ -2,8 +2,9 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
-import { foldAllCompleted, foldLabel } from '$lib/components/plans/planTreeFold';
+import { foldAllCompleted, foldLabel } from '$lib/components/plans/planFoldLevels';
 import { node } from './fixtures/planTreeNode';
+import { withFolds } from './fixtures/planFolds';
 
 /**
  * Journey step 1: at every level of the tree, work the server marks `folded`
@@ -72,7 +73,7 @@ function mixedTree(): OperatorNode[] {
 
 describe('PlanTree — finished work folds at the bottom of each level', () => {
 	it('puts one fold row at the bottom of every level and leads each level with open work', async () => {
-		component = mount(PlanTree, { target: host, props: { nodes: mixedTree(), currentNodeIds: ['live'] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: mixedTree(), currentNodeIds: ['live'] }) });
 		await settle();
 
 		// 'fresh' is declared before 'open' and 'phase' in mixedTree(), so this
@@ -94,7 +95,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 			node({ id: 'open', title: 'Open task' }),
 			node({ id: 'newer', title: 'Finished 1h ago', state: 'accepted', last_transition_at: hoursAgo(1) }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['Open task', 'Finished 1h ago', 'Finished 3h ago']);
 	});
@@ -105,7 +106,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 			node({ id: 'child', title: 'Open child', parent_id: 'phase', depth: 1 }),
 			node({ id: 'open-sibling', title: 'Open sibling' }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes, currentNodeIds: ['child'] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, currentNodeIds: ['child'] }) });
 		await settle();
 		// 'phase' itself is terminal, but its child is still open, so it must
 		// not be treated as finished for ordering (mirrors the server's rule
@@ -114,7 +115,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 	});
 
 	it('offers one fold control per level; there is no separate plan-wide toggle', async () => {
-		component = mount(PlanTree, { target: host, props: { nodes: mixedTree(), currentNodeIds: ['live'] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: mixedTree(), currentNodeIds: ['live'] }) });
 		await settle();
 		const labels = [...host.querySelectorAll('button')].map((button) => button.textContent?.trim());
 		expect(labels).not.toContain('Hide completed');
@@ -123,7 +124,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 	});
 
 	it('keeps progress from the server: folded work still counts as done', async () => {
-		component = mount(PlanTree, { target: host, props: { nodes: mixedTree(), currentNodeIds: ['live'] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: mixedTree(), currentNodeIds: ['live'] }) });
 		await settle();
 		const phase = [...host.querySelectorAll('.tree-row')].find(
 			(row) => row.querySelector('.row-title')?.textContent === 'Phase',
@@ -136,7 +137,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 			node({ id: 'open', title: 'Open task' }),
 			...Array.from({ length: 12 }, (_, i) => done(`Done ${i}`, { last_transition_at: hoursAgo(30 + i) })),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['Open task', '[12 completed]']);
 
@@ -161,7 +162,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 			node({ id: 'todo', title: 'Todo child', parent_id: 'phase', depth: 1 }),
 			done('Old child', { parent_id: 'phase', depth: 1 }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['Open task', 'Phase']);
 		const toggle = host.querySelector<HTMLButtonElement>('.branch-toggle');
@@ -175,7 +176,7 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 			node({ id: 'phase', title: 'Phase', state: 'pending' }),
 			done('Old child', { parent_id: 'phase', depth: 1 }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		const toggle = host.querySelector<HTMLButtonElement>('.branch-toggle');
 		expect(toggle, 'the parent offers disclosure').toBeTruthy();
@@ -187,17 +188,13 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 	});
 
 	it('names folded outcomes truthfully', () => {
-		expect(foldLabel([done('a'), done('b'), done('c', { state: 'failed', display: { label_key: 'finished', tone_key: 'failed' } })]))
-			.toBe('2 completed, 1 failed');
-		expect(foldLabel([done('a', { state: 'closed', display: { label_key: 'finished', tone_key: 'closed' } })]))
-			.toBe('1 closed');
+		expect(foldLabel({ done: 2, failed: 1, closed: 0 })).toBe('2 completed, 1 failed');
+		expect(foldLabel({ done: 0, failed: 0, closed: 1 })).toBe('1 closed');
 	});
 
 	it('wears the done mark only when every folded step completed', () => {
-		expect(foldAllCompleted([done('a'), done('b')])).toBe(true);
-		expect(foldAllCompleted([done('a'), done('c', { state: 'failed', display: { label_key: 'finished', tone_key: 'failed' } })]))
-			.toBe(false);
-		expect(foldAllCompleted([done('a', { state: 'closed', display: { label_key: 'finished', tone_key: 'closed' } })]))
-			.toBe(false);
+		expect(foldAllCompleted({ done: 2, failed: 0, closed: 0 })).toBe(true);
+		expect(foldAllCompleted({ done: 1, failed: 1, closed: 0 })).toBe(false);
+		expect(foldAllCompleted({ done: 0, failed: 0, closed: 1 })).toBe(false);
 	});
 });

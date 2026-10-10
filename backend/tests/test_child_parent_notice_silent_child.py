@@ -11,6 +11,7 @@ from automation.continuation.sources.silent_child import SilentChildSource
 from infra.input_admission import accept_thread_input
 from plans import delegation_child_lifecycle as lifecycle, public, service
 from tests.child_parent_notice_helpers import begin_worker_turn, db, delegated, wakes
+from tests.plan_writer_authorizer import raw_plan_seed
 
 __all__ = ["db"]
 
@@ -159,7 +160,8 @@ def test_f8_settled_delegating_step_hears_nothing(db):
 def test_f8_running_worker_still_wakes_while_parent_reviews(db):
     step, _plan, _node = delegated(db)
     begin_worker_turn(db)
-    db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (step.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (step.id,))
 
     assert _sweep(db) == ["parent"]
 

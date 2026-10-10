@@ -15,6 +15,7 @@ import pytest
 
 from infra.schema import SCHEMA_SQL
 from plans import mutations, node_cost, service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 T0 = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
 
@@ -63,7 +64,8 @@ def _event(db, node_id, event, minutes, *, prior=None, new=None, depends_on=None
 
 def _move(db, node_id, prior, new, minutes):
     _event(db, node_id, "state_transition", minutes, prior=prior, new=new)
-    db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (new, node_id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (new, node_id))
 
 
 def _watch(db, node, armed, *, resolved=None):

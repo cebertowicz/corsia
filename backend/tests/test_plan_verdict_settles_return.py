@@ -30,6 +30,7 @@ from plans import archival, mutations, service
 from plans.boundary import PlanActor, mutate
 from plans.projections import open_delegated_node_ids, open_delegated_work
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 NOW = "2026-08-01T00:00:00+00:00"
 PARENT = PlanActor("parent", "user-1", "project-1")
@@ -568,7 +569,8 @@ def _started_branch(db, plan_id: str) -> str:
         plan_id, kind="task", title="Branch step", acceptance_criteria="Done",
         parent_id=branch.id, db=db,
     )
-    db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (step.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (step.id,))
     db.commit()
     return branch.id
 
@@ -636,7 +638,8 @@ def test_a_never_started_parent_reads_as_its_steps(monkeypatch):
             plan.id, kind="task", title="Branch step", acceptance_criteria="Done",
             parent_id=branch.id, db=db,
         )
-        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (step.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (step.id,))
         db.commit()
 
         assert open_delegated_node_ids(db, plan.id) == ()

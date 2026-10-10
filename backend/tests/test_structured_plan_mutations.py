@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from infra.schema import SCHEMA_SQL
 from plans import mutations, service
 from plans.boundary import PlanActor, mutate
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 class _DbProxy:
@@ -559,10 +560,11 @@ def _four_siblings(db, archived_title: str):
         )
         for title in ("A", "B", "C", "D")
     }
-    db.execute(
-        "UPDATE plan_nodes SET archived_at=? WHERE id=?",
-        (service._now(), nodes[archived_title].id),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at=? WHERE id=?",
+            (service._now(), nodes[archived_title].id),
+        )
     db.commit()
     return plan, nodes
 
@@ -632,10 +634,11 @@ def test_archiving_a_sibling_after_a_reorder_keeps_the_live_order(db):
     mutations.reorder_node(nodes["A"].id, 2, db=db)
     db.commit()
 
-    db.execute(
-        "UPDATE plan_nodes SET archived_at=? WHERE id=?",
-        (service._now(), nodes["C"].id),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at=? WHERE id=?",
+            (service._now(), nodes["C"].id),
+        )
     db.commit()
 
     assert _ordered(db, plan.id) == ["D", "A"]

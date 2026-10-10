@@ -14,6 +14,7 @@ import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
 import type { OperatorEnvelope, OperatorNode } from '$lib/api/plans';
 import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from './fixtures/operatorPlan';
+import { planFoldFields } from './fixtures/planFolds';
 
 vi.mock('$lib/ws', () => ({ on: () => () => {} }));
 
@@ -26,7 +27,7 @@ const childLink = (planId: string, threadId: string) => ({
 	progress: { done: 0, total: 1, open: 1, liveness: 'advancing' as const },
 });
 
-/** A root-level current step, a collapsed off-path branch, a subagent step, and a chain eight levels deep. */
+/** A root-level current step, a collapsed off-path branch (and one older failure the read does not list, see `OLD`), a subagent step, and a chain eight levels deep. */
 function planNodes(threadId: string): OperatorNode[] {
 	const chain = Array.from({ length: 8 }, (_, depth) => operatorNode({
 		id: `d${depth}`, title: `Deep ${depth}`, depth, parent_id: depth > 0 ? `d${depth - 1}` : null,
@@ -35,7 +36,6 @@ function planNodes(threadId: string): OperatorNode[] {
 		operatorNode({ id: 'now', title: `Now for ${threadId}`, state: 'active' }),
 		operatorNode({ id: 'branch', title: 'Branch' }),
 		operatorNode({ id: 'leaf', title: 'Leaf', depth: 1, parent_id: 'branch' }),
-		operatorNode({ id: 'old', title: 'Old failure', state: 'failed', folded: true }),
 		// Malformed: past the overview depth with no parent to drill from.
 		operatorNode({ id: 'orphan', title: 'Orphan', depth: 9 }),
 		operatorNode({ id: 'spawn', title: 'Spawned', child: childLink('plan-child', 'child-thread') }),
@@ -43,7 +43,18 @@ function planNodes(threadId: string): OperatorNode[] {
 	];
 }
 
+/** An older finished row the pane read does not list: the server counts it and serves it from its history. */
+const OLD = {
+	id: 'old', parent_id: null, kind: 'task', title: 'Old failure', state: 'failed', folded_at: '2026-09-01T00:00:00Z',
+	fold_bucket: 'failed', display: { label_key: 'finished', tone_key: 'failed' },
+	folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false,
+};
+
 function envelope(threadId: string, nodes = planNodes(threadId)): OperatorEnvelope {
+	const fields = planFoldFields(nodes);
+	const withOld = threadId === 'child-thread'
+		? fields
+		: { folds: [{ parent_id: null, done: 0, failed: 1, closed: 0, more: 1 }], root_count: fields.root_count + 1 };
 	return {
 		contract_version: 2,
 		as_of: 'now',
@@ -58,7 +69,7 @@ function envelope(threadId: string, nodes = planNodes(threadId)): OperatorEnvelo
 			oversize: null,
 			current_node_ids: ['now'],
 			next_node_ids: [],
-			nodes,
+			nodes, ...withOld,
 		}],
 	};
 }
@@ -75,6 +86,9 @@ function ok(body: OperatorEnvelope, tag: string) {
 /** Serve each thread's plan (and the subagent step's plan); a thread listed in `hanging` never answers. */
 function serve(hanging: string[] = []) {
 	vi.stubGlobal('fetch', vi.fn((url: string) => {
+		const plain = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => body, headers: { get: () => null } });
+		if (url.includes('/folded?')) return plain({ plan_id: 'plan-t1', parent: 'root', items: [OLD], next_cursor: null });
+		if (url.endsWith('/nodes/old/path')) return plain({ plan_id: 'plan-t1', node: OLD, ancestors: [], page: null });
 		if (url.includes('/nodes/')) return Promise.resolve(ok(childEnvelope(), 'child'));
 		const threadId = url.split('/').pop() ?? '';
 		if (hanging.includes(threadId)) return new Promise(() => {});
@@ -152,7 +166,7 @@ describe('ThreadPlanPane attention-node focus', () => {
 		expect(host.querySelector('.drill-view')).toBeNull();
 	});
 
-	it('pages a folded finished node into view with the fold reveal', async () => {
+	it('pages an older finished node in from the server\'s history and focuses its row', async () => {
 		serve();
 		await mountPane({ threadId: 't1' });
 		expect(row('old')).toBeUndefined();

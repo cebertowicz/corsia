@@ -26,6 +26,7 @@ from plans import node_waits, service
 from plans.boundary import PlanActor, mutate
 from tests.test_attention_queue import _mid, _seed, raise_decision
 from tests.test_attention_queue_api import _DbProxy, _immediate
+from tests.plan_writer_authorizer import raw_plan_seed
 
 OWNER = PlanActor("root", "user-1", "project-1")
 FOREIGN = PlanActor("foreign", "user-2", "project-2")
@@ -292,7 +293,8 @@ def test_an_open_decision_node_refuses_a_follow_up_naming_the_owning_lane(db):
 def test_an_archived_source_node_refuses_a_follow_up(db):
     plan = _plan(db)
     source = _task(db, plan.id)
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (source.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (source.id,))
     db.commit()
 
     with pytest.raises(service.PlanError, match="plan node is archived"):

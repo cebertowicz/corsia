@@ -21,6 +21,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from tests.plan_writer_authorizer import raw_plan_seed
 
 REPO = Path(__file__).resolve().parents[2]
 BACKEND = REPO / "backend"
@@ -192,27 +193,29 @@ def seeded_db() -> Iterator[sqlite3.Connection]:
         "created_at,updated_at) VALUES ('plan-1','thread','owner-1','active',3,"
         "'2026-01-01T00:00:00+00:00','2026-01-01T02:00:00+00:00')"
     )
-    connection.execute(
-        "INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,"
-        "acceptance_criteria,commitment_id,state,created_at,updated_at) "
-        "VALUES ('node-1','plan-1',0,'task','T','DOD','node-1','accepted',"
-        "'2026-01-01T00:00:00+00:00','2026-01-01T02:00:00+00:00')"
-    )
-    for index, (event, prior, new, result, at) in enumerate((
-        ("node_created", None, None, None, "2026-01-01T00:00:00+00:00"),
-        ("state_transition", "pending", "active", None, "2026-01-01T01:00:00+00:00"),
-        ("state_transition", "active", "review_requested", None,
-         "2026-01-01T01:30:00+00:00"),
-        ("review_rejected", None, None, None, "2026-01-01T01:40:00+00:00"),
-        ("state_transition", "review_requested", "accepted", "passed",
-         "2026-01-01T02:00:00+00:00"),
-    )):
+    with raw_plan_seed(connection):
         connection.execute(
-            "INSERT INTO plan_node_events (id,node_id,provenance,event,"
-            "prior_state,new_state,verification_result,created_at) "
-            "VALUES (?,?,'test',?,?,?,?,?)",
-            (f"ev-{index}", "node-1", event, prior, new, result, at),
+            "INSERT INTO plan_nodes (id,plan_id,order_key,kind,title,"
+            "acceptance_criteria,commitment_id,state,created_at,updated_at) "
+            "VALUES ('node-1','plan-1',0,'task','T','DOD','node-1','accepted',"
+            "'2026-01-01T00:00:00+00:00','2026-01-01T02:00:00+00:00')"
         )
+        # Seeded in the same block: the plan counts its settling events (`settled_events`).
+        for index, (event, prior, new, result, at) in enumerate((
+            ("node_created", None, None, None, "2026-01-01T00:00:00+00:00"),
+            ("state_transition", "pending", "active", None, "2026-01-01T01:00:00+00:00"),
+            ("state_transition", "active", "review_requested", None,
+             "2026-01-01T01:30:00+00:00"),
+            ("review_rejected", None, None, None, "2026-01-01T01:40:00+00:00"),
+            ("state_transition", "review_requested", "accepted", "passed",
+             "2026-01-01T02:00:00+00:00"),
+        )):
+            connection.execute(
+                "INSERT INTO plan_node_events (id,node_id,provenance,event,"
+                "prior_state,new_state,verification_result,created_at) "
+                "VALUES (?,?,'test',?,?,?,?,?)",
+                (f"ev-{index}", "node-1", event, prior, new, result, at),
+            )
     connection.execute(
         "INSERT INTO plan_liveness_wakes (id,thread_id,status,deadline,cycle,"
         "last_open_count,armed_at,fired_at,updated_at) "

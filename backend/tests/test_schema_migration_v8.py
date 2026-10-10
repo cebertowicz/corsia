@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 
@@ -186,23 +187,24 @@ def _node(
     follow_up_of: str | None = None,
     spawn_kind: str | None = None,
 ) -> None:
-    db.execute(
-        """INSERT INTO plan_nodes
-           (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,
-            checkpoint_exception,state,spawned_thread_id,follow_up_of,
-            spawn_kind,revision,created_at,updated_at)
-           VALUES (?,?,NULL,?,'task',?,'verified',0,?,?,?,?,1,'t','t')""",
-        (
-            node_id,
-            plan_id,
-            order_key,
-            node_id,
-            state,
-            spawned_thread_id,
-            follow_up_of,
-            spawn_kind,
-        ),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            """INSERT INTO plan_nodes
+               (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,
+                checkpoint_exception,state,spawned_thread_id,follow_up_of,
+                spawn_kind,revision,created_at,updated_at)
+               VALUES (?,?,NULL,?,'task',?,'verified',0,?,?,?,?,1,'t','t')""",
+            (
+                node_id,
+                plan_id,
+                order_key,
+                node_id,
+                state,
+                spawned_thread_id,
+                follow_up_of,
+                spawn_kind,
+            ),
+        )
 
 
 def _attach(db: sqlite3.Connection, node_id: str, child_plan_id: str, at: str) -> None:

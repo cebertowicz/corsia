@@ -16,6 +16,7 @@ import plans.mutations as mutations
 import plans.rollup as rollup
 import plans.service as service
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 @pytest.fixture
@@ -70,10 +71,11 @@ def _parent_spawn_node(db, title="Delegate"):
 
 
 def _stage_legacy_attachment(node_id, child_id, *, db, payload=None):
-    db.execute(
-        "UPDATE plan_nodes SET spawned_thread_id=? WHERE id=?",
-        (child_id, node_id),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET spawned_thread_id=? WHERE id=?",
+            (child_id, node_id),
+        )
     event_id = service._event(
         db, node_id, "spawned_thread_attached", actor_id=None,
         provenance="test.p3_attachment",
@@ -234,10 +236,11 @@ def test_legacy_attachment_is_not_a_structured_epoch(db):
 
 def test_malformed_and_ineligible_legacy_attachments_suppress_nothing(db):
     _parent_plan, malformed = _parent_spawn_node(db, "Malformed")
-    db.execute(
-        "UPDATE plan_nodes SET spawned_thread_id='child' WHERE id=?",
-        (malformed.id,),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET spawned_thread_id='child' WHERE id=?",
+            (malformed.id,),
+        )
     db.execute(
         """INSERT INTO plan_node_events
            (id,node_id,actor_id,provenance,event,payload_json,created_at)

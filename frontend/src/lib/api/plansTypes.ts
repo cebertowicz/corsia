@@ -4,6 +4,7 @@
  */
 
 import type { OperatorCommitmentCost, OperatorInitiative, OperatorNodeCost } from './plansCostTypes';
+import type { OperatorFoldLevel } from './plansFolded';
 
 export type OperatorLiveness =
 	| 'advancing'
@@ -235,6 +236,8 @@ export interface OperatorNode {
 	/** Lineage total, on every task of a lineage of two or more; null elsewhere. */
 	initiative: OperatorInitiative | null;
 	branch_progress: { done: number; total: number } | null;
+	/** When the work under this node, all of it quietly set aside by its agent, next comes due (ISO); null if any open work is not. */
+	scheduled_until: string | null;
 	attention_path: string[];
 	completion: OperatorCompletion | null;
 	child: OperatorChildSummary | null;
@@ -253,7 +256,11 @@ export interface OperatorPlanEntry {
 	oversize: { open: number; budget: number } | null;
 	current_node_ids: string[];
 	next_node_ids: string[];
+	/** Open rows, plus the window of folded rows this read lists (`folds` says what the rest of each level is). */
 	nodes: OperatorNode[];
+	folds: OperatorFoldLevel[];
+	/** Every top-level root of the plan, folded ones included: the sole-wrapper rule reads it, not `nodes`. */
+	root_count: number;
 }
 
 export interface OperatorTarget {

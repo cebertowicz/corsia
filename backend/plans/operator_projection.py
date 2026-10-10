@@ -6,13 +6,16 @@ import hashlib
 import json
 
 import infra.config as config
-from infra.packed_rows import fetch_all
 import plans.decision_projection as decision_projection
 import plans.delegation_harvest as delegation_harvest
 import plans.hierarchy as hierarchy
 import plans.operator_display_state as operator_display_state
+import plans.open_folds as open_folds
+import plans.open_rollup as open_rollup
+import plans.open_tree as open_tree
 import plans.operator_node_state as operator_node_state
 import plans.operator_nodes as operator_nodes
+import plans.operator_owners as operator_owners
 import plans.pane_views as pane_views
 import plans.rollup as rollup
 import plans.service as service
@@ -29,12 +32,6 @@ class OperatorNotFound(LookupError):
 def _require_human(actor: PlanActor) -> None:
     if actor.kind != "user" or not actor.user_id:
         raise OperatorNotFound(_UNAVAILABLE)
-
-
-# Rollups list only live threads; a direct read of one thread or worker also
-# reaches an archived one, since archiving hides a thread but keeps its plan.
-# Only a purged thread is gone.
-_LIVE_THREAD = "archived_at IS NULL AND COALESCE(lifecycle_state,'active') != 'archived'"
 
 
 def _session(thread_id: str, actor: PlanActor, *, db):
@@ -82,106 +79,21 @@ def _plan_for_thread(thread_id: str, actor: PlanActor, *, db):
     return session, plan
 
 
-def _plan_row(item):
-    """Accept a full rollup or its plan row for shared owner filtering."""
-    return item.plan if isinstance(item, rollup.PlanRollup) else item
-
-
-def _owner_index(
-    projected: list, actor: PlanActor, *, db, include_archived: bool,
-    exclude_archived_projects: bool = False,
-) -> dict:
-    """Batch accessible owner labels for full or compact plan projections.
-
-    ``exclude_archived_projects`` also drops a thread owner whose project is
-    archived; the Activity rollups set it, the other readers keep their rows.
-    """
-    thread_ids = {
-        _plan_row(item)["owner_id"] for item in projected
-        if _plan_row(item)["owner_kind"] == "thread"
-    }
-    project_ids = {
-        _plan_row(item)["owner_id"] for item in projected
-        if _plan_row(item)["owner_kind"] == "project_scope"
-    }
-    sessions = {}
-    live = "" if include_archived else f" AND {_LIVE_THREAD}"
-    if exclude_archived_projects:
-        live += (
-            " AND COALESCE(project_id,'') NOT IN"
-            " (SELECT id FROM projects WHERE COALESCE(status,'active')='archived')"
-        )
-    ordered_threads = sorted(thread_ids)
-    for start in range(0, len(ordered_threads), hierarchy._ID_CHUNK):
-        chunk = ordered_threads[start:start + hierarchy._ID_CHUNK]
-        marks = ",".join("?" for _ in chunk)
-        rows = fetch_all(
-            db,
-            f"""SELECT id, title, project_id FROM threads WHERE id IN ({marks})
-                AND user_id=? AND purged_at IS NULL{live}""",
-            (*chunk, actor.user_id),
-        )
-        sessions.update({row["id"]: row for row in rows})
-    memberships = {
-        row["project_id"] for row in fetch_all(
-            db, "SELECT DISTINCT project_id FROM threads WHERE user_id=?", (actor.user_id,),
-        )
-    }
-    projects = {}
-    ordered_projects = sorted(project_ids)
-    for start in range(0, len(ordered_projects), hierarchy._ID_CHUNK):
-        chunk = ordered_projects[start:start + hierarchy._ID_CHUNK]
-        marks = ",".join("?" for _ in chunk)
-        rows = fetch_all(
-            db,
-            f"""SELECT id, name FROM projects WHERE id IN ({marks})
-                AND COALESCE(status,'active') != 'archived'""",
-            tuple(chunk),
-        )
-        projects.update({row["id"]: row for row in rows if row["id"] in memberships})
-    owners = {}
-    for item in projected:
-        plan = _plan_row(item)
-        if plan["owner_kind"] == "workspace_scope":
-            owner = {
-                "label": config.WORKSPACE_SELECTION.name,
-                "project_id": None,
-                "thread_id": None,
-            }
-        elif plan["owner_kind"] == "project_scope" and plan["owner_id"] in projects:
-            owner = {
-                "label": projects[plan["owner_id"]]["name"],
-                "project_id": plan["owner_id"],
-                "thread_id": None,
-            }
-        elif plan["owner_kind"] == "thread" and plan["owner_id"] in sessions:
-            session = sessions[plan["owner_id"]]
-            owner = {
-                "label": session["title"] or "Untitled thread",
-                "project_id": session["project_id"],
-                "thread_id": plan["owner_id"],
-            }
-        else:
-            continue
-        owners[plan["id"]] = owner
-    return owners
-
-
 def _review_targets(
     projected: list[rollup.PlanRollup],
     actor: PlanActor,
     *,
-    db,
+    db, open_nodes: bool = False,
 ) -> dict[str, dict]:
     """Resolve each review-requested node to the actor who can move it.
 
+    ``open_nodes``: read only decisions held at a node with open work (a read of the open work).
     The caller already chose which plans are visible; these lookups only name
     who reviews, so an archived owner or parent still resolves.
     """
     plan_ids = [item.plan["id"] for item in projected]
-    decision_nodes = {
-        item["node_id"] for item in decision_projection.raised_decisions(plan_ids, db=db)
-    }
+    raised = decision_projection.raised_decisions(plan_ids, db=db, open_nodes=open_nodes)
+    decision_nodes = {item["node_id"] for item in raised}
     targets: dict[str, dict] = {}
     for item in projected:
         reviewers: dict[str, dict] = {}
@@ -247,13 +159,27 @@ def _child_plan_ids(projected: list[rollup.PlanRollup]) -> set[str]:
 def presented_plans(
     projected: list[rollup.PlanRollup], actor: PlanActor, *, db, include_archived: bool = False,
     costs: bool = True, memo: dict | None = None, lean: bool = False,
+    detail_ids: frozenset[str] | None = None,
 ) -> list[dict]:
-    """Present each visible top-level plan; ``lean`` is ``operator_node_state.project``'s."""
+    """Present each visible top-level plan; ``lean`` is ``operator_node_state.project``'s.
+
+    ``detail_ids`` narrows an open-tree read's detail facts to these rows (a read of one node).
+
+    A rollup over open trees (``plans.open_rollup``) is presented from the rows it
+    lists: each node's facts are read for those rows alone, and each presented plan
+    says what it folded, per level, and how many roots it has (``plans.open_folds``).
+    """
     child_ids = _child_plan_ids(projected)
-    owners = _owner_index(projected, actor, db=db, include_archived=include_archived)
-    review_targets = _review_targets(projected, actor, db=db)
+    owners = operator_owners.owner_index(projected, actor, db=db, include_archived=include_archived)
+    opened = bool(projected) and all(item.tree is not None for item in projected)
+    review_targets = _review_targets(projected, actor, db=db, open_nodes=opened)
     node_states = operator_node_state.project(
         projected, review_targets, db=db, costs=costs, memo=memo, lean=lean,
+        detail_ids=(
+            detail_ids if detail_ids is not None
+            else frozenset(node["id"] for item in projected for node in item.nodes)
+        ) if opened else None,
+        titles=open_tree.PlansTitles(db, [item.tree for item in projected]) if opened else None,
     )
     plans = []
     for item in projected:
@@ -264,8 +190,12 @@ def presented_plans(
             owners.get(item.plan["id"]),
             review_targets,
             node_states,
+            item.tree,
         )
         if presented is not None:
+            if item.tree is not None:
+                presented["folds"] = open_folds.levels(item.tree)
+                presented["root_count"] = item.tree.plan["top_roots"]
             plans.append(presented)
     return plans
 
@@ -329,7 +259,9 @@ def record_thread_view(
 
 def _scope(kind: str, owner_id: str, label: str, actor: PlanActor, *, db):
     memo: dict = {}
-    projected = rollup.rollup_scope(kind, owner_id, db=db, child_depth=0, memo=memo)
+    projected = open_rollup.rollup_scope(
+        kind, owner_id, db=db, memo=memo, window=open_tree.FoldWindow(since=None),
+    )
     root = db.execute(
         "SELECT state FROM plans WHERE owner_kind=? AND owner_id=?",
         (kind, owner_id),
@@ -361,14 +293,13 @@ def read_thread(thread_id: str, *, actor: PlanActor, db) -> dict:
     _require_human(actor)
     session, plan = _plan_for_thread(thread_id, actor, db=db)
     memo: dict = {}
+    seen = pane_views.read(db, user_id=actor.user_id, thread_id=thread_id)
     projected = [] if plan is None else [
-        rollup.rollup_thread(plan["id"], db=db, child_depth=0, memo=memo),
+        open_rollup.rollup_thread(plan["id"], db=db, memo=memo, window=open_tree.FoldWindow(since=seen)),
     ]
     target = {"kind": "thread", "id": thread_id, "label": session["title"] or "Untitled thread"}
     return _envelope(
-        target, projected, actor, db=db, include_archived=True,
-        seen=pane_views.read(db, user_id=actor.user_id, thread_id=thread_id),
-        memo=memo,
+        target, projected, actor, db=db, include_archived=True, seen=seen, memo=memo,
     )
 
 
@@ -387,7 +318,9 @@ def read_child(node_id: str, *, actor: PlanActor, db) -> dict:
     except (PermissionError, service.PlanError) as exc:
         raise OperatorNotFound(_UNAVAILABLE) from exc
     memo: dict = {}
-    child = rollup.child_plan_for_spawnable(node_id, db=db, child_depth=1, memo=memo)
+    child = open_rollup.child_plan_for_spawnable(
+        node_id, db=db, child_depth=1, memo=memo, window=open_tree.FoldWindow(since=None),
+    )
     if child is None or child.plan["state"] == "archived":
         raise OperatorNotFound(_UNAVAILABLE)
     session = _session(child.plan["owner_id"], actor, db=db)

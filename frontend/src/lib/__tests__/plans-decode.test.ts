@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { decodeOperatorEnvelope } from '$lib/api/plansDecode';
+import type { OperatorNode } from '$lib/api/plans';
 import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from './fixtures/operatorPlan';
 // Built by the backend projection itself; test_operator_envelope_contract.py
 // fails when the projection's shape moves away from it (#1768).
 import projected from './fixtures/operator-envelope.contract.json';
+import { planFoldFields } from './fixtures/planFolds';
 
 type Json = Record<string, any>;
 const projectedNodes = (body: Json): Json[] => body.plans[0].nodes;
@@ -31,7 +33,7 @@ function envelope(nodes: unknown[] = [operatorNode({ id: 'a', title: 'Step' })])
 			display: planDisplay('working', 'active'),
 			current_node_ids: ['a'],
 			next_node_ids: [],
-			nodes,
+			nodes, ...planFoldFields(nodes as OperatorNode[]),
 		}],
 	};
 }
@@ -73,6 +75,20 @@ describe('decodeOperatorEnvelope', () => {
 		expect(decodeOperatorEnvelope({ ...envelope(), seen_through: null })).not.toBeNull();
 		expect(decodeOperatorEnvelope(envelope())).not.toBeNull();
 		expect(decodeOperatorEnvelope({ ...envelope(), seen_through: 1727173200 })).toBeNull();
+	});
+
+	it('reads the plan entry\'s folds and root count, and refuses a plan entry without them', () => {
+		const bare = envelope();
+		const entry = bare.plans[0];
+		const level = { parent_id: null, done: 2, failed: 0, closed: 1, more: 3 };
+		const withFolds = { ...bare, plans: [{ ...entry, folds: [level], root_count: 4 }] };
+		expect(decodeOperatorEnvelope(withFolds)?.plans[0].folds).toEqual([level]);
+		expect(decodeOperatorEnvelope(withFolds)?.plans[0].root_count).toBe(4);
+		const { folds: _folds, ...noFolds } = entry;
+		const { root_count: _roots, ...noRoots } = entry;
+		expect(decodeOperatorEnvelope({ ...bare, plans: [noFolds] })).toBeNull();
+		expect(decodeOperatorEnvelope({ ...bare, plans: [noRoots] })).toBeNull();
+		expect(decodeOperatorEnvelope({ ...bare, plans: [{ ...entry, folds: [{ ...level, more: 'x' }] }] })).toBeNull();
 	});
 
 	it('refuses a body that is not the envelope', () => {

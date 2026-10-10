@@ -10,6 +10,7 @@ import pytest
 from infra import thread_updates
 from infra.database import initialize_schema
 from plans import service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _AT = "2026-09-29T10:00:00"
 
@@ -148,7 +149,8 @@ def test_the_title_is_snapshotted_and_survives_rename_and_node_deletion(db):
     _plan_update(db, "event-1", node_id)
     db.execute("UPDATE plan_nodes SET title='Renamed later' WHERE id=?", (node_id,))
     _plan_update(db, "event-2", node_id, kind="closed")
-    db.execute("DELETE FROM plan_nodes WHERE id=?", (node_id,))
+    with raw_plan_seed(db):
+        db.execute("DELETE FROM plan_nodes WHERE id=?", (node_id,))
 
     assert [(row["title"], row["node_id"]) for row in _rows(db)] == [
         ("Ship the export", node_id), ("Renamed later", node_id),
@@ -386,7 +388,8 @@ def _assign(db, node_id: str, assignee: str | None) -> None:
 
 
 def _fail(db, node_id: str) -> None:
-    db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (node_id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (node_id,))
 
 
 def test_a_card_says_whether_its_item_is_assigned_to_the_user_now(db):
@@ -396,7 +399,8 @@ def test_a_card_says_whether_its_item_is_assigned_to_the_user_now(db):
     for index, node_id in enumerate((agent_owned, user_owned, archived)):
         _fail(db, node_id)
         _plan_update(db, f"f{index}", node_id, kind="failed")
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (archived,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (archived,))
 
     cards, _more = thread_updates.read_newest_cards(db, "owner", min_seq=0)
 
@@ -426,12 +430,14 @@ def test_only_a_failure_on_a_user_assigned_item_can_light_the_update_dot(db):
 
 def _closed_parent_of(db, node_id: str) -> None:
     parent = _node(db, title="Parent")
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent,))
-    db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent, node_id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent,))
+        db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent, node_id))
 
 
 def _retried(db, node_id: str) -> None:
-    db.execute("UPDATE plan_nodes SET state='active' WHERE id=?", (node_id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='active' WHERE id=?", (node_id,))
 
 
 def _followed_up(db, node_id: str) -> None:
@@ -475,8 +481,12 @@ def test_a_blocked_card_on_an_agent_owned_item_does_not_ask(db):
     assert _blocked_ask(db) is True
 
 
-@pytest.mark.parametrize("settle", [_closed_parent_of, lambda db, node: db.execute(
-    "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node,))])
+def _archived(db, node_id: str) -> None:
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node_id,))
+
+
+@pytest.mark.parametrize("settle", [_closed_parent_of, _archived])
 def test_a_blocked_card_in_a_retired_branch_or_archived_does_not_ask(db, settle):
     node_id = _node(db)
     _assign(db, node_id, "user")
