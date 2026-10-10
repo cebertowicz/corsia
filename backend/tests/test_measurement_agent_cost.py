@@ -54,16 +54,18 @@ def _read(db) -> dict:
     return query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)})
 
 
-def test_only_tasks_with_a_rating_and_a_known_price_count_per_agent_and_window(db):
+def test_a_task_counts_when_it_has_priced_dollars_and_a_rating_whatever_else_its_chain_holds(db):
     _task(db, "m", "M")                       # counted: 2 h
     _task(db, "l", "L")                       # counted: 8 h
     _task(db, "before", "M", accepted="2026-08-19T12:00:00Z")   # the previous window
     _task(db, "unrated", None)                # no usable size: excluded, never zero hours
-    _task(db, "local", "S")                   # only local calls: no dollars to attribute
-    _task(db, "unproven", "S")                # a call Cost cannot price: its figure would be low
-    _task(db, "gap", "S")                     # a call failed to reach the ledger
-    for node in ("m", "l", "unrated", "gap"):
+    _task(db, "local", "S")                   # only local calls: no priced dollars
+    _task(db, "unproven", "S")                # only a call Cost cannot price: no priced dollars
+    _task(db, "gap", "S")                     # a call failed to reach the ledger: still counted
+    _task(db, "mixed", "S")                   # a priced call beside one Cost cannot price: still counted
+    for node in ("m", "l", "unrated", "gap", "mixed"):
         _usage(db, f"u-{node}", node, OPUS)
+    _usage(db, "u-mixed-unproven", "mixed", "codex/gpt-5.6-terra", source="external_harness:codex")
     _usage(db, "u-before", "before", OPUS, at="2026-08-18T12:00:00Z")
     _usage(db, "u-local", "local", LOCAL_ID, source="conversation")
     _usage(db, "u-unproven", "unproven", "codex/gpt-5.6-terra", source="external_harness:codex")
@@ -71,15 +73,16 @@ def test_only_tasks_with_a_rating_and_a_known_price_count_per_agent_and_window(d
     prepare_outcome_periods(db, {**SCOPE, "grain": GRAIN}, roots=True)
     priced = {row["task_id"]: row["dollars"] for row in query_model_costs(db, {**SCOPE, "grain": two_windows(GRAIN)}, IdentityResolver(db))
               if row["outcome"] == "priced"}
-    assert set(priced) == {"m", "l", "unrated", "gap", "before"}
+    assert set(priced) == {"m", "l", "unrated", "gap", "mixed", "before"}
 
     costs = query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)})
+    counted = priced["m"] + priced["l"] + priced["gap"] + priced["mixed"]
     assert costs == {
-        ("root", LATEST): {"dollars": pytest.approx(priced["m"] + priced["l"]), "hours": 10.0, "n": 2},
+        ("root", LATEST): {"dollars": pytest.approx(counted), "hours": 11.0, "n": 4},
         ("root", PREVIOUS): {"dollars": pytest.approx(priced["before"]), "hours": 2.0, "n": 1},
     }
     cell = dollars_metric(costs, "root", GRAIN, 1)
-    assert cell["value"] == pytest.approx((priced["m"] + priced["l"]) / 10.0) and cell["n"] == 2
+    assert cell["value"] == pytest.approx(counted / 11.0) and cell["n"] == 4
     assert cell["previous_value"] == pytest.approx(priced["before"] / 2.0) and cell["previous_n"] == 1
     assert dollars_metric(costs, "other", GRAIN, 1)["value"] is None
 
