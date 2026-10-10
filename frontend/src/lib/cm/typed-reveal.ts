@@ -1,5 +1,6 @@
 import { type ChangeSet } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { commentRanges } from './comment-marks';
 import { typingDriver } from './typed-reveal-driver';
 import { arrivalSelects } from './typed-reveal-arrival';
 import {
@@ -31,7 +32,8 @@ export function createTypedReveal(options: { canType?: () => boolean; isInView?:
 		}),
 	};
 	const tracker = EditorView.updateListener.of((update) => { ref.view = update.view; });
-	return [typedRevealOptions.of(resolved), authorTagger, typedReveals, arrivalSelects, typingDriver, tracker];
+	// The lanes read the comment ranges (a committed suggestion claims its preview); the editor's comment marks share this field.
+	return [typedRevealOptions.of(resolved), commentRanges, authorTagger, typedReveals, arrivalSelects, typingDriver, tracker];
 }
 
 /** Show everything still hidden, in every lane (disconnect, reconnect, tab hidden). */
