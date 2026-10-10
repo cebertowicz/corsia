@@ -1,5 +1,7 @@
 #!/bin/bash
-# Assign the fixed E2E port pair reserved for this ci-integration runner slot.
+# Assign the fixed E2E port pair reserved for this runner. A GitHub-hosted
+# job has its own VM and takes the first pair; a self-hosted runner takes the
+# pair reserved for its slot.
 set -euo pipefail
 
 if [ -z "${GITHUB_ENV:-}" ]; then
@@ -7,16 +9,20 @@ if [ -z "${GITHUB_ENV:-}" ]; then
   exit 1
 fi
 
-case "${RUNNER_NAME:-}" in
-  mac-studio-corsia-runner-1) slot=1 ;;
-  mac-studio-corsia-runner-2) slot=2 ;;
-  mac-studio-corsia-runner-3) slot=3 ;;
-  mac-studio-corsia-runner-4) slot=4 ;;
-  *)
-    echo "::error::Unexpected ci-integration runner '${RUNNER_NAME:-unset}'; refusing to choose E2E ports" >&2
-    exit 1
-    ;;
-esac
+if [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then
+  slot=1
+else
+  case "${RUNNER_NAME:-}" in
+    mac-studio-corsia-runner-1) slot=1 ;;
+    mac-studio-corsia-runner-2) slot=2 ;;
+    mac-studio-corsia-runner-3) slot=3 ;;
+    mac-studio-corsia-runner-4) slot=4 ;;
+    *)
+      echo "::error::Unexpected ci-integration runner '${RUNNER_NAME:-unset}'; refusing to choose E2E ports" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 backend_port=$((32000 + 2 * (slot - 1)))
 frontend_port=$((backend_port + 1))
