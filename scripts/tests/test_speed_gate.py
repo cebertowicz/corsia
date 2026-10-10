@@ -105,12 +105,30 @@ def test_error_responses_are_not_measured():
     assert "/broken" not in ratchet.new_baseline(current, "x")["routes"]
 
 
-def test_determinism_tolerates_sampling_jitter_but_not_a_real_difference():
+def unstable(first, second):
+    return sorted((item.route, item.metric) for item in ratchet.compare_runs(first, second) if not item.within_band)
+
+
+def test_run_to_run_steps_may_differ_by_one_percent_of_the_larger_run_but_statements_must_match():
     first = result({"/a": cost(100_000, size=1000)})
-    assert ratchet.same_counts(first, result({"/a": cost(100_600, size=1005)})) == []
-    assert ratchet.same_counts(first, result({"/a": cost(100_700, size=1000)})) == ["/a"]
-    assert ratchet.same_counts(first, result({"/a": cost(100_000, statements=6, size=1000)})) == ["/a"]
-    assert ratchet.same_counts(first, result({"/b": cost()})) == ["/a", "/b"]
+    # 1% of the larger run (1,006) is the band on this route; the 600-step floor is below it
+    assert unstable(first, result({"/a": cost(100_900, size=1005)})) == []
+    assert unstable(first, result({"/a": cost(101_200, size=1000)})) == [("/a", "steps")]
+    assert unstable(first, result({"/a": cost(100_000, statements=6, size=1000)})) == [("/a", "statements")]
+    assert unstable(first, result({"/b": cost()})) == [("/a", "measured"), ("/b", "measured")]
+
+
+def test_the_step_band_grows_with_the_route_and_has_a_floor_for_small_ones():
+    assert ratchet.run_band("steps", 11_238_100, 11_238_800) == 112_388
+    assert ratchet.run_band("steps", 1_890_000, 1_892_500) == 18_925
+    assert ratchet.run_band("steps", 20_000, 20_500) == ratchet.STEP_SLACK
+    assert ratchet.run_band("statements", 51, 51) == 0
+
+
+def test_a_difference_inside_the_band_is_still_listed_with_both_numbers_and_its_band():
+    items = ratchet.compare_runs(result({"/a": cost(1_892_500)}), result({"/a": cost(1_890_000)}))
+    assert [(item.metric, item.first, item.second, item.band, item.within_band) for item in items] \
+        == [("steps", 1_892_500, 1_890_000, 18_925, True)]
 
 
 def test_report_names_the_would_fail_route_and_the_mode():
@@ -211,16 +229,33 @@ def test_a_stuck_stage_is_stopped_and_reports_where_it_stopped(tmp_path, capsys,
     assert "route 7: /api/slow" in capsys.readouterr().err
 
 
-def test_a_nondeterministic_tree_prints_every_runs_counts_and_keeps_the_runs(tmp_path, monkeypatch, capsys):
+MANIFEST = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s"}
+
+
+def test_runs_that_disagree_beyond_the_band_are_a_warning_report_only_and_exit_3_when_enforcing(tmp_path, monkeypatch, capsys):
     runs = [result({"/a": cost(100_000), "/b": cost()}), result({"/a": cost(102_000, statements=6), "/b": cost()})]
-    manifest = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s"}
-    monkeypatch.setattr(cli.runner, "build_and_measure", lambda backend, repeats: (runs, manifest, {}))
-    out = tmp_path / "m.json"
-    _, code = cli.measure_tree(tmp_path, 2, keep_runs=out)
-    printed = capsys.readouterr().err
-    assert code == cli.EXIT_NONDETERMINISTIC and "/b" not in printed
-    assert "run 1: steps 100,000, statements 5" in printed and "run 2: steps 102,000, statements 6" in printed
+    monkeypatch.setattr(cli.runner, "build_and_measure", lambda backend, repeats: (runs, MANIFEST, {}))
+    out, summary = tmp_path / "m.json", tmp_path / "summary.md"
+    _, code = cli.measure_tree(tmp_path, 2, keep_runs=out, summary=summary)
+    captured = capsys.readouterr()
+    assert code == 0 and "::warning title=Read-cost speed gate" in captured.out and "/b" not in captured.err
+    assert "run 1: steps 100,000, statements 5" in captured.err and "run 2: steps 102,000, statements 6" in captured.err
+    assert "statements run 1 5, run 2 6, difference 1, band 0: OUTSIDE the band" in captured.err
+    assert "report-only: the job stays green" in summary.read_text() and "`/a`" in summary.read_text()
     assert json.loads(Path(f"{out}.run2.json").read_text())["routes"]["/a"]["steps"] == 102_000
+    _, code = cli.measure_tree(tmp_path, 2, enforce=True)
+    assert code == cli.EXIT_NONDETERMINISTIC
+
+
+def test_runs_that_differ_inside_the_band_print_the_numbers_and_never_fail(tmp_path, monkeypatch, capsys):
+    runs = [result({"/a": cost(1_892_500)}), result({"/a": cost(1_890_000)})]
+    monkeypatch.setattr(cli.runner, "build_and_measure", lambda backend, repeats: (runs, MANIFEST, {}))
+    for enforce in (False, True):
+        _, code = cli.measure_tree(tmp_path, 2, enforce=enforce, summary=tmp_path / "summary.md")
+        assert code == 0
+    printed = capsys.readouterr().err
+    assert "steps run 1 1,892,500, run 2 1,890,000, difference 2,500, band 18,925: within the band" in printed
+    assert "NONDETERMINISTIC" not in printed and not (tmp_path / "summary.md").exists()
 
 
 def test_a_difference_between_runs_names_the_statement_and_thread_that_differ():
@@ -238,8 +273,32 @@ def test_database_jobs_are_limited_to_one_worker_so_a_call_never_depends_on_whic
     module = types.ModuleType("infra.db_async")
     module.__spec__ = importlib.machinery.ModuleSpec("infra.db_async", None)
     module._pool = SimpleNamespace(_max_workers=8)
+    module._read_pool = SimpleNamespace(_max_workers=6)
+    module._bulk_pool = SimpleNamespace(_max_workers=2)
     monkeypatch.setitem(sys.modules, "infra", types.ModuleType("infra"))
     monkeypatch.setitem(sys.modules, "infra.db_async", module)
     monkeypatch.setattr(sys.modules["infra"], "db_async", module, raising=False)
     harness._single_db_worker()
-    assert module._pool._max_workers == 1
+    assert [pool._max_workers for pool in (module._pool, module._read_pool, module._bulk_pool)] == [1, 1, 1]
+
+
+def test_the_usage_rollup_is_built_to_its_end_and_no_request_schedules_a_refresh(monkeypatch):
+    import importlib.machinery
+    import types
+
+    steps = iter([True, True, False])
+    refreshed = []
+    rollup = types.ModuleType("api.usage_rollup")
+    rollup.__spec__ = importlib.machinery.ModuleSpec("api.usage_rollup", None)
+    rollup.refresh_step = lambda db: refreshed.append(db) or next(steps)
+    rollup.schedule_refresh = lambda: "scheduled"
+    database = types.ModuleType("infra.database")
+    database.get_db = lambda: SimpleNamespace(close=lambda: refreshed.append("closed"))
+    api = types.ModuleType("api")
+    api.usage_rollup = rollup
+    for name, module in (("api", api), ("api.usage_rollup", rollup), ("infra", types.ModuleType("infra")),
+                         ("infra.database", database)):
+        monkeypatch.setitem(sys.modules, name, module)
+    harness._settle_usage_rollup()
+    assert len(refreshed) == 4 and refreshed[-1] == "closed"  # three steps, then the connection is closed
+    assert rollup.schedule_refresh() is None

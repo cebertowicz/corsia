@@ -23,7 +23,7 @@ jobs:
     # time, so it does not depend on the host's load. It does depend on the
     # SQLite version, which the baseline records, so the baseline is generated
     # from this job's own measurement artifact on this hosted image.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       CORSIA_ANALYTICS_DISABLE: '1'
@@ -71,10 +71,12 @@ jobs:
 
       - name: Measure every read route
         if: steps.scope.outputs.measure == 'true'
-        # Two independent runs must agree: a gate whose own counts move is a defect.
+        # Two independent runs must agree: statements exactly, steps within 1% of the larger run. A gate whose
+        # own counts move beyond that is a defect; phase 1 reports it (warning and job summary) and stays green.
         run: |
           PYTHONPATH=scripts .venv/bin/python -m speed_gate.cli measure \
-            --backend backend --out "$RUNNER_TEMP/speed-gate.json" --repeats 2
+            --backend backend --out "$RUNNER_TEMP/speed-gate.json" --repeats 2 \
+            --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Compare with the baseline (report-only)
         if: steps.scope.outputs.measure == 'true'

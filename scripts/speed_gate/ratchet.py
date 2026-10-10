@@ -18,8 +18,14 @@ GROWTH = 0.25
 MIN_RISE = {"steps": 10_000, "statements": 5, "bytes": 16_384}
 #: Fresh-route ceilings: a route above one is a would-fail unless grandfathered.
 CEILINGS = {"steps": 500_000, "statements": 500, "bytes": 1_048_576}
-#: Two runs of one tree may differ by this many steps per route. Over 9 runs of the fixture the largest
-#: deviation was 300 (two routes); this is twice that. Statements never moved and bytes moved by at most 1.
+#: Two runs of one tree may differ in steps by this share of the larger run, or by ``STEP_SLACK``, whichever
+#: is more. Statements must match exactly. A route's step count carries a sampling phase from every statement
+#: any connection ran before it, so it moves by a few samples between runs; on the costliest routes the
+#: wiggle grows with the work (a fraction of a percent), and 1% stays far below a real regression (a route
+#: ceiling is 500,000 steps and a rise must exceed 25%).
+RUN_BAND = 0.01
+#: The floor under that band, for small routes, where one or two samples are a large share. Over 9 runs of the
+#: fixture the largest deviation was 300 (two routes); this is twice that.
 STEP_SLACK = 600
 
 
@@ -116,20 +122,46 @@ def distribution(current: dict) -> list[tuple[str, dict]]:
     return sorted(measured(current).items(), key=lambda item: -item[1]["steps"])
 
 
-def same_counts(first: dict, second: dict) -> list[str]:
-    """Routes whose recorded counts differ between two runs (the determinism check).
+@dataclass
+class Disagreement:
+    """One count that differs between two runs of the same tree, with the band it was judged against."""
 
-    Statements must match exactly. Steps are sampled every ``progress_every`` instructions
-    with the sample phase carried across statements and threads, so runs may differ by a few
-    samples (``STEP_SLACK``); response bytes may differ by a few digits on a route that reports
-    the host's own readings. Anything larger is a real difference between the runs.
+    route: str
+    metric: str  # "steps" | "statements" | "bytes" | "measured"
+    first: int | None
+    second: int | None
+    band: int
+
+    @property
+    def within_band(self) -> bool:
+        return self.first is not None and self.second is not None and abs(self.first - self.second) <= self.band
+
+
+def run_band(metric: str, first: int, second: int) -> int:
+    """How far apart two runs of one tree may be on ``metric``."""
+    larger = max(first, second)
+    if metric == "statements":
+        return 0
+    if metric == "steps":
+        return max(STEP_SLACK, int(larger * RUN_BAND))
+    return max(16, larger // 100)  # response bytes: a few digits on a route that reports the host's own readings
+
+
+def compare_runs(first: dict, second: dict) -> list[Disagreement]:
+    """Every count that differs between two runs of one tree (the determinism check), in or out of its band.
+
+    Only a difference outside the band (``Disagreement.within_band`` false) is an instability; the rest is
+    reported so the tolerance is visible. A route measured in only one run is always outside the band.
     """
-    slack = STEP_SLACK
-    differing = []
-    for route in sorted(set(measured(first)) | set(measured(second))):
-        a, b = measured(first).get(route), measured(second).get(route)
-        if a is None or b is None or a["statements"] != b["statements"] or abs(a["steps"] - b["steps"]) > slack:
-            differing.append(route)
-        elif abs(a["bytes"] - b["bytes"]) > max(16, a["bytes"] // 100):
-            differing.append(route)
-    return differing
+    found = []
+    one, two = measured(first), measured(second)
+    for route in sorted(set(one) | set(two)):
+        a, b = one.get(route), two.get(route)
+        if a is None or b is None:
+            found.append(Disagreement(route, "measured", None if a is None else a["steps"],
+                                      None if b is None else b["steps"], 0))
+            continue
+        for metric in METRICS:
+            if a[metric] != b[metric]:
+                found.append(Disagreement(route, metric, a[metric], b[metric], run_band(metric, a[metric], b[metric])))
+    return found

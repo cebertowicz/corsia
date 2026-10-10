@@ -27,6 +27,8 @@ from pathlib import Path
 from . import clock, routes
 
 PROGRESS_EVERY = 100
+#: One rollup step builds one day; the fixture spans well under this many.
+SETTLE_STEP_LIMIT = 1000
 
 
 class Counters:
@@ -87,21 +89,47 @@ def _open_app(backend: Path, db_file: Path):
 
 
 def _single_db_worker() -> None:
-    """Serve every database job from one worker thread, so a measured call never depends on which thread ran it.
+    """Serve every database job of each lane from one worker thread, so a measured call never depends on which thread ran it.
 
-    The application runs each read on a pool of worker threads, each with its own connection. A worker runs
-    its connection setup statements the first time it serves a job, and its step counter carries a sampling
-    phase from every statement it ran before. Which idle worker takes a job depends on thread timing, so the
-    same call could cost one statement (or a few samples) more or less from run to run. The harness sends one
-    request at a time, so one worker serves it as the pool would, and the warm-up calls before each
-    measurement settle that worker's connection.
+    The application runs each read on a pool of worker threads (the default pool and the read and bulk
+    lanes), each with its own connection. A worker runs its connection setup statements the first time it
+    serves a job, and its step counter carries a sampling phase from every statement it ran before. Which
+    idle worker takes a job depends on thread timing, so the same call could cost one statement (or a few
+    samples) more or less from run to run. The harness sends one request at a time, so one worker per lane
+    serves it as the pool would, and the warm-up calls before each measurement settle that worker's connection.
     """
     if importlib.util.find_spec("infra.db_async") is None:
         return
     from infra import db_async
-    pool = getattr(db_async, "_pool", None)
-    if pool is not None and hasattr(pool, "_max_workers"):
-        pool._max_workers = 1  # nothing has been submitted yet, so a second worker is never started
+    for name in ("_pool", "_read_pool", "_bulk_pool"):  # an older tree has fewer lanes
+        pool = getattr(db_async, name, None)
+        if pool is not None and hasattr(pool, "_max_workers"):
+            pool._max_workers = 1  # nothing has been submitted yet, so a second worker is never started
+
+
+def _settle_usage_rollup() -> None:
+    """Finish the usage rollup before any measurement, and stop requests from scheduling a refresh.
+
+    A Measurement route starts a background task that builds the hourly rollup one day at a time while the
+    request is served, so how much of it a measured request sees, and whether the task's own statements land
+    inside the measured window, depends on thread timing. The harness measures a read on the settled state
+    a running instance is in, and the refresh is background work, not part of any request. So the rollup is
+    built here to its end on the frozen clock, and the scheduling call is replaced with a no-op.
+    """
+    if importlib.util.find_spec("api.usage_rollup") is None:  # an older tree has no rollup
+        return
+    from api import usage_rollup
+    from infra.database import get_db
+
+    usage_rollup.schedule_refresh = lambda *args, **kwargs: None  # type: ignore[assignment]
+    db = get_db()
+    try:
+        for _ in range(SETTLE_STEP_LIMIT):
+            if not usage_rollup.refresh_step(db):
+                return
+    finally:
+        db.close()
+    raise RuntimeError(f"the usage rollup was still building after {SETTLE_STEP_LIMIT} steps")
 
 
 def _extra_query(app) -> dict[str, str]:
@@ -136,6 +164,7 @@ def run(backend: Path, db_file: Path) -> dict:
     install_counting(counters)
     app, client, token = _open_app(backend, db_file)
     _single_db_worker()
+    _settle_usage_rollup()
     ids = routes.fixture_ids(str(db_file))
     extra = _extra_query(app)
     headers = {"Authorization": f"Bearer {token}"}
