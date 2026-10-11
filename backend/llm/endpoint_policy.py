@@ -44,6 +44,16 @@ def registration_default(instance_name: str | None, base_url: str) -> str:
     return "allowed"
 
 
+def relocation_restriction(instance_name: str | None, base_url: str) -> str | None:
+    """The restriction an edit that moves an endpoint writes when the edit names none.
+
+    Moving onto a host whose ``registration_default`` restricts it tightens the stored
+    value, because the usage terms belong to the new host; any other move keeps it.
+    """
+    default = registration_default(instance_name, base_url)
+    return default if default != "allowed" else None
+
+
 def registration_restriction(db, server_id: str, instance_name: str | None, base_url: str) -> str | None:
     """The restriction to write when a registration names none, or None to write nothing.
 

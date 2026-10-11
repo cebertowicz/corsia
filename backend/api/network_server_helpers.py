@@ -16,7 +16,7 @@ from infra.key_store_servers import (
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
-from llm.endpoint_policy import registration_restriction
+from llm.endpoint_policy import registration_restriction, relocation_restriction
 from llm.external_declared_models import (
     LIST_UNSUPPORTED, META_KEY, clean_model_ids, declared_model_ids, declared_model_refusal,
 )
@@ -244,8 +244,8 @@ async def update_external_server(server_id: str, body) -> dict:
                 set_server_key(server_id, supplied_key, db=db)
             if body.cache_warm_seconds is not None:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
-            if body.agent_use_restriction is not None:
-                fields["agent_use_restriction"] = body.agent_use_restriction
+            if limit := body.agent_use_restriction or (moved and relocation_restriction(server["instance_name"], base)):
+                fields["agent_use_restriction"] = limit
             if declared:
                 fields[META_KEY] = declared
             cleared = (META_KEY,) if declared == [] else ()

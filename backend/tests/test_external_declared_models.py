@@ -243,6 +243,46 @@ def test_agent_use_restriction_round_trips_through_endpoint_metadata(isolated_db
     assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
 
 
+def test_moving_an_endpoint_onto_a_token_plan_host_restricts_it(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server, update_external_server
+    from api.network_servers import AddServerBody, UpdateExternalServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Workspace", base_url="https://api.example.com/compatible-mode/v1",
+            dialect="openai", model_ids=["glm-5.3"],
+        ),
+    ))["server_id"]
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
+
+    asyncio.run(update_external_server(sid, UpdateExternalServerBody(base_url=_BASE)))
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "interactive_only"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+
+def test_an_edit_that_stays_on_its_host_keeps_a_chosen_restriction(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server, update_external_server
+    from api.network_servers import AddServerBody, UpdateExternalServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Workspace", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"],
+            agent_use_restriction="allowed",
+        ),
+    ))["server_id"]
+
+    asyncio.run(update_external_server(sid, UpdateExternalServerBody(base_url=_BASE)))
+
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
+
+
 def test_a_re_add_without_the_field_keeps_the_stored_restriction(isolated_db, monkeypatch) -> None:
     from api.network_server_helpers import add_external_server
     from api.network_servers import AddServerBody
