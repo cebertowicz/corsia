@@ -102,9 +102,10 @@ async def _prepare_external_checkpoint(
         )
     if boundary is None:
         return None
-    # An external harness's next fold is its hard wall, which coincides with
-    # its own compaction trigger. Without a warm source, skipping this optional
-    # fold hands that recovery boundary to the provider; cold-admit it instead.
+    # Claude Code lacks auto-compaction; optional no-warm awaits warm; Codex cold-admits.
+    if not required and context.target.harness == "claude-code":
+        from core.checkpoint_types import OptionalCheckpointSkipped
+        raise OptionalCheckpointSkipped("no warm source for an optional fold")
     # Cold admission reads the database and renders the source; keep it off
     # the event loop, as the warm path's fallback already does.
     return await asyncio.to_thread(

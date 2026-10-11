@@ -643,8 +643,8 @@ async def test_external_initial_checkpoint_warm_source_matches_completed_boundar
     assert "first answer" in source
     assert "next ask" not in source
 
-    # An external provider's hard wall is also its own compaction trigger, so
-    # an optional no-warm fold must cold-admit before the provider reaches it.
+    # Codex compacts at its own hard wall, so an optional no-warm fold must
+    # cold-admit before the provider reaches it.
     optional_fallback = await bridge._prepare_external_checkpoint(
         "checkpoint-3",
         context=context,
@@ -657,6 +657,22 @@ async def test_external_initial_checkpoint_warm_source_matches_completed_boundar
     assert optional_fallback is not None
     assert optional_fallback.request.mode == "cold"
     assert optional_fallback.request.through_seq == 4
+
+    from core.checkpoint_types import OptionalCheckpointSkipped
+    from dataclasses import replace
+
+    with pytest.raises(
+        OptionalCheckpointSkipped,
+        match="no warm source for an optional fold",
+    ):
+        await bridge._prepare_external_checkpoint(
+            "checkpoint-cc",
+            context=replace(context, target=_target("claude-code")),
+            live=SimpleNamespace(session=SimpleNamespace()),
+            identity=TurnIdentity("running-turn", 2),
+            warm_source=None,
+            required=False,
+        )
 
 
 @pytest.mark.asyncio
@@ -831,14 +847,15 @@ async def test_codex_fresh_process_captures_registered_rollout(monkeypatch) -> N
 @pytest.mark.parametrize("harness", ["claude-code", "codex"])
 @pytest.mark.parametrize("mode", ["exact_replay", "checkpoint_tail"])
 @pytest.mark.parametrize("required", [False, True])
-async def test_fresh_process_initial_fold_is_cold_without_a_warm_source(
+async def test_fresh_process_initial_fold_follows_harness_no_warm_policy(
     monkeypatch, harness, mode, required,
 ):
-    """A fresh external process cold-admits when a warm source is unavailable.
+    """A fresh external process follows its harness's no-warm policy.
 
-    An external harness compacts at its hard wall, so delaying an optional fold
-    until a later live boundary risks handing recovery to the provider.
+    Claude Code has automatic compaction disabled, so an optional no-warm fold
+    waits for a later warm boundary. Codex compacts at its hard wall and cold-admits.
     """
+    from core.checkpoint_resume import CheckpointWaitScope, ProviderBoundary, _start_checkpoint
     from history.types import HistoryBoundary
     from subagents import harness_checkpoint_resume as bridge
 
@@ -867,9 +884,50 @@ async def test_fresh_process_initial_fold_is_cold_without_a_warm_source(
             prepared=SimpleNamespace(mode=mode),
         )
 
-    admission = await prepare_initial("checkpoint-fresh", required)
-    assert admission.request.mode == "cold"
-    assert [call["context"] for call in cold_calls] == [context]
+    from loguru import logger
+
+    async def render_installed(_record):
+        raise AssertionError("optional skip must not render an installed checkpoint")
+
+    lines: list[str] = []
+    sink = logger.add(lines.append, format="{level}|{message}", level="DEBUG")
+    try:
+        if harness == "claude-code" and not required:
+            admission = await _start_checkpoint(
+                ProviderBoundary(
+                    thread_id="thread-fresh",
+                    turn=TurnIdentity("turn-fresh", 1),
+                    context_window=100_000,
+                    canonical_input_tokens=None,
+                    provider_input_tokens=None,
+                    minimum_input_tokens=0,
+                    adopted_checkpoint_id=None,
+                    active_checkpoint=None,
+                    installed_checkpoint=None,
+                    prepare_checkpoint=prepare_initial,
+                    render_installed=render_installed,
+                    wait_scope=CheckpointWaitScope(),
+                ),
+                required=False,
+            )
+        else:
+            admission = await prepare_initial("checkpoint-fresh", required)
+    finally:
+        logger.remove(sink)
+
+    if harness == "claude-code" and not required:
+        assert admission is None
+        assert cold_calls == []
+        assert sum(line.startswith("INFO|Optional checkpoint skipped") for line in lines) == 1
+        refused = (
+            "INFO|checkpoint warm capture refused for thread-fresh "
+            "(claude-code): no_live_handle\n"
+        )
+        assert lines.count(refused) == 1
+        assert not any(line.startswith("WARNING|") for line in lines)
+    else:
+        assert admission.request.mode == "cold"
+        assert [call["context"] for call in cold_calls] == [context]
 
 
 @pytest.mark.asyncio
