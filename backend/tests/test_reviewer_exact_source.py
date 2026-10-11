@@ -267,6 +267,18 @@ _BASE_RULES = (
 )
 
 
+def _temp_rule() -> str:
+    import os
+    from pathlib import Path
+
+    temp_root = f"{Path('/tmp').resolve()}/claude-{os.getuid()}"
+    escaped = temp_root.replace(".", "\\.")
+    return (
+        f'(allow file-write* (literal "{temp_root}")'
+        f' (regex #"^{escaped}/{_RUN_FOLDER}(/.*)?$"))'
+    )
+
+
 def test_write_scope_with_custom_config_root_allows_only_the_run_state_folder():
     from reviewer.reviewer_exact_source import (
         claude_config_state_scope, render_write_profile,
@@ -277,6 +289,7 @@ def test_write_scope_with_custom_config_root_allows_only_the_run_state_folder():
     assert render_write_profile(["/x/work"], scope) == (
         _BASE_RULES.format(work="/x/work")
         + f'(allow file-write* (regex #"^/x/acct/projects/{_RUN_FOLDER}(/.*)?$"))'
+        + _temp_rule()
     )
     assert scope.global_file.as_posix() == "/x/acct/.claude.json"
 
@@ -291,6 +304,7 @@ def test_write_scope_without_config_root_variable_uses_the_default_root():
     assert render_write_profile(["/x/work"], scope) == (
         _BASE_RULES.format(work="/x/work")
         + f'(allow file-write* (regex #"^/srv/home/\\.claude/projects/{_RUN_FOLDER}(/.*)?$"))'
+        + _temp_rule()
     )
     assert scope.global_file.as_posix() == "/srv/home/.claude.json"
 
@@ -356,21 +370,28 @@ def test_write_scope_fails_closed_without_sandbox_for_config_state(monkeypatch):
 
 
 def test_discard_config_state_removes_only_this_runs_folder(tmp_path):
+    import dataclasses
+
     from reviewer.reviewer_exact_source import claude_config_state_scope, discard_config_state
 
-    scope = claude_config_state_scope(
-        {"CLAUDE_CONFIG_DIR": str(tmp_path)}, "/tmp/review/corsia-cc-ab_c1234",
+    scope = dataclasses.replace(
+        claude_config_state_scope(
+            {"CLAUDE_CONFIG_DIR": str(tmp_path)}, "/tmp/review/corsia-cc-ab_c1234",
+        ),
+        temp_root=tmp_path / "cli-tmp",
     )
     mine = tmp_path / "projects" / "-private-tmp-review-corsia-cc-ab-c1234"
     other = tmp_path / "projects" / "-private-tmp-review-corsia-cc-zz-c9999"
-    for folder in (mine, other):
+    my_temp = tmp_path / "cli-tmp" / "-private-tmp-review-corsia-cc-ab-c1234"
+    other_temp = tmp_path / "cli-tmp" / "-private-tmp-review-corsia-cc-zz-c9999"
+    for folder in (mine, other, my_temp, other_temp):
         (folder / "s" / "tool-results").mkdir(parents=True)
     (tmp_path / "settings.json").write_text("{}")
 
     discard_config_state(scope)
 
-    assert not mine.exists()
-    assert other.is_dir()
+    assert not mine.exists() and not my_temp.exists()
+    assert other.is_dir() and other_temp.is_dir()
     assert (tmp_path / "settings.json").is_file()
 
 
@@ -379,18 +400,27 @@ def test_discard_config_state_removes_only_this_runs_folder(tmp_path):
     reason="needs macOS sandbox-exec outside another sandbox (the backend and CI runners are not sandboxed)",
 )
 def test_write_scope_confines_config_state_to_the_run_folder(tmp_path):
+    import dataclasses
+
     from reviewer.reviewer_exact_source import claude_config_state_scope, write_confined
 
     config, work = tmp_path / "acct", tmp_path / "work"
+    temp_root = (tmp_path / "cli-tmp").resolve()
     run_dir = work / "corsia-cc-ab_c1234"
     run_folder = config / "projects" / "-tmp-work-corsia-cc-ab-c1234"
     sibling = config / "projects" / "-tmp-work-corsia-cc-zz-c9999"
-    for folder in (run_dir, run_folder, sibling, config / "hooks"):
+    temp_folder = temp_root / "-tmp-work-corsia-cc-ab-c1234"
+    temp_sibling = temp_root / "-tmp-work-corsia-cc-zz-c9999"
+    for folder in (run_dir, run_folder, sibling, config / "hooks", temp_sibling):
         folder.mkdir(parents=True)
-    scope = claude_config_state_scope({"CLAUDE_CONFIG_DIR": str(config)}, str(run_dir))
-    script = " ; ".join(
+    scope = dataclasses.replace(
+        claude_config_state_scope({"CLAUDE_CONFIG_DIR": str(config)}, str(run_dir)),
+        temp_root=temp_root,
+    )
+    script = f"mkdir -p {temp_folder} ; " + " ; ".join(
         f"echo x > {target}" for target in (
-            run_folder / "ok", sibling / "no", config / "hooks" / "no",
+            run_folder / "ok", temp_folder / "ok", sibling / "no", temp_sibling / "no",
+            temp_root / "no", config / "hooks" / "no",
             config / "settings.json", config / ".claude.json",
         )
     )
@@ -398,9 +428,10 @@ def test_write_scope_confines_config_state_to_the_run_folder(tmp_path):
     subprocess.run(write_confined(["/bin/sh", "-c", script], [str(work)], scope))
 
     assert (run_folder / "ok").is_file()
+    assert (temp_folder / "ok").is_file()
     assert not any(
         path.exists() for path in (
-            sibling / "no", config / "hooks" / "no",
-            config / "settings.json", config / ".claude.json",
+            sibling / "no", temp_sibling / "no", temp_root / "no",
+            config / "hooks" / "no", config / "settings.json", config / ".claude.json",
         )
     )
