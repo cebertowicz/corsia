@@ -148,11 +148,17 @@ describe('F7-F11 landing', () => {
 
 	it('keeps landing targets and the pinned header under the app header, below the phone safe area', () => {
 		// jsdom has no layout: assert the one shared offset every pinned or landing element reads.
-		expect(messageListSource).toMatch(/--sticky-top: calc\(var\(--header-height, 0px\) \+ env\(safe-area-inset-top, 0px\)\)/);
+		expect(messageListSource).toMatch(/--sticky-top: calc\(var\(--header-height, 0px\) \+ env\(safe-area-inset-top, 0px\) \+ 8px\)/);
 		expect(workBlockSource).toMatch(/top: var\(--sticky-top, 0px\)/);
 		expect(workBlockSource).toMatch(/scroll-margin-top: var\(--sticky-top, 0px\)/);
 		expect(messageListSource).toMatch(/position: sticky; top: var\(--sticky-top, 0px\); z-index: 5;/);
 		expect(workBlockSource).toMatch(/z-index: 4;/);
+	});
+
+	it('keeps the lead-in under the header out of the scroller padding, which a sticky offset would add to', () => {
+		const messagesRules = messageListSource.slice(messageListSource.indexOf('.messages {'));
+		expect(messagesRules).toMatch(/\.messages::before \{ content: ''; display: block; flex: none; height: var\(--messages-lead\); \}/);
+		expect(messagesRules).not.toMatch(/padding-top:|padding: calc\(var\(--header-height\)/);
 	});
 });
 

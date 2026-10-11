@@ -354,20 +354,22 @@
 		-webkit-backdrop-filter: var(--glass-blur);
 		border-radius: 8px;
 	}
+	/* Padding-top would be added to a sticky child's `top`, so the lead-in under the header is a spacer;
+	   sticky chrome then pins at `--sticky-top`, 8px under the header. */
 	.messages {
 		flex: 1; overflow-y: auto;
-		--sticky-top: var(--header-height, 0px);
-		padding: calc(var(--header-height) + 24px) 16px calc(var(--input-bar-height, 100px) + 16px);
+		--sticky-top: calc(var(--header-height, 0px) + 8px);
+		--messages-lead: calc(var(--header-height) + 24px);
+		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
 	}
+	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {
 		.messages {
-			--sticky-top: calc(var(--header-height, 0px) + env(safe-area-inset-top, 0px));
+			--sticky-top: calc(var(--header-height, 0px) + env(safe-area-inset-top, 0px) + 8px);
+			--messages-lead: var(--messages-pad-top, calc(var(--header-height) + 24px + env(safe-area-inset-top, 0px)));
 			padding-left: 12px;
 			padding-right: 12px;
-			padding-top: var(--messages-pad-top, calc(var(--header-height) + 24px + env(safe-area-inset-top, 0px)));
 			padding-bottom: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px);
-		}
-		.messages {
 			transform: translateY(var(--empty-parallax-offset, 0));
 		}
 	}
