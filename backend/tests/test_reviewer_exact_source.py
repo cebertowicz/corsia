@@ -318,7 +318,7 @@ def test_write_scope_without_config_root_variable_uses_the_default_root():
     assert scope.global_file.as_posix() == "/srv/home/.claude.json"
 
 
-def test_write_scope_avoids_counted_regex_intervals():
+def test_write_profile_contains_no_counted_regex_interval():
     import re
 
     from reviewer.reviewer_exact_source import claude_config_state_scope, render_write_profile
@@ -327,10 +327,6 @@ def test_write_scope_avoids_counted_regex_intervals():
         ["/x/work"], claude_config_state_scope({"CLAUDE_CONFIG_DIR": "/x/acct"}, _RUN_DIR),
     )
 
-    # Rendered profiles carry one brace, so a doubled-brace source check is inert.
-    counted_interval_profile = r'(regex #"^/private/tmp/claude-[^/]{1,64}-cwd$")'
-    assert re.search(r"\{\d", counted_interval_profile)
-    # Seatbelt silently ignores a rule containing a counted interval.
     assert not re.search(r"\{\d", profile)
 
 

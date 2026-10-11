@@ -154,9 +154,9 @@ def render_write_profile(
             f' (regex #"^{_sb_regex_path(temp_root)}/{folder}(/.*)?$"))'
         )
         temp_parent = _sb_regex_path(str(config_state.temp_root.parent))
-        # Job 114450929931 proved Seatbelt ignores counted intervals. The CLI's
-        # cwd file ignores TMPDIR, so this stays anchored to the resolved temp root
-        # and matches only claude-...-cwd names; [^/]* cannot cross a separator.
+        # Seatbelt treats counted intervals in regex predicates as never matching.
+        # The CLI writes per-command claude-...-cwd files directly in the system
+        # temp directory; [^/]* cannot cross a separator. Evidence: job 114450929931.
         rules.append(
             f'(allow file-write* (regex #"^{temp_parent}/claude-[^/]*-cwd$"))'
         )
