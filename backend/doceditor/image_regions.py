@@ -20,6 +20,8 @@ from PIL import Image
 
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
+from infra.database import write_transaction
+from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
 from registry import models as registry_models
 from registry.file_types import image_media_type
@@ -236,10 +238,25 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
         image = Path(str(path))
         target = _working_tray(db, reader_thread_id) / f"{image.stem}-feedback-{batch_id}.png"
         marks = marks_for(db, regional)
-        after_commit(db, lambda: _save(render_marked_image(image.read_bytes(), marks), target))
+        after_commit(db, lambda: _draw_copy(image, marks, target, reader_thread_id))
         line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
     for item in regional:
         item["marked_image_line"] = line
+
+
+def _draw_copy(image: Path, marks: list[Mark], target: Path, reader_thread_id: str) -> None:
+    """Draw a delivered batch's copy; if it fails, tell the reader the named file will not appear."""
+    try:
+        _save(render_marked_image(image.read_bytes(), marks), target)
+    except RENDER_ERRORS as exc:
+        with write_transaction(None, scope="marked_copy_failed") as connection:
+            append_thread_context_note(
+                connection,
+                thread_id=reader_thread_id,
+                summary=(f"The marked-up image {target.name} named in your feedback task could not be "
+                         f"drawn ({exc}); the region lines in the task still say where each comment is."),
+                details={"path": str(target)},
+            )
 
 
 def _unmarkable(path: str | None) -> str | None:
