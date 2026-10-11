@@ -129,7 +129,7 @@ test.describe('@surface:measurement agents populated', () => {
 			const names = table.locator('tbody tr th .name');
 			await expect(names).toHaveText(['Ahead', 'Behind', 'Middle']);
 			await expect(table.locator('thead th')).toHaveText([
-				'Agent', 'Outcomes', 'First try', '$ per hour of work', 'Change in minutes per outcome, vs the previous window',
+				'Agent', 'Outcomes', 'First try', '$ per person-hour of work delivered', 'Change in minutes per outcome, vs the previous window',
 			]);
 			await expect(table.locator('thead th').nth(1)).toHaveAttribute('aria-sort', 'none');
 

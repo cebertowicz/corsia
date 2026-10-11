@@ -71,7 +71,7 @@ describe('MeasurementAgentsTable', () => {
 		render(state([agentRow()]));
 		const headers = [...host.querySelectorAll('thead th')].map((cell) => (cell.textContent ?? '').trim());
 		expect(headers).toEqual([
-			'Agent', 'Outcomes', 'First try', '$ per hour of work',
+			'Agent', 'Outcomes', 'First try', '$ per person-hour of work delivered',
 			'Change in minutes per outcome, vs Sep 21 to Sep 27',
 		]);
 		for (const gone of ['Rank', 'Asks', 'Tokens', 'Outcomes / week', '8 weeks before']) expect(host.textContent).not.toContain(gone);
@@ -282,7 +282,9 @@ describe('MeasurementAgentsTable', () => {
 	it('keeps every column in view at 430px and under: names and headers wrap between words, the long headers get narrow columns', () => {
 		render(state([agentRow()]));
 		const headers = [...host.querySelectorAll('thead th')];
-		expect(headers[3].classList.contains('cost') && headers[3].textContent).toBe('$ per hour of work');
+		expect(headers[3].classList.contains('cost') && headers[3].textContent).toBe('$ per person-hour of work delivered');
+		expect(headers[3].querySelector('button')?.getAttribute('aria-label'), 'a phone reader still hears the full name').toBe('$ per person-hour of work delivered');
+		expect(headers[3].querySelector('.long')?.textContent, 'only the tail of the name drops on a phone').toBe('of work delivered');
 		expect(headers[4].classList.contains('change') && headers[4].textContent).toBe('Change in minutes per outcome, vs Sep 21 to Sep 27');
 		const css = source.slice(source.indexOf('<style>'));
 		const at = css.indexOf('@media (max-width: 430px)');

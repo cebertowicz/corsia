@@ -73,7 +73,7 @@ test.describe('@flow:measurement-cost-desktop @surface:measurement Cost remains 
 	test('keeps the API-equivalent summary and charts legible beside the Measurement controls in both themes', async ({ page, request }, testInfo) => {
 		const section = await openCost(page, request, testInfo);
 		await expect(section.getByText('Total spend, Sep 28 to Oct 4')).toBeVisible();
-		await expect(section.getByRole('heading', { name: 'API-equivalent $ per hour of delivered work, Sep 21 to Oct 4, by day' })).toBeVisible();
+		await expect(section.getByRole('heading', { name: 'API-equivalent $ per person-hour of work delivered, Sep 21 to Oct 4, by day' })).toBeVisible();
 		await section.scrollIntoViewIfNeeded();
 		for (const theme of ['light', 'dark'] as const) {
 			await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);

@@ -74,11 +74,11 @@ MEASURES: dict[str, Measure] = {
         "Read the latest rejected outcomes for the shared cause."),
     # The Cost headline's own figure, read as served; no agent or model is ranked on it.
     "cost_per_hour": Measure(
-        "cost_per_hour", "Cost per hour of delivered work", False, "dollars",
+        "cost_per_hour", "Cost per person-hour of work delivered", False, "dollars",
         "Check which models and size classes drive the cost.", per_agent=False, from_series=False, from_cost=True),
     # Agents only: the scope's figure is every agent's tasks pooled, served beside the rows.
     "dollars_per_hour": Measure(
-        DOLLARS_PER_HOUR, "$ per hour of work", False, "dollars",
+        DOLLARS_PER_HOUR, "$ per person-hour of work delivered", False, "dollars",
         "Check which size class and model drive the cost.", from_series=False),
     # Models only: the label names the size class, and each row reads its model's biggest comparable class.
     "cost_per_task": Measure(
