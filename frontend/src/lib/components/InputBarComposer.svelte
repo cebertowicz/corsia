@@ -2,6 +2,7 @@
 	import InputBarControls from './InputBarControls.svelte';
 	import QueuedInputStack from './QueuedInputStack.svelte';
 	import type { Attachment, SheetView } from './inputBarHelpers';
+	import { toastClearanceSurface } from '$lib/stores/toastClearance';
 	let {
 		inputEl = $bindable<HTMLDivElement | undefined>(),
 		threadId,
@@ -67,9 +68,10 @@
 	}
 </script>
 
-<QueuedInputStack {threadId} />
+<div use:toastClearanceSurface>
+	<QueuedInputStack {threadId} />
 
-<div class="input-chip" class:multi-line={isMultiLine}>
+	<div class="input-chip" class:multi-line={isMultiLine}>
 	{#if pendingAttachments.length > 0}
 		<div class="attachment-previews">
 			{#each pendingAttachments as att}
@@ -144,4 +146,5 @@
 		{onSendClick}
 			{onQueueAfterTurn}
 	/>
+	</div>
 </div>

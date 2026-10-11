@@ -7,6 +7,7 @@
 	import { portal } from '$lib/actions/portal';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
+	import { toastClearance } from '$lib/stores/toastClearance';
 
 	let {
 		ariaLabel,
@@ -87,6 +88,9 @@
 	}
 
 	onMount(() => {
+		const stopToastClearance = panel
+			? toastClearance.register(panel, () => window.innerWidth <= 768)
+			: undefined;
 		const removeBackLayer = pushBackLayer(() => {
 			onClose();
 			return true;
@@ -98,6 +102,7 @@
 		});
 		return () => {
 			mounted = false;
+			stopToastClearance?.();
 			removeBackLayer();
 		};
 	});
