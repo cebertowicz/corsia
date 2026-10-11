@@ -305,6 +305,11 @@ def _aggregate_agent(registry: dict[str, Any], agent: dict[str, Any], grain: Gra
     for name in TABLE_METRICS:
         measured_periods = sum(1 for period in previous_periods if measured(name, period))
         metrics[name]["previous_value"] = _pooled_value(registry, name, previous, measured, measured_periods)
+        if name == "active_hours_per_outcome" and measured_periods < len(previous_periods):
+            # Minutes were recorded for only part of the previous window, so its pooled
+            # figure covers fewer weeks than the latest: a change against it is a change in
+            # coverage. No previous figure; the table reads "new" and Biggest changes skips it.
+            metrics[name]["previous_value"] = None
         metrics[name]["previous_n"] = sum(_denominator(item) for item in previous
                                           if item and measured(name, item["period"]))
     frame = list(grain.periods[-FRAME_PERIODS:])
