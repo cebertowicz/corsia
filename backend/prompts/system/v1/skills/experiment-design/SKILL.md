@@ -18,7 +18,7 @@ Before anything runs, write the decision, the change being tested, its baseline,
 |---|---|
 | Cheap to notice and undo (wording, prompt, rubric, config, a reversible default) | Direction check: the change is clearly better on a small sample. No perfect score, no significance test |
 | Costly to undo, or it changes what many people or agents do | Consistent effect across a larger varied sample, plus a check of the main quality floor |
-| A published or general claim (superiority, savings, benchmark results) | Controlled comparison per section 4, with uncertainty reported |
+| A published or general claim (superiority, savings, benchmark results, a persistent owner's readiness) | Controlled comparison per section 4, with uncertainty reported |
 
 Reuse what already exists as the baseline (current outputs, historical labels, prior runs) instead of re-running it, when it was produced under the same conditions as the new arm apart from the change; otherwise re-run it or narrow the claim.
 
@@ -44,7 +44,7 @@ The consequence sets the size. Rewording a grading rubric you can revert tomorro
 
 ## 4. Controls for high-consequence claims only
 
-Use this section only when section 1 puts the claim in the bottom row. Freeze the hypothesis, outcome, analysis and stopping rules before any results. List each factor that could differ between arms (model and version, harness, delivered instructions and context, data split, environment, cache, run order, scoring) and say how it is held fixed, randomized, or left uncontrolled with a narrower claim. Verify what was actually delivered to each arm, not what the brief said. Have someone independent check the design and the controls before the deciding stage.
+Use this section only for a published or general claim (section 1). Freeze the hypothesis, outcome, analysis and stopping rules before any results. List each factor that could differ between arms (model and version, harness, delivered instructions and context, data split, environment, cache, run order, scoring) and say how it is held fixed, randomized, or left uncontrolled with a narrower claim. Verify what was actually delivered to each arm, not what the brief said. Have someone independent check the design and the controls before the deciding stage.
 
 ## 5. Report
 
