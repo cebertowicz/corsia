@@ -166,16 +166,16 @@
 	{#each pinned as comment (comment.id)}
 		{@const shown = comment.id === selectedId || comment.id === hoveredId || comment.id === focusedTag || sweeping.has(comment.id)}
 		{#if isPoint(comment.region)}
-			<span class="dot" class:faint={!shown} class:stale={comment.regionStale} style:left={pct(comment.region.x)} style:top={pct(comment.region.y)} style:--c={colorOf(comment)} aria-hidden="true"></span>
+			<span class="dot" class:faint={!shown} class:stale={comment.regionStale} style:left={pct(comment.region.x)} style:top={pct(comment.region.y)} style:--region-color={colorOf(comment)} aria-hidden="true"></span>
 		{:else if shown}
-			<span class="box" class:stale={comment.regionStale} class:sweep={sweeping.has(comment.id)} style:left={pct(comment.region.x)} style:top={pct(comment.region.y)} style:width={pct(comment.region.w)} style:height={pct(comment.region.h)} style:--c={colorOf(comment)} aria-hidden="true" data-region-box={comment.id}></span>
+			<span class="box" class:stale={comment.regionStale} class:sweep={sweeping.has(comment.id)} style:left={pct(comment.region.x)} style:top={pct(comment.region.y)} style:width={pct(comment.region.w)} style:height={pct(comment.region.h)} style:--region-color={colorOf(comment)} aria-hidden="true" data-region-box={comment.id}></span>
 		{/if}
 	{/each}
 	{#if preview}
 		{#if isPoint(preview)}
-			<span class="dot draft" style:left={pct(preview.x)} style:top={pct(preview.y)} style:--c={draftColor} aria-hidden="true"></span>
+			<span class="dot draft" style:left={pct(preview.x)} style:top={pct(preview.y)} style:--region-color={draftColor} aria-hidden="true"></span>
 		{:else}
-			<span class="box draft" style:left={pct(preview.x)} style:top={pct(preview.y)} style:width={pct(preview.w)} style:height={pct(preview.h)} style:--c={draftColor} aria-hidden="true" data-region-draft></span>
+			<span class="box draft" style:left={pct(preview.x)} style:top={pct(preview.y)} style:width={pct(preview.w)} style:height={pct(preview.h)} style:--region-color={draftColor} aria-hidden="true" data-region-draft></span>
 		{/if}
 	{/if}
 	{#each tags as { comment, x, y, side } (comment.id)}
@@ -189,7 +189,7 @@
 			class:leftward={side === 'left' || side === 'up-left' || side === 'down-left'}
 			style:left="{x}px"
 			style:top="{y}px"
-			style:--c={colorOf(comment)}
+			style:--region-color={colorOf(comment)}
 			aria-label={label(comment)}
 			aria-pressed={comment.id === selectedId}
 			data-region-tag={comment.regionNumber}
@@ -211,16 +211,16 @@
 	.regions.box-mode { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
 
 	/* A box is the author's colour inside a thin white line, so it reads on light and dark parts of a screenshot. */
-	.box { position: absolute; box-sizing: border-box; border: 2px solid var(--c); border-radius: 2px; box-shadow: 0 0 0 1px #fff, inset 0 0 0 1px #fff; pointer-events: none; }
+	.box { position: absolute; box-sizing: border-box; border: 2px solid var(--region-color); border-radius: 2px; box-shadow: 0 0 0 1px #fff, inset 0 0 0 1px #fff; pointer-events: none; }
 	.box.stale { border-style: dashed; opacity: 0.55; }
-	.box.draft { border-style: solid; background: color-mix(in srgb, var(--c) 10%, transparent); }
+	.box.draft { border-style: solid; background: color-mix(in srgb, var(--region-color) 10%, transparent); }
 	.box.sweep { animation: sweep 600ms cubic-bezier(0.22, 1, 0.36, 1); }
 	@keyframes sweep { from { clip-path: inset(0 100% 100% 0); } to { clip-path: inset(0 0 0 0); } }
 
 	/* A point pin is a 14 px dot. */
-	.dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px #fff; pointer-events: none; }
-	.dot.faint { background: color-mix(in srgb, var(--c) 80%, transparent); }
-	.dot.stale { opacity: 0.55; outline: 1.5px dashed var(--c); outline-offset: 3px; }
+	.dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--region-color); box-shadow: 0 0 0 2px #fff; pointer-events: none; }
+	.dot.faint { background: color-mix(in srgb, var(--region-color) 80%, transparent); }
+	.dot.stale { opacity: 0.55; outline: 1.5px dashed var(--region-color); outline-offset: 3px; }
 
 	/* The 22 px disc sits on the placed centre; an agent's name grows away from the box it points at. */
 	.tag {
@@ -233,23 +233,23 @@
 	.tag.leftward::before { left: auto; right: -11px; }
 	.disc {
 		box-sizing: border-box; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
-		background: var(--c); color: #111; border: 1.5px solid color-mix(in srgb, var(--c) 70%, #000);
+		background: var(--region-color); color: #111; border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, #000);
 		box-shadow: 0 0 0 1.5px #fff; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
 		transition: background var(--dur-tight, 120ms);
 	}
 	.name {
 		max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: var(--radius-pill, 999px);
-		background: var(--c); color: #111; border: 1.5px solid color-mix(in srgb, var(--c) 70%, #000); box-shadow: 0 0 0 1.5px #fff;
+		background: var(--region-color); color: #111; border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, #000); box-shadow: 0 0 0 1.5px #fff;
 		font-size: 11px; font-weight: 600; line-height: 14px;
 	}
 	/* Faint until hovered, focused or picked: only the fill fades; the digit, border and white ring stay solid. */
-	.tag.faint .disc, .tag.faint .name { background: color-mix(in srgb, var(--c) 80%, transparent); }
-	.tag.selected .disc { box-shadow: 0 0 0 1.5px #fff, 0 0 0 4px var(--c); }
+	.tag.faint .disc, .tag.faint .name { background: color-mix(in srgb, var(--region-color) 80%, transparent); }
+	.tag.selected .disc { box-shadow: 0 0 0 1.5px #fff, 0 0 0 4px var(--region-color); }
 	.tag.stale { opacity: 0.55; }
-	.tag.stale .disc, .tag.stale .name { border-style: dashed; background: color-mix(in srgb, var(--c) 70%, transparent); }
-	.tag:hover .disc, .tag:hover .name { background: var(--c); }
+	.tag.stale .disc, .tag.stale .name { border-style: dashed; background: color-mix(in srgb, var(--region-color) 70%, transparent); }
+	.tag:hover .disc, .tag:hover .name { background: var(--region-color); }
 	.tag:focus-visible { outline: none; }
-	.tag:focus-visible .disc { background: var(--c); outline: 2px solid var(--accent); outline-offset: 3px; }
+	.tag:focus-visible .disc { background: var(--region-color); outline: 2px solid var(--accent); outline-offset: 3px; }
 	@media (prefers-reduced-motion: reduce) {
 		.box.sweep { animation: none; }
 		.disc { transition: none; }

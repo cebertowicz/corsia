@@ -216,7 +216,7 @@ describe('CommentThread', () => {
 		const num = host.querySelector<HTMLElement>('.ct-head .ct-num')!;
 		expect(num.textContent).toBe('3');
 		expect(num.getAttribute('aria-label')).toBe('Comment 3');
-		expect(num.style.getPropertyValue('--c')).toBe('#e5484d');
+		expect(num.style.getPropertyValue('--region-color')).toBe('#e5484d');
 		unmount(component!); host.remove();
 		render(thread({ anchor: '', regionNumber: 3, resolved: true }));
 		expect(host.querySelector('.ct-res-head .ct-num')?.textContent).toBe('3');

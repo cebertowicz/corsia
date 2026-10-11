@@ -27,6 +27,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--depth',
 	// The comment rail width: DocViewer's `style:--doc-rail` and the editor's rail, both from railWidth().
 	'--doc-rail',
+	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
+	'--region-color',
 ]);
 
 /**

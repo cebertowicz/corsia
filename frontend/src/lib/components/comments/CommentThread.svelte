@@ -166,7 +166,7 @@
 	<div class="ct resolved" class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}">
 		<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 			<svg class="ct-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-			{#if comment.regionNumber != null}<span class="ct-num" style:--c={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
+			{#if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<span class="ct-res-text">Resolved · {comment.replies.length + 1} message{comment.replies.length ? 's' : ''}</span>
 			<svg class="ct-chev" class:open={resolvedOpen} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg>
 		</button>
@@ -185,7 +185,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 	<div class="ct" class:focused class:acked={comment.acked} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus}>
 		<div class="ct-head">
-			{#if comment.regionNumber != null}<span class="ct-num" style:--c={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
+			{#if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<span class="ct-author">{author.name}</span>
 			{#if author.kind === 'agent' && agentTag(author)}<span class="ct-tag" title="via {author.provider} · {author.thread}">{agentTag(author)}</span>{/if}
@@ -284,7 +284,7 @@
 	/* An image comment's number, in its tag's colour and shape. */
 	.ct-num {
 		box-sizing: border-box; flex-shrink: 0; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
-		background: var(--c, var(--accent)); color: #111; border: 1.5px solid color-mix(in srgb, var(--c, var(--accent)) 70%, #000);
+		background: var(--region-color, var(--accent)); color: #111; border: 1.5px solid color-mix(in srgb, var(--region-color, var(--accent)) 70%, #000);
 		font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
 	}
 	.ct-suggestion-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
