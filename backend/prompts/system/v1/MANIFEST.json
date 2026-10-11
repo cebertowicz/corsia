@@ -279,6 +279,12 @@
       "sha256": "2909468bcf8b92791a37a5199e3c063f44e95cd03c389a9518c883528798a554"
     },
     {
+      "bytes": 3790,
+      "kind": "skill",
+      "path": "skills/experiment-design/SKILL.md",
+      "sha256": "90f8bd86b562564e2c3542b840022d1597962ca60345e2fa34f9d913155d71df"
+    },
+    {
       "bytes": 3647,
       "kind": "skill",
       "path": "skills/github/SKILL.md",
@@ -315,10 +321,10 @@
       "sha256": "f96a968ba81f38933a4803514a3dc1b0006f617e4e2430b5cc97e506f6710eb5"
     },
     {
-      "bytes": 8349,
+      "bytes": 8342,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "96e62f98da07745e83d15d9717952debfe70d62316185c52a9cbd8cf264a07f7"
+      "sha256": "b3d676ce1c01f6cd98cc369a7da7eebfc932761ab1d4d1e3460cb7c8ebac120e"
     }
   ],
   "version": "v1"
