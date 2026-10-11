@@ -4,9 +4,9 @@
     python -m speed_gate.cli compare --current measurement.json --baseline quality/speed-gate-baseline.json
     python -m speed_gate.cli update-baseline --current measurement.json --baseline ... --reason "why"
 
-CI and ``scripts/check-pr`` run the same ``compare`` against the same committed baseline; they differ only in
-``--enforce``. Exit codes: 0 pass (or would-fail in report-only mode), 1 would-fail or an improved route with
---enforce (a PR that moves a cost updates the baseline in the same PR), 2 version mismatch with --enforce
+CI and ``scripts/check-pr`` run the same report-only ``compare`` against the same committed baseline and print one
+``speed-gate: ...`` line per finding kind, naming the routes. ``--enforce`` is the later, enforcing mode. Exit codes: 0 pass (or would-fail in report-only mode), 1 would-fail
+or an improved route with --enforce (a PR that moves a cost updates the baseline in the same PR), 2 version mismatch with --enforce
 (report-only warns and exits 0), 3 the runs of one tree disagreed with --enforce (report-only warns and exits
 0), 4 the fixture build or a harness run failed, or a measurement guard stopped the run (no verdict).
 """
@@ -106,6 +106,8 @@ def measure_tree(backend: Path, repeats: int, keep_runs: Path | None = None, *, 
             handle.write(_instability_summary(unstable, len(differences) - len(unstable), len(runs), enforce))
     if enforce:
         return first, EXIT_NONDETERMINISTIC
+    routes = ", ".join(sorted({item.route for item in unstable}))
+    print(f"speed-gate: runs of this tree disagreed on {routes}")
     print("::warning title=Read-cost speed gate::runs of one tree disagreed; "
           "report-only, so this is not a failure (it would fail with --enforce)")
     return first, 0
@@ -121,9 +123,14 @@ def decide(current: dict, baseline: dict, *, enforce: bool, base_label: str, sum
             handle.write(text + "\n")
     if verdict.status == "version_mismatch":
         # Not a verdict, but report-only phase must not turn CI red: warn loudly, fail only when enforcing.
+        print(f"speed-gate: rebaseline needed, {verdict.message}")
         print(f"::warning title=Read-cost speed gate::{verdict.message}")
         return EXIT_REBASELINE if enforce else 0
     unrecorded = verdict.status == "would_fail" or any(item.kind == "improved" for item in verdict.findings)
+    for label, kinds in (("would fail", ("growth", "ceiling", "error")), ("baseline should drop", ("improved", "removed"))):
+        routes = sorted({item.route for item in verdict.findings if item.kind in kinds})
+        if routes:
+            print(f"speed-gate: {label} on {', '.join(routes)}")
     if unrecorded and enforce:
         print("The committed baseline does not match this tree. Update it in this PR from this measurement: "
               "python -m speed_gate.cli update-baseline --current <measurement> "

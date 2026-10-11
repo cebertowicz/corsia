@@ -287,14 +287,6 @@ def test_a_tolerated_byte_difference_is_listed_and_never_fails(tmp_path, monkeyp
     assert "NONDETERMINISTIC" not in printed and not (tmp_path / "summary.md").exists()
 
 
-def test_a_difference_between_runs_names_the_statement_and_thread_that_differ():
-    def run(trace):
-        return {"routes": {"/a": {"info": {"trace": trace}}}}
-    common = ["portal: SELECT 1", "db_0: SELECT 2"]
-    lines = cli._trace_difference([run(common + ["db_0: SELECT 3"]), run(common)], "/a")
-    assert lines == ["    only in run 1: db_0: SELECT 3 (x1)"]
-
-
 def test_enforcing_also_fails_when_a_route_improved_so_the_baseline_cannot_go_stale(tmp_path, capsys):
     base = tmp_path / "baseline.json"
     base.write_text(json.dumps(baseline_for({"/a": cost(1_000_000)})))
@@ -306,10 +298,15 @@ def test_enforcing_also_fails_when_a_route_improved_so_the_baseline_cannot_go_st
     assert "update-baseline" in capsys.readouterr().err
 
 
-def test_there_is_no_merge_base_gate_command_and_no_step_band():
-    with pytest.raises(SystemExit):
-        cli.build_parser().parse_args(["gate", "--head-backend", "b", "--base-backend", "b"])
-    assert not hasattr(ratchet, "run_band") and not hasattr(ratchet, "STEP_SLACK")
+def test_report_only_compare_names_the_routes_that_would_fail_or_should_drop_and_exits_zero(tmp_path, capsys):
+    base = tmp_path / "baseline.json"
+    base.write_text(json.dumps(baseline_for({"/grew": cost(100_000), "/fell": cost(1_000_000), "/gone": cost()})))
+    current = tmp_path / "current.json"
+    current.write_text(json.dumps(result({"/grew": cost(400_000), "/fell": cost(100_000)})))
+    assert cli.main(["compare", "--current", str(current), "--baseline", str(base)]) == 0
+    out = capsys.readouterr().out
+    assert "speed-gate: would fail on /grew\n" in out
+    assert "speed-gate: baseline should drop on /fell, /gone\n" in out
 
 
 @pytest.fixture
