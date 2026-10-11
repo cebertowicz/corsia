@@ -1991,8 +1991,8 @@ async def test_shell_runs_real_worktree_lifecycle_without_switching_base(
     policy = RepoPolicy("p1", "app", repo.resolve(), "dev", True)
     monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [policy])
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_rw", lambda: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     monkeypatch.setattr(shell, "list_registered_repo_policies", lambda: [policy])
     monkeypatch.setattr(
         worktrees, "list_registered_repo_policies", lambda **_kwargs: [policy]
@@ -2094,8 +2094,8 @@ async def test_shell_runs_real_fast_forward_pull_on_pinned_base(
     policy = RepoPolicy("p1", "app", repo.resolve(), "main", True)
     monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [policy])
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_rw", lambda: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     monkeypatch.setattr(shell, "list_registered_repo_policies", lambda: [policy])
     monkeypatch.setattr(shell, "is_safehouse_available", lambda: True)
     monkeypatch.setattr(shell, "safehouse_version_error", lambda: None)

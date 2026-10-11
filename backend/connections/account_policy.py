@@ -137,18 +137,24 @@ def require_inference(provider: str) -> None:
         raise AccountAdmissionError(NOT_INFERENCE)
 
 
+_READ = object()
+
+
 def _turn_identity(provider: str, *, thread_id: str | None, project_id: str | None,
-                   account_id: str | None, model: str | None, db) -> str | None:
+                   account_id: str | None, model: str | None, db, binding=_READ) -> str | None:
     """The account a new turn of ``model`` runs on, before any usability reason.
 
     The thread's binding, else the project default, else the workspace Default.
     Where the project opted into rollover and that account is limited for
     ``model``, the first usable account along the order instead. An explicit
-    ``account_id`` is the caller's own choice and never rolls over.
+    ``account_id`` is the caller's own choice and never rolls over. A caller that
+    already read the thread's binding row (or its absence, ``None``) passes it, so
+    the answer is the same without a second read.
     """
-    binding = db.execute("SELECT account_id,pending_account_id FROM thread_vendor_accounts "
-                         "WHERE thread_id=? AND provider=?",
-                         (thread_id, provider)).fetchone() if thread_id and account_id is None else None
+    if binding is _READ:
+        binding = db.execute("SELECT account_id,pending_account_id FROM thread_vendor_accounts "
+                             "WHERE thread_id=? AND provider=?",
+                             (thread_id, provider)).fetchone() if thread_id and account_id is None else None
     if binding is not None and binding["pending_account_id"] is not None:
         # A person's choice made during a running turn: the next claim moves to it, and it never rolls over.
         return str(binding["pending_account_id"])
@@ -183,12 +189,20 @@ def turn_account(provider: str, *, thread_id: str | None = None, project_id: str
     """
     require_inference(provider)
     project = thread_scope(thread_id, db=db)["project_id"] if thread_id else project_id
+    return _scoped_turn_account(provider, thread_id=thread_id, project=project, account_id=account_id,
+                                model=model, db=db)
+
+
+def _scoped_turn_account(provider: str, *, thread_id: str | None, project: str | None,
+                         account_id: str | None, model: str | None, db,
+                         binding=_READ) -> tuple[str | None, str | None]:
+    """``turn_account`` for a caller that already holds the thread's project, and optionally its binding."""
     projects = [project] if project is not None else []
     for item in projects:
         if not project_exists(item, db=db):
             return None, PROJECT_POLICY_MISSING
     identity = _turn_identity(provider, thread_id=thread_id, project_id=project, account_id=account_id,
-                              model=model, db=db)
+                              model=model, db=db, binding=binding)
     if identity is None:
         policies = _policies(provider, projects, db=db)
         return None, "account_project_denied" if any(policy["disabled"] for policy in policies) else NOT_CONFIGURED

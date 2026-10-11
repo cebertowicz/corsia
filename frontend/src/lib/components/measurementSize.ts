@@ -102,8 +102,8 @@ export function changeText(cur: number | null, prev: number | null, nCur: number
 	return percentChange(cur, prev);
 }
 
-/** "-4% vs Sep 21 to Sep 27 (n 451)": a comparison against the previous window. A 'new' change has no previous figure to compare, so it prints no previous window and no previous n; with no previous window it prints the change alone. */
+/** "-4% vs Sep 21 to Sep 27 (n 451)": a comparison against the previous window, and "new vs Aug 10 to Sep 6 (n 450)" when the measure does not cover all of it; with no previous window it prints the change alone. */
 export function versusPrevious(change: string, previousText: string | null, previousN?: number): string {
-	if (change === 'new' || !previousText) return change;
+	if (!previousText) return change;
 	return `${change} vs ${previousText}${previousN === undefined ? '' : ` (n ${previousN.toLocaleString('en-US')})`}`;
 }

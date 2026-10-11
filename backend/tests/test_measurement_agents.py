@@ -917,3 +917,35 @@ async def test_all_work_serves_a_populated_agents_table_at_both_grains(isolated_
     assert body["period"]["grain"] == grain
     assert [row["agent"]["id"] for row in body["rows"]] == ["worker"]
     assert "dollars_per_work_hour" in body["rows"][0]["metrics"]
+
+
+def _seed_minutes_agent(now: datetime):
+    """One agent with 25 outcomes and one human message in each period of both windows."""
+    from api.measurement_scope import resolve_grain
+
+    grain = resolve_grain("weeks", "UTC", now=now)
+
+    def seed(db):
+        _seed_agent(db, "worker")
+        for period in (*grain.previous.periods, *grain.latest.periods):
+            _seed_period(db, "worker", period, 25)
+            db.execute("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) "
+                       "VALUES (?,?,'user','x','{}',?)", (f"m-{period}", "worker", f"{period}T12:00:00Z"))
+    return seed
+
+
+def test_a_previous_window_minutes_recording_did_not_cover_has_no_figure(isolated_db):
+    """Minutes are recorded from 2026-08-31: a previous window starting before it reads "new".
+
+    Pooling only its recorded weeks would put a four-week figure beside a one-week figure and
+    report the difference in coverage as a change in the work.
+    """
+    cell = _build(_seed_minutes_agent(datetime(2026, 10, 10, 9, tzinfo=timezone.utc)),
+                  now=datetime(2026, 10, 10, 9, tzinfo=timezone.utc))["rows"][0]["metrics"]["active_hours_per_outcome"]
+    assert cell["value"] is not None and cell["previous_value"] is None
+
+
+def test_a_previous_window_minutes_recording_covered_keeps_its_figure(isolated_db):
+    now = datetime(2026, 11, 16, 9, tzinfo=timezone.utc)
+    cell = _build(_seed_minutes_agent(now), now=now)["rows"][0]["metrics"]["active_hours_per_outcome"]
+    assert cell["value"] is not None and cell["previous_value"] == pytest.approx(cell["value"])

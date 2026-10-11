@@ -93,8 +93,10 @@ def test_containing_verifies_only_the_repository_holding_the_path(
     two_pinned_repos, monkeypatch,
 ):
     from infra import project_repo_policy
+    from infra.git_state_cache import clear_git_state_cache
 
     workspace, db, repos = two_pinned_repos
+    clear_git_state_cache()  # this test counts Git branch reads; a cache hit reads none
     checked: list[Path] = []
     real_branch = project_repo_policy.current_repo_branch
     monkeypatch.setattr(
@@ -105,6 +107,7 @@ def test_containing_verifies_only_the_repository_holding_the_path(
     everything = project_repo_policy.list_registered_repo_policies(workspace=workspace, db=db)
     assert sorted(checked) == sorted(repos.values())
     checked.clear()
+    clear_git_state_cache()
 
     held = project_repo_policy.list_registered_repo_policies(
         workspace=workspace, db=db, containing=repos["app"] / "src" / "x.py",
@@ -112,6 +115,7 @@ def test_containing_verifies_only_the_repository_holding_the_path(
     assert held == [policy for policy in everything if policy.repo_name == "app"]
     assert checked == [repos["app"]]
     checked.clear()
+    clear_git_state_cache()
 
     outside = project_repo_policy.list_registered_repo_policies(
         workspace=workspace, db=db, containing=workspace / "shared" / "doc.md",

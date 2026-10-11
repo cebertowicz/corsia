@@ -488,9 +488,9 @@ async def test_models_does_not_show_turn_only_raw_selectors(isolated_db, monkeyp
 
     served = await measurement_models(project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     assert _named_rows(served) == []
-    # Unresolved aliases share Other; their failures are disclosed, provider limits are not failures.
-    (other,) = served["rows"]
-    assert other["failed_turns_per_100"] == pytest.approx(51.0)
+    # A model with no spend and under 14 tasks has no row, so turns alone list nothing; the unresolved
+    # alias failures are disclosed, and provider limits are not failures.
+    assert served["rows"] == []
     assert served["unmatched_failed_turns"] == 51
 
 

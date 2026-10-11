@@ -152,7 +152,8 @@ def test_scope_walk_and_pre_window_lookup_search_their_indexes_without_planner_s
             "SEARCH prior USING INDEX idx_measurement_human_messages_time (thread_id=? AND created_at<?)"
         ], seek
         lookup = _plan_children(db, _active_family_sql(grain, PREPARED_SCOPE, PREPARED_OUTCOMES), params, "CO-ROUTINE pre_window_message")
-        assert lookup[0] == "SCAN s", lookup
+        # The pick walks the user's threads (the gap is measured across all of them), by index.
+        assert lookup[0] == "SEARCH s USING INDEX idx_threads_user (user_id=?)", lookup
 
 
 def test_scope_walk_keeps_its_child_search_when_analyzed_with_only_root_threads() -> None:

@@ -165,27 +165,46 @@ def _presence_predicate(scope_project: str, scope_agent: str | None, scope_threa
     return f"({closure} OR v.project_id=:scope_project)"
 
 
-def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
+def human_minutes_cte(grain: Grain) -> str:
+    """Return the ``human_minutes(thread_id, created_at, period, seconds)`` CTEs.
+
+    One row per human message in the range: the 60 seconds the message itself is worth
+    plus the gap since the person's previous message when that gap is under
+    ``:max_active_gap_seconds``. The gap is measured across the *user's whole* human
+    stream, not inside a scope, so a thread's minutes are the same whichever page asks:
+    the All-work total, a project, one agent and the Agents table all sum these rows.
+    A caller keeps the threads it scopes to and sums ``seconds`` by ``period``. The
+    caller supplies the leading ``WITH``.
+    """
     return f"""
-      WITH pre_window_message AS (
-        -- The latest of each thread's latest: one index seek per scope thread
+      pre_window_message AS (
+        -- The latest of each thread's latest: one index seek per thread
         -- instead of sorting every earlier message.
-        SELECT m.id,m.created_at FROM {scope_threads} s JOIN messages m ON m.id=(
+        SELECT m.id,m.thread_id,m.created_at FROM threads s JOIN messages m ON m.id=(
           SELECT prior.id FROM messages prior WHERE prior.thread_id=s.id
             AND prior.role='user' AND COALESCE(json_extract(prior.metadata,'$.sender_kind'),'')='' AND prior.created_at < :from_ts
           ORDER BY prior.created_at DESC,prior.id DESC LIMIT 1
-        ) ORDER BY m.created_at DESC,m.id DESC LIMIT 1
+        ) WHERE s.user_id=:user_id ORDER BY m.created_at DESC,m.id DESC LIMIT 1
       ), human_messages AS (
-        SELECT id,created_at,LAG(created_at) OVER (ORDER BY created_at,id) AS prior_at FROM (
-          SELECT m.id,m.created_at FROM messages m WHERE m.thread_id IN (SELECT id FROM {scope_threads})
+        SELECT id,thread_id,created_at,LAG(created_at) OVER (ORDER BY created_at,id) AS prior_at FROM (
+          SELECT m.id,m.thread_id,m.created_at FROM messages m JOIN threads s ON s.id=m.thread_id
+            WHERE s.user_id=:user_id
             AND m.role='user' AND COALESCE(json_extract(m.metadata,'$.sender_kind'),'')='' AND {range_filter("m.created_at")}
-          UNION ALL SELECT id,created_at FROM pre_window_message
+          UNION ALL SELECT id,thread_id,created_at FROM pre_window_message
         )
-      ), active_periods AS (
-        SELECT {grain.bucket('created_at')} AS period,
-          SUM(60 + CASE WHEN prior_at IS NULL THEN 0 WHEN strftime('%s',created_at)-strftime('%s',prior_at)<=:max_active_gap_seconds
-          THEN MAX(0,strftime('%s',created_at)-strftime('%s',prior_at)) ELSE 0 END)/3600.0 AS active_hours
-        FROM human_messages WHERE {grain.bucket('created_at')} IS NOT NULL GROUP BY period
+      ), human_minutes AS (
+        SELECT thread_id,{grain.bucket('created_at')} AS period,
+          60 + CASE WHEN prior_at IS NULL THEN 0 WHEN strftime('%s',created_at)-strftime('%s',prior_at)<=:max_active_gap_seconds
+          THEN MAX(0,strftime('%s',created_at)-strftime('%s',prior_at)) ELSE 0 END AS seconds
+        FROM human_messages
+      )"""
+
+
+def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
+    return f"""
+      WITH {human_minutes_cte(grain)}, active_periods AS (
+        SELECT period,SUM(seconds)/3600.0 AS active_hours FROM human_minutes
+        WHERE period IS NOT NULL AND thread_id IN (SELECT id FROM {scope_threads}) GROUP BY period
       ) SELECT a.period,a.active_hours,COALESCE(o.outcomes,0) AS outcomes FROM active_periods a
         LEFT JOIN {outcomes} o USING(period) ORDER BY a.period
     """

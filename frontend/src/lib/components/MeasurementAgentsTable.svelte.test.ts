@@ -93,7 +93,7 @@ describe('MeasurementAgentsTable', () => {
 	});
 
 	it('says why a change is missing instead of showing zero', () => {
-		const thin = agentRow(); thin.metrics.active_hours_per_outcome = metric(null);
+		const thin = agentRow({ n: 400 }); thin.metrics.active_hours_per_outcome = metric(null);
 		const fresh = agentRow({ agent: { id: 'agent-2', name: 'Fresh', project: { id: 'p1', name: 'CORSIA' } } });
 		fresh.metrics.active_hours_per_outcome = { ...metric(0.05), previous_value: null };
 		render(state([thin, fresh]));
@@ -119,10 +119,23 @@ describe('MeasurementAgentsTable', () => {
 			.toEqual(['320', '78%', '–', '-50%']);
 	});
 
-	it('shows the server\'s first ten rows, in a single line each', () => {
-		render(state(Array.from({ length: 12 }, (_, index) => agentRow({ agent: { id: `a${index}`, name: `Agent ${index}`, project: { id: 'p1', name: 'CORSIA' } } }))));
+	it('shows the ten agents with the most outcomes, in a single line each', () => {
+		// Served ranked by a quality metric, so the row set is not the served first ten.
+		render(state(Array.from({ length: 12 }, (_, index) => agentRow({ n: 100 + index, agent: { id: `a${index}`, name: `Agent ${index}`, project: { id: 'p1', name: 'CORSIA' } } }))));
 		expect(host.querySelectorAll('tbody tr')).toHaveLength(10);
-		expect(host.querySelectorAll('tbody tr:first-child th button.filter')[0]?.getAttribute('aria-label')).toBe('Filter to this agent: Agent 0');
+		expect(host.querySelectorAll('tbody tr:first-child th button.filter')[0]?.getAttribute('aria-label')).toBe('Filter to this agent: Agent 11');
+		expect(host.querySelector('tbody')?.textContent).not.toContain('Agent 0');
+	});
+
+	it('capitalises the first letter of an agent name wherever the table prints it', () => {
+		render(state([agentRow({ agent: { id: 'agent-9', name: 'conductor', project: { id: 'p1', name: 'CORSIA' } } })]));
+		expect(host.querySelector('tbody th button.filter')?.textContent).toBe('Conductor');
+		expect(host.querySelector('tbody th button.filter')?.getAttribute('aria-label')).toBe('Filter to this agent: Conductor');
+	});
+
+	it('leaves out an agent with no outcomes in the window', () => {
+		render(state([agentRow({ n: 0, status: 'too_few', rank: null }), agentRow({ n: 5, agent: { id: 'a2', name: 'Busy', project: { id: 'p1', name: 'CORSIA' } } })]));
+		expect(host.querySelectorAll('tbody tr')).toHaveLength(1);
 	});
 
 	it('leaves a too-few agent in the list and named', () => {
@@ -202,9 +215,9 @@ describe('MeasurementAgentsTable', () => {
 		expect(ariaSorts()).toEqual(['none', 'none', 'none', 'none', 'none']);
 	});
 
-	it('opens in the order the server ranked the rows', () => {
+	it('opens with the most outcomes first, not in the order the server ranked the rows', () => {
 		render(state([named('a', 'Few', { n: 5 }), named('b', 'Many', { n: 50 })]));
-		expect(names()).toEqual(['Few', 'Many']);
+		expect(names()).toEqual(['Many', 'Few']);
 	});
 
 	it('sorts ascending, then descending, then back to the served order', () => {

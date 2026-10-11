@@ -12,6 +12,7 @@
 	let {
 		title = 'Document',
 		presence,
+		reviewBar,
 		commentsOpen = false,
 		commentsLoading = false,
 		ready,
@@ -41,6 +42,8 @@
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
+		/** The review bar sits first in the header, so its buttons come before the document in tab order. */
+		reviewBar?: import('svelte').Snippet;
 		commentsOpen?: boolean;
 		commentsLoading?: boolean;
 		ready: boolean;
@@ -144,6 +147,7 @@
 </script>
 
 <header class="document-header" use:detailsKeys>
+	{#if reviewBar}{@render reviewBar()}{/if}
 	<div class="document-identity">
 		<button type="button" class="identity-details" aria-label="Document details" aria-expanded={detailsOpen}
 			onclick={() => detailsOpen = !detailsOpen}>

@@ -25,7 +25,7 @@ from api.measurement_queries import prepare_outcome_periods, query_family
 from api.measurement_scope import validate_scope
 from api.measurement_size import outcome_sizes
 from api.model_groups import (
-    MIN_TASKS, ModelTally, PeriodTasks, cost_class, floor_label, group_shares, includes_local, rest_label, split_by_floor,
+    MIN_TASKS, ModelTally, PeriodTasks, cost_class, group_shares, includes_local, other_label, rest_label, split_by_spend,
 )
 from core.measurement_scope import Grain
 from core.size_rating import CLASS_MIDPOINT_HOURS
@@ -140,6 +140,18 @@ def _row(
     }
 
 
+def _other_row(
+    rest: list[str], tallies: Mapping[str, ModelTally],
+    sizes: Mapping[str, Mapping[str, ModelTally]], first_try: Mapping[str, int],
+) -> dict[str, Any]:
+    # The other row's cells pool its members' tasks, as its own rate does.
+    pooled = ModelTally()
+    for key in rest:
+        pooled.merge(tallies[key])
+    pooled_sizes = _pooled_sizes(sizes[key] for key in rest)
+    return {**_row("", other_label(len(rest)), pooled, False, pooled_sizes, first_try), "other": True}
+
+
 def build_models(
     token_rows: list[dict[str, Any]], turn_rows: list[dict[str, Any]], error_rows: list[dict[str, Any]],
     cost_rows: list[dict[str, Any]], *, resolve: Callable[[Mapping[str, Any]], ModelIdentity],
@@ -196,13 +208,10 @@ def build_models(
     for key in tokens:
         # A model seen only in token share still belongs in the table or its floor row.
         tallies.setdefault(key, ModelTally())
-    kept, floor = split_by_floor(tallies)
+    kept, rest = split_by_spend(tallies)
     rows = [_row(key, identities[key].label, tallies[key], key not in offered, sizes[key], first_try) for key in kept]
-    rows.sort(key=lambda row: (-row["tasks"], row["label"], row["model"]))
-    if floor is not None:
-        # The floor row's cells pool its members' tasks, as its own rate does.
-        floor_sizes = _pooled_sizes(sizes[key] for key in tallies.keys() - set(kept))
-        rows.append({**_row("", floor_label(), floor, False, floor_sizes, first_try), "other": True})
+    if rest:
+        rows.append(_other_row(rest, tallies, sizes, first_try))
 
     total = sum(tokens.values())
     return {
