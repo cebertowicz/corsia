@@ -10,7 +10,7 @@ from loguru import logger
 
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
-from registry import models, registration_writer
+from registry import models, registration_events, registration_writer
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type, image_media_type
 from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
@@ -157,9 +157,9 @@ def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
                 return artifact
         upload = _db.execute(
             "SELECT external_id FROM artifact_identities "
-            "WHERE integration='upload' AND type IN ('upload', 'image') "
+            "WHERE integration='upload' AND type IN (?, ?) "
             "AND path=? AND state='active'",
-            (identity.canonical,),
+            (*registration_events.UPLOAD_IDENTITY_TYPES, identity.canonical),
         ).fetchone()
         return models.resolve_upload(upload["external_id"], db=_db) if upload else None
     finally:

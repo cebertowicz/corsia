@@ -39,16 +39,20 @@ def resolve(integration: str, type: str, external_id: str, db=None) -> dict | No
             _db.close()
 
 
+UPLOAD_IDENTITY_TYPES = ("upload", "image")
+
+
 def resolve_upload(external_id: str, db=None) -> dict | None:
     """Resolve an active upload identity by file id, whether typed upload or image."""
     _db = db or get_db()
     try:
         identity = _db.execute(
             "SELECT integration, type, state FROM artifact_identities "
-            "WHERE integration='upload' AND type IN ('upload', 'image') AND external_id=?",
-            (external_id,),
+            "WHERE integration='upload' AND type IN (?, ?) AND external_id=? "
+            "AND state='active' ORDER BY type='image' DESC LIMIT 1",
+            (*UPLOAD_IDENTITY_TYPES, external_id),
         ).fetchone()
-        if identity is None or identity["state"] != "active":
+        if identity is None:
             return None
         return resolve_normalized_owner(
             _db, identity["integration"], identity["type"], external_id,

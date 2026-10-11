@@ -286,3 +286,42 @@ def test_register_upload_classifies_only_the_canonical_path_suffix(main_db, tmp_
         resolved = models.resolve_upload(f"upload-{index}", db=main_db)
         assert resolved is not None
         assert resolved["type"] == expected_type
+
+
+@pytest.mark.parametrize(
+    ("archived_type", "active_type"),
+    [
+        pytest.param("image", "upload", id="archived-image-active-upload"),
+        pytest.param("upload", "image", id="archived-upload-active-image"),
+    ],
+)
+def test_resolve_upload_ignores_archived_twin(main_db, archived_type, active_type):
+    """The active typed identity wins when a file id has an archived twin."""
+    from registry import models
+
+    file_id = f"twin-{archived_type}-{active_type}"
+    archived = models.register_artifact(
+        integration="upload",
+        type=archived_type,
+        external_id=file_id,
+        parent_thread_id="archived-owner",
+        db=main_db,
+    )
+    active = models.register_artifact(
+        integration="upload",
+        type=active_type,
+        external_id=file_id,
+        parent_thread_id="active-owner",
+        db=main_db,
+    )
+    main_db.execute(
+        "UPDATE artifact_identities SET state='archived' WHERE id=?",
+        (archived["id"],),
+    )
+    main_db.commit()
+
+    resolved = models.resolve_upload(file_id, db=main_db)
+
+    assert resolved is not None
+    assert resolved["id"] == active["id"]
+    assert resolved["type"] == active_type
