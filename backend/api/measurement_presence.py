@@ -61,10 +61,10 @@ def presence_allocation_cte(grain: Grain) -> str:
         UNION ALL
         SELECT p.thread_id,t.project_id,
           MAX(datetime(p.last_entered_at),datetime(:from_ts)) AS began,
-          MIN(datetime('now'),datetime(:to_ts)) AS ended
+          MIN(COALESCE(datetime(p.exit_pending_at),datetime('now')),datetime(:to_ts)) AS ended
         FROM thread_presence p JOIN threads t ON t.id=p.thread_id
         WHERE t.user_id=:user_id AND p.present=1
-          AND p.last_entered_at<:to_ts AND datetime('now')>:from_ts
+          AND p.last_entered_at<:to_ts AND COALESCE(datetime(p.exit_pending_at),datetime('now'))>:from_ts
       ), presence_events AS (
         SELECT began AS instant,1 AS delta FROM presence_intervals WHERE began<ended
         UNION ALL SELECT ended AS instant,-1 AS delta FROM presence_intervals WHERE began<ended
@@ -92,10 +92,18 @@ def presence_allocation_cte(grain: Grain) -> str:
 
 
 def first_presence_at(db, user_id: str) -> str | None:
-    """Return the user's first recorded presence instant across retained sources."""
+    """Return the user's first recorded presence instant across retained sources.
+
+    Ownership follows ``presence_intervals``: a threaded visit belongs to its thread's
+    owner, a project-level visit to its recorded user.
+    """
     row = db.execute("""
         SELECT MIN(instant) AS instant FROM (
-          SELECT datetime(entered_at) AS instant FROM presence_visits WHERE user_id=:user_id
+          SELECT datetime(v.entered_at) AS instant
+          FROM presence_visits v JOIN threads t ON t.id=v.thread_id WHERE t.user_id=:user_id
+          UNION ALL
+          SELECT datetime(entered_at) AS instant FROM presence_visits
+          WHERE thread_id IS NULL AND user_id=:user_id
           UNION ALL
           SELECT datetime(p.last_entered_at) AS instant
           FROM thread_presence p JOIN threads t ON t.id=p.thread_id

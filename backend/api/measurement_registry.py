@@ -30,8 +30,8 @@ REGISTRY: dict[str, MetricDefinition] = {
     "rejections_per_outcome": MetricDefinition("outcomes", "ratio", 20, "2026-08-16"),
     "active_hours_per_outcome": MetricDefinition("active", "hours_per_outcome", 20, "2026-08-31", True, presence_backed=True),
     "outcomes_per_active_hour": MetricDefinition("active", "outcomes_per_hour", 20, "2026-08-31", True, presence_backed=True),
-    # Sized work is its own instrument: its rows and subtotals run from its start, and the rate is withheld
-    # as no_active_time in any period without presence time.
+    # Sized work is its own instrument: its rows and subtotals run from its start. Its rate divides by
+    # presence time, so the rate (rows and windows) is measured only from the first presence period.
     "estimated_human_hours_per_active_hour": MetricDefinition("size", "estimated_human_hours_per_active_hour", 20, "2026-08-31", True),
     # A plain total: a measured period with no presence is a true zero, so nothing is withheld.
     "time_on_platform_h": MetricDefinition("presence", "hours", 0, "2026-09-29", presence_backed=True),

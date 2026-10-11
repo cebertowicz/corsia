@@ -228,9 +228,17 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         metric_spine = _metric_spine(metric, spine, first_limit_period, first_presence, page_grain)
         eligible, first_row = set(metric_spine), len(rows)
         drawn = [period for period in metric_spine if period in page_grain.served]
+        # Sized hours run from the instrument's start, but the size rate divides them by presence
+        # time, which exists only from the first recorded presence. Before that the rate is not
+        # measured: no row or window may divide earlier work by later time.
+        rate_start = max(REGISTRY[metric].start, first_presence) if family == "size" and first_presence else REGISTRY[metric].start
+        rate_period = instrument_period(rate_start, page_grain) if family == "size" else ""
+
+        def rate_measured(name: str, period: str, start: str = rate_period) -> bool:
+            return measured(name, period) and period >= start
         if family == "size":
-            rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, drawn, family_rows[family], period_comparable, measured,
-                                   dates={"data_start": REGISTRY[metric].start, "comparability_before": _COMPARABILITY_BREAK}))
+            rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, drawn, family_rows[family], period_comparable, rate_measured,
+                                   dates={"data_start": rate_start, "comparability_before": _COMPARABILITY_BREAK}))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
             periods = [*drawn, current_period] if metric == "fresh_tokens" else drawn
@@ -245,7 +253,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
             rows.extend(_row(metric, period, sources.get(period), selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence) for period in drawn)
             if metric == "outcomes" and outcomes_so_far is not None:
                 rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain, first_presence))
-        pooling = {"measured": measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,
+        pooling = {"measured": rate_measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,
                    "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence)}
         # Every series pools the window its card names; a size series' comparability marks its rows, never its window.
         windows[metric] = series_windows(metric, page_grain, by_period, periods=set(metric_spine), **pooling)

@@ -201,3 +201,30 @@ def test_presence_coverage_is_one_registry_attribute():
         assert period_measured(name, "2026-09-14", first_presence_period="2026-09-14")
     # A total withholds nothing in a measured period: no presence there is a true zero.
     assert REGISTRY["time_on_platform_h"].minimum_n == 0
+
+
+@pytest.mark.asyncio
+async def test_an_exit_pending_live_visit_ends_where_the_user_left(isolated_db):
+    """A live visit already marked exit-pending counts only up to its back-dated exit,
+    the same instant the sweep will record, so a served period never shrinks later."""
+    from api.measurement_queries import prepare_outcome_periods
+    from infra.database import get_db
+    from tests.test_measurement_api import _family_in_range, _grained
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','t','t')")
+        _seed_thread(db, "agent-a", project_id="one", agent=True)
+        db.execute(
+            "INSERT INTO thread_presence (user_id,thread_id,present,last_entered_at,exit_pending_at,exit_pending_since,"
+            "exit_pending_reason,last_confirmed_at,updated_at) VALUES ('steve','agent-a',1,'2026-09-21T12:00:00Z',"
+            "'2026-09-21T12:30:00Z','2026-09-21T12:32:00Z','hidden','2026-09-21T12:30:00Z','2026-09-21T12:32:00Z')"
+        )
+        db.commit()
+        params = {"user_id": USER["id"], "scope_project": "one", "scope_agent": None,
+                  "from": LEGACY_WEEK_FROM, "to": LEGACY_WEEK_TO}
+        prepare_outcome_periods(db, _grained(params))
+        rows = _family_in_range(db, "presence", params)
+    finally:
+        db.close()
+    assert [row["value"] for row in rows] == [pytest.approx(0.5)]
