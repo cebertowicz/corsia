@@ -3,7 +3,9 @@
 ``doceditor/image_regions.py`` and ``doceditor/image_markup.py`` port three viewer
 rules (``docPresence.ts`` ``agentColor``, ``projectColors.ts`` ``projectColor``,
 ``imageRegions.ts`` ``placeTag`` and ``placeTags``) so the image an agent gets back looks like the
-one the reader sees. This test and the frontend's
+one the reader sees, and ``doceditor/doc_images.py`` ports ``markdown-image.ts``
+``resolveImagePath``, so a comment on an image in a document is keyed by the file
+the editor draws. This test and the frontend's
 ``image-region-parity.test.ts`` both hold their side to one committed fixture, so
 a change to either side fails until the other follows.
 """
@@ -15,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from doceditor.doc_images import resolve_image_path
 from doceditor.image_markup import Region, place_tag, place_tags
 from doceditor.image_regions import _project_color, agent_color
 
@@ -55,3 +58,8 @@ def test_tag_sets_match_viewer(case):
     assert [side for _, _, side in placed] == [e["side"] for e in case["expected"]]
     for (x, y, _), expected in zip(placed, case["expected"], strict=True):
         assert (x, y) == (pytest.approx(expected["x"], abs=1e-3), pytest.approx(expected["y"], abs=1e-3))
+
+
+@pytest.mark.parametrize("case", CONTRACT["image_paths"], ids=lambda c: c["case"])
+def test_image_path_matches_viewer(case):
+    assert resolve_image_path(case["doc_path"], case["url"]) == case["expected"]

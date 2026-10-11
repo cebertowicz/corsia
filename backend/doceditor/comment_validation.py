@@ -13,7 +13,7 @@ def validate_create(
 ) -> str:
     """Validate the common create shape and return normalized body text."""
     text = (body or "").strip()
-    check_region_shape(region=region, parent_id=parent_id, review=review, quote=quote, replacement=replacement)
+    check_region_shape(region=region, parent_id=parent_id, review=review, replacement=replacement)
     if replacement is not None:
         if parent_id or review:
             raise CommentActionError(
@@ -43,6 +43,6 @@ def validate_create(
     if not parent_id and not review and region is None and not (quote or "").strip():
         raise CommentActionError(
             "quote_required",
-            "quote is required to anchor a top-level comment (on an image, pass region instead)",
+            "quote is required to anchor a top-level comment (on an image artifact, pass region instead)",
         )
     return text

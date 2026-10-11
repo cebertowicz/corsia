@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from doceditor import comments, feedback_batches, image_regions
+from doceditor import comments, doc_images, feedback_batches, image_regions
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -48,7 +48,7 @@ def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None
         return anchor.quote, anchor.start, anchor.end, anchor.prefix, anchor.suffix
     if request.live_capture:
         raise CommentSelectionChanged("The live document closed. Reopen it; your draft is kept.")
-    if request.parent_id or request.review or not request.quote or request.region is not None:
+    if request.parent_id or request.review or not request.quote:
         return request.quote, request.start, request.end, None, None
     if request.browser:
         try:
@@ -58,7 +58,26 @@ def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None
         return request.quote, request.start, request.end, *(context or (None, None))
     text = read_doc_text(request.path)
     start, end = resolve_quote(text, request.quote, request.near)
+    if request.region is not None:
+        return doc_images.widen_to_image(text, start, end)
     return request.quote, start, end, *(anchor_context(text, start, end, request.quote) or (None, None))
+
+
+def _image(db, request: CommentInput, quote: str | None) -> tuple[str | None, str]:
+    """The (image_src, image_rev) a new region comment is placed on.
+
+    An image artifact is its own image; in a document it is the file the
+    anchored markdown shows, resolved here and never taken from the client.
+    """
+    if image_regions.is_image_path(request.path):
+        return None, image_regions.image_revision(image_regions.require_image(request.path))
+    if request.artifact_id is not None:
+        artifact = registry_models.get_artifact(request.artifact_id, db=db)
+        owner = artifact["parent_thread_id"] if artifact else None
+    else:
+        owner = request.author_thread_id
+    image = doc_images.image_file(db, doc_path=request.path, markdown=quote, owner_thread_id=owner)
+    return str(image), image_regions.image_revision(image)
 
 
 def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, receipt: CreateReceipt):
@@ -71,9 +90,9 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 raise CommentAccessDenied('Artifact not found')
         duplicate = comments.get_comment(identifier, db=db)
         quote, start, end, prefix, suffix = _anchor(request, anchor, duplicate)
-        image_rev = None
+        image_src = image_rev = None
         if request.region is not None and duplicate is None:
-            image_rev = image_regions.image_revision(image_regions.require_image(request.path))
+            image_src, image_rev = _image(db, request, quote)
         artifact_id = request.artifact_id
         registered = request.registration is not None
         with write_transaction(db, scope="create_document_comment") as connection:
@@ -87,7 +106,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
                 review=request.review, replacement=request.replacement, client_id=identifier,
-                region=request.region, image_rev=image_rev, db=connection,
+                region=request.region, image_rev=image_rev, image_src=image_src, db=connection,
             )
             feedback = feedback_batches.record_comment(connection, row, created=created, submit=request.submit)
         return row, registered, feedback

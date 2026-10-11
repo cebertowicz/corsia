@@ -106,8 +106,7 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             raise HTTPException(400, exc.message) from exc
     try:
         region = image_regions.check_region_shape(
-            region=body.region, parent_id=body.parent_id, review=body.review,
-            quote=body.anchor_text, replacement=body.replacement,
+            region=body.region, parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         )
     except CommentActionError as exc:
         raise HTTPException(400, exc.message) from exc
@@ -122,8 +121,6 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             db.close()
 
     path = await run_in_db(_access)
-    if region is not None and not image_regions.is_image_path(path):
-        raise HTTPException(400, "region applies only to an image artifact.")
 
     if body.anchor_text and not body.parent_id and not body.review and (body.from_off is None or body.to_off is None):
         raise HTTPException(400, "Anchored comments require selection offsets")
