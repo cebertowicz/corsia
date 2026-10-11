@@ -70,8 +70,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": ["string", "null"],
         "enum": [*SIZE_CLASSES, None],
         "description": (
-            f"Human-equivalent effort to deliver the node: {SIZE_SCALE_DESCRIPTION}. "
-            "Set it on every task you add."
+            f"{SIZE_SCALE_DESCRIPTION}. Set it on every task you add."
         ),
     },
     "difficulty_rerated": {

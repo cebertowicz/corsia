@@ -20,18 +20,16 @@ def test_the_rubric_names_every_size_class_in_order():
     assert tuple(named) == SIZE_CLASSES
 
 
-def test_the_tool_field_carries_the_rubric_and_tells_agents_to_set_it():
+def test_the_tool_field_carries_the_exact_rubric_and_tells_agents_to_set_it():
     description = MUTATION_FIELD_SCHEMAS["size"]["description"]
-    assert SIZE_SCALE_DESCRIPTION in description
-    assert "every task you add" in description
+    assert description == f"{SIZE_SCALE_DESCRIPTION}. Set it on every task you add."
 
 
-def test_the_skill_states_the_rubric_once_in_its_general_plan_guidance():
+def test_the_skill_states_the_exact_rubric_once_in_its_general_plan_guidance():
     text = _SKILL.read_text(encoding="utf-8")
     assert text.count(SIZE_SCALE_DESCRIPTION) == 1
     plan_section = text.split("## Plan", 1)[1].split("## Declared workflows", 1)[0]
-    assert "- **Size.** Set `size` on each task node you add or insert" in plan_section
-    assert SIZE_SCALE_DESCRIPTION in plan_section
+    assert f"- **Size.** {SIZE_SCALE_DESCRIPTION}. Set it on every task you add or insert." in plan_section
     workflow = text.split("## Declared workflows", 1)[1].split("\n## ", 1)[0]
     assert "under 15 min" not in workflow and "(see **Size**)" in workflow
 

@@ -38,6 +38,8 @@ CLASS_MIDPOINT_HOURS: dict[str, float] = {
 }
 SIZE_CLASSES = (*CLASS_MIDPOINT_HOURS, UNKNOWN)
 SIZE_SCALE_DESCRIPTION = (
+    "How long a capable person would need to deliver this result by hand, including the reading, "
+    "thinking, drafting, checking and revising it takes; not how long you will take. "
     "XS under 15 min, S under 1 h, M under 4 h, L under 16 h, XL under 80 h, "
     "XXL more; unknown if you cannot tell"
 )
