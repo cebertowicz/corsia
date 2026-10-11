@@ -179,3 +179,32 @@ def notify_reviewer_verdict(
             },
         )
     return result
+
+
+def notify_required_check_timeout(
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    workflow_run: dict[str, Any],
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> OwnerDeliveryResult:
+    """Route a required CI timeout through the established PR-owner event path."""
+    run_url = str(workflow_run.get("html_url") or "")
+    job_name = str(
+        workflow_run.get("job_name") or workflow_run.get("name") or workflow_run.get("display_title") or "required check"
+    )
+    return deliver_owner_event(
+        repo,
+        pr_number,
+        "reviewer.required_check_timeout",
+        f"PR #{pr_number}: required check timed out ({job_name}); inspect {run_url}",
+        {
+            "repo": repo,
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "run_url": run_url,
+            "job_name": job_name,
+        },
+        loop,
+        chip=f"PR #{pr_number}: required check timed out ({job_name})",
+    )

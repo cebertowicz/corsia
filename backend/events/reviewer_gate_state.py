@@ -54,3 +54,30 @@ def release_in_flight(pr_key: str, head_sha: str) -> None:
     """Release an eligible reviewer run after its terminal attempt."""
     with _IN_FLIGHT_LOCK:
         _IN_FLIGHT.discard((pr_key, head_sha))
+
+
+def claim_workflow_rerun(pr_key: str, run_id: int, attempt: int) -> bool:
+    """Durably claim one Actions re-run attempt in the existing gate state.
+
+    The primary PR key remains exclusively for a reviewer verdict receipt. Its
+    namespaced sibling key is an action receipt, so a restart cannot submit the
+    same Actions run attempt twice and no second state registry is introduced.
+    """
+    from infra.database import write_transaction
+
+    action_key = f"{pr_key}:rerun:{run_id}:{attempt}"
+    with write_transaction(None, scope="claim_workflow_rerun") as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO reviewer_gate_state (pr_key, reviewed_sha) VALUES (?, ?)",
+            (action_key, "rerun"),
+        )
+        return cursor.rowcount == 1
+
+
+def release_workflow_rerun(pr_key: str, run_id: int, attempt: int) -> None:
+    """Release a failed re-run request so a later sweep may retry it."""
+    from infra.database import write_transaction
+
+    action_key = f"{pr_key}:rerun:{run_id}:{attempt}"
+    with write_transaction(None, scope="release_workflow_rerun") as conn:
+        conn.execute("DELETE FROM reviewer_gate_state WHERE pr_key = ?", (action_key,))

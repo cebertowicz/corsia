@@ -35,6 +35,7 @@ RUNTIME_LOOP_TASKS: tuple[tuple[str, str], ...] = (
     ("cc idle retirement", "_cc_idle_retirement_task"),
     ("github notifications", "_github_notifications_task"),
     ("pr quiet watch", "_pr_quiet_watch_task"),
+    ("reviewer reconciliation", "_reviewer_reconciliation_task"),
     ("request timing flush", "_request_timing_flush_task"),
     ("live bulletin feed", "_live_bulletin_task"),
 )
@@ -123,6 +124,9 @@ async def _start_runtime_services() -> None:
     state._cc_idle_retirement_task = asyncio.create_task(idle_retirement_loop())
     state._github_notifications_task = asyncio.create_task(notifications_poll_loop())
     state._pr_quiet_watch_task = asyncio.create_task(pr_quiet_watch_loop())
+    from events.reviewer_reconciliation import loop as reviewer_reconciliation_loop
+
+    state._reviewer_reconciliation_task = asyncio.create_task(reviewer_reconciliation_loop())
     from infra.request_timing import start_flush_loop
 
     state._request_timing_flush_task = start_flush_loop()

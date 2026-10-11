@@ -329,3 +329,4 @@ def get_pull_request_info(repo: str, pr_number: int) -> dict[str, Any] | None:
         "title": title,
         "body": body,
     }
+

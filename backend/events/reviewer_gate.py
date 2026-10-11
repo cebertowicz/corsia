@@ -14,6 +14,7 @@ from infra.product_events import emit_product_event
 
 
 MERGEABILITY_RETRY_DELAYS_S = (30.0, 90.0, 300.0)
+# Periodic reconciliation lives in reviewer_reconciliation.py.
 _PENDING_RETRIES: set[asyncio.Task[None]] = set()
 
 
@@ -172,6 +173,7 @@ def _evaluate_review_gate(
     internal_event: str,
     loop: asyncio.AbstractEventLoop | None,
     mergeability_retry_attempt: int = 0,
+    checks: list[dict[str, Any]] | None = None,
 ) -> None:
     pr_key = reviewer_gate_state.pr_key(repo, pr_number)
     if reviewer_gate_state.get_reviewed_sha(pr_key) == head_sha:
@@ -185,7 +187,7 @@ def _evaluate_review_gate(
         )
         return
 
-    checks_result = github_reviewer_gate.checks_green(repo, pr_number, head_sha)
+    checks_result = github_reviewer_gate.checks_green(repo, pr_number, head_sha) if checks is None else github_reviewer_gate.checks_green(repo, pr_number, head_sha, checks)
     if checks_result is None:
         log.error(
             "reviewer-gate: PR #{} sha={} — check fetch unreadable; "
@@ -280,6 +282,8 @@ def _evaluate_ready_pr(
         )
     finally:
         reviewer_gate_state.release_in_flight(pr_key, head_sha)
+
+
 
 
 def _schedule_mergeability_retry(
