@@ -219,8 +219,11 @@ def recount_changed_plans() -> list[str]:
             if owner == threading.get_ident():
                 found.extend(_mismatches(connection))
             elif path is not None:
-                uri = f"file:{quote(path)}?mode=ro"
-                with closing(_original_connect(uri, uri=True, timeout=0, factory=_guarded(sqlite3.Connection))) as reader:
+                # A guarded subclass: ``aggregates.ready`` keeps a weak reference to its connection.
+                reader: sqlite3.Connection = _original_connect(
+                    f"file:{quote(path)}?mode=ro", uri=True, timeout=0, factory=_guarded(sqlite3.Connection)
+                )
+                with closing(reader):
                     found.extend(_mismatches(reader))
         except sqlite3.Error:
             continue  # closed, locked or without the plan tables: nothing to compare
