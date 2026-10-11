@@ -248,7 +248,7 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
             tray = _working_tray(db, reader_thread_id)
         except (ValueError, OSError) as exc:
             problem = f"the reader's working folder could not be used ({exc})."
-    if problem is not None:
+    if tray is None:
         line = f"Marked-up image unavailable: {problem}"
     else:
         image = Path(str(path))
