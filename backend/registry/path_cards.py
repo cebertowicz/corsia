@@ -20,7 +20,7 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import unquote
 
-from registry.chat_cards import reference_card, reference_cards as live_reference_cards
+from registry.chat_cards import reference_card, reference_cards_by_artifact
 from registry.path_access import lookup_file, lookup_files
 
 MAX_CARDS = 8
@@ -110,7 +110,7 @@ def reference_cards_by_message(
         for lookup in found.values()
         if lookup.artifact is not None
     }
-    cards_by_artifact = live_reference_cards(db, artifacts, user_id)
+    cards_by_artifact = reference_cards_by_artifact(db, artifacts, user_id)
     result: dict[str, tuple[list[dict], int]] = {}
     for message_id, paths in paths_by_message.items():
         cards: list[dict] = []
@@ -132,7 +132,7 @@ def reference_cards_by_message(
     return result
 
 
-def reference_cards(
+def reference_cards_for_text(
     db, text: str, bases: Sequence[Path], user_id: str, *, covered: Mapping[str, Collection[str]] | None = None,
 ) -> tuple[list[dict], int]:
     """Cards for the registered artifacts ``text`` names, and how many more past the cap.

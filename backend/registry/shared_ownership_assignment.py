@@ -17,6 +17,7 @@ from infra.settings import set_setting
 from plans import public as plans
 from registry import node_retirement, service
 from registry.doc_freshness import seed_verified_from_headers
+from registry.file_resolution import find_file_identity
 from registry.durable_writes import _bounded_shared_files
 from registry.identity_metadata import merge_identity_metadata
 from registry.ownership import rehome_artifact
@@ -98,7 +99,7 @@ def inventory_shared_ownership(workspace: Path, project_id: str | None, *, db) -
     rows: list[Assignment] = []
     files = sorted(_bounded_shared_files(shared_root), key=lambda item: item.as_posix())
     for path in files:
-        artifact = service.find_file_identity(str(path), db=db)
+        artifact = find_file_identity(str(path), db=db)
         registered = artifact_owner(str(artifact["id"]), db=db) if artifact else None
         fields = header_fields(path)
         header_value = fields.get("owner")
@@ -264,7 +265,7 @@ def apply_shared_ownership(
     with write_transaction(db, scope="assign_shared_ownership") as connection:
         for row in rows:
             path = root / row.path
-            artifact = service.find_file_identity(str(path), db=connection)
+            artifact = find_file_identity(str(path), db=connection)
             if artifact is None:
                 initial_owner = scope_conductor(project_id, db=connection) or row.owner
                 artifact = service.register_write_strict(

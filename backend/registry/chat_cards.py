@@ -142,7 +142,9 @@ def ask_cards(db, asks: Mapping[str, str]) -> dict[str, dict[str, Any]]:
     return cards
 
 
-def reference_cards(db, artifacts: Mapping[str, Mapping[str, Any]], user_id: str) -> dict[str, dict[str, Any]]:
+def reference_cards_by_artifact(
+    db, artifacts: Mapping[str, Mapping[str, Any]], user_id: str,
+) -> dict[str, dict[str, Any]]:
     """Reference cards by artifact id, with owning-thread access checked in one read."""
     access = may_access_artifacts(
         [artifact.get("parent_thread_id") for artifact in artifacts.values()], user_id, db=db,

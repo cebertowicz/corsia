@@ -94,19 +94,31 @@ def require_human_user(user: dict = Depends(require_user)) -> dict:
     return user
 
 
-def owns_thread(thread_id: str, user_id: str, db=None) -> bool:
-    """True iff ``thread_id`` exists AND belongs to ``user_id``.
+def owned_thread_ids(thread_ids, user_id: str, db=None) -> set[str]:
+    """Return the requested real thread ids owned by ``user_id`` in one read."""
+    from infra.database import get_db
 
-    The one ownership predicate the resource routes share — a thin boolean
-    over ``get_thread_for_user`` so handlers read as "does this user own the
-    owning thread?" at the callsite. ``None``/empty owning-thread ids (the
-    ``ui``/``project:<id>`` sentinels, an unscoped register) are never owned
-    by a real user and fall through to False.
-    """
-    if not thread_id:
-        return False
-    from infra.queries import get_thread_for_user
-    return get_thread_for_user(thread_id, user_id, db=db) is not None
+    requested = list(dict.fromkeys(thread_id for thread_id in thread_ids if thread_id))
+    if not requested:
+        return set()
+    marks = ",".join("?" for _ in requested)
+    connection = db or get_db()
+    try:
+        return {
+            row["id"]
+            for row in connection.execute(
+                f"SELECT id FROM threads WHERE user_id=? AND id IN ({marks})",
+                (user_id, *requested),
+            ).fetchall()
+        }
+    finally:
+        if db is None:
+            connection.close()
+
+
+def owns_thread(thread_id: str, user_id: str, db=None) -> bool:
+    """True iff ``thread_id`` exists and belongs to ``user_id``."""
+    return bool(thread_id) and thread_id in owned_thread_ids([thread_id], user_id, db=db)
 
 
 def is_owner_sentinel(parent_thread_id: str | None) -> bool:
@@ -127,20 +139,9 @@ def is_owner_sentinel(parent_thread_id: str | None) -> bool:
 
 def may_access_artifacts(parent_thread_ids, user_id: str, db=None) -> dict[str | None, bool]:
     """Batch the owning-thread access predicate for a page of artifact cards."""
-    from infra.database import get_db
-
     owners = list(dict.fromkeys(parent_thread_ids))
     real = [owner for owner in owners if not is_owner_sentinel(owner)]
-    owned: set[str] = set()
-    if real:
-        marks = ",".join("?" for _ in real)
-        owned = {
-            row["id"]
-            for row in (db or get_db()).execute(
-                f"SELECT id FROM threads WHERE user_id=? AND id IN ({marks})",
-                (user_id, *real),
-            ).fetchall()
-        }
+    owned = owned_thread_ids(real, user_id, db=db)
     return {
         owner: is_owner_sentinel(owner) or owner in owned
         for owner in owners

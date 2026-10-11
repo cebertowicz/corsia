@@ -10,6 +10,7 @@ from loguru import logger
 from infra.database import get_db, write_transaction
 from infra.product_events import emit_product_event
 from registry import models, service
+from registry.file_resolution import prepare_file_identity
 
 def thread_sentinel(project_id: str) -> str:
     """The ``parent_thread_id`` sentinel for settings-driven rows."""
@@ -33,7 +34,7 @@ def sync_bootload_documents(
         prepared = []
         for entry in files:
             path = (workspace_dir / entry).resolve()
-            identity = service.prepare_file_identity(str(path), db=_db)
+            identity = prepare_file_identity(str(path), db=_db)
             if identity is None:
                 raise ValueError(f"path is outside the registrable roots: {path}")
             prepared.append((entry, identity))

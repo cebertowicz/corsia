@@ -18,7 +18,7 @@ from registry.shared_category_index import (
 from registry.shared_document_events import record_post_write_events
 from registry.identity_metadata import sha256_file as _sha256_file
 from registry import durable_write_intents as intents
-from registry import models, registration_writer, service, write_preparation
+from registry import file_resolution, models, registration_writer, service, write_preparation
 from registry.shared_principals import WriteAuthority, artifact_owner
 from registry.shared_target import SharedTarget
 from registry.document_ownership import document_write_authority
@@ -162,7 +162,7 @@ def _similar_files(target: Path, shared_root: Path) -> list[str]:
 
 
 def _intent_identity(target: Path, *, db) -> tuple[str, str]:
-    identity = service.prepare_file_identity(str(target), db=db)
+    identity = file_resolution.prepare_file_identity(str(target), db=db)
     if identity is None:
         raise DurableWritePolicyError(
             f"Shared target is outside registrable roots: {target}"
@@ -216,7 +216,7 @@ def _register_applied(
             f"Shared target is outside registrable roots: {shared.path}"
         )
     source_identity = (
-        service.prepare_file_identity(str(source), db=db)
+        file_resolution.prepare_file_identity(str(source), db=db)
         if source is not None and not source.exists() else None
     )
     metadata = {"last_written_sha256": content_hash}
@@ -234,7 +234,7 @@ def _register_applied(
         if artifact["external_id"] != external_id:
             raise RuntimeError("Durable write identity changed during registration.")
         source_artifact = (
-            service.find_file_identity(source_identity, db=db)
+            file_resolution.find_file_identity(source_identity, db=db)
             if source_identity is not None else None
         )
         if source_artifact is not None:
@@ -700,7 +700,7 @@ def _recovery_shared_target(target: Path, row: dict, *, workspace: Path, db) -> 
             scope_id = str(project["id"])
             break
     category_root = target.parent
-    artifact = service.find_file_identity(str(target), db=db)
+    artifact = file_resolution.find_file_identity(str(target), db=db)
     owner = artifact_owner(str(artifact["id"]), db=db) if artifact is not None else None
     return SharedTarget(
         target,

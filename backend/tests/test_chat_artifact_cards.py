@@ -19,13 +19,13 @@ import pytest
 
 from api.thread_cards import attach_cards, hydrate_update_asks
 from api.thread_paging import page_messages
-from infra import thread_updates
+from infra import auth, thread_updates
 from infra.schema import SCHEMA_SQL
 from plans import service
 from plans.boundary import PlanActor, mutate
 from registry import service as registry_service
 from registry.chat_cards import ask_cards
-from registry.path_cards import MAX_CARDS, reference_cards, targets, workspace_path
+from registry.path_cards import MAX_CARDS, reference_cards_for_text, targets, workspace_path
 from tests.plan_ask_helpers import document_ask
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -166,6 +166,25 @@ def test_a_hold_without_call_ids_binds_to_the_latest_step_of_its_turn_at_that_ti
     page = _page(db)
 
     assert [i for i in ("m1", "m2", "m3", "m4") if page[i].get("cards")] == ["m2"]
+
+
+def test_single_and_batch_artifact_access_share_the_owned_thread_seam(db, monkeypatch):
+    calls = []
+
+    def owned_thread_ids(thread_ids, user_id, *, db=None):
+        calls.append((tuple(thread_ids), user_id, db))
+        return {"owner"}
+
+    monkeypatch.setattr(auth, "owned_thread_ids", owned_thread_ids)
+
+    assert auth.may_access_artifact("owner", "user", db=db)
+    assert auth.may_access_artifacts(["owner", "stranger", "ui", None], "user", db=db) == {
+        "owner": True, "stranger": False, "ui": True, None: True,
+    }
+    assert calls == [
+        (("owner",), "user", db),
+        (("owner", "stranger"), "user", db),
+    ]
 
 
 def test_page_card_queries_are_constant_for_asks_and_references(db, ws, monkeypatch):
@@ -495,7 +514,7 @@ def test_a_message_gets_a_card_per_registered_file_it_names_and_none_for_others(
     strangers = _registered(db, ws, "theirs.md", thread="stranger")
     text = f"[plan](plan.md) [no](unregistered.md) [theirs](theirs.md) [gone](missing.md) {ws}/plan.md"
 
-    cards, more = reference_cards(db, text, [ws.resolve()], "user")
+    cards, more = reference_cards_for_text(db, text, [ws.resolve()], "user")
 
     assert [(c["kind"], c["artifact_id"], c["title"]) for c in cards] == [("artifact", kept, "plan.md")]
     assert more == 0 and strangers not in {c["artifact_id"] for c in cards}
@@ -506,7 +525,7 @@ def test_a_message_past_the_cap_shows_eight_cards_and_the_count_of_the_rest(db, 
     for name in names:
         _registered(db, ws, name)
 
-    cards, more = reference_cards(db, " ".join(f"[x]({n})" for n in names), [ws.resolve()], "user")
+    cards, more = reference_cards_for_text(db, " ".join(f"[x]({n})" for n in names), [ws.resolve()], "user")
 
     assert (len(cards), more) == (MAX_CARDS, 3)
 
@@ -578,7 +597,7 @@ def test_a_reference_card_carries_the_artifact_type_the_canvas_uses_for_images(d
     png = str(registry_service.register_write_strict("owner", str(ws / "shot.png"), title="Shot", db=db)["id"])
     doc = _registered(db, ws, "plan.md")
 
-    cards, _ = reference_cards(db, "[a](shot.png) [b](plan.md)", [ws.resolve()], "user")
+    cards, _ = reference_cards_for_text(db, "[a](shot.png) [b](plan.md)", [ws.resolve()], "user")
 
     by_id = {c["artifact_id"]: c for c in cards}
     assert (by_id[png]["type"], by_id[png]["icon"], by_id[png]["opens"]) == ("image", "image", True)

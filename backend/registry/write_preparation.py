@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from infra.database import get_db
-from registry import service
+from registry.file_resolution import find_file_identity, prepare_file_identity
 from registry.file_identity import FileIdentity, PreparedFileWrite
 from registry.identity_metadata import sha256_file
 
@@ -20,7 +20,7 @@ def prepare_file_write(
     """Resolve identity, hash the local file, and plan any moved-file recovery."""
     if isinstance(abs_path, PreparedFileWrite):
         return abs_path
-    identity = service.prepare_file_identity(abs_path, db=db)
+    identity = prepare_file_identity(abs_path, db=db)
     if identity is None:
         return None
     path = Path(identity.canonical)
@@ -29,7 +29,7 @@ def prepare_file_write(
     _db = db or get_db()
     try:
         moved_from = None
-        existing = service.find_file_identity(identity, db=_db)
+        existing = find_file_identity(identity, db=_db)
         if existing is None:
             from registry.moved_files import plan_shared_moved_file_recovery
 

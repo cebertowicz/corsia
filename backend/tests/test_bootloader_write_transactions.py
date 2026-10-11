@@ -10,7 +10,7 @@ import pytest
 from api import context_bootloader as api
 from infra import config, database
 from infra.platform_paths import WorkspaceSelection
-from registry import bootload, service
+from registry import bootload, file_resolution, service
 from registry.file_identity import FileIdentity
 
 
@@ -22,7 +22,7 @@ def context_scope(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "WORKSPACE_SELECTION", WorkspaceSelection(
         workspace_id="context-writes", root=workspace.resolve(), name="Context writes",
     ))
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **_kwargs: [workspace])
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", lambda **_kwargs: [workspace])
     for filename in ("first.md", "second.md"):
         (workspace / filename).write_text(filename, encoding="utf-8")
     with database.write_transaction(None, scope="seed_bootloader_write_test") as db:
@@ -147,7 +147,7 @@ async def test_context_edit_commits_its_list_journal_and_audit(
 def test_bootload_prepares_real_paths_before_acquiring_its_writer(context_scope, monkeypatch):
     """Resolving inside the writer blocks another connection before registration."""
     db_path, workspace = context_scope
-    prepare = service.prepare_file_identity
+    prepare = file_resolution.prepare_file_identity
 
     def prepare_with_free_writer(path, **kwargs):
         if not isinstance(path, FileIdentity):
@@ -156,7 +156,7 @@ def test_bootload_prepares_real_paths_before_acquiring_its_writer(context_scope,
                 other.rollback()
         return prepare(path, **kwargs)
 
-    monkeypatch.setattr(service, "prepare_file_identity", prepare_with_free_writer)
+    monkeypatch.setattr(file_resolution, "prepare_file_identity", prepare_with_free_writer)
     assert bootload.sync_bootload_documents("context-project", workspace, ["first.md"]) is None
     with closing(sqlite3.connect(str(db_path))) as check:
         check.row_factory = sqlite3.Row

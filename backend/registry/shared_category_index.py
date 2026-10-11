@@ -8,6 +8,7 @@ import re
 
 from infra.database import write_transaction
 from registry import service
+from registry.file_resolution import find_file_identity
 from registry.identity_metadata import merge_identity_metadata, sha256_file
 from registry.shared_document_events import record_post_write_events
 from registry.shared_documents import resolve_shared_target
@@ -87,7 +88,7 @@ def append_category_index_entry(
             project_id = None if shared.scope_id == "workspace" else shared.scope_id
             conductor = scope_conductor(project_id, db=db)
             with write_transaction(db, scope="register_category_index"):
-                artifact = service.find_file_identity(str(index_path), db=db)
+                artifact = find_file_identity(str(index_path), db=db)
                 if artifact is None:
                     artifact = service.register_write_strict(
                         conductor or index_shared.actor_principal or thread_id,

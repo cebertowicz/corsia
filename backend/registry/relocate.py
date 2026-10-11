@@ -14,6 +14,7 @@ from core.workspace_layout import thread_tray_owners
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from registry import models, service
 from registry.file_identity import external_identity_for_path
+from registry.file_resolution import normalize_file_path
 from registry.identity_bridge import OWNER_REGISTRATION_STATES
 from registry.registration_events import _append_registration_event, _now
 from registry.relocation_identity import target_identity
@@ -114,7 +115,7 @@ def _validated_move(
     if not source_p.exists():
         raise RelocationError(f"source file does not exist: {source}")
 
-    normalized = service.normalize_file_path(target_path, db=db)
+    normalized = normalize_file_path(target_path, db=db)
     if normalized is None:
         raise RelocationError(
             f"target is outside the registrable roots: {target_path}"

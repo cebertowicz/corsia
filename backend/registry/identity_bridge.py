@@ -24,24 +24,7 @@ class OriginRebind:
     plan_node_id: str | None
 
 
-def settled_row_rebind(
-    db, artifact_id: str, thread_id: str | None,
-) -> OriginRebind | None:
-    """Unbound rebind for a thread's retired row, so a deliberate hand-off shows it.
-
-    None when no thread is to be shown the artifact, or its row is absent,
-    shown, quiet or pinned: there is nothing to lift, and a live row keeps the
-    task it is bound to.
-    """
-    if thread_id is None:
-        return None
-    settled = db.execute(
-        "SELECT 1 FROM artifact_registrations "
-        "WHERE artifact_id=? AND parent_thread_id=? AND surfacing='settled'",
-        (artifact_id, thread_id),
-    ).fetchone()
-    return OriginRebind(None) if settled else None
-
+# Registration rebind lookup is owned by registry.registration_rebind.
 
 class ParentChainOwnershipError(PermissionError):
     """A digest-only parent-chain subscriber cannot become an owner."""
@@ -89,42 +72,130 @@ def normalized_row_by_id(
     parent_thread_id: str | None = None,
     registration_states: tuple[str, ...] = OWNER_REGISTRATION_STATES,
 ) -> dict | None:
+    if parent_thread_id is None and registration_states == OWNER_REGISTRATION_STATES:
+        return normalized_rows_by_ids(db, [artifact_id]).get(artifact_id)
+
     identity = db.execute(
         "SELECT state FROM artifact_identities WHERE id=?", (artifact_id,)
     ).fetchone()
-    if identity is None:
+    if identity is None or identity["state"] != "active":
         return None
 
     states = registration_states
-    projected_state = None
-    if parent_thread_id is None and registration_states == OWNER_REGISTRATION_STATES:
-        if identity["state"] != "active":
-            states = OWNER_REGISTRATION_STATES
-        else:
-            owner = _joined_registration(db, artifact_id, states)
-            if owner is not None:
-                return public_row_from_normalized(owner)
-            released_owner = _latest_released_owner_thread_id(db, artifact_id)
-            if released_owner is None:
-                return None
-            parent_thread_id = released_owner
-            states = RELEASED_OWNER_REGISTRATION_STATES
-            projected_state = "archived"
-    elif identity["state"] != "active":
-        return None
 
     row = _joined_registration(
         db, artifact_id, states, parent_thread_id=parent_thread_id
     )
     if row is None:
         return None
-    projected = dict(row)
-    if projected_state is not None:
-        projected["projected_state"] = projected_state
-    return public_row_from_normalized(projected)
+    return public_row_from_normalized(row)
 
 
-# Batch projections live in registry.batch_projection.
+def normalized_rows_by_ids(db, artifact_ids) -> dict[str, dict]:
+    """Default public projections for artifacts, including released-owner fallback.
+
+    This is the sole default projection rule for both single and batched reads.
+    """
+    ids = list(dict.fromkeys(artifact_ids))
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    owner_states = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
+    rows = db.execute(
+        f"""SELECT {_registration_columns()}
+              FROM artifact_identities i
+              JOIN artifact_registrations r ON r.artifact_id=i.id
+             WHERE i.id IN ({marks})
+               AND r.relationship_state IN ({owner_states})
+             ORDER BY i.id,
+                      CASE r.relationship_state
+                        WHEN 'owner-pinned' THEN 0 ELSE 1 END,
+                      r.updated_at DESC, r.id ASC""",
+        (*ids, *OWNER_REGISTRATION_STATES),
+    ).fetchall()
+    found: dict[str, dict] = {}
+    for row in rows:
+        found.setdefault(row["identity_id"], public_row_from_normalized(row))
+
+    unresolved = [artifact_id for artifact_id in ids if artifact_id not in found]
+    if not unresolved:
+        return found
+    marks = ",".join("?" for _ in unresolved)
+    latest = db.execute(
+        f"""WITH ranked AS (
+                SELECT artifact_id, event_type, old_owner_thread_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY artifact_id ORDER BY created_at DESC, rowid DESC
+                       ) AS position
+                  FROM artifact_registration_events
+                 WHERE artifact_id IN ({marks})
+                   AND event_type IN ('ownership_released', 'ownership_rehomed')
+            )
+            SELECT artifact_id, old_owner_thread_id
+              FROM ranked
+             WHERE position=1 AND event_type='ownership_released'""",
+        unresolved,
+    ).fetchall()
+    released = [(row["artifact_id"], row["old_owner_thread_id"]) for row in latest]
+    if not released:
+        return found
+    values = ",".join("(?, ?)" for _ in released)
+    released_states = ",".join("?" for _ in RELEASED_OWNER_REGISTRATION_STATES)
+    rows = db.execute(
+        f"""WITH requested(artifact_id, parent_thread_id) AS (VALUES {values})
+            SELECT {_registration_columns()}
+              FROM requested
+              JOIN artifact_identities i ON i.id=requested.artifact_id AND i.state='active'
+              JOIN artifact_registrations r ON r.artifact_id=i.id
+                 AND r.parent_thread_id=requested.parent_thread_id
+             WHERE r.relationship_state IN ({released_states})
+             ORDER BY i.id,
+                      CASE r.relationship_state
+                        WHEN 'owner-pinned' THEN 0
+                        WHEN 'owner-active' THEN 1 ELSE 2 END,
+                      r.updated_at DESC, r.id ASC""",
+        (*[value for request in released for value in request], *RELEASED_OWNER_REGISTRATION_STATES),
+    ).fetchall()
+    for row in rows:
+        artifact_id = row["identity_id"]
+        if artifact_id not in found:
+            projected = dict(row)
+            projected["projected_state"] = "archived"
+            found[artifact_id] = public_row_from_normalized(projected)
+    return found
+
+
+def resolve_normalized_owners(
+    db, integration: str, identities: list[tuple[str, str]],
+) -> dict[tuple[str, str], dict]:
+    """Batch active owner projections by ``(type, external_id)``."""
+    requested = list(dict.fromkeys(identities))
+    if not requested:
+        return {}
+    values = ",".join("(?, ?)" for _ in requested)
+    owner_states = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
+    rows = db.execute(
+        f"""WITH requested(type, external_id) AS (VALUES {values})
+            SELECT requested.type AS requested_type,
+                   requested.external_id AS requested_external_id,
+                   {_registration_columns()}
+              FROM requested
+              JOIN artifact_identities i ON i.integration=? AND i.type=requested.type
+                 AND i.external_id=requested.external_id AND i.state='active'
+              JOIN artifact_registrations r ON r.artifact_id=i.id
+             WHERE r.relationship_state IN ({owner_states})
+             ORDER BY requested.type, requested.external_id,
+                      CASE r.relationship_state
+                        WHEN 'owner-pinned' THEN 0 ELSE 1 END,
+                      r.updated_at DESC, r.id ASC""",
+        (*[value for request in requested for value in request], integration, *OWNER_REGISTRATION_STATES),
+    ).fetchall()
+    found: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        key = (row["requested_type"], row["requested_external_id"])
+        found.setdefault(key, public_row_from_normalized(row))
+    return found
+
 
 def _latest_released_owner_thread_id(db, artifact_id: str) -> str | None:
     latest = db.execute(

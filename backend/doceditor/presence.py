@@ -14,7 +14,7 @@ from doceditor.document_scope import MAX_TEXT_BYTES
 import infra.config as config
 from infra.time import utc_now_iso
 from registry import models as registry_models
-from registry.service import resolve_file_identity
+from registry.file_resolution import resolve_file_identity
 from tools.catalog import normalize_tool_name
 
 

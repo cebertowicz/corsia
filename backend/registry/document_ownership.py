@@ -12,6 +12,7 @@ from pathlib import Path
 
 from infra.settings import get_setting
 from registry import service
+from registry.file_resolution import find_file_identity, prepare_file_identity
 from registry.identity_metadata import last_written_sha256, sha256_file
 from registry.shared_document_messages import owner_refusal
 from registry.shared_edit_classification import classify_edit
@@ -51,7 +52,7 @@ def _owner_row(artifact: dict | None, *, db) -> str | None:
 
 
 def recover_moved_identity(path: Path, *, thread_id: str, db, setup: bool = True) -> dict | None:
-    artifact = service.find_file_identity(str(path), db=db)
+    artifact = find_file_identity(str(path), db=db)
     if artifact is not None or not path.is_file() or path.is_symlink():
         return artifact
     from registry.moved_files import plan_moved_file_recovery, apply_moved_file_recovery
@@ -120,10 +121,10 @@ def document_write_authority(
     path = target.expanduser().resolve(strict=False)
     if not path.is_file():
         return None
-    identity = service.prepare_file_identity(str(path), db=db)
+    identity = prepare_file_identity(str(path), db=db)
     if identity is None or identity.zone != "workspace":
         return None
-    artifact = service.find_file_identity(identity, db=db)
+    artifact = find_file_identity(identity, db=db)
     owner = _owner_row(artifact, db=db)
     if artifact is None or owner is None:
         return None

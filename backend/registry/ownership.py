@@ -13,8 +13,8 @@ from registry.identity_bridge import (
     ParentChainOwnershipError,
     _latest_released_owner_thread_id,
     _upsert_registration,
-    settled_row_rebind,
 )
+from registry.registration_rebind import settled_row_rebind
 from registry.removal_events import emit_owner_removal
 from registry.registration_events import (
     _append_registration_event,

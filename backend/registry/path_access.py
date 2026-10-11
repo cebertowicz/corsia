@@ -12,7 +12,7 @@ from typing import Any, NamedTuple
 
 from core.workspace_context_sources import is_workspace_context_path
 from infra import config
-from registry import service as registry_service
+from registry.file_resolution import resolve_file_identities, resolve_file_identity
 
 
 class FileLookup(NamedTuple):
@@ -50,7 +50,7 @@ def lookup_files(raw_paths, bases: list[Path], *, db=None) -> dict[str, FileLook
             continue
         candidates[raw_path] = FileLookup(candidate, True, True, None)
         existing.append(str(candidate))
-    identities = registry_service.resolve_file_identities(existing, db=db)
+    identities = resolve_file_identities(existing, db=db)
     return {
         raw_path: FileLookup(lookup.path, lookup.allowed, lookup.is_file, identities.get(str(lookup.path)))
         for raw_path, lookup in candidates.items()
@@ -68,5 +68,5 @@ def lookup_file(raw_path: str, bases: list[Path], *, db=None) -> FileLookup:
     if not candidate.is_file():
         return FileLookup(candidate, True, False, None)
     return FileLookup(
-        candidate, True, True, registry_service.resolve_file_identity(str(candidate), db=db),
+        candidate, True, True, resolve_file_identity(str(candidate), db=db),
     )

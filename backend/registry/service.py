@@ -11,73 +11,24 @@ from loguru import logger
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_writer
-from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
-from registry.file_types import extension_type
+from registry.file_identity import FileIdentity, PreparedFileWrite
+from registry.file_resolution import (
+    classify,
+    find_file_identity,
+    normalize_file_path,
+    prepare_file_identity,
+    resolve_file_identities,
+    resolve_file_identity,
+)
 from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
 from registry.origin_telemetry import emit_committed_origin
-from tools.sandbox_config import get_allowed_dirs_rw
 
 
-def classify(path: Path) -> str:
-    """Artifact type for a file."""
-    from core.skill_validation import is_skill_file
 
-    if is_skill_file(path):
-        return "skill"
-    return extension_type(path)
-
-
-def is_tmp(path: Path) -> bool:
-    """True if the file lives under a ``working/`` tray."""
-    return "working" in {p.lower() for p in path.parts}
-
-
-def registrable_zone(
-    p: Path, *, db=None, allowed_roots: list[Path] | None = None,
-) -> str | None:
-    """Return ``workspace`` or ``repo`` when ``p`` is registrable."""
-    from infra import config
-
-    workspace = config.WORKSPACE.resolve()
-    candidates = [(workspace, "workspace")]
-    candidates.extend(
-        (root, "repo")
-        for root in {
-            allowed.resolve()
-            for allowed in (
-                allowed_roots if allowed_roots is not None else get_allowed_dirs_rw(db=db, containing=p)
-            )
-            if allowed.resolve() != workspace
-        }
-    )
-    matches = [
-        (root, zone)
-        for root, zone in candidates
-        if p == root or p.is_relative_to(root)
-    ]
-    if not matches:
-        return None
-    return max(matches, key=lambda match: len(match[0].parts))[1]
-
-
-def normalize_file_path(
-    raw_path: str, *, db=None, allowed_roots: list[Path] | None = None,
-) -> tuple[str, str, bool] | None:
-    """Resolve a caller-supplied file path for registration."""
-    from infra import config
-
-    p = Path(raw_path).expanduser()
-    if not p.is_absolute():
-        p = config.WORKSPACE / p
-    p = p.resolve()
-    zone = registrable_zone(p, db=db, allowed_roots=allowed_roots)
-    if zone is None:
-        return None
-    return str(p), zone, (is_tmp(p) if zone == "workspace" else False)
-
+# File identity preparation is owned by registry.file_resolution.
 
 def register_write(
     thread_id: str | None,
@@ -110,40 +61,7 @@ def register_write(
         return None
 
 
-def prepare_file_identity(
-    abs_path: str | FileIdentity, *, db=None, allowed_roots: list[Path] | None = None,
-) -> FileIdentity | None:
-    """Prepare filesystem facts once; database ownership is always read later."""
-    if isinstance(abs_path, FileIdentity):
-        return abs_path
-    normalized = normalize_file_path(abs_path, db=db, allowed_roots=allowed_roots)
-    if normalized is None:
-        return None
-    canonical, zone, ephemeral = normalized
-    return FileIdentity(canonical, zone, ephemeral, classify(Path(canonical)),
-                        external_identity_for_path(canonical, zone, db=db))
-
-
-def find_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, Any] | None:
-    """Resolve a workspace/repository file logical-first, then by legacy path."""
-    from registry.file_resolution import find_file_identity as _find_file_identity
-
-    return _find_file_identity(abs_path, db=db)
-
-
-def resolve_file_identities(abs_paths, *, db=None) -> dict[str, dict[str, Any]]:
-    """Resolve active file owners for many physical paths in one registry read."""
-    from registry.file_resolution import resolve_file_identities as _resolve_file_identities
-
-    return _resolve_file_identities(abs_paths, db=db)
-
-
-def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
-    """Resolve an active file owner from a physical path."""
-    from registry.file_resolution import resolve_file_identity as _resolve_file_identity
-
-    return _resolve_file_identity(abs_path, db=db)
-
+# Canonical file identity utilities are imported from registry.file_resolution.
 
 def retire_missing_temporary_under(
     root: Path,

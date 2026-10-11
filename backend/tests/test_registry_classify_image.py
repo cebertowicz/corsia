@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from registry.service import classify
+from registry.file_resolution import classify
 
 
 @pytest.mark.parametrize(

@@ -8,6 +8,7 @@ from pathlib import Path
 from infra.database import write_transaction
 from registry import models, service
 from registry.file_identity import MovedFileRecovery, external_identity_for_path
+from registry.file_resolution import normalize_file_path
 from registry.identity_metadata import sha256_file
 from registry import relocate
 from registry.relocation_identity import target_identity
@@ -38,7 +39,7 @@ def _validated_move(
     actor_thread_id: str,
 ) -> dict:
     source = Path(identity["path"])
-    source_identity = service.normalize_file_path(str(source), db=db)
+    source_identity = normalize_file_path(str(source), db=db)
     if source_identity is None or source_identity[1] != zone:
         raise relocate.RelocationError("moved file changed registrable zones")
     relocate._reject_foreign_thread_tray(str(target), actor_thread_id)
@@ -85,7 +86,7 @@ def plan_moved_file_recovery(
     target = path.expanduser().resolve(strict=False)
     if not target.is_file() or target.is_symlink():
         return None
-    normalized = service.normalize_file_path(str(target), db=db)
+    normalized = normalize_file_path(str(target), db=db)
     if normalized is None:
         return None
     _canonical, zone, _default = normalized

@@ -54,6 +54,27 @@ def test_containing_matches_the_full_list_for_every_zone(tmp_path, monkeypatch):
         assert set(sandbox_config.get_allowed_dirs_rw(containing=probe)) == expected, probe
 
 
+def test_file_batch_resolution_uses_each_path_containing_scope(monkeypatch, tmp_path):
+    from registry import file_resolution
+
+    paths = [
+        str(tmp_path / "one" / "doc.md"),
+        str(tmp_path / "one" / "second.md"),
+        str(tmp_path / "two" / "doc.md"),
+    ]
+    calls: list[Path] = []
+
+    def allowed_dirs(*, db=None, containing=None):
+        calls.append(containing)
+        return []
+
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", allowed_dirs)
+    monkeypatch.setattr(file_resolution, "prepare_file_identity", lambda *_args, **_kwargs: None)
+
+    assert file_resolution.resolve_file_identities(paths) == {}
+    assert calls == [Path(paths[0]).parent, Path(paths[2]).parent]
+
+
 def test_containing_never_lists_worktrees(tmp_path, monkeypatch):
     sandbox_config, probes = _sandbox(tmp_path, monkeypatch)
 

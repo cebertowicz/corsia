@@ -24,7 +24,7 @@ _TOKEN = OWNER_TOKEN
 def db(tmp_path, monkeypatch):
     from infra import config
     from infra.platform_paths import WorkspaceSelection
-    from registry import service
+    from registry import file_resolution
 
     monkeypatch.setattr(config, "WORKSPACE", tmp_path)
     monkeypatch.setattr(
@@ -37,7 +37,7 @@ def db(tmp_path, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        service,
+        file_resolution,
         "get_allowed_dirs_rw",
         lambda **_kwargs: [tmp_path.resolve()],
     )

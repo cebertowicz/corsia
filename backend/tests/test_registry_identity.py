@@ -837,3 +837,45 @@ def test_rehome_clears_prior_triage_projection(isolated_db):
         assert routing["triage"] is None
     finally:
         db.close()
+
+
+def test_single_and_batch_default_projections_match_active_released_and_rehomed(isolated_db):
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        active = _register(db, "org/repo#projection-active", "thread-a")
+        released = _register(db, "org/repo#projection-released", "thread-a")
+        rehomed = _register(db, "org/repo#projection-rehomed", "thread-a")
+        for artifact in (released, rehomed):
+            models.release_artifact(
+                integration="github",
+                type="pull-request",
+                external_id=artifact["external_id"],
+                actor_thread_id="thread-a",
+                authority="current-owner-handoff",
+                reason="projection test release",
+                source_path="test",
+                db=db,
+            )
+        models.rehome_artifact(
+            integration="github",
+            type="pull-request",
+            external_id=rehomed["external_id"],
+            new_owner_thread_id="thread-b",
+            actor_thread_id="thread-a",
+            authority="current-owner-handoff",
+            reason="projection test rehome",
+            source_path="test",
+            db=db,
+        )
+
+        ids = [active["id"], released["id"], rehomed["id"]]
+        batch = models.get_artifacts(ids, db=db)
+
+        assert batch == {artifact_id: models.get_artifact(artifact_id, db=db) for artifact_id in ids}
+        assert batch[active["id"]]["state"] == "active"
+        assert batch[released["id"]]["state"] == "archived"
+        assert batch[rehomed["id"]]["parent_thread_id"] == "thread-b"
+    finally:
+        db.close()

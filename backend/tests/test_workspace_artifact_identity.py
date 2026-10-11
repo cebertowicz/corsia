@@ -13,7 +13,7 @@ from tests.registry_helpers import make_session, seed_artifact
 def identity_scope(isolated_db, tmp_path, monkeypatch):
     from infra import config
     from infra.database import get_db
-    from registry import service
+    from registry import file_resolution
 
     workspace = tmp_path / "workspace"
     repository = tmp_path / "repository"
@@ -27,7 +27,7 @@ def identity_scope(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "WORKSPACE", workspace)
     monkeypatch.setattr(config, "WORKSPACE_SELECTION", selection)
     monkeypatch.setattr(
-        service,
+        file_resolution,
         "get_allowed_dirs_rw",
         lambda **_kwargs: [workspace.resolve(), repository.resolve()],
     )
@@ -72,13 +72,13 @@ def test_native_repository_inside_workspace_keeps_absolute_identity(
     identity_scope,
     monkeypatch,
 ):
-    from registry import service
+    from registry import file_resolution, service
 
     workspace, repository, thread_id, db = identity_scope
     native_repository = workspace / "projects" / "alpha" / "source" / "native"
     native_repository.mkdir(parents=True)
     monkeypatch.setattr(
-        service,
+        file_resolution,
         "get_allowed_dirs_rw",
         lambda **_kwargs: [
             workspace.resolve(),
@@ -99,12 +99,12 @@ def test_workspace_inside_repository_keeps_logical_identity(
     identity_scope,
     monkeypatch,
 ):
-    from registry import service
+    from registry import file_resolution, service
 
     workspace, _repository, thread_id, db = identity_scope
     ancestor_repository = workspace.parent
     monkeypatch.setattr(
-        service,
+        file_resolution,
         "get_allowed_dirs_rw",
         lambda **_kwargs: [workspace.resolve(), ancestor_repository.resolve()],
     )
@@ -122,12 +122,12 @@ def test_repository_ancestor_outside_workspace_keeps_absolute_identity(
     identity_scope,
     monkeypatch,
 ):
-    from registry import service
+    from registry import file_resolution, service
 
     workspace, _repository, thread_id, db = identity_scope
     ancestor_repository = workspace.parent
     monkeypatch.setattr(
-        service,
+        file_resolution,
         "get_allowed_dirs_rw",
         lambda **_kwargs: [workspace.resolve(), ancestor_repository.resolve()],
     )
@@ -232,7 +232,7 @@ def test_relative_registration_reuses_caller_db_for_repo_policy_lookup(
     identity_scope,
     monkeypatch,
 ):
-    from registry import service
+    from registry import file_resolution, service
 
     workspace, _repository, thread_id, db = identity_scope
 
@@ -242,7 +242,7 @@ def test_relative_registration_reuses_caller_db_for_repo_policy_lookup(
         lookups.append(kwargs.get("db"))
         return [workspace.resolve()]
 
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", allowed_dirs)
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", allowed_dirs)
     db.execute("BEGIN")
     artifact = service.register_write_strict(
         thread_id,
