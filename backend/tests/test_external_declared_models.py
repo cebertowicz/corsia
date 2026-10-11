@@ -218,6 +218,31 @@ def test_edit_refuses_a_value_that_is_not_a_model_id(isolated_db, monkeypatch) -
     assert err.value.status_code == 400
 
 
+def test_agent_use_restriction_round_trips_through_endpoint_metadata(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server, update_external_server
+    from api.network_servers import AddServerBody, UpdateExternalServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Restricted", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"],
+            agent_use_restriction="interactive_only",
+        ),
+    ))["server_id"]
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "interactive_only"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+    asyncio.run(update_external_server(
+        sid, UpdateExternalServerBody(base_url=_BASE, agent_use_restriction="allowed"),
+    ))
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "allowed"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
+
+
 # ── removal stays removed ────────────────────────────────────────────────────
 
 def _seed_removable(path) -> None:

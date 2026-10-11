@@ -162,33 +162,63 @@ async def test_global_batch_selects_oldest_candidates_across_owners(isolated_db,
     assert ["owner earliest" in prompt for prompt in seen] == [False, True]
 
 
-def test_token_plan_checker_setting_is_refused(monkeypatch):
+def test_interactive_only_checker_setting_is_refused(isolated_db, monkeypatch):
     from api import system
-
-    monkeypatch.setattr(system, "_ready_public_litellm_models", lambda: {"token-plan-model"})
-    monkeypatch.setattr(system, "is_alibaba_token_plan_model", lambda model: model == "token-plan-model")
-    with pytest.raises(HTTPException, match="Alibaba Token Plan"):
-        system._save_exact_model_defaults({"corrections_checker_model": "token-plan-model"})
-
-
-def test_token_plan_detection_uses_the_external_connection(isolated_db):
-    from infra.settings import is_alibaba_token_plan_model
 
     db = _db()
     try:
         db.execute(
             "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
-            "VALUES ('token-plan','external','external','token-plan','Alibaba Token Plan',443,'online','t','t','t',?)",
-            (json.dumps({"base_url": "https://token-plan.example.com/compatible-mode/v1"}),),
-        )
-        db.execute(
-            "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,created_at,updated_at) "
-            "VALUES ('token-model','native','external','glm','external@token-plan/glm','Token model','t','t')"
+            "VALUES ('restricted','external','external','restricted','Restricted',443,'online','t','t','t',?)",
+            (json.dumps({"agent_use_restriction": "interactive_only"}),),
         )
         db.commit()
-        assert is_alibaba_token_plan_model("external@token-plan/glm", db=db)
     finally:
         db.close()
+    monkeypatch.setattr(system, "_ready_public_litellm_models", lambda: {"external@restricted/glm"})
+
+    with pytest.raises(HTTPException, match="interactive-only endpoint"):
+        system._save_exact_model_defaults({"corrections_checker_model": "external@restricted/glm"})
+
+
+def test_endpoint_agent_use_defaults_allowed_for_existing_endpoint(isolated_db):
+    from llm.endpoint_policy import endpoint_agent_use
+
+    db = _db()
+    try:
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES ('existing','external','external','existing','Existing',443,'online','t','t','t',?)",
+            (json.dumps({"base_url": "https://existing.example/v1"}),),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert endpoint_agent_use("external@existing/model") == "allowed"
+
+
+@pytest.mark.asyncio
+async def test_interactive_only_checker_is_skipped_at_runtime(isolated_db, monkeypatch):
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+
+    db = _db()
+    try:
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES ('restricted','external','external','restricted','Restricted',443,'online','t','t','t',?)",
+            (json.dumps({"agent_use_restriction": "interactive_only"}),),
+        )
+        db.commit()
+    finally:
+        db.close()
+    set_setting("agents", {"defaults": {"corrections_checker_model": "external@restricted/glm"}})
+    monkeypatch.setattr(job, "_resolve_target", lambda _: pytest.fail("restricted model was resolved"))
+
+    assert await job.run_corrections_recording() == {
+        "status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0,
+    }
 
 
 @pytest.mark.asyncio

@@ -243,6 +243,8 @@ async def update_external_server(server_id: str, body) -> dict:
                 set_server_key(server_id, supplied_key, db=db)
             if body.cache_warm_seconds is not None:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
+            if body.agent_use_restriction is not None:
+                fields["agent_use_restriction"] = body.agent_use_restriction
             if declared:
                 fields[META_KEY] = declared
             cleared = (META_KEY,) if declared == [] else ()
@@ -295,13 +297,15 @@ async def add_external_server(body) -> dict:
             fields: dict = {"base_url": base}
             if body.cache_warm_seconds:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
+            if body.agent_use_restriction is not None:
+                fields["agent_use_restriction"] = body.agent_use_restriction
             if key:
                 set_server_key(sid, key, db=db)
             else:
                 remove_server_key(sid, db=db)
             if declared:
                 fields[META_KEY] = declared
-            owned = ("cache_warm_seconds", META_KEY)
+            owned = ("cache_warm_seconds", "agent_use_restriction", META_KEY)
             nd.set_server_metadata(
                 sid, db=db, clear=tuple(k for k in owned if k not in fields), **fields,
             )

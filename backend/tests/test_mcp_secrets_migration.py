@@ -19,7 +19,7 @@ import pytest
 
 from infra import key_store, key_store_values
 from infra.database import initialize_schema
-from infra.database_migrations import MIGRATIONS, MigrationError, migrate_to_current
+from infra.database_migrations import MIGRATIONS, MigrationError, migrate_108_to_109, migrate_to_current
 from infra.migration_mcp_secrets import FROM_VERSION, migrate_mcp_secrets
 from infra.schema import SCHEMA_VERSION
 from tools import mcp_secrets
@@ -87,7 +87,7 @@ def _migrate(path) -> None:
 
 def test_the_step_is_registered_and_current():
     assert SCHEMA_VERSION == FROM_VERSION + 1
-    assert MIGRATIONS[FROM_VERSION] is migrate_mcp_secrets
+    assert MIGRATIONS[FROM_VERSION] is migrate_108_to_109
     assert FROM_VERSION - 1 in MIGRATIONS  # the ladder has no gap below it
 
 

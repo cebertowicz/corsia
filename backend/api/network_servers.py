@@ -101,6 +101,7 @@ class AddServerBody(BaseModel):
     # never sent, and nothing schedules against it yet (a native warm idle fold
     # is follow-up work). Bounded at 24h, the longest retention offered today.
     cache_warm_seconds: int | None = Field(default=None, ge=1, le=86_400)
+    agent_use_restriction: Literal["allowed", "interactive_only"] | None = None
     # Ids to catalog when the endpoint does not list its models (Alibaba's plans).
     model_ids: list[str] | None = None
     api_key: str | None = None  # optional admin token (--api-key)
@@ -113,6 +114,7 @@ class UpdateExternalServerBody(BaseModel):
     # Declarative only: this remains endpoint metadata and does not schedule a
     # cache warm or alter managed-server cache behavior.
     cache_warm_seconds: int | None = Field(default=None, ge=1, le=86_400)
+    agent_use_restriction: Literal["allowed", "interactive_only"] | None = None
     # None keeps the stored ids; a list (even empty) replaces them.
     model_ids: list[str] | None = None
 
