@@ -214,15 +214,19 @@
 {/if}
 
 <style>
-	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); }
-	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); }
-	.drawer-heading h2 span { color: var(--text-secondary); font-weight: var(--fw-medium); }
-	.drawer-heading :global(button), .comment-filters button { min-height: 44px; }
-	.comment-filters { display: flex; gap: 4px; flex: none; }
-	.comment-filters button { flex: 1; border: 0; border-radius: var(--radius-sm); color: var(--text-secondary); background: none; font: inherit; font-size: var(--text-footnote); cursor: pointer; }
-	.comment-filters button[aria-pressed="true"] { color: var(--accent); background: var(--accent-bg); }
+	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: 4px; min-height: 0; min-width: 0; position: relative; isolation: isolate; padding: 6px 8px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); }
+	/* The glass material is its own layer under the content, so the drawer's own box stays plain for the contrast probe, which cannot composite a backdrop filter. */
+	.canvas-comment-drawer::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--glass-regular-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim), var(--shadow-chip); pointer-events: none; }
+	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 4px; }
+	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-secondary); }
+	.drawer-heading h2 span { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; margin-left: 2px; }
+	/* A segmented control: one track, the chosen segment raised on it. */
+	.comment-filters { display: flex; gap: 2px; flex: none; padding: 2px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+	.comment-filters button { position: relative; flex: 1; height: 22px; border: 0; border-radius: var(--radius-2xs); color: var(--text-secondary); background: none; font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; transition: background var(--dur-tight), color var(--dur-tight); }
+	.comment-filters button:hover { color: var(--text-primary); }
+	.comment-filters button[aria-pressed="true"] { color: var(--text-primary); background: var(--glass-thick); box-shadow: var(--glass-rim), 0 1px 2px rgba(0, 0, 0, 0.12); }
 	.comment-filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	@media (pointer: coarse) { .comment-filters button::after { content: ''; position: absolute; inset: -6px 0; } }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

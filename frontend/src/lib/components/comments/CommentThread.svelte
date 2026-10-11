@@ -244,9 +244,9 @@
 
 <style>
 	.ct {
-		background: var(--glass-thin); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-		padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
-		box-shadow: var(--glass-rim); transition: border-color var(--dur-tight), box-shadow var(--dur-tight); cursor: pointer;
+		background: color-mix(in srgb, var(--text-primary) 4%, transparent); border: 1px solid transparent; border-radius: var(--radius-sm);
+		padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
+		transition: border-color var(--dur-tight), box-shadow var(--dur-tight); cursor: pointer;
 	}
 	.ct.read-only .ct-act, .ct.read-only .ct-compose, .ct.read-only .ct-res-acts { display: none; }
 	.ct.focused { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glass-rim), 0 0 0 3px var(--accent-subtle); }
@@ -300,14 +300,14 @@
 	.ct-send { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent); border: none; color: #fff; cursor: pointer; transition: filter var(--dur-tight); }
 	.ct-send:hover { filter: brightness(1.08); }
 
-	.ct.resolved { padding: 0; background: none; border-style: dashed; cursor: default; gap: 0; }
-	.ct-res-head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 8px 12px; }
+	.ct.resolved { padding: 0; background: none; cursor: default; gap: 0; }
+	.ct-res-head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 6px 10px; }
 	.ct-check { color: var(--green); flex-shrink: 0; }
 	.ct-cross { color: var(--text-secondary); flex-shrink: 0; }
 	.ct-res-text { flex: 1; font-size: var(--text-footnote); color: var(--text-secondary); }
 	.ct-chev { color: var(--text-tertiary); flex-shrink: 0; transition: transform var(--dur-tight); }
 	.ct-chev.open { transform: rotate(90deg); }
-	.ct-res-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 12px 10px; }
+	.ct-res-body { display: flex; flex-direction: column; gap: 8px; padding: 2px 10px 8px; }
 	.ct-res-acts { display: flex; align-items: center; gap: 8px; }
 	.ct-link { flex-shrink: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; }
 	.ct-link:hover { text-decoration: underline; }
