@@ -55,10 +55,19 @@ async function expectEveryTagReachable(page: Page, count: number) {
 	}
 }
 
-/** Waits until `target` stops moving, so a sliding drawer is measured where it lands. */
-async function settled(target: Locator) {
+/**
+ * Waits until the layout's own transitions finish and `target` neither moves nor scrolls between two reads 150 ms apart,
+ * so a sliding drawer is measured where it lands, even when a busy machine stalls frames.
+ */
+async function settled(page: Page, target: Locator) {
+	await layout(page).evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
 	let last = '';
-	await expect.poll(async () => { const now = JSON.stringify(await target.boundingBox()); const same = now === last; last = now; return same; }).toBe(true);
+	await expect.poll(async () => {
+		const now = JSON.stringify([await target.boundingBox(), await target.evaluate((el) => el.scrollTop)]);
+		const same = now === last;
+		last = now;
+		return same;
+	}, { intervals: [150] }).toBe(true);
 }
 /** The image request answers 404, so the viewer shows why it could not load. */
 async function failImage(page: Page, seeded: Seeded) {
@@ -117,7 +126,7 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			// The drawer: at least three whole cards with thirteen comments, the text comment among them.
 			await pill(page).click();
 			await expect(drawer(page)).toBeVisible();
-			await settled(drawerList(page));
+			await settled(page, drawerList(page));
 			await expect(drawerList(page).locator('.ct')).toHaveCount(13);
 			const listBox = (await drawerList(page).boundingBox())!;
 			const cardBoxes = await drawerList(page).locator('.ct').evaluateAll((cards) => cards.map((card) => {
