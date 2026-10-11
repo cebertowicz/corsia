@@ -17,12 +17,14 @@ describe('rangesToRefresh', () => {
 		row('u2', 'user'), row('a3', 'assistant'), row('a4', 'assistant'),
 	];
 
-	it('re-reads only the carded messages when no turn ended', () => {
+	it('re-reads carded messages through exact reads when no turn ended', () => {
 		expect(rangesToRefresh(rows, 't1', false)).toEqual([{ from: 'a1', to: 'a1' }]);
 	});
 
-	it('coalesces the finished turn and earlier carded rows into one range', () => {
-		expect(rangesToRefresh(rows, 't1', true)).toEqual([{ from: 'a1', to: 'a4' }]);
+	it('reads the completed turn as one range and earlier cards exactly', () => {
+		expect(rangesToRefresh(rows, 't1', true)).toEqual([
+			{ from: 'a3', to: 'a4' }, { from: 'a1', to: 'a1' },
+		]);
 	});
 
 	it('leaves other threads and unsent rows alone', () => {
@@ -30,30 +32,19 @@ describe('rangesToRefresh', () => {
 		expect(rangesToRefresh(mixed, 't1', true)).toEqual([]);
 	});
 
-	it('caps the carded messages it re-reads at the newest few', () => {
-		const many = Array.from({ length: 20 }, (_, i) => row(`m${i}`, 'assistant', { cards: card }));
-		expect(rangesToRefresh(many, 't1', false)).toEqual([{ from: 'm8', to: 'm19' }]);
+	it('caps card refreshes at twelve exact reads', () => {
+		const many = Array.from({ length: 20 }, (_, index) => row(`m${index}`, 'assistant', { cards: card }));
+		expect(rangesToRefresh(many, 't1', false)).toEqual(
+			Array.from({ length: 12 }, (_, index) => ({ from: `m${index + 8}`, to: `m${index + 8}` })),
+		);
 	});
 
-	it('sends one request for one nudge with twelve sparse carded rows', async () => {
-		vi.useFakeTimers();
-		activeThreadId.set('t1');
-		token.set('test-token');
-		messages.set(Array.from({ length: 50 }, (_, index) => row(`m${index}`, 'assistant', {
-			cards: index < 48 && index % 4 === 0 ? card : undefined,
-		})));
-		const fetch = vi.fn(async () => ({
-			ok: true,
-			json: async () => ({ messages: Array.from({ length: 12 }, (_, index) => row(`m${index * 4}`, 'assistant', { cards: card })) }),
-		}));
-		vi.stubGlobal('fetch', fetch);
-		watchMessageCards();
-		emit('plans_changed', {});
-		await vi.advanceTimersByTimeAsync(400);
-		expect(fetch).toHaveBeenCalledTimes(1);
+	it('caps a completed-turn range at the newest fifty rows', () => {
+		const completed = [row('u1', 'user'), ...Array.from({ length: 70 }, (_, index) => row(`a${index}`, 'assistant'))];
+		expect(rangesToRefresh(completed, 't1', true)).toEqual([{ from: 'a20', to: 'a69' }]);
 	});
 
-	it('falls back only for sparse selected rows and never merges collapsed rows', async () => {
+	it('keeps sparse Focus-like card reads exact and never merges collapsed rows', async () => {
 		vi.useFakeTimers();
 		activeThreadId.set('t1');
 		token.set('test-token');
@@ -65,11 +56,9 @@ describe('rangesToRefresh', () => {
 			const from = params.get('from_id')!;
 			const to = params.get('to_id')!;
 			if (from === 'm0' && to === 'm60') {
-				return { ok: true, json: async () => ({
-					messages: [row('m60', 'assistant', { cards: card }), row('hidden', 'assistant')], has_more: true,
-				}) };
+				return { ok: true, json: async () => ({ messages: [row('hidden', 'assistant')] }) };
 			}
-			return { ok: true, json: async () => ({ messages: [row(from, 'assistant', { cards: card })], has_more: false }) };
+			return { ok: true, json: async () => ({ messages: [row(from, 'assistant', { cards: card })] }) };
 		});
 		vi.stubGlobal('fetch', fetch);
 		watchMessageCards();
@@ -77,30 +66,41 @@ describe('rangesToRefresh', () => {
 		await vi.advanceTimersByTimeAsync(400);
 
 		expect(fetch).toHaveBeenCalledTimes(7);
-		const fallbacks = fetch.mock.calls.slice(1).map(([input]) => {
+		expect(fetch.mock.calls).toHaveLength(7);
+		for (const [input] of fetch.mock.calls) {
 			const params = new URL(String(input), 'http://corsia.test').searchParams;
-			return [params.get('from_id'), params.get('to_id')];
-		});
-		expect(fallbacks).toEqual([['m0', 'm0'], ['m10', 'm10'], ['m20', 'm20'], ['m30', 'm30'], ['m40', 'm40'], ['m50', 'm50']]);
+			expect(params.get('from_id')).toBe(params.get('to_id'));
+		}
 		expect(get(messages).some((message) => message.id === 'hidden')).toBe(false);
 	});
 
-	it('refreshes a carded row older than the latest fifty loaded rows', async () => {
+	it('uses at most thirteen requests for a completed turn with twelve older cards', async () => {
 		vi.useFakeTimers();
 		activeThreadId.set('t1');
 		token.set('test-token');
-		messages.set(Array.from({ length: 70 }, (_, index) => row(`m${index}`, 'assistant', {
-			cards: index === 0 ? card : undefined,
-		})));
-		const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ messages: [row('m0', 'assistant', { cards: card })] }) }));
+		messages.set([
+			...Array.from({ length: 12 }, (_, index) => row(`c${index}`, 'assistant', { cards: card })),
+			row('u1', 'user'),
+			...Array.from({ length: 51 }, (_, index) => row(`a${index}`, 'assistant')),
+		]);
+		const fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const params = new URL(String(input), 'http://corsia.test').searchParams;
+			const from = params.get('from_id')!;
+			const to = params.get('to_id')!;
+			if (from === 'c0' && to === 'a50') {
+				return { ok: true, json: async () => ({ messages: [row('hidden', 'assistant')] }) };
+			}
+			return { ok: true, json: async () => ({ messages: [row(from, 'assistant')] }) };
+		});
 		vi.stubGlobal('fetch', fetch);
 		watchMessageCards();
-		emit('plans_changed', {});
+		emit('turn_complete', {});
 		await vi.advanceTimersByTimeAsync(400);
 
-		expect(fetch).toHaveBeenCalledTimes(1);
-		const params = new URL(String(fetch.mock.calls[0][0]), 'http://corsia.test').searchParams;
-		expect([params.get('from_id'), params.get('to_id')]).toEqual(['m0', 'm0']);
+		expect(fetch).toHaveBeenCalledTimes(13);
+		const completedTurn = new URL(String(fetch.mock.calls[0][0]), 'http://corsia.test').searchParams;
+		expect([completedTurn.get('from_id'), completedTurn.get('to_id')]).toEqual(['a1', 'a50']);
+		expect(get(messages).some((message) => message.id === 'hidden')).toBe(false);
 	});
 });
 
