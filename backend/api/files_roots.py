@@ -16,8 +16,8 @@ from doceditor.document_scope import (
 )
 from infra import config
 from infra.workspace_paths import looks_like_workspace_reference
-from registry import service as registry_service
 from registry.doc_freshness import freshness
+from registry.file_resolution import is_tmp
 from registry.identity_metadata import parse_metadata
 from registry.shared_principals import is_under_shared_roots, owner_label, shared_roots
 
@@ -67,7 +67,7 @@ def walk(root: Path) -> tuple[list[dict], bool]:
                 "name": name,
                 "size": stat.st_size,
                 "mtime": stat.st_mtime,
-                "tmp": registry_service.is_tmp(rel),
+                "tmp": is_tmp(rel),
             })
             if len(nodes) >= MAX_NODES:
                 capped = True
