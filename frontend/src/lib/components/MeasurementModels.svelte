@@ -28,8 +28,8 @@
 	const colors = ['#2f6fdb', '#0f8a6c', '#d9822b', '#8a5cc2', '#c4476a', '#6b7787'];
 	/** The "Other (N more models)" slice's own neutral, lighter than the slate slice in both themes. */
 	const restColor = '#9aa4b2';
-	/** Priced dollars of every row, so each row's share is of the window's whole API-equivalent spend. */
-	const totalSpend = $derived(rows.reduce((sum, row) => sum + (row.spend_usd ?? 0), 0));
+	/** The window's whole API-equivalent spend, served: ledger dollars of every call, with or without a row here. */
+	const totalSpend = $derived(state.totalSpendUsd);
 	const windowSuffix = $derived(state.period ? `, ${periodName(state.period.latest)}` : '');
 	const pieHeading = $derived(`Share of tokens by model${windowSuffix}`);
 

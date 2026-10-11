@@ -93,7 +93,7 @@ function serveModels(mode: ModelsOutcome) {
 					await route.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"models unavailable"}' });
 					return;
 				}
-				await route.fulfill({ json: { rows: mode === 'none' ? [] : PAIRS, min_tasks: 14, token_shares: mode === 'none' ? [] : TOKEN_SHARES, unmatched_failed_turns: 0, unresolved_token_share: 0, period: { grain: 'days', timezone: 'UTC', current: '2026-10-05', range: { from: '2026-09-21', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } } } });
+				await route.fulfill({ json: { rows: mode === 'none' ? [] : PAIRS, min_tasks: 14, token_shares: mode === 'none' ? [] : TOKEN_SHARES, unmatched_failed_turns: 0, unresolved_token_share: 0, total_spend_usd: mode === 'none' ? 0 : 1400, period: { grain: 'days', timezone: 'UTC', current: '2026-10-05', range: { from: '2026-09-21', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } } } });
 				return;
 			}
 			const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
@@ -174,7 +174,7 @@ test.describe('@flow:measurement-models-393 @surface:measurement the Models sect
 			expect(await item.locator('td.tasks').evaluate((td) => getComputedStyle(td, '::before').content), `${pair.label} labels its task count`).toBe('"Tasks"');
 			// The pair reads as words, not a one-character column (a desktop width share once leaked in).
 			expect((await item.locator('td.tasks').boundingBox())!.width, `${pair.label} task cell is wide enough to read`).toBeGreaterThan(60);
-			const priced = pair.rate_reason === 'none' && pair.spend_usd !== null;
+			const priced = pair.spend_usd !== null;
 			const spend = item.locator('td.spend');
 			if (priced) await expect(spend, `${pair.label} shows its share of spend`).toBeVisible();
 			else await expect(spend, `${pair.label} has no priced spend, so no Share pair`).toBeHidden();

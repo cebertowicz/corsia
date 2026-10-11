@@ -106,7 +106,7 @@ async function serveMeasurement(page: import('@playwright/test').Page, project: 
 					{ model: 'codex/gpt-6.1-sol', label: 'gpt-6.1-sol', tasks: 14, failed_turns_per_100: 1.2, recorded_cost_per_task: 1.6, cost_class: 'priced', rate_reason: 'none', cost_change: -0.1, change_reason: 'none', previous_tasks: 18, not_offered_now: false, other: false, includes_local: false, recording_gap: false },
 				],
 				token_shares: [{ model: 'claude-code/claude-opus-5-5', label: 'Claude Opus 5.5', share_of_tokens: 0.75 }, { model: 'codex/gpt-6.1-sol', label: 'gpt-6.1-sol', share_of_tokens: 0.25 }],
-				min_tasks: 14, unmatched_failed_turns: 0, unresolved_token_share: 0,
+				min_tasks: 14, unmatched_failed_turns: 0, unresolved_token_share: 0, total_spend_usd: 0,
 			} });
 			return;
 		}

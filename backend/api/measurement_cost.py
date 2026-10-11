@@ -17,11 +17,17 @@ from fastapi import Depends, Query
 from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
 from api.measurement_actual import build_actual
 from api.measurement_average import cost_average
-from api.measurement_queries import PREPARED_OUTCOMES, PREPARED_SCOPE
+from api.measurement_join import joined_read
+from api.measurement_queries import (
+    PREPARED_OUTCOMES, PREPARED_SCOPE, prepare_outcome_periods, prepare_scope_threads,
+)
 from api.measurement_registry import REGISTRY, period_measured
+from api.measurement_scope import validate_scope
 from api.measurement_size import size_period_totals
 from api.usage_rollup import usage_params, usage_source
 from core.measurement_scope import Grain, Window, query_params
+from infra.database import get_db
+from infra.db_async import run_bulk
 from llm.api_equivalent import (
     api_equivalent, has_public_long_context_price, has_unpublished_cache_rate, is_not_api_priced, price_identity,
 )
@@ -103,9 +109,53 @@ _EXCLUDED_TEXT = {
 }
 
 
-def register_cost_route(
-    router, *, require_user, resolve_grain, get_db, validate_scope, prepare_outcome_periods, run_in_db,
-) -> None:
+@joined_read
+async def ledger_read(project: str, agent: str, page_grain: Grain, user: dict) -> list[dict[str, Any]]:
+    """The scope's classified usage ledger over the averaged page grain, joined with an identical read in flight.
+
+    Cost and Models both price this one ledger, so a page load that draws both reads it once. A reader
+    keeps the periods it needs (Models its latest window) and never mutates the rows.
+    """
+    def query() -> list[dict[str, Any]]:
+        db = get_db()
+        try:
+            selected_scope = validate_scope(db, user["id"], project, agent)
+            params = {**selected_scope.params(user["id"]), "grain": page_grain}
+            prepare_scope_threads(db, params)
+            return ledger_shapes(db, params)
+        finally:
+            db.close()
+
+    return await run_bulk(query)
+
+
+@joined_read
+async def cost_read(project: str, agent: str, page_grain: Grain, user: dict) -> dict[str, Any]:
+    """The Cost payload for one viewer, scope and calendar, joined with an identical read in flight.
+
+    The page's Cost panel and ``/where-to-look`` (which ranks the Cost headline's $ per hour of
+    work) both read it, and it prices the ledger ``ledger_read`` shares with Models, so one page
+    load reads the ledger once.
+    """
+    ledger = await ledger_read(project, agent, page_grain, user)
+
+    def query() -> dict[str, Any]:
+        db = get_db()
+        try:
+            selected_scope = validate_scope(db, user["id"], project, agent)
+            params = {**selected_scope.params(user["id"]), "grain": page_grain}
+            prepare_outcome_periods(db, params)
+            cost = build_cost(db, params, ledger)
+            # The series' moving average spans the grain's own window, served so the chart names it without a copy.
+            return {"scope": selected_scope.response(), "period": page_grain.describe(),
+                    "average_periods": page_grain.average_periods, **cost}
+        finally:
+            db.close()
+
+    return await run_bulk(query)
+
+
+def register_cost_route(router, *, require_user, resolve_grain) -> None:
     """Attach Cost to the shared Measurement router without growing its module."""
     @router.get("/cost")
     async def measurement_cost(
@@ -113,21 +163,7 @@ def register_cost_route(
         timezone_name: str = Query(..., alias="timezone"), user: dict = Depends(require_user),
     ):
         """Return the known API-equivalent subtotal with retained-usage-record coverage and Actual completeness."""
-        page_grain = resolve_grain(grain, timezone_name, averaged=True)
-
-        def query() -> tuple[dict[str, str | None], dict[str, Any]]:
-            db = get_db()
-            try:
-                selected_scope = validate_scope(db, user["id"], project, agent)
-                params = {**selected_scope.params(user["id"]), "grain": page_grain}
-                prepare_outcome_periods(db, params)
-                return selected_scope.response(), build_cost(db, params)
-            finally:
-                db.close()
-
-        selected_scope, cost = await run_in_db(query)
-        # The series' moving average spans the grain's own window, served so the chart names it without a copy.
-        return {"scope": selected_scope, "period": page_grain.describe(), "average_periods": page_grain.average_periods, **cost}
+        return await cost_read(project, agent, resolve_grain(grain, timezone_name, averaged=True), user)
 
 
 def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -158,6 +194,11 @@ def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
     for shape in shapes:
         shape["model"] = resolve(shape).key
     return shapes
+
+
+def ledger_shapes(db, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """The grouped ledger of the prepared periods, each shape priced or told why not: the one read Cost and Models share."""
+    return classify_usage_rows(_usage_rows(db, params), endpoint_listings(db))
 
 
 def endpoint_listings(db) -> dict[str, str]:
@@ -278,14 +319,16 @@ def _pooled(series: list[dict[str, Any]], window: Window, grain: Grain) -> dict[
     }
 
 
-def build_cost(db, params: dict[str, Any]) -> dict[str, Any]:
+def build_cost(db, params: dict[str, Any], ledger: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build Cost from Measurement's already prepared scope and outcome periods.
+
+    ``ledger`` is the grain's classified usage ledger as ``ledger_read`` shares it; without one it is read here.
 
     ``latest`` and ``previous`` are the grain's two comparison windows (7 days against the
     7 before, or 4 weeks against the 4 before), pooled; ``series`` is every completed period.
     """
     grain: Grain = params["grain"]
-    classified = classify_usage_rows(_usage_rows(db, params), endpoint_listings(db))
+    classified = ledger if ledger is not None else ledger_shapes(db, params)
     every = _series(db, classified, size_period_totals(db, params), grain)
     # The lead-in periods are read only so each drawn period has a full span for its average.
     series = [{**row, "average": cost_average(every, grain, row["period"], MINIMUM_SIZED)} for row in every if row["period"] in grain.served]

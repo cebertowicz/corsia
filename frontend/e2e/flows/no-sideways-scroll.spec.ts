@@ -298,7 +298,7 @@ async function seed(
 					{ model: 'codex/gpt-5.6-terra', label: 'gpt-5.6-terra', share_of_tokens: 0.08, tokens: 800000000 }, { model: 'codex/gpt-5.6-luna', label: 'gpt-5.6-luna', share_of_tokens: 0.06, tokens: 600000000 },
 					{ model: 'qwen3.8-flash', label: 'qwen3.8-flash', share_of_tokens: 0.05, tokens: 500000000 }, { model: 'deepseek-v4.1-flash', label: 'deepseek-v4.1-flash', share_of_tokens: 0.04, tokens: 400000000 },
 				],
-				min_tasks: 14, unmatched_failed_turns: 0, unresolved_token_share: 0.02,
+				min_tasks: 14, unmatched_failed_turns: 0, unresolved_token_share: 0.02, total_spend_usd: 69.3,
 			} });
 		}
 		const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];

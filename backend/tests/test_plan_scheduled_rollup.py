@@ -163,13 +163,14 @@ def test_three_nested_levels_carry_the_soonest_end(db):
     middle = tree.add("Middle", kind="phase", parent=top)
     bottom = tree.add("Bottom", kind="phase", parent=middle)
     late, early = tree.add("Late", parent=bottom), tree.add("Early", parent=middle)
-    soonest = _at(days=2)
-    tree.schedule(late, _at(days=9))
+    # Each end is taken once: a second ``_at`` can land in the next second and no longer match.
+    soonest, latest = _at(days=2), _at(days=9)
+    tree.schedule(late, latest)
     tree.schedule(early, soonest)
     until = tree.until()
     assert _same(until["Top"], soonest)
     assert _same(until["Middle"], soonest)
-    assert _same(until["Bottom"], _at(days=9))
+    assert _same(until["Bottom"], latest)
     assert until["Late"] is not None
 
 

@@ -6,7 +6,7 @@ instead of one per surface. Each section states its own membership in the
 remainder's label, and no two share the bare word "Other":
 
 * the Models table keeps models that spent something or have at least ``MIN_TASKS``
-  accepted tasks, ranks them by priced spend, shows the top ``MODEL_ROWS`` and puts
+  accepted tasks, ranks them by ledger spend (every priced call of the window), shows the top ``MODEL_ROWS`` and puts
   the rest in "Other (N more models)";
 * token share and Spend keep their top ``SHOWN`` by their own measure and put
   the rest in "N more models".
@@ -114,10 +114,14 @@ class ModelTally:
     previous: PeriodTasks = field(default_factory=PeriodTasks)
     turns: int = 0
     failed: int = 0
+    #: Priced dollars of every ledger call in the latest window, whether or not an accepted task's chain holds it:
+    #: the figure a row's share of spend and its rank read, and the one Cost's headline adds up.
+    ledger: float = 0.0
 
     def merge(self, other: ModelTally) -> None:
         self.latest.merge(other.latest)
         self.previous.merge(other.previous)
+        self.ledger += other.ledger
         self.turns += other.turns
         self.failed += other.failed
 
@@ -127,11 +131,11 @@ def split_by_spend(
 ) -> tuple[list[str], list[str]]:
     """Keys that hold their own table row, and the keys of the models pooled into "Other".
 
-    A model is listed when it spent something in the latest window or has ``minimum`` accepted
-    tasks; the listed models rank by priced spend, then tasks, and the first ``shown`` keep a row.
+    A model is listed when its ledger calls were priced in the latest window or it has ``minimum``
+    accepted tasks; the listed models rank by that ledger spend, then tasks, and the first ``shown`` keep a row.
     """
-    listed = [key for key, tally in tallies.items() if tally.latest.dollars > 0 or len(tally.latest.tasks) >= minimum]
-    listed.sort(key=lambda key: (-tallies[key].latest.dollars, -len(tallies[key].latest.tasks), key))
+    listed = [key for key, tally in tallies.items() if tally.ledger > 0 or len(tally.latest.tasks) >= minimum]
+    listed.sort(key=lambda key: (-tallies[key].ledger, -len(tallies[key].latest.tasks), key))
     return listed[:shown], listed[shown:]
 
 

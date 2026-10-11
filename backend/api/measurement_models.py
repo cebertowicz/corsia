@@ -11,6 +11,7 @@ restricted to that class's tasks, its change, and the share right first try.
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import replace
@@ -18,6 +19,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from api.cost_identity import IdentityResolver, ModelIdentity
+from api.measurement_cost import ledger_read, ledger_shapes
 from api.measurement_join import joined_read
 from api.measurement_model_cost import materialize_chain, query_model_costs, query_recording_gaps
 from api.measurement_model_turns import query_model_turns
@@ -125,8 +127,9 @@ def _row(
         "tasks": len(latest.tasks),
         "failed_turns_per_100": 100 * tally.failed / tally.turns if tally.turns >= MIN_TURNS else None,
         "recorded_cost_per_task": round(rate, 10) if rate is not None else None,
-        # Priced dollars of the latest window, None (never 0) when nothing was priced.
-        "spend_usd": round(latest.dollars, 10) if rate is not None else None,
+        # Ledger priced dollars of every call in the latest window, None (never 0) when nothing was priced;
+        # the page divides it by ``total_spend_usd``. The rate above stays the chain's dollars per task.
+        "spend_usd": round(tally.ledger, 10) if tally.ledger > 0 else None,
         "cost_class": cost_class(latest.outcomes),
         "includes_local": includes_local(latest.outcomes),
         # A task whose call failed to reach the ledger leaves the figure possibly low.
@@ -152,18 +155,36 @@ def _other_row(
     return {**_row("", other_label(len(rest)), pooled, False, pooled_sizes, first_try), "other": True}
 
 
+def _add_ledger(
+    ledger_rows: Iterable[Mapping[str, Any]], latest: Collection[str], resolve: Callable[[Mapping[str, Any]], ModelIdentity],
+    identities: dict[str, ModelIdentity], tallies: dict[str, ModelTally],
+) -> float:
+    """Add each priced ledger shape of the latest window to its model's ``ledger``; returns the window's total."""
+    total = 0.0
+    for row in ledger_rows:
+        if row["outcome"] != "priced" or row["dollars"] is None or str(row["period"]) not in latest:
+            continue
+        identity = resolve(row)
+        identities[identity.key] = identity
+        tallies[identity.key].ledger += float(row["dollars"])
+        total += float(row["dollars"])
+    return total
+
+
 def build_models(
     token_rows: list[dict[str, Any]], turn_rows: list[dict[str, Any]], error_rows: list[dict[str, Any]],
     cost_rows: list[dict[str, Any]], *, resolve: Callable[[Mapping[str, Any]], ModelIdentity],
     latest: Collection[str], previous: Collection[str], offered: set[str], gaps: Iterable[str] = (),
-    outcomes: Mapping[str, tuple[str | None, int]] | None = None,
+    outcomes: Mapping[str, tuple[str | None, int]] | None = None, ledger_rows: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Collapse resolved rows into Models rows, token shares and their disclosures.
 
     ``cost_rows`` are ``query_model_costs`` output, already carrying their
     identity; ``gaps`` are the task ids with a call that failed to reach the
     ledger; ``outcomes`` maps a task id to its size class (None when unsized)
-    and first-try mark, from ``api.measurement_size.outcome_sizes``. Grouping
+    and first-try mark, from ``api.measurement_size.outcome_sizes``; ``ledger_rows`` are Cost's classified
+    ledger shapes (``ledger_shapes``), whose priced dollars in ``latest`` are every row's spend and,
+    summed, the ``total_spend_usd`` each share divides by. Grouping
     is owned by ``api.model_groups``: rows under ``MIN_TASKS``
     accepted tasks share one floor row (``model`` empty, ``other`` true) rather
     than being dropped, and token shares past the top six share "Other (N more models)".
@@ -199,6 +220,7 @@ def build_models(
         identities[identity.key] = identity
         tallies[identity.key].failed += 1
         unmatched += not identity.resolved
+    total_spend = _add_ledger(ledger_rows, latest, resolve, identities, tallies)
     tokens: dict[str, int] = defaultdict(int)
     for row in token_rows:
         identity = resolve(row)
@@ -219,6 +241,7 @@ def build_models(
         # Every model's tasks of one class pooled: the figure a row's class is read against.
         "size_overall": _size_cells(_pooled_sizes(sizes.values()), first_try),
         "min_tasks": MIN_TASKS,
+        "total_spend_usd": round(total_spend, 10),
         "token_shares": group_shares([
             {"model": key, "label": identities[key].label, "share_of_tokens": amount / total, "tokens": amount}
             for key, amount in sorted(tokens.items(), key=lambda item: (-item[1], item[0])) if total
@@ -247,10 +270,10 @@ def _latest_window_params(params: dict[str, Any]) -> dict[str, Any]:
     return {**params, "from_ts": start[:10], "to_ts": (date.fromisoformat(end[:10]) + timedelta(days=1)).isoformat()}
 
 
-def models_payload(
+def models_inputs(
     db, scope_params: dict[str, Any], grain: Grain, catalog_entries: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Read and build Models for one validated scope and the page grain.
+    """Read everything Models builds from except the usage ledger, for one validated scope and the page grain.
 
     The grain's latest window is read for tasks, prices, turns and token share, and the
     window before it only for the change: one comparison rule, resolved once. The tasks'
@@ -267,33 +290,76 @@ def models_payload(
         gaps = query_recording_gaps(db, params, chain_rows=chain)
     finally:
         db.execute(f"DROP TABLE IF EXISTS {chain}")  # the pooled connection outlives the request
+    return {
+        "token_rows": query_family(db, "models", _latest_window_params(params)),
+        "turn_rows": turn_rows, "error_rows": error_rows, "cost_rows": cost_rows,
+        "latest": grain.latest.periods, "previous": grain.previous.periods,
+        "offered": resolve.offered_now(catalog_entries), "gaps": gaps, "outcomes": outcome_sizes(db, params),
+        "latest_window_params": _latest_window_params(params),
+    }
+
+
+def models_from_inputs(db, inputs: Mapping[str, Any], ledger: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Build Models from ``models_inputs`` and the usage ledger.
+
+    ``ledger`` is the classified ledger as ``api.measurement_cost.ledger_read`` shares it with Cost, whose
+    periods cover the latest window. Every share of spend divides ledger dollars of every call by the window's
+    ledger total, as Cost adds it up; only the latest window counts, as a row's share is of that window alone.
+    Without one the ledger is read here for that window alone.
+    """
     return build_models(
-        query_family(db, "models", _latest_window_params(params)),
-        turn_rows, error_rows, cost_rows, resolve=resolve,
-        latest=grain.latest.periods, previous=grain.previous.periods,
-        offered=resolve.offered_now(catalog_entries), gaps=gaps,
-        outcomes=outcome_sizes(db, params),
+        inputs["token_rows"], inputs["turn_rows"], inputs["error_rows"], inputs["cost_rows"],
+        resolve=IdentityResolver(db), latest=inputs["latest"], previous=inputs["previous"],
+        offered=inputs["offered"], gaps=inputs["gaps"], outcomes=inputs["outcomes"],
+        ledger_rows=ledger if ledger is not None else ledger_shapes(db, inputs["latest_window_params"]),
     )
+
+
+def models_payload(
+    db, scope_params: dict[str, Any], grain: Grain, catalog_entries: Iterable[Mapping[str, Any]],
+    ledger: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Read and build Models for one validated scope and the page grain, on one connection."""
+    return models_from_inputs(db, models_inputs(db, scope_params, grain, catalog_entries), ledger)
 
 
 @joined_read
 async def models_read(project: str, agent: str, page_grain: Grain, user: dict) -> dict[str, Any]:
-    """The ``/models`` body for one resolved grain; Biggest changes reads the same one."""
+    """The ``/models`` body for one resolved grain; Biggest changes reads the same one.
 
-    def query() -> dict[str, Any]:
+    The ledger is the one Cost reads for the same page load (its averaged grain, joined), fetched while the
+    rest of Models is read, so the page waits on neither more than on the slower of them; the final build is
+    in memory.
+    """
+
+    def read() -> tuple[dict[str, Any], dict[str, Any]]:
         db = get_db()
         try:
             from llm.model_status import catalog_base_rows
 
             selected_scope = validate_scope(db, user["id"], project, agent)
-            models = models_payload(db, selected_scope.params(user["id"]), page_grain, catalog_base_rows())
+            return selected_scope.response(), models_inputs(db, selected_scope.params(user["id"]), page_grain, catalog_base_rows())
+        finally:
+            db.close()
+
+    def build(scope: dict[str, Any], inputs: dict[str, Any], ledger: list[dict[str, Any]]) -> dict[str, Any]:
+        db = get_db()
+        try:
             return {
                 "definition_version": 3,
-                "scope": selected_scope.response(),
+                "scope": scope,
                 "period": page_grain.describe(),
-                **models,
+                **models_from_inputs(db, inputs, ledger),
             }
         finally:
             db.close()
 
-    return await run_bulk(query)
+    ledger_task = asyncio.ensure_future(ledger_read(project, agent, page_grain.averaged(), user))
+    ledger_task.add_done_callback(lambda task: task.cancelled() or task.exception())  # a failure here is raised below
+    try:
+        scope, inputs = await run_bulk(read)
+        ledger = await ledger_task
+    except BaseException:
+        ledger_task.cancel()
+        raise
+    return await run_bulk(build, scope, inputs, ledger)

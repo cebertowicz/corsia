@@ -371,13 +371,5 @@ async def measurement_models(
     return await models_read(project, agent, resolve_grain(grain, timezone_name), user)
 
 
-register_cost_route(
-    router,
-    require_user=require_user,
-    resolve_grain=resolve_grain,
-    get_db=get_db,
-    validate_scope=validate_scope,
-    prepare_outcome_periods=prepare_outcome_periods,
-    run_in_db=run_bulk,
-)
+register_cost_route(router, require_user=require_user, resolve_grain=resolve_grain)
 
