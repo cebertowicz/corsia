@@ -23,7 +23,7 @@ from typing import Literal, Sequence
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from core.image_resize import heif_supported
+from core.image_resize import decode_slot, heif_supported
 from infra.config import MAX_CONCURRENT_IMAGE_NORMALIZATIONS
 from infra.host_resources import image_decode_pixel_budget
 
@@ -262,9 +262,11 @@ def render_marked_image(data: bytes, marks: Sequence[Mark]) -> bytes:
     with Image.open(io.BytesIO(data)) as source:
         _check_budget(source)
         source.draft("RGB", (MAX_RENDER_SIDE, MAX_RENDER_SIDE))
-        source.load()
-        # Upright, as the viewer's <img> shows it, so fractions land on the same pixels.
-        img = _fit(ImageOps.exif_transpose(source).convert("RGB"))
+        # The budget is one slot's share of memory, so the full frame is held only inside a slot.
+        with decode_slot():
+            source.load()
+            # Upright, as the viewer's <img> shows it, so fractions land on the same pixels.
+            img = _fit(ImageOps.exif_transpose(source).convert("RGB"))
     draw = ImageDraw.Draw(img)
     scale = _scale_for(img)
     for mark in marks:

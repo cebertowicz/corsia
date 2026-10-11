@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import math
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from itertools import combinations
 
 import pytest
@@ -127,3 +129,25 @@ def test_render_caps_the_longest_side():
 
     assert max(img.size) == MAX_RENDER_SIDE
     assert img.format == "PNG"
+
+
+def test_render_decodes_only_in_a_shared_decode_slot():
+    """The decode budget is a per-slot share, so a render waits while every slot is busy."""
+    from core import image_resize
+    from infra.config import MAX_CONCURRENT_IMAGE_NORMALIZATIONS
+
+    held = 0
+    try:
+        for _slot in range(MAX_CONCURRENT_IMAGE_NORMALIZATIONS):
+            assert image_resize.decode_slot().acquire(timeout=5)
+            held += 1
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(render_marked_image, _png(200, 100), [Mark(1, Region(0.1, 0.1, 0.2, 0.2))])
+            with pytest.raises(FutureTimeout):
+                future.result(timeout=0.3)
+            image_resize.decode_slot().release()
+            held -= 1
+            assert Image.open(io.BytesIO(future.result(timeout=5))).format == "PNG"
+    finally:
+        for _slot in range(held):
+            image_resize.decode_slot().release()
