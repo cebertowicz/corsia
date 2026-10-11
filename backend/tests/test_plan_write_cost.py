@@ -303,12 +303,18 @@ def test_touched_plans_are_found_without_probing_every_plan(db, scene, monkeypat
     """Under the writer lock, finding touched plans never probes each plan in turn.
 
     A correlated per-plan probe scanned plan_node_attempts once per plan and
-    held the lock ~1.5 s per write on a 1,600-plan production database.
+    held the lock ~1.5 s per write on a 1,600-plan production database. Nor
+    does it scan a history table: SQLite 3.53 merges a plain UNION in plan_id
+    order and so read every plan_nodes row on every plan write.
     """
     later = "9999-01-01T00:00:00+00:00"
     untouched, plan = _mark_touched(db, later, monkeypatch)
     assert untouched == []
     assert not any("CORRELATED" in step for step in plan)
+    assert not any(
+        step.startswith(("SCAN plan_nodes", "SCAN e", "SCAN plan_node_attempts"))
+        for step in plan
+    ), plan
 
     db.execute("UPDATE plan_nodes SET updated_at=? WHERE id=?", (later, scene.pending))
     touched, _plan = _mark_touched(db, later, monkeypatch)

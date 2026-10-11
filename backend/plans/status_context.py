@@ -73,16 +73,19 @@ def touched_plans(db, *, since: str, owner_id: str | None = None) -> list:
     reconciliation still counts as a touch. Each table is read once rather
     than probing every plan: a per-plan correlated probe scanned
     ``plan_node_attempts`` once per plan and held the writer lock for seconds
-    on a large database.
+    on a large database. The branches join with UNION ALL (``IN`` already
+    de-duplicates): a plain UNION lets SQLite 3.53 merge them in plan_id order,
+    which it does by scanning every plan_nodes row instead of the
+    ``updated_at`` range.
     """
     owner = "" if owner_id is None else " AND p.owner_kind='thread' AND p.owner_id=?"
     return db.execute(
         """SELECT p.* FROM plans p WHERE p.id IN (
              SELECT id FROM plans WHERE updated_at>=?
-             UNION SELECT plan_id FROM plan_nodes WHERE updated_at>=?
-             UNION SELECT n.plan_id FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
+             UNION ALL SELECT plan_id FROM plan_nodes WHERE updated_at>=?
+             UNION ALL SELECT n.plan_id FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
                    WHERE e.created_at>=?
-             UNION SELECT plan_id FROM plan_node_attempts
+             UNION ALL SELECT plan_id FROM plan_node_attempts
                    WHERE selected_at>=? OR released_at>=?)""" + owner,
         (since, since, since, since, since) + (() if owner_id is None else (owner_id,)),
     ).fetchall()
