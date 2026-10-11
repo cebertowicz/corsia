@@ -14,6 +14,7 @@ user clears that ask, the holds it placed clear and the agent is told
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass
 from typing import Callable
 
@@ -272,14 +273,16 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
 def _release(
     db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
 ) -> int:
-    from plans import admission, admission_projection, holds, plan_wake, service
+    from plans import admission, holds, plan_wake
     from prompts import plan_wakes as wakes
 
     rows = db.execute(
         f"""SELECT h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,
-                  i.title AS ask
+                  n.revision, n.executor_thread_id, n.owner_thread_id,
+                  p.owner_kind, p.owner_id, i.title AS ask
              FROM plan_node_artifact_links l
              JOIN plan_nodes n ON n.id = l.node_id
+             JOIN plans p ON p.id = n.plan_id
              JOIN plan_node_holds h ON h.node_id = n.id
              JOIN artifact_identities i ON i.id = l.artifact_id
             WHERE l.artifact_id=? AND l.role='attention'
@@ -287,7 +290,7 @@ def _release(
             ORDER BY h.created_at, h.id""",
         (artifact_id,),
     ).fetchall()
-    released_by_plan: dict[str, list[tuple[str, str]]] = {}
+    released_by_plan: dict[str, list[tuple[sqlite3.Row, str]]] = {}
     for row in rows:
         holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",
@@ -303,26 +306,24 @@ def _release(
             f'The user {done} "{ask}", so {row["kind"]} '
             f'"{row["title"]}" no longer waits on them: pick it up.'
         )
-        released_by_plan.setdefault(str(row["plan_id"]), []).append(
-            (str(row["node_id"]), summary),
-        )
+        released_by_plan.setdefault(str(row["plan_id"]), []).append((row, summary))
     for plan_id, released in released_by_plan.items():
+        summaries = {str(row["node_id"]): summary for row, summary in released}
         reconciled = admission.reconcile_plan(
             plan_id, actor_id=None, provenance=_PROVENANCE,
-            selection_wake_summaries=dict(released), db=db,
+            selection_wake_summaries=summaries, db=db,
         )
-        plan = service._plan_row(db, plan_id)
-        for node_id, summary in released:
-            node = service._node_row(db, node_id)
-            executor = admission_projection.executor_of(node, plan)
+        for row, summary in released:
+            node_id = str(row["node_id"])
+            executor = (
+                str(row["owner_id"]) if row["owner_kind"] == "thread"
+                else row["executor_thread_id"] or row["owner_thread_id"]
+            )
             if executor is None or node_id in reconciled.selection_woken:
                 continue
             plan_wake.append(
                 db, recipient=executor, kind=plan_wake.ASK_RELEASED, subject_id=node_id,
-                revision=int(node["revision"]), plan_id=plan_id,
-                content=plan_wake.with_next(
-                    db, plan_id, executor, wakes.WAKE_ASK_RELEASED.format(summary=summary),
-                ),
-                open_node_id=node_id,
+                revision=int(row["revision"]), plan_id=plan_id,
+                content=wakes.WAKE_ASK_RELEASED.format(summary=summary), open_node_id=node_id,
             )
     return len(rows)
