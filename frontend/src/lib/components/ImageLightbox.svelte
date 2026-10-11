@@ -117,7 +117,7 @@
 	export function imageBounds(): DOMRect | null { return imgEl?.isConnected ? imgEl.getBoundingClientRect() : null; }
 	/** The image's own pixel size once it has loaded, for a caller sizing the space around the viewer. */
 	export function naturalSize(): Size | null { return natural; }
-	/** Scrolls so the given fraction of the image (0..1 on each axis) is centred in the viewport, keeping the zoom. */
+	/** Glides the given fraction of the image (0..1 on each axis) to the viewport's centre, keeping the zoom; at once with reduced motion. */
 	export function revealFraction(x: number, y: number) {
 		const el = viewportEl;
 		const image = imgEl;
@@ -125,8 +125,7 @@
 		const at = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
 		const view = el.getBoundingClientRect();
 		const delta = scrollToHold(at, { x: view.left + view.width / 2, y: view.top + view.height / 2 }, image.getBoundingClientRect());
-		el.scrollLeft += delta.x;
-		el.scrollTop += delta.y;
+		el.scrollTo({ left: el.scrollLeft + delta.x, top: el.scrollTop + delta.y, behavior: $prefersReducedMotion ? 'auto' : 'smooth' });
 	}
 	function toFit() {
 		free = null;
