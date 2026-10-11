@@ -19,7 +19,7 @@ def notify(
     for node_id, executor in reconciled.selected:
         if not executor or executor == causing_executor:
             continue
-        node = plan_wake.node(db, node_id)
+        node = plan_wake.read_node(db, node_id)
         if delegated_selection.told_elsewhere(db, executor, node, from_worker=from_worker):
             continue
         summary = (selection_wake_summaries or {}).get(node_id)

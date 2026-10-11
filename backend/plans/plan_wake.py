@@ -229,7 +229,7 @@ def notify_returned(
     from plans.close_next_bounds import bounded
     from prompts import plan_wakes as wakes
 
-    node = _node(db, node_id)
+    node = read_node(db, node_id)
     plan = service._plan_row(db, node["plan_id"])
     if plan["owner_kind"] != "thread":
         return None
@@ -294,7 +294,7 @@ def notify_revision(
     from prompts import plan_wakes as wakes
 
     with service._connection(db) as connection:
-        node = _node(connection, node_id)
+        node = read_node(connection, node_id)
         own_plan = service.ensure_plan("thread", recipient, db=connection)
         to_worker = node["spawned_thread_id"] == recipient
         field = handoff_brief.bounded_field(connection, node, own_plan.id)
@@ -345,7 +345,7 @@ def notify_closed(
 
     if not executor or executor == causing_executor:
         return
-    node = _node(db, node_id)
+    node = read_node(db, node_id)
     if node["state"] in node_order.OPEN_TASK_STATES:
         return
     append(
@@ -362,7 +362,7 @@ def notify_closed(
     )
 
 
-def node(db, node_id: str):
+def read_node(db, node_id: str):
     """Return the plan-node row needed to compose a wake."""
     from plans import service
 
