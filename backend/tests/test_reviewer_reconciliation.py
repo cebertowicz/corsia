@@ -6,23 +6,29 @@ from unittest.mock import ANY, patch
 import pytest
 from reviewer_gate_fixtures import _DEFAULT_PR_INFO
 
-
-@pytest.fixture
-def _reload_gate(isolated_db):
-    import events.reviewer_gate as gate_mod
-    import events.reviewer_reconciliation as reconciliation_mod
-
-    gate_mod = importlib.reload(gate_mod)
-    reconciliation_mod = importlib.reload(reconciliation_mod)
-    gate_mod.reconcile_reviewer_gate_once = reconciliation_mod.reconcile_once
-    gate_mod.RECONCILIATION_EVENT = reconciliation_mod.RECONCILIATION_EVENT
-    gate_mod.reconciliation_log = reconciliation_mod.log
-    return gate_mod
-
-
 REPO = "owner/repo"
 HEAD = "abc123def"
 PR_NUMBER = 42
+
+# Copied from real cancelled corsia check-run annotations on 2026-10-11.
+# Each fixture cites its GitHub Actions workflow run / check run source.
+SUPERSESSION = "Canceling since a higher priority waiting request for unit-refs/pull/402/merge exists"
+# workflow 38156715956 / check run 114521093057
+TIMEOUT = "The job has exceeded the maximum execution time of 25m0s"
+# workflow 38089220836 / check run 114322017158
+DELIBERATE_CANCEL = "The run was canceled by @corsia-bot."
+# workflow 38081362709 / check run 114298778697
+GENERIC_CANCEL = "The operation was canceled."
+# workflow 38156715956 / check run 114521093057
+# No real or documented cancelled-run infrastructure annotation is currently verified.
+UNKNOWN_INFRASTRUCTURE = "The runner has received a shutdown signal."
+
+
+@pytest.fixture
+def reconciliation(isolated_db):
+    import events.reviewer_reconciliation as reconciliation_mod
+
+    return importlib.reload(reconciliation_mod)
 
 
 def _open_prs():
@@ -33,113 +39,203 @@ def _green_checks():
     return [{"id": 10, "name": "backend", "state": "SUCCESS"}]
 
 
+def _cancelled_checks():
+    return [{"id": 10, "name": "required-ci", "state": "CANCELLED"}]
+
+
+def _workflow(message: str, *, run_id: int = 99, jobs: list[dict] | None = None):
+    return {
+        "id": run_id,
+        "run_attempt": 1,
+        "html_url": f"https://example.test/run/{run_id}",
+        "job_name": "required-ci",
+        "jobs": jobs or [],
+        "annotations": [{"message": message}],
+    }
+
+
+def _reconcile_cancelled(reconciliation, workflow, *, second_workflow=None):
+    workflows = [workflow] if second_workflow is None else [workflow, second_workflow]
+    return patch.object(reconciliation.github_reviewer_gate, "fetch_required_check_contexts", return_value={"required-ci"}), \
+        patch.object(reconciliation.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
+        patch.object(reconciliation.github_reviewer_gate, "fetch_check_runs", return_value=_cancelled_checks()), \
+        patch.object(reconciliation.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
+        patch.object(reconciliation.github_reviewer_gate, "fetch_workflow_run", side_effect=workflows)
+
+
 class TestReviewerReconciliation:
-    def test_missed_completion_fires_once(self, _reload_gate):
-        gate_mod = _reload_gate
+    @pytest.mark.parametrize(
+        ("message", "expected"),
+        [
+            (SUPERSESSION, "supersession"),
+            (TIMEOUT, "timeout"),
+            (DELIBERATE_CANCEL, "deliberate"),
+            (GENERIC_CANCEL, "unrecognized"),
+        ],
+    )
+    def test_real_cancelled_annotations_are_never_retryable(self, reconciliation, message, expected):
+        """Pin all four sampled corsia cancellation texts to fail-closed outcomes."""
+        assert reconciliation._cancel_reason(_workflow(message)) == expected
+        assert expected != "infrastructure"
 
-        with patch.object(gate_mod.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_check_runs", return_value=_green_checks()), \
-             patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch.object(gate_mod.github_reviewer_gate, "reviewer_status", return_value={}), \
-             patch.object(gate_mod, "_evaluate_review_gate") as evaluate:
-
-            gate_mod.reconcile_reviewer_gate_once([REPO])
+    def test_missed_completion_claims_and_fires_once_across_passes(self, reconciliation):
+        with patch.object(reconciliation.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_check_runs", return_value=_green_checks()), \
+             patch.object(reconciliation.github_reviewer_gate, "checks_green", return_value=True), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_pr_info_awaiting_mergeability", return_value=_DEFAULT_PR_INFO), \
+             patch.object(reconciliation.github_reviewer_gate, "reviewer_status", return_value={}), \
+             patch("events.reviewer_gate._evaluate_review_gate") as evaluate:
+            reconciliation.reconcile_once([REPO])
+            reconciliation.reconcile_once([REPO])
 
         evaluate.assert_called_once_with(
-            REPO, HEAD, PR_NUMBER, gate_mod.RECONCILIATION_EVENT, ANY, checks=_green_checks(),
+            REPO, HEAD, PR_NUMBER, reconciliation.RECONCILIATION_EVENT, ANY, checks=_green_checks(),
         )
 
-    def test_second_pass_does_not_refire_a_reviewed_head(self, _reload_gate):
-        gate_mod = _reload_gate
-        gate_mod.reviewer_gate_state.mark_reviewed(f"{REPO}#{PR_NUMBER}", HEAD)
+    def test_stale_pending_reviewer_status_is_recovered_once(self, reconciliation, monkeypatch):
+        monkeypatch.setattr(reconciliation.time, "time", lambda: 2_000.0)
+        stale_status = {"state": "pending", "created_at": "1970-01-01T00:00:00Z"}
 
-        with patch.object(gate_mod.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
-             patch.object(gate_mod, "_evaluate_review_gate") as evaluate:
+        with patch.object(reconciliation.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_check_runs", return_value=_green_checks()), \
+             patch.object(reconciliation.github_reviewer_gate, "checks_green", return_value=True), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_pr_info_awaiting_mergeability", return_value=_DEFAULT_PR_INFO), \
+             patch.object(reconciliation.github_reviewer_gate, "reviewer_status", return_value=stale_status), \
+             patch("events.reviewer_gate._evaluate_review_gate") as evaluate:
+            reconciliation.reconcile_once([REPO])
+            reconciliation.reconcile_once([REPO])
 
-            gate_mod.reconcile_reviewer_gate_once([REPO])
+        evaluate.assert_called_once_with(
+            REPO, HEAD, PR_NUMBER, reconciliation.RECONCILIATION_EVENT, ANY, checks=_green_checks(),
+        )
+
+    def test_recent_pending_reviewer_status_is_not_recovered(self, reconciliation, monkeypatch):
+        monkeypatch.setattr(reconciliation.time, "time", lambda: 2_000.0)
+        recent_status = {"state": "pending", "created_at": "1970-01-01T00:31:00Z"}
+
+        with patch.object(reconciliation.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_check_runs", return_value=_green_checks()), \
+             patch.object(reconciliation.github_reviewer_gate, "checks_green", return_value=True), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_pr_info_awaiting_mergeability", return_value=_DEFAULT_PR_INFO), \
+             patch.object(reconciliation.github_reviewer_gate, "reviewer_status", return_value=recent_status), \
+             patch("events.reviewer_gate._evaluate_review_gate") as evaluate:
+            reconciliation.reconcile_once([REPO])
 
         evaluate.assert_not_called()
 
-    def test_pending_reviewer_status_does_not_duplicate_a_run(self, _reload_gate):
-        gate_mod = _reload_gate
+    def test_stale_pending_reviewer_status_waits_for_green_checks(self, reconciliation, monkeypatch):
+        monkeypatch.setattr(reconciliation.time, "time", lambda: 2_000.0)
+        stale_status = {"state": "pending", "created_at": "1970-01-01T00:00:00Z"}
 
-        with patch.object(gate_mod.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_check_runs", return_value=_green_checks()), \
-             patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch.object(gate_mod.github_reviewer_gate, "reviewer_status", return_value={"state": "pending"}), \
-             patch.object(gate_mod, "_evaluate_review_gate") as evaluate:
-
-            gate_mod.reconcile_reviewer_gate_once([REPO])
+        with patch.object(reconciliation.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_check_runs", return_value=_green_checks()), \
+             patch.object(reconciliation.github_reviewer_gate, "checks_green", return_value=False), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_pr_info_awaiting_mergeability", return_value=_DEFAULT_PR_INFO), \
+             patch.object(reconciliation.github_reviewer_gate, "reviewer_status", return_value=stale_status), \
+             patch("events.reviewer_gate._evaluate_review_gate") as evaluate:
+            reconciliation.reconcile_once([REPO])
 
         evaluate.assert_not_called()
 
-    def test_superseded_cancelled_required_check_is_ignored(self, _reload_gate):
-        gate_mod = _reload_gate
-        cancelled = [{"id": 10, "name": "required-ci", "state": "CANCELLED"}]
-        stale_pr = {**_DEFAULT_PR_INFO, "headRefOid": "newer-head"}
+    def test_stale_pending_reviewer_status_respects_existing_in_flight_claim(self, reconciliation, monkeypatch):
+        monkeypatch.setattr(reconciliation.time, "time", lambda: 2_000.0)
+        stale_status = {"state": "pending", "created_at": "1970-01-01T00:00:00Z"}
+        pr_key = reconciliation.reviewer_gate_state.pr_key(REPO, PR_NUMBER)
+        assert reconciliation.reviewer_gate_state.claim_in_flight(pr_key, HEAD)
+        try:
+            with patch.object(reconciliation.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
+                 patch.object(reconciliation.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
+                 patch.object(reconciliation.github_reviewer_gate, "fetch_check_runs", return_value=_green_checks()), \
+                 patch.object(reconciliation.github_reviewer_gate, "checks_green", return_value=True), \
+                 patch.object(reconciliation.github_reviewer_gate, "fetch_pr_info_awaiting_mergeability", return_value=_DEFAULT_PR_INFO), \
+                 patch.object(reconciliation.github_reviewer_gate, "reviewer_status", return_value=stale_status), \
+                 patch("events.reviewer_gate._evaluate_review_gate") as evaluate:
+                reconciliation.reconcile_once([REPO])
+        finally:
+            reconciliation.reviewer_gate_state.release_in_flight(pr_key, HEAD)
 
-        with patch.object(gate_mod.github_reviewer_gate, "fetch_required_check_contexts", return_value={"required-ci"}), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_check_runs", return_value=cancelled), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=stale_pr), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_workflow_run") as workflow, \
-             patch.object(gate_mod.github_reviewer_gate, "rerun_workflow_run") as rerun:
+        evaluate.assert_not_called()
 
-            gate_mod.reconcile_reviewer_gate_once([REPO])
+    def test_missed_completion_waits_for_mergeability_before_claiming(self, reconciliation):
+        not_mergeable = {**_DEFAULT_PR_INFO, "mergeable": "CONFLICTING"}
+        with patch.object(reconciliation.github_reviewer_gate, "fetch_required_check_contexts", return_value=set()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_check_runs", return_value=_green_checks()), \
+             patch.object(reconciliation.github_reviewer_gate, "checks_green", return_value=True), \
+             patch.object(reconciliation.github_reviewer_gate, "reviewer_status", return_value={}), \
+             patch.object(reconciliation.github_reviewer_gate, "fetch_pr_info_awaiting_mergeability", side_effect=[not_mergeable, _DEFAULT_PR_INFO]), \
+             patch("events.reviewer_gate._evaluate_review_gate") as evaluate:
+            reconciliation.reconcile_once([REPO])
+            reconciliation.reconcile_once([REPO])
 
-        workflow.assert_not_called()
+        evaluate.assert_called_once_with(
+            REPO, HEAD, PR_NUMBER, reconciliation.RECONCILIATION_EVENT, ANY, checks=_green_checks(),
+        )
+
+    def test_supersession_annotation_is_ignored(self, reconciliation):
+        patches = _reconcile_cancelled(reconciliation, _workflow(SUPERSESSION))
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patch.object(reconciliation.github_reviewer_gate, "rerun_failed_jobs") as rerun, \
+             patch.object(reconciliation.github_reviewer_notifications, "notify_required_check_cancelled") as notify:
+            reconciliation.reconcile_once([REPO])
+
+        rerun.assert_not_called()
+        notify.assert_not_called()
+
+    def test_timeout_annotation_routes_owner_without_rerun(self, reconciliation):
+        workflow = _workflow(TIMEOUT)
+        patches = _reconcile_cancelled(reconciliation, workflow)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patch.object(reconciliation.github_reviewer_gate, "rerun_failed_jobs") as rerun, \
+             patch.object(reconciliation.github_reviewer_notifications, "notify_required_check_timeout") as timeout:
+            reconciliation.reconcile_once([REPO])
+
+        timeout.assert_called_once_with(REPO, PR_NUMBER, HEAD, workflow, ANY)
         rerun.assert_not_called()
 
-    def test_timeout_is_routed_to_owner_not_rerun(self, _reload_gate):
-        gate_mod = _reload_gate
-        cancelled = [{"id": 10, "name": "required-ci", "state": "CANCELLED"}]
-        timed_out = {
-            "id": 99,
-            "run_attempt": 1,
-            "html_url": "https://example.test/run/99",
-            "jobs": [{"name": "slow-required-job", "steps": [{"name": "run", "conclusion": "timed_out"}]}],
-        }
+    def test_deliberate_cancel_annotation_is_ignored(self, reconciliation):
+        patches = _reconcile_cancelled(reconciliation, _workflow(DELIBERATE_CANCEL))
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patch.object(reconciliation.github_reviewer_gate, "rerun_failed_jobs") as rerun, \
+             patch.object(reconciliation.github_reviewer_notifications, "notify_required_check_cancelled") as notify:
+            reconciliation.reconcile_once([REPO])
 
-        with patch.object(gate_mod.github_reviewer_gate, "fetch_required_check_contexts", return_value={"required-ci"}), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_check_runs", return_value=cancelled), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_workflow_run", return_value=timed_out), \
-             patch.object(gate_mod.github_reviewer_notifications, "notify_required_check_timeout") as notify, \
-             patch.object(gate_mod.github_reviewer_gate, "rerun_workflow_run") as rerun:
-
-            gate_mod.reconcile_reviewer_gate_once([REPO])
-
-        notify.assert_called_once_with(REPO, PR_NUMBER, HEAD, timed_out, ANY)
         rerun.assert_not_called()
+        notify.assert_not_called()
 
-    def test_infrastructure_cancel_is_rerun_exactly_once(self, _reload_gate):
-        gate_mod = _reload_gate
-        cancelled = [{"id": 10, "name": "required-ci", "state": "CANCELLED"}]
-        infrastructure = {"id": 99, "run_attempt": 1, "html_url": "https://example.test/run/99"}
+    def test_unknown_cancel_routes_owner_without_rerun(self, reconciliation):
+        workflow = _workflow(GENERIC_CANCEL)
+        patches = _reconcile_cancelled(reconciliation, workflow)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patch.object(reconciliation.github_reviewer_gate, "rerun_failed_jobs") as rerun, \
+             patch.object(reconciliation.github_reviewer_notifications, "notify_required_check_cancelled") as notify:
+            reconciliation.reconcile_once([REPO])
 
-        with patch.object(gate_mod.github_reviewer_gate, "fetch_required_check_contexts", return_value={"required-ci"}), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_open_pull_requests", return_value=_open_prs()), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_check_runs", return_value=cancelled), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
-             patch.object(gate_mod.github_reviewer_gate, "fetch_workflow_run", return_value=infrastructure), \
-             patch.object(gate_mod.github_reviewer_gate, "rerun_workflow_run", return_value=True) as rerun:
+        rerun.assert_not_called()
+        notify.assert_called_once_with(REPO, PR_NUMBER, HEAD, workflow, "unrecognized", ANY)
 
-            gate_mod.reconcile_reviewer_gate_once([REPO])
-            gate_mod.reconcile_reviewer_gate_once([REPO])
+    def test_failed_sibling_routes_owner_without_rerun(self, reconciliation):
+        workflow = _workflow(UNKNOWN_INFRASTRUCTURE, jobs=[{"conclusion": "failure"}])
+        patches = _reconcile_cancelled(reconciliation, workflow)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patch.object(reconciliation.github_reviewer_gate, "rerun_failed_jobs") as rerun, \
+             patch.object(reconciliation.github_reviewer_notifications, "notify_required_check_cancelled") as notify:
+            reconciliation.reconcile_once([REPO])
 
-        rerun.assert_called_once_with(REPO, 99)
+        rerun.assert_not_called()
+        notify.assert_called_once_with(REPO, PR_NUMBER, HEAD, workflow, "failed_sibling", ANY)
 
-    def test_github_read_failure_is_logged_not_swallowed(self, _reload_gate):
-        gate_mod = _reload_gate
+    def test_unverified_infrastructure_text_routes_owner_without_rerun(self, reconciliation):
+        workflow = _workflow(UNKNOWN_INFRASTRUCTURE)
+        patches = _reconcile_cancelled(reconciliation, workflow)
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patch.object(reconciliation.github_reviewer_gate, "rerun_failed_jobs") as rerun, \
+             patch.object(reconciliation.github_reviewer_notifications, "notify_required_check_cancelled") as notify:
+            reconciliation.reconcile_once([REPO])
 
-        with patch.object(gate_mod.github_reviewer_gate, "fetch_required_check_contexts", return_value=None), \
-             patch.object(gate_mod.reconciliation_log, "error") as error:
-
-            gate_mod.reconcile_reviewer_gate_once([REPO])
-
-        assert any("reviewer_sweep:" in str(call.args[0]) and "required_contexts_unreadable" in str(call.args[0])
-                   for call in error.call_args_list)
+        rerun.assert_not_called()
+        notify.assert_called_once_with(REPO, PR_NUMBER, HEAD, workflow, "unrecognized", ANY)

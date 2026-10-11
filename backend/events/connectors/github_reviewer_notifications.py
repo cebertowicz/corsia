@@ -208,3 +208,34 @@ def notify_required_check_timeout(
         loop,
         chip=f"PR #{pr_number}: required check timed out ({job_name})",
     )
+
+
+def notify_required_check_cancelled(
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    workflow_run: dict[str, Any],
+    reason: str,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> OwnerDeliveryResult:
+    """Route a cancelled required check that reconciliation cannot safely retry."""
+    run_url = str(workflow_run.get("html_url") or "")
+    job_name = str(
+        workflow_run.get("job_name") or workflow_run.get("name") or workflow_run.get("display_title") or "required check"
+    )
+    return deliver_owner_event(
+        repo,
+        pr_number,
+        "reviewer.required_check_cancelled",
+        f"PR #{pr_number}: cancelled required check ({job_name}; {reason}); inspect {run_url}",
+        {
+            "repo": repo,
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "run_url": run_url,
+            "job_name": job_name,
+            "reason": reason,
+        },
+        loop,
+        chip=f"PR #{pr_number}: cancelled required check ({reason})",
+    )

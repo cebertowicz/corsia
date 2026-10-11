@@ -3,15 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from datetime import datetime
 from typing import Any
 
 from loguru import logger as log
 
 from events import reviewer_gate_state
 from events.connectors import github_reviewer_gate, github_reviewer_notifications
+from reviewer.reviewer_backends import REVIEWER_RUN_TIMEOUT_S
 
 RECONCILIATION_INTERVAL_S = 5 * 60
 RECONCILIATION_EVENT = "automation.github.reviewer_sweep"
+
+# Real corsia annotation prefixes, sampled 2026-10-11:
+# check run 114521093057 (workflow 38156715956), check run 114322017158
+# (workflow 38089220836), and check run 114298778697 (workflow 38081362709).
+_SUPERSESSION_PREFIX = "Canceling since a higher priority waiting request for "
+_TIMEOUT_PREFIX = "The job has exceeded the maximum execution time"
+_DELIBERATE_CANCEL_PREFIX = "The run was canceled by @"
+# No real or documented cancelled-run infrastructure annotation has been
+# verified. Adding an entry is the one-line, evidence-backed data change that
+# enables the existing narrow rerun path; each entry needs a real API fixture.
+_INFRASTRUCTURE_ANNOTATION_PREFIXES: tuple[str, ...] = ()
 
 
 def reconcile_once(
@@ -38,7 +52,7 @@ def _reconcile_pull_request(
     required_contexts: set[str],
     loop: asyncio.AbstractEventLoop | None,
 ) -> None:
-    """Run the canonical gate or repair one readable cancelled required check."""
+    """Run the canonical gate or fail closed on a cancelled required check."""
     pr_number = pull_request.get("number")
     head_sha = pull_request.get("head_sha")
     if not isinstance(pr_number, int) or not isinstance(head_sha, str) or not head_sha:
@@ -65,6 +79,12 @@ def _reconcile_pull_request(
         log.error("reviewer_sweep: skip pr={} head={} reason=reviewer_status_unreadable", pr_number, head_sha[:8])
         return
     if status:
+        if _stuck_pending_status(status):
+            if not github_reviewer_gate.checks_green(repo, pr_number, head_sha, checks):
+                log.info("reviewer_sweep: skip pr={} head={} reason=checks_not_green", pr_number, head_sha[:8])
+                return
+            _fire_reconciliation_review(repo, pr_number, head_sha, pr_key, checks, loop, "pending_recovery")
+            return
         log.info(
             "reviewer_sweep: skip pr={} head={} reason=reviewer_status_{}",
             pr_number, head_sha[:8], str(status.get("state") or "present").lower(),
@@ -73,10 +93,53 @@ def _reconcile_pull_request(
     if not github_reviewer_gate.checks_green(repo, pr_number, head_sha, checks):
         log.info("reviewer_sweep: skip pr={} head={} reason=checks_not_green", pr_number, head_sha[:8])
         return
+    _fire_reconciliation_review(repo, pr_number, head_sha, pr_key, checks, loop, "missed_completion")
+
+
+def _fire_reconciliation_review(
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    pr_key: str,
+    checks: list[dict[str, Any]],
+    loop: asyncio.AbstractEventLoop | None,
+    action: str,
+) -> None:
+    """Claim and send exactly one reconciliation recovery into the canonical gate."""
+    pr_info = github_reviewer_gate.fetch_pr_info_awaiting_mergeability(repo, pr_number, head_sha)
+    if pr_info is None:
+        log.error("reviewer_sweep: skip pr={} head={} reason=pr_info_unreadable", pr_number, head_sha[:8])
+        return
+    if pr_info.get("headRefOid") != head_sha:
+        log.info("reviewer_sweep: skip pr={} head={} reason=superseded", pr_number, head_sha[:8])
+        return
+    if github_reviewer_gate.hold_pr_until_reviewable(repo, pr_number, head_sha, pr_info):
+        log.info("reviewer_sweep: skip pr={} head={} reason=not_mergeable", pr_number, head_sha[:8])
+        return
+    if reviewer_gate_state.is_in_flight(pr_key, head_sha):
+        log.info("reviewer_sweep: skip pr={} head={} reason=review_in_flight", pr_number, head_sha[:8])
+        return
+    if not reviewer_gate_state.claim_reconciliation_action(pr_key, head_sha, action):
+        log.info("reviewer_sweep: skip pr={} head={} reason=review_already_claimed", pr_number, head_sha[:8])
+        return
     from events.reviewer_gate import _evaluate_review_gate
 
-    log.info("reviewer_sweep: fired pr={} head={} reason=missed_completion", pr_number, head_sha[:8])
+    log.info("reviewer_sweep: fired pr={} head={} reason={}", pr_number, head_sha[:8], action)
     _evaluate_review_gate(repo, head_sha, pr_number, RECONCILIATION_EVENT, loop, checks=checks)
+
+
+def _stuck_pending_status(status: dict[str, str]) -> bool:
+    """Return whether a timestamped reviewer pending status exceeded its run limit."""
+    if str(status.get("state") or "").lower() != "pending":
+        return False
+    created_at = status.get("created_at") or status.get("updated_at")
+    if not isinstance(created_at, str):
+        return False
+    try:
+        started = datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return False
+    return time.time() - started >= REVIEWER_RUN_TIMEOUT_S
 
 
 def _reconcile_cancelled_required_checks(
@@ -103,9 +166,12 @@ def _reconcile_cancelled_required_checks(
                 pr_number, head_sha[:8], check.get("name"),
             )
             continue
-        reason = _cancel_reason(check, workflow_run)
-        if reason == "supersession":
-            log.info("reviewer_sweep: skip pr={} head={} reason=supersession", pr_number, head_sha[:8])
+        if _has_failed_job(workflow_run):
+            _route_cancelled_check(repo, pr_number, head_sha, workflow_run, "failed_sibling", loop)
+            continue
+        reason = _cancel_reason(workflow_run)
+        if reason in {"supersession", "deliberate"}:
+            log.info("reviewer_sweep: skip pr={} head={} reason={}", pr_number, head_sha[:8], reason)
             continue
         if reason == "timeout":
             github_reviewer_notifications.notify_required_check_timeout(
@@ -113,46 +179,62 @@ def _reconcile_cancelled_required_checks(
             )
             log.warning("reviewer_sweep: routed pr={} head={} reason=timeout", pr_number, head_sha[:8])
             continue
+        if reason != "infrastructure":
+            _route_cancelled_check(repo, pr_number, head_sha, workflow_run, "unrecognized", loop)
+            continue
+        context = check.get("name")
         run_id = workflow_run.get("id")
-        attempt = workflow_run.get("run_attempt", 1)
-        if not isinstance(run_id, int) or not isinstance(attempt, int):
-            log.error("reviewer_sweep: skip pr={} head={} reason=workflow_run_malformed", pr_number, head_sha[:8])
+        if not isinstance(context, str) or not isinstance(run_id, int):
+            _route_cancelled_check(repo, pr_number, head_sha, workflow_run, "workflow_run_malformed", loop)
             continue
-        if not reviewer_gate_state.claim_workflow_rerun(pr_key, run_id, attempt):
-            log.info("reviewer_sweep: skip pr={} head={} reason=rerun_already_claimed", pr_number, head_sha[:8])
+        if not reviewer_gate_state.claim_required_context_rerun(pr_key, head_sha, context):
+            _route_cancelled_check(repo, pr_number, head_sha, workflow_run, "rerun_already_attempted", loop)
             continue
-        if github_reviewer_gate.rerun_workflow_run(repo, run_id):
-            log.info("reviewer_sweep: rerun pr={} head={} reason=infrastructure", pr_number, head_sha[:8])
+        if github_reviewer_gate.rerun_failed_jobs(repo, run_id):
+            _route_cancelled_check(repo, pr_number, head_sha, workflow_run, "rerun_requested", loop)
             continue
-        reviewer_gate_state.release_workflow_rerun(pr_key, run_id, attempt)
-        log.error("reviewer_sweep: skip pr={} head={} reason=rerun_request_failed", pr_number, head_sha[:8])
+        _route_cancelled_check(repo, pr_number, head_sha, workflow_run, "rerun_request_failed", loop)
 
 
-def _cancel_reason(check: dict[str, Any], workflow_run: dict[str, Any]) -> str:
-    """Classify cancellation from GitHub's run, job and annotation detail."""
-    detail_values: list[Any] = [
-        check.get("conclusion_detail"),
-        check.get("details"),
-        (check.get("output") or {}).get("title") if isinstance(check.get("output"), dict) else "",
-        (check.get("output") or {}).get("summary") if isinstance(check.get("output"), dict) else "",
-        workflow_run.get("conclusion_detail"),
-        workflow_run.get("name"),
+def _has_failed_job(workflow_run: dict[str, Any]) -> bool:
+    """Return whether a failed sibling makes a cancelled run a fail-fast cascade."""
+    return any(
+        isinstance(job, dict) and str(job.get("conclusion") or "").lower() == "failure"
+        for job in workflow_run.get("jobs") or []
+    )
+
+
+def _cancel_reason(workflow_run: dict[str, Any]) -> str:
+    """Classify only the cancelled check run's annotation messages, fail closed by default."""
+    messages = [
+        str(annotation.get("message") or "")
+        for annotation in workflow_run.get("annotations") or []
+        if isinstance(annotation, dict)
     ]
-    for job in workflow_run.get("jobs") or []:
-        if isinstance(job, dict):
-            detail_values.extend((job.get("name"), job.get("conclusion"), job.get("status")))
-            for step in job.get("steps") or []:
-                if isinstance(step, dict):
-                    detail_values.extend((step.get("name"), step.get("conclusion"), step.get("status")))
-    for annotation in workflow_run.get("annotations") or []:
-        if isinstance(annotation, dict):
-            detail_values.extend((annotation.get("title"), annotation.get("message"), annotation.get("raw_details")))
-    detail = " ".join(str(value or "") for value in detail_values).lower().replace("_", " ").replace("-", " ")
-    if "timeout" in detail or "timed out" in detail or "time limit" in detail:
-        return "timeout"
-    if "supersed" in detail or "newer run" in detail or "concurrency" in detail:
+    if any(message.startswith(_SUPERSESSION_PREFIX) for message in messages):
         return "supersession"
-    return "infrastructure"
+    if any(message.startswith(_TIMEOUT_PREFIX) for message in messages):
+        return "timeout"
+    if any(message.startswith(_DELIBERATE_CANCEL_PREFIX) for message in messages):
+        return "deliberate"
+    if any(message.startswith(prefix) for prefix in _INFRASTRUCTURE_ANNOTATION_PREFIXES for message in messages):
+        return "infrastructure"
+    return "unrecognized"
+
+
+def _route_cancelled_check(
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    workflow_run: dict[str, Any],
+    reason: str,
+    loop: asyncio.AbstractEventLoop | None,
+) -> None:
+    """Wake the PR owner for a cancellation that cannot safely be retried."""
+    github_reviewer_notifications.notify_required_check_cancelled(
+        repo, pr_number, head_sha, workflow_run, reason, loop,
+    )
+    log.warning("reviewer_sweep: routed pr={} head={} reason={}", pr_number, head_sha[:8], reason)
 
 
 async def loop() -> None:

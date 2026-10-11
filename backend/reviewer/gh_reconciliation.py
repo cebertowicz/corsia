@@ -54,13 +54,18 @@ def get_open_pull_requests(repo: str, base_ref: str) -> list[dict[str, Any]] | N
 
 
 def get_branch_required_contexts(repo: str, branch: str) -> set[str] | None:
-    """Return branch-rule required status-check contexts without hard-coding them."""
+    """Return branch-rule required status-check contexts without hard-coding them.
+
+    GitHub's branch-rules endpoint returns a top-level rule array, not a
+    ruleset envelope. An unreadable or shape-mismatched response stays
+    distinct from a readable branch that simply has no required contexts.
+    """
     data = _json_api(["api", f"repos/{repo}/rules/branches/{branch}"])
-    if not isinstance(data, dict) or not isinstance(data.get("rules"), list):
+    if not isinstance(data, list):
         log.warning("Branch rules unreadable for %s@%s", repo, branch)
         return None
     contexts: set[str] = set()
-    for rule in data["rules"]:
+    for rule in data:
         if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
             continue
         parameters = rule.get("parameters")
@@ -134,18 +139,18 @@ def get_workflow_run_for_check(repo: str, check: dict[str, Any]) -> dict[str, An
     return data
 
 
-def rerun_workflow_run(repo: str, run_id: int) -> bool:
-    """Ask GitHub Actions to re-run one workflow run through its supported endpoint."""
+def rerun_failed_jobs(repo: str, run_id: int) -> bool:
+    """Ask GitHub Actions to re-run only failed jobs from one workflow run."""
     from reviewer.gh_api import run_gh
 
     try:
         result = run_gh(
-            ["api", "--method", "POST", f"repos/{repo}/actions/runs/{run_id}/rerun"], timeout=30.0,
+            ["api", "--method", "POST", f"repos/{repo}/actions/runs/{run_id}/rerun-failed-jobs"], timeout=30.0,
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
-        log.warning("Workflow rerun request failed for %s run %s: %s", repo, run_id, type(exc).__name__)
+        log.warning("Failed-job rerun request failed for %s run %s: %s", repo, run_id, type(exc).__name__)
         return False
     if result.returncode != 0:
-        log.warning("Workflow rerun request failed for %s run %s: %s", repo, run_id, result.stderr[:200])
+        log.warning("Failed-job rerun request failed for %s run %s: %s", repo, run_id, result.stderr[:200])
         return False
     return True

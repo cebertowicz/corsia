@@ -32,6 +32,10 @@ from reviewer.reviewer_exact_source import (
 
 log = logging.getLogger(__name__)
 
+# Shared upper bound for one reviewer process; reconciliation uses it before
+# treating a pending reviewer status as stranded after a backend restart.
+REVIEWER_RUN_TIMEOUT_S = 30 * 60
+
 
 def _resolve_cc_binary() -> str:
     """Resolve the Claude Code CLI binary, mirroring the cc_runtime path.
@@ -81,7 +85,7 @@ def _run_write_confined(
                 capture_output=True,
                 text=True,
                 cwd=run_dir,
-                timeout=1800,  # 30 min per locked decision #16
+                timeout=REVIEWER_RUN_TIMEOUT_S,  # 30 min per locked decision #16
                 env=env,
             )
         finally:

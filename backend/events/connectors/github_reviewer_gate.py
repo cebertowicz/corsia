@@ -96,9 +96,9 @@ def fetch_workflow_run(repo: str, check: dict[str, Any]) -> dict[str, Any] | Non
     return get_workflow_run_for_check(repo, check)
 
 
-def rerun_workflow_run(repo: str, run_id: int) -> bool:
-    """Re-run a GitHub Actions workflow through the supported Actions endpoint."""
-    from reviewer.gh_reconciliation import rerun_workflow_run as rerun
+def rerun_failed_jobs(repo: str, run_id: int) -> bool:
+    """Re-run only failed Actions jobs through the supported endpoint."""
+    from reviewer.gh_reconciliation import rerun_failed_jobs as rerun
 
     return rerun(repo, run_id)
 
