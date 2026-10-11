@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { cubicOut } from 'svelte/easing';
-	import { onMount, tick } from 'svelte';
+	import { tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
 	import { focusTrap } from '$lib/actions/focusTrap';
@@ -20,6 +20,8 @@
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
 		followKeyboard = false,
+		open = true,
+		onClosed = () => {},
 	}: {
 		ariaLabel: string;
 		/**
@@ -44,6 +46,10 @@
 		 * visual viewport the app already publishes as CSS variables.
 		 */
 		followKeyboard?: boolean;
+		/** Whether the caller keeps the drawer mounted for its local close transition. */
+		open?: boolean;
+		/** Runs after the drawer's 260ms local outro completes. */
+		onClosed?: () => void;
 	} = $props();
 
 	let panel = $state<HTMLElement | null>(null);
@@ -105,12 +111,11 @@
 		stopToastClearance = undefined;
 	}
 
-	onMount(() => {
-		stopToastClearance = panel
-			? toastClearance.register(panel, {
-				measure: () => restingViewportBottomOccupancy(panel),
-			})
-			: undefined;
+	$effect(() => {
+		if (!open || !panel) return;
+		stopToastClearance = toastClearance.register(panel, {
+			measure: () => restingViewportBottomOccupancy(panel!),
+		});
 		const removeBackLayer = pushBackLayer(() => {
 			onClose();
 			return true;
@@ -134,18 +139,20 @@
 	band it was painted only over the chat column in a WebKit webview, leaving the
 	rail, the open document and the right pane uncovered.
 -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
+{#if open}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
 	class="drawer-backdrop"
 	class:follow-keyboard={followKeyboard}
 	data-adaptive-drawer
 	onclick={onBackdrop}
-	onoutrostart={releaseToastClearance}
-	transition:fade={fadeParams}
-	use:portal
->
-	<div class="drawer-motion" transition:fly={flyParams}>
+		onoutrostart={releaseToastClearance}
+		in:fade|global={fadeParams}
+		out:fade={fadeParams}
+		use:portal
+	>
+		<div class="drawer-motion" in:fly|global={flyParams} out:fly={flyParams} onoutroend={onClosed}>
 		<div
 			bind:this={panel}
 			class="drawer-panel"
@@ -179,7 +186,8 @@
 			</div>
 		</div>
 	</div>
-</div>
+	</div>
+{/if}
 
 <style>
 	.drawer-backdrop {
