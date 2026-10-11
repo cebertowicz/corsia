@@ -10,6 +10,7 @@ from tests.plan_review_helpers import submit_review_evidence
 from tests.test_plan_rejection_revision import (
     _db, _events, _plain_step, _reject, _revision_of, _start,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _edges(db, node_id: str) -> list[str]:
@@ -33,7 +34,7 @@ def _strand(db, node_id: str, on: str) -> None:
 
 
 def test_stranded_edges_follow_the_rejections_to_the_newest_revision(monkeypatch):
-    assert SCHEMA_VERSION == 104
+    assert SCHEMA_VERSION == 112
     db = _db(monkeypatch)
     try:
         plan, step = _plain_step(db)
@@ -50,12 +51,14 @@ def test_stranded_edges_follow_the_rejections_to_the_newest_revision(monkeypatch
         _reject(db, plan.id, first)
         newest = _revision_of(db, first)["id"]
         # Before v55 a rejection failed its submission rather than closing it.
-        db.execute(
-            "UPDATE plan_nodes SET state='failed' WHERE id IN (?,?)", (step.id, first),
-        )
+        with raw_plan_seed(db):
+            db.execute(
+                "UPDATE plan_nodes SET state='failed' WHERE id IN (?,?)", (step.id, first),
+            )
         _strand(db, waiting.id, step.id)
         _strand(db, settled.id, step.id)
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (settled.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (settled.id,))
         # An agent already added the edge to the newest revision by hand.
         _strand(db, doubled.id, step.id)
         db.execute(

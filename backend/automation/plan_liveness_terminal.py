@@ -74,7 +74,7 @@ def on_thread_turn_complete(
                 )
             public.on_worker_turn_end(
                 connection, thread_id, changed_plan_ids=effects.changed_plan_ids,
-                turn_errored=turn_id is not None,
+                turn_errored=True,
             )
             return wake
         # Any success proves the provider serves this thread again, whether or

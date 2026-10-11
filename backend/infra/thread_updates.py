@@ -29,6 +29,7 @@ import sqlite3
 from typing import Literal, get_args
 
 from infra import presence
+from infra.thread_update_asks import ask_sql, asks_user_sql
 from infra.presence_time import iso, parse, seen_boundary
 from infra.visit_divider import divider_from_row
 
@@ -47,21 +48,6 @@ PAGE_LIMIT = 100
 CHANGED_EVENT = "thread_updates_changed"
 
 _COLUMNS = "id,thread_id,kind,source_kind,source_id,node_id,title,after_seq,created_at"
-
-#: Whether an update's plan item still asks the user, right now. ``asks_user`` is the
-#: rule the chat list's Failed mark reads (``failure_asks_user_sql``): a retried,
-#: followed-up, deleted, archived or retired-branch item asks nothing.
-#: ``blocked_asks_user`` is its twin for an item blocked on the user; it feeds no mark
-#: or dot, only whether the card splits a Focus block.
-def _asks_user_sql(blocked: bool = False) -> str:
-    from plans import public
-
-    rule = public.blocked_user_task_sql if blocked else public.failure_asks_user_sql
-    return f"""EXISTS (
-    SELECT 1 FROM plan_nodes n
-     WHERE n.id = thread_updates.node_id AND {rule('n')}
-)"""
-
 
 def canonical_time(value: str) -> str:
     """One ordering shape for every source: naive UTC with microseconds."""
@@ -244,7 +230,7 @@ def latest_by_thread_with_attention(
                 SELECT thread_id,
                        MAX({newest}) AS display_key,
                        MAX(CASE WHEN kind NOT IN ('done', 'done_follow_up', 'closed')
-                                 AND (kind != 'failed' OR {_asks_user_sql()})
+                                 AND (kind != 'failed' OR {asks_user_sql()})
                                 THEN {newest} END) AS attention_key
                   FROM thread_updates INDEXED BY idx_thread_updates_thread_time
                  WHERE thread_id IN ({','.join('?' * len(ids))})
@@ -341,8 +327,9 @@ def read_newest_cards(
         f"""SELECT {_COLUMNS}, EXISTS (
                 SELECT 1 FROM plan_nodes n
                  WHERE n.id = thread_updates.node_id AND n.archived_at IS NULL
-             ) AS node_exists, {_asks_user_sql()} AS asks_user,
-             {_asks_user_sql(blocked=True)} AS blocked_asks_user
+             ) AS node_exists, {asks_user_sql()} AS asks_user,
+             {asks_user_sql(blocked=True)} AS blocked_asks_user,
+             {ask_sql('id')} AS ask_hold_id, {ask_sql('owner_id')} AS ask_artifact_id
              FROM thread_updates
              WHERE thread_id=? AND after_seq >= ? AND kind != 'marked'
              ORDER BY after_seq DESC, id DESC LIMIT ?""",
@@ -352,10 +339,15 @@ def read_newest_cards(
     retained = rows[:CARD_WINDOW_LIMIT]
     cards = [
         {
-            **_public(tuple(row)[:-3]),
+            **_public(tuple(row)[:-5]),
             "node_exists": bool(row["node_exists"]),
             "asks_user": bool(row["asks_user"]),
             "blocked_asks_user": bool(row["blocked_asks_user"]),
+            # The user ask this update recorded; the API hydrates it into a card.
+            "ask": (
+                {"hold_id": row["ask_hold_id"], "artifact_id": row["ask_artifact_id"]}
+                if row["ask_hold_id"] else None
+            ),
         }
         for row in reversed(retained)
     ]

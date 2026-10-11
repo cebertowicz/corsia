@@ -140,37 +140,22 @@ def write(
     commit; without one, or when it does not check out, nothing is written.
     """
     from core.placement_save import save_placement
-    from infra.guidance_git import digest
 
     path = destination.path
     assert path is not None
-    current = path.read_text() if path.exists() else None
     relative = _relative(path)
-    if decision.duplicate_of and current is not None and says(current, decision.duplicate_of):
+    planned = commit_plan(place, decision, destination, room)
+    if planned == _ALREADY:
         settle(
-            entry, "already", "already-at-destination", mark="already",
+            entry, "already", _ALREADY, mark="already",
             detail=relative, retire=f"already at {relative}",
             source_ref=f"file:{relative}", destination=relative,
         )
         return
-    writes = {path: _new_text(destination.kind, current, decision)}
-    expected = {path: digest(current)}
-    operations: list[Operation] = []
-    over = _over_cap(destination.kind, current, decision)
-    if over is not None:
-        if room is None:
-            settle(entry, "unplaced", over, destination=relative)
-            return
-        if current != room.base:
-            # The fork made room against text that is gone; only a fresh
-            # review can make room again, so the next checkpoint reconsiders.
-            settle(entry, "unplaced", "destination-changed", destination=relative)
-            return
-        made = _made_room(place, decision, destination, current, room)
-        if isinstance(made, str):
-            settle(entry, "unplaced", made, destination=relative)
-            return
-        writes, expected, operations = made
+    if isinstance(planned, str):
+        settle(entry, "unplaced", planned, destination=relative)
+        return
+    writes, expected, operations = planned
     sha = save_placement(
         entry, place, decision, relative, path, writes, expected, operations,
         settle=settle, defer=defer, refuse=refuse, author=_author, message=_message, logger=logger,
@@ -217,18 +202,36 @@ def room_refusal(
     return made if isinstance(made, str) else None
 
 
-def planned_writes(
-    place: ThreadPlace, decision: Decision, destination: Destination, room: Room | None
-) -> dict[Path, str]:
-    """The files ``write`` would commit for this answer; empty when it writes none."""
+_ALREADY = "already-at-destination"
+_Plan = tuple[dict[Path, str], dict[Path, str | None], list[Operation]]
+
+
+def commit_plan(
+    place: ThreadPlace, decision: Decision, destination: Destination, room: Room | None,
+) -> _Plan | str:
+    """The one commit plan for this answer, or why it writes nothing.
+
+    ``write`` commits it and the answer-time loadability check validates it,
+    so both see the same bytes. ``_ALREADY`` when the file already says the
+    lesson; otherwise the ``unplaced`` reason.
+    """
+    from infra.guidance_git import digest
+
     path = destination.path
-    current = path.read_text() if path is not None and path.exists() else None
-    if path is None or (decision.duplicate_of and current and says(current, decision.duplicate_of)):
-        return {}
+    assert path is not None
+    current = path.read_text() if path.exists() else None
+    if decision.duplicate_of and current is not None and says(current, decision.duplicate_of):
+        return _ALREADY
+    over = _over_cap(destination.kind, current, decision)
+    if over is None:
+        return {path: _new_text(destination.kind, current, decision)}, {path: digest(current)}, []
     if room is None:
-        return {path: _new_text(destination.kind, current, decision)}
-    made = _made_room(place, decision, destination, room.base, room)
-    return {} if isinstance(made, str) else made[0]
+        return over
+    if current != room.base:
+        # The fork made room against text that is gone; only a fresh
+        # review can make room again, so the next checkpoint reconsiders.
+        return "destination-changed"
+    return _made_room(place, decision, destination, current, room)
 
 
 def _made_room(

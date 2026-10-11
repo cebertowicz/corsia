@@ -17,6 +17,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 from fastapi import HTTPException
+from tests.plan_writer_authorizer import raw_plan_seed
 
 USER = {"id": "steve"}
 
@@ -193,23 +194,24 @@ def _seed_period(db, agent_id: str, period: str, outcomes: int, *, not_first_try
     UTC noon, unless ``at`` names the exact UTC instant they settle at."""
     rows = [(f"{agent_id}-{period}-{index}", f"plan-{agent_id}", index, f"commitment-{agent_id}-{period}-{index}",
              difficulty, at or f"{period}T12:00:00Z") for index in range(start, start + outcomes)]
-    db.executemany(
-        "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-        "commitment_id,requirements_revision,revision,difficulty,created_at,updated_at) "
-        "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, ?, ?, ?)",
-        [(node_id, plan_id, order_key, commitment_id, node_difficulty, settled, settled)
-         for node_id, plan_id, order_key, commitment_id, node_difficulty, settled in rows],
-    )
-    db.executemany(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?,'test','accepted','active','accepted',?)",
-        [(f"event-{node_id}", node_id, settled) for node_id, _, _, _, _, settled in rows],
-    )
-    db.executemany(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?,'test','review_rejected','active','active',?)",
-        [(f"reject-{node_id}", node_id, settled) for node_id, _, _, _, _, settled in rows[:not_first_try]],
-    )
+    with raw_plan_seed(db):
+        db.executemany(
+            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
+            "commitment_id,requirements_revision,revision,difficulty,created_at,updated_at) "
+            "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, ?, ?, ?)",
+            [(node_id, plan_id, order_key, commitment_id, node_difficulty, settled, settled)
+             for node_id, plan_id, order_key, commitment_id, node_difficulty, settled in rows],
+        )
+        db.executemany(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?,'test','accepted','active','accepted',?)",
+            [(f"event-{node_id}", node_id, settled) for node_id, _, _, _, _, settled in rows],
+        )
+        db.executemany(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?,'test','review_rejected','active','active',?)",
+            [(f"reject-{node_id}", node_id, settled) for node_id, _, _, _, _, settled in rows[:not_first_try]],
+        )
 
 
 def _seed_tokens(db, thread_id: str, period: str, tokens: int, *, count: int = 1) -> None:
@@ -278,6 +280,7 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     """Run the same build the served route runs, with the route's registry and its two period predicates."""
     from api.measurement import REGISTRY, period_comparable, period_measured
     from api.measurement_agents import build_agents
+    from api.measurement_chain_costs import chain_costs
     from api.measurement_findings import derive_findings_state
     from api.measurement_queries import prepare_outcome_periods
     from api.measurement_scope import resolve_grain
@@ -290,9 +293,9 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     db = get_db()
     try:
         prepare_outcome_periods(db, {**params, "grain": grain}, roots=True)
-        rows, findings, summaries, count = build_agents(
+        rows, findings, summaries, count, _overall = build_agents(
             db, params, REGISTRY, metric, sort, grain, comparable or period_comparable,
-            measured or (lambda name, period: period_measured(name, period, grain)))
+            measured or (lambda name, period: period_measured(name, period, grain)), chain_costs(db, params, grain)["cost_rows"])
         return {"rows": rows, "findings": findings, "project_summaries": summaries["active"],
                 "agent_count": count, "findings_state": derive_findings_state(rows, findings, count)}
     finally:
@@ -917,3 +920,35 @@ async def test_all_work_serves_a_populated_agents_table_at_both_grains(isolated_
     assert body["period"]["grain"] == grain
     assert [row["agent"]["id"] for row in body["rows"]] == ["worker"]
     assert "dollars_per_work_hour" in body["rows"][0]["metrics"]
+
+
+def _seed_minutes_agent(now: datetime):
+    """One agent with 25 outcomes and one human message in each period of both windows."""
+    from api.measurement_scope import resolve_grain
+
+    grain = resolve_grain("weeks", "UTC", now=now)
+
+    def seed(db):
+        _seed_agent(db, "worker")
+        for period in (*grain.previous.periods, *grain.latest.periods):
+            _seed_period(db, "worker", period, 25)
+            db.execute("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) "
+                       "VALUES (?,?,'user','x','{}',?)", (f"m-{period}", "worker", f"{period}T12:00:00Z"))
+    return seed
+
+
+def test_a_previous_window_minutes_recording_did_not_cover_has_no_figure(isolated_db):
+    """Minutes are recorded from 2026-08-31: a previous window starting before it reads "new".
+
+    Pooling only its recorded weeks would put a four-week figure beside a one-week figure and
+    report the difference in coverage as a change in the work.
+    """
+    cell = _build(_seed_minutes_agent(datetime(2026, 10, 10, 9, tzinfo=timezone.utc)),
+                  now=datetime(2026, 10, 10, 9, tzinfo=timezone.utc))["rows"][0]["metrics"]["active_hours_per_outcome"]
+    assert cell["value"] is not None and cell["previous_value"] is None
+
+
+def test_a_previous_window_minutes_recording_covered_keeps_its_figure(isolated_db):
+    now = datetime(2026, 11, 16, 9, tzinfo=timezone.utc)
+    cell = _build(_seed_minutes_agent(now), now=now)["rows"][0]["metrics"]["active_hours_per_outcome"]
+    assert cell["value"] is not None and cell["previous_value"] == pytest.approx(cell["value"])

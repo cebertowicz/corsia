@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 async def check_external_server(server_id: str, server: dict) -> dict:
     """``{"ok", "message"}`` naming what the endpoint answered and what was found."""
+    from infra.key_store_servers import resolve_server
     from llm.external_provider import auth_headers
 
     if server.get("status") == "disabled":
@@ -35,7 +36,7 @@ async def check_external_server(server_id: str, server: dict) -> dict:
         return {"ok": False, "message": "This endpoint has no saved URL. Set it under Advanced."}
     try:
         await _probe_external(
-            base, dialect, auth_headers(dialect, stored.get("api_key")), action="test",
+            base, dialect, auth_headers(dialect, await run_in_db(resolve_server, server_id)), action="test",
             declared=declared_model_ids(stored),
         )
     except HTTPException as e:

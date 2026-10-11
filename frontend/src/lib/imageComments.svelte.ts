@@ -1,0 +1,168 @@
+import { fromStore } from 'svelte/store';
+import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
+import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
+import { isPoint, type ImageRegion } from '$lib/imageRegions';
+import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { addRegionComment, moveRegion } from '$lib/stores/imageRegionComments';
+import { toasts } from '$lib/stores/toast';
+
+const WHOLE = (region: ImageRegion) => region.x === 0 && region.y === 0 && region.w === 1 && region.h === 1;
+/** What the composer says a new comment is on, in place of a quote. */
+export function regionLabel(region: ImageRegion): string {
+	return WHOLE(region) ? 'The whole image' : isPoint(region) ? 'Point on the image' : 'Box on the image';
+}
+
+/**
+ * The image viewer's comment state (DCOL-FR13.3): box mode, the region being
+ * written, moving a stale pin, and which comment is picked. Cards, the drawer
+ * and the composer are the document's own, through its comment surface.
+ */
+export function createImageComments(context: {
+	artifactId: () => string | null;
+	readOnly: () => boolean;
+	/** Where focus goes when a card closes with nothing else to return to. */
+	restoreFocus: () => void;
+	/** Scroll a comment's region and its tag into view at the current zoom. */
+	reveal?: (id: string, region: ImageRegion) => void;
+	/** A comment or reply was posted, so the review status may change. */
+	onCreated?: () => void;
+	/**
+	 * Posts a new region comment; an image inside a document anchors it on the image's markdown. Without it the
+	 * comment goes on the image artifact. `failure` words what went wrong for the toast.
+	 */
+	post?: () => { create: (region: ImageRegion, text: string) => Promise<string>; failure?: (error: unknown) => string } | null;
+}) {
+	// Its own draft scope, so closing a card here never aborts a document's comment capture elsewhere.
+	const ui = createCommentSurfaceState(context.restoreFocus, () => `image-comments:${context.artifactId() ?? ''}`);
+	const focused = fromStore(focusedDocComment);
+	const retryToast = createCommentRetryToast(toasts);
+	const threads = createThreadActions(context.artifactId, () => context.onCreated?.());
+	let boxMode = $state(false);
+	let draftRegion = $state<ImageRegion | null>(null);
+	let draftBody = $state('');
+	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
+	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
+	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
+	let listPicks = $state(0);
+
+	function show(id: string, anchor: CommentAnchor) {
+		focusedDocComment.set(id);
+		ui.anchor = anchor;
+		ui.state = { kind: 'thread', id };
+	}
+	function close() {
+		ui.close();
+		draftRegion = null;
+		draftBody = '';
+	}
+	/** The Comment button: box mode on, or off again without placing anything. */
+	function toggleBoxMode() {
+		if (context.readOnly() || moving?.region) return;
+		boxMode = !boxMode;
+		if (!boxMode) moving = null;
+	}
+	/** A box, point or whole-image region was drawn: it opens the composer, or moves the pin being moved. */
+	async function draw(region: ImageRegion, anchor: CommentAnchor) {
+		const artifact = context.artifactId();
+		if (context.readOnly() || !artifact || moving?.region) return;
+		// One comment per press of Comment, so the next one-finger pan draws nothing.
+		boxMode = false;
+		const move = moving;
+		if (move) {
+			// Keep the new location visible until the server accepts it or rejects it.
+			moving = { ...move, region };
+			try {
+				await submitDocumentComment(() => moveRegion(artifact, move.id, region), retryToast.remember, () => "Couldn't move the pin — try again");
+				retryToast.dismissAfterSuccess();
+				moving = null;
+				show(move.id, anchor);
+			} catch { moving = null; /* The toast says why; the pin stays where it was. */ }
+			return;
+		}
+		draftRegion = region;
+		draftBody = '';
+		ui.openDraft(anchor);
+	}
+	async function submit(text: string) {
+		const artifact = context.artifactId(), region = draftRegion, anchor = ui.anchor;
+		if (!artifact || !region) return;
+		// The composer keeps the text when this rejects.
+		const post = context.post?.();
+		const id = await submitDocumentComment(
+			() => (post ? post.create(region, text) : addRegionComment(artifact, region, text)), retryToast.remember, post?.failure,
+		);
+		retryToast.dismissAfterSuccess();
+		draftRegion = null;
+		draftBody = '';
+		context.onCreated?.();
+		if (anchor) show(id, anchor);
+	}
+	/**
+	 * A tag was picked: its card opens beside its box, and closing it returns
+	 * focus to the tag. With the drawer open, the drawer stays and the tag is
+	 * selected there instead, so the drawer can bring its card into view.
+	 */
+	function pick(id: string, anchor: () => DOMRect | null, opener: HTMLElement) {
+		draftRegion = null;
+		if (ui.state?.kind === 'list') { focusedDocComment.set(id); listPicks += 1; return; }
+		ui.focusMarker([id], opener, anchor);
+	}
+	/** Open a comment's card at its tag, as a pick would: the viewer was opened on it from the document. */
+	function select(id: string, tag: HTMLElement, region: ImageRegion | null | undefined) {
+		draftRegion = null;
+		if (region) context.reveal?.(id, region);
+		ui.focusMarker([id], tag, () => (tag.isConnected ? tag.getBoundingClientRect() : null));
+	}
+	/** A card in the drawer was selected: the drawer stays, the tag is picked and scrolled into view. */
+	function showFromList(id: string, region: ImageRegion | null | undefined) {
+		focusedDocComment.set(id);
+		if (region) context.reveal?.(id, region);
+	}
+	/** Move pin: the next box or point drawn becomes the comment's new place. */
+	function movePin(id: string) {
+		if (context.readOnly()) return;
+		close();
+		moving = { id };
+		boxMode = true;
+	}
+	/**
+	 * Escape closes an open card or composer first, then leaves box mode, and
+	 * only then reaches the viewer's own Back. It runs in the capture phase so
+	 * it decides before the viewer and the card each see the key.
+	 */
+	function onKeydownCapture(event: KeyboardEvent) {
+		if (event.key !== 'Escape' || event.defaultPrevented) return;
+		if (ui.state) {
+			event.preventDefault();
+			close();
+			ui.restoreFocus();
+		} else if ((boxMode || moving) && !moving?.region) {
+			event.preventDefault();
+			boxMode = false;
+			moving = null;
+		}
+	}
+
+	return {
+		ui,
+		get boxMode() { return boxMode; },
+		get moving() { return moving?.id ?? null; },
+		get movingRegion() { return moving?.region ?? null; },
+		get moveSaving() { return !!moving?.region; },
+		get listPicks() { return listPicks; },
+		get draftRegion() { return draftRegion; },
+		get selectedId() {
+			if (ui.state?.kind === 'thread') return ui.state.id;
+			return ui.state?.kind === 'list' ? focused.current : null;
+		},
+		/** A card or the composer is open over the image. */
+		get cardOpen() { return ui.state?.kind === 'thread' || ui.state?.kind === 'draft'; },
+		/** The composer has text, so the review bar must not answer over it. */
+		get hasDraftText() { return !!draftRegion && draftBody.trim() !== ''; },
+		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody } : null; },
+		setDraftBody(text: string) { draftBody = text; },
+		threads,
+		close, toggleBoxMode, draw, submit, pick, select, showFromList, movePin, onKeydownCapture,
+	};
+}
+export type ImageComments = ReturnType<typeof createImageComments>;

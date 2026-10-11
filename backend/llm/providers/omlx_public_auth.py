@@ -48,11 +48,10 @@ async def public_headers(cfg: dict, *, url: str | None = None) -> dict[str, str]
 
 def _registered_origins_and_key(server_id: str) -> tuple[set[tuple[str, str, int | None]], str | None]:
     """Read a registered server's current key and every authorized public origin."""
-    from llm.network_discovery import get_server_metadata
+    from infra.key_store_servers import resolve_server
     from llm.network_endpoints import _server_port, get_endpoints
 
-    metadata = get_server_metadata(server_id)
-    key = metadata.get("api_key") if metadata else None
+    key = resolve_server(server_id)
     port = _server_port(server_id)
     endpoints = get_endpoints(server_id)
     if port is None or not endpoints:

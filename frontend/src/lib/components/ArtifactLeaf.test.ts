@@ -83,6 +83,7 @@ import { setWs } from '$lib/ws/state';
 import { connectionState } from '$lib/stores/connection';
 import { LIVE_OPEN_WAIT_MS, startLiveDocuments } from '$lib/stores/liveDocuments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { closeDocumentImage, documentImageViewers } from '$lib/stores/documentImageViewer';
 import { EditorView } from '@codemirror/view';
 
 let host: HTMLElement;
@@ -845,5 +846,34 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		expect(host.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: 0, head: 0 });
 		expect(view.contentDOM.contains(document.activeElement)).toBe(false);
+	});
+
+	it('opens the image from a marker over a comment on part of it, at that comment, instead of its card', async () => {
+		focusedDocComment.set(null);
+		const IMG = { from: 7, to: 21 };
+		mocks.rangeFor.mockReturnValue(IMG);
+		mocks.fetchContent.mockResolvedValue({ text: 'Intro\n\n![Mock](a.png)\n', revision: 'r-1', writable: true, artifact: { id: 'art-pin' } });
+		mocks.setComments({ 'art-pin': [{
+			id: 'pin', ...IMG, anchor: '![Mock](a.png)', author: 'you', text: 'note', at: 'now', resolved: false, replies: [],
+			region: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, regionNumber: 1, imageSrc: '/a.png',
+		}] });
+		openArtifactTab(THREAD, { path: '/art-pin.md', title: 'art-pin.md' });
+		render();
+		const img = await vi.waitFor(() => {
+			const found = host.querySelector<HTMLImageElement>('.cm-md-image img');
+			expect(found).not.toBeNull();
+			return found!;
+		});
+		Object.defineProperty(img, 'complete', { value: true });
+		Object.defineProperty(img, 'naturalWidth', { value: 640 });
+		const marker = await vi.waitFor(() => {
+			const found = host.querySelector<HTMLButtonElement>('.cm-comment-marker');
+			expect(found).not.toBeNull();
+			return found!;
+		});
+		marker.click();
+		await vi.waitFor(() => expect(get(documentImageViewers)[THREAD]).toMatchObject({ ...IMG, focus: { id: 'pin' }, comments: { artifactId: 'art-pin' } }));
+		expect(host.querySelector('.popover')).toBeNull();
+		closeDocumentImage(THREAD);
 	});
 });

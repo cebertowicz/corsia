@@ -71,7 +71,7 @@ describe('MeasurementAgentsTable', () => {
 		render(state([agentRow()]));
 		const headers = [...host.querySelectorAll('thead th')].map((cell) => (cell.textContent ?? '').trim());
 		expect(headers).toEqual([
-			'Agent', 'Outcomes', 'First try', '$ per hour of work',
+			'Agent', 'Outcomes', 'First try', '$ per person-hour of work delivered',
 			'Change in minutes per outcome, vs Sep 21 to Sep 27',
 		]);
 		for (const gone of ['Rank', 'Asks', 'Tokens', 'Outcomes / week', '8 weeks before']) expect(host.textContent).not.toContain(gone);
@@ -93,7 +93,7 @@ describe('MeasurementAgentsTable', () => {
 	});
 
 	it('says why a change is missing instead of showing zero', () => {
-		const thin = agentRow(); thin.metrics.active_hours_per_outcome = metric(null);
+		const thin = agentRow({ n: 400 }); thin.metrics.active_hours_per_outcome = metric(null);
 		const fresh = agentRow({ agent: { id: 'agent-2', name: 'Fresh', project: { id: 'p1', name: 'CORSIA' } } });
 		fresh.metrics.active_hours_per_outcome = { ...metric(0.05), previous_value: null };
 		render(state([thin, fresh]));
@@ -119,10 +119,23 @@ describe('MeasurementAgentsTable', () => {
 			.toEqual(['320', '78%', '–', '-50%']);
 	});
 
-	it('shows the server\'s first ten rows, in a single line each', () => {
-		render(state(Array.from({ length: 12 }, (_, index) => agentRow({ agent: { id: `a${index}`, name: `Agent ${index}`, project: { id: 'p1', name: 'CORSIA' } } }))));
+	it('shows the ten agents with the most outcomes, in a single line each', () => {
+		// Served ranked by a quality metric, so the row set is not the served first ten.
+		render(state(Array.from({ length: 12 }, (_, index) => agentRow({ n: 100 + index, agent: { id: `a${index}`, name: `Agent ${index}`, project: { id: 'p1', name: 'CORSIA' } } }))));
 		expect(host.querySelectorAll('tbody tr')).toHaveLength(10);
-		expect(host.querySelectorAll('tbody tr:first-child th button.filter')[0]?.getAttribute('aria-label')).toBe('Filter to this agent: Agent 0');
+		expect(host.querySelectorAll('tbody tr:first-child th button.filter')[0]?.getAttribute('aria-label')).toBe('Filter to this agent: Agent 11');
+		expect(host.querySelector('tbody')?.textContent).not.toContain('Agent 0');
+	});
+
+	it('capitalises the first letter of an agent name wherever the table prints it', () => {
+		render(state([agentRow({ agent: { id: 'agent-9', name: 'conductor', project: { id: 'p1', name: 'CORSIA' } } })]));
+		expect(host.querySelector('tbody th button.filter')?.textContent).toBe('Conductor');
+		expect(host.querySelector('tbody th button.filter')?.getAttribute('aria-label')).toBe('Filter to this agent: Conductor');
+	});
+
+	it('leaves out an agent with no outcomes in the window', () => {
+		render(state([agentRow({ n: 0, status: 'too_few', rank: null }), agentRow({ n: 5, agent: { id: 'a2', name: 'Busy', project: { id: 'p1', name: 'CORSIA' } } })]));
+		expect(host.querySelectorAll('tbody tr')).toHaveLength(1);
 	});
 
 	it('leaves a too-few agent in the list and named', () => {
@@ -202,9 +215,9 @@ describe('MeasurementAgentsTable', () => {
 		expect(ariaSorts()).toEqual(['none', 'none', 'none', 'none', 'none']);
 	});
 
-	it('opens in the order the server ranked the rows', () => {
+	it('opens with the most outcomes first, not in the order the server ranked the rows', () => {
 		render(state([named('a', 'Few', { n: 5 }), named('b', 'Many', { n: 50 })]));
-		expect(names()).toEqual(['Few', 'Many']);
+		expect(names()).toEqual(['Many', 'Few']);
 	});
 
 	it('sorts ascending, then descending, then back to the served order', () => {
@@ -266,16 +279,30 @@ describe('MeasurementAgentsTable', () => {
 		expect(wrap?.getAttribute('aria-label')).toContain('Agents table');
 	});
 
-	it('gives the two long headers room for two or three lines at 430px and under, without changing their text', () => {
+	it('keeps every column in view at 430px and under: names and headers wrap between words, the long headers get narrow columns', () => {
 		render(state([agentRow()]));
 		const headers = [...host.querySelectorAll('thead th')];
-		expect(headers[3].classList.contains('cost') && headers[3].textContent).toBe('$ per hour of work');
+		expect(headers[3].classList.contains('cost') && headers[3].textContent).toBe('$ per person-hour of work delivered');
+		expect(headers[3].querySelector('button')?.getAttribute('aria-label'), 'a phone reader still hears the full name').toBe('$ per person-hour of work delivered');
+		expect(headers[3].querySelector('.long')?.textContent, 'only the tail of the name drops on a phone').toBe('of work delivered');
 		expect(headers[4].classList.contains('change') && headers[4].textContent).toBe('Change in minutes per outcome, vs Sep 21 to Sep 27');
 		const css = source.slice(source.indexOf('<style>'));
 		const at = css.indexOf('@media (max-width: 430px)');
 		expect(at, 'a phone block exists').toBeGreaterThan(-1);
 		const phone = css.slice(at, css.indexOf('\n\t}', at));
-		expect(phone).toContain('thead th.cost { min-width: 11ch; }');
-		expect(phone).toContain('thead th.change { min-width: 20ch; }');
+		// No floor on the table or the headers, so the columns share the width instead of scrolling past the edge.
+		expect(phone).toContain('table { width: 100%; min-width: 0; table-layout: fixed; font-size: var(--text-footnote); }');
+		expect(phone).not.toContain('min-width: 11ch');
+		expect(phone).not.toContain('min-width: 20ch');
+		// A name wraps between its words and a header wraps too; neither may break inside a word.
+		expect(phone).toContain('tbody th { white-space: normal; }');
+		expect(phone).toMatch(/\.filter \{[^}]*white-space: normal;[^}]*word-break: normal;/);
+		expect(phone).toMatch(/thead th \{[^}]*white-space: normal;[^}]*word-break: normal;/);
+		// Every fixed-layout column is allocated explicitly so the Agent column
+		// retains room for a complete unbroken name at phone widths.
+		expect(phone).toContain('thead th:first-child { width: 28%; }');
+		expect(phone).toContain('thead th:nth-child(2), thead th:nth-child(3) { width: 10%; }');
+		expect(phone).toContain('thead th.cost { width: 17%; }');
+		expect(phone).toContain('thead th.change { width: 35%; }');
 	});
 });

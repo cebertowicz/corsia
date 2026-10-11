@@ -9,8 +9,8 @@ Object.defineProperty(window, 'matchMedia', { configurable: true, value: (query:
 
 afterEach(() => { if (component) unmount(component); host?.remove(); component = null; host = undefined; });
 const row = { model: 'claude-code/claude-opus-5-5', label: 'Claude Opus 5.5', tasks: 498, failed_turns_per_100: 2.7, recorded_cost_per_task: 2.3, spend_usd: 1145.4, cost_class: 'priced' as const, rate_reason: 'none' as const, cost_change: -0.13, change_reason: 'none' as const, previous_tasks: 500, not_offered_now: false, other: false, includes_local: false, recording_gap: false, sizes: [] as ModelsState['rows'][number]['sizes'] };
-const other = { ...row, model: '', label: 'Other models (under 14 tasks)', tasks: 9, recorded_cost_per_task: null, spend_usd: null, cost_class: 'no_pricing' as const, rate_reason: 'unpriced' as const, cost_change: null, change_reason: 'too_few_before' as const, previous_tasks: 4, other: true };
-function state(overrides: Partial<ModelsState> = {}): ModelsState { return { loading: false, error: null, rows: [row], minTasks: 14, tokenShares: [{ model: 'claude-code/claude-opus-5-5', label: 'Claude Opus 5.5', share_of_tokens: .4, tokens: 4_600_000_000 }, { model: 'codex/gpt-6.1-sol', label: 'GPT-6.1 Sol', share_of_tokens: .3, tokens: 9_800_000_000 }, { model: 'small', label: 'small', share_of_tokens: .3, tokens: 9_800_000_000 }], unmatchedFailedTurns: 0, unresolvedTokenShare: .026, period: null, scopeKey: 'all:none', grain: 'days', ...overrides }; }
+const other = { ...row, model: '', label: 'Other (3 more models)', tasks: 9, recorded_cost_per_task: null, spend_usd: null, cost_class: 'no_pricing' as const, rate_reason: 'unpriced' as const, cost_change: null, change_reason: 'too_few_before' as const, previous_tasks: 4, other: true };
+function state(overrides: Partial<ModelsState> = {}): ModelsState { return { loading: false, error: null, rows: [row], minTasks: 14, tokenShares: [{ model: 'claude-code/claude-opus-5-5', label: 'Claude Opus 5.5', share_of_tokens: .4, tokens: 4_600_000_000 }, { model: 'codex/gpt-6.1-sol', label: 'GPT-6.1 Sol', share_of_tokens: .3, tokens: 9_800_000_000 }, { model: 'small', label: 'small', share_of_tokens: .3, tokens: 9_800_000_000 }], unmatchedFailedTurns: 0, unresolvedTokenShare: .026, totalSpendUsd: 1145.4, period: null, scopeKey: 'all:none', grain: 'days', ...overrides }; }
 function render(overrides: Partial<ModelsState> = {}) { host = document.body.appendChild(document.createElement('div')); component = mount(MeasurementModels, { target: host, props: { state: state(overrides) } }); flushSync(); return host; }
 
 describe('MeasurementModels', () => {
@@ -62,10 +62,8 @@ describe('MeasurementModels', () => {
 		const page = render({ rows: [{ ...row, model: 'codex/gpt-5.6-sol', label: 'gpt-5.6-sol', not_offered_now: true }] });
 		expect(page.textContent).toContain('not offered now');
 	});
-	it('says $ per accepted task counts the whole chain, with each model charged for its own share', () => {
-		expect(render().textContent).toContain(
-			"Includes the task's workers and sent-back attempts; each model is charged for its own share."
-		);
+	it('says $ per accepted task counts the whole chain, in API-equivalent dollars', () => {
+		expect(render().textContent).toContain('$ per accepted task, whole chain, API-equivalent.');
 	});
 	/** The rate cell of one row rendered alone. */
 	function rateCell(r: Partial<ModelsState['rows'][number]>): string {
@@ -88,10 +86,15 @@ describe('MeasurementModels', () => {
 		const page = render({ period: { grain: 'days', timezone: 'UTC', current: '2026-10-05', range: span, latest: span, previous: { from: '2026-09-21', to: '2026-09-27' } } });
 		expect(page.querySelector('#models-title')?.textContent).toBe('Models, Sep 28 to Oct 4');
 	});
-	it('shows each row its share of the priced spend, a dash where nothing was priced', () => {
-		const page = render({ rows: [row, { ...row, model: 'b', label: 'B', spend_usd: 3436.2 }, other] });
+	it('shows each row its share of the window\'s whole spend, a dash where nothing was priced', () => {
+		// $4,581.6 is on the rows; the other $418.4 of the window\'s ledger belongs to models with no row of their own.
+		const page = render({ rows: [row, { ...row, model: 'b', label: 'B', spend_usd: 3436.2 }, other], totalSpendUsd: 5000 });
 		const cells = [...page.querySelectorAll('tbody tr td.spend')].map((td) => td.textContent);
-		expect(cells).toEqual(['25.0%', '75.0%', '—']);
+		expect(cells).toEqual(['22.9%', '68.7%', '—']);
+	});
+	it('shows no share while the window has no priced spend', () => {
+		const page = render({ totalSpendUsd: 0 });
+		expect([...page.querySelectorAll('tbody tr td.spend')].map((td) => td.textContent)).toEqual(['—']);
 	});
 	it('names the cause in the rate cell when there is no figure', () => {
 		expect(rateCell({})).toBe('$2.30');
@@ -99,18 +102,13 @@ describe('MeasurementModels', () => {
 		expect(rateCell({ recorded_cost_per_task: null, cost_class: 'local', rate_reason: 'local' })).toBe('no list price');
 		expect(rateCell({ tasks: 0, recorded_cost_per_task: null, cost_class: null, rate_reason: 'no_tasks' })).toBe('—');
 	});
-	it('groups models under the task cutoff as Other and keeps their unknown cost unknown', () => {
+	it('groups the models past the named rows as Other and keeps their unknown cost unknown', () => {
 		const page = render({ rows: [row, other] });
 		const cells = [...page.querySelectorAll('tbody tr')].at(-1)?.textContent ?? '';
-		expect(cells).toContain('Other models (under 14 tasks)');
+		expect(cells).toContain('Other (3 more models)');
 		expect(cells).toContain('unpriced');
 		expect(cells).not.toContain('$0');
-		expect(page.textContent).toContain('Models with under 14 accepted tasks share the last table row.');
-	});
-	it('states the served minimum-tasks floor, never a copy of it', () => {
-		const page = render({ rows: [row, { ...other, label: 'Other models (under 20 tasks)' }], minTasks: 20 });
-		expect(page.textContent).toContain('Models with under 20 accepted tasks share the last table row.');
-		expect(page.textContent).not.toContain('14');
+		expect(page.textContent).not.toContain('share the last table row');
 	});
 	it('discloses local models in a priced group without calling its calls unpriced', () => {
 		const page = render({ rows: [{ ...other, recorded_cost_per_task: 2, cost_class: 'priced', rate_reason: 'none', includes_local: true }] });
@@ -160,8 +158,8 @@ describe('MeasurementModels', () => {
 		expect(first).toEqual(['S $1.07 new · 100% first try', 'M $3.09 -7% · 92% first try', '—']);
 		expect(second).toEqual(['—', '—', 'L $8.56 +24% · 92% first try']);
 		expect(page.querySelector('td.blended')).toBeNull();
-		expect(page.textContent).toContain('First try is graded by the agents.');
-		expect(page.textContent).toContain('shown at 14 or more tasks of the class');
+		expect(page.textContent).toContain('$ per task within each size class, whole chain, API-equivalent; a class shows only with 14 or more tasks.');
+		expect(page.textContent).toContain('A change compares one named size class that has 14 or more tasks in both windows, otherwise n/a, mix changed.');
 	});
 	it('shows the blended rate across the size columns for a row with no size cell', () => {
 		const page = render({ rows: [{ ...row, sizes: [cell] }, { ...row, model: 'b', label: 'B', recorded_cost_per_task: 0.5 }, { ...row, model: 'c', label: 'C', recorded_cost_per_task: null, cost_class: 'local', rate_reason: 'local' }] });
@@ -183,6 +181,6 @@ describe('MeasurementModels', () => {
 		host?.remove(); component && unmount(component); component = null;
 		const shown = render({ rows: [row, other] });
 		expect(shown.querySelectorAll('tbody tr')).toHaveLength(2);
-		expect(shown.textContent).toContain('Models with under 14 accepted tasks share the last table row.');
+		expect(shown.textContent).toContain('Other (3 more models)');
 	});
 });

@@ -35,6 +35,8 @@ class ApplicationReview:
     reason_category: ApplicationReasonCategory
     reason: str
     user_attestation: str
+    #: The requester's own model reviewed because the chosen reviewer could not run.
+    reviewer_fallback: bool = False
 
     @property
     def allowed(self) -> bool:

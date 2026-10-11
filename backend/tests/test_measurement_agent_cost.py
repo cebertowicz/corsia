@@ -8,12 +8,14 @@ import pytest
 
 from api.cost_identity import IdentityResolver
 from api.measurement_agent_cost import dollars_metric, query_task_hour_cost
+from api.measurement_chain_costs import chain_costs
 from api.measurement_agents import RANKING_MINIMUM_N
 from api.measurement_models import two_windows
 from api.measurement_model_cost import query_model_costs
 from api.measurement_queries import prepare_outcome_periods
 from core.measurement_scope import resolve_grain
 from model_identity_fixtures import LOCAL_ID, seed_identity_catalog
+from tests.plan_writer_authorizer import raw_plan_seed
 
 # Weeks in UTC on Monday 2026-10-05: the latest window is Sep 7 to Oct 4, the previous Aug 10 to Sep 6.
 GRAIN = resolve_grain("weeks", "UTC", now=datetime(2026, 10, 5, 12, tzinfo=timezone.utc))
@@ -38,9 +40,10 @@ def db(isolated_db):
 
 
 def _task(db, node: str, size: str | None, accepted: str = "2026-09-30T12:00:00Z") -> None:
-    db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,size,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,?,'t','t')",
-               (node, node, size))
-    db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accept-{node}", node, accepted))
+    with raw_plan_seed(db):
+        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,size,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,?,'t','t')",
+                   (node, node, size))
+        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accept-{node}", node, accepted))
 
 
 def _usage(db, usage_id: str, node: str, model: str, *, source: str = "external_harness:claude-code", prompt: int = 1_000_000,
@@ -51,19 +54,21 @@ def _usage(db, usage_id: str, node: str, model: str, *, source: str = "external_
 
 def _read(db) -> dict:
     prepare_outcome_periods(db, {**SCOPE, "grain": GRAIN}, roots=True)
-    return query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)})
+    return query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)}, chain_costs(db, SCOPE, GRAIN)["cost_rows"])
 
 
-def test_only_tasks_with_a_rating_and_a_known_price_count_per_agent_and_window(db):
+def test_a_task_counts_when_it_has_priced_dollars_and_a_rating_whatever_else_its_chain_holds(db):
     _task(db, "m", "M")                       # counted: 2 h
     _task(db, "l", "L")                       # counted: 8 h
     _task(db, "before", "M", accepted="2026-08-19T12:00:00Z")   # the previous window
     _task(db, "unrated", None)                # no usable size: excluded, never zero hours
-    _task(db, "local", "S")                   # only local calls: no dollars to attribute
-    _task(db, "unproven", "S")                # a call Cost cannot price: its figure would be low
-    _task(db, "gap", "S")                     # a call failed to reach the ledger
-    for node in ("m", "l", "unrated", "gap"):
+    _task(db, "local", "S")                   # only local calls: no priced dollars
+    _task(db, "unproven", "S")                # only a call Cost cannot price: no priced dollars
+    _task(db, "gap", "S")                     # a call failed to reach the ledger: still counted
+    _task(db, "mixed", "S")                   # a priced call beside one Cost cannot price: still counted
+    for node in ("m", "l", "unrated", "gap", "mixed"):
         _usage(db, f"u-{node}", node, OPUS)
+    _usage(db, "u-mixed-unproven", "mixed", "codex/gpt-5.6-terra", source="external_harness:codex")
     _usage(db, "u-before", "before", OPUS, at="2026-08-18T12:00:00Z")
     _usage(db, "u-local", "local", LOCAL_ID, source="conversation")
     _usage(db, "u-unproven", "unproven", "codex/gpt-5.6-terra", source="external_harness:codex")
@@ -71,15 +76,16 @@ def test_only_tasks_with_a_rating_and_a_known_price_count_per_agent_and_window(d
     prepare_outcome_periods(db, {**SCOPE, "grain": GRAIN}, roots=True)
     priced = {row["task_id"]: row["dollars"] for row in query_model_costs(db, {**SCOPE, "grain": two_windows(GRAIN)}, IdentityResolver(db))
               if row["outcome"] == "priced"}
-    assert set(priced) == {"m", "l", "unrated", "gap", "before"}
+    assert set(priced) == {"m", "l", "unrated", "gap", "mixed", "before"}
 
-    costs = query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)})
+    costs = query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)}, chain_costs(db, SCOPE, GRAIN)["cost_rows"])
+    counted = priced["m"] + priced["l"] + priced["gap"] + priced["mixed"]
     assert costs == {
-        ("root", LATEST): {"dollars": pytest.approx(priced["m"] + priced["l"]), "hours": 10.0, "n": 2},
+        ("root", LATEST): {"dollars": pytest.approx(counted), "hours": 11.0, "n": 4},
         ("root", PREVIOUS): {"dollars": pytest.approx(priced["before"]), "hours": 2.0, "n": 1},
     }
     cell = dollars_metric(costs, "root", GRAIN, 1)
-    assert cell["value"] == pytest.approx((priced["m"] + priced["l"]) / 10.0) and cell["n"] == 2
+    assert cell["value"] == pytest.approx(counted / 11.0) and cell["n"] == 4
     assert cell["previous_value"] == pytest.approx(priced["before"] / 2.0) and cell["previous_n"] == 1
     assert dollars_metric(costs, "other", GRAIN, 1)["value"] is None
 
@@ -115,6 +121,20 @@ def test_the_figure_is_withheld_under_the_table_floor_and_pools_across_periods()
     assert dollars_metric({("a", periods[0]): {"dollars": 1.0, "hours": 0.0, "n": 25}}, "a", GRAIN, RANKING_MINIMUM_N)["value"] is None
 
 
+def test_the_scope_figure_pools_every_agents_tasks_by_the_same_function():
+    latest, before = list(GRAIN.latest.periods), list(GRAIN.previous.periods)
+    costs = {
+        ("a", latest[0]): {"dollars": 10.0, "hours": 10.0, "n": 25},
+        ("b", latest[1]): {"dollars": 30.0, "hours": 10.0, "n": 25},
+        ("a", before[0]): {"dollars": 5.0, "hours": 10.0, "n": 25},
+    }
+    overall = dollars_metric(costs, None, GRAIN, RANKING_MINIMUM_N)
+    assert (overall["value"], overall["n"]) == (2.0, 50)
+    assert (overall["previous_value"], overall["previous_n"]) == (0.5, 25)
+    # One agent's own cell is unchanged by the other's tasks.
+    assert dollars_metric(costs, "a", GRAIN, RANKING_MINIMUM_N)["value"] == 1.0
+
+
 @pytest.mark.asyncio
 async def test_the_agents_route_serves_dollars_per_hour_and_attention_minutes(isolated_db, monkeypatch):
     from test_measurement_agents import POST_BREAK, _freeze, _read, _seed_agent, _seed_project, _seed_period, _seeded
@@ -140,3 +160,6 @@ async def test_the_agents_route_serves_dollars_per_hour_and_attention_minutes(is
     # Each S task is 1 h of work carrying one 1M-token Opus call, so dollars per hour is that call's price.
     assert cell["value"] == pytest.approx(8.0)
     assert row["active_minutes"] == pytest.approx(1.0)
+    # The one agent is all the work there is, so the scope's pooled figure is its own.
+    overall = (await _read())["overall"]["dollars_per_work_hour"]
+    assert (overall["value"], overall["n"]) == (cell["value"], cell["n"])

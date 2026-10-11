@@ -48,6 +48,7 @@ from tests.plan_close_next_helpers import (
     task,
 )
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
+from tests.plan_writer_authorizer import raw_plan_seed
 
 KEY = "selected_description"
 #: Serialized-byte ceiling of one carried description, as the tool emits it.
@@ -94,7 +95,8 @@ def _without_creation_event(db, node_id: str):
     row = dict(service._node_row(db, node_id), id=uuid.uuid4().hex)
     row["order_key"] += 1
     marks = ",".join("?" for _ in row)
-    db.execute(f"INSERT INTO plan_nodes ({','.join(row)}) VALUES ({marks})", tuple(row.values()))
+    with raw_plan_seed(db):
+        db.execute(f"INSERT INTO plan_nodes ({','.join(row)}) VALUES ({marks})", tuple(row.values()))
     assert db.execute(
         "SELECT COUNT(*) FROM plan_node_events WHERE node_id=?", (row["id"],),
     ).fetchone()[0] == 0

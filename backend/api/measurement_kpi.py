@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
+from api.measurement_registry import TOKENS_RECORDED_FROM
 from api.measurement_token_sql import TOKEN_FIGURE_SQL
 
 
@@ -30,6 +31,7 @@ _TOKEN_SQL = f"""
 """
 
 
+
 def _token_figure(row: dict[str, Any] | None, name: str) -> dict[str, int]:
     """One token figure: the sum of what was recorded, and how many calls recorded none of it."""
     if row is None:
@@ -44,6 +46,7 @@ def build_kpi(db, current: Period, previous: Period) -> dict[str, Any]:
     return {
         name: {
             "start": period.start, "end": period.end,
+            "tokens_recorded": period.start >= TOKENS_RECORDED_FROM,
             "tokens": {key: _token_figure(tokens.get(name), key) for key, _, _ in TOKEN_FIGURE_SQL},
         }
         for name, period in (("current", current), ("previous", previous))

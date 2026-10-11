@@ -187,7 +187,7 @@ def decision_causes(node_plans, *, db) -> dict[str, list[dict]]:
     plan_ids = {str(plan["id"]) for plan in sources.values()}
     open_rows = [
         row
-        for row in decision_projection.rows_for_plans(plan_ids, db=db)
+        for row in decision_projection.rows_for_plans(plan_ids, db=db, open_nodes=True)
         if row["state"] in decision_projection.OPEN_STATES
         and row["source_node_id"] in sources
     ]
@@ -198,7 +198,8 @@ def decision_causes(node_plans, *, db) -> dict[str, list[dict]]:
     # answer route must agree, so a question cleared out of band stops holding
     # its task. Read once for the batch.
     answerable = {
-        row["id"] for row in decision_projection.raised_decisions(plan_ids, db=db)
+        row["id"]
+        for row in decision_projection.raised_decisions(plan_ids, db=db, open_nodes=True)
     }
     reviewers = _reviewers(
         db, {str(sources[row["source_node_id"]]["owner_id"]) for row in open_rows},

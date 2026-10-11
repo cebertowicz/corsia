@@ -47,6 +47,16 @@ describe("AdaptiveDrawer", () => {
     expect(host.querySelector(".drawer-body")?.classList.contains("fill")).toBe(true);
   });
 
+  it("sits on the visible part of the screen only when asked to follow the keyboard", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
+    await settle();
+    expect(host.querySelector(".drawer-backdrop")?.classList.contains("follow-keyboard")).toBe(false);
+    unmount(component);
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn(), followKeyboard: true } });
+    await settle();
+    expect(host.querySelector(".drawer-backdrop")?.classList.contains("follow-keyboard")).toBe(true);
+  });
+
   it("owns one modal dialog and moves focus to the consumer target", async () => {
     component = mount(AdaptiveDrawerHarness, {
       target: host,

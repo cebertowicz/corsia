@@ -38,7 +38,7 @@ def test_api_key_never_leaves_the_row():
 
 
 def test_presence_and_mask_survive_redaction():
-    out = _public_server_view(_row({"api_key": "sk-ws-ABCDEF123456"}))
+    out = _public_server_view(_row({}), {"ns-test": "sk-ws-ABCDEF123456"})
     assert out["has_key"] is True
     assert out["masked_key"].endswith("3456")
     assert out["masked_key"].startswith("\u2022\u2022\u2022\u2022")

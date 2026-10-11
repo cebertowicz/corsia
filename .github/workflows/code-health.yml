@@ -3,22 +3,6 @@ name: Code health
 on:
   pull_request:
     branches: [main, dev]
-    # Not named/wired as a required check, and deliberately so: this repo is
-    # private without the plan tier that unlocks branch protection (the API
-    # returns 403), so "required" has no GitHub-enforced meaning here anyway
-    # -- the merge gate reads statusCheckRollup instead. If that changes, this
-    # paths filter would need to go first: a PR touching none of these paths
-    # never runs this job, so a required check gated on it would wait forever
-    # on a check that never reports.
-    # '**.py' rather than '**/*.py': in GitHub's filter syntax the '**/'
-    # form requires at least one directory separator, so a file added at the
-    # repository root would not match and the gate would silently skip it.
-    paths:
-      - '**.py'
-      - '**.ts'
-      - '**.svelte'
-      - 'quality/file-size-limits.json'
-      - '.github/workflows/code-health.yml'
   workflow_dispatch:
 
 concurrency:
@@ -29,12 +13,40 @@ permissions:
   contents: read
 
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: '(^|/).+\.(py|ts|svelte)$|^quality/file-size-limits\.json$|^\.github/workflows/code-health\.yml$|^\.github/actions/relevance/action\.yml$'
+
   file-sizes:
+    needs: relevance
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: File size ratchet
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-python@v5
         with:

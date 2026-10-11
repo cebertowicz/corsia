@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
 import { node } from './fixtures/planTreeNode';
+import { withFolds } from './fixtures/planFolds';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -24,7 +25,7 @@ async function settle() {
 
 describe('PlanTree row details disclosure', () => {
 	async function open(target: OperatorNode): Promise<string> {
-		component = mount(PlanTree, { target: host, props: { nodes: [target] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [target] }) });
 		flushSync();
 		(host.querySelector('.row-body') as HTMLButtonElement).click();
 		await settle();
@@ -80,7 +81,7 @@ describe('PlanTree row details disclosure', () => {
 			},
 		});
 		// The row itself is the details control; there is no separate Details button.
-		component = mount(PlanTree, { target: host, props: { nodes: [detailed] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [detailed] }) });
 		flushSync();
 		expect([...host.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Details')).toBe(false);
 		const button = host.querySelector('.row-body') as HTMLButtonElement;
@@ -452,7 +453,7 @@ describe('PlanTree branch rows', () => {
 			node({ id: 'parent', title: 'Parent step', branch_progress: { done: 1, total: 2 } }),
 			node({ id: 'child', title: 'Child step', parent_id: 'parent', depth: 1 }),
 		];
-		component = mount(PlanTree, { target: host, props: { nodes } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		flushSync();
 		const body = host.querySelector('.row-body') as HTMLButtonElement;
 		const expand = host.querySelector('.branch-toggle') as HTMLButtonElement;
@@ -477,13 +478,13 @@ describe('PlanTree user task controls', () => {
 	it('keeps lifecycle actions out of expanded details when the row has a task menu', async () => {
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes: [node({
 					id: 'mine', title: 'Sign the contract',
 					user_actions: ['mark_done', 'pause_node', 'close_node'],
 				})],
 				onUserAction: () => {},
-			},
+			}),
 		});
 		flushSync();
 
@@ -500,7 +501,7 @@ describe('PlanTree user task controls', () => {
 	it('still says the user moves next on an agent task blocked on them', async () => {
 		component = mount(PlanTree, {
 			target: host,
-			props: {
+			props: withFolds({
 				nodes: [node({
 					id: 'theirs', user_actions: ['pause_node', 'close_node'],
 					execution: {
@@ -513,7 +514,7 @@ describe('PlanTree user task controls', () => {
 					},
 				})],
 				onUserAction: () => {},
-			},
+			}),
 		});
 		flushSync();
 		(host.querySelector('.row-body') as HTMLButtonElement).click();

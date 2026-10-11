@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.lesson_trials import TRIAL_SCHEMA, Trial, validate_trial
+from core.lesson_trials import BODY_WORDS, TRIAL_SCHEMA, Trial, lesson_block, validate_trial
 
 Q1 = ("thread", "agent", "project", "everywhere")
 Q2 = ("every_turn", "task_start", "lookup")
@@ -304,7 +304,6 @@ def skill_body_cap(text: str) -> int:
     be refused at save, so the fork must be asked for room against the same
     number the loader checks.
     """
-    from core.lesson_trials import BODY_WORDS, lesson_block
     from core.skill_validation import validate_skill_text
 
     if lesson_block(validate_skill_text(text).metadata) is not None:

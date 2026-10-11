@@ -375,14 +375,16 @@ def test_affected_account_threads_filter_provider_subjects_through_canonical_che
     db.commit()
     checked = []
 
-    def canonical(provider, *, thread_id, model, db):
-        checked.append((provider, thread_id, model))
+    def canonical(provider, *, thread_id, project, account_id, model, db, binding):
+        checked.append((provider, thread_id, model, binding and binding["account_id"]))
         return (legacy["id"] if thread_id == "destination" else second["id"], None)
 
-    monkeypatch.setattr(account_policy, "turn_account", canonical)
+    # turn_account is this selector once a caller has read the thread's project (and binding)
+    monkeypatch.setattr(account_policy, "_scoped_turn_account", canonical)
 
     assert affected_thread_ids(legacy["id"], db=db) == ["destination"]
-    assert checked == [("codex", "destination", "codex/test"), ("codex", "other", "codex/test")]
+    assert checked == [("codex", "destination", "codex/test", legacy["id"]),
+                       ("codex", "other", "codex/test", second["id"])]
 
 
 def test_affected_account_threads_includes_unbound_queued_default_subject(accounts):

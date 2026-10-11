@@ -96,17 +96,17 @@ def executable_fingerprint_for_path(path: Path) -> tuple[str, str]:
     return str(resolved), hashlib.sha256(material.encode()).hexdigest()
 
 
-def executable_fingerprint_for_process(
-    process: psutil.Process,
-) -> tuple[str, str]:
+def executable_fingerprint_for_process(process: psutil.Process) -> tuple[str, str]:
     try:
         executable = process.exe()
     except psutil.NoSuchProcess as exc:
         raise BrowserPidAbsent from exc
-    except (psutil.AccessDenied, OSError) as exc:
+    except psutil.AccessDenied as exc:
+        raise BrowserExitTornRead("browser daemon executable identity is unavailable") from exc
+    except OSError as exc:
         raise BrowserIdentityError("browser daemon executable identity is unavailable") from exc
     if not executable:
-        raise BrowserIdentityError("browser daemon executable identity is unavailable")
+        raise BrowserExitTornRead("browser daemon executable identity is unavailable")
     return executable_fingerprint_for_path(Path(executable))
 
 
@@ -366,7 +366,7 @@ def observe_session(*, socket_dir: Path, session: str, binding: DaemonBinding | 
             supported_version=version, version=sidecars.version, time_tolerance_seconds=TIME_TOLERANCE_SECONDS,
         )
     except (BrowserIdentityError, BrowserPidAbsent):
-        # macOS can deny environ() while the bound process is exiting. A fresh
+        # macOS can deny environ() or blank exe() while the bound process exits. A fresh
         # kernel disappearance is observable; the owner still requires close ack.
         if binding is not None and is_zombie(binding.pid):
             return Observation(binding, False, session_absent(socket_dir, session))

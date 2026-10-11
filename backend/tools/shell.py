@@ -61,7 +61,6 @@ from tools.shell_output import (
     with_shell_warnings,
 )
 from tools.shell_policy import load_shell_repo_policies
-from tools.shell_stage_timing import ShellStageTimer
 from tools.shell_guard import (
     chained_base_git_denial_guidance,
     check_command_safety,
@@ -279,7 +278,6 @@ class BashTool(Tool):
         agent_account = await bind_agent_account(env)
         profile_path: Path | None = None
         cwd_fd: int | None = None
-        timer = ShellStageTimer()
 
         try:
             from tools.host_access_gate import (
@@ -320,13 +318,11 @@ class BashTool(Tool):
                     "to trigger a fresh action review."
                 )
 
-            timer.mark("admission")
             leased = consumed is not None
             try:
                 policies, grant_policies = await asyncio.to_thread(
                     load_shell_repo_policies, list_registered_repo_policies, leased, project_id
                 )
-                timer.mark("policy")
             except RepoPolicyQueryError as exc:
                 return (
                     "Error: repository policy enforcement is unavailable: "
@@ -433,7 +429,6 @@ class BashTool(Tool):
             )
             if cwd_denial is not None:
                 return cwd_denial
-            timer.mark("guard")
             envelope = execution_envelope_for_consumed_action(
                 consumed,
                 leased=leased, thread_id=thread_id,
@@ -447,25 +442,22 @@ class BashTool(Tool):
             profile_path, argv = await prepare_execution_envelope(
                 command, canonical_cwd, envelope,
             )
-            timer.mark("envelope")
             shared_write_started_at_ns = time.time_ns()
-            with timer.spawn_window():
-                owned = await PROCESS_OWNER.spawn(
-                    argv,
-                    thread_id=thread_id,
-                    turn_id=authoritative_turn_id,
-                    lease_id=getattr(consumed, "lease_id", None),
-                    lease_revision=getattr(consumed, "lease_revision", None),
-                    permit_id=getattr(consumed, "permit_id", None),
-                    cwd=canonical_cwd,
-                    cwd_fd=cwd_fd,
-                    env=env,
-                    timeout_seconds=effective_timeout,
-                    background=background,
-                    cleanup_paths=(profile_path,) if background else (),
-                    **long_call.spawn_options,
-                )
-            timer.mark("run")
+            owned = await PROCESS_OWNER.spawn(
+                argv,
+                thread_id=thread_id,
+                turn_id=authoritative_turn_id,
+                lease_id=getattr(consumed, "lease_id", None),
+                lease_revision=getattr(consumed, "lease_revision", None),
+                permit_id=getattr(consumed, "permit_id", None),
+                cwd=canonical_cwd,
+                cwd_fd=cwd_fd,
+                env=env,
+                timeout_seconds=effective_timeout,
+                background=background,
+                cleanup_paths=(profile_path,) if background else (),
+                **long_call.spawn_options,
+            )
             if isinstance(owned, BackgroundProcessResult):
                 # ProcessOwner now owns the profile through terminal cleanup.
                 profile_path = None
@@ -538,14 +530,11 @@ class BashTool(Tool):
                 result, registration_warning, ownership_notices,
             )
 
-            timer.mark("post")
             return result
 
         except Exception as e:
-            timer.failed = True
             return f"Error executing command: {str(e)}"
         finally:
-            timer.emit()
             if cwd_fd is not None:
                 try:
                     os.close(cwd_fd)

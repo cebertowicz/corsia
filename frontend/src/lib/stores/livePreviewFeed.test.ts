@@ -7,6 +7,10 @@ import { textDigest, type DocumentFrame } from './documentWire';
 
 const DOC = 'Hello world. The rest stays.';
 
+// A live view keeps its typing driver ticking after the test, and a tick after the file's
+// environment is gone throws on the missing document; every view is destroyed after its test.
+const disposers = new Set<() => void>();
+
 function harness(doc = DOC) {
 	const view = new EditorView({
 		state: EditorState.create({ doc, extensions: [createTypedReveal({ canType: () => true, isInView: () => true })] }),
@@ -14,7 +18,9 @@ function harness(doc = DOC) {
 	});
 	let listener: ((frame: DocumentFrame) => void) | null = null;
 	const stop = attachPreviewFeed(view, { onFrame: (next) => { listener = next; return () => { listener = null; }; } });
-	return { view, send: (frame: Record<string, unknown>) => listener?.(frame as unknown as DocumentFrame), stop, listening: () => listener !== null };
+	const dispose = () => { if (!disposers.delete(dispose)) return; stop(); view.destroy(); };
+	disposers.add(dispose);
+	return { view, send: (frame: Record<string, unknown>) => listener?.(frame as unknown as DocumentFrame), stop, dispose, listening: () => listener !== null };
 }
 
 const previews = (view: EditorView) => view.state.field(typedReveals).flatMap((lane) => lane.previews.map((p) => ({ ...p, threadId: lane.threadId })));
@@ -23,7 +29,7 @@ const preview = (digest: string, slots: unknown[], callId = 'call-1', kind?: str
 	({ type: 'doc_preview', call_id: callId, thread_id: 'thread-a', name: 'Alpha', digest, slots, ...(kind ? { kind } : {}) });
 const end = (outcome: string) => ({ type: 'doc_preview_end', call_id: 'call-1', thread_id: 'thread-a', outcome });
 
-afterEach(() => { vi.useRealTimers(); document.body.innerHTML = ''; });
+afterEach(() => { vi.useRealTimers(); [...disposers].forEach((dispose) => dispose()); document.body.innerHTML = ''; });
 
 describe('live preview feed', () => {
 	it('places a slot when the frame was computed on the text this editor shows', async () => {
@@ -112,9 +118,25 @@ describe('live preview feed', () => {
 			expect(previews(h.view).length, `${kind} ${outcome}`).toBe(kept ? 1 : 0);
 			vi.advanceTimersByTime(CLAIM_GRACE_MS);
 			expect(previews(h.view), `${kind} ${outcome}`).toEqual([]);
-			h.stop();
-			h.view.destroy();
+			h.dispose();
 		}
+	});
+
+	it('a suggestion whole in one frame and settled at once is still placed, and held for its arrival', async () => {
+		const h = harness();
+		const digest = await textDigest(DOC);
+		h.send(preview(digest, [{ slot: 0, from: 6, to: 11, at: 0, text: 'the whole insert' }], 'call-1', 'suggest'));
+		h.send(end('settled'));
+		await settle();
+		expect(previews(h.view)).toMatchObject([{ mode: 'suggest', text: 'the whole insert', typed: 0 }]);
+	});
+
+	it('a frame still waiting to be placed when its call ends any other way is never placed', async () => {
+		const h = harness();
+		h.send(preview(await textDigest(DOC), [{ slot: 0, from: 6, to: 11, at: 0, text: 'the' }], 'call-1', 'suggest'));
+		h.send(end('refused'));
+		await settle();
+		expect(previews(h.view)).toEqual([]);
 	});
 
 	it('stops listening when detached', () => {

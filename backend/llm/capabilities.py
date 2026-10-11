@@ -109,8 +109,8 @@ def provider_from_model(model: str) -> str:
 
 
 _CLOUD_PROVIDERS = {
-    "anthropic/": {"config_key": "anthropic", "env_var": "ANTHROPIC_API_KEY"},
-    "openai/": {"config_key": "openai", "env_var": "OPENAI_API_KEY"},
+    "anthropic/": {"config_key": "anthropic"},
+    "openai/": {"config_key": "openai"},
 }
 
 
@@ -128,11 +128,11 @@ def native_transport_identity(model: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _resolve_api_key(config_key: str, env_var: str) -> str:
-    """Resolve API key: config.local.json first, then env var fallback."""
-    from infra.settings import get_api_keys
-    keys = get_api_keys()
-    return keys.get(config_key) or os.environ.get(env_var, "")
+def _resolve_api_key(config_key: str) -> str:
+    """Resolve a cloud provider's key from the key store. The environment is not read."""
+    from infra.key_store import resolve_provider
+
+    return resolve_provider(config_key) or ""
 
 
 def make_provider_params(model: str) -> dict:
@@ -150,7 +150,7 @@ def make_provider_params(model: str) -> dict:
     api_base = None
     for prefix, cfg in _CLOUD_PROVIDERS.items():
         if model.startswith(prefix):
-            api_key = _resolve_api_key(cfg["config_key"], cfg["env_var"])
+            api_key = _resolve_api_key(cfg["config_key"])
             break
 
     return {"model": model, "api_key": api_key, "api_base": api_base, "uses_streaming": True}

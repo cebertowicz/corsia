@@ -2,15 +2,14 @@ import { StateEffect } from '@codemirror/state';
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { AGENT_PRESENT_FOR } from '$lib/docPresence';
 import { hashSeed, shownAt, stepTimes, typingSchedule, type PaceStep } from '$lib/typingPace';
-import { clampPresenceLabelsNow } from './presence-marks';
+import { clampPresenceLabelsNow, LABEL_FADE_MS } from './presence-marks';
 import { backlogCount, backlogText } from './typed-reveal-preview';
 import { endSelect, selectShown } from './typed-reveal-select';
 import { dropLane, laneState, revealAll, revealCount, typedReveals, type Lane } from './typed-reveal-state';
 
 /** The caret holds steady for this long after the last character, then blinks. */
 export const TYPING_IDLE_MS = 200;
-/** The name label fades this long after the last character. */
-export const LABEL_FADE_MS = 2_000;
+export { LABEL_FADE_MS };
 
 interface Clock {
 	generation: number;

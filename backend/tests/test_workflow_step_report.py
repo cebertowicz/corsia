@@ -11,6 +11,7 @@ import pytest
 
 from infra.schema import SCHEMA_SQL
 from plans import mutations, service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 # Load the script by path: putting scripts/ on sys.path would let scripts/tests
 # shadow this suite's own `tests` package for every module collected after it.
@@ -197,8 +198,9 @@ def test_j_rejected_revision_is_one_chain_with_rework(db):
     _attempt(db, revision, 1)
     _usage(db, first, "first", "model/a", 10, 0.1)
     _usage(db, revision, "revision", "model/a", 20, 0.2)
-    db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (first.id,))
-    db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (revision.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (first.id,))
+        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (revision.id,))
     db.commit()
 
     group = report(db)["groups"][0]
@@ -233,7 +235,8 @@ def test_l_accept_with_follow_up_is_a_separate_step(db):
                      workflow_version="v1", workflow_step="build", difficulty="standard")
     follow_up = _node(db, plan.id, "review", parent_id=phase.id, workflow_ref="demo",
                       workflow_version="v1", workflow_step="review", difficulty="standard")
-    db.execute("UPDATE plan_nodes SET state='accepted_with_followup' WHERE id=?", (original.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='accepted_with_followup' WHERE id=?", (original.id,))
     db.execute("UPDATE plan_nodes SET follow_up_of=? WHERE id=?", (original.id, follow_up.id))
     _attempt(db, original, 1)
     _attempt(db, follow_up, 1)
@@ -269,7 +272,8 @@ def test_unknown_usage_and_closed_node_are_reported(db):
     task = _node(db, plan.id, "build", parent_id=phase.id, workflow_ref="demo",
                  workflow_version="v1", workflow_step="build", difficulty="standard")
     _usage(db, task, "unknown", "model/a", None, None)
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (task.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (task.id,))
     db.commit()
 
     group = report(db)["groups"][0]["metrics"]

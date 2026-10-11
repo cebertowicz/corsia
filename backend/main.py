@@ -57,6 +57,7 @@ from api import (
     host_access_router,
     audit_reads_router,
     plans_router,
+    plans_folded_router,
 )
 from api.attention import router as attention_router
 from api.system_perf import router as system_perf_router
@@ -149,6 +150,7 @@ app.include_router(skills_router)
 app.include_router(host_access_router)
 app.include_router(audit_reads_router)
 app.include_router(plans_router)
+app.include_router(plans_folded_router)
 app.include_router(auth_router)
 
 app.include_router(webhooks_router)

@@ -7,7 +7,7 @@
  * failed one -- never "Unavailable" rendered from undefined, never a throw
  * inside a consumer. Every operator read passes through this (`plans.ts`).
  */
-import type { OperatorEnvelope } from './plansTypes';
+import type { OperatorEnvelope, OperatorNode } from './plansTypes';
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === 'string';
@@ -61,17 +61,27 @@ function isNode(v: unknown): boolean {
 	if (typeof v.folded !== 'boolean' || !isStr(v.last_transition_at)) return false;
 	if (!isObject(v.executor) || !isStr(v.executor.label) || !isExecution(v.execution) || !isDisplay(v.display)) return false;
 	if (v.status_reason !== undefined && !isStrOrNull(v.status_reason)) return false;
+	if (!isStrOrNull(v.scheduled_until)) return false;
 	if (!isChild(v.child) || !isReview(v.review) || !(v.branch_progress === null || isProgress(v.branch_progress))) return false;
 	if (!isCommitmentCost(v.commitment_cost) || !isNodeCost(v.node_cost) || !isInitiative(v.initiative)) return false;
 	if (!isNum(v.requirements_revision) || !isEvidence(v.evidence)) return false;
 	return Array.isArray(v.user_actions) && isStrArray(v.attention_path);
 }
 
+/** One operator node (the single-node read), or null when the body is not one. */
+export function decodeOperatorNode(v: unknown): OperatorNode | null {
+	return isNode(v) ? (v as unknown as OperatorNode) : null;
+}
+
+const isFoldLevel = (v: unknown): boolean =>
+	isObject(v) && isStrOrNull(v.parent_id) && isNum(v.done) && isNum(v.failed) && isNum(v.closed) && isNum(v.more);
+
 function isPlanEntry(v: unknown): boolean {
 	if (!isObject(v) || !isObject(v.plan) || !isStr(v.plan.id) || !isStr(v.plan.state) || !isNum(v.plan.revision)) return false;
 	if (!isObject(v.owner) || !isObject(v.progress) || !isPlanProgress(v.progress)) return false;
 	if (!isObject(v.progress.distribution) || !isDisplay(v.display) || !isOversize(v.oversize)) return false;
 	if (!isStrArray(v.current_node_ids) || !isStrArray(v.next_node_ids)) return false;
+	if (!Array.isArray(v.folds) || !v.folds.every(isFoldLevel) || !isNum(v.root_count)) return false;
 	return Array.isArray(v.nodes) && v.nodes.every(isNode);
 }
 

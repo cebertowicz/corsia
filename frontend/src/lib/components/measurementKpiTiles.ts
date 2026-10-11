@@ -50,7 +50,7 @@ function seriesTile(id: keyof typeof KPI_MEASURES, label: string, panel: PanelSt
 /** The four measures the sections below headline, from the panels' own windows blocks and the cost payload. */
 export function measureTiles(panels: Record<string, PanelState>, cost: MeasurementCost | null): Partial<Record<KpiTile['id'], KpiTile>> {
 	const tiles: Partial<Record<KpiTile['id'], KpiTile>> = {};
-	const size = seriesTile('work', 'Hours of work per hour of your attention', panels[KPI_MEASURES.work.panel], (v) => `${v.toFixed(0)} h`);
+	const size = seriesTile('work', 'Work per hour of your attention', panels[KPI_MEASURES.work.panel], (v) => `${v.toFixed(0)} h`);
 	const firstTry = seriesTile('first-try', 'First-try rate (agent-graded)', panels[KPI_MEASURES['first-try'].panel], (v) => `${(v * 100).toFixed(0)}%`);
 	const minutes = seriesTile('minutes', 'Your minutes per outcome', panels[KPI_MEASURES.minutes.panel], (v) => `${(v * 60).toFixed(1)} min`);
 	if (size) tiles.work = size;
@@ -60,7 +60,7 @@ export function measureTiles(panels: Record<string, PanelState>, cost: Measureme
 	if (cost && costPeriod) {
 		const view = costView({ ...cost, period: costPeriod });
 		const rate = view ? view.current.perHour : null;
-		tiles.cost = { id: 'cost', label: 'Cost per hour of delivered work', value: rate === null ? '–' : money(rate), sub: windowLine(periodName(costPeriod.latest), { n: view?.current.sized ?? 0 }, view?.change ?? 'n/a') };
+		tiles.cost = { id: 'cost', label: 'Cost per person-hour of work delivered', value: rate === null ? '–' : money(rate), sub: windowLine(periodName(costPeriod.latest), { n: view?.current.sized ?? 0 }, view?.change ?? 'n/a') };
 	}
 	return tiles;
 }
@@ -76,7 +76,7 @@ const span = (window: { from: string; to: string }): string => periodName(window
 /** The total over the latest window beside the previous one, with the four parts that add up to it. */
 export function tokensTile(kpi: Kpi): KpiTile {
 	const total = kpi.current.tokens.total, before = kpi.previous.tokens.total;
-	const change = before.value > 0 ? percentChange(total.value, before.value) : 'new';
+	const change = before.value > 0 && kpi.previous.tokens_recorded !== false ? percentChange(total.value, before.value) : 'new';
 	const parts = kpi.current.tokens;
 	return {
 		id: 'tokens', label: 'Tokens', value: tokens(total),

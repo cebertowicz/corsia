@@ -271,7 +271,7 @@ in-line.
 | `--ease-snap` | `cubic-bezier(0.2, 0, 0, 1)` | Button + IconButton state changes (100ms); tight UI feedback. Source: `ui/Button.svelte:59`, `ui/IconButton.svelte:46`. |
 | `--ease-material` | `cubic-bezier(0.4, 0, 0.2, 1)` | Sidebar collapse width transition (250ms). Source: `Sidebar.svelte:189`. |
 | `--ease-ios-sheet` | `cubic-bezier(0.32, 0.72, 0, 1)` | Mobile drawer transform (320ms); swipe-row snap. The iOS sheet curve. Source: `Sidebar.svelte:259`. |
-| `--ease-entrance` | `cubic-bezier(0.22, 1, 0.36, 1)` | Login hero-grow (600ms), fade-rise (380ms). Pronounced ease-out for entrance. Source: `LoginScreen.svelte:94, 106`. |
+| `--ease-entrance` | `cubic-bezier(0.22, 1, 0.36, 1)` | Login hero-grow (600ms), fade-rise (380ms); phone `main` slide when the rail or pane opens and closes (`--dur-spring`). Pronounced ease-out with no overshoot. Source: `LoginScreen.svelte:94, 106`, `HomeShell.svelte:339, 374`. |
 | `--ease-cubic-out` (Svelte built-in) | `cubicOut` ≈ `cubic-bezier(0.33, 1, 0.68, 1)` | Auth gate ↔ app cross-fade (320 / 460ms). Source: `+page.svelte:39, 347–354`. |
 
 **Note on auth-fade curve drift.** `Sidebar.svelte:255` comment claims
@@ -607,7 +607,10 @@ on touch viewports — visual size unchanged, HIG target met.
 tracks the finger 1:1; the open edge rubber-bands (×0.15 — small so the
 canvas never exposes a seam); release is velocity-aware (a ≥0.5 px/ms
 flick commits by direction, else the 40% positional snap); settle uses
-`--ease-spring` at `--dur-spring`.
+`--ease-entrance` at `--dur-spring`. Never an overshooting curve such as
+`--ease-spring` on a full-width transform: the overshoot carries `main`
+past x=0, so content briefly sits off the left edge and the page scrolls
+sideways.
 
 **P3 accents.** Behind `@supports`, the four accent hues upgrade to
 `color(display-p3 …)` (same component values, wider gamut — vivid on

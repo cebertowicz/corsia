@@ -17,6 +17,8 @@ import { activeToolsByThread } from '$lib/stores/threads';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
 import { FADE_MS, LINGER_MS, PHRASE_HOLD_MS, _resetLiveStepForTests } from '$lib/components/plans/planLiveStep';
 import { operatorNode } from './fixtures/operatorPlan';
+import { withLiveFolds } from './fixtures/planFolds';
+import { childState } from './fixtures/planFolds';
 
 /**
  * PRD-ATTENTION-SIGNAL AS14: a plan item whose worker runs, or that its own
@@ -85,7 +87,7 @@ function ownTask(): OperatorNode {
 
 function render(nodes: OperatorNode[], extra: Record<string, unknown> = {}): { nodes: OperatorNode[] } {
 	const props = $state({ nodes, ...extra });
-	component = mount(PlanTree, { target: host, props });
+	component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
 	flushSync();
 	return props;
 }
@@ -335,7 +337,7 @@ describe('plan item live step (AS14)', () => {
 	});
 
 	it('drops a parent\'s line only when a rendered child row shows the same thread', () => {
-		const ready = (nodes: OperatorNode[]) => ({ status: 'ready', planId: 'child-plan', nodes, currentNodeIds: [], nextNodeIds: [], errorMessage: null });
+		const ready = (nodes: OperatorNode[]) => (childState({ status: 'ready', planId: 'child-plan', nodes, currentNodeIds: [], nextNodeIds: [], errorMessage: null }));
 		const state = $state({ nodes: [ownTask()] });
 		const expanded = { isChildExpanded: (id: string) => id === 'delegated', childRowState: () => ready(state.nodes) };
 		render([delegated()], expanded);
@@ -372,7 +374,7 @@ describe('plan item live step (AS14)', () => {
 
 	it('keeps a delegated step spinning after its subagent\'s row takes the line', () => {
 		const step = { ...delegated(), display: { label_key: 'working', tone_key: 'active' } } as OperatorNode;
-		const ready = { status: 'ready', planId: 'child-plan', nodes: [boundChild()], currentNodeIds: [], nextNodeIds: [], errorMessage: null };
+		const ready = childState({ status: 'ready', planId: 'child-plan', nodes: [boundChild()], currentNodeIds: [], nextNodeIds: [], errorMessage: null });
 		const props = $state({ open: false });
 		render([step], { isChildExpanded: () => props.open, childRowState: () => ready });
 		startWorker();
@@ -390,7 +392,7 @@ describe('plan item live step (AS14)', () => {
 		const group = operatorNode({ id: 'grp', title: 'Group' });
 		const nested = { ...boundChild(), parent_id: 'grp', depth: 1 };
 		const other = operatorNode({ id: 'other', title: 'Other step' });
-		const ready = { status: 'ready', planId: 'child-plan', nodes: [group, nested, other], currentNodeIds: [], nextNodeIds: [], errorMessage: null };
+		const ready = childState({ status: 'ready', planId: 'child-plan', nodes: [group, nested, other], currentNodeIds: [], nextNodeIds: [], errorMessage: null });
 		render([delegated()], { isChildExpanded: (id: string) => id === 'delegated', childRowState: () => ready });
 		startWorker();
 		expect(host.textContent).not.toContain('Bound step');
@@ -433,7 +435,7 @@ describe('plan item live step (AS14)', () => {
 	it('keeps a delegated step\'s line when the row bound to its worker is folded away', () => {
 		const hidden = { ...boundChild(), folded: true };
 		const other = operatorNode({ id: 'other', title: 'Other step' });
-		const ready = { status: 'ready', planId: 'child-plan', nodes: [hidden, other], currentNodeIds: [], nextNodeIds: [], errorMessage: null };
+		const ready = childState({ status: 'ready', planId: 'child-plan', nodes: [hidden, other], currentNodeIds: [], nextNodeIds: [], errorMessage: null });
 		render([delegated()], { isChildExpanded: (id: string) => id === 'delegated', childRowState: () => ready });
 		startWorker();
 
@@ -450,7 +452,7 @@ describe('plan item live step (AS14)', () => {
 			const group = operatorNode({ id: 'grp', title: 'Group' });
 			const nested = { ...boundChild(), parent_id: 'grp', depth: 1 };
 			const other = operatorNode({ id: 'other', title: 'Other step' });
-			const ready = { status: 'ready', planId: 'child-plan', nodes: [group, nested, other], currentNodeIds: [], nextNodeIds: [], errorMessage: null };
+			const ready = childState({ status: 'ready', planId: 'child-plan', nodes: [group, nested, other], currentNodeIds: [], nextNodeIds: [], errorMessage: null });
 			render([delegated()], { isChildExpanded: (id: string) => id === 'delegated', childRowState: () => ready });
 			startWorker();
 			// The Turn's only tool finalizes: the store empties mid-Turn, so a later row sees no phrase.
@@ -502,7 +504,7 @@ describe('plan item live step (AS14)', () => {
 		const group = operatorNode({ id: 'grp', title: 'Group' });
 		const nested = { ...boundChild(), parent_id: 'grp', depth: 1 };
 		const other = operatorNode({ id: 'other', title: 'Other step' });
-		const ready = { status: 'ready', planId: 'child-plan', nodes: [group, nested, other], currentNodeIds: [], nextNodeIds: [], errorMessage: null };
+		const ready = childState({ status: 'ready', planId: 'child-plan', nodes: [group, nested, other], currentNodeIds: [], nextNodeIds: [], errorMessage: null });
 		render([delegated()], { isChildExpanded: (id: string) => id === 'delegated', childRowState: () => ready });
 		startWorker();
 		handleStepText({
@@ -569,7 +571,7 @@ describe('plan item live step (AS14)', () => {
 	});
 
 	it('keeps a parent\'s line when its subagent\'s plan has not loaded, or is collapsed', () => {
-		const loading = { status: 'loading', planId: null, nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null };
+		const loading = childState({ status: 'loading', planId: null, nodes: [], currentNodeIds: [], nextNodeIds: [], errorMessage: null });
 		render([delegated()], { isChildExpanded: () => true, childRowState: () => loading });
 		startWorker();
 		expect(subline('Delegated step')).toBe(`Working 3 min · ${READING}`);

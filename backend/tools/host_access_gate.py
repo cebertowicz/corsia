@@ -36,6 +36,7 @@ from host_access.credential_sanitizer import sanitize_credential_data
 from host_access.supervisor import (
     consume_host_action_permit as _consume_host_action_permit,
 )
+from host_access.reviewer_unavailable import action_review_refusal
 from host_access.supervisor import ActionReviewUnavailableError
 from host_access.supervisor import HostAccessSupervisorError
 from host_access.supervisor import ProjectPolicyChangedError
@@ -818,10 +819,7 @@ async def _review_action(
     except ProjectPolicyChangedError as exc:
         raise HostAccessBlocked("Project policy changed; request host access again.") from exc
     except ActionReviewUnavailableError as exc:
-        raise HostAccessBlocked(
-            f"Host action denied: {exc}. Your lease is still active; "
-            "retrying the action triggers a fresh review."
-        ) from exc
+        raise HostAccessBlocked(action_review_refusal(exc)) from exc
     except HostAccessGateError:
         raise
     except HostAccessSupervisorError as exc:

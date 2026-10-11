@@ -186,7 +186,16 @@ def test_the_operator_projection_marks_folded_and_counts_branches_in_play():
         _plan, nodes = _mixed_plan(db)
         entry = operator_projection.read_thread("worker", actor=HUMAN, db=db)["plans"][0]
         by_id = {node["id"]: node for node in entry["nodes"]}
-        assert {node_id for node_id, node in by_id.items() if node["folded"]} == _folded(nodes)
+        # The pane lists the folded rows of the window at the levels it lists; the finished
+        # phase's two children are behind its fold, counted but not listed.
+        behind = {nodes["accepted"].id, nodes["failed"].id}
+        assert {node_id for node_id, node in by_id.items() if node["folded"]} == _folded(nodes) - behind
+        levels = {level["parent_id"]: level for level in entry["folds"]}
+        assert levels[nodes["done_phase"].id] == {
+            "parent_id": nodes["done_phase"].id, "done": 1, "failed": 1, "closed": 0, "more": 2,
+        }
+        assert levels[nodes["open_phase"].id]["more"] == 0 and levels[None]["more"] == 0
+        assert entry["root_count"] == 6
         # Only the open phase and the open root are in play: 1 of 3 leaves done.
         assert (entry["progress"]["done"], entry["progress"]["total"]) == (1, 3)
         assert by_id[nodes["open_phase"].id]["branch_progress"] == {"done": 1, "total": 2}
@@ -342,9 +351,14 @@ def test_the_full_read_omits_folded_nodes_and_counts_them_per_level():
         shown = {node["id"] for node in page["nodes"]}
         assert shown == {nodes["open_phase"].id, nodes["open_child"].id, nodes["open_root"].id}
         assert page["total_count"] == 3
-        levels = {level["parent_id"]: level["count"] for level in page["folded"]["levels"]}
-        assert levels == {None: 4, nodes["open_phase"].id: 1}
-        assert page["folded"]["node_count"] == 7
+        # Per level, by the tone the pane's fold row shows; a level with none left out, and
+        # the finished phase reads as its leaves (one failed).
+        levels = {
+            level["parent_id"]: {tone: n for tone, n in level.items() if tone != "parent_id"}
+            for level in page["folded"]["levels"]
+        }
+        assert levels == {None: {"done": 3, "failed": 1}, nodes["open_phase"].id: {"done": 1}}
+        assert "node_count" not in page["folded"] and "count" not in page["folded"]["levels"][0]
         assert page["folded"]["include"] == "plan_read(mode='full', include_folded=true)"
         # The ratio the agent reads is the pane's ratio.
         assert (page["progress"]["done"], page["progress"]["total"]) == (1, 3)
@@ -450,7 +464,7 @@ def test_an_archived_node_is_gone_not_folded():
         archival.archive_node(target.id, actor_id="worker", db=db)
         db.commit()
         page = read_current_plan(actor=WORKER, db=db)
-        assert page["folded"]["node_count"] == 6
+        assert page["folded"]["levels"][0] == {"parent_id": None, "done": 2, "failed": 1}
         entry = operator_projection.read_thread("worker", actor=HUMAN, db=db)["plans"][0]
         assert target.id not in {node["id"] for node in entry["nodes"]}
     finally:
@@ -482,7 +496,7 @@ def test_a_fold_moves_the_revision_so_unchanged_means_the_same_folded_set():
         db.commit()
         second = read_current_plan(actor=WORKER, db=db, known_revision=first["plan"]["revision"])
         assert "unchanged" not in second
-        assert second["folded"]["node_count"] == 1
+        assert second["folded"]["levels"] == [{"parent_id": None, "done": 1}]
     finally:
         db.close()
 

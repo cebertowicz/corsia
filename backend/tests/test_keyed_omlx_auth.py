@@ -15,7 +15,7 @@ def test_keyed_omlx_dispatch_uses_header_without_logging_token(monkeypatch, capl
 
     token = "test-keyed-omlx-dispatch"
     monkeypatch.setattr(network_endpoints, "build_api_base", lambda _sid: "http://omlx.test/v1")
-    monkeypatch.setattr(network_discovery, "get_server_metadata", lambda _sid: {"api_key": token})
+    monkeypatch.setattr("infra.key_store_servers.resolve_server", lambda _sid: token)
     caplog.set_level(logging.DEBUG)
 
     params = OmlxBackend().make_provider_params("omlx@server-a/model-a")
@@ -33,7 +33,7 @@ def test_keyed_omlx_health_uses_header_for_loaded_model_check(monkeypatch, caplo
     monkeypatch.setattr(network_discovery, "get_server", lambda _sid: {
         "id": "server-a", "instance_name": "oMLX", "port": 5201,
     })
-    monkeypatch.setattr(network_discovery, "get_server_metadata", lambda _sid: {"api_key": token})
+    monkeypatch.setattr("infra.key_store_servers.resolve_server", lambda _sid: token)
 
     async def fresh(_server_id, *, budget_s=1.0):
         return True
@@ -63,6 +63,7 @@ async def test_keyed_omlx_native_transport_uses_current_key_from_cached_params(i
     """CORSIA's real LiteLLM path resolves the current registered key per request."""
     import llm.base as base
     from infra.db_async import run_in_db
+    from infra.key_store_servers import set_server_key
     from llm import network_discovery as nd
     from llm.local_backends import OmlxBackend
     from llm.providers import omlx_lifecycle as lifecycle
@@ -71,7 +72,7 @@ async def test_keyed_omlx_native_transport_uses_current_key_from_cached_params(i
         nd.upsert_server,
         "omlx", "mock.invalid", "Proof", "mock.invalid", 5200, "online", kind="managed",
     )
-    await run_in_db(nd.set_server_metadata, server_id, api_key="first")
+    await run_in_db(set_server_key, server_id, "first")
     params = OmlxBackend().make_provider_params(f"omlx@{server_id}/proof-model")
     status_headers: list[str | None] = []
     requests: list[httpx.Request] = []
@@ -141,7 +142,7 @@ async def test_keyed_omlx_native_transport_uses_current_key_from_cached_params(i
             api_base=params["api_base"], omlx_server_id=params["omlx_server_id"],
             retry_transient_errors=False,
         )
-        await run_in_db(nd.set_server_metadata, server_id, api_key="second")
+        await run_in_db(set_server_key, server_id, "second")
         chunks: list[str] = []
 
         async def on_content(chunk):

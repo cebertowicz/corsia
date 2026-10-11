@@ -17,11 +17,11 @@ from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
 from api.measurement_registry import REGISTRY, instrument_period, period_measured
-from api.measurement_models import models_payload
+from api.measurement_models import models_read, task_chain_costs
 from api.measurement_agent_attention import MAX_ACTIVE_GAP_SECONDS
 from api.measurement_partial import current_period_outcomes
 from api.measurement_queries import prepare_outcome_periods, query_family
-from api.measurement_size import size_family, size_rows, size_window_periods
+from api.measurement_size import size_family, size_rows
 from api.measurement_windows import series_windows
 from api.measurement_scope import resolve_grain, scope_cte, validate_scope
 from infra.auth import require_user
@@ -246,9 +246,8 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
                 rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain))
         pooling = {"measured": measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,
                    "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain)}
-        # A size window pools the run its chart draws: nothing before a comparability break.
-        pooled = size_window_periods(rows[first_row:]) if family == "size" else set(metric_spine)
-        windows[metric] = series_windows(metric, page_grain, by_period, periods=pooled, **pooling)
+        # Every series pools the window its card names; a size series' comparability marks its rows, never its window.
+        windows[metric] = series_windows(metric, page_grain, by_period, periods=set(metric_spine), **pooling)
         add_averages(rows[first_row:], metric, page_grain, eligible, by_period, **pooling)
     # The page reads each series' minimum n and the moving average's length from here, never from a copy of its own.
     return {"definition_version": 1, "scope": selected_scope, "period": page_grain.describe(), "average_periods": page_grain.average_periods,
@@ -322,6 +321,9 @@ async def measurement_agents(
 async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str, metric: str, dollars: bool,
                          user: dict) -> dict[str, Any]:
     """The ``/agents`` body for one resolved grain and an already validated metric and sort."""
+    # The dollars per hour read the task chains Models reads for the same page load: awaited here, outside the
+    # lane, so this read holds no worker while it waits for them.
+    cost_rows = (await task_chain_costs(project, agent, page_grain, user))["cost_rows"] if dollars else []
 
     def query() -> dict[str, Any]:
         db = get_db()
@@ -330,9 +332,9 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
             # One prepared window covers every period the grain draws, so nothing reads live plans.
             prepare_outcome_periods(db, params, roots=True)
-            rows, findings, summaries, agent_count = build_agents(
+            rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain, period_comparable,
-                lambda name, period: period_measured(name, period, page_grain), with_dollars=dollars)
+                lambda name, period: period_measured(name, period, page_grain), cost_rows, with_dollars=dollars)
             return {
                 "definition_version": 1,
                 "scope": selected_scope.response(),
@@ -343,6 +345,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
                 "rows": rows,
                 "findings": findings,
                 "findings_state": derive_findings_state(rows, findings, agent_count),
+                "overall": overall,
                 "project_summaries": summaries["active"],
                 "inactive_projects": summaries["inactive"],
             }
@@ -367,34 +370,8 @@ async def measurement_models(
     grain's latest window (and the previous window for the change), with model identity
     and price from Cost's owners; see ``api.measurement_models``.
     """
-    page_grain = resolve_grain(grain, timezone_name)
-
-    def query() -> dict[str, Any]:
-        db = get_db()
-        try:
-            from llm.model_status import catalog_base_rows
-
-            selected_scope = validate_scope(db, user["id"], project, agent)
-            models = models_payload(db, selected_scope.params(user["id"]), page_grain, catalog_base_rows())
-            return {
-                "definition_version": 3,
-                "scope": selected_scope.response(),
-                "period": page_grain.describe(),
-                **models,
-            }
-        finally:
-            db.close()
-
-    return await run_bulk(query)
+    return await models_read(project, agent, resolve_grain(grain, timezone_name), user)
 
 
-register_cost_route(
-    router,
-    require_user=require_user,
-    resolve_grain=resolve_grain,
-    get_db=get_db,
-    validate_scope=validate_scope,
-    prepare_outcome_periods=prepare_outcome_periods,
-    run_in_db=run_bulk,
-)
+register_cost_route(router, require_user=require_user, resolve_grain=resolve_grain)
 

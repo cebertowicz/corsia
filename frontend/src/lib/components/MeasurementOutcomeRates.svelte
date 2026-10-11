@@ -3,7 +3,7 @@
 	import MeasurementAgentsMinutes from './MeasurementAgentsMinutes.svelte';
 	import { measurementAgents } from '$lib/stores/measurementAgents';
 	import MeasurementPeriodSection from './MeasurementPeriodSection.svelte';
-	import { periodChange, periodView } from './measurementPeriodView';
+	import { changeOnly, periodView } from './measurementPeriodView';
 
 	let { attention, asks, firstTry, onRetry }: {
 		attention: PanelState;
@@ -15,10 +15,11 @@
 	const asksView = $derived(periodView(asks.rows, 'asks_per_outcome', 1, asks.period, asks.windows?.asks_per_outcome));
 	/** One line under the agents table, for all agents together; the kept Asks per outcome chart draws the series. */
 	const asksLine = $derived.by(() => {
-		if (asks.loading && !asks.rows.length) return 'Asks per outcome, all agents: loading';
-		if (asks.error && !asks.rows.length) return 'Asks per outcome, all agents: not available right now';
+		const lead = 'Asks are not recorded per agent yet. All agents together:';
+		if (asks.loading && !asks.rows.length) return `${lead} loading.`;
+		if (asks.error && !asks.rows.length) return `${lead} not available right now.`;
 		const value = asksView.current.value;
-		return `Asks per outcome, all agents: ${value === null ? '–' : value.toFixed(2)}, ${periodChange(asksView)}`;
+		return `${lead} ${value === null ? '–' : value.toFixed(2)} asks per outcome, ${changeOnly(asksView)}.`;
 	});
 </script>
 
@@ -54,5 +55,5 @@
 />
 
 <style>
-	.asks { margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+	.asks { margin: 8px 0 0; font-size: 13px; font-style: italic; color: var(--text-secondary); overflow-wrap: anywhere; }
 </style>

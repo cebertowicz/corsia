@@ -305,6 +305,11 @@ def _aggregate_agent(registry: dict[str, Any], agent: dict[str, Any], grain: Gra
     for name in TABLE_METRICS:
         measured_periods = sum(1 for period in previous_periods if measured(name, period))
         metrics[name]["previous_value"] = _pooled_value(registry, name, previous, measured, measured_periods)
+        if name == "active_hours_per_outcome" and measured_periods < len(previous_periods):
+            # Minutes were recorded for only part of the previous window, so its pooled
+            # figure covers fewer weeks than the latest: a change against it is a change in
+            # coverage. No previous figure; the table reads "new" and Biggest changes skips it.
+            metrics[name]["previous_value"] = None
         metrics[name]["previous_n"] = sum(_denominator(item) for item in previous
                                           if item and measured(name, item["period"]))
     frame = list(grain.periods[-FRAME_PERIODS:])
@@ -345,10 +350,10 @@ def _rank(registry: dict[str, Any], rows: list[dict[str, Any]], metric: str, sor
 
 
 def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: str, sort: str,
-                 grain: Grain, comparable: Callable[[str, str], bool],
-                 measured: Callable[[str, str], bool], with_dollars: bool = True,
-                 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]], int]:
-    """Return ranked rows, findings, PL-4 project summaries and the agent population.
+                 grain: Grain, comparable: Callable[[str, str], bool], measured: Callable[[str, str], bool],
+                 cost_rows: list[dict[str, Any]], with_dollars: bool = True,
+                 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]], int, dict[str, Any]]:
+    """Return ranked rows, findings, PL-4 project summaries, the agent population and the scope's pooled cells.
 
     ``registry``, ``comparable`` and ``measured`` are the caller's: the route that owns
     the ids, thresholds, comparability bound and instrument starts passes its own, so
@@ -357,7 +362,9 @@ def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: s
     prepared window and the periods these rows answer for, so no period can fall outside
     the data prepared for it. The table pools the grain's latest window and carries the
     previous window beside it; the findings frame is its last nine periods; the project
-    summaries count outcomes in the latest window.
+    summaries count outcomes in the latest window. ``cost_rows`` are
+    ``api.measurement_chain_costs.chain_costs`` for the same scope and grain; the dollars per hour reads those
+    rows instead of walking the rated tasks' chains again.
     """
     # Invariants, not caller validation: the route answers an unknown metric or sort
     # with a 400 before any of this runs, so reaching here with one is a server fault.
@@ -380,9 +387,11 @@ def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: s
     aggregated = [_aggregate_agent(registry, agent, grain, metric, comparable, measured) for agent in agents.values()]
     # Dollars per hour reads each task's whole chain, so it covers only the two windows the table shows.
     # ``with_dollars=False`` is for a reader of the other columns only (Biggest changes), so it does not pay for it.
-    costs = query_task_hour_cost(db, {**query, "grain": two_windows(grain)}) if with_dollars else None
+    costs = query_task_hour_cost(db, {**query, "grain": two_windows(grain)}, cost_rows) if with_dollars else None
     for row in aggregated if costs is not None else ():
         row["metrics"][DOLLARS_PER_HOUR] = dollars_metric(costs, row["agent"]["id"], grain, RANKING_MINIMUM_N)
+    # What an agent's own cell is read against: every agent's tasks pooled, by the same function.
+    overall = {DOLLARS_PER_HOUR: dollars_metric(costs, None, grain, RANKING_MINIMUM_N)} if costs is not None else {}
     rows = _rank(registry, aggregated, metric, sort)
     findings = _findings(rows)
-    return rows, findings, _project_summaries(db, rows, grain), len(agents)
+    return rows, findings, _project_summaries(db, rows, grain), len(agents), overall

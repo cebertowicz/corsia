@@ -61,8 +61,8 @@ def _v100(*, rows: bool) -> sqlite3.Connection:
     return db
 
 
-def test_step_is_registered_at_100_and_102_is_current() -> None:
-    assert SCHEMA_VERSION == 104
+def test_step_is_registered_at_100() -> None:
+    assert SCHEMA_VERSION == 112
     assert MIGRATIONS[100] is migrate_100_to_101
 
 
@@ -187,7 +187,7 @@ def test_a_fresh_install_and_a_migrated_database_agree_on_the_bill_tables() -> N
 
 
 @pytest.mark.parametrize("start", [97, 98, 99, 100])
-def test_the_whole_chain_from_97_ends_at_101_with_the_bill_facts_intact(start: int) -> None:
+def test_the_whole_chain_from_97_ends_current_with_the_bill_facts_intact(start: int) -> None:
     from infra.database import initialize_schema
     from infra.database_migrations import migrate_to_current
 
@@ -214,7 +214,7 @@ def test_the_whole_chain_from_97_ends_at_101_with_the_bill_facts_intact(start: i
 
         migrate_to_current(db, SCHEMA_VERSION)
 
-        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 104
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 112
         assert db.execute("SELECT kind,amount_cents,charge_day FROM vendor_account_billing_facts WHERE id='c1'").fetchone() == (
             "subscription_rate", 2000, 17)
         assert db.execute("SELECT COUNT(*) FROM plan_status_dirty").fetchone() == (0,)

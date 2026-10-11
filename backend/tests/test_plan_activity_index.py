@@ -17,6 +17,7 @@ import plans.holds as holds
 import plans.mutations as mutations
 import plans.service as service
 from plans.boundary import PlanActor
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 @pytest.fixture
@@ -179,13 +180,14 @@ def test_compact_index_823_plans_4673_nodes_is_chunked_and_fact_bounded(db, monk
            VALUES (?,'thread',?,?,?,?)""",
         plan_rows,
     )
-    db.executemany(
-        """INSERT INTO plan_nodes
-           (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,
-            commitment_id,created_at,updated_at)
-           VALUES (?,?,NULL,?,'task',?,?,?,?,?)""",
-        node_rows,
-    )
+    with raw_plan_seed(db):
+        db.executemany(
+            """INSERT INTO plan_nodes
+               (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,
+                commitment_id,created_at,updated_at)
+               VALUES (?,?,NULL,?,'task',?,?,?,?,?)""",
+            node_rows,
+        )
     db.commit()
     assert len(node_rows) == 4673
 
@@ -342,9 +344,10 @@ def test_compact_semantic_matrix_matches_full_projection(db):
 
     accepted = add_thread("accepted", "Accepted")
     accepted_task = _task(accepted.id, "Accepted task", db=db)
-    db.execute(
-        "UPDATE plan_nodes SET state='accepted' WHERE id=?", (accepted_task.id,),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET state='accepted' WHERE id=?", (accepted_task.id,),
+        )
 
     attention_plan = add_thread("raised-attention", "Raised attention")
     attention_task = _task(attention_plan.id, "Read the note", db=db)
@@ -487,22 +490,23 @@ def test_compact_nested_sibling_local_order_matches_full_projection(db):
 
     plan = service.ensure_plan("thread", "moving", db=db)
     created_at = "2026-01-01T00:00:00+00:00"
-    db.executemany(
-        """INSERT INTO plan_nodes
-           (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,
-            commitment_id,state,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        [
-            ("zz-phase", plan.id, None, 0, "phase", "Phase", "Phase done",
-             "zz-phase", "pending", created_at, created_at),
-            ("yy-track", plan.id, "zz-phase", 0, "track", "Track", "Track done",
-             "zz-phase", "pending", created_at, created_at),
-            ("aa-open", plan.id, "yy-track", 0, "task", "Open", "Open done",
-             "zz-phase", "pending", created_at, created_at),
-            ("bb-done", plan.id, "yy-track", 1, "task", "Done", "Done",
-             "zz-phase", "accepted", created_at, created_at),
-        ],
-    )
+    with raw_plan_seed(db):
+        db.executemany(
+            """INSERT INTO plan_nodes
+               (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,
+                commitment_id,state,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                ("zz-phase", plan.id, None, 0, "phase", "Phase", "Phase done",
+                 "zz-phase", "pending", created_at, created_at),
+                ("yy-track", plan.id, "zz-phase", 0, "track", "Track", "Track done",
+                 "zz-phase", "pending", created_at, created_at),
+                ("aa-open", plan.id, "yy-track", 0, "task", "Open", "Open done",
+                 "zz-phase", "pending", created_at, created_at),
+                ("bb-done", plan.id, "yy-track", 1, "task", "Done", "Done",
+                 "zz-phase", "accepted", created_at, created_at),
+            ],
+        )
     db.commit()
 
     full = operator_projection.read_thread("moving", actor=_actor(), db=db)["plans"][0]
@@ -640,10 +644,11 @@ def test_compact_child_reattachment_churn_matches_full_newest_owner(db):
     parent_plan = db.execute(
         "SELECT id FROM plans WHERE owner_kind='thread' AND owner_id='moving'"
     ).fetchone()
-    db.execute(
-        "UPDATE plan_nodes SET state='closed' WHERE plan_id=? AND spawned_thread_id='child'",
-        (str(parent_plan["id"]),),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET state='closed' WHERE plan_id=? AND spawned_thread_id='child'",
+            (str(parent_plan["id"]),),
+        )
     replacement = _task(
         str(parent_plan["id"]), "Delegated again", db=db, spawn_kind="claude-code",
     )

@@ -146,6 +146,11 @@ function adoptedContent(existing: any, incoming: unknown): unknown {
 function mergeAdoptedRow(existing: any, incoming: any): any {
 	const merged: any = { ...mergeMessageDelivery(existing, incoming), _optimistic: false };
 	merged.content = adoptedContent(existing, incoming?.content);
+	// A page states a message's cards afresh (server-computed, live state), so an absent key means none.
+	if (incoming?.cards !== undefined || existing?.cards !== undefined) {
+		merged.cards = incoming?.cards;
+		merged.cards_more = incoming?.cards_more;
+	}
 	const priorMeta = existing?.metadata;
 	const nextMeta = incoming?.metadata;
 	if (priorMeta && typeof priorMeta === 'object' && nextMeta && typeof nextMeta === 'object') {

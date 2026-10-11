@@ -2643,6 +2643,48 @@ render_service_plist generation-test
     assert "CORSIA_RESTART_CURL" not in environment
 
 
+def test_rendered_launchd_service_keeps_key_variables_for_the_key_store_migration(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / "corsia.env"
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    env_file.write_text(
+        "ANTHROPIC_API_KEY=anthropic-render-for-migration\n"
+        "export OPENAI_API_KEY=\"openai-render-for-migration\"\n"
+        "BRAVE_API_KEY=brave-render-for-migration\n"
+        "VISIBLE_SETTING=preserved\n"
+    )
+    result = _run_bash(
+        """
+warn() { echo "warn: $*" >&2; }
+ok() { :; }
+fail() { return 1; }
+BACKEND_PORT=9999
+BACKEND_DIR=/tmp/corsia/backend
+BACKEND_LOG=/tmp/corsia/backend.log
+CORSIA_WORKSPACE=/tmp/corsia/workspace
+CORSIA_STATE_DIR=/tmp/corsia/state
+PYTHON=/usr/bin/python3
+ENV_FILE="$TEST_ENV_FILE"
+source scripts/corsia.d/service.sh
+resolve_bind_host() { echo 0.0.0.0; }
+render_service_plist generation-test
+""",
+        env={"HOME": str(home_dir), "TEST_ENV_FILE": str(env_file)},
+    )
+
+    assert result.returncode == 0, result.stderr
+    environment = plistlib.loads(result.stdout.encode())["EnvironmentVariables"]
+    assert environment["VISIBLE_SETTING"] == "preserved"
+    for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "BRAVE_API_KEY"):
+        assert key in environment
+        assert f"{env_file} sets {key}" not in result.stderr
+    assert environment["ANTHROPIC_API_KEY"] == "anthropic-render-for-migration"
+    assert environment["OPENAI_API_KEY"] == "openai-render-for-migration"
+    assert environment["BRAVE_API_KEY"] == "brave-render-for-migration"
+
+
 def test_service_install_replaces_plist_with_owner_only_permissions(
     tmp_path: Path,
 ) -> None:

@@ -74,8 +74,7 @@ def _isolate_lifespan(monkeypatch) -> None:
     monkeypatch.setattr(app_startup_runtime, "rearm_idle_checkpoints", _noop)
     monkeypatch.setattr(app_startup_runtime, "nightly_job_loop", _noop)
     monkeypatch.setattr(app_lifecycle, "shutdown_pool", lambda: None)
-    monkeypatch.setattr("infra.settings.bootstrap_env", lambda: None)
-    monkeypatch.setattr("infra.settings.get_api_keys", lambda: {})
+    monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {})
     monkeypatch.setattr("llm.lifecycle.get_local_providers", lambda: [])
     monkeypatch.setattr(network_discovery, "get_servers", lambda: [])
     monkeypatch.setattr(network_discovery, "health_sweep_loop", _noop)
@@ -858,7 +857,7 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         "check_server",
         lambda _name: block("provider auto-start"),
     )
-    monkeypatch.setattr("infra.settings.get_api_keys", lambda: {"openai": "key"})
+    monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {"openai": "key"})
     monkeypatch.setattr(
         llm_catalog,
         "discover_cloud_models",

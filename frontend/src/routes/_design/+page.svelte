@@ -16,7 +16,6 @@
 		typeof window !== 'undefined' &&
 		new URLSearchParams(window.location.search).get('frame') === 'attention-dock';
 	import AttentionCard from '$lib/components/AttentionCard.svelte';
-	import AttentionList from '$lib/components/AttentionList.svelte';
 	import AttentionRollup from '$lib/components/AttentionRollup.svelte';
 	import ContextSheet from '$lib/components/ContextSheet.svelte';
 	import ThreadContextPanel from '$lib/components/ThreadContextPanel.svelte';
@@ -455,16 +454,6 @@
 		<div class="card stack">
 			<AttentionCard item={demoRaised[0]} mode="parent" demoReview={demoBlockingReview} />
 			<AttentionCard item={demoRaised[1]} mode="parent" demoReview={demoCleanReview} />
-		</div>
-	</section>
-
-	<section class="block">
-		<header class="block-head">
-			<h2>Attention List — pull-only raised items</h2>
-			<p>Section auto-hides when empty. Sorted high-urgency first.</p>
-		</header>
-		<div class="card stack">
-			<AttentionList demo={demoRaised} mode="user" />
 		</div>
 	</section>
 

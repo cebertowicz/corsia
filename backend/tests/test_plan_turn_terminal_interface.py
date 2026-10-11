@@ -21,6 +21,7 @@ from tests.test_plan_turn_terminal_settlement import (
     _settle_task,
     _task,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _settle_turn_in_terminal_write(db, turn_id: str):
@@ -95,7 +96,8 @@ def test_settle_turn_releases_a_selection_left_on_a_closed_task() -> None:
         service.transition_node(task_b.id, "active", db=db)
         _open_dispatch(db, attempt_a, "turn-crashed")
         # Pre-#2705 shape: closed with the attempt still open.
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (task_a.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (task_a.id,))
         db.commit()
 
         assert _settle_turn_in_terminal_write(db, "turn-crashed") == 1

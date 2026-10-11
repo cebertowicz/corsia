@@ -49,7 +49,7 @@ function entry(over: Partial<OperatorPlanEntry> = {}): OperatorPlanEntry {
 		oversize: null,
 		current_node_ids: [],
 		next_node_ids: [],
-		nodes: [],
+		nodes: [], folds: [], root_count: 0,
 		...over,
 	};
 }

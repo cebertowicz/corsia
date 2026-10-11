@@ -8,7 +8,7 @@ export type CostPeriod = {
 	period: string;
 	dollars: number | null;
 	priced_records: number;
-	api_records: number;
+	usage_records: number;
 	outcomes: number;
 	per_outcome: number | null;
 	/** Size-rated accepted outcomes and their hours of work; per_hour is all priced spend over those hours, withheld under the minimum n. */
@@ -24,7 +24,7 @@ export type CostWindowFigures = {
 	to: string;
 	dollars: number | null;
 	priced_records: number;
-	api_records: number;
+	usage_records: number;
 	outcomes: number;
 	per_outcome: number | null;
 	sized: number;
@@ -41,7 +41,7 @@ export type MeasurementCost = {
 	/** How many periods each served moving average spans. */
 	averagePeriods?: number;
 	series: CostPeriod[]; latest: CostWindowFigures | null; previous: CostWindowFigures | null;
-	coverage: { priced_records: number; api_records: number }; not_api_priced_records: number; excluded: ExcludedRecords[]; actual: ActualCost;
+	coverage: { priced_records: number; usage_records: number }; not_api_priced_records: number; excluded: ExcludedRecords[]; actual: ActualCost;
 };
 export type CostState = { loading: boolean; error: string | null; data: MeasurementCost | null; scopeKey: string | null; grain: MeasurementGrain | null };
 
@@ -53,7 +53,7 @@ export const measurementCost = writable<CostState>({ loading: true, error: null,
 
 /** The one wording for how much of a period's retained usage the dollars cover. */
 export function coverageText(priced: number, total: number): string {
-	return `${priced.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} usage records priced`;
+	return `${priced.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} usage records`;
 }
 
 function numberOrNull(value: unknown): number | null { return typeof value === 'number' && Number.isFinite(value) ? value : null; }
@@ -77,14 +77,14 @@ export function decodeMeasurementCost(value: unknown): MeasurementCost {
 		// The moving average is absent before the series is long enough; a present value that is not a number rejects the response.
 		const average = row.average === undefined || row.average === null ? null : numberOrNull(row.average);
 		if (row.average !== undefined && row.average !== null && average === null) throw new Error('cost average shape');
-		return { period: row.period, dollars, priced_records: count(row.priced_records), api_records: count(row.api_records), outcomes: count(row.outcomes), per_outcome: perOutcome, sized: numberOrNull(row.sized) ?? 0, hours: numberOrNull(row.hours) ?? 0, per_hour: numberOrNull(row.per_hour), average };
+		return { period: row.period, dollars, priced_records: count(row.priced_records), usage_records: count(row.usage_records), outcomes: count(row.outcomes), per_outcome: perOutcome, sized: numberOrNull(row.sized) ?? 0, hours: numberOrNull(row.hours) ?? 0, per_hour: numberOrNull(row.per_hour), average };
 	};
 	const pooled = (item: unknown): CostWindowFigures => {
 		const row = item as Record<string, unknown>;
 		const dollars = row.dollars === null ? null : numberOrNull(row.dollars);
 		const perOutcome = row.per_outcome === null ? null : numberOrNull(row.per_outcome);
 		if (civilDate(row.from) === null || civilDate(row.to) === null || dollars === null && row.dollars !== null || row.per_outcome !== null && perOutcome === null || dollars === null && perOutcome !== null) throw new Error('cost window shape');
-		return { from: row.from as string, to: row.to as string, dollars, priced_records: count(row.priced_records), api_records: count(row.api_records), outcomes: count(row.outcomes), per_outcome: perOutcome, sized: numberOrNull(row.sized) ?? 0, hours: numberOrNull(row.hours) ?? 0, per_hour: numberOrNull(row.per_hour) };
+		return { from: row.from as string, to: row.to as string, dollars, priced_records: count(row.priced_records), usage_records: count(row.usage_records), outcomes: count(row.outcomes), per_outcome: perOutcome, sized: numberOrNull(row.sized) ?? 0, hours: numberOrNull(row.hours) ?? 0, per_hour: numberOrNull(row.per_hour) };
 	};
 	const actual = body.actual as Record<string, unknown>;
 	const coverage = body.coverage as Record<string, unknown>;
@@ -113,7 +113,7 @@ export function decodeMeasurementCost(value: unknown): MeasurementCost {
 		period: body.period === undefined ? null : decodePeriod(body.period),
 		...(body.average_periods === undefined ? {} : { averagePeriods: decodeAveragePeriods(body.average_periods) }),
 		series: body.series.map(period), latest: body.latest === null ? null : pooled(body.latest), previous: body.previous === null ? null : pooled(body.previous),
-		coverage: { priced_records: count(coverage.priced_records), api_records: count(coverage.api_records) },
+		coverage: { priced_records: count(coverage.priced_records), usage_records: count(coverage.usage_records) },
 		not_api_priced_records: count(body.not_api_priced_records),
 		excluded: body.excluded.map((item) => { const row = item as Record<string, unknown>; if (typeof row.kind !== 'string' || typeof row.text !== 'string') throw new Error('excluded cost records'); return { kind: row.kind, text: row.text, records: count(row.records) }; }),
 		actual: { subscription_records: count(actual.subscription_records), unknown_charge_records: count(actual.unknown_charge_records), external_unset_records: actual.external_unset_records === undefined ? 0 : count(actual.external_unset_records), direct_api_dollars: actual.direct_api_dollars as number, complete: actual.complete as boolean, workspace_subscription: workspaceContext },

@@ -106,8 +106,8 @@ def test_safehouse_argv_is_direct_and_ignores_workdir_config(
     rw = tmp_path / "rw"
     ro = tmp_path / "ro"
     monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: str(safehouse))
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [rw])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [ro])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [rw])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [ro])
 
     argv = shell_guard.safehouse_argv(
         "printf '%s' ok",
@@ -889,8 +889,8 @@ def test_generated_execution_envelope_compiles_with_safehouse(
     profile_path = tmp_path / "envelope.sb"
     monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [])
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_rw", lambda: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     profile_path.write_text(
         shell_guard.execution_envelope_profile(
             "printf ok",
@@ -1115,8 +1115,8 @@ async def test_bash_uses_direct_safehouse_argv_and_backend_selected_envelope(
     monkeypatch.setattr(shell, "is_path_allowed", lambda *_a, **_k: True)
     monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [])
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_rw", lambda: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     monkeypatch.setattr(
         shell_guard.shutil,
         "which",

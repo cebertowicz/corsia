@@ -74,6 +74,11 @@ def require_user_header_only(
     return user
 
 
+def is_person_session(user: dict) -> bool:
+    """True when the credential is a signed-in person session, not a machine token."""
+    return user.get("token_kind") == "session"
+
+
 def require_human_user(user: dict = Depends(require_user)) -> dict:
     """Require session provenance for a human decision, not machine credentials.
 
@@ -81,7 +86,7 @@ def require_human_user(user: dict = Depends(require_user)) -> dict:
     human session. The decision surface must retain its own isolation and
     current capability binding.
     """
-    if user.get("token_kind") != "session":
+    if not is_person_session(user):
         raise HTTPException(
             403,
             "This change needs the signed-in person: open CORSIA and make it there.",

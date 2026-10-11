@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EditorState } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { EditorState, StateField, type Extension } from '@codemirror/state';
+import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import { commentMarks, setCommentRanges, type CommentRange } from './comment-marks';
 import { commentRail } from './comment-rail';
 import { railWidth } from './comment-clusters';
 
 const views: EditorView[] = [];
 
-function mount(doc: string) {
-	const view = new EditorView({ state: EditorState.create({ doc, extensions: [commentMarks, commentRail] }), parent: document.body });
+function mount(doc: string, extra: Extension = []) {
+	const view = new EditorView({ state: EditorState.create({ doc, extensions: [commentMarks, commentRail, extra] }), parent: document.body });
 	views.push(view);
 	return view;
 }
@@ -24,7 +24,43 @@ async function show(view: EditorView, ranges: CommentRange[]) {
 afterEach(() => {
 	views.splice(0).forEach((view) => view.destroy());
 	document.body.innerHTML = '';
+	vi.unstubAllGlobals();
 });
+
+/** A line drawn as a block widget, as an image alone on its line is. */
+class Block extends WidgetType {
+	toDOM() {
+		const wrap = document.createElement('div');
+		wrap.className = 'block-widget';
+		return wrap;
+	}
+}
+
+const blockLine = (from: number, to: number) => StateField.define({
+	create: () => Decoration.set([Decoration.replace({ widget: new Block(), block: true }).range(from, to)]),
+	update: (decorations) => decorations,
+	provide: (field) => EditorView.decorations.from(field),
+});
+
+/** jsdom has no ResizeObserver; this one records what is watched and reports a resize on demand. */
+function stubResizeObserver() {
+	const observers: { callback: () => void; watched: Set<Element> }[] = [];
+	vi.stubGlobal('ResizeObserver', class {
+		private readonly entry: { callback: () => void; watched: Set<Element> };
+		constructor(callback: () => void) { this.entry = { callback, watched: new Set() }; observers.push(this.entry); }
+		observe(element: Element) { this.entry.watched.add(element); }
+		unobserve(element: Element) { this.entry.watched.delete(element); }
+		disconnect() { this.entry.watched.clear(); }
+	});
+	return {
+		watches: (element: Element) => observers.some((observer) => observer.watched.has(element)),
+		resize: (element: Element) => observers.filter((observer) => observer.watched.has(element)).forEach((observer) => observer.callback()),
+	};
+}
+
+const placeAt = (element: Element, top: number) => {
+	element.getBoundingClientRect = () => ({ top, bottom: top + 200, left: 0, right: 600, height: 200, width: 600, x: 0, y: top, toJSON: () => ({}) });
+};
 
 describe('comment rail', () => {
 	it('draws a glyph button for one thread and a count button for several', async () => {
@@ -99,6 +135,24 @@ describe('comment rail', () => {
 		expect(view.dom.style.getPropertyValue('--doc-rail')).toBe('');
 	});
 
+	it('keeps the whole hit box when the text inset is narrower, and centres the glyph in that inset', async () => {
+		const view = mount('alpha');
+		view.contentDOM.style.paddingLeft = '24px';
+		await show(view, [{ from: 0, to: 5, id: 'a' }]);
+		const [{ style }] = buttons(view);
+		expect(railWidth()).toBe(44);
+		expect([style.width, style.height]).toEqual(['44px', '44px']);
+		expect(style.paddingRight).toBe(`${44 - 24}px`);
+	});
+
+	it('leaves no spare padding when the inset is the whole rail', async () => {
+		const view = mount('alpha');
+		view.contentDOM.style.paddingLeft = '44px';
+		await show(view, [{ from: 0, to: 5, id: 'a' }]);
+		const [{ style }] = buttons(view);
+		expect([style.width, style.height, style.paddingRight]).toEqual(['44px', '44px', '0px']);
+	});
+
 	it('drops the marker together with the highlight when an edit collapses its anchor', async () => {
 		const view = mount('alpha\nbeta');
 		await show(view, [{ from: 0, to: 5, id: 'a' }, { from: 6, to: 10, id: 'b' }]);
@@ -108,6 +162,37 @@ describe('comment rail', () => {
 		await frame();
 		expect(view.dom.querySelectorAll('.cm-comment-anchor')).toHaveLength(1);
 		expect(buttons(view).map((button) => button.dataset.commentIds)).toEqual(['b']);
+	});
+
+	it('puts the marker of a line drawn as a block widget at the widget, and moves it when the widget resizes', async () => {
+		const observer = stubResizeObserver();
+		const view = mount('alpha\nimage\ngamma', blockLine(6, 11));
+		const widget = view.contentDOM.querySelector('.block-widget')!;
+		placeAt(widget, 300);
+		await show(view, [{ from: 6, to: 11, id: 'a' }]);
+		expect(buttons(view)[0].style.top).toBe('300px');
+		// An image above that loads, or a theme that changes the widget's size, moves it without any editor update.
+		expect(observer.watches(widget)).toBe(true);
+		placeAt(widget, 344);
+		observer.resize(widget);
+		await frame();
+		expect(buttons(view)[0].style.top).toBe('344px');
+	});
+
+	it('regroups when an uncommented block widget above a commented line resizes', async () => {
+		const observer = stubResizeObserver();
+		const view = mount('image\nalpha', blockLine(0, 5));
+		const widget = view.contentDOM.querySelector('.block-widget')!;
+		const line = view.contentDOM.querySelector('.cm-line')!;
+		placeAt(line, 20);
+		await show(view, [{ from: 6, to: 11, id: 'a' }]);
+		expect(buttons(view)[0].style.top).toBe('20px');
+		// The image above loads: the commented line moves down while the text's height may stay pinned at its minimum.
+		expect(observer.watches(widget)).toBe(true);
+		placeAt(line, 220);
+		observer.resize(widget);
+		await frame();
+		expect(buttons(view)[0].style.top).toBe('220px');
 	});
 
 	it('lists every thread once even when one range is repeated', async () => {

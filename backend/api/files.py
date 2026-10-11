@@ -16,7 +16,6 @@ from api.files_roots import (
     shared_projector,
     walk,
 )
-from core.workspace_context_sources import is_workspace_context_path
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
 from doceditor.document_scope import UI_THREAD
 from infra import config
@@ -24,16 +23,9 @@ from infra.auth import authenticate, owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db
 from registry import service as registry_service
+from registry.path_access import path_allowed
 
 router = APIRouter(prefix="/api/files", tags=["files"])
-
-
-def _path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
-    return (
-        any(path == b or b in path.parents for b in bases)
-        or is_workspace_context_path(path, config.WORKSPACE, db=db)
-    )
-
 
 
 @router.get("/tree")
@@ -172,7 +164,7 @@ async def register(token: str, body: RegisterBody):
                 p = Path(body.path).expanduser().resolve(strict=True)
             except OSError as e:
                 raise HTTPException(404, f"No such file: {e}") from e
-            if not _path_allowed(p, bases, db=db):
+            if not path_allowed(p, bases, db=db):
                 raise HTTPException(400, "Path is outside this scope's roots")
             row = registry_service.register_write_strict(
                 body.thread_id or UI_THREAD,

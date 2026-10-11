@@ -3,19 +3,37 @@ name: Lint (ruff + mypy)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'tools/**'
-      - 'pyproject.toml'
-      - '.github/workflows/lint.yml'
   workflow_dispatch:
 
 concurrency:
   group: lint-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  LINT_RELEVANCE_PATTERNS: '^backend/|^tools/|^pyproject\.toml$|^\.github/workflows/lint\.yml$|^\.github/actions/relevance/action\.yml$'
+
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: ${{ env.LINT_RELEVANCE_PATTERNS }}
+
   ruff:
+    needs: relevance
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: ruff (advisory)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -23,7 +41,15 @@ jobs:
     # always success so the reviewer gate is never blocked by a lint issue.
     continue-on-error: true
     steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-python@v5
         with:
@@ -39,6 +65,8 @@ jobs:
         run: .venv/bin/ruff check . || true
 
   mypy:
+    needs: relevance
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: mypy (regression gate)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -50,7 +78,15 @@ jobs:
     env:
       CORSIA_ANALYTICS_DISABLE: '1'
     steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-python@v5
         with:

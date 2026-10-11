@@ -572,7 +572,7 @@ def test_concurrent_shared_write_is_not_blamed_on_a_command_that_never_names_it(
     first = _write(scope, "concurrent.md", "first\n")
     target = scope["category"] / "concurrent.md"
     started = time.time_ns()
-    target.write_text("another writer\n", encoding="utf-8")
+    _shell_write(target, "another writer\n", started)
     for command in (
         "git show origin/dev:shared/documents/concurrent.md",
         "sed -n 1,5p README.md && git fetch origin",

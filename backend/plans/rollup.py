@@ -23,6 +23,9 @@ class PlanRollup:
     progress: dict
     nodes: list[dict]
     moving: bool = False
+    #: The loaded open tree when ``nodes`` are the open work and a window, not the whole plan
+    #: (``plans.open_rollup``); None for the full projection.
+    tree: Any = None
 
 
 @dataclass(frozen=True)
@@ -40,20 +43,25 @@ def _plan_data(row) -> dict:
     return projected
 
 
-def rejected_round_sql(node_alias: str, event_alias: str) -> str:
-    """One sent-back round membership predicate for detail and narrow reads."""
-    return f"{event_alias}.event='review_rejected' AND {node_alias}.state='closed'"
+def round_feedback_sql(node_alias: str, event_alias: str) -> str:
+    """The feedback event of a sent-back round.
+
+    ``plan_nodes.sent_back`` alone says a row is a round; its ``review_rejected``
+    event is history, read only for the feedback text it carries.
+    """
+    return f"{node_alias}.sent_back=1 AND {event_alias}.event='review_rejected'"
 
 
-def rejected_branch_cte(marks: str) -> str:
-    """The sent-back rounds and descendants that have no independent row."""
-    return f"""WITH RECURSIVE rejected(id) AS (
-        SELECT DISTINCT e.node_id FROM plan_node_events e
-        JOIN plan_nodes n ON n.id=e.node_id
-        WHERE n.plan_id IN ({marks}) AND ({rejected_round_sql('n', 'e')})
-        UNION
-        SELECT child.id FROM plan_nodes child JOIN rejected ON child.parent_id=rejected.id
-    )"""
+def round_feedback(rows) -> dict[str, str]:
+    """Each round's feedback from its event rows (``node_id``, ``payload_json``), last wins."""
+    feedback: dict[str, str] = {}
+    for row in rows:
+        try:
+            text = json.loads(row["payload_json"] or "{}").get("feedback")
+        except (TypeError, json.JSONDecodeError):
+            text = None
+        feedback[str(row["node_id"])] = str(text or "")
+    return feedback
 
 
 def _settlements(connection, plan_id: str) -> tuple[dict, dict[str, str]]:
@@ -64,28 +72,25 @@ def _settlements(connection, plan_id: str) -> tuple[dict, dict[str, str]]:
     shown, it reads as a second, closed copy of one task. Its revision says
     why it is being redone instead.
     """
-    rows = fetch_all(
+    completed = {
+        row["node_id"]: row for row in fetch_all(
+            connection,
+            """SELECT e.id,e.node_id,e.created_at FROM plan_node_events e
+               JOIN plan_nodes n ON n.id=e.node_id
+               WHERE n.plan_id=? AND e.event='state_transition'
+                 AND e.new_state IN ('accepted','accepted_with_followup')
+               ORDER BY e.created_at,e.rowid""",
+            (plan_id,),
+        )
+    }
+    sent_back = round_feedback(fetch_all(
         connection,
-        f"""SELECT e.id,e.node_id,e.created_at,e.event,e.payload_json FROM plan_node_events e
+        f"""SELECT e.node_id,e.payload_json FROM plan_node_events e
            JOIN plan_nodes n ON n.id=e.node_id
-           WHERE n.plan_id=?
-             AND ((e.event='state_transition'
-                   AND e.new_state IN ('accepted','accepted_with_followup'))
-                  OR ({rejected_round_sql('n', 'e')}))
+           WHERE n.plan_id=? AND {round_feedback_sql('n', 'e')}
            ORDER BY e.created_at,e.rowid""",
         (plan_id,),
-    )
-    completed: dict = {}
-    sent_back: dict[str, str] = {}
-    for row in rows:
-        if row["event"] == "state_transition":
-            completed[row["node_id"]] = row
-            continue
-        try:
-            feedback = json.loads(row["payload_json"] or "{}").get("feedback")
-        except (TypeError, json.JSONDecodeError):
-            feedback = None
-        sent_back[str(row["node_id"])] = str(feedback or "")
+    ))
     return completed, sent_back
 
 
@@ -117,7 +122,7 @@ def _child_plan(
     if child_depth == 0:
         state = projections._plan_state(
             connection, str(child["id"]), memo,
-            plan=child, nodes=child_nodes[str(child["id"])],
+            plan=child, nodes=child_nodes.get(str(child["id"])),
         )
         return PlanRollup(
             plan=_plan_data(child),
@@ -158,9 +163,10 @@ def _rollup_plan(
     """Project one plan's nodes in canonical plan order, recursing into child plans."""
     completed, sent_back = _settlements(connection, plan_row["id"])
     links = _links_by_node(connection, plan_row["id"])
+    rounds = {str(row["id"]) for row, _path in listed if row["sent_back"]}
     rows = [
         (row, path) for row, path in listed
-        if row["id"] not in sent_back and sent_back.keys().isdisjoint(path)
+        if str(row["id"]) not in rounds and rounds.isdisjoint(path)
     ]
     waits = node_waits.project(connection, [row for row, _path in rows])
     ordered: list[dict] = []

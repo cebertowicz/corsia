@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 
 from plans import admission, boundary_fields as fields, service
 
@@ -106,7 +107,9 @@ def arm_write(plan_id: str, params, actor, db):
         params = event_wait.with_deadline(params, db=db, owner=actor.thread_id)
     condition = _validated_condition(params.get("condition"))
     artifact_id = _binding(params, actor, db)
-    superseded = _resolve_past_deadline_watches(db, params["node_id"])
+    superseded = _resolve_superseded_watches(
+        db, params["node_id"], scheduled=bool(params.get("scheduled")),
+    )
     try:
         watch = watches.arm_watch(
             artifact_id if artifact_id is not None else params["node_id"],
@@ -140,6 +143,37 @@ def arm_write(plan_id: str, params, actor, db):
         actor_id=actor.audit_id, provenance="plan_watch_armed",
     )
     return watch
+
+
+def _resolve_superseded_watches(db, node_id: str, *, scheduled: bool) -> list[str]:
+    """Settle every armed wait the one now being armed replaces.
+
+    A task has one schedule (#903): arming a scheduled wait retires each armed
+    scheduled wait on the node, past or future, through the same settling path
+    as an expired deadline. Event waits bound to an artifact are never
+    replaced by a schedule, and a schedule is never replaced by one of them.
+    """
+    ids = _resolve_past_deadline_watches(db, node_id)
+    if not scheduled:
+        return ids
+    from automation import watches
+
+    rows = db.execute(
+        """SELECT w.id FROM expected_event_watches w
+           WHERE w.plan_node_id=? AND w.status='armed'
+             AND EXISTS (
+               SELECT 1 FROM plan_node_events e
+               WHERE e.node_id=w.plan_node_id AND e.event='watch_armed'
+                 AND json_extract(e.payload_json,'$.watch_id')=w.id
+                 AND json_extract(e.payload_json,'$.scheduled.reason') IS NOT NULL)
+           ORDER BY w.id""",
+        (node_id,),
+    ).fetchall()
+    for row in rows:
+        watch_id = str(row["id"])
+        if watches.resolve_watch(watch_id, db=db):
+            ids.append(watch_id)
+    return ids
 
 
 def _resolve_past_deadline_watches(db, node_id: str) -> list[str]:
@@ -223,6 +257,15 @@ def finish_arm(plan_id: str, params, actor, watch, db) -> dict:
     )
     result = admission.result(params["node_id"], db=db)
     result["watch"] = asdict(watch)
+    row = db.execute(
+        """SELECT json_extract(payload_json,'$.superseded_watch_ids') AS ids
+           FROM plan_node_events WHERE node_id=? AND event='watch_armed'
+             AND json_extract(payload_json,'$.watch_id')=?
+           ORDER BY rowid DESC LIMIT 1""",
+        (params["node_id"], watch.id),
+    ).fetchone()
+    if row is not None and row["ids"]:
+        result["superseded_watch_ids"] = json.loads(row["ids"])
     return result
 
 

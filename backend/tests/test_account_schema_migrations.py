@@ -756,6 +756,7 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         assert list(db.iterdump()) == once
     backups = list(tmp_path.glob("deployed80.db.pre-migration-v80-*.bak"))
     assert len(backups) == 1 and backups[0] == result.backup_path
+    assert backups[0].stat().st_mode & 0o777 == 0o600, "the copy holds credentials: owner-only"
     with closing(sqlite3.connect(backups[0])) as backup:
         assert backup.execute("PRAGMA user_version").fetchone()[0] == 80
         assert _ledger(backup) == ledger
@@ -874,7 +875,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_81_to_82_vendor_policy import migrate_81_to_82
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
 
-    assert SCHEMA_VERSION == 104
+    assert SCHEMA_VERSION == 112
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
     assert max(MIGRATIONS) == SCHEMA_VERSION - 1

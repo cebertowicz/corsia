@@ -9,6 +9,7 @@ from typing import Any
 
 from infra.database import get_db
 from infra.db_async import run_in_db
+from infra.state.context import running_call_ids
 from memory import node_start_opened, node_start_recall
 from plans import public
 from plans.public import (
@@ -59,7 +60,7 @@ _OPERATIONS = [
 ]
 
 
-def _thread_actor(thread_id, actor_row, turn_identity=None) -> PlanActor:
+def _thread_actor(thread_id, actor_row, turn_identity=None, call_ids=None) -> PlanActor:
     """Build one current execution actor from server-bound task context."""
 
     return PlanActor(
@@ -67,6 +68,7 @@ def _thread_actor(thread_id, actor_row, turn_identity=None) -> PlanActor:
         user_id=actor_row["user_id"],
         project_id=actor_row["project_id"],
         turn_id=getattr(turn_identity, "turn_id", None),
+        **(call_ids or {}),
     )
 
 
@@ -197,13 +199,14 @@ class PlanEnsureTool(Tool):
 
 def _mutation_operation(
     thread_id, actor_row, turn_identity, plan_id, operation, params, mutation_id, workflows,
+    call_ids=None,
 ):
     """Execute one actor-bound mutation on a worker database connection."""
 
     db = get_db()
     try:
         import tools.workflow_task_fields as workflow_task_fields
-        actor = _thread_actor(thread_id, actor_row, turn_identity)
+        actor = _thread_actor(thread_id, actor_row, turn_identity, call_ids)
         workflow_version = None
         if operation in {"add", "insert"}:
             workflow_task_fields.validate_creation_reference(params, workflows)
@@ -374,7 +377,7 @@ class PlanUpdateTool(_OperationTool):
             result = await run_in_db(partial(
                 _mutation_operation,
                 actor_thread_id, actor_row, turn_identity, plan_id, operation,
-                params, mutation_id, workflows,
+                params, mutation_id, workflows, running_call_ids(),
             ))
             projected = public.deliver_deferred(result)
             await public.drive_deferred(result)

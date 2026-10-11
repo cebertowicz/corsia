@@ -12,7 +12,7 @@ def test_checkpoint_contract_covers_continuation_without_an_output_schema() -> N
     assert "decisions with rationale and rejected alternatives" in lowered
     assert "verification and known failures" in lowered
     assert "open questions, risks, and blockers" in lowered
-    assert "next actions with dependencies or ownership" in lowered
+    assert "the exact next action with its dependencies or ownership" in lowered
     assert "return only one json" not in lowered
 
 

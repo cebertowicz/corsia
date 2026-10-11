@@ -279,23 +279,45 @@ def test_seed_default_settings_only_fills_missing_keys(tmp_path):
     assert agents == {"defaults": {}}
 
 
-def test_seed_provider_api_key_sets_key_for_e2e_model_provider(tmp_path, monkeypatch):
-    target_db = tmp_path / "corsia.db"
-    _init_schema_db(target_db)
-    conn = sqlite3.connect(target_db)
-    conn.row_factory = sqlite3.Row
+@pytest.fixture
+def clean_openai_key():
+    from infra import key_store_providers
 
-    script = _load_script()
-    script["_seed_default_settings"](conn)
+    key_store_providers.remove_provider_key("openai")
+    yield
+    key_store_providers.remove_provider_key("openai")
+
+
+def test_seed_provider_api_key_writes_key_store_not_settings(tmp_path, monkeypatch, clean_openai_key):
+    from infra import key_store_providers
+
     monkeypatch.setenv("CORSIA_SEED_PROVIDER_API_KEY", "sk-test-key")
-    script["_seed_provider_api_key"](conn, "openai/gpt-4o")
-    conn.commit()
+    script = _load_script()
+    script["_seed_provider_api_key"](tmp_path / "state", tmp_path / "ws", "openai/gpt-4o")
 
-    providers = json.loads(
-        conn.execute("SELECT value FROM settings WHERE key='providers'").fetchone()[0]
-    )
-    conn.close()
-    assert providers == {"openai": {"apiKey": "sk-test-key"}}
+    assert key_store_providers.provider_keys() == {"openai": "sk-test-key"}
+
+
+def test_seed_provider_api_key_falls_back_to_provider_env_var(tmp_path, monkeypatch, clean_openai_key):
+    from infra import key_store_providers
+
+    monkeypatch.delenv("CORSIA_SEED_PROVIDER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    script = _load_script()
+    script["_seed_provider_api_key"](tmp_path / "state", tmp_path / "ws", "openai/gpt-4o")
+
+    assert key_store_providers.provider_keys() == {"openai": "sk-from-env"}
+
+
+def test_seed_provider_api_key_without_input_writes_nothing(tmp_path, monkeypatch, clean_openai_key):
+    from infra import key_store_providers
+
+    monkeypatch.delenv("CORSIA_SEED_PROVIDER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    script = _load_script()
+    script["_seed_provider_api_key"](tmp_path / "state", tmp_path / "ws", "openai/gpt-4o")
+
+    assert key_store_providers.provider_keys() == {}
 
 
 def test_seed_reviewer_model_merges_into_existing_agents_defaults(tmp_path, monkeypatch):

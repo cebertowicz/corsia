@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.plan_writer_authorizer import raw_plan_seed
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -41,13 +42,14 @@ def _nodes(db, owner, count, *, accepted_at=ACCEPTED_AT, evidence=False):
     ids = []
     for number in range(count):
         node_id = f"{owner}-node-{number}"
-        db.execute(
-            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,"
-            "requirements_revision,revision,created_at,updated_at) VALUES (?,?,NULL,?,'task','Synthetic task','done',"
-            "'accepted',?,1,1,'t','t')", (node_id, plan_id, number, node_id))
-        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,payload_json,created_at) "
-                   "VALUES (?,?,'test','accepted','active','accepted',?,?)",
-                   (f"{node_id}-accepted", node_id, json.dumps({"evidence": "synthetic proof"}) if evidence else None, accepted_at))
+        with raw_plan_seed(db):
+            db.execute(
+                "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,"
+                "requirements_revision,revision,created_at,updated_at) VALUES (?,?,NULL,?,'task','Synthetic task','done',"
+                "'accepted',?,1,1,'t','t')", (node_id, plan_id, number, node_id))
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,payload_json,created_at) "
+                       "VALUES (?,?,'test','accepted','active','accepted',?,?)",
+                       (f"{node_id}-accepted", node_id, json.dumps({"evidence": "synthetic proof"}) if evidence else None, accepted_at))
         ids.append(node_id)
     return ids
 
@@ -458,6 +460,38 @@ async def test_comparability_across_weeks_follows_the_rating_method_not_the_reco
     rows = await _size_rows()
     for week in (WEEK, second):
         assert (_week(rows, week)["comparable"], _week(rows, week)["size"]["comparable_reason"]) == (False, "profile_changes_in_range")
+
+
+@pytest.mark.asyncio
+async def test_the_headline_window_pools_every_period_even_when_none_is_comparable(isolated_db, monkeypatch):
+    """Mixed rating methods mark each week not comparable; the window the card names is still pooled whole."""
+    from datetime import datetime, timezone
+
+    from api.measurement import measurement_series
+
+    monkeypatch.setattr("core.measurement_scope._now", lambda: datetime(2026, 10, 9, 12, tzinfo=timezone.utc))
+    second = "2026-09-28"
+    db = _db()
+    try:
+        _thread(db, "root")
+        _thread(db, "later")
+        first = _nodes(db, "root", 20)
+        next_week = _nodes(db, "later", 20, accepted_at="2026-09-30T12:00:00Z")
+        _messages(db, "root")
+        db.executemany("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?,?,'user','x','{}',?)",
+                       [("later-m1", "later", "2026-09-30T10:00:00Z"), ("later-m2", "later", "2026-09-30T10:10:00Z")])
+        _import(db, _rows(db, first, "M", rater_version="2026-10-01"))
+        _import(db, _rows(db, next_week, "M", rater="other-rater", rater_version="2026-10-01"))
+        db.commit()
+    finally:
+        db.close()
+    served = await measurement_series("estimated_human_hours_per_active_hour", project="all", agent="none", grain="weeks",
+                                      timezone_name="UTC", user=USER)
+    assert [row["comparable"] for row in served["rows"] if row["period"] in (WEEK, second)] == [False, False]
+    latest = served["windows"]["estimated_human_hours_per_active_hour"]["latest"]
+    assert (latest["n"], latest["from"], latest["to"]) == (40, "2026-09-07", "2026-10-04")
+    assert latest["size"]["estimated_hours"] == pytest.approx(80.0)
+    assert latest["size"]["active_hours"] == pytest.approx(0.4)
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from infra.database import get_db
-from plans import admission, operator_projection, service, tool_dispatches
+from plans import admission, folded_reads, operator_projection, service, tool_dispatches
 from plans.boundary import PlanActor, mutate
 from tests.event_routing_helpers import mk_session
 
@@ -228,16 +228,24 @@ def test_venue_constraint_wait_resume_and_settlement_need_no_user_repair(isolate
     )["state"] == "accepted"
 
     projection = operator_projection.read_thread(venue.owner, actor=HUMAN, db=db)
-    shown = {node["id"]: node for node in projection["plans"][0]["nodes"]}
+    plan = projection["plans"][0]
     assert projection["contract_version"] == 2
-    assert projection["plans"][0]["current_node_ids"] == []
-    assert projection["plans"][0]["next_node_ids"] == []
-    assert shown[venue.compare_id]["requirements_revision"] == 2
-    assert shown[venue.compare_id]["display"]["label_key"] == "finished"
-    assert shown[venue.compare_id]["branch_progress"] is None
-    assert shown[venue.phase_id]["branch_progress"] == {"done": 1, "total": 1}
-    # The finished phase folds, so nothing is left in play.
-    assert projection["plans"][0]["progress"]["done"] == 0
+    assert plan["current_node_ids"] == []
+    assert plan["next_node_ids"] == []
+    # The finished phase folds, so nothing is left in play. The pane ships the folded
+    # phase row; the finished task beneath it is on the phase's folded page.
+    [phase] = plan["nodes"]
+    assert phase["id"] == venue.phase_id
+    assert phase["folded"] is True
+    assert phase["branch_progress"] == {"done": 1, "total": 1}
+    assert plan["progress"]["done"] == 0
+    [compare] = folded_reads.read_folded(
+        venue.plan_id, parent=venue.phase_id, actor=HUMAN, db=db,
+    )["items"]
+    assert compare["id"] == venue.compare_id
+    assert compare["display"]["label_key"] == "finished"
+    assert compare["has_folded_children"] is False
+    assert service._node_row(db, venue.compare_id)["requirements_revision"] == 2
     assert projection["plans"][0]["progress"]["total"] == 0
     worker_plan = operator_projection.read_thread(
         venue.worker, actor=HUMAN, db=db,

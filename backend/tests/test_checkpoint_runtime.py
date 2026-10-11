@@ -630,7 +630,8 @@ async def test_cold_invoke_adds_frozen_continuity_index_after_creation(
 
     instruction = captured["instruction"]
     assert json.dumps({"facts": [entry_id]}, separators=(",", ":")) in instruction
-    assert "SECRET BODY" not in instruction
+    # The frozen index names no body; only the review below it offers one.
+    assert "SECRET BODY" not in instruction.split("[CORSIA saved-entry review]", 1)[0]
 
 
 @pytest.mark.asyncio
@@ -681,8 +682,8 @@ async def test_placement_is_decided_by_the_fork_on_the_threads_model_and_effort(
     sent = captured["request"]
     assert (sent.target, sent.reasoning_effort) == (target, "high")
     assert sent.instruction.startswith("Write one checkpoint.")
-    review = sent.instruction.split("[CORSIA placement review]", 1)[1]
-    offered = json.loads(review.split("Lessons:\n", 1)[1])
+    review = sent.instruction.split("[CORSIA saved-entry review]", 1)[1]
+    offered = json.loads(review.split("Entries:\n", 1)[1])
     assert [lesson["entry_id"] for lesson in offered] == [entry_id]
 
 

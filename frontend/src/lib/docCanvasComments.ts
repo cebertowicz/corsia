@@ -56,10 +56,14 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 	});
 }
 
-/** What the viewer header shows about the listed comments: how many lost their text, and the live placement reload state. */
+/**
+ * What the viewer header shows about the listed comments: how many lost their text, and the live placement reload state.
+ * The count is the list's 'Text changed' group, so a resolved thread is never in it: a decided suggestion is resolved,
+ * and Accept replaced its quote by design.
+ */
 export function commentSurfaceStatus(comments: DocComment[]) {
 	return {
-		orphanedCount: comments.filter((comment) => comment.orphaned).length,
+		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),
 		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};
@@ -72,10 +76,11 @@ export function commentSurfaceStatus(comments: DocComment[]) {
  * Accept the server refused (`refused`, from `suggestionRefusals`): that card shows as orphaned
  * until its refusal is cleared, even where a stale screen still shows its quote.
  * A live row not yet placed (4.2) is never orphaned; it sorts by the server's offset.
- * Orphaned cards sort after located ones.
+ * Orphaned cards sort after located ones. Comments on one image read in their tags' number order (FR13.6).
  */
 export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
+	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
 	return comments.map((comment) => ({ ...comment, orphaned: !comment.review && !unplaced(comment) && (comment.id in refused || rangeFor(comment, text) === null) }))
-		.sort((a, b) => at(a) - at(b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
+		.sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
 }

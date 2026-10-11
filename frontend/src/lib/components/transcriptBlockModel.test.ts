@@ -107,6 +107,14 @@ describe('plan cards in a block (B6, B22)', () => {
 		expect(lines).toMatchObject([{ line: { type: 'plan_card', outcome: 'Blocked' } }]);
 	});
 
+	it('tucks a blocked card that no longer asks you into one title-and-state line, with no ask card', () => {
+		const ask = { kind: 'ask', artifact_id: 'a1', title: 'Launch plan', hold_id: 'h1', state: 'answered' };
+		const entries = merge([blocked(1, 11, { title: 'Ship the export', blocked_asks_user: false, ask })]);
+		const lines = blockEntries(folds(entries)[0]).filter((e) => e.kind === 'line');
+		expect(lines).toMatchObject([{ line: { type: 'plan_card', text: 'Ship the export · Blocked' } }]);
+		expect(entries.map((e) => e.kind)).not.toContain('update');
+	});
+
 	it('keeps a blocked card that asks you as its own card', () => {
 		expect(merge([blocked(1, 11, { blocked_asks_user: true })]).map((e) => e.kind)).toContain('update');
 	});

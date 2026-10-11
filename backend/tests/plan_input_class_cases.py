@@ -35,6 +35,7 @@ from tests.plan_scene import (  # noqa: F401 - shared plan fixtures
     raise_decision,
     scene,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _workflow_fields_before_migration(db, scene):
@@ -162,9 +163,10 @@ def _attach_over_another_worker(db, scene):
         "INSERT OR IGNORE INTO threads (id,user_id,model,created_at,updated_at) "
         "VALUES ('worker-a','user-1','test/model','t','t')"
     )
-    db.execute(
-        "UPDATE plan_nodes SET spawned_thread_id='worker-a' WHERE id=?", (scene.own,),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET spawned_thread_id='worker-a' WHERE id=?", (scene.own,),
+        )
     db.commit()
     return partial(
         _mutate, db, scene.plan_id, "attach_spawned_thread",
@@ -187,10 +189,11 @@ def _delegate_to(node: str | None = None, *, finish: bool = False, worker: bool 
                 "INSERT OR IGNORE INTO threads (id,user_id,model,created_at,updated_at) "
                 "VALUES ('worker-a','user-1','test/model','t','t')"
             )
-            db.execute(
-                "UPDATE plan_nodes SET spawned_thread_id='worker-a' WHERE id=?",
-                (scene.own,),
-            )
+            with raw_plan_seed(db):
+                db.execute(
+                    "UPDATE plan_nodes SET spawned_thread_id='worker-a' WHERE id=?",
+                    (scene.own,),
+                )
         db.commit()
         return partial(delegate_attach.choose, "root", node or scene.own, db=db)
 
@@ -486,7 +489,7 @@ _CASES = {
     # --- plans/size_fields.py ---
     (
         "size_fields.py",
-        'f"size must be one of: {\', \'.join(SIZE_CLASSES)}. {SIZE_SCALE_DESCRIPTION}."',
+        'f"size must be one of: {\', \'.join(SIZE_CLASSES)}. {SIZE_MEANING} {SIZE_SCALE_DESCRIPTION}."',
     ): _operation(
         "add", {"kind": "task", "title": "T", "acceptance_criteria": "DOD", "size": "large"},
     ),
@@ -516,10 +519,7 @@ _CASES = {
         "user_ask.py",
         '"a decision is not blocked on; raise it, and it holds its task by itself"',
     ): _user_block_on_decision_artifact,
-    (
-        "user_ask.py",
-        '"ask_artifact_id must name an active registered document"',
-    ): _user_block_on_non_document,
+    ("user_ask.py", "NOT_ASKABLE"): _user_block_on_non_document,
     # --- plans/node_creation.py ---
     ("node_creation.py", 'f"invalid plan node kind: {kind}"'): _operation(
         "add", {"kind": "epic", "title": "T", "acceptance_criteria": "DOD"},

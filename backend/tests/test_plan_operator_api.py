@@ -20,6 +20,7 @@ import plans.rollup as rollup
 import plans.service as service
 from plans.boundary import PlanActor
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 class _DbProxy:
@@ -331,10 +332,11 @@ def test_thread_read_loads_child_details_only_on_demand(db, monkeypatch):
 def test_scope_reads_survive_a_child_whose_delegating_step_was_archived(db):
     """#2077: a retired delegating step listed its child twice and read as a cycle."""
     ids = _seed_operator_tree(db)
-    db.execute(
-        "UPDATE plan_nodes SET archived_at=? WHERE id=?",
-        ("2026-07-03T00:00:00+00:00", ids["delegated"]),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at=? WHERE id=?",
+            ("2026-07-03T00:00:00+00:00", ids["delegated"]),
+        )
     projection = _projection()
 
     for payload in (

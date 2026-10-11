@@ -4,11 +4,16 @@ import json
 from pathlib import Path
 import sys
 
+from tools import mcp_secrets
 from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
 
 
 def configure_mcp(args) -> int:
-    """Validate and replace MCP server configuration; never persist bearer values."""
+    """Validate and replace MCP server configuration.
+
+    Credential-named env and header values go to the key store; the saved
+    config keeps references. Bearer values are never persisted.
+    """
     from infra.database import write_transaction
     from infra.settings import get_setting, set_setting
 
@@ -16,9 +21,10 @@ def configure_mcp(args) -> int:
         servers = json.loads(Path(args.file).expanduser().read_text())
         if not isinstance(servers, dict):
             raise MCPConfigError("configuration must be an object keyed by server name")
-        for config in servers.values():
+        for name, config in servers.items():
             if not isinstance(config, dict):
                 raise MCPConfigError("each server configuration must be an object")
+            config, _ = mcp_secrets.split_secrets(name, config)
             allowed_names(config)
             timeout_seconds(config, "connect_timeout", 10)
             timeout_seconds(config, "tool_timeout", 30)
@@ -28,6 +34,7 @@ def configure_mcp(args) -> int:
                 raise MCPConfigError("configure an HTTP URL or a stdio command without bearer_file")
         with write_transaction(None, scope="configure_mcp") as db:
             tools = get_setting("tools", db=db) or {}
+            servers = mcp_secrets.replace_servers(tools.get("mcpServers") or {}, servers, db=db)
             tools["mcpServers"] = servers
             set_setting("tools", tools, db=db)
     except MCPConfigError as error:

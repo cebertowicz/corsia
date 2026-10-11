@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from api.files_revision import _path_allowed, _writable
+from api.files_revision import _writable
 from api.files_roots import scope_bases
 from doceditor.document_scope import MAX_TEXT_BYTES, revision
 from infra import config
@@ -12,6 +12,7 @@ from infra.auth import owns_thread
 from infra.database import get_db
 from registry import service as registry_service
 from registry.file_types import image_media_type
+from registry.path_access import ReadRefused, checked_read
 from registry.doc_freshness import artifact_freshness
 
 #: Typed ``detail.code`` of the 415 a text open answers for an image file.
@@ -47,21 +48,18 @@ def _live_open_setup(p: Path, project_id: str | None, thread_id: str | None, db)
 
 
 def checked_read_path(path: str, project_id: str | None, db) -> tuple[Path, list[Path]]:
-    """The one read-scope gate: an existing file inside this scope's roots, or the refusal.
+    """The read-scope gate (``checked_read``) for one project's roots, answered over HTTP.
 
-    Every read of a file's bytes (a document open, raw image serving) passes through here, so the
-    answers cannot differ: 404 for a missing path, 400 for one outside the scope or not a file.
+    404 for a missing path, 400 for one outside the scope or not a file.
     """
     bases = scope_bases(project_id, db)
     try:
-        p = Path(path).expanduser().resolve(strict=True)
-    except OSError as exc:
-        raise HTTPException(404, f"No such file: {exc}") from exc
-    if not _path_allowed(p, bases, db=db):
-        raise HTTPException(400, "Path is outside this scope's roots")
-    if not p.is_file():
-        raise HTTPException(400, "Not a file")
-    return p, bases
+        return checked_read(path, bases, db=db), bases
+    except ReadRefused as exc:
+        if exc.reason == "missing":
+            raise HTTPException(404, f"No such file: {exc}") from exc
+        detail = "Path is outside this scope's roots" if exc.reason == "outside" else "Not a file"
+        raise HTTPException(400, detail) from exc
 
 
 def read_document(path: str, user_id: str, project_id: str | None, thread_id: str | None,

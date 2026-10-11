@@ -199,3 +199,54 @@ async def test_unclaimable_day_does_not_sweep(run_db, monkeypatch):
         await nightly._run_job_safely()
 
     retention.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_manual_corrections_drain_keeps_scheduler_triggers_live_and_cancels_cleanly(monkeypatch):
+    from jobs import corrections_recording, nightly
+
+    manual_started = asyncio.Event()
+    manual_cancelled = asyncio.Event()
+    maintenance_calls: list[bool] = []
+    starts = 0
+    nightly_checks = iter([False, False, True])
+    claims = iter([True, True])
+    real_sleep = asyncio.sleep
+    sleeps = 0
+
+    async def drain():
+        nonlocal starts
+        starts += 1
+        manual_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            manual_cancelled.set()
+            raise
+
+    async def run_maintenance(*, include_corrections=False):
+        maintenance_calls.append(include_corrections)
+
+    async def controlled_sleep(_seconds):
+        nonlocal sleeps
+        sleeps += 1
+        await real_sleep(0)
+        if sleeps == 2:
+            await asyncio.wait_for(manual_started.wait(), timeout=0.5)
+        if sleeps == 4:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(nightly, "STARTUP_DELAY", 0)
+    monkeypatch.setattr(nightly, "_should_run_nightly", lambda: next(nightly_checks))
+    monkeypatch.setattr(nightly, "_should_run_on_idle", lambda: False)
+    monkeypatch.setattr(nightly, "_run_job_safely", run_maintenance)
+    monkeypatch.setattr(nightly, "_run_corrections_recording_safely", drain)
+    monkeypatch.setattr(corrections_recording, "claim_manual_corrections_recording", lambda: next(claims))
+    monkeypatch.setattr(asyncio, "sleep", controlled_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await nightly.nightly_job_loop()
+
+    assert starts == 1
+    assert maintenance_calls == [False]
+    assert manual_cancelled.is_set()

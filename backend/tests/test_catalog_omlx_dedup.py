@@ -70,7 +70,6 @@ def test_alias_promoted_to_display_name(monkeypatch, fresh_db):
             "id": sid, "provider": "omlx",
             "instance_id": "inst-1", "instance_name": "Mac",
             "host": "127.0.0.1", "port": 5100, "status": "online",
-            "api_key": "admin-key",
         } if sid == "srv-test" else None,
     )
     router = _Router({
@@ -374,7 +373,6 @@ def test_config_base_does_not_shadow_runtime_window(monkeypatch, fresh_db):
             "id": sid, "provider": "omlx",
             "instance_id": "inst-1", "instance_name": "Mac",
             "host": "127.0.0.1", "port": 5100, "status": "online",
-            "api_key": "[REDACTED]",
         } if sid == "srv-test" else None,
     )
 

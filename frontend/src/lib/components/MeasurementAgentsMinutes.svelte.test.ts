@@ -65,6 +65,11 @@ describe('MeasurementAgentsMinutes', () => {
 		expect(cells).toEqual([['13', '135', '30'], ['3.6', '7.3', '30']]);
 	});
 
+	it('capitalises the first letter of an agent name', () => {
+		render([row('a', 5.1, { agent: { id: 'a', name: 'conductor', project: { id: 'p1', name: 'CORSIA' } } })]);
+		expect(host.querySelector('tbody th')?.textContent).toBe('Conductor');
+	});
+
 	it('shows a dash for minutes the server did not serve', () => {
 		render([row('a', 5.1, { active_minutes: null })]);
 		expect(host.querySelectorAll('tbody tr:first-child td')[1].textContent).toContain('–');
@@ -98,7 +103,15 @@ describe('measurement table headers', () => {
 		}
 	});
 
-	it('keeps the break-anywhere rule for long agent names in the Minutes body', () => {
-		expect(midWordRules(minutesSource).map(([selector]) => selector)).toEqual(['tbody th']);
+	it('wraps agent names and subjects at their spaces; only the name cell may break an unbroken name wider than the card', () => {
+		// A name with spaces or one real word never breaks mid-word. The one exception is a single unbroken token (a path or id)
+		// wider than the card, which would otherwise widen the page; only the name cell carries that rule, never a header or a figure.
+		const minutesRules = midWordRules(minutesSource);
+		expect(minutesRules.map(([selector]) => selector)).toEqual(['tbody th']);
+		// The name column keeps room for the longest real agent name, so the rule above only reaches tokens longer than that.
+		expect(minutesRules[0][1]).toMatch(/min-width:\s*1[5-9]ch/);
+		const subjectRules = midWordRules(changesSource).flatMap(([selector]) => selector.split(',')).map((part) => part.trim());
+		// The action sentence (.act) already broke an unbroken token; the subject is the only other rule.
+		expect(subjectRules).toEqual(['.act', '.tb td.subj b']);
 	});
 });

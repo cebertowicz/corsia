@@ -27,6 +27,32 @@ def range_filter(column: str) -> str:
     return f"{column} >= :from_ts AND {column} < :to_ts"
 
 
+_SPAWNED_ROOTS = """, spawned_roots AS (
+          SELECT t.id FROM threads t WHERE t.spawned_by IS NOT NULL
+          UNION SELECT d.spawned_thread_id FROM plan_nodes d WHERE d.spawned_thread_id IS NOT NULL
+        )"""
+
+
+def _rejection_periods(grain: Grain | None) -> str:
+    return f""", rejection_periods AS (
+          SELECT {grain.bucket('e.created_at') if grain else 'NULL'} AS period, COUNT(*) AS rejections
+          FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
+          JOIN plans rp ON rp.id=n.plan_id
+          WHERE e.event='review_rejected' AND n.plan_id IN (SELECT id FROM top_plans)
+            AND rp.owner_id NOT IN (SELECT id FROM spawned_roots)
+            AND {range_filter("e.created_at")} GROUP BY period
+        )"""
+
+
+def rejection_ctes(grain: Grain | None = None) -> str:
+    """Return ``spawned_roots`` and ``rejection_periods`` for the scope's ``top_plans``.
+
+    ``outcome_ctes`` carries the same two CTEs; a reader that wants only the send-backs appends these and
+    never names the settlement.
+    """
+    return _SPAWNED_ROOTS + _rejection_periods(grain)
+
+
 def outcome_ctes(grain: Grain | None = None, *, plans: str = "top_plans", limited_to_range: bool = True) -> str:
     """Return the canonical accepted-task CTEs for one eligible-plan set.
 
@@ -57,10 +83,7 @@ def outcome_ctes(grain: Grain | None = None, *, plans: str = "top_plans", limite
           SELECT node_id FROM rejected
           UNION SELECT node_id FROM released_bad
           UNION SELECT id FROM plan_nodes WHERE state='failed'
-        ), spawned_roots AS (
-          SELECT t.id FROM threads t WHERE t.spawned_by IS NOT NULL
-          UNION SELECT d.spawned_thread_id FROM plan_nodes d WHERE d.spawned_thread_id IS NOT NULL
-        ), outcome_rows AS (
+        ){_SPAWNED_ROOTS}, outcome_rows AS (
           SELECT n.id,n.commitment_id,p.owner_id AS root_id,n.difficulty,s.settled_at,
             {grain.bucket('s.settled_at') if grain else 'NULL'} AS period,
             CASE WHEN n.id IN (SELECT node_id FROM reworked)
@@ -74,71 +97,60 @@ def outcome_ctes(grain: Grain | None = None, *, plans: str = "top_plans", limite
             AND p.owner_id NOT IN (SELECT id FROM spawned_roots)
         ), outcome_periods AS (
           SELECT period, COUNT(*) AS outcomes, SUM(first_try) AS first_try FROM outcome_rows GROUP BY period
-        ), rejection_periods AS (
-          SELECT {grain.bucket('e.created_at') if grain else 'NULL'} AS period, COUNT(*) AS rejections
-          FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
-          JOIN plans rp ON rp.id=n.plan_id
-          WHERE e.event='review_rejected' AND n.plan_id IN (SELECT id FROM top_plans)
-            AND rp.owner_id NOT IN (SELECT id FROM spawned_roots)
-            AND {range_filter("e.created_at")} GROUP BY period
-        )
+        ){_rejection_periods(grain)}
     """
+
+
+def prepare_scope_threads(db, params: dict[str, Any]) -> None:
+    """Materialize the scope's threads alone, for a read of the usage ledger that needs no outcome periods."""
+    db.execute(_DDL[PREPARED_SCOPE])
+    db.execute("DELETE FROM measurement_scope_threads")
+    db.execute(scope_cte() + "INSERT INTO measurement_scope_threads(id,root_id) SELECT id,root_id FROM scope_threads", query_params(params))
 
 
 def _materialize_outcome_periods(db, params: dict[str, Any], *, roots: bool) -> None:
     """Materialize the shared scope and outcome aggregate for one request connection.
 
-    ``roots`` adds the per-root grains the Agents surface reads: the same settled
-    outcome rows, grouped by the agent that owns the plan instead of by the whole
-    scope. Both grains are built from the **same statement text** -- ``scope_cte()
-    + outcome_ctes()`` runs once into the settled nodes and again into the scope
-    periods -- so the scope totals and the per-agent totals agree because they share
-    one definition and see one snapshot of the data, not because a single pass
-    feeds both. With ``roots`` the settlement is therefore evaluated twice, and
-    that second evaluation is a real cost this request pays.
+    The accepted outcomes are settled **once**, into ``measurement_outcome_nodes``
+    (each with the agent that owns its plan). Every other grain is a ``GROUP BY`` over
+    those rows: the scope totals, and with ``roots`` the per-agent and per-difficulty
+    grains the Agents surface reads. ``api.measurement_size`` reads the same rows to
+    size each outcome, so no reader of this connection settles the scope again, and the
+    totals agree because they are one population, not several runs of one statement.
+    Only the rejection counts come from their own statement: they are not outcomes.
     """
-    db.execute(_DDL[PREPARED_SCOPE])
-    db.execute("DELETE FROM measurement_scope_threads")
-    db.execute(scope_cte() + "INSERT INTO measurement_scope_threads(id,root_id) SELECT id,root_id FROM scope_threads", query_params(params))
+    prepare_scope_threads(db, params)
     db.execute(_DDL[PREPARED_OUTCOMES])
     db.execute("DELETE FROM measurement_outcome_periods")
-    if not roots:
-        db.execute(scope_cte() + outcome_ctes(params["grain"]) + """
-            INSERT INTO measurement_outcome_periods(period,outcomes,first_try,rejections)
-            SELECT o.period,o.outcomes,o.first_try,COALESCE(r.rejections,0)
-            FROM outcome_periods o LEFT JOIN rejection_periods r USING(period)
-        """, query_params(params))
-        return
-
-    db.execute(_DDL[PREPARED_ROOTS])
-    db.execute("DELETE FROM measurement_scope_roots")
-    db.execute(scope_cte() + "INSERT INTO measurement_scope_roots(id) SELECT id FROM scope_roots", query_params(params))
+    if roots:
+        db.execute(_DDL[PREPARED_ROOTS])
+        db.execute("DELETE FROM measurement_scope_roots")
+        db.execute(scope_cte() + "INSERT INTO measurement_scope_roots(id) SELECT id FROM scope_roots", query_params(params))
     db.execute(_DDL[PREPARED_OUTCOME_NODES])
     db.execute("DELETE FROM measurement_outcome_nodes")
-    # One settlement feeds both grains: the settled nodes are materialized with the
-    # agent that owns their plan, and the per-agent and per-difficulty grains read
-    # those rows. The scope totals below stay the statement the series already runs.
     db.execute(scope_cte() + outcome_ctes(params["grain"]) + """
         INSERT INTO measurement_outcome_nodes(node_id,root_id,period,first_try,difficulty)
-        SELECT id,root_id,period,first_try,difficulty FROM outcome_rows WHERE root_id IS NOT NULL
+        SELECT id,root_id,period,first_try,difficulty FROM outcome_rows
     """, query_params(params))
-    db.execute(_DDL[PREPARED_ROOT_OUTCOMES])
-    db.execute("DELETE FROM measurement_root_outcome_periods")
-    db.execute("""
-        INSERT INTO measurement_root_outcome_periods(root_id,period,outcomes,first_try)
-        SELECT root_id,period,COUNT(*),SUM(first_try) FROM measurement_outcome_nodes GROUP BY root_id,period
-    """)
-    db.execute(_DDL[PREPARED_ROOT_DIFFICULTIES])
-    db.execute("DELETE FROM measurement_root_difficulty_periods")
-    db.execute("""
-        INSERT INTO measurement_root_difficulty_periods(root_id,period,difficulty,count)
-        SELECT root_id,period,COALESCE(difficulty,'unclassified'),COUNT(*)
-        FROM measurement_outcome_nodes GROUP BY root_id,period,COALESCE(difficulty,'unclassified')
-    """)
-    db.execute(scope_cte() + outcome_ctes(params["grain"]) + """
+    if roots:
+        db.execute(_DDL[PREPARED_ROOT_OUTCOMES])
+        db.execute("DELETE FROM measurement_root_outcome_periods")
+        db.execute("""
+            INSERT INTO measurement_root_outcome_periods(root_id,period,outcomes,first_try)
+            SELECT root_id,period,COUNT(*),SUM(first_try) FROM measurement_outcome_nodes GROUP BY root_id,period
+        """)
+        db.execute(_DDL[PREPARED_ROOT_DIFFICULTIES])
+        db.execute("DELETE FROM measurement_root_difficulty_periods")
+        db.execute("""
+            INSERT INTO measurement_root_difficulty_periods(root_id,period,difficulty,count)
+            SELECT root_id,period,COALESCE(difficulty,'unclassified'),COUNT(*)
+            FROM measurement_outcome_nodes GROUP BY root_id,period,COALESCE(difficulty,'unclassified')
+        """)
+    db.execute(scope_cte() + rejection_ctes(params["grain"]) + """
         INSERT INTO measurement_outcome_periods(period,outcomes,first_try,rejections)
         SELECT o.period,o.outcomes,o.first_try,COALESCE(r.rejections,0)
-        FROM outcome_periods o LEFT JOIN rejection_periods r USING(period)
+        FROM (SELECT period,COUNT(*) AS outcomes,SUM(first_try) AS first_try
+              FROM measurement_outcome_nodes GROUP BY period) o LEFT JOIN rejection_periods r USING(period)
     """, query_params(params))
 
 
@@ -165,27 +177,46 @@ def _presence_predicate(scope_project: str, scope_agent: str | None, scope_threa
     return f"({closure} OR v.project_id=:scope_project)"
 
 
-def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
+def human_minutes_cte(grain: Grain) -> str:
+    """Return the ``human_minutes(thread_id, created_at, period, seconds)`` CTEs.
+
+    One row per human message in the range: the 60 seconds the message itself is worth
+    plus the gap since the person's previous message when that gap is under
+    ``:max_active_gap_seconds``. The gap is measured across the *user's whole* human
+    stream, not inside a scope, so a thread's minutes are the same whichever page asks:
+    the All-work total, a project, one agent and the Agents table all sum these rows.
+    A caller keeps the threads it scopes to and sums ``seconds`` by ``period``. The
+    caller supplies the leading ``WITH``.
+    """
     return f"""
-      WITH pre_window_message AS (
-        -- The latest of each thread's latest: one index seek per scope thread
+      pre_window_message AS (
+        -- The latest of each thread's latest: one index seek per thread
         -- instead of sorting every earlier message.
-        SELECT m.id,m.created_at FROM {scope_threads} s JOIN messages m ON m.id=(
+        SELECT m.id,m.thread_id,m.created_at FROM threads s JOIN messages m ON m.id=(
           SELECT prior.id FROM messages prior WHERE prior.thread_id=s.id
             AND prior.role='user' AND COALESCE(json_extract(prior.metadata,'$.sender_kind'),'')='' AND prior.created_at < :from_ts
           ORDER BY prior.created_at DESC,prior.id DESC LIMIT 1
-        ) ORDER BY m.created_at DESC,m.id DESC LIMIT 1
+        ) WHERE s.user_id=:user_id ORDER BY m.created_at DESC,m.id DESC LIMIT 1
       ), human_messages AS (
-        SELECT id,created_at,LAG(created_at) OVER (ORDER BY created_at,id) AS prior_at FROM (
-          SELECT m.id,m.created_at FROM messages m WHERE m.thread_id IN (SELECT id FROM {scope_threads})
+        SELECT id,thread_id,created_at,LAG(created_at) OVER (ORDER BY created_at,id) AS prior_at FROM (
+          SELECT m.id,m.thread_id,m.created_at FROM messages m JOIN threads s ON s.id=m.thread_id
+            WHERE s.user_id=:user_id
             AND m.role='user' AND COALESCE(json_extract(m.metadata,'$.sender_kind'),'')='' AND {range_filter("m.created_at")}
-          UNION ALL SELECT id,created_at FROM pre_window_message
+          UNION ALL SELECT id,thread_id,created_at FROM pre_window_message
         )
-      ), active_periods AS (
-        SELECT {grain.bucket('created_at')} AS period,
-          SUM(60 + CASE WHEN prior_at IS NULL THEN 0 WHEN strftime('%s',created_at)-strftime('%s',prior_at)<=:max_active_gap_seconds
-          THEN MAX(0,strftime('%s',created_at)-strftime('%s',prior_at)) ELSE 0 END)/3600.0 AS active_hours
-        FROM human_messages WHERE {grain.bucket('created_at')} IS NOT NULL GROUP BY period
+      ), human_minutes AS (
+        SELECT thread_id,{grain.bucket('created_at')} AS period,
+          60 + CASE WHEN prior_at IS NULL THEN 0 WHEN strftime('%s',created_at)-strftime('%s',prior_at)<=:max_active_gap_seconds
+          THEN MAX(0,strftime('%s',created_at)-strftime('%s',prior_at)) ELSE 0 END AS seconds
+        FROM human_messages
+      )"""
+
+
+def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
+    return f"""
+      WITH {human_minutes_cte(grain)}, active_periods AS (
+        SELECT period,SUM(seconds)/3600.0 AS active_hours FROM human_minutes
+        WHERE period IS NOT NULL AND thread_id IN (SELECT id FROM {scope_threads}) GROUP BY period
       ) SELECT a.period,a.active_hours,COALESCE(o.outcomes,0) AS outcomes FROM active_periods a
         LEFT JOIN {outcomes} o USING(period) ORDER BY a.period
     """
@@ -293,14 +324,14 @@ def root_decision_family_sql(grain: Grain, scope_threads: str, root_outcomes: st
 
 
 def model_family_sql(grain: Grain, scope_threads: str) -> str:
-    """Return the latest window's fresh tokens per literal model and its manifest identity.
+    """Return the latest window's tokens per literal model and its manifest identity.
 
-    It is the share numerator and remains the same expression used by the tokens
-    family. ``api.cost_identity`` turns each shape into one model identity. Accepted-task
+    It is the share numerator: fresh tokens plus cache re-reads, the total the Tokens figure
+    sums (``TOKEN_FIGURE_SQL``). ``api.cost_identity`` turns each shape into one model identity. Accepted-task
     cost is deliberately not added: it has a different clock and a node-bound join in ``measurement_model_cost``.
     """
     return f"""
-      SELECT {identity_columns("u")},{ROLLUP_TOKEN_SUM_SQL} AS tokens
+      SELECT {identity_columns("u")},{ROLLUP_TOKEN_SUM_SQL}+SUM({CACHED_TOKEN_SQL}) AS tokens
       FROM {usage_source(scope_threads, grain)} u {identity_join("u")}
       WHERE {grain.bucket('u.hour')} BETWEEN '{grain.latest.first}' AND '{grain.latest.last}'
       GROUP BY {IDENTITY_GROUP} ORDER BY tokens DESC,model

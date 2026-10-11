@@ -4,7 +4,8 @@ import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '.
 
 /**
  * The comment margin marker: each marker sits inside the rail the content padding reserves (24px for a fine
- * pointer, 44px otherwise), its whole hit box opens its own thread or list, no two markers overlap, and its
+ * pointer, 44px otherwise; at phone width the 44px hit box reaches 20px into the text's edge, the text keeping
+ * the 24px inset), its whole hit box opens its own thread or list, no two markers overlap, and its
  * glyph, count and focus ring meet contrast in both themes. Everything here reads public DOM geometry (rects, elementFromPoint, selection, computed style);
  * nothing reaches into CodeMirror's private fields.
  */
@@ -60,6 +61,9 @@ function isMobile(info: TestInfo) {
 function railFor(info: TestInfo) {
 	return isMobile(info) ? COARSE_RAIL : FINE_RAIL;
 }
+
+/** Where the text starts inside the content box: the fine rail's width at both widths, the coarse hit box reaching past it. */
+const TEXT_INSET = FINE_RAIL;
 
 /** The two widths under test. `tall` is a viewport high enough that CodeMirror renders every line at once. */
 function viewport(info: TestInfo, tall: boolean) {
@@ -424,7 +428,8 @@ test.describe('@flow:doc-margin-marker', () => {
 			})));
 		});
 		const cases = [
-			{ name: 'inside the first glyph of a flush-left line', x: target.glyph.x, y: target.glyph.y },
+			// A touch pointer's hit box reaches into the text's edge on purpose, so its first glyph belongs to the marker.
+			...(rail <= TEXT_INSET ? [{ name: 'inside the first glyph of a flush-left line', x: target.glyph.x, y: target.glyph.y }] : []),
 			{ name: '1px right of the rail', x: target.content + rail + 1, y: target.y },
 		];
 		for (const { name, x, y } of cases) {
@@ -490,7 +495,7 @@ test.describe('@flow:doc-margin-marker', () => {
 		expect(withMarkers.firstTop, 'the first line starts at the content top').toBe(4);
 		expect(withMarkers.firstHeight, 'the first line is as tall as the same text with no marker').toBe(withMarkers.firstBare);
 		expect(withMarkers.wrappedHeight, 'a wrapped line wraps as the same text at the same width would with no marker').toBe(withMarkers.wrappedBare);
-		expect(withMarkers.firstLeft, 'the text starts at the rail\'s inner edge').toBeCloseTo(rail, 0);
+		expect(withMarkers.firstLeft, 'the text starts at the text inset, whatever the hit box reaches over').toBeCloseTo(TEXT_INSET, 0);
 
 		// The drawer narrows the canvas: markers re-seat and stay clustered the same way.
 		const before = (await markers(page)).map((marker) => keysOf(opened, marker));

@@ -17,6 +17,7 @@ from automation import plan_liveness
 from plans import delegation_child_lifecycle, service
 from plans.projections import liveness_signal
 from tests.child_parent_notice_helpers import begin_worker_turn, db, delegated, wakes
+from tests.plan_writer_authorizer import raw_plan_seed
 
 __all__ = ["db"]
 
@@ -352,7 +353,8 @@ def test_f2_stays_quiet_while_a_provider_reset_is_armed(db):
 def test_f2_stays_quiet_when_the_parent_already_reviews_the_step(db):
     """A step up for review is D4's round, never F2's."""
     step, _plan, _node = delegated(db)
-    db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (step.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (step.id,))
 
     _complete("worker", db=db)
 

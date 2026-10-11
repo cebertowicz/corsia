@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 from infra.packed_rows import fetch_all
-from plans import hierarchy, node_states
+from plans import aggregates, hierarchy, node_states
 from plans.decision_fields import pick_of
 
 DECISION_TYPE = "plan-decision"
@@ -28,8 +28,13 @@ _BODY_REQUIRED = (
     "node_id", "source_node_id", "thread_id",
 )
 
+#: Reads that serve a task still in play ask only for decisions on open nodes
+#: (``idx_plan_nodes_open``): a decision held by a node nothing is open beneath waits on
+#: no one, and the read then costs the open work, not the history of the plan.
+_OPEN_NODES = " AND n.folded=0"
+
 # A question on closed work leaves the attention surface with it (#1887).
-def _rows_sql(marks: str, *, compact: bool = False) -> str:
+def _rows_sql(marks: str, *, compact: bool = False, open_nodes: bool = False) -> str:
     """Same eligible linked identities for full and narrow lifecycle consumers.
 
     CROSS JOIN pins the join order to the named plans' nodes, then their links,
@@ -39,6 +44,7 @@ def _rows_sql(marks: str, *, compact: bool = False) -> str:
     """
     columns = "i.id AS artifact_id,i.metadata,n.plan_id,l.node_id"
     columns += ",p.owner_id,t.spawned_by" if compact else ",i.external_id,i.created_at"
+    open_clause = _OPEN_NODES if open_nodes else ""
     owners = "JOIN plans p ON p.id=n.plan_id LEFT JOIN threads t ON t.id=p.owner_id" if compact else ""
     return f"""
     SELECT {columns}
@@ -52,7 +58,7 @@ def _rows_sql(marks: str, *, compact: bool = False) -> str:
        AND i.state = 'active'
        AND {node_states.in_work_sql('n')}
        AND {node_states.outside_retired_branch_sql('n')}
-       AND n.plan_id IN ({marks})
+       AND n.plan_id IN ({marks}){open_clause}
     """
 
 
@@ -131,13 +137,17 @@ def read(decision_id: str, *, db) -> dict:
     return project(row, body)
 
 
-def rows_for_plans(plan_ids, *, db) -> list[dict]:
-    """Return every well-formed decision attached to the given plans."""
+def rows_for_plans(plan_ids, *, db, open_nodes: bool = False) -> list[dict]:
+    """Return every well-formed decision attached to the given plans.
+
+    ``open_nodes`` keeps the ones held by a node with open work in or at it.
+    """
     unique = list(dict.fromkeys(plan_ids))
     if not unique:
         return []
     marks = ",".join("?" for _ in unique)
-    rows = fetch_all(db, _rows_sql(marks), (DECISION_TYPE, *unique))
+    open_nodes = open_nodes and aggregates.ready(db)
+    rows = fetch_all(db, _rows_sql(marks, open_nodes=open_nodes), (DECISION_TYPE, *unique))
     projected = []
     for row in rows:
         body = _body(row)
@@ -196,14 +206,17 @@ def answerable(db, source_nodes: dict[str, str]) -> dict[str, bool]:
     }
 
 
-def raised_decisions(plan_ids, *, db) -> list[dict]:
+def raised_decisions(plan_ids, *, db, open_nodes: bool = False) -> list[dict]:
     """Return the decisions actually awaiting the user, in canonical order.
 
     A decision counts only when its body says raised, the pile agrees, and the
     answer route could settle it. Reading the body alone let a plan keep
     counting a question whose attention had been cleared out of band.
     """
-    rows = [item for item in rows_for_plans(plan_ids, db=db) if item["state"] == RAISED]
+    rows = [
+        item for item in rows_for_plans(plan_ids, db=db, open_nodes=open_nodes)
+        if item["state"] == RAISED
+    ]
     live = answerable(
         db, {item["artifact_id"]: item["source_node_id"] for item in rows},
     )
@@ -275,9 +288,13 @@ def awaiting_count(plan_ids, *, db) -> int:
 
     Named for what it is: PRD-PLANS E6 says a decision does not pause the
     thread, so these plans are waiting on the user, not blocked.
+
+    A decision is held by a node in work, and a node in work is never folded, so
+    the read asks for the open rows alone (``idx_plan_nodes_open``) and costs the
+    open work, not the plan's history.
     """
     rows = hierarchy.descendants(db, plan_ids)
-    return len(raised_decisions([row["id"] for row in rows], db=db))
+    return len(raised_decisions([row["id"] for row in rows], db=db, open_nodes=True))
 
 
 def next_order_key(plan_id: str, *, db) -> int:

@@ -90,3 +90,13 @@ def test_a_catalog_model_no_longer_offered_keeps_its_display_name(db):
 def test_offered_now_names_an_alias_by_what_it_resolves_to_today(db):
     offered = IdentityResolver(db).offered_now([{"litellm_model": "claude-code/sonnet"}])
     assert offered == {"claude-code/sonnet", "claude-code/claude-sonnet-4-8"}
+
+
+@pytest.mark.parametrize(("key", "label"), [
+    ("deepseek-v4.1-flash", "deepseek-v4.1-flash"),
+    ("external@ns-96c32a544b/qwen3.8-flash", "external@ns-96c32a544b/qwen3.8-flash"),
+    ("glm-5.3", "glm-5.3"),
+    ("some-other-model", "some-other-model"),
+])
+def test_a_model_without_a_persisted_catalog_name_keeps_its_literal_label(db, key, label):
+    assert IdentityResolver(db)(_row(key)).label == label

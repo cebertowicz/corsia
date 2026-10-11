@@ -6,6 +6,7 @@ import { resetObserversForTests } from '$lib/stores/planQuery.svelte';
 import { token } from '$lib/stores/auth';
 import type { OperatorNode } from '$lib/api/plans';
 import { EMPTY_DISTRIBUTION, operatorNode, planDisplay } from './fixtures/operatorPlan';
+import { withFolds } from './fixtures/planFolds';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -45,22 +46,47 @@ describe('PlanDrillView', () => {
 	];
 
 	it('shows only the focused subtree, normalizing depth, and hides unrelated siblings', () => {
-		component = mount(PlanDrillView, { target: host, props: { nodes, rootId: 'root', onBack: () => {} } });
+		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes, rootId: 'root', onBack: () => {} }) });
 		flushSync();
 		expect(host.textContent).toContain('Descendant A');
 		expect(host.textContent).not.toContain('Different branch');
 	});
 
+	it('folds the subtree\'s finished work by the server\'s count for its levels, and no other level\'s', () => {
+		const folded = {
+			planId: 'plan-1',
+			levels: [
+				{ parent_id: null, done: 9, failed: 0, closed: 0, more: 9 },
+				{ parent_id: 'root', done: 4, failed: 1, closed: 0, more: 5 },
+			],
+		};
+		component = mount(PlanDrillView, { target: host, props: { nodes, folded, rootId: 'root', onBack: () => {} } });
+		flushSync();
+		const labels = [...host.querySelectorAll('.fold-label')].map((label) => label.textContent?.trim());
+		expect(labels).toEqual(['4 completed, 1 failed']);
+	});
+
+	it('keeps a drilled root that is itself finished as the heading, not under a fold row', () => {
+		const finished = [
+			node({ id: 'root', title: 'Root', depth: 2, state: 'accepted', folded: true }),
+			node({ id: 'child-a', title: 'Descendant A', parent_id: 'root', depth: 3 }),
+		];
+		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes: finished, rootId: 'root', onBack: () => {} }) });
+		flushSync();
+		expect(host.querySelector('.fold-row')).toBeNull();
+		expect(host.querySelector('.drill-title')?.textContent).toBe('Root');
+	});
+
 	it('calls onBack when the Back control is used', () => {
 		const onBack = vi.fn();
-		component = mount(PlanDrillView, { target: host, props: { nodes, rootId: 'root', onBack } });
+		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes, rootId: 'root', onBack }) });
 		flushSync();
 		(host.querySelector('.drill-back') as HTMLButtonElement).click();
 		expect(onBack).toHaveBeenCalledOnce();
 	});
 
 	it('uses the same PlanTree renderer (row markup) as the scope card', () => {
-		component = mount(PlanDrillView, { target: host, props: { nodes, rootId: 'root', onBack: () => {} } });
+		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes, rootId: 'root', onBack: () => {} }) });
 		flushSync();
 		expect(host.querySelector('.plan-tree')).toBeTruthy();
 		expect(host.querySelectorAll('.tree-row').length).toBeGreaterThan(0);
@@ -77,7 +103,7 @@ describe('PlanDrillView', () => {
 			node({ id: 'B1', title: 'B1', parent_id: 'B', depth: 2 }),
 			node({ id: 'B2', title: 'B2', parent_id: 'B', depth: 2 }),
 		];
-		component = mount(PlanDrillView, { target: host, props: { nodes: dfsNodes, rootId: 'R', onBack: () => {} } });
+		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes: dfsNodes, rootId: 'R', onBack: () => {} }) });
 		flushSync();
 		const titles = [...host.querySelectorAll('.row-title')].map((el) => el.textContent ?? '');
 		expect(titles).toEqual(['R', 'A', 'A1', 'A2', 'B', 'B1', 'B2']);
@@ -91,7 +117,7 @@ describe('PlanDrillView', () => {
 			node({ id: 'y', title: 'Y', parent_id: 'x', depth: 1 }),
 		];
 		const start = Date.now();
-		component = mount(PlanDrillView, { target: host, props: { nodes: cyclic, rootId: 'root', onBack: () => {} } });
+		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes: cyclic, rootId: 'root', onBack: () => {} }) });
 		flushSync();
 		expect(Date.now() - start).toBeLessThan(1000);
 		// Neither x nor y is a descendant of root — the cycle must not hang or false-include them.
@@ -111,7 +137,7 @@ describe('PlanDrillView', () => {
 					progress: { done: 1, total: 2, open: 1, liveness: 'advancing', distribution: { ...EMPTY_DISTRIBUTION, active: 1 } },
 					display: planDisplay('working', 'active'),
 					current_node_ids: [], next_node_ids: [],
-					nodes: [node({ id: 'child-step', title: 'Child step' })],
+					nodes: [node({ id: 'child-step', title: 'Child step' })], folds: [], root_count: 1,
 				}],
 			}),
 			headers: { get: () => '"r"' },
@@ -123,7 +149,7 @@ describe('PlanDrillView', () => {
 				child: { available: true, plan_id: 'p2', thread_id: 'child-thread', progress: { done: 1, total: 2, open: 1, liveness: 'advancing' } },
 			}),
 		];
-		component = mount(PlanDrillView, { target: host, props: { nodes: withChild, rootId: 'root', onBack: () => {} } });
+		component = mount(PlanDrillView, { target: host, props: withFolds({ nodes: withChild, rootId: 'root', onBack: () => {} }) });
 		flushSync();
 		const chip = host.querySelector('.spawn-chip') as HTMLButtonElement;
 		expect(chip.getAttribute('aria-expanded')).toBe('false');

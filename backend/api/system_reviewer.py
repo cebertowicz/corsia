@@ -11,7 +11,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from infra.settings import get_host_access_reviewer_model
+from host_access.reviewer_unavailable import (
+    FALLBACK_OFF_FIX,
+    FALLBACK_PARTIAL,
+    FALLBACK_REVIEWING,
+    OFF_FAIL,
+    OFF_FAIL_UNTIL_THEN,
+    OFF_PARTIAL_FAIL,
+    OFF_PARTIAL_FAIL_UNTIL_THEN,
+)
+from infra.settings import (
+    get_host_access_reviewer_fallback,
+    get_host_access_reviewer_model,
+)
 from llm import catalog as model_catalog
 
 HARNESSES = ("claude-code", "codex")
@@ -127,20 +139,41 @@ def _reasons(blocks: list[ScopeBlock]) -> dict[str, str]:
     }
 
 
-def reviewer_unavailable_text(name: str, blocks: list[ScopeBlock]) -> str:
-    """The sentence for a model no scope can review with."""
+def _lead(name: str, blocks: list[ScopeBlock]) -> str:
+    """The first sentence: the model and why no scope can use it."""
     why = "; ".join(_reasons(blocks).values())
-    return f"{name} can't review requests right now ({why}). Choose another model."
+    return f"{name} can't review requests right now ({why})."
 
 
-def _partial_text(name: str, blocks: list[ScopeBlock]) -> str:
+def reviewer_unavailable_text(name: str, blocks: list[ScopeBlock]) -> str:
+    """The sentence for a model no scope can review with, when saving it."""
+    return f"{_lead(name, blocks)} Choose another model."
+
+
+def _reset_known(blocks: list[ScopeBlock]) -> bool:
+    """Whether any block says when its limit lifts, so ``until then`` is true."""
+    return any(block.reset for block in blocks)
+
+
+def reviewer_status_text(name: str, blocks: list[ScopeBlock], *, fallback_on: bool) -> str:
+    """Settings' sentence for a chosen model no scope can review with."""
+    if fallback_on:
+        return f"{_lead(name, blocks)} {FALLBACK_REVIEWING}"
+    fails = OFF_FAIL_UNTIL_THEN if _reset_known(blocks) else OFF_FAIL
+    return f"{_lead(name, blocks)} {fails} {FALLBACK_OFF_FIX}"
+
+
+def _partial_text(name: str, blocks: list[ScopeBlock], *, fallback_on: bool) -> str:
     """The sentence naming the scopes whose requests fail while others work."""
     parts = [
         f"{name} can't review requests from "
         f"{', '.join(b.scope for b in blocks if b.reason == reason)} right now ({why})."
         for reason, why in _reasons(blocks).items()
     ]
-    return " ".join(parts) + " Those requests fail until then."
+    if fallback_on:
+        return " ".join(parts) + FALLBACK_PARTIAL
+    fails = OFF_PARTIAL_FAIL_UNTIL_THEN if _reset_known(blocks) else OFF_PARTIAL_FAIL
+    return f"{' '.join(parts)} {fails} {FALLBACK_OFF_FIX}"
 
 
 def reviewer_save_error(model_id: object) -> str | None:
@@ -183,11 +216,12 @@ def host_access_reviewer_status() -> dict[str, str | None]:
         name = str(row.get("name") or row.get("id") or configured)
         blocks, total = reviewer_scope_blocks(str(row["id"]))
     unavailable = len(blocks) >= total
+    fallback_on = get_host_access_reviewer_fallback()
     message = None
     if unavailable:
-        message = reviewer_unavailable_text(name, blocks)
+        message = reviewer_status_text(name, blocks, fallback_on=fallback_on)
     elif blocks:
-        message = _partial_text(name, blocks)
+        message = _partial_text(name, blocks, fallback_on=fallback_on)
     return {
         "host_access_reviewer_model": configured,
         "host_access_reviewer_model_name": name,
