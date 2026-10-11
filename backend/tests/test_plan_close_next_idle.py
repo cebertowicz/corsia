@@ -5,7 +5,7 @@ ready, the block it already returns lists every open task, waits with an end
 first and soonest first, each with when it ends. It tells the agent to start a
 waiting task that can move now, unless a wait ends within 15 minutes: that one
 is about to report. A wake that composes the same block says the same. Any
-ready task keeps the ordinary listing.
+ready task keeps the ordinary listing, with ready work listed first.
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ def test_a_wait_ending_within_fifteen_minutes_keeps_the_list_and_drops_the_pick_
     assert "idle" not in block
 
 
-def test_any_ready_task_keeps_the_ordinary_listing(db):
+def test_any_ready_task_keeps_the_ordinary_listing_ready_first(db):
     plan = owner_plan(db)
     current = task(db, plan.id, "Current work")
     waiting = task(db, plan.id, "Waiting work")
@@ -168,10 +168,29 @@ def test_any_ready_task_keeps_the_ordinary_listing(db):
     block = next_block(close(db, plan.id, "request_review", current.id))
 
     assert_block_shape(block, named=False)
-    assert row_ids(block) == [waiting.id, ready.id]
+    assert row_ids(block) == [ready.id, waiting.id]
     assert block["open_tasks_listed"] == listed(2, 2)
     assert "idle" not in block
     assert all("ends" not in item for item in block["open_tasks"])
+
+
+def test_a_ready_task_ranked_below_three_waits_is_still_named(db):
+    """corsia#403: the three listed rows were the waits above it, in plan order."""
+    plan = owner_plan(db)
+    current = task(db, plan.id, "Current work")
+    waits = [task(db, plan.id, f"Scheduled upkeep {n}") for n in (1, 2, 3)]
+    ready = task(db, plan.id, "New ready work")
+    select(db, plan.id, current.id)
+    for node in waits:
+        _watch(db, plan.id, node.id, timedelta(hours=7))
+
+    block = next_block(_watch(db, plan.id, current.id, timedelta(days=1)))
+
+    assert_block_shape(block, named=False)
+    assert_rows_exact(db, block)
+    assert block["selected"] is None
+    assert row_ids(block) == [ready.id, waits[0].id, waits[1].id]
+    assert block["open_tasks_listed"] == listed(3, 4)
 
 
 def test_more_than_five_waits_list_the_five_soonest_and_count_the_rest(db):

@@ -8,6 +8,10 @@ tells the agent to start a waiting task that can move now, except in a paused
 plan or when a wait ends within ``IMMINENT_SECONDS``: that wait is about to
 report, and the agent should let it.
 
+An executor with something ready lists ready work first, then held work, each
+in plan order (``ready_first``), so a ready task ranked below waits is never
+cut from the block (corsia#403).
+
 This module only orders and decides. When a wait ends comes from the
 admission projection's watch causes (``ends_at``); ``plans.close_next`` turns
 the order into rows and ``prompts.plan_tools`` owns every word.
@@ -17,8 +21,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-
-import plans.admission as admission
 
 #: Held conditions: the task is open but cannot move until its cause clears.
 HELD_CONDITIONS = frozenset({"paused", "blocked", "waiting"})
@@ -42,15 +44,17 @@ class IdleListing:
     pick_up: bool
 
 
-def idle_listing(db, plan, tasks: list, now: datetime) -> IdleListing | None:
+def idle_listing(
+    plan, tasks: list, projections: dict[str, dict], now: datetime,
+) -> IdleListing | None:
     """Return what an idle executor lists, or None when a task is ready or none is open.
 
-    ``tasks`` is every open task of the executor in plan order. A task a park
-    just set aside is one of them, so it is listed rather than left out.
+    ``tasks`` is every open task of the executor in plan order, and
+    ``projections`` their admission projections. A task a park just set aside
+    is one of them, so it is listed rather than left out.
     """
     if not tasks:
         return None
-    projections = admission.project_many([(row, plan) for row in tasks], db=db)
     if any(projections[str(row["id"])]["condition"] not in HELD_CONDITIONS for row in tasks):
         return None
     seconds = {str(row["id"]): _seconds_left(projections[str(row["id"])], now) for row in tasks}
@@ -72,6 +76,14 @@ def idle_listing(db, plan, tasks: list, now: datetime) -> IdleListing | None:
         total=len(tasks),
         pick_up=plan["state"] == "active" and bool(waits) and not imminent,
     )
+
+
+def ready_first(tasks: list, projections: dict[str, dict]) -> list:
+    """Return ``tasks`` with ready ones first, then held ones, each kept in plan order."""
+    def held(row) -> bool:
+        return projections[str(row["id"])]["condition"] in HELD_CONDITIONS
+
+    return sorted(tasks, key=held)
 
 
 def release_wait(projection: dict, row) -> dict:

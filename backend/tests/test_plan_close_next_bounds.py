@@ -97,6 +97,10 @@ def _worst_case_scene(db, monkeypatch):
     for node in others[:3]:
         queue_active(db, node.id)
         pause(db, plan.id, node.id, reason=reason, actor=actor)
+    # Ready work leads the listing, so the rest wait too and the long rows stay listed.
+    for node in others[3:]:
+        queue_active(db, node.id)
+        pause(db, plan.id, node.id, reason="later", actor=actor)
     titles = {
         others[0].id: EMOJI * 60 + QUOTE_RUN,
         others[1].id: QUOTE_RUN + EMOJI * 60,
