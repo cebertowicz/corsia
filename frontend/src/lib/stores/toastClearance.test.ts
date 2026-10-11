@@ -63,6 +63,16 @@ describe('toast clearance', () => {
 		expect(get(clearance)).toBe(0);
 	});
 
+	it('uses a resting measurement when a sheet is transformed at registration', () => {
+		const clearance = createToastClearanceStore();
+		const drawer = surface(window.innerHeight);
+		Object.defineProperty(drawer, 'offsetHeight', { configurable: true, value: 440 });
+		const unregister = clearance.register(drawer, { measure: () => drawer.offsetHeight });
+
+		expect(get(clearance)).toBe(440);
+		unregister();
+	});
+
 	it('updates when a registered surface resizes', () => {
 		const clearance = createToastClearanceStore();
 		let top = 620;
