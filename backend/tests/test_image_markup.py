@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import io
+import math
+from itertools import combinations
 
 from PIL import Image
 
-from doceditor.image_markup import MAX_RENDER_SIDE, Mark, Region, place_tag, render_marked_image, tag_geometry
+from doceditor.image_markup import MAX_RENDER_SIDE, Mark, Region, place_tag, place_tags, render_marked_image, tag_geometry
 
 
 def _png(width: int, height: int, color=(240, 240, 240)) -> bytes:
@@ -60,6 +62,23 @@ def test_a_point_keeps_its_tag_up_and_right_unless_clipped():
     cx, cy, side = place_tag(Region(0.999, 0.001), 1000, 1000, radius=10, gap=3)
     assert side != "up-right"
     assert _inside(cx, cy, 10, 1000, 1000)
+
+
+def test_tags_on_close_neighbours_do_not_overlap():
+    # Points on adjacent buttons of a screenshot, a box beside them; each tag keeps clear of the earlier ones.
+    regions = [Region(0.50, 0.50), Region(0.51, 0.50), Region(0.50, 0.51), Region(0.47, 0.49, 0.02, 0.02)]
+    tags = place_tags(regions, 1000, 1000, radius=10, gap=3)
+
+    assert [side for _, _, side in tags][:2] == ["up-right", "down-right"]
+    for (ax, ay, _), (bx, by, _) in combinations(tags, 2):
+        assert math.hypot(ax - bx, ay - by) >= 2 * (10 + 2)
+
+
+def test_a_crowded_tag_still_takes_a_spot_on_the_image():
+    # With every outside spot taken, a tag overlaps rather than leaving the image.
+    tags = place_tags([Region(0.0, 0.0, 1.0, 0.5)] * 2, 1000, 1000, radius=10, gap=3)
+
+    assert [side for _, _, side in tags] == ["inside", "inside"]
 
 
 def test_render_draws_the_tag_outside_the_box_and_leaves_the_corner_clear():

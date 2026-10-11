@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { agentColor } from '$lib/docPresence';
-import { placeTag } from '$lib/imageRegions';
+import { placeTag, placeTags } from '$lib/imageRegions';
 import { projectColor } from '$lib/utils/projectColors';
 import contract from './fixtures/image-region-parity.contract.json';
 
@@ -20,5 +20,14 @@ describe('image region parity contract', () => {
 		expect(tag.side).toBe(expected.side);
 		expect(tag.x).toBeCloseTo(expected.x, 3);
 		expect(tag.y).toBeCloseTo(expected.y, 3);
+	});
+
+	it.each(contract.tag_sets)('placeTags: $case', ({ regions, width, height, radius, gap, expected }) => {
+		const tags = placeTags(regions, { width, height }, radius, gap);
+		expect(tags.map((tag) => tag.side)).toEqual(expected.map((tag) => tag.side));
+		tags.forEach((tag, i) => {
+			expect(tag.x).toBeCloseTo(expected[i].x, 3);
+			expect(tag.y).toBeCloseTo(expected[i].y, 3);
+		});
 	});
 });

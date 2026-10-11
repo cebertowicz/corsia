@@ -31,8 +31,12 @@ export const isPoint = (region: ImageRegion): boolean => region.w <= 0 && region
 
 const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high);
 
-/** The tag's centre in pixels of a `size` frame, and the side it took. */
-export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, gap = TAG_GAP): Point & { side: TagSide } {
+/**
+ * The tag's centre in pixels of a `size` frame, and the side it took. A spot that
+ * would overlap a tag already at one of `avoid`'s centres is passed over while
+ * another spot fits.
+ */
+export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, gap = TAG_GAP, avoid: Point[] = []): Point & { side: TagSide } {
 	const { width, height } = size;
 	const r = radius + 2;
 	const x0 = region.x * width;
@@ -46,6 +50,8 @@ export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, g
 		const x1 = x0 + region.w * width;
 		spots = [[x0 - gap - r, y0 + r, 'left'], [x0 + r, y0 - gap - r, 'above'], [x1 + gap + r, y0 + r, 'right']];
 	}
+	const clear = (cx: number, cy: number) => avoid.every((other) => Math.hypot(cx - other.x, cy - other.y) >= 2 * r);
+	for (const [x, y, side] of spots) if (fits(x, y) && clear(x, y)) return { x, y, side };
 	for (const [x, y, side] of spots) if (fits(x, y)) return { x, y, side };
 	const [x, y, side]: [number, number, TagSide] = isPoint(region) ? spots[0] : [x0 + gap + radius, y0 + gap + radius, 'inside'];
 	// A tag never leaves the image, even on one smaller than the tag itself.
@@ -54,6 +60,13 @@ export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, g
 		y: clamp(y, Math.min(r, height / 2), Math.max(height - r, height / 2)),
 		side,
 	};
+}
+
+/** Every tag on one image, placed in `regions`' order, each keeping clear of those before it. */
+export function placeTags(regions: ImageRegion[], size: Size, radius = TAG_RADIUS, gap = TAG_GAP): (Point & { side: TagSide })[] {
+	const placed: (Point & { side: TagSide })[] = [];
+	for (const region of regions) placed.push(placeTag(region, size, radius, gap, placed));
+	return placed;
 }
 
 /** The region a drag from `a` to `b` (pixels in a `size` frame) draws; a short drag is a point at `a`. */

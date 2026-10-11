@@ -16,6 +16,7 @@ fetched. Callers run it off the event loop.
 from __future__ import annotations
 
 import io
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Sequence
@@ -112,13 +113,15 @@ TagSide = Literal["left", "above", "right", "inside", "up-right", "up-left", "do
 
 def place_tag(
     region: Region, width: int, height: int, *, radius: float, gap: float,
+    avoid: Sequence[tuple[float, float]] = (),
 ) -> tuple[float, float, TagSide]:
     """Return the tag's centre and the side it took, for a ``width`` x ``height`` image.
 
     A spot is usable only when the whole tag, its white ring included, lies on
     the image. A box tries left of its top-left corner, above it, then right of
     the box, and falls back to inside its corner. A point tries up-right, then
-    the other diagonals.
+    the other diagonals. A spot that would overlap a tag already centred at one
+    of ``avoid`` is passed over while another spot fits.
     """
     r = radius + 2  # the white ring drawn around the tag
     x0, y0 = region.x * width, region.y * height
@@ -142,6 +145,12 @@ def place_tag(
             (x0 + r, y0 - gap - r, "above"),
             (x1 + gap + r, y0 + r, "right"),
         ]
+    def clear(cx: float, cy: float) -> bool:
+        return all(math.hypot(cx - ox, cy - oy) >= 2 * r for ox, oy in avoid)
+
+    for cx, cy, side in spots:
+        if fits(cx, cy) and clear(cx, cy):
+            return cx, cy, side
     for cx, cy, side in spots:
         if fits(cx, cy):
             return cx, cy, side
@@ -153,6 +162,17 @@ def place_tag(
     cx = min(max(cx, min(r, width / 2)), max(width - r, width / 2))
     cy = min(max(cy, min(r, height / 2)), max(height - r, height / 2))
     return cx, cy, side
+
+
+def place_tags(
+    regions: Sequence[Region], width: int, height: int, *, radius: float, gap: float,
+) -> list[tuple[float, float, TagSide]]:
+    """Every tag on one image, placed in ``regions``' order, each clear of those before it."""
+    placed: list[tuple[float, float, TagSide]] = []
+    for region in regions:
+        placed.append(place_tag(region, width, height, radius=radius, gap=gap,
+                                avoid=[(x, y) for x, y, _ in placed]))
+    return placed
 
 
 def _draw_region(draw: ImageDraw.ImageDraw, mark: Mark, img: Image.Image, scale: _Scale) -> None:
@@ -170,10 +190,10 @@ def _draw_region(draw: ImageDraw.ImageDraw, mark: Mark, img: Image.Image, scale:
     draw.rectangle((x0, y0, x1, y1), outline=color, width=s)
 
 
-def _draw_tag(draw: ImageDraw.ImageDraw, mark: Mark, img: Image.Image, scale: _Scale) -> None:
+def _draw_tag(draw: ImageDraw.ImageDraw, mark: Mark, centre: tuple[float, float], scale: _Scale) -> None:
     color = _rgb(mark.color)
     r = scale.radius
-    cx, cy, _side = place_tag(mark.region, img.width, img.height, radius=r, gap=scale.stroke + 1)
+    cx, cy = centre
     draw.ellipse((cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), fill="white")
     draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color)
     draw.text((cx, cy), str(mark.number), fill="white", font=scale.font, anchor="mm")
@@ -212,8 +232,10 @@ def render_marked_image(data: bytes, marks: Sequence[Mark]) -> bytes:
     scale = _scale_for(img)
     for mark in marks:
         _draw_region(draw, mark, img, scale)
-    for mark in marks:
-        _draw_tag(draw, mark, img, scale)
+    tags = place_tags([mark.region for mark in marks], img.width, img.height,
+                      radius=scale.radius, gap=scale.stroke + 1)
+    for mark, (cx, cy, _side) in zip(marks, tags, strict=True):
+        _draw_tag(draw, mark, (cx, cy), scale)
     out = io.BytesIO()
     img.save(out, format="PNG", optimize=True)
     return out.getvalue()

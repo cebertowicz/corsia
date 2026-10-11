@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_COLORS } from '$lib/docPresence';
-import { describeRegion, nearestTarget, placeTag, regionColor, regionFromDrag, regionRect } from './imageRegions';
+import { describeRegion, nearestTarget, placeTag, placeTags, regionColor, regionFromDrag, regionRect, TAG_RADIUS } from './imageRegions';
 
 const FRAME = { width: 800, height: 500 };
 
@@ -32,6 +32,24 @@ describe('placeTag', () => {
 	it('keeps the whole tag on an image smaller than the tag', () => {
 		const tag = placeTag({ x: 0, y: 0, w: 1, h: 1 }, { width: 10, height: 10 });
 		expect(tag).toMatchObject({ x: 5, y: 5, side: 'inside' });
+	});
+});
+
+describe('placeTags', () => {
+	it('keeps each tag clear of the ones before it on close neighbours', () => {
+		// Points on adjacent buttons of a screenshot, a few pixels apart at the default canvas.
+		const regions = [{ x: 0.5, y: 0.5, w: 0, h: 0 }, { x: 0.51, y: 0.5, w: 0, h: 0 }, { x: 0.5, y: 0.52, w: 0, h: 0 }];
+		const tags = placeTags(regions, FRAME);
+		for (let i = 0; i < tags.length; i++) {
+			for (let j = i + 1; j < tags.length; j++) {
+				expect(Math.hypot(tags[i].x - tags[j].x, tags[i].y - tags[j].y)).toBeGreaterThanOrEqual(2 * (TAG_RADIUS + 2));
+			}
+		}
+	});
+
+	it('lets a crowded tag overlap rather than leave the image', () => {
+		const tags = placeTags([{ x: 0, y: 0, w: 1, h: 0.5 }, { x: 0, y: 0, w: 1, h: 0.5 }], FRAME);
+		expect(tags.map((tag) => tag.side)).toEqual(['inside', 'inside']);
 	});
 });
 
