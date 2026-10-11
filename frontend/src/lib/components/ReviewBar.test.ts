@@ -51,6 +51,23 @@ describe('ReviewBar', () => {
 		expect(button('Approve with changes')).toBeTruthy();
 	});
 
+	it('keeps a long ask compact and reveals both askers only when expanded', async () => {
+		api.fetchReviewBar.mockResolvedValue({
+			...read(0),
+			ask_reason: 'Please review the detailed deployment and rollback plan before the handoff.',
+			other_askers: ['Research'],
+			other_asks: [{ name: 'Research', reason: 'Check the evidence links.' }],
+			other_request_count: 1,
+		});
+		await render();
+		expect(host.textContent).toContain('Docs agent');
+		expect(host.textContent).not.toContain('Check the evidence links.');
+		host.querySelector<HTMLButtonElement>('.rb-line')!.click();
+		flushSync();
+		expect(host.textContent).toContain('Please review the detailed deployment and rollback plan before the handoff.');
+		expect(host.textContent).toContain('Research: Check the evidence links.');
+	});
+
 	it('shows nothing when no ask is raised', async () => {
 		api.fetchReviewBar.mockResolvedValue({ ...read(0), ask_raised: false });
 		component = mount(ReviewBar, { target: host, props: { artifactId: 'doc-1' } });
@@ -65,13 +82,13 @@ describe('ReviewBar', () => {
 		await render();
 		button('Request changes')!.click();
 		flushSync();
-		const input = host.querySelector<HTMLInputElement>('input')!;
+		const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		button('Request changes')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		expect(host.querySelector('.review-bar.receipt')).toBeNull();
-		expect(host.querySelector<HTMLInputElement>('input')!.value).toBe('Tighten the rollout');
+		expect(host.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Tighten the rollout');
 	});
 
 	it('R4: a send from the note keeps the note, busies only the pressed button, and returns focus to the note on failure', async () => {
@@ -81,14 +98,14 @@ describe('ReviewBar', () => {
 		await render();
 		button('Request changes')!.click();
 		flushSync();
-		const input = host.querySelector<HTMLInputElement>('input')!;
+		const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		button('Request changes')!.click();
 		flushSync();
 
 		// Mid-send: the same input is still mounted, the bar is still the note layout, and only the sender spins.
-		expect(host.querySelector('input')).toBe(input);
+		expect(host.querySelector('textarea')).toBe(input);
 		expect(host.querySelector('.review-bar.noting')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
 		expect(host.querySelectorAll('.spinner')).toHaveLength(1);
@@ -98,7 +115,7 @@ describe('ReviewBar', () => {
 
 		fail(new Error('500'));
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
-		expect(host.querySelector('input')).toBe(input);
+		expect(host.querySelector('textarea')).toBe(input);
 		expect(input.value).toBe('Tighten the rollout');
 		await vi.waitFor(() => expect(document.activeElement).toBe(input));
 	});
@@ -123,15 +140,15 @@ describe('ReviewBar', () => {
 		let fail!: (error: Error) => void;
 		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
 		await render();
-		const region = [...host.querySelectorAll<HTMLElement>('[role="status"].sr-only')][0];
+		const region = host.querySelector<HTMLElement>('.rb-status[role="status"]');
 		expect(region).toBeTruthy();
 		expect(region.textContent).toBe('');
 		button('Approve')!.click();
 		flushSync();
 		expect(region.isConnected).toBe(true);
-		expect(region.textContent).toBe('Sending your review');
+		expect(region.textContent).toBe('Sending your review…');
 		fail(new Error('500'));
-		await vi.waitFor(() => expect(region.textContent).toBe(''));
+		await vi.waitFor(() => expect(region.textContent).toBe(SEND_FAILED));
 	});
 
 	it('R2: the receipt takes focus and is announced as status', async () => {
@@ -155,7 +172,7 @@ describe('ReviewBar', () => {
 		expect(api.answerReview).not.toHaveBeenCalled();
 		button('Request changes')!.click();
 		flushSync();
-		expect(host.querySelector('input')).toBeNull();
+		expect(host.querySelector('textarea')).toBeNull();
 	});
 
 	it('a plain Approve is not blocked by a draft', async () => {

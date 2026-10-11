@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
+	import DocFeedbackStatus, { type FeedbackSummary } from './DocFeedbackStatus.svelte';
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
@@ -40,6 +40,7 @@
 		tabText = '',
 		onReopen,
 		onRead,
+		feedbackSummary = $bindable({ pending: 0, owner: null, graceMinutes: null, sending: false }),
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
@@ -71,6 +72,8 @@
 		tabText?: string;
 		onReopen?: () => void;
 		onRead?: () => void;
+		/** The unsent comments, for the pill's dot and accessible summary. */
+		feedbackSummary?: FeedbackSummary;
 	} = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
@@ -82,6 +85,8 @@
 	let placementReloadRequested = $state(false);
 	let placementReloadSeenBusy = $state(false);
 	let commentStatus = $state<HTMLButtonElement>();
+	// Threads name the pill; messages name the unsent delivery state.
+	const commentLabel = $derived(`${commentCount} open thread${commentCount === 1 ? '' : 's'}${feedbackSummary.pending ? `, ${feedbackSummary.pending} message${feedbackSummary.pending === 1 ? '' : 's'} not sent yet` : ''}`);
 	const uid = $props.id();
 	const unplacedId = `unplaced-${uid}`;
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
@@ -146,6 +151,7 @@
 	export function commentCreated(): void { feedbackStatus?.commentCreated(); }
 	export function sync(id: string, feedback: CommentFeedback): void { feedbackStatus?.sync(id, feedback); }
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
+	export function sendNow(): Promise<void> | undefined { return feedbackStatus?.sendNow(); }
 </script>
 
 <header class="document-header" use:detailsKeys>
@@ -158,58 +164,35 @@
 		</button>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
+		<span class="document-tools">
+			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
+			<button type="button" class="doc-tool comment-status" bind:this={commentStatus} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
+				aria-label={commentsLoading ? 'Loading comments' : commentLabel}
+				aria-describedby={orphanedCount ? unplacedId : undefined}
+				title={commentsLoading ? 'Comments are loading' : orphanedCount ? unplacedPhrase : undefined} onclick={(event) => onOpenComments(event.currentTarget)}>
+				<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if orphanedCount}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
+				<span class="count">{commentsLoading ? '…' : commentCount}</span>{#if !commentsLoading}<span class="count-unit">{commentCount === 1 ? 'thread' : 'threads'}</span>{/if}{#if feedbackSummary.pending}<span class="unsent-dot" aria-hidden="true"></span>{/if}
+				{#if orphanedCount}<span id={unplacedId} class="sr-only">{unplacedPhrase}</span>{/if}
+			</button>
+			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
+		</span>
 	</div>
 {#if freshness && freshnessPresentation}
 	<div class="document-metadata" class:expanded={detailsOpen}>
 		<div class="metadata-owner">Owner: {freshness.owner_name}</div>
-		{#if freshnessPresentation.datetime}
-			<time datetime={freshnessPresentation.datetime}>
-				{freshnessPresentation.phrase}
-				{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}
-			</time>
-		{:else}
-			<span class="metadata-secondary">{freshnessPresentation.phrase}</span>
-		{/if}
+		{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>{:else}<span class="metadata-secondary">{freshnessPresentation.phrase}</span>{/if}
 		{#if freshnessPresentation.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
-		{#if shouldOfferVerification(freshness)}
-			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>
-		{/if}
-		<!-- Verification recovery is rendered outside the static metadata disclosure. -->
+		{#if shouldOfferVerification(freshness)}<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>{/if}
 	</div>
 {/if}
 
-<DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
-	connectionStatusId={liveConnectionDescriptionId} />
+<DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead} connectionStatusId={liveConnectionDescriptionId} />
 <span class:sr-only={!verificationError && !placementAnnouncement} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || placementAnnouncement || staleAnnouncement}</span>
-{#if readonly && ready}
-	<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>
-{/if}
+{#if readonly && ready}<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>{/if}
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
-	<div class="document-status-row">
-		<span class="feedback-controls"><DocFeedbackStatus
-			bind:this={feedbackStatus}
-			{artifactId}
-			{targetInstanceId}
-			{onFeedbackChanged}
-		/></span>
-		{#if stale && ready}
-			<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
-		{/if}
-		<button type="button" class="doc-tool comment-status" bind:this={commentStatus} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
-			aria-label={commentsLoading ? 'Loading comments' : `${commentCount} comment${commentCount === 1 ? '' : 's'}`}
-			aria-describedby={orphanedCount ? unplacedId : undefined}
-			title={commentsLoading ? 'Comments are loading' : orphanedCount ? unplacedPhrase : undefined} onclick={(event) => onOpenComments(event.currentTarget)}>
-			<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if orphanedCount}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
-			<span class="count">{commentsLoading ? '…' : commentCount}</span>
-			{#if orphanedCount}<span id={unplacedId} class="sr-only">{unplacedPhrase}</span>{/if}
-		</button>
-		{#if orphanedCount && placementReloadVisible}
-			<button type="button" class="doc-tool orphan-reload" aria-label="Reload comment placements"
-				aria-disabled={placementReloadUnavailable || placementReloading ? 'true' : undefined}
-				aria-describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined}
-				onclick={reloadPlacements}>Place again</button>
-		{/if}
-		{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
+	<div class="document-status-row document-notices">
+		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} bind:summary={feedbackSummary} /></span>
+		{#if orphanedCount && placementReloadVisible}<button type="button" class="doc-tool orphan-reload" aria-label="Reload comment placements" aria-disabled={placementReloadUnavailable || placementReloading ? 'true' : undefined} aria-describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</button>{/if}
 	</div>
 {/if}
 </header>
@@ -259,5 +242,42 @@
 		.feedback-controls :global(> .sending-now:not(.grace)) { flex: 1; min-width: 0; }
 		.feedback-controls :global(> .sending-now:not(.grace) > .btn) { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
+	}
+
+	/* Slice-one review header: the title is already named by the tab or app bar, so only document tools remain in the slim row. */
+	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); }
+	.document-identity { justify-content: flex-end; }
+	.identity-details { display: none; }
+	.document-tools { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
+	.count-unit { color: var(--text-tertiary); }
+	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
+	.document-notices:not(:has(.undelivered:not(.idle), .orphan-reload)) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+	.document-header :global(.doc-tool) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
+	.document-header :global(.doc-tool:hover:not(:disabled)) { background: var(--bg-tertiary); color: var(--text-primary); }
+	.document-header :global(.doc-tool:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.document-header :global(.doc-tool:disabled) { opacity: 0.5; cursor: not-allowed; }
+	.document-header :global(.doc-tool.warn) { background: var(--amber-bg); color: var(--amber-text); }
+	.document-header :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
+	.document-header :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
+	@container doc-canvas (max-width: 600px) {
+		.identity-details:has(.identity-age) { display: flex; }
+		.count-unit { display: none; }
+		.document-title { display: none; }
+		.document-header :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
+	}
+	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
+	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
+	.document-header:has(:global(.rb-slot)) > :global(*) { grid-column: 1 / -1; }
+	.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-column: 1 / -1; grid-row: 1 / 3; }
+	.document-header:has(:global(.rb-slot)) > .document-identity { display: contents; }
+	.document-header:has(:global(.rb-slot)) .identity-details { grid-column: 1 / -1; grid-row: 3; }
+	.document-header:has(:global(.rb-slot)) :global(.presence-row) { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
+	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
+	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
+	@media (any-pointer: coarse) {
+		@container doc-canvas (max-width: 600px) {
+			.document-header:has(:global(.rb-slot)) { align-items: center; }
+			.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: 44px; }
+		}
 	}
 </style>

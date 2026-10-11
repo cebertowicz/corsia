@@ -7,25 +7,40 @@
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
 
+	export type FeedbackSummary = { pending: number; owner: string | null; graceMinutes: number | null; sending: boolean };
+
 	let {
 		artifactId,
 		targetInstanceId,
 		onFeedbackChanged,
 		compact = false,
+		summary = $bindable({ pending: 0, owner: null, graceMinutes: null, sending: false }),
 	}: {
 		artifactId: string | null;
 		targetInstanceId: string | null;
 		onFeedbackChanged?: () => void;
 		/** Shown in a narrow bar (DocFeedbackControls). */
 		compact?: boolean;
+		/** Header and drawer state derived from the one feedback owner. */
+		summary?: FeedbackSummary;
 	} = $props();
 
 	const feedback = holdDocFeedback(() => ({ artifactId, targetInstanceId }), () => onFeedbackChanged?.());
+
+	$effect(() => {
+		summary = {
+			pending: feedback.pendingCount,
+			owner: feedback.ownerName,
+			graceMinutes: feedback.sendingGrace ? feedback.graceMinutes : null,
+			sending: feedback.sending,
+		};
+	});
 
 	export function commentCreated() { feedback.commentCreated(); }
 	export function sync(id: string, current: CommentFeedback) { feedback.sync(id, current); }
 	/** The batch itself, for an image viewer over this document to show and send. */
 	export function controller(): DocFeedback { return feedback; }
+	export function sendNow(): Promise<void> { return feedback.send(); }
 
 	onMount(() => subscribeToDocumentCommentChanges(
 		() => feedback.artifactId,

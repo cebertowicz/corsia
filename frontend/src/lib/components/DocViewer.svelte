@@ -38,6 +38,7 @@
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
 	import DocCanvasActivity from './DocCanvasActivity.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
+	import type { FeedbackSummary } from './DocFeedbackStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { toasts } from '$lib/stores/toast';
 	import { shouldReloadPresenceEdit } from '$lib/docPresence';
@@ -83,6 +84,7 @@
 	let editText = $state('');
 	let suggestionBusyId = $state<string | null>(null);
 	let feedbackStatus = $state<DocViewerStatus>();
+	let feedbackSummary = $state<FeedbackSummary>({ pending: 0, owner: null, graceMinutes: null, sending: false });
 
 	// Reactive save state for the currently loaded target, sourced from the
 	// per-tab-instance save queue — never a single shared "current doc" flag.
@@ -308,10 +310,11 @@
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
 		bind:this={feedbackStatus}
+		bind:feedbackSummary
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !openRefusal}
-		commentCount={listedComments.length}
+		commentCount={listedComments.filter((comment) => !comment.resolved).length}
 		{orphanedCount}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
@@ -332,7 +335,7 @@
 		onReopen={() => reloadNonce += 1}
 		onRead={() => reloadNonce += 1}
 	>
-		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
+		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
 		{#snippet presence()}
 			{#if target && loadedArtifactId}
 				<DocPresenceStatus {target} artifactId={loadedArtifactId} {docState} root={docRoot}
