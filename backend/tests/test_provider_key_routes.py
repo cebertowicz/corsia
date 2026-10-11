@@ -247,8 +247,7 @@ def test_a_saved_key_follows_the_base_url_only_to_the_same_host(client):
 
 @pytest.mark.parametrize("failure", ["host", "commit"])
 @pytest.mark.parametrize("provider, old_base, new_base", [
-    ("openai", "https://api.openai.com/v1", "https://elsewhere.example/v1"),  # cloud
-    ("omlx", "http://127.0.0.1:8000/v1", "http://elsewhere.example:8000/v1"),  # network
+    ("openai", "https://api.openai.com/v1", "https://elsewhere.example/v1"),
 ])
 def test_a_failed_base_write_keeps_the_old_key(client, monkeypatch, provider, old_base, new_base, failure):
     path = f"/api/settings/providers/{provider}"
@@ -270,6 +269,24 @@ def test_a_failed_base_write_keeps_the_old_key(client, monkeypatch, provider, ol
     assert key_store.resolve_provider(provider) == old_value
     assert (get_setting("providers") or {})[provider]["apiBase"] == old_base
     assert list(values_after_a_sweep().values()) == [old_value]
+
+
+def test_network_provider_refuses_an_api_key_it_would_not_store(client):
+    response = client.put(
+        "/api/settings/providers/omlx",
+        json={"api_key": VALUE, "api_base": "http://127.0.0.1:8000/v1"},
+        headers=_header(SESSION),
+    )
+
+    assert response.status_code == 400
+    assert "network-servers" in response.json()["detail"]
+    assert key_store.resolve_provider("omlx") is None
+
+    response = client.put(
+        "/api/settings/providers/omlx", json={"api_base": "http://127.0.0.1:8000/v1"}, headers=_header(SESSION),
+    )
+    assert response.status_code == 200
+    assert response.json()["has_key"] is False
 
 
 @pytest.mark.parametrize("failure", ["host", "commit"])

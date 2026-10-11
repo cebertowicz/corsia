@@ -2,8 +2,7 @@
 
 A provider row says whether a key is set and never carries it. A legacy
 provider appears only while it holds a key and can be removed there with the
-password. A key environment variable that is set but no longer read is noted
-by presence alone.
+password. A key environment variable CORSIA ignores is noted by presence alone.
 """
 
 from __future__ import annotations
