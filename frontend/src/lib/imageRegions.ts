@@ -118,6 +118,27 @@ export function revealCentre(region: ImageRegion, tag: DOMRect | null, frame: DO
 	return { x: ((left + right) / 2 - frame.left) / frame.width, y: ((top + bottom) / 2 - frame.top) / frame.height };
 }
 
+const intersects = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+/**
+ * The comments whose agent name, beside its tag in `layer`, covers another
+ * tag on screen or another comment's point, so the name hides at rest.
+ */
+export function crowdedNames(layer: HTMLElement): Set<string> {
+	const tagsOnScreen = [...layer.querySelectorAll<HTMLElement>('[data-region-tag]')].filter((tag) => !tag.inert);
+	const dots = [...layer.querySelectorAll<HTMLElement>('[data-region-dot]')];
+	const hidden = new Set<string>();
+	for (const tag of tagsOnScreen) {
+		const name = tag.querySelector<HTMLElement>('.name');
+		const id = tag.dataset.commentId;
+		if (!name || !id) continue;
+		const nameRect = name.getBoundingClientRect();
+		const covers = (other: HTMLElement) => intersects(nameRect, other.getBoundingClientRect());
+		if (tagsOnScreen.some((other) => other !== tag && covers(other)) || dots.some((dot) => dot.dataset.regionDot !== id && covers(dot))) hidden.add(id);
+	}
+	return hidden;
+}
+
 /** The target nearest `at` within the 44 px hit area, so overlapping targets go to the closer centre. */
 export function nearestTarget<T extends Point & { id: string }>(targets: T[], at: Point, reach = HIT_RADIUS): string | null {
 	let best: { id: string; d: number } | null = null;

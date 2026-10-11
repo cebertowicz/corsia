@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_COLORS } from '$lib/docPresence';
-import { describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, revealCentre, TAG_RADIUS } from './imageRegions';
+import { crowdedNames, describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, revealCentre, TAG_RADIUS } from './imageRegions';
 
 const FRAME = { width: 800, height: 500 };
 
@@ -126,5 +126,32 @@ describe('regionColor and describeRegion', () => {
 	it('describes boxes and points in words', () => {
 		expect(describeRegion({ x: 0.1, y: 0.2, w: 0.3, h: 0.1 })).toBe('box 30% wide, 10% tall at 10% across, 20% down');
 		expect(describeRegion({ x: 0.7, y: 0.6, w: 0, h: 0 })).toBe('point at 70% across, 60% down');
+	});
+});
+
+describe('crowdedNames', () => {
+	function element(html: string, rect: [number, number, number, number]) {
+		const holder = document.createElement('div');
+		holder.innerHTML = html;
+		const node = holder.firstElementChild as HTMLElement;
+		node.getBoundingClientRect = () => new DOMRect(...rect);
+		return node;
+	}
+	function tagWithName(id: string, name: [number, number, number, number]) {
+		const tag = element(`<button data-region-tag="${id}" data-comment-id="${id}"><span class="name"></span></button>`, [0, 0, 0, 0]);
+		tag.querySelector<HTMLElement>('.name')!.getBoundingClientRect = () => new DOMRect(...name);
+		return tag;
+	}
+	it("hides a name over another tag or another comment's point, but not over its own point or a leaving tag", () => {
+		const layer = document.createElement('div');
+		const leavingTag = element('<button data-region-tag="e" data-comment-id="e"></button>', [410, 8, 22, 22]);
+		leavingTag.inert = true;
+		layer.append(
+			tagWithName('a', [10, 10, 40, 12]), element('<button data-region-tag="b" data-comment-id="b"></button>', [30, 8, 22, 22]),
+			tagWithName('c', [200, 10, 40, 12]), element('<div data-region-dot="c"></div>', [210, 8, 14, 14]),
+			tagWithName('d', [400, 10, 40, 12]), leavingTag,
+			tagWithName('f', [600, 10, 40, 12]), element('<div data-region-dot="g"></div>', [610, 8, 14, 14]),
+		);
+		expect([...crowdedNames(layer)].sort()).toEqual(['a', 'f']);
 	});
 });

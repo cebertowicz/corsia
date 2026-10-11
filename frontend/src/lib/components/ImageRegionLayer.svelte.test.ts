@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ImageRegionLayer from './ImageRegionLayer.svelte';
 import type { DocComment } from '$lib/stores/docComments';
@@ -10,7 +10,7 @@ const OLD: ImageRegion = { x: 0.1, y: 0.1, w: 0.2, h: 0.2 };
 const NEW: ImageRegion = { x: 0.6, y: 0.5, w: 0.2, h: 0.2 };
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
-let animate: ReturnType<typeof vi.spyOn>;
+let animate: MockInstance<Element['animate']>;
 
 function comment(region: ImageRegion, id = 'a', regionNumber = 1): DocComment {
 	return { id, anchor: '', author: 'you', authorKind: 'user', text: id, at: 'now', resolved: false, replies: [], region, regionNumber };

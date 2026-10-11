@@ -8,8 +8,9 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import type { DocComment } from '$lib/stores/docComments';
 	import {
-		describeRegion, isPoint, nearestTarget, placeTags, regionFromDrag, regionRect, type ImageRegion, type Point,
+		crowdedNames, describeRegion, isPoint, nearestTarget, placeTags, regionFromDrag, regionRect, type ImageRegion, type Point,
 	} from '$lib/imageRegions';
+	import { regionMotion } from '$lib/imageRegionMotion';
 
 	/**
 	 * `movedFrom` is where a pin being moved was, while its new place saves.
@@ -97,35 +98,8 @@
 		const positions = placeTags(pinned.map((comment) => comment.region), size);
 		return pinned.map((comment, index) => ({ comment, key: `${comment.id}:${comment.saves}`, ...positions[index] }));
 	});
-	function motion() {
-		const root = getComputedStyle(document.documentElement);
-		return { duration: Number.parseFloat(root.getPropertyValue('--dur-tight')) || 0, easing: root.getPropertyValue('--ease-snap').trim() || 'ease-out' };
-	}
-	/** Marks and tags fade in where they appear and out where they leave, on the motion tokens, rather than popping. */
-	const fades = new WeakMap<Element, Animation>();
-	function fade(node: Element, _params: unknown, { direction }: { direction: 'in' | 'out' | 'both' }) {
-		const { duration, easing } = motion();
-		const opacity = () => { const value = Number.parseFloat(getComputedStyle(node).opacity); return Number.isNaN(value) ? 1 : value; };
-		// A fade that turns back starts where the last one reached.
-		const previous = fades.get(node);
-		const from = previous ? opacity() : null;
-		previous?.cancel();
-		const rest = opacity();
-		const frames = direction === 'out' ? [{ opacity: from ?? rest }, { opacity: 0 }] : [{ opacity: from ?? 0 }, { opacity: rest }];
-		fades.set(node, node.animate(frames, { duration, easing, fill: direction === 'out' ? 'forwards' : 'none' }));
-		return { duration };
-	}
-	/** A tag placed somewhere new because a neighbour came, went or moved glides there; with reduced motion it moves at once. */
-	const glides = new WeakMap<Element, Animation>();
-	function glide(node: Element, { from, to }: { from: DOMRect; to: DOMRect }) {
-		glides.get(node)?.cancel();
-		if (resized || get(prefersReducedMotion)) return { duration: 0 };
-		const { duration, easing } = motion();
-		glides.set(node, node.animate([{ translate: `${from.left - to.left}px ${from.top - to.top}px` }, { translate: '0px 0px' }], { duration, easing }));
-		return { duration };
-	}
+	const { fade, glide } = regionMotion(() => resized || get(prefersReducedMotion));
 	const preview = $derived(stroke ? regionFromDrag(stroke.from, stroke.to, size) : draft);
-	const intersects = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 	const sameIds = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((id) => b.has(id));
 	function showAgentName(comment: Pinned) {
 		return comment.authorKind === 'agent' && (comment.id === selectedId || comment.id === hoveredId || comment.id === focusedTag || !hiddenAgentNames.has(comment.id));
@@ -134,17 +108,7 @@
 	$effect(() => {
 		void tags;
 		if (!layer) return;
-		const tagsOnScreen = [...layer.querySelectorAll<HTMLElement>('[data-region-tag]')].filter((tag) => !tag.inert);
-		const dots = [...layer.querySelectorAll<HTMLElement>('[data-region-dot]')];
-		const hidden = new Set<string>();
-		for (const tag of tagsOnScreen) {
-			const name = tag.querySelector<HTMLElement>('.name');
-			const id = tag.dataset.commentId;
-			if (!name || !id) continue;
-			const nameRect = name.getBoundingClientRect();
-			const covers = (other: HTMLElement) => intersects(nameRect, other.getBoundingClientRect());
-			if (tagsOnScreen.some((other) => other !== tag && covers(other)) || dots.some((dot) => dot.dataset.regionDot !== id && covers(dot))) hidden.add(id);
-		}
+		const hidden = crowdedNames(layer);
 		if (!sameIds(hiddenAgentNames, hidden)) hiddenAgentNames = hidden;
 	});
 
