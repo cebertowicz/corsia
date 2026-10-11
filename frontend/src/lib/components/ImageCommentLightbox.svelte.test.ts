@@ -195,6 +195,17 @@ describe('ImageCommentLightbox', () => {
 			expect(scrollIntoView).not.toHaveBeenCalled();
 		});
 
+		it('scrolls the drawer back to the card when its already selected tag is picked again', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			await openDrawer();
+			card('second').querySelector<HTMLElement>('.ct')!.click();
+			await settle();
+			scrollTo.mockClear();
+			tag(3).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+			await settle();
+			expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }));
+		});
+
 		it('opens the drawer at the selected comment’s card, marked', async () => {
 			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 			tag(3).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));

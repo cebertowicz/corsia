@@ -166,7 +166,8 @@
 			chosen = nearestTarget(tags.map((tag) => ({ id: tag.comment.id, x: box.left + tag.x, y: box.top + tag.y })), { x: event.clientX, y: event.clientY }) ?? id;
 		}
 		const comment = pinned.find((item) => item.id === chosen);
-		if (comment) onPick(chosen, anchorFor(comment.region), event.currentTarget as HTMLElement);
+		// A pin saving at its new place is not picked: on a phone, the tap that placed it also lands on it as a click.
+		if (comment && !comment.movedFrom) onPick(chosen, anchorFor(comment.region), event.currentTarget as HTMLElement);
 	}
 	function onSurfaceKey(event: KeyboardEvent) {
 		if (event.key !== 'Enter' || readOnly) return;

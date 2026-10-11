@@ -340,9 +340,9 @@
 		transition: background-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap);
 	}
 	.lightbox :global(.control.icon) { width: 28px; padding: 0; }
-	/* Hover only where a pointer hovers, and never over a pressed or open control, so the pressed accent always shows. */
+	/* Hover only where a pointer hovers, and never over a pressed, open or held control, so the accent and press tint show. */
 	@media (hover: hover) {
-		.lightbox :global(.control:hover:not(:disabled):not([aria-pressed='true']):not([aria-expanded='true'])) { background: var(--bg-hover); color: var(--text-primary); }
+		.lightbox :global(.control:hover:not(:disabled):not(:active):not([aria-pressed='true']):not([aria-expanded='true'])) { background: var(--bg-hover); color: var(--text-primary); }
 	}
 	.lightbox :global(.control[aria-pressed='true']), .lightbox :global(.control[aria-expanded='true']) { background: var(--accent-bg); color: var(--accent); }
 	.lightbox :global(.control:disabled) { opacity: 0.4; cursor: default; }

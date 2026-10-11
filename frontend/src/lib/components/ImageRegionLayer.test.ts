@@ -89,6 +89,15 @@ describe('ImageRegionLayer', () => {
 		expect([old.style.left, old.classList.contains('leaving')]).toEqual(['10%', true]);
 	});
 
+	it('ignores the tap that lands on a pin while it saves at its new place', () => {
+		const { onPick } = render({
+			comments: [comment('a', 1, { x: 0.1, y: 0.1, w: 0, h: 0 })],
+			moving: { id: 'a', region: { x: 0.7, y: 0.6, w: 0, h: 0 } },
+		});
+		host.querySelector<HTMLElement>('[data-region-tag="1"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+		expect(onPick).not.toHaveBeenCalled();
+	});
+
 	it('shows a moved point pending at its new spot rather than as a bare dot', () => {
 		render({
 			comments: [comment('a', 1, { x: 0.1, y: 0.1, w: 0, h: 0 })],

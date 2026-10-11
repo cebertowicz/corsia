@@ -213,12 +213,14 @@ export function expectTransition(values: Array<string | number>, what: string) {
 export async function pressFrame(page: Page, target: Locator, testInfo: TestInfo, name: string, read: (el: Element) => string) {
 	const box = await target.boundingBox();
 	expect(box, `${name} has a box`).not.toBeNull();
-	const atRest = await target.evaluate(read);
 	await page.evaluate(() => window.addEventListener('click', (event) => {
 		event.preventDefault();
 		event.stopImmediatePropagation();
 	}, { capture: true, once: true }));
+	// Compared with the settled hover, so a hover tint can never pass for the press.
 	await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+	await page.waitForTimeout(400);
+	const atRest = await target.evaluate(read);
 	await page.mouse.down();
 	const held = await target.evaluate(read);
 	await still(page, testInfo, name, await clipOf(page, target));

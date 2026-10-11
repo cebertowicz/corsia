@@ -20,7 +20,7 @@
 	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
 	 * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
 	 */
-	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void };
+	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
@@ -58,6 +58,7 @@
 	let drawer = $state<HTMLElement>();
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
+	const picks = $derived(image?.picks ?? 0);
 	let navigationNotice = $state('');
 	const byNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 	const displayed = $derived.by(() => {
@@ -106,6 +107,8 @@
 	// An image's selected comment, picked on the image or there when the drawer opens, is scrolled to and marked in it.
 	$effect(() => {
 		const id = focusedId;
+		// Picking the selected tag again scrolls back to its card.
+		void picks;
 		if (!isImage || surfaceState?.kind !== 'list' || !id) return;
 		void tick().then(() => scrollToCard(id));
 	});

@@ -258,7 +258,8 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await page.reload();
 			await page.getByText(seeded.sessionTitle).first().click();
 			await expect(viewer(page).locator('.load-error')).toBeVisible();
-			await expect(commentButton(page)).toBeDisabled();
+			await expect(viewer(page).getByRole('button', { name: 'Try again' })).toBeVisible();
+			await expect(commentButton(page)).toHaveCount(0);
 			await shoot(page, testInfo, '1440-41-image-failed', true);
 		} finally {
 			fs.rmSync(seeded.imagePath, { force: true });
@@ -325,7 +326,8 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await sheet(page).getByRole('button', { name: 'Move pin' }).tap();
 			await expect(sheet(page)).toHaveCount(0);
 			const release = await holdThenFailMove(page);
-			const spot = await at(page, .55, .7);
+			// Clear of every tag, since a tag keeps its own press in box mode.
+			const spot = await at(page, .35, .85);
 			await touchDrag(page, spot, spot);
 			await expect(commentButton(page)).toContainText('Moving pin…');
 			await expect(tag(page, 1)).toHaveClass(/pending/);
@@ -339,7 +341,7 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			// A comment that fails to post keeps its text in the sheet.
 			await failNextPost(page, seeded);
 			await commentButton(page).tap();
-			await touchDrag(page, await at(page, .2, .3), await at(page, .5, .5));
+			await touchDrag(page, await at(page, .15, .75), await at(page, .45, .95));
 			await sheet(page).locator('textarea').fill('Too much padding on phones');
 			await sheet(page).getByRole('button', { name: 'Comment', exact: true }).tap();
 			await expect(toast(page, "Couldn't post the comment")).toBeVisible();

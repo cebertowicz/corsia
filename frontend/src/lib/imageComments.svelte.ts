@@ -37,6 +37,8 @@ export function createImageComments(context: {
 	let draftBody = $state('');
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
+	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
+	let listPicks = $state(0);
 
 	function show(id: string, anchor: CommentAnchor) {
 		focusedDocComment.set(id);
@@ -94,7 +96,7 @@ export function createImageComments(context: {
 	 */
 	function pick(id: string, anchor: () => DOMRect | null, opener: HTMLElement) {
 		draftRegion = null;
-		if (ui.state?.kind === 'list') { focusedDocComment.set(id); return; }
+		if (ui.state?.kind === 'list') { focusedDocComment.set(id); listPicks += 1; return; }
 		ui.focusMarker([id], opener, anchor);
 	}
 	/** A card in the drawer was selected: the drawer stays, the tag is picked and scrolled into view. */
@@ -133,6 +135,7 @@ export function createImageComments(context: {
 		get moving() { return moving?.id ?? null; },
 		get movingRegion() { return moving?.region ?? null; },
 		get moveSaving() { return !!moving?.region; },
+		get listPicks() { return listPicks; },
 		get draftRegion() { return draftRegion; },
 		get selectedId() {
 			if (ui.state?.kind === 'thread') return ui.state.id;
