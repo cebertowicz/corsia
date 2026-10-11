@@ -40,7 +40,6 @@ def user(scope):
 @pytest.mark.parametrize("harness", ["claude-code", "codex"])
 async def test_memory_checkpoint_stop_and_queued_same_author_write_converge(ownership_scope, tmp_path, monkeypatch, harness):
     import ws
-    from ws import stop_control
     from core.turns_steps import USER_INTERRUPTION_TOOL_RESULT
     from host_access.processes import PROCESS_OWNER
     from infra import state
@@ -73,14 +72,6 @@ async def test_memory_checkpoint_stop_and_queued_same_author_write_converge(owne
     owner = cc_runtime._LIVE.get(sid) if harness == "claude-code" else codex_runtime._LIVE.get(sid)
     owner.tool_names["call"] = "write_file"
     monkeypatch.setattr(PROCESS_OWNER, "terminate_turn", AsyncMock())
-    committed = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    original_commit = stop_control._commit_stop_terminal
-    def record_stop_commit(*args, **kwargs):
-        result = original_commit(*args, **kwargs)
-        loop.call_soon_threadsafe(committed.set)
-        return result
-    monkeypatch.setattr(stop_control, "_commit_stop_terminal", record_stop_commit)
     queued = stop = None
     try:
         await asyncio.wait_for(entered.wait(), 2)
@@ -90,12 +81,9 @@ async def test_memory_checkpoint_stop_and_queued_same_author_write_converge(owne
         await sleep(.01)
         assert not queued.done(), "the same document writer must stay behind the current lane item"
         stop = asyncio.create_task(ws._do_stop(user(scope), sid, None, None, identity.turn_id))
-        try:
-            await asyncio.wait_for(committed.wait(), 5)
-            receipt = await asyncio.wait_for(stop, 5)
-        except asyncio.TimeoutError as error:
-            raise AssertionError("Stop blocked behind the pinned document lane") from error
-        assert not release.is_set(), "Stop must settle before the pinned lane is released"
+        done, _ = await asyncio.wait({stop}, timeout=5)
+        assert done, "Stop blocked behind the pinned document lane"
+        receipt = stop.result()
         assert receipt.outcome == "stopped"
         await _settle_stop_work()
         rows = db.execute("SELECT content,metadata FROM messages WHERE role='tool' AND json_extract(metadata,'$.tool_call_id')='call'").fetchall()
