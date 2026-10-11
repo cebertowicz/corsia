@@ -153,6 +153,20 @@ describe('contract-v2 server display keys', () => {
 		expect(nodeSubline(value)).toMatch(/^Archived/);
 	});
 
+	it.each([
+		['complete', 'Done'],
+		['closed', 'Won’t do'],
+		['failed', 'Failed'],
+	] as const)('says what an open container’s %s work did, row and details alike', (tone, label) => {
+		const value = node({
+			state: 'active',
+			branch_progress: { done: 3, total: 3 },
+			display: { label_key: 'finished', tone_key: tone },
+		});
+		expect(nodeDisplayLabel(value)).toBe(label);
+		expect(nodeSubline(value)).toMatch(new RegExp(`^${label}`));
+	});
+
 	it('labels every server plan state', () => {
 		// Exhaustive by construction: a new OperatorPlanLabelKey that nobody
 		// maps fails here rather than silently rendering "Unavailable" to a

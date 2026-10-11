@@ -72,6 +72,13 @@ const FINISHED_NODE_LABELS: Partial<Record<OperatorNode['state'], string>> = {
 	failed: 'Failed',
 };
 
+/** An open container the server rolls up as finished reads the word of its work. */
+const FINISHED_BRANCH_LABELS: Record<string, string> = {
+	complete: 'Done',
+	closed: 'Won’t do',
+	failed: 'Failed',
+};
+
 const NODE_STATES: Record<OperatorNodeLabelKey, NodeDisplayState> = {
 	working: 'working',
 	needs_you: 'needs-you',
@@ -99,7 +106,10 @@ export function nodeDisplayState(node: OperatorNode): NodeDisplayState {
 /** Translate one server-owned node key to user-facing copy. */
 export function nodeDisplayLabel(node: OperatorNode, _isNext = false): string {
 	const key = node.display.label_key as string;
-	if (key === 'finished') return FINISHED_NODE_LABELS[node.state] ?? NODE_LABELS.finished;
+	if (key === 'finished') {
+		const branch = node.branch_progress ? FINISHED_BRANCH_LABELS[node.display.tone_key] : undefined;
+		return FINISHED_NODE_LABELS[node.state] ?? branch ?? NODE_LABELS.finished;
+	}
 	return Object.hasOwn(NODE_LABELS, key)
 		? NODE_LABELS[key as OperatorNodeLabelKey]
 		: 'Unavailable';
@@ -149,8 +159,9 @@ function finishedOutcome(node: OperatorNode): string {
 				: `${label} · follow-up created`;
 		case 'failed': return label;
 		case 'closed': return node.status_reason ? `${label}: ${node.status_reason}` : label;
-		// Archived before it settled: the server sends `finished` with an open state.
-		default: return 'Archived';
+		// An open container whose work all finished says what its work did; a
+		// leaf archived before it settled is the only other open `finished`.
+		default: return node.branch_progress ? label : 'Archived';
 	}
 }
 
