@@ -24,6 +24,7 @@
 	import { runHasMore, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { needsWakeRetry } from './pendingWakeRetry';
 	import { isHumanMessage } from './transcriptRowKinds';
+
 	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
 		userIsNearBottom: boolean;
@@ -132,7 +133,6 @@
 			} : undefined,
 		},
 	));
-	// MessageList remains the transcript and DOM scroll owner.
 	const dividerLanding = new DividerLandingIntent((threadId) => {
 		landedVisit = threadId;
 		if (get(openAtDivider) === threadId) openAtDivider.set(null);
