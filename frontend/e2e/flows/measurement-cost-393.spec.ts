@@ -40,7 +40,7 @@ test.describe('@flow:measurement-cost-393 @surface:measurement Cost is usable on
 	test('shows the approved API-equivalent and incomplete Actual states without sideways scrolling', async ({ page, request }, testInfo) => {
 		const section = await openCost(page, request, testInfo);
 		await expect(section.getByText('Total spend, Sep 28 to Oct 4')).toBeVisible();
-		await expect(section.getByText('3,900 of 5,171 usage records priced in this range.')).toBeVisible();
+		await expect(section.getByText('3,900 of 5,171 usage records priced in Sep 28 to Oct 4.')).toBeVisible();
 		await section.scrollIntoViewIfNeeded();
 		let box = await section.boundingBox();
 		expect(box!.x + box!.width).toBeLessThanOrEqual(393);
