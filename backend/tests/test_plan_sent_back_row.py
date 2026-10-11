@@ -62,28 +62,52 @@ def test_a_second_send_back_still_shows_one_row(db):
     assert row["execution"]["revision_round"] == 2
 
 
-def test_the_stored_row_fact_alone_makes_a_round():
+def _closed(db, plan_id: str, title: str):
+    from plans import closure
+
+    node = _task(db, plan_id, title=title)
+    service.transition_node(node.id, "active", db=db)
+    closure.close_node(node.id, reason="Not needed", db=db)
+    return node
+
+
+def test_the_stored_mark_alone_makes_a_round_in_every_read(db):
     """``plan_nodes.sent_back`` is the one store; the event only carries the feedback text.
 
-    No runtime read decides membership from the ``review_rejected`` event: the one
-    predicate that joins it requires the stored mark. The recount oracle
-    (``aggregates_recount``) derives the mark from the events on purpose, to prove the
-    one writer (``rejection._send_back``) wrote both.
+    The one writer (``rejection._send_back``) writes both, so they can only disagree
+    through a defect. Pull them apart on purpose: the pane and the full rollup must
+    both follow the stored mark, never the ``review_rejected`` event.
     """
-    import re
-    from pathlib import Path
+    import uuid
 
     from plans import rollup
+    from tests.plan_writer_authorizer import raw_plan_seed
 
-    assert rollup.round_feedback_sql("n", "e").startswith("n.sent_back=1 AND ")
-    plans_dir = Path(rollup.__file__).parent
-    readers = {
-        path.name: len(re.findall(r"event\s*=\s*'review_rejected'", path.read_text()))
-        for path in plans_dir.glob("*.py")
-    }
-    assert {name: n for name, n in readers.items() if n} == {
-        "rollup.py": 1, "aggregates_recount.py": 1,
-    }
+    plan = _plan(db)
+    stray = _closed(db, plan.id, "Event only")
+    _closed(db, plan.id, "Ordinary close")
+    marked = _closed(db, plan.id, "Mark only")
+    with raw_plan_seed(db):
+        db.execute(
+            """INSERT INTO plan_node_events(id,node_id,provenance,event,payload_json,created_at)
+               VALUES (?,?,'test','review_rejected','{"feedback":"stray"}','2026-10-11T00:00:00')""",
+            (uuid.uuid4().hex, stray.id),
+        )
+        db.execute("UPDATE plan_nodes SET sent_back=1 WHERE id=?", (marked.id,))
+    db.commit()
+
+    pane = {row["title"]: row for row in _pane(db)}
+    full = {node["title"] for node in rollup.rollup_thread(plan.id, db=db).nodes}
+
+    assert set(pane) == full == {"Event only", "Ordinary close"}
+    assert pane["Event only"]["status_reason"] == "Not needed"
+
+    # Put the two stores back in agreement: the teardown recount derives the mark
+    # from the events and must judge a plan the one writer could have produced.
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET sent_back=1 WHERE id=?", (stray.id,))
+        db.execute("UPDATE plan_nodes SET sent_back=0 WHERE id=?", (marked.id,))
+    db.commit()
 
 
 def test_an_ordinary_close_still_shows_closed(db):
