@@ -336,7 +336,7 @@
 <style>
 	.app { position: fixed; inset: 0; display: flex; overflow: hidden; background: transparent; }
 	@media (max-width: 1024px) {
-		.main { transition: transform var(--dur-spring) var(--ease-spring); }
+		.main { transition: transform var(--dur-spring) var(--ease-entrance); }
 		.main.pane-open { transform: translateX(calc(-1 * min(420px, 92vw))); }
 		.main-close-tap.open { display: block; pointer-events: auto; }
 	}
@@ -371,7 +371,7 @@
 		.app { bottom: auto; height: 100vh; }
 		.main {
 			transform: translateX(0);
-			transition: transform var(--dur-spring) var(--ease-spring);
+			transition: transform var(--dur-spring) var(--ease-entrance);
 			will-change: transform;
 			border-top-left-radius: 32px;
 			border-bottom-left-radius: 32px;
