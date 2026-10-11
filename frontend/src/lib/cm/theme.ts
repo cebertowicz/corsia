@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
+import { FINE_RAIL } from './comment-clusters';
 
 export const docTheme = EditorView.theme({
 	'&': {
@@ -19,6 +20,10 @@ export const docTheme = EditorView.theme({
 		caretColor: 'var(--accent)',
 		maxWidth: '100%'
 	},
+	// A touch pointer at phone width (the 600px canvas threshold the document header and review bar use) keeps the fine
+	// rail's inset on both sides, so the column is centred; its 44px marker hit box then reaches into the text's edge
+	// instead of reserving a wider left inset (see the rail below). A fine pointer keeps the one-sided rail.
+	'@media (any-pointer: coarse)': { '@container doc-canvas (max-width: 600px)': { '.cm-content': { paddingInline: `${FINE_RAIL}px` } } },
 	'.cm-line': { padding: '0 2px' },
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },

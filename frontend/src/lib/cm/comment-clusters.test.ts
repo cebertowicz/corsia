@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { clusterMarkerLines, COARSE_RAIL, FINE_RAIL, markerRailWidth, readPointerEnvironment } from './comment-clusters';
 
@@ -76,5 +78,17 @@ describe('markerRailWidth', () => {
 		const win = { matchMedia: (query: string) => ({ matches: query === '(any-pointer: coarse)' }), navigator: { maxTouchPoints: 0 } } as unknown as Window;
 		expect(readPointerEnvironment(win)).toEqual({ coarse: true, touchPoints: 0, touchEvents: false });
 		expect(readPointerEnvironment({ navigator: {} } as unknown as Window)).toEqual({ coarse: undefined, touchPoints: undefined, touchEvents: false });
+	});
+});
+
+describe('phone text inset', () => {
+	// The header and review bar are Svelte CSS and cannot import FINE_RAIL; the editor theme does. They must agree on the inset.
+	const strip = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, '');
+	const component = (name: string) => strip(readFileSync(resolve(__dirname, '../components', name), 'utf8'));
+
+	it('is the fine rail in the document header and the review bar, as in the editor theme', () => {
+		expect(component('DocViewerStatus.svelte')).toContain(`.document-header { padding-left: ${FINE_RAIL}px; }`);
+		expect(component('ReviewBar.svelte')).toContain(`.review-bar { margin-left: -${FINE_RAIL}px; }`);
+		expect(strip(readFileSync(resolve(__dirname, 'theme.ts'), 'utf8'))).toContain('paddingInline: `${FINE_RAIL}px`');
 	});
 });

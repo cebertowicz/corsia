@@ -224,6 +224,8 @@
 	/* One toolbar: every control is the same quiet ghost button in the app's UI type. */
 	.document-status-row { gap: 4px; }
 	.document-status-row :global(.doc-tool) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
+	/* A touch pointer's text inset at phone width is the fine rail's 24px (FINE_RAIL), not its 44px hit box: see the editor theme. */
+	@media (any-pointer: coarse) { @container doc-canvas (max-width: 600px) { .document-header { padding-left: 24px; } } }
 	.document-status-row :global(.doc-tool:hover:not(:disabled)) { background: var(--bg-tertiary); color: var(--text-primary); }
 	.document-status-row :global(.doc-tool:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.document-status-row :global(.doc-tool:disabled) { opacity: 0.5; cursor: not-allowed; }
