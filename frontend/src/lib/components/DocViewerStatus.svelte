@@ -8,6 +8,7 @@
 	import { Button, StatePill } from '$lib/components/ui';
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import type { CommentFeedback } from '$lib/api/docs';
+	import type { DocFeedback } from '$lib/docFeedback.svelte';
 
 	let {
 		title = 'Document',
@@ -144,6 +145,7 @@
 
 	export function commentCreated(): void { feedbackStatus?.commentCreated(); }
 	export function sync(id: string, feedback: CommentFeedback): void { feedbackStatus?.sync(id, feedback); }
+	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
 </script>
 
 <header class="document-header" use:detailsKeys>

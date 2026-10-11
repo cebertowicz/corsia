@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocComment } from '$lib/stores/docComments';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
+import type { DocFeedback } from '$lib/docFeedback.svelte';
 
 const imageRequestAt = vi.fn();
 const remapDocumentImage = vi.fn();
@@ -15,6 +16,7 @@ function comment(id: string, extra: Partial<DocComment> = {}): DocComment {
 }
 const onImage = (id: string, from = 10, to = 24) => comment(id, { region: BOX, regionNumber: 1, imageSrc: '/ws/a.png', from, to });
 const TARGET: DocViewerTarget = { instanceId: 'tab-1', path: 'doc.md', name: 'doc.md', projectId: 'p1', threadId: 't1', artifactId: 'a1' };
+const batch = { pendingCount: 0 } as unknown as DocFeedback;
 const DRAWN = { src: '/ws/a.png', alt: 'Mock', from: 10, to: 24, scrollTop: 0, top: 0 };
 
 function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null } = {}) {
@@ -23,7 +25,7 @@ function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; 
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage ?? undefined, root: () => document.createElement('div'), comments: () => comments,
 		artifactId: () => 'a1', target: () => (overrides.target === undefined ? TARGET : overrides.target), readOnly: () => false,
-		text: () => '', session: () => undefined, accent: () => null,
+		text: () => '', session: () => undefined, accent: () => null, feedback: () => batch,
 	});
 	return { images, onOpenImage };
 }
@@ -38,7 +40,7 @@ describe('opening a document image from its comments', () => {
 		images.openOr(['one'], { id: 'one' }, otherwise);
 		await vi.waitFor(() => expect(onOpenImage).toHaveBeenCalledOnce());
 		expect(imageRequestAt).toHaveBeenCalledWith(expect.any(HTMLElement), { from: 10, to: 24 });
-		expect(onOpenImage).toHaveBeenCalledWith(expect.objectContaining({ ...DRAWN, focus: { id: 'one' }, comments: expect.objectContaining({ artifactId: 'a1', projectId: 'p1', readOnly: false }) }));
+		expect(onOpenImage).toHaveBeenCalledWith(expect.objectContaining({ ...DRAWN, focus: { id: 'one' }, comments: expect.objectContaining({ artifactId: 'a1', projectId: 'p1', readOnly: false, feedback: batch }) }));
 		expect(otherwise).not.toHaveBeenCalled();
 	});
 

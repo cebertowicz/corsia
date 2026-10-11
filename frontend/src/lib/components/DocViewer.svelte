@@ -145,7 +145,7 @@
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage, root: () => docRoot, comments: () => listedComments, artifactId: () => loadedArtifactId,
 		target: () => target, readOnly: () => readonly, text: () => editText, session: () => liveSession, accent: () => accent,
-	});
+		feedback: () => feedbackStatus?.feedback() });
 	function focusInText(id: string) { setCommentScrollTarget(id, commentUI.state?.kind === 'list', 'navigation'); focusedDocComment.set(id); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string) { images.openOr([id], { id }, () => focusInText(id)); }

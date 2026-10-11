@@ -9,6 +9,11 @@ vi.mock('$lib/api/docs', () => ({
 	patchComment: vi.fn(),
 	persistPositions: vi.fn(),
 }));
+// An image artifact's viewer keeps its feedback batch (ImageCommentLightboxSend.svelte.test.ts covers it).
+vi.mock('$lib/api/docFeedback', () => {
+	const result = () => Promise.resolve({ woken: [], undelivered_batches: [] });
+	return { sendDocFeedback: vi.fn(result), leaveDocFeedback: vi.fn(result), returnDocFeedback: vi.fn(result), retryDocFeedback: vi.fn(result) };
+});
 vi.mock('$lib/stores/viewport', async () => {
 	const { writable: make } = await import('svelte/store');
 	return { isMobile: make(false), prefersReducedMotion: make(false) };

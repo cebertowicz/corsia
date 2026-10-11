@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store';
 import type { OpenImageRequest } from '$lib/cm/markdown-image';
 import type { ImageRegion } from '$lib/imageRegions';
+import type { DocFeedback } from '$lib/docFeedback.svelte';
 import { remapOccurrence } from '$lib/docImageComments';
 
 /** What the viewer needs to show and take comments on parts of an image inside a document (DCOL-FR13.3). */
@@ -13,6 +14,8 @@ export interface DocumentImageComments {
 	post: (from: number, to: number, region: ImageRegion, text: string) => Promise<string>;
 	/** What a failed post says. */
 	failure?: (error: unknown) => string;
+	/** The document's feedback batch: the viewer shows its pending-send status and Send (DCOL-FR13.12). */
+	feedback?: DocFeedback;
 }
 
 /** An image of a document to show larger, with its comments when the document has them. */

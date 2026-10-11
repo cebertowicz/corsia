@@ -291,6 +291,7 @@
 										failure: comments.failure,
 									}}
 									focus={shownImage.focus ?? null}
+									feedback={comments.feedback ?? null}
 								/>
 							{/key}
 						{:else}

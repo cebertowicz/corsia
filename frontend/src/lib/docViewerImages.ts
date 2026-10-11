@@ -2,6 +2,7 @@ import { get } from 'svelte/store';
 import { imageRequestAt, type OpenImageRequest } from '$lib/cm/markdown-image';
 import { imageContentUrl } from '$lib/artifactImage';
 import { sharedImage, type ImageOccurrence } from '$lib/docImageComments';
+import type { DocFeedback } from '$lib/docFeedback.svelte';
 import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { regionColor } from '$lib/imageRegions';
@@ -24,6 +25,7 @@ interface DocViewerImagesOptions {
 	text: () => string;
 	session: () => LiveDocumentSession | undefined;
 	accent: () => string | null;
+	feedback: () => DocFeedback | undefined;
 }
 
 /**
@@ -37,7 +39,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		options.onOpenImage()?.({ ...request, focus, comments: artifactId ? {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
 			post: (from, to, region, body) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session() }, region, body),
-			failure: options.session() ? liveFailureMessage : undefined,
+			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
 		} : undefined });
 	}
 	/** The one image all of `ids` are region comments on, when the viewer can open images. */
