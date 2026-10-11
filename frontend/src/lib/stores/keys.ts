@@ -4,9 +4,6 @@ import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
 import { disconnect } from '$lib/ws/connection';
 
-/** Where a key is read from: Settings › Keys. */
-export type KeySource = 'keys';
-
 /** One entry's metadata. The API never returns a value. */
 export interface KeyEntry {
 	name: string;
@@ -16,7 +13,6 @@ export interface KeyEntry {
 	added_by: string | null;
 	used_by: string | null;
 	is_set: boolean;
-	source: KeySource | null;
 	set_at: string | null;
 	checkable: boolean;
 	/** An environment variable CORSIA found and ignores for this key. */

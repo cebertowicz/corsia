@@ -42,7 +42,7 @@ VALUE_MAX = 4096
 #: header, and an HTTP client refusing it could echo it in its error text.
 _VALUE_PATTERN = re.compile(r"^[\x21-\x7e]+$")
 
-#: Where a resolved key came from. The environment is no longer read.
+#: Where a resolved key comes from: the key store.
 SOURCE_STORE = "keys"
 
 #: Entry-name prefixes code owns for the kinds that resolve from the store.
@@ -251,11 +251,7 @@ def resolve_names(names: Iterable[str], *, db: sqlite3.Connection | None = None)
     return key_store_values.resolve(_db(db), names)
 
 
-def _source(name: str, stored_names: set[str]) -> str | None:
-    return SOURCE_STORE if name in stored_names else None
-
-
-def _metadata(name: str, row: sqlite3.Row | None, source: str | None) -> dict:
+def _metadata(name: str, row: sqlite3.Row | None, is_set: bool) -> dict:
     builtin = BUILTINS.get(name)
     if builtin is not None:
         label, description = builtin.label, ""
@@ -271,9 +267,8 @@ def _metadata(name: str, row: sqlite3.Row | None, source: str | None) -> dict:
         "used_by": builtin.used_by if builtin else None,
         "added_by": None if builtin or row is None else row["added_by_name"],
         "added_by_thread_id": None if builtin or row is None else row["added_by_thread_id"],
-        "is_set": source is not None,
-        "source": source,
-        "set_at": row["set_at"] if row is not None and source == SOURCE_STORE else None,
+        "is_set": is_set,
+        "set_at": row["set_at"] if row is not None and is_set else None,
         "checkable": builtin is not None and builtin.checkable,
     }
 
@@ -289,11 +284,11 @@ def list_entries(db: sqlite3.Connection | None = None) -> list[dict]:
     }
     stored_names = set(key_store_values.resolve(conn, [*BUILTINS, *rows]))
     entries = [
-        _metadata(name, rows.get(name), _source(name, stored_names))
+        _metadata(name, rows.get(name), name in stored_names)
         for name in BUILTINS
     ]
     entries.extend(
-        _metadata(name, row, _source(name, stored_names))
+        _metadata(name, row, name in stored_names)
         for name, row in rows.items()
         if name not in BUILTINS and row["label"] is not None
     )

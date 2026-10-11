@@ -101,6 +101,20 @@ def test_record_read_holds_its_write_owner(server, monkeypatch, operation, prefi
     _writer_available(server)
 
 
+def test_server_key_removal_failure_rolls_back_server_removal(server, monkeypatch):
+    from llm import network_discovery as nd
+
+    def fail_key_removal(*_args, **_kwargs):
+        raise RuntimeError("key removal failed")
+
+    monkeypatch.setattr(nd, "remove_server_key", fail_key_removal)
+
+    with pytest.raises(RuntimeError, match="key removal failed"):
+        nd.remove_server("server")
+
+    assert _read(server, "SELECT status FROM network_servers WHERE id='server'") == [("offline",)]
+
+
 @pytest.mark.parametrize("existing", [False, True])
 def test_endpoint_failure_rolls_back_its_server(server, existing):
     from llm.network_discovery import upsert_server
