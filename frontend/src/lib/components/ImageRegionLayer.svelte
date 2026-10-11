@@ -287,6 +287,9 @@
 	}
 	/* Only the disc answers a press, so the label and the 44 px target stay put. */
 	.tag:active { scale: none; }
+	/* A hovered, focused or picked tag rises over its neighbours, so a close one never covers its name. */
+	.tag:not(.faint) { z-index: 1; }
+	.tag.selected { z-index: 2; }
 	.tag.leftward { flex-direction: row-reverse; transform: translate(calc(-100% + 11px), -11px); }
 	/* An invisible 44 px target around the disc; overlapping ones go to the nearer centre. */
 	.tag::before { content: ''; position: absolute; left: -11px; top: -11px; width: 44px; height: 44px; }
