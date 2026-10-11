@@ -66,15 +66,18 @@ the requesting owner keeps semantic correctness and verifies the outcome.
 For every product-affecting change, the responsible domain owner completes all
 three stages before code:
 
-1. **Product:** current approved user outcome and behavior delta;
+1. **Product:** the job to be done, the 3–5 main journeys it touches, then
+   requirements and behavior delta, done before design and reported to
+   the owner, not sent for review;
 2. **UX/IA:** the composed existing surface, information hierarchy,
    design-system reuse, states, and user-facing acceptance evidence. A
-   user-facing design (placement, controls, save behavior, copy) is walked
-   through the 3–5 main user journeys it touches as rendered mockups and
-   approved by the lane that owns the composed experience (the owner if
-   none); the build task depends on that accepted review. The conductor
-   names another lane to review that lane's own designs. The owner approves
-   behavior on the rendered design and settles any disagreement;
+   user-facing design (placement, controls, look, save behavior, copy) is
+   walked through those journeys as rendered mockups, reviewed by the lane
+   owning the composed experience, if any (or one the conductor names for
+   that lane's own designs), then approved by the owner. That review never
+   substitutes for the owner's approval; the build task depends on both,
+   restyles and look-changing fixes included. The owner settles
+   disagreements, and shipped functionality is never reverted over its look;
 3. **Engineering:** technical design, implementation, tests, review, and
    real-surface verification.
 
