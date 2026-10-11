@@ -18,7 +18,7 @@
     "/api/threads/{thread_id}/context-snapshot/next-turn"
   ],
   "progress_every": 100,
-  "reason": "Measure on the pinned SQLite 3.50.4 (sqlean.py 3.50.4.5) with background work drained and one pooled connection per lane; recorded from a hosted three-run measurement whose runs agreed exactly",
+  "reason": "Re-recorded at the merge of dev 4248085: the Measurement reads changed in dev (#410, #414), so Measurement Agents, Cost, Models and Series moved; hosted three-run measurement, runs agreed exactly, SQLite 3.50.4 (sqlean.py 3.50.4.5)",
   "routes": {
     "/api/agents": {
       "bytes": 221,
@@ -107,13 +107,13 @@
     },
     "/api/measurement/agents": {
       "bytes": 68990,
-      "statements": 36,
-      "steps": 3253800
+      "statements": 55,
+      "steps": 3363200
     },
     "/api/measurement/cost": {
       "bytes": 1115,
-      "statements": 47,
-      "steps": 5478800
+      "statements": 50,
+      "steps": 4931400
     },
     "/api/measurement/key-figures": {
       "bytes": 1178,
@@ -132,13 +132,13 @@
     },
     "/api/measurement/models": {
       "bytes": 1488,
-      "statements": 82,
-      "steps": 5660800
+      "statements": 86,
+      "steps": 5151600
     },
     "/api/measurement/series": {
       "bytes": 49740,
-      "statements": 29,
-      "steps": 7945200
+      "statements": 32,
+      "steps": 7397500
     },
     "/api/measurement/series/index": {
       "bytes": 6514,
@@ -276,7 +276,7 @@
       "steps": 0
     },
     "/api/system/update-status": {
-      "bytes": 235,
+      "bytes": 234,
       "statements": 1,
       "steps": 0
     },
@@ -341,7 +341,7 @@
       "steps": 0
     },
     "/api/version": {
-      "bytes": 712,
+      "bytes": 684,
       "statements": 0,
       "steps": 0
     }
