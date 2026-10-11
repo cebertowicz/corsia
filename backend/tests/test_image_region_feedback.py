@@ -269,3 +269,25 @@ def test_an_image_pillow_cannot_decode_names_no_copy(isolated_db, tmp_path, rend
     assert items[0]["marked_image_line"] == "Marked-up image unavailable: the image file could not be read."
     assert items[0]["region_line"].startswith("Region 1: box at x 10%")
     assert renders == []
+
+
+def test_a_reader_tray_that_cannot_be_resolved_still_delivers_the_text(isolated_db, tmp_path, monkeypatch, renders):
+    # A symlinked or non-directory working tray makes the path resolver raise; delivery must not depend on it.
+    def unresolvable(*_args):
+        raise ValueError("the working tray is a symlink")
+
+    monkeypatch.setattr(image_regions, "_working_tray", unresolvable)
+    image = tmp_path / "shot.png"
+    Image.new("RGB", (80, 50), (245, 245, 245)).save(image, format="PNG")
+    db = get_db()
+    try:
+        items = [_regional_item()]
+        image_regions.annotate_delivery(db, items, path=str(image), reader_thread_id="owner", batch_id="b1")
+    finally:
+        db.close()
+
+    assert items[0]["marked_image_line"] == (
+        "Marked-up image unavailable: the reader's working folder could not be used (the working tray is a symlink)."
+    )
+    assert items[0]["region_line"].startswith("Region 1: box at x 10%")
+    assert renders == []

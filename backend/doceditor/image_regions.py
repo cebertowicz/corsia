@@ -227,8 +227,8 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
     Delivery holds the SQLite writer, so here only the marks and the image's
     header are read; the copy is drawn once the delivery commits, and a
     rolled-back delivery draws none. It is named for the batch, which delivers
-    once. A copy that cannot be made leaves the reason in its place; the text
-    still goes.
+    once. A copy that cannot be made, or a reader tray that cannot be
+    resolved, leaves the reason in its place; the text still goes.
     """
     regional = [item for item in items if item["kind"] == "comment" and item.get("region_number") is not None]
     if not regional:
@@ -237,11 +237,17 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
     for item in regional:
         item["region_line"] = describe_region(item)
     problem = _unmarkable(path)
+    tray = None
+    if problem is None:
+        try:
+            tray = _working_tray(db, reader_thread_id)
+        except (ValueError, OSError) as exc:
+            problem = f"the reader's working folder could not be used ({exc})."
     if problem is not None:
         line = f"Marked-up image unavailable: {problem}"
     else:
         image = Path(str(path))
-        target = _working_tray(db, reader_thread_id) / f"{image.stem}-feedback-{batch_id}.png"
+        target = tray / f"{image.stem}-feedback-{batch_id}.png"
         marks = marks_for(db, regional)
         after_commit(db, lambda: _draw_copy(image, marks, target, reader_thread_id))
         line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
