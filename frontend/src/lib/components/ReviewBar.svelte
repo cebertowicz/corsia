@@ -4,6 +4,7 @@
 	import { agentColor } from '$lib/docPresence';
 	import { on } from '$lib/ws';
 	import { createReviewBarState, DRAFT_OPEN } from '$lib/reviewBarState.svelte';
+	import { answerFailed, answerPending } from '$lib/stores/cardAnswers';
 
 	/**
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
@@ -68,8 +69,11 @@
 		return true;
 	}
 	/** The answer closes the user's feedback batch on the server; the viewer's pending-batch state re-reads it. */
-	async function settle(sent: Promise<boolean>) {
-		if (await sent) { onAnswered?.(); return; }
+	async function settle(verdict: 'approved' | 'approved_with_changes' | 'changes_requested') {
+		if (!artifactId) return;
+		answerPending(artifactId, { state: verdict, feedback: bar.read?.round_feedback_counts });
+		if (await bar.answer(verdict)) { onAnswered?.(); return; }
+		answerFailed(artifactId);
 		// A send that came back without a receipt leaves focus on the control that sent it.
 		await tick();
 		if (bar.phase === 'noting') noteInput?.focus();
@@ -77,7 +81,7 @@
 	}
 	function approve() {
 		if (round > 0 && blocked()) return;
-		void settle(bar.answer(round > 0 ? 'approved_with_changes' : 'approved'));
+		void settle(round > 0 ? 'approved_with_changes' : 'approved');
 	}
 	async function requestChanges() {
 		if (blocked()) return;
@@ -92,7 +96,7 @@
 	}
 	function sendNote() {
 		if (blocked()) return;
-		void settle(bar.answer('changes_requested'));
+		void settle('changes_requested');
 	}
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter') { event.preventDefault(); sendNote(); }

@@ -1,9 +1,11 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ReviewBar from './ReviewBar.svelte';
 import { DRAFT_OPEN, SEND_FAILED } from '$lib/reviewBarState.svelte';
 import { ReviewRefusal, type ReviewBarRead } from '$lib/api/reviewBar';
+import { pendingAnswers } from '$lib/stores/cardAnswers';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
@@ -32,6 +34,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	api.fetchReviewBar.mockReset();
 	api.answerReview.mockReset();
+	pendingAnswers.set({});
 });
 afterEach(() => {
 	if (component) unmount(component);
@@ -116,6 +119,21 @@ describe('ReviewBar', () => {
 		fail(new Error('500'));
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		await vi.waitFor(() => expect(document.activeElement).toBe(button('Approve')));
+	});
+
+	it('marks the matching card answer pending before the request and clears it when the request fails', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		let fail!: (error: Error) => void;
+		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
+		await render();
+
+		button('Approve')!.click();
+		flushSync();
+		expect(get(pendingAnswers)).toEqual({ 'doc-1': { state: 'approved', feedback: counts(0) } });
+
+		fail(new Error('500'));
+		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
+		expect(get(pendingAnswers)).toEqual({});
 	});
 
 	it('announces the send through a status region that is already mounted when it starts', async () => {

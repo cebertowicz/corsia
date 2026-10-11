@@ -2,7 +2,13 @@
 	// Typed artifact icon. The backend presentation registry chooses the icon
 	// name, so a new artifact type needs a case here — not a change to pane
 	// hierarchy control flow.
-	let { icon }: { icon: string } = $props();
+	let { icon, tile = 0, muted = false }: {
+		icon: string;
+		/** Side in px of a filled type tile the icon sits centred in; 0 draws the bare icon. */
+		tile?: number;
+		/** Draw in the neutral tertiary colour instead of the type's own, for something out of reach. */
+		muted?: boolean;
+	} = $props();
 
 	const ICON_COLOR: Record<string, string> = {
 		'file-text': 'var(--violet-2, var(--violet))',
@@ -12,10 +18,10 @@
 		paperclip: 'var(--green)',
 		'git-pull-request': 'var(--sky)'
 	};
-	const color = $derived(ICON_COLOR[icon] ?? 'var(--text-tertiary)');
+	const color = $derived(muted ? 'var(--text-tertiary)' : ICON_COLOR[icon] ?? 'var(--text-tertiary)');
 </script>
 
-<span class="ic" style="color: {color}" aria-hidden="true">
+<span class="ic" class:filled={tile > 0} style="color: {color}; --tile: {tile}px" aria-hidden="true">
 	{#if icon === 'file-text'}
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
 	{:else if icon === 'file-code'}
@@ -36,4 +42,14 @@
 <style>
 	.ic { display: flex; flex-shrink: 0; }
 	.ic svg { width: 15px; height: 15px; }
+	/* The tile is the icon's own colour at a low tint, so each type reads by colour before shape. */
+	.ic.filled {
+		align-items: center;
+		justify-content: center;
+		width: var(--tile);
+		height: var(--tile);
+		border-radius: var(--radius-sm);
+		background: color-mix(in srgb, currentColor 14%, transparent);
+	}
+	.ic.filled svg { width: 55%; height: 55%; }
 </style>
