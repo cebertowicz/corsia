@@ -73,6 +73,41 @@ describe("AdaptiveDrawer", () => {
     expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(1);
   });
 
+  it("runs drawer transitions when a caller conditionally mounts it", async () => {
+    const originalAnimate = Element.prototype.animate;
+    const dispatchEvent = vi.spyOn(Element.prototype, "dispatchEvent");
+    Element.prototype.animate = vi.fn(() => {
+      const animation = {
+        cancel: vi.fn(),
+        finished: Promise.resolve(),
+      } as unknown as Animation;
+      Object.defineProperty(animation, "onfinish", {
+        set(callback: (event: Event) => void) {
+          queueMicrotask(() => callback(new Event("finish")));
+        },
+      });
+      return animation;
+    }) as unknown as typeof Element.prototype.animate;
+
+    try {
+      component = mount(AdaptiveDrawerHarness, {
+        target: host,
+        props: { callerControlled: true, onClose: vi.fn() },
+      });
+      await settle();
+
+      (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+      await settle();
+      expect(dispatchEvent.mock.calls.map(([event]) => event.type)).toContain("introstart");
+
+      (host.querySelector(".drawer-done") as HTMLButtonElement).click();
+      await settle();
+      expect(dispatchEvent.mock.calls.map(([event]) => event.type)).toContain("outrostart");
+    } finally {
+      Element.prototype.animate = originalAnimate;
+    }
+  });
+
   it("closes from its explicit control and Escape", async () => {
     const close = vi.fn();
     component = mount(AdaptiveDrawerHarness, {

@@ -142,10 +142,10 @@
 	data-adaptive-drawer
 	onclick={onBackdrop}
 	onoutrostart={releaseToastClearance}
-	transition:fade={fadeParams}
+	transition:fade|global={fadeParams}
 	use:portal
 >
-	<div class="drawer-motion" transition:fly={flyParams}>
+	<div class="drawer-motion" transition:fly|global={flyParams}>
 		<div
 			bind:this={panel}
 			class="drawer-panel"
