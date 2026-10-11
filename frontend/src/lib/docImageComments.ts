@@ -36,6 +36,11 @@ export function sharedImage(comments: DocComment[], ids: string[]): ImageOccurre
 	return shared;
 }
 
+/** The image's alt text, read from the markdown a region comment is anchored on; empty when it has none. */
+export function imageAlt(comment: DocComment): string {
+	return /^!\[([^\]]*)\]/.exec(comment.anchor ?? '')?.[1].trim() ?? '';
+}
+
 /**
  * The drawer row a comment is listed under: one per image of the document, so its comments sit together under one
  * thumbnail. A comment whose image markdown is gone still groups by its file. Text comments have none.

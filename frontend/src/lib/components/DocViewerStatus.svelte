@@ -222,7 +222,7 @@
 	.identity-age { display: none; }
 	.feedback-controls { display: contents; }
 	/* The grace text gives way first (ellipsis); Send now keeps its whole label and the row keeps one line. */
-	.feedback-controls :global(> .sending-now) { display: inline-flex; flex: 1 1 8rem; min-width: min-content; align-items: center; gap: 4px; }
+	.feedback-controls :global(> .sending-now.grace) { flex: 1 1 8rem; min-width: min-content; }
 	.feedback-controls :global(> .sending-now > .btn) { flex: none; }
 	.feedback-controls :global(> .sending-now > .sending-grace) { flex: 1 1 0; min-width: 0; contain: inline-size; }
 	.identity-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
@@ -254,8 +254,10 @@
 		.document-metadata:not(.expanded) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
-		.feedback-controls :global(> .sending-now > .btn) { min-height: 44px; }
-		.feedback-controls :global(> .btn) { display: block; flex: 1; min-width: 0; min-height: 44px; overflow: hidden; text-overflow: ellipsis; }
+		.feedback-controls :global(> .sending-now > .btn), .feedback-controls :global(> .sending-now > .sent) { min-height: 44px; }
+		/* Send alone fills the rest of the row. */
+		.feedback-controls :global(> .sending-now:not(.grace)) { flex: 1; min-width: 0; }
+		.feedback-controls :global(> .sending-now:not(.grace) > .btn) { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
 	}
 </style>

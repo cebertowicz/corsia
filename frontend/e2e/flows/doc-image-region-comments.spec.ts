@@ -53,11 +53,12 @@ const overlay = (page: Page) => page.locator('.image-overlay');
 const bar = (page: Page) => overlay(page).locator('.bar');
 const docImage = (page: Page) => page.locator('.cm-md-image img').first();
 const marker = (page: Page) => page.locator('.cm-comment-marker').first();
+const drawer = (page: Page) => page.locator('.canvas-comment-drawer, .drawer-panel[role="dialog"]');
 const tag = (page: Page, number: number) => overlay(page).locator(`[data-region-tag="${number}"]:not([inert])`);
 const viewerSend = (page: Page) => bar(page).getByRole('button', { name: /^Send/ });
 const docSend = (page: Page) => page.locator('.document-status-row').getByRole('button', { name: /^Send/ });
 const docComments = (page: Page) => page.locator('.document-status-row .comment-status');
-const drawerThumb = (page: Page) => page.locator('.canvas-comment-drawer, .drawer-panel[role="dialog"]').locator('[data-region-thumb]').first();
+const drawerThumb = (page: Page) => drawer(page).locator('[data-region-thumb]').first();
 const surface = (page: Page) => overlay(page).locator('[data-image-regions]');
 
 async function openDocument(page: Page, seeded: Seeded, width: number) {
@@ -81,18 +82,33 @@ async function openImage(page: Page, which = 0) {
 		return same;
 	}, { intervals: [150] }).toBe(true);
 }
-/** Draws a box over part of the image and posts a comment on it. */
+/** Draws a box over part of the image and posts a comment on it; the drag starts on bare image, not on a tag. */
 async function commentOnRegion(page: Page, text: string, at = { x: 0.2, y: 0.25 }) {
 	await bar(page).locator('[data-image-comment]').click();
 	const box = (await surface(page).boundingBox())!;
 	const from = { x: box.x + box.width * at.x, y: box.y + box.height * at.y };
 	const to = { x: box.x + box.width * (at.x + 0.25), y: box.y + box.height * (at.y + 0.25) };
+	// A press on a tag picks that comment rather than drawing, so a start on one would draw nothing.
+	const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.tag')?.getAttribute('aria-label') ?? null, from);
+	expect(under, `the drag for "${text}" starts on bare image`).toBeNull();
 	await drag(page, from, to);
 	const composer = page.locator('textarea[placeholder="Comment…"]');
 	await expect(composer).toBeVisible();
 	await composer.fill(text);
 	await page.keyboard.press('ControlOrMeta+Enter');
 	await expect(composer).toHaveCount(0);
+}
+/** On a phone the posted comment stays open in a sheet over the bar; Done puts it away, as before a user's next tap. */
+async function putSheetAway(page: Page) {
+	if ((page.viewportSize()?.width ?? 1440) > 768) return;
+	const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
+	await expect(backdrop).toBeVisible();
+	const layer = () => page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
+	const open = await layer();
+	await page.getByRole('button', { name: 'Done', exact: true }).click();
+	await expect(backdrop).toHaveCount(0);
+	// The sheet pops its history entry asynchronously; a tap before that pop would be undone by it.
+	if (open !== null) await expect.poll(layer, { message: 'the sheet\'s history entry is gone' }).not.toBe(open);
 }
 /** Every bar control is whole inside the bar, which stays one row inside the viewer. */
 async function expectBarFits(page: Page) {
@@ -107,29 +123,80 @@ async function expectBarFits(page: Page) {
 	}
 	await expect(bar(page).getByRole('button', { name: 'Fit', exact: true })).toBeInViewport({ ratio: 1 });
 }
+const nextFrames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 /**
- * The margin marker for a comment on the image sits beside the image, not the text above it, in either theme; each
- * theme's frame is taken once it has settled.
+ * Each margin marker sits at the top of its own image, in either theme, two frames after the theme changes: the rail
+ * follows an image's size and place as it draws, with no waiting for things to settle. Leaving the viewer re-lays the
+ * document out at its column's width first; that settles before the theme changes, so each switch is measured alone.
  */
-async function expectMarkerBesideImage(page: Page, testInfo: TestInfo, name: string) {
-	// A theme switch redraws the image; leaving the viewer can reflow the canvas. Measure once nothing moves.
-	for (const scheme of ['light', 'dark'] as const) {
+async function expectMarkersBesideImages(page: Page, testInfo: TestInfo, name: string) {
+	let last = '';
+	await expect.poll(async () => {
+		const now = JSON.stringify(await page.locator('.cm-md-image').evaluateAll((images) => images.map((image) => image.getBoundingClientRect().toJSON())));
+		const same = now === last;
+		last = now;
+		return same;
+	}, { intervals: [250] }).toBe(true);
+	const start = await page.locator('html').getAttribute('data-theme');
+	for (const scheme of start === 'dark' ? ['light', 'dark'] as const : ['dark', 'light'] as const) {
 		await page.emulateMedia({ colorScheme: scheme });
 		await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
-		let last = '';
-		await expect.poll(async () => {
-			const now = JSON.stringify([await docImage(page).boundingBox(), await marker(page).boundingBox()]);
-			const same = now === last;
-			last = now;
-			return same;
-		}, { intervals: [250] }).toBe(true);
-		const image = (await docImage(page).boundingBox())!;
-		const mark = (await marker(page).boundingBox())!;
-		const middle = mark.y + mark.height / 2;
-		expect(middle, `${scheme}: marker at ${middle} beside the image (${image.y}–${image.y + image.height})`).toBeGreaterThanOrEqual(image.y);
-		expect(middle, `${scheme}: marker beside the image`).toBeLessThanOrEqual(image.y + image.height);
+		await nextFrames(page);
+		const markers = page.locator('.cm-comment-marker');
+		for (let index = 0; index < await markers.count(); index++) {
+			const image = (await page.locator('.cm-md-image').nth(index).boundingBox())!;
+			const mark = (await markers.nth(index).boundingBox())!;
+			expect(Math.abs(mark.y - image.y), `${scheme}: marker ${index + 1} at ${mark.y}, its image's top at ${image.y}`).toBeLessThanOrEqual(2);
+		}
 		await saveEvidenceScreenshot(page, testInfo, `${name}-${scheme}`, { fullPage: false });
 	}
+}
+/** One frame: ms since sampling began, the count pill's left edge, and the Send slot's width and opacity (null: no slot). */
+type Sample = [number, number, number | null, number | null];
+/** The slot's own motion as it started: its first and last keyframes and its duration at the page's real speed. */
+type SlotMotion = { from: { maxWidth: string; opacity: number }; to: { maxWidth: string; opacity: number }; duration: number };
+/**
+ * Reads, every frame until stopped, where the bar's count pill sits and the Send slot's size and opacity, and each motion
+ * the slot runs that opens or closes its space (Svelte's own timing animations carry no keyframes, so they are skipped).
+ */
+async function startSampling(page: Page) {
+	await page.evaluate(() => {
+		const state = { seen: [] as Sample[], motions: [] as SlotMotion[], on: true };
+		const known = new WeakSet<Animation>();
+		(window as unknown as { __slot: typeof state }).__slot = state;
+		const start = performance.now();
+		const frame = (keyframe: ComputedKeyframe) => ({ maxWidth: String(keyframe.maxWidth), opacity: Number(keyframe.opacity) });
+		const tick = () => {
+			const pill = document.querySelector('.image-overlay .bar [data-image-comments-pill]');
+			const slot = document.querySelector<HTMLElement>('.image-overlay .bar .sending-now');
+			for (const animation of slot?.getAnimations() ?? []) {
+				const effect = animation.effect as KeyframeEffect | null;
+				const keyframes = effect?.getKeyframes() ?? [];
+				if (known.has(animation) || !keyframes.some((keyframe) => 'maxWidth' in keyframe)) continue;
+				known.add(animation);
+				state.motions.push({ from: frame(keyframes[0]), to: frame(keyframes.at(-1)!), duration: Number(effect!.getTiming().duration) });
+			}
+			const round = (value: number) => Math.round(value * 10) / 10;
+			state.seen.push([Math.round(performance.now() - start), round(pill?.getBoundingClientRect().left ?? 0),
+				slot ? round(slot.getBoundingClientRect().width) : null, slot ? Number(getComputedStyle(slot).opacity) : null]);
+			if (state.on) requestAnimationFrame(tick);
+		};
+		requestAnimationFrame(tick);
+	});
+}
+const stopSampling = (page: Page) => page.evaluate(() => {
+	const state = (window as unknown as { __slot: { seen: Sample[]; motions: SlotMotion[]; on: boolean } }).__slot;
+	state.on = false;
+	return { seen: state.seen, motions: state.motions };
+});
+/** The pill moved from where it was to where it ends through in-between places, never more than half the way in a frame. */
+function expectGlide(seen: Sample[], what: string) {
+	const xs = seen.map(([, x]) => x);
+	const total = Math.abs(xs[xs.length - 1] - xs[0]);
+	expect(total, `${what}: the pill moved`).toBeGreaterThan(8);
+	expect(new Set(xs).size, `${what}: in-between places ${JSON.stringify(xs)}`).toBeGreaterThanOrEqual(4);
+	const jump = Math.max(...xs.slice(1).map((x, index) => Math.abs(x - xs[index])));
+	expect(jump, `${what}: largest move in one frame of ${total}`).toBeLessThanOrEqual(total / 2);
 }
 const mockOnly = (testInfo: TestInfo) => {
 	test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
@@ -164,7 +231,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(overlay(page)).toHaveCount(0);
 		await expect(docSend(page)).toHaveText(/^\s*Send 1 comment to /);
 		await expect(marker(page)).toBeVisible();
-		await expectMarkerBesideImage(page, testInfo, 'doc-1440-04-document-marker-pending');
+		await expectMarkersBesideImages(page, testInfo, 'doc-1440-04-document-marker-pending');
 
 		// J3: the marker opens the viewer on its comment, its card at its tag.
 		await marker(page).click();
@@ -192,7 +259,10 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await viewerSend(page).click();
 		const body = (await sent).postDataJSON() as { artifact_id?: string } | null;
 		if (body?.artifact_id) expect(body.artifact_id).toBe(seeded.artifactId);
-		await expect(viewerSend(page)).toHaveCount(0);
+		// It says Sent for a moment, then goes.
+		await expect(bar(page).locator('.sent')).toHaveText(/^\s*Sent\s*$/);
+		await saveEvidenceScreenshot(page, testInfo, 'doc-1440-07-viewer-sent-confirmed-dark', { fullPage: false });
+		await expect(bar(page).locator('.sending-now')).toHaveCount(0);
 		await shoot(page, testInfo, 'doc-1440-07-viewer-sent', true);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(docSend(page)).toHaveCount(0);
@@ -229,49 +299,153 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(docSend(page)).toHaveText(/^\s*Send 1 comment to /);
-		await expectMarkerBesideImage(page, testInfo, 'doc-393-04-document-marker-pending');
+		await expectMarkersBesideImages(page, testInfo, 'doc-393-04-document-marker-pending');
 		await docComments(page).click();
 		await expect(page.locator('.drawer-panel[role="dialog"], .canvas-comment-drawer').getByText('Tap target too small')).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
 		await shoot(page, testInfo, 'doc-393-05-drawer-image-group', true);
 	});
 
-	test('many comments on two images: tags in the viewer, a marker per image, a drawer group per image (1440)', async ({ page, request }, testInfo) => {
+	for (const width of [1440, 393]) test(`many comments on two images: tags in the viewer, a marker per image, a drawer group per image (${width})`, async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(240_000);
-		await page.setViewportSize({ width: 1440, height: 900 });
-		const seeded = await seedDocument(page, request, 'doc-image-regions-many', null, DOC_TWO);
-		await openDocument(page, seeded, 1440);
+		await page.setViewportSize({ width, height: width > 768 ? 900 : 852 });
+		const seeded = await seedDocument(page, request, `doc-image-regions-many-${width}`, null, DOC_TWO);
+		await openDocument(page, seeded, width);
 		const notes = [
-			['The header crowds the logo', { x: 0.05, y: 0.05 }], ['Search needs a label', { x: 0.4, y: 0.1 }],
-			['This card is too tall', { x: 0.1, y: 0.5 }], ['Footer links are low contrast', { x: 0.55, y: 0.6 }],
+			// Spaced so that on a phone each new box starts clear of the tags already placed.
+			['The header crowds the logo', { x: 0.05, y: 0.05 }], ['Search needs a label', { x: 0.6, y: 0.1 }],
+			['This card is too tall', { x: 0.1, y: 0.55 }], ['Footer links are low contrast', { x: 0.6, y: 0.6 }],
 		] as const;
 		await openImage(page, 0);
-		for (const [text, at] of notes) await commentOnRegion(page, text, at);
-		await page.keyboard.press('Escape');
+		for (const [text, at] of notes) { await commentOnRegion(page, text, at); await putSheetAway(page); }
+		// The last card is still open on a desktop; on a phone Done put it away, and Escape would leave the viewer.
+		if (width > 768) await page.keyboard.press('Escape');
 		await expect(tag(page, 4)).toBeVisible();
-		await shoot(page, testInfo, 'doc-1440-many-01-viewer-four-tags', true);
+		await shoot(page, testInfo, `doc-${width}-many-01-viewer-four-tags`, true);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
 
 		await openImage(page, 1);
 		await commentOnRegion(page, 'Toggle labels are unclear', { x: 0.1, y: 0.2 });
+		await putSheetAway(page);
 		await commentOnRegion(page, 'Save should be primary', { x: 0.6, y: 0.65 });
-		await page.keyboard.press('Escape');
+		await putSheetAway(page);
+		if (width > 768) await page.keyboard.press('Escape');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
 		// A marker beside each image, and the document's row counting all six.
 		await expect(page.locator('.cm-comment-marker')).toHaveCount(2);
 		await expect(docSend(page)).toHaveText(/^\s*Send 6 comments to /);
-		await shoot(page, testInfo, 'doc-1440-many-02-document-two-markers', true);
+		await expectMarkersBesideImages(page, testInfo, `doc-${width}-many-02-document-two-markers`);
 
 		// The drawer: one group per image, each under one thumbnail, comments in number order; scrolled to the second.
 		await docComments(page).click();
-		const thumbs = page.locator('.canvas-comment-drawer [data-region-thumb]');
+		const thumbs = drawer(page).locator('[data-region-thumb]');
 		await expect(thumbs).toHaveCount(2);
-		await shoot(page, testInfo, 'doc-1440-many-03-drawer-two-groups', true);
+		await shoot(page, testInfo, `doc-${width}-many-03-drawer-two-groups`, true);
 		await thumbs.nth(1).scrollIntoViewIfNeeded();
-		await expect(page.locator('.canvas-comment-drawer').getByText('Save should be primary')).toBeVisible();
-		await shoot(page, testInfo, 'doc-1440-many-04-drawer-scrolled', true);
+		await expect(drawer(page).getByText('Save should be primary')).toBeVisible();
+		await shoot(page, testInfo, `doc-${width}-many-04-drawer-scrolled`, true);
 	});
+
+	for (const width of [1440, 393]) test(`the viewer bar shows the sending countdown, and a batch not delivered with Retry (${width})`, async ({ page, request }, testInfo) => {
+		mockOnly(testInfo);
+		test.setTimeout(180_000);
+		await page.setViewportSize({ width, height: width > 768 ? 900 : 852 });
+		const seeded = await seedDocument(page, request, `doc-image-regions-states-${width}`, null);
+		// The server sets these on its own clock or on a failed delivery; the frames rewrite its answers to show them.
+		const inject: { grace?: string; undelivered?: unknown[] } = {};
+		await page.route('**/api/artifacts/*/comments*', async (route) => {
+			if (route.request().method() !== 'GET') return route.fallback();
+			const response = await route.fetch();
+			const json = await response.json();
+			if (json.feedback && inject.grace) json.feedback.grace_closes_at = inject.grace;
+			if (json.feedback && inject.undelivered) json.feedback.undelivered_batches = inject.undelivered;
+			await route.fulfill({ response, json });
+		});
+		await openDocument(page, seeded, width);
+		inject.grace = new Date(Date.now() + 3 * 60_000).toISOString();
+		await openImage(page);
+		await commentOnRegion(page, 'The header crowds the logo');
+		await page.keyboard.press('Escape');
+		await expect(viewerSend(page)).toHaveText(/^\s*Send now\s*$/);
+		await expect(viewerSend(page)).toHaveAttribute('aria-label', /^Sending to .+ in \d+ min\. Send now$/);
+		await expectBarFits(page);
+		await shoot(page, testInfo, `doc-${width}-09-viewer-sending-grace`, true);
+
+		inject.grace = undefined;
+		inject.undelivered = [{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1 }];
+		await page.route('**/api/doc-feedback/send', (route) => route.fulfill({ json: { woken: [], undelivered_batches: inject.undelivered } }));
+		await viewerSend(page).click();
+		const retry = bar(page).getByRole('button', { name: /Retry/ });
+		await expect(retry).toBeVisible();
+		await expect(bar(page).locator('.sent')).toHaveCount(0);
+		await expectBarFits(page);
+		if (width <= 768) expect((await retry.boundingBox())!.height, 'Retry keeps a 44 px target').toBeGreaterThanOrEqual(44);
+		await shoot(page, testInfo, `doc-${width}-10-viewer-undelivered-retry`, true);
+	});
+
+	for (const [label, width, reduced] of [['1440', 1440, false], ['393', 393, false], ['1440-reduced-motion', 1440, true]] as const) {
+		test(`Send grows into the viewer bar, says Sent, then leaves with nothing jumping (recorded, ${label})`, async ({ browser, request }, testInfo) => {
+			mockOnly(testInfo);
+			test.setTimeout(180_000);
+			const size = { width, height: width > 768 ? 900 : 852 };
+			const context = await browser.newContext({
+				baseURL: testInfo.project.use.baseURL, viewport: size, colorScheme: 'dark',
+				reducedMotion: reduced ? 'reduce' : 'no-preference', recordVideo: { dir: testInfo.outputPath('video'), size },
+			});
+			const page = await context.newPage();
+			// The page's animations run ten times slower, from before each trigger to the end, so the recording and the
+			// per-frame samples resolve the motion; each motion's own keyframes and duration are read at real speed.
+			const cdp = await context.newCDPSession(page);
+			const slow = async () => { await cdp.send('Animation.enable'); await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.1 }); };
+			try {
+				const seeded = await seedDocument(page, request, `doc-send-motion-${label}`, null);
+				await openDocument(page, seeded, width);
+				await openImage(page);
+				await expect(bar(page).locator('.sending-now')).toHaveCount(0);
+				await slow();
+				await startSampling(page);
+				await commentOnRegion(page, 'The header crowds the logo');
+				await expect(viewerSend(page)).toBeVisible();
+				await page.waitForTimeout(3000);
+				const arrival = await stopSampling(page);
+				await putSheetAway(page);
+
+				// Send turns into Sent where it stands; the leave is measured from Sent on.
+				await viewerSend(page).click();
+				await expect(bar(page).locator('.sent')).toBeVisible();
+				await startSampling(page);
+				await expect(bar(page).locator('.sending-now')).toHaveCount(0, { timeout: 15_000 });
+				await page.waitForTimeout(300);
+				const departure = await stopSampling(page);
+				fs.writeFileSync(testInfo.outputPath('samples.json'), JSON.stringify({ playbackRate: 0.1, arrival, departure }));
+
+				if (reduced) {
+					// Reduced motion keeps only the fade: no space opens or closes, and Send passes through partial opacity.
+					const fading = (seen: Sample[]) => seen.some(([, , , opacity]) => opacity !== null && opacity > 0.05 && opacity < 0.95);
+					expect(arrival.motions, 'arrival opens no space').toEqual([]);
+					expect(departure.motions, 'departure closes no space').toEqual([]);
+					expect(fading(arrival.seen), `arrival fades ${JSON.stringify(arrival.seen)}`).toBe(true);
+					expect(fading(departure.seen), `departure fades ${JSON.stringify(departure.seen)}`).toBe(true);
+				} else {
+					// At real speed: Send grows in from nothing as it fades in; Sent fades, then its space closes.
+					expect(arrival.motions).toHaveLength(1);
+					expect(arrival.motions[0]).toMatchObject({ from: { maxWidth: '0px', opacity: 0 }, to: { opacity: 1 }, duration: 220 });
+					expect(arrival.motions[0].to.maxWidth).not.toBe('0px');
+					expect(departure.motions).toHaveLength(1);
+					expect(departure.motions[0]).toMatchObject({ from: { opacity: 1 }, to: { maxWidth: '0px', opacity: 0 }, duration: 340 });
+					expect(departure.motions[0].from.maxWidth).not.toBe('0px');
+					expectGlide(arrival.seen, 'arrival');
+					expectGlide(departure.seen, 'departure');
+				}
+			} finally {
+				await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 }).catch(() => {});
+				const video = page.video();
+				await context.close();
+				await video?.saveAs(testInfo.outputPath(`send-motion-${label}.webm`));
+			}
+		});
+	}
 });

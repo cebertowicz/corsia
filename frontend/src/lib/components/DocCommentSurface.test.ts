@@ -416,6 +416,17 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		expect(host.querySelector('[data-comment-id="a"] .ct-num')!.textContent).toBe('1');
 	});
 
+	it('names each image beside its thumbnail by its alt text, and in the thumbnail\'s accessible name', () => {
+		const named = [onImage('a', 1, 10, { anchor: '![Settings screen](a.png)' }), onImage('c', 1, 40, { anchor: '![](c.png)' })];
+		render({ state: { kind: 'list' }, comments: named, images: images() });
+		const thumbs = [...host.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
+		expect(thumbs[0].querySelector('[data-thumb-caption]')!.textContent).toBe('Settings screen');
+		expect(thumbs[0].getAttribute('aria-label')).toBe('Settings screen: image with comment 1');
+		// No alt text: no caption, and the name says only what it is.
+		expect(thumbs[1].querySelector('[data-thumb-caption]')).toBeNull();
+		expect(thumbs[1].getAttribute('aria-label')).toBe('image with comment 1');
+	});
+
 	it('opens the image from its thumbnail and places a stale pin again there; an image no longer in the text has nowhere to open', () => {
 		const groups = images();
 		const onFocus = vi.fn();

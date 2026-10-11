@@ -18,6 +18,9 @@ const DELIVERY_REASONS: Record<string, string> = {
 	owner_unaddressable: "its owner can't be reached",
 };
 
+/** How long Send shows "Sent" after the comments went, before it goes. */
+export const SENT_HOLD_MS = 1500;
+
 /**
  * One open document's feedback batch as the user sees it: the comments waiting to go to its owner, the Send that
  * closes the batch, and what could not be delivered. The open tab holds it (`holdDocFeedback`); an image viewer over
@@ -33,6 +36,11 @@ export class DocFeedback {
 	leaveSent = $state(false);
 	feedback = $state<CommentFeedback | null>(null);
 	countdownNow = $state(Date.now());
+	/** How many comments the last Send delivered, while it says so; 0 otherwise. */
+	sent = $state(0);
+	/** The last Send ended in a batch not delivered: Retry takes Send's place at once, so Send does not close beside it. */
+	handedToRetry = false;
+	private sentTimer: ReturnType<typeof setTimeout> | undefined;
 
 	readonly undeliveredCount = $derived(this.undelivered.reduce((count, batch) => count + batch.item_count, 0));
 	readonly undeliveredReason = $derived.by(() => {
@@ -55,11 +63,13 @@ export class DocFeedback {
 	});
 	readonly sendingGrace = $derived(this.pendingCount > 0 && this.graceMinutes !== null);
 	readonly graceText = $derived(`Sending to ${this.ownerName ?? 'the owner'} in ${this.graceMinutes} min`);
+	readonly sentText = $derived(`${this.sent} comment${this.sent === 1 ? '' : 's'} sent${this.ownerName ? ` to ${this.ownerName}` : ''}`);
 
 	/** Another document (or tab) is shown: leave the one before, and start afresh. */
 	show(artifactId: string | null, targetInstanceId: string | null) {
 		if (this.artifactId === artifactId && this.targetInstanceId === targetInstanceId) return;
 		this.leave();
+		this.confirmSent(0);
 		this.artifactId = artifactId;
 		this.targetInstanceId = targetInstanceId;
 		this.pendingCount = 0;
@@ -69,6 +79,7 @@ export class DocFeedback {
 	}
 
 	commentCreated() {
+		this.confirmSent(0);
 		this.pendingCount += 1;
 		this.leaveSent = false;
 	}
@@ -78,7 +89,10 @@ export class DocFeedback {
 		this.feedback = current;
 		this.pendingCount = current.open_count;
 		this.undelivered = current.undelivered_batches;
-		if (this.pendingCount > 0) this.leaveSent = false;
+		if (this.pendingCount > 0) {
+			this.leaveSent = false;
+			this.confirmSent(0);
+		}
 		// Only a visible document counts as the user returning; a refresh in a hidden tab must not.
 		if (document.visibilityState === 'visible' && !current.grace_closes_at) {
 			void returnDocFeedback(id).catch((error) => console.error('feedback return failed', error));
@@ -89,13 +103,28 @@ export class DocFeedback {
 		if (this.artifactId === id) this.undelivered = result.undelivered_batches;
 	}
 
+	/** Say `count` comments just went, for SENT_HOLD_MS; 0 stops saying it. */
+	private confirmSent(count: number) {
+		clearTimeout(this.sentTimer);
+		this.sent = count;
+		if (count > 0) this.sentTimer = setTimeout(() => { this.sent = 0; }, SENT_HOLD_MS);
+	}
+
 	send = async () => {
 		const id = this.artifactId;
 		if (!id || this.pendingCount === 0) return;
+		const count = this.pendingCount;
+		const undeliveredBefore = this.undeliveredCount;
 		this.sending = true;
+		this.handedToRetry = false;
 		try {
 			this.applyResult(id, await sendDocFeedback(id));
-			if (this.artifactId === id) this.pendingCount = 0;
+			if (this.artifactId === id) {
+				this.handedToRetry = this.undeliveredCount > undeliveredBefore;
+				this.pendingCount = 0;
+				// A batch that could not be delivered says so in its own line; only one that went says Sent.
+				if (!this.handedToRetry) this.confirmSent(count);
+			}
 		} catch {
 			toasts.show("Couldn't send your comments — try again", 'error');
 		} finally {
