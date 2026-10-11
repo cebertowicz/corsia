@@ -22,8 +22,8 @@ describe('image region parity contract', () => {
 		expect(tag.y).toBeCloseTo(expected.y, 3);
 	});
 
-	it.each(contract.tag_sets)('placeTags: $case', ({ regions, width, height, radius, gap, expected }) => {
-		const tags = placeTags(regions, { width, height }, radius, gap);
+	it.each(contract.tag_sets)('placeTags: $case', ({ regions, width, height, radius, gap, dot, expected }) => {
+		const tags = placeTags(regions, { width, height }, radius, gap, dot);
 		expect(tags.map((tag) => tag.side)).toEqual(expected.map((tag) => tag.side));
 		tags.forEach((tag, i) => {
 			expect(tag.x).toBeCloseTo(expected[i].x, 3);

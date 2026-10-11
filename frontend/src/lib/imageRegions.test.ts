@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_COLORS } from '$lib/docPresence';
-import { describeRegion, nearestTarget, placeTag, placeTags, regionColor, regionFromDrag, regionRect, TAG_RADIUS } from './imageRegions';
+import { describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, TAG_RADIUS } from './imageRegions';
 
 const FRAME = { width: 800, height: 500 };
 
@@ -44,6 +44,25 @@ describe('placeTags', () => {
 			for (let j = i + 1; j < tags.length; j++) {
 				expect(Math.hypot(tags[i].x - tags[j].x, tags[i].y - tags[j].y)).toBeGreaterThanOrEqual(2 * (TAG_RADIUS + 2));
 			}
+		}
+	});
+
+	it("keeps each tag off every other comment's dot and box while a clear spot fits", () => {
+		const covers = (tag: { x: number; y: number }, region: { x: number; y: number; w: number; h: number }) => {
+			const r = TAG_RADIUS + 2;
+			if (region.w <= 0 && region.h <= 0) return Math.hypot(tag.x - region.x * 800, tag.y - region.y * 500) < r + POINT_RADIUS + 2;
+			const nx = Math.min(Math.max(tag.x, region.x * 800), (region.x + region.w) * 800);
+			const ny = Math.min(Math.max(tag.y, region.y * 500), (region.y + region.h) * 500);
+			return Math.hypot(tag.x - nx, tag.y - ny) < r;
+		};
+		// A point whose first spot lands on a later point's dot, and a box whose left spot sits on a neighbour's box edge.
+		const cases = [
+			[{ x: 0.5, y: 0.5, w: 0, h: 0 }, { x: 0.5 + 15.4 / 800, y: 0.5 - 15.4 / 500, w: 0, h: 0 }],
+			[{ x: 0.4, y: 0.4, w: 0.1, h: 0.1 }, { x: 0.3, y: 0.35, w: 0.08, h: 0.1 }],
+		];
+		for (const regions of cases) {
+			const tags = placeTags(regions, FRAME);
+			tags.forEach((tag, i) => regions.forEach((region, j) => { if (i !== j) expect(covers(tag, region), `tag ${i + 1} on mark ${j + 1}`).toBe(false); }));
 		}
 	});
 

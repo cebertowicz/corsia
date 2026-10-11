@@ -7,6 +7,8 @@
  * what its box points at. A box's tag tries left of its top-left corner, above
  * it, then right of the box, and only when the image edge clips all three sits
  * inside the box's corner. A point's tag tries up-right, then the other diagonals.
+ * A spot over another comment's dot or box, or over a tag placed before it, is
+ * passed over while a clear one fits.
  */
 import type { ImageRegion } from '$lib/api/docs';
 import { agentColor } from '$lib/docPresence';
@@ -16,6 +18,8 @@ export type { ImageRegion };
 export type Point = { x: number; y: number };
 export type Size = { width: number; height: number };
 export type TagSide = 'left' | 'above' | 'right' | 'inside' | 'up-right' | 'up-left' | 'down-right' | 'down-left';
+/** Another comment's mark in pixels of the frame: a point's dot, ring included, or a box. */
+export type Mark = { x: number; y: number; r: number } | { x0: number; y0: number; x1: number; y1: number };
 
 /** A tag is a 22 px disc; its white ring adds 2 px. */
 export const TAG_RADIUS = 11;
@@ -33,10 +37,10 @@ const clamp = (value: number, low: number, high: number) => Math.min(Math.max(va
 
 /**
  * The tag's centre in pixels of a `size` frame, and the side it took. A spot that
- * would overlap a tag already at one of `avoid`'s centres is passed over while
- * another spot fits.
+ * would overlap a tag already at one of `avoid`'s centres or one of `marks` is
+ * passed over while another spot fits; tags weigh more than marks.
  */
-export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, gap = TAG_GAP, avoid: Point[] = []): Point & { side: TagSide } {
+export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, gap = TAG_GAP, avoid: Point[] = [], marks: Mark[] = []): Point & { side: TagSide } {
 	const { width, height } = size;
 	const r = radius + 2;
 	const x0 = region.x * width;
@@ -51,6 +55,10 @@ export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, g
 		spots = [[x0 - gap - r, y0 + r, 'left'], [x0 + r, y0 - gap - r, 'above'], [x1 + gap + r, y0 + r, 'right']];
 	}
 	const clear = (cx: number, cy: number) => avoid.every((other) => Math.hypot(cx - other.x, cy - other.y) >= 2 * r);
+	const open = (cx: number, cy: number) => marks.every((mark) => 'r' in mark
+		? Math.hypot(cx - mark.x, cy - mark.y) >= r + mark.r
+		: Math.hypot(cx - clamp(cx, mark.x0, mark.x1), cy - clamp(cy, mark.y0, mark.y1)) >= r);
+	for (const [x, y, side] of spots) if (fits(x, y) && clear(x, y) && open(x, y)) return { x, y, side };
 	for (const [x, y, side] of spots) if (fits(x, y) && clear(x, y)) return { x, y, side };
 	for (const [x, y, side] of spots) if (fits(x, y)) return { x, y, side };
 	const [x, y, side]: [number, number, TagSide] = isPoint(region) ? spots[0] : [x0 + gap + radius, y0 + gap + radius, 'inside'];
@@ -62,10 +70,18 @@ export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, g
 	};
 }
 
-/** Every tag on one image, placed in `regions`' order, each keeping clear of those before it. */
-export function placeTags(regions: ImageRegion[], size: Size, radius = TAG_RADIUS, gap = TAG_GAP): (Point & { side: TagSide })[] {
+/**
+ * Every tag on one image, placed in `regions`' order, each keeping clear of the
+ * tags before it and of every other comment's mark; `dot` is a point's dot
+ * radius with its ring.
+ */
+export function placeTags(regions: ImageRegion[], size: Size, radius = TAG_RADIUS, gap = TAG_GAP, dot = POINT_RADIUS + 2): (Point & { side: TagSide })[] {
+	const { width, height } = size;
+	const marks: Mark[] = regions.map((region) => isPoint(region)
+		? { x: region.x * width, y: region.y * height, r: dot }
+		: { x0: region.x * width, y0: region.y * height, x1: (region.x + region.w) * width, y1: (region.y + region.h) * height });
 	const placed: (Point & { side: TagSide })[] = [];
-	for (const region of regions) placed.push(placeTag(region, size, radius, gap, placed));
+	regions.forEach((region, index) => placed.push(placeTag(region, size, radius, gap, placed, marks.filter((_, other) => other !== index))));
 	return placed;
 }
 

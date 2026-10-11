@@ -6,6 +6,7 @@ import io
 import math
 from itertools import combinations
 
+import pytest
 from PIL import Image
 
 from doceditor.image_markup import MAX_RENDER_SIDE, Mark, Region, place_tag, place_tags, render_marked_image, tag_geometry
@@ -72,6 +73,30 @@ def test_tags_on_close_neighbours_do_not_overlap():
     assert [side for _, _, side in tags][:2] == ["up-right", "down-right"]
     for (ax, ay, _), (bx, by, _) in combinations(tags, 2):
         assert math.hypot(ax - bx, ay - by) >= 2 * (10 + 2)
+
+
+def _covers(tag: tuple[float, float, str], region: Region, radius: float, dot: float) -> bool:
+    cx, cy, _ = tag
+    r = radius + 2
+    if region.is_point:
+        return math.hypot(cx - region.x * 1000, cy - region.y * 1000) < r + dot
+    nx = min(max(cx, region.x * 1000), (region.x + region.w) * 1000)
+    ny = min(max(cy, region.y * 1000), (region.y + region.h) * 1000)
+    return math.hypot(cx - nx, cy - ny) < r
+
+
+@pytest.mark.parametrize("regions", [
+    # A point whose first spot lands on a later point's dot.
+    [Region(0.5, 0.5), Region(0.514, 0.486)],
+    # A box whose left spot sits on a neighbour's box edge.
+    [Region(0.4, 0.4, 0.1, 0.1), Region(0.3, 0.35, 0.087, 0.1)],
+], ids=["dot", "box"])
+def test_a_tag_keeps_off_other_comments_marks(regions):
+    tags = place_tags(regions, 1000, 1000, radius=10, gap=3, dot=8)
+
+    for i, tag in enumerate(tags):
+        for j, region in enumerate(regions):
+            assert i == j or not _covers(tag, region, 10, 8), f"tag {i + 1} on mark {j + 1}"
 
 
 def test_a_crowded_tag_still_takes_a_spot_on_the_image():

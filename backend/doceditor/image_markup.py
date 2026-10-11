@@ -111,9 +111,18 @@ def _scale_for(img: Image.Image) -> _Scale:
 TagSide = Literal["left", "above", "right", "inside", "up-right", "up-left", "down-right", "down-left"]
 
 
+def _dot_radius(radius: float) -> float:
+    """A point's dot radius, its white ring included, for tags of ``radius``."""
+    return max(5, round(radius * 0.6)) + 2
+
+
+# Another comment's mark in pixels: a point's dot (x, y, r), or a box (x0, y0, x1, y1).
+TagMark = tuple[float, float, float] | tuple[float, float, float, float]
+
+
 def place_tag(
     region: Region, width: int, height: int, *, radius: float, gap: float,
-    avoid: Sequence[tuple[float, float]] = (),
+    avoid: Sequence[tuple[float, float]] = (), marks: Sequence[TagMark] = (),
 ) -> tuple[float, float, TagSide]:
     """Return the tag's centre and the side it took, for a ``width`` x ``height`` image.
 
@@ -121,7 +130,8 @@ def place_tag(
     the image. A box tries left of its top-left corner, above it, then right of
     the box, and falls back to inside its corner. A point tries up-right, then
     the other diagonals. A spot that would overlap a tag already centred at one
-    of ``avoid`` is passed over while another spot fits.
+    of ``avoid``, or one of ``marks``, is passed over while another spot fits;
+    tags weigh more than marks.
     """
     r = radius + 2  # the white ring drawn around the tag
     x0, y0 = region.x * width, region.y * height
@@ -148,6 +158,21 @@ def place_tag(
     def clear(cx: float, cy: float) -> bool:
         return all(math.hypot(cx - ox, cy - oy) >= 2 * r for ox, oy in avoid)
 
+    def open_(cx: float, cy: float) -> bool:
+        for mark in marks:
+            if len(mark) == 3:
+                mx, my, mr = mark
+                if math.hypot(cx - mx, cy - my) < r + mr:
+                    return False
+            else:
+                mx0, my0, mx1, my1 = mark
+                if math.hypot(cx - min(max(cx, mx0), mx1), cy - min(max(cy, my0), my1)) < r:
+                    return False
+        return True
+
+    for cx, cy, side in spots:
+        if fits(cx, cy) and clear(cx, cy) and open_(cx, cy):
+            return cx, cy, side
     for cx, cy, side in spots:
         if fits(cx, cy) and clear(cx, cy):
             return cx, cy, side
@@ -166,12 +191,24 @@ def place_tag(
 
 def place_tags(
     regions: Sequence[Region], width: int, height: int, *, radius: float, gap: float,
+    dot: float | None = None,
 ) -> list[tuple[float, float, TagSide]]:
-    """Every tag on one image, placed in ``regions``' order, each clear of those before it."""
+    """Every tag on one image, placed in ``regions``' order.
+
+    Each keeps clear of the tags before it and of every other comment's mark;
+    ``dot`` is a point's dot radius with its ring, the renderer's by default.
+    """
+    dot = _dot_radius(radius) if dot is None else dot
+    marks: list[TagMark] = [
+        (r.x * width, r.y * height, dot) if r.is_point
+        else (r.x * width, r.y * height, (r.x + r.w) * width, (r.y + r.h) * height)
+        for r in regions
+    ]
     placed: list[tuple[float, float, TagSide]] = []
-    for region in regions:
+    for index, region in enumerate(regions):
         placed.append(place_tag(region, width, height, radius=radius, gap=gap,
-                                avoid=[(x, y) for x, y, _ in placed]))
+                                avoid=[(x, y) for x, y, _ in placed],
+                                marks=[m for other, m in enumerate(marks) if other != index]))
     return placed
 
 
@@ -180,7 +217,7 @@ def _draw_region(draw: ImageDraw.ImageDraw, mark: Mark, img: Image.Image, scale:
     region = mark.region
     x0, y0 = region.x * img.width, region.y * img.height
     if region.is_point:
-        dot = max(5, round(scale.radius * 0.6))
+        dot = _dot_radius(scale.radius) - 2
         draw.ellipse((x0 - dot - 2, y0 - dot - 2, x0 + dot + 2, y0 + dot + 2), fill="white")
         draw.ellipse((x0 - dot, y0 - dot, x0 + dot, y0 + dot), fill=color)
         return

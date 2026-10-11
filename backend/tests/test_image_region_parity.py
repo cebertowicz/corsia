@@ -51,7 +51,7 @@ def test_tag_placement_matches_viewer(case):
 @pytest.mark.parametrize("case", CONTRACT["tag_sets"], ids=lambda c: c["case"])
 def test_tag_sets_match_viewer(case):
     regions = [Region(r["x"], r["y"], r["w"], r["h"]) for r in case["regions"]]
-    placed = place_tags(regions, case["width"], case["height"], radius=case["radius"], gap=case["gap"])
+    placed = place_tags(regions, case["width"], case["height"], radius=case["radius"], gap=case["gap"], dot=case["dot"])
     assert [side for _, _, side in placed] == [e["side"] for e in case["expected"]]
     for (x, y, _), expected in zip(placed, case["expected"], strict=True):
         assert (x, y) == (pytest.approx(expected["x"], abs=1e-3), pytest.approx(expected["y"], abs=1e-3))
