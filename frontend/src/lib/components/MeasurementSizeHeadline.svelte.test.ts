@@ -76,7 +76,7 @@ describe('MeasurementSizeHeadline', () => {
 		const points = el.querySelector('.mob svg polyline.ma')?.getAttribute('points')?.split(' ');
 		expect(points).toHaveLength(3);
 		expect(el.querySelector('.lg')?.textContent).toContain('4-week moving average');
-		expect(el.querySelector('figcaption')?.textContent).toContain('the line is the 4-week moving average');
+		expect(el.querySelector('figcaption')?.textContent).not.toContain('moving average');
 	});
 
 	it('draws a week with too few sized outcomes hollow with its raw rate and low n, and scales the axis to the full bars', () => {

@@ -47,22 +47,25 @@ class Measure:
 
     def __init__(self, series: str, label: str, higher_is_better: bool, fmt: str, action: str,
                  *, scale: float = 1.0, per_agent: bool = True, from_series: bool = True, per_model: bool = False,
-                 from_cost: bool = False) -> None:
+                 from_cost: bool = False, scope_label: str | None = None) -> None:
         self.series, self.label, self.higher_is_better, self.format = series, label, higher_is_better, fmt
         self.action, self.scale, self.per_agent = action, scale, per_agent
         # ``from_series``: the scope's own windows come from ``/series``; otherwise the measure has no series id.
         # ``from_cost``: the scope's own windows are the Cost headline's ``latest`` and ``previous``.
         self.from_series, self.per_model, self.from_cost = from_series, per_model, from_cost
+        # ``scope_label``: the scope row's wording where it differs from an agent row's ("Your minutes per outcome").
+        self.scope_label = scope_label
 
 
 #: measure id -> definition. The action lines are the page's fixed wording.
 MEASURES: dict[str, Measure] = {
     "hours_per_hour": Measure(
-        "estimated_human_hours_per_active_hour", "Work per hour of your attention", True, "hours",
+        "estimated_human_hours_per_active_hour", "Work per hour you spend", True, "hours",
         "Check which outcomes took the most of your time.", per_agent=False),
     "minutes_per_outcome": Measure(
         "active_hours_per_outcome", "Minutes per outcome", False, "minutes",
-        "Review recent send-backs and how work is asked of you.", scale=60.0),
+        "Review its recent send-backs and how it asks you.", scale=60.0,
+        scope_label="Your minutes per outcome"),
     "asks_per_outcome": Measure(
         "asks_per_outcome", "Asks per outcome", False, "ratio",
         "Review what keeps being asked, and whether guidance answers it.", per_agent=False),
@@ -125,7 +128,7 @@ def _scope_items(
             continue
         if before["n"] < MINIMUM_N or after["n"] < MINIMUM_N or not all(comparable(measure.series, first) for first in firsts):
             continue
-        item = _item(scope, key, before["value"] * measure.scale, after["value"] * measure.scale, after["n"], None)
+        item = _item(scope, key, before["value"] * measure.scale, after["value"] * measure.scale, after["n"], None, measure.scope_label)
         if item:
             items.append(item)
     return items

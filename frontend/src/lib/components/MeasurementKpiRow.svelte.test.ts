@@ -89,7 +89,7 @@ describe('MeasurementKpiRow', () => {
 	it('shows the five tiles in order, each a number and unit with its window, n and change', async () => {
 		await render(state({ current: period(), previous: before }));
 		expect([...host.querySelectorAll('[data-kpi]')].map((node) => (node as HTMLElement).dataset.kpi)).toEqual(['work', 'first-try', 'cost', 'minutes', 'tokens']);
-		expect(tile('work')).toBe('Hours of work per hour of your attention 92 h Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)');
+		expect(tile('work')).toBe('Work per hour of your attention 92 h Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('first-try')).toBe('First-try rate (agent-graded) 89% Sep 28 to Oct 4, n 1,377, +5% vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('cost')).toBe('Cost per hour of delivered work $1.49 Sep 28 to Oct 4, n 1,187, -4% vs Sep 21 to Sep 27 (n 399)');
 		expect(tile('minutes')).toBe('Your minutes per outcome 1.8 min Sep 28 to Oct 4, n 1,377, -69% vs Sep 21 to Sep 27 (n 451)');

@@ -289,7 +289,7 @@ describe('MeasurementAgentsTable', () => {
 		expect(at, 'a phone block exists').toBeGreaterThan(-1);
 		const phone = css.slice(at, css.indexOf('\n\t}', at));
 		// No floor on the table or the headers, so the columns share the width instead of scrolling past the edge.
-		expect(phone).toContain('table { min-width: 0; }');
+		expect(phone).toContain('table { min-width: 0; font-size: var(--text-footnote); }');
 		expect(phone).not.toContain('min-width: 11ch');
 		expect(phone).not.toContain('min-width: 20ch');
 		// A name wraps between its words and a header wraps too; neither may break inside a word.

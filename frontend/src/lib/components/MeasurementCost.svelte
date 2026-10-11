@@ -74,7 +74,7 @@
 					axisTitle="API-equivalent $ per hour of delivered work"
 					{unit}
 					averageName={chart.averageName}
-					caption={`API-equivalent dollars of every priced call divided by the estimated hours of size-rated accepted work; lower is better. n is size-rated accepted outcomes per ${unit}. ${chart.note}${startsAt ? ` The series starts at ${startsAt}, the first ${unit} with size-rated accepted work.` : ''}`}
+					caption={`API-equivalent dollars of every priced call divided by the estimated hours of size-rated accepted work; lower is better. n is size-rated accepted outcomes per ${unit}.${startsAt ? ` The series starts at ${startsAt}, the first ${unit} with size-rated accepted work.` : ''}`}
 					minN={20}
 					minNText="fewer than 20 outcomes"
 					ariaLabel={`API-equivalent dollars per hour of delivered work, ${chart.rangeText}`}
@@ -85,7 +85,7 @@
 			{:else}
 				<p class="sentence">No usage records could be priced in this range.</p>
 			{/if}
-			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.api_records)} in {periodText}.</p>
+			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.api_records)} in {periodText} are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.</p>
 		{/if}
 		{#if costState.error}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>{/if}
 	{/if}

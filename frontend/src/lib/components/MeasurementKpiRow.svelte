@@ -9,7 +9,7 @@
 	let { state: figures, onRetry }: { state: KeyFiguresState; onRetry: () => void } = $props();
 
 	const order: { id: KpiTile['id']; label: string }[] = [
-		{ id: 'work', label: 'Hours of work per hour of your attention' },
+		{ id: 'work', label: 'Work per hour of your attention' },
 		{ id: 'first-try', label: 'First-try rate (agent-graded)' },
 		{ id: 'cost', label: 'Cost per hour of delivered work' },
 		{ id: 'minutes', label: 'Your minutes per outcome' },

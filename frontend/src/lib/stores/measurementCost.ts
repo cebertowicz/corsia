@@ -53,7 +53,7 @@ export const measurementCost = writable<CostState>({ loading: true, error: null,
 
 /** The one wording for how much of a period's retained usage the dollars cover. */
 export function coverageText(priced: number, total: number): string {
-	return `${priced.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} usage records priced`;
+	return `${priced.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} usage records`;
 }
 
 function numberOrNull(value: unknown): number | null { return typeof value === 'number' && Number.isFinite(value) ? value : null; }

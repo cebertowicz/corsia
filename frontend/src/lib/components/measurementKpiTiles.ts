@@ -50,7 +50,7 @@ function seriesTile(id: keyof typeof KPI_MEASURES, label: string, panel: PanelSt
 /** The four measures the sections below headline, from the panels' own windows blocks and the cost payload. */
 export function measureTiles(panels: Record<string, PanelState>, cost: MeasurementCost | null): Partial<Record<KpiTile['id'], KpiTile>> {
 	const tiles: Partial<Record<KpiTile['id'], KpiTile>> = {};
-	const size = seriesTile('work', 'Hours of work per hour of your attention', panels[KPI_MEASURES.work.panel], (v) => `${v.toFixed(0)} h`);
+	const size = seriesTile('work', 'Work per hour of your attention', panels[KPI_MEASURES.work.panel], (v) => `${v.toFixed(0)} h`);
 	const firstTry = seriesTile('first-try', 'First-try rate (agent-graded)', panels[KPI_MEASURES['first-try'].panel], (v) => `${(v * 100).toFixed(0)}%`);
 	const minutes = seriesTile('minutes', 'Your minutes per outcome', panels[KPI_MEASURES.minutes.panel], (v) => `${(v * 60).toFixed(1)} min`);
 	if (size) tiles.work = size;

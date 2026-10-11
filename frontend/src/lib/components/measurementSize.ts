@@ -45,19 +45,17 @@ function weekAxis(period: MeasurementPeriod, points: BarPoint[]): string[] {
 /**
  * Each chart's drawn points, the dates they span, what one bar is and the line drawn over it. On Weeks every chart shares one axis,
  * the weeks of `weekAxis`: a week the series has no point for (its measure had not started) is drawn empty, and weeks read before
- * the axis only feed the averages. Days draw the series as served. The note names the line only when a moving-average point is drawn.
+ * the axis only feed the averages. Days draw the series as served.
  */
-export function grainChart(period: MeasurementPeriod | undefined, points: BarPoint[], averagePeriods: number | undefined): { unit: 'day' | 'week'; averageName: string; note: string; points: BarPoint[]; rangeText: string } {
+export function grainChart(period: MeasurementPeriod | undefined, points: BarPoint[], averagePeriods: number | undefined): { unit: 'day' | 'week'; averageName: string; points: BarPoint[]; rangeText: string } {
 	const unit = period?.grain === 'days' ? 'day' : 'week';
 	const averageName = averagePeriods ? `${averagePeriods}-${unit} moving average` : 'moving average';
 	const byStart = new Map(points.map((point) => [point.start, point]));
 	const drawn = period?.grain === 'weeks' && points.length
 		? weekAxis(period, points).map((start): BarPoint => byStart.get(start) ?? { start, value: null, n: 0, ma: null, empty: true })
 		: points;
-	const averaged = drawn.some((point) => point.ma !== null);
 	return {
 		unit, averageName, points: drawn,
-		note: averaged ? `Each bar is one ${unit}; the line is the ${averageName}.` : `Each bar is one ${unit}.`,
 		rangeText: period && drawn.length ? `${shortDate(drawn[0].start)} to ${shortDate(period.range.to)}` : '',
 	};
 }

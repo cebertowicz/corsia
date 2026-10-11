@@ -55,5 +55,5 @@
 />
 
 <style>
-	.asks { margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+	.asks { margin: 8px 0 0; font-size: 13px; font-style: italic; color: var(--text-secondary); overflow-wrap: anywhere; }
 </style>

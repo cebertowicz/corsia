@@ -66,14 +66,14 @@
 		{@render extra?.()}
 		<h4>{chartTitle}, {chart.rangeText}, by {chart.unit}</h4>
 		{#if drawChart}
-			{@render drawChart({ points: chart.points, unit: chart.unit, axisTitle: perUnit(axisTitle), caption: `${perUnit(caption)} ${grainChart(state.period, [], state.averagePeriods).note}`, ariaLabel: `${chartTitle}, ${chart.rangeText}` })}
+			{@render drawChart({ points: chart.points, unit: chart.unit, axisTitle: perUnit(axisTitle), caption: perUnit(caption), ariaLabel: `${chartTitle}, ${chart.rangeText}` })}
 		{:else}
 		<MeasurementBarChart
 			points={chart.points}
 			axisTitle={perUnit(axisTitle)}
 			unit={chart.unit}
 			averageName={chart.averageName}
-			caption={`${perUnit(caption)} ${chart.note}`}
+			caption={perUnit(caption)}
 			minN={minimum}
 			{minNText}
 			ariaLabel={`${chartTitle}, ${chart.rangeText}`}

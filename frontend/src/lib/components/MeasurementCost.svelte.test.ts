@@ -38,7 +38,7 @@ describe('MeasurementCost', () => {
 		expect(text(host!.querySelector('.spendcard') as HTMLElement)).toBe('Total spend, Sep 28 to Oct 4$10,600API-equivalent, every priced call in the windowHours of work delivered2,120');
 		expect(content).not.toContain('per accepted outcome');
 		expect(content).not.toContain('not in this rate');
-		expect(content).toContain('160 of 200 usage records priced in Sep 28 to Oct 4.');
+		expect(content).toContain('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
 		expect(content).not.toContain('Not priced:');
 		expect(content).not.toContain('Not API-priced:');
 	});
@@ -301,7 +301,6 @@ describe('MeasurementCost', () => {
 		expect(text(markup)).toContain('The series starts at Sep 21, the first week with size-rated accepted work.');
 		expect(text(markup)).toContain('Hours of work delivered');
 		// Two weeks serve no moving average, so no line is drawn and the caption does not name one.
-		expect(text(markup)).toContain('Each bar is one week.');
 		expect(text(markup)).not.toContain('moving average');
 	});
 	it('prints where the series starts only when it opens inside the shown window', () => {
@@ -331,7 +330,7 @@ describe('MeasurementCost', () => {
 		unmount(component!); host?.remove();
 		const days = render({ data: { ...withAverage, averagePeriods: 7, period: { ...withAverage.period!, grain: 'days' } } });
 		expect(days.querySelector('.cost .lg')?.textContent).toContain('7-day moving average');
-		expect(text(days)).toContain('Each bar is one day; the line is the 7-day moving average.');
+		expect(text(days)).not.toContain('the line is the 7-day moving average');
 		unmount(component!); host?.remove();
 		expect(render().querySelector('.cost .lg')?.textContent).not.toContain('moving average');
 	});
@@ -363,7 +362,7 @@ describe('MeasurementCost', () => {
 		const card = markup.querySelector('section.card.cost') as HTMLElement;
 		expect(card.querySelector('h3')?.textContent).toBe('Cost per hour of delivered work');
 		expect(card.querySelector('.spendcard')).not.toBeNull();
-		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records priced in Sep 28 to Oct 4.');
+		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
 		expect(markup.querySelector('.missing')).toBeNull();
 	});
 });
