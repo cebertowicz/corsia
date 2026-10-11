@@ -18,6 +18,7 @@ from typing import Any, Iterable, Mapping
 
 from PIL import Image
 
+from doceditor import live_events
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
 from infra.database import write_transaction
@@ -203,10 +204,14 @@ def write_marked_image(db, *, image: Path, rows: Iterable[Mapping[str, Any]], re
     The name carries the content hash, so a copy is never overwritten with other
     bytes: a tool result that names an earlier copy still verifies.
     """
-    png = render_marked_image(image.read_bytes(), marks_for(db, rows))
-    digest = hashlib.sha256(png).hexdigest()
-    target = _working_tray(db, reader_thread_id) / f"{label}-{digest[:16]}.png"
-    _save(png, target)
+    try:
+        png = render_marked_image(image.read_bytes(), marks_for(db, rows))
+        digest = hashlib.sha256(png).hexdigest()
+        target = _working_tray(db, reader_thread_id) / f"{label}-{digest[:16]}.png"
+        _save(png, target)
+    except RENDER_ERRORS as exc:
+        live_events.marked_copy_failed("agent_result", exc)
+        raise
     return MarkedImage(target, digest, len(png))
 
 
@@ -260,6 +265,7 @@ def _draw_copy(image: Path, marks: list[Mark], target: Path, reader_thread_id: s
     try:
         _save(render_marked_image(image.read_bytes(), marks), target)
     except RENDER_ERRORS as exc:
+        live_events.marked_copy_failed("delivery", exc)
         with write_transaction(None, scope="marked_copy_failed") as connection:
             append_thread_context_note(
                 connection,
