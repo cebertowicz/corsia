@@ -258,7 +258,7 @@ def _resolve_upload(
         file_id=file_id,
         filename=filename,
     )
-    artifact = models.resolve("upload", "upload", file_id)
+    artifact = models.resolve_upload(file_id)
     if artifact is None or not isinstance(artifact.get("path"), str):
         raise _reject(
             "image_not_found",

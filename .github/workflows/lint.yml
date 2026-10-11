@@ -33,7 +33,7 @@ jobs:
 
   ruff:
     needs: relevance
-    if: ${{ needs.relevance.outputs.relevant == 'true' }}
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: ruff (advisory)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -41,6 +41,12 @@ jobs:
     # always success so the reviewer gate is never blocked by a lint issue.
     continue-on-error: true
     steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -60,7 +66,7 @@ jobs:
 
   mypy:
     needs: relevance
-    if: ${{ needs.relevance.outputs.relevant == 'true' }}
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: mypy (regression gate)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -72,6 +78,12 @@ jobs:
     env:
       CORSIA_ANALYTICS_DISABLE: '1'
     steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1

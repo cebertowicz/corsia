@@ -1,4 +1,4 @@
-"""The agent-grain attention time behind minutes per outcome on the Agents table."""
+"""Presence-only attention behind minutes per outcome on the Agents table."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ from datetime import datetime, timezone
 
 import pytest
 
-from api.measurement_agent_attention import MAX_ACTIVE_GAP_SECONDS, query_root_active
+from api.measurement_agent_attention import query_root_active
 from api.measurement_queries import prepare_outcome_periods, query_family
 from core.measurement_scope import resolve_grain
 
-LATEST, PREVIOUS = "2026-09-28", "2026-09-21"
+LATEST = "2026-09-28"
 SCOPE = {"scope_project": "all", "scope_agent": None, "user_id": "steve"}
 GRAIN = resolve_grain("weeks", "UTC", now=datetime(2026, 10, 5, 12, tzinfo=timezone.utc))
-PARAMS = {**SCOPE, "grain": GRAIN, "max_active_gap_seconds": MAX_ACTIVE_GAP_SECONDS}
+PARAMS = {**SCOPE, "grain": GRAIN}
 
 
 @pytest.fixture
@@ -29,22 +29,12 @@ def db(isolated_db):
         connection.close()
 
 
-def _message(db, message_id: str, thread: str, at: str) -> None:
-    db.execute("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?,?, 'user', 'x', '{}', ?)",
-               (message_id, thread, at))
-
-
-def _two_agents_interleaved(db) -> None:
-    _message(db, "a1", "root", "2026-09-29T12:00:00Z")
-    _message(db, "o1", "other", "2026-09-29T12:02:00Z")  # lands between root's two messages
-    _message(db, "a2", "root", "2026-09-29T12:05:00Z")
-
-
-def _two_agents_taking_turns_past_the_cap(db) -> None:
-    # Each agent's own gap is 960 s (over the cap); the person's gaps are 480 s each (under it).
-    _message(db, "a1", "root", "2026-09-29T12:00:00Z")
-    _message(db, "o1", "other", "2026-09-29T12:08:00Z")
-    _message(db, "a2", "root", "2026-09-29T12:16:00Z")
+def _visit(db, thread: str, entered_at: str, exited_at: str, *, visit_user: str = "steve", reason: str = "hidden") -> None:
+    db.execute(
+        "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+        "VALUES (?, 'chat', ?, ?, ?, 0, 1, ?)",
+        (visit_user, thread, entered_at, exited_at, reason),
+    )
 
 
 def _agent_rows(db, params):
@@ -52,27 +42,20 @@ def _agent_rows(db, params):
     return {row["root_id"]: row["active_hours"] for row in query_root_active(db, params)}
 
 
-def test_a_gap_is_measured_across_the_whole_stream_of_human_messages(db):
-    _two_agents_interleaved(db)
+def test_overlapping_threads_count_once_and_split_evenly_between_agents(db):
+    _visit(db, "root", "2026-09-29T12:00:00Z", "2026-09-29T12:10:00Z")
+    _visit(db, "other", "2026-09-29T12:05:00Z", "2026-09-29T12:15:00Z")
     rows = _agent_rows(db, {**PARAMS})
-    # The person's stream is a1, o1, a2: 60 s, then 120 s + 60 s, then 180 s + 60 s.
-    assert rows["root"] == pytest.approx(300 / 3600)
-    assert rows["other"] == pytest.approx(180 / 3600)
-
-
-def test_the_agent_rows_add_up_to_the_all_work_figure(db):
-    _two_agents_taking_turns_past_the_cap(db)
-    params = {**PARAMS}
-    rows = _agent_rows(db, params)
-    prepare_outcome_periods(db, params)
-    total = query_family(db, "active", params)
-    assert [row["period"] for row in total] == [LATEST]
-    assert total[0]["active_hours"] == pytest.approx(1140 / 3600)
+    prepare_outcome_periods(db, PARAMS)
+    total = query_family(db, "active", PARAMS)
+    assert total == [{"period": LATEST, "active_hours": pytest.approx(15 / 60), "outcomes": 0}]
+    assert rows == {"root": pytest.approx(7.5 / 60), "other": pytest.approx(7.5 / 60)}
     assert sum(rows.values()) == pytest.approx(total[0]["active_hours"])
 
 
-def test_an_agent_row_equals_that_agents_own_page(db):
-    _two_agents_taking_turns_past_the_cap(db)
+def test_agent_page_uses_the_same_equal_share_as_its_row(db):
+    _visit(db, "root", "2026-09-29T12:00:00Z", "2026-09-29T12:10:00Z")
+    _visit(db, "other", "2026-09-29T12:05:00Z", "2026-09-29T12:15:00Z")
     rows = _agent_rows(db, {**PARAMS})
     for agent, hours in rows.items():
         own = {**PARAMS, "scope_agent": agent}
@@ -80,9 +63,50 @@ def test_an_agent_row_equals_that_agents_own_page(db):
         assert query_family(db, "active", own)[0]["active_hours"] == pytest.approx(hours)
 
 
-def test_the_message_before_the_window_starts_the_first_gap_for_every_agent(db):
-    # The window opens 2026-07-13; the earlier message seeds the first gap and is not counted.
-    _message(db, "p1", "other", "2026-07-12T23:58:00Z")
-    _message(db, "a1", "root", "2026-07-13T00:01:00Z")
-    rows = _agent_rows(db, {**PARAMS})
-    assert rows == {"root": pytest.approx(240 / 3600)}
+def test_agent_time_on_platform_uses_the_same_equal_share_as_attention(db):
+    _visit(db, "root", "2026-09-29T12:00:00Z", "2026-09-29T12:10:00Z")
+    _visit(db, "other", "2026-09-29T12:05:00Z", "2026-09-29T12:15:00Z")
+    own = {**PARAMS, "scope_agent": "root"}
+    prepare_outcome_periods(db, own)
+    assert query_family(db, "presence", own)[0]["value"] == pytest.approx(7.5 / 60)
+    assert query_family(db, "active", own)[0]["active_hours"] == pytest.approx(7.5 / 60)
+
+
+@pytest.mark.parametrize(("zone", "entered_at", "exited_at"), [
+    ("UTC", "2026-09-29T23:30:00Z", "2026-09-30T00:30:00Z"),
+    ("Asia/Kolkata", "2026-09-29T18:00:00Z", "2026-09-29T19:00:00Z"),
+])
+def test_period_boundary_intervals_preserve_and_split_time(db, zone, entered_at, exited_at):
+    grain = resolve_grain("days", zone, now=datetime(2026, 10, 1, 12, tzinfo=timezone.utc))
+    params = {**SCOPE, "grain": grain}
+    _visit(db, "root", entered_at, exited_at)
+    prepare_outcome_periods(db, params)
+    rows = query_family(db, "active", params)
+    assert {row["period"]: row["active_hours"] for row in rows} == {
+        "2026-09-29": pytest.approx(0.5), "2026-09-30": pytest.approx(0.5),
+    }
+
+
+def test_presence_start_uses_one_global_source_for_days_and_weeks(db):
+    from api.measurement_presence import first_presence_period
+
+    _visit(db, "root", "2026-09-21T12:00:00Z", "2026-09-21T12:10:00Z")
+    assert first_presence_period(db, "steve", resolve_grain("days", "UTC", now=datetime(2026, 10, 1, tzinfo=timezone.utc))) == "2026-09-21"
+    assert first_presence_period(db, "steve", resolve_grain("weeks", "UTC", now=datetime(2026, 10, 1, tzinfo=timezone.utc))) == "2026-09-21"
+
+
+def test_idle_exit_stops_accrual_at_the_recorded_exit(db):
+    _visit(db, "root", "2026-09-29T12:00:00Z", "2026-09-29T12:10:00Z", reason="idle")
+    prepare_outcome_periods(db, PARAMS)
+    assert query_family(db, "active", PARAMS)[0]["active_hours"] == pytest.approx(10 / 60)
+
+
+def test_visit_follows_referenced_thread_owner_not_visit_row_owner(db):
+    _visit(db, "root", "2026-09-29T12:00:00Z", "2026-09-29T12:10:00Z", visit_user="imported-owner")
+    prepare_outcome_periods(db, PARAMS)
+    assert query_family(db, "active", PARAMS)[0]["active_hours"] == pytest.approx(10 / 60)
+
+
+def test_pre_presence_periods_are_absent(db):
+    prepare_outcome_periods(db, PARAMS)
+    assert query_family(db, "active", PARAMS) == []

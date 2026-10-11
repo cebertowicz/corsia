@@ -33,11 +33,17 @@ jobs:
 
   file-sizes:
     needs: relevance
-    if: ${{ needs.relevance.outputs.relevant == 'true' }}
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: File size ratchet
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -57,6 +63,8 @@ jobs:
           set -e
           python -m venv "$RUNNER_TEMP/ratchet-test-venv"
           "$RUNNER_TEMP/ratchet-test-venv/bin/pip" install --quiet pytest
+          # The speed-gate tests import the harness, which needs its pinned SQLite (dev/CI only).
+          "$RUNNER_TEMP/ratchet-test-venv/bin/pip" install --quiet --require-hashes --only-binary :all: -r scripts/speed_gate/requirements.txt
           "$RUNNER_TEMP/ratchet-test-venv/bin/python" -m pytest scripts/tests/ -q
 
       - name: No file grows past its recorded size

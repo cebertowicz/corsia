@@ -282,6 +282,7 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     from api.measurement_agents import build_agents
     from api.measurement_chain_costs import chain_costs
     from api.measurement_findings import derive_findings_state
+    from api.measurement_presence import first_presence_period
     from api.measurement_queries import prepare_outcome_periods
     from api.measurement_scope import resolve_grain
     from infra.database import get_db
@@ -293,9 +294,10 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     db = get_db()
     try:
         prepare_outcome_periods(db, {**params, "grain": grain}, roots=True)
+        first_presence = first_presence_period(db, params["user_id"], grain)
         rows, findings, summaries, count, _overall = build_agents(
             db, params, REGISTRY, metric, sort, grain, comparable or period_comparable,
-            measured or (lambda name, period: period_measured(name, period, grain)), chain_costs(db, params, grain)["cost_rows"])
+            measured or (lambda name, period: period_measured(name, period, grain, first_presence)), chain_costs(db, params, grain)["cost_rows"])
         return {"rows": rows, "findings": findings, "project_summaries": summaries["active"],
                 "agent_count": count, "findings_state": derive_findings_state(rows, findings, count)}
     finally:
@@ -923,7 +925,7 @@ async def test_all_work_serves_a_populated_agents_table_at_both_grains(isolated_
 
 
 def _seed_minutes_agent(now: datetime):
-    """One agent with 25 outcomes and one human message in each period of both windows."""
+    """One agent with 25 outcomes and one recorded presence interval in each period."""
     from api.measurement_scope import resolve_grain
 
     grain = resolve_grain("weeks", "UTC", now=now)
@@ -932,20 +934,16 @@ def _seed_minutes_agent(now: datetime):
         _seed_agent(db, "worker")
         for period in (*grain.previous.periods, *grain.latest.periods):
             _seed_period(db, "worker", period, 25)
-            db.execute("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) "
-                       "VALUES (?,?,'user','x','{}',?)", (f"m-{period}", "worker", f"{period}T12:00:00Z"))
+            db.execute("INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+                       "VALUES ('steve','chat',?,?,?,3600,1,'hidden')", ("worker", f"{period}T12:00:00Z", f"{period}T13:00:00Z"))
     return seed
 
 
-def test_a_previous_window_minutes_recording_did_not_cover_has_no_figure(isolated_db):
-    """Minutes are recorded from 2026-08-31: a previous window starting before it reads "new".
-
-    Pooling only its recorded weeks would put a four-week figure beside a one-week figure and
-    report the difference in coverage as a change in the work.
-    """
+def test_a_previous_window_with_recorded_presence_keeps_its_figure(isolated_db):
+    """Presence-backed minutes compare normally when both windows have retained visits."""
     cell = _build(_seed_minutes_agent(datetime(2026, 10, 10, 9, tzinfo=timezone.utc)),
                   now=datetime(2026, 10, 10, 9, tzinfo=timezone.utc))["rows"][0]["metrics"]["active_hours_per_outcome"]
-    assert cell["value"] is not None and cell["previous_value"] is None
+    assert cell["value"] is not None and cell["previous_value"] == pytest.approx(cell["value"])
 
 
 def test_a_previous_window_minutes_recording_covered_keeps_its_figure(isolated_db):

@@ -38,7 +38,7 @@ def _registered_upload_path(
         return None
     from registry import models
 
-    artifact = models.resolve("upload", "upload", file_id, db=db)
+    artifact = models.resolve_upload(file_id, db=db)
     path = artifact.get("path") if artifact is not None else None
     if artifact is None or artifact.get("parent_thread_id") != thread_id:
         return None

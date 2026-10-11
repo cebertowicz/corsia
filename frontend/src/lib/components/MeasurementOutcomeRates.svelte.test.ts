@@ -42,7 +42,7 @@ describe('MeasurementOutcomeRates', () => {
 		expect(text(minutes.querySelector('.stat'))).toBe('3.0 minutes per outcome, Oct 5 to Nov 1, n 160, -50% vs Sep 7 to Oct 4 (n 160)');
 		expect(text(minutes.querySelector('.asks'))).toBe('Asks are not recorded per agent yet. All agents together: 0.10 asks per outcome, -50%.');
 		expect(text(minutes.querySelector('h4'))).toBe('Minutes of your engagement per outcome, Sep 7 to Nov 1, by week');
-		expect(text(minutes.querySelector('figcaption'))).toContain('Your engaged minutes divided by accepted outcomes; source: your messages and accepted outcomes; lower is better. n is accepted outcomes per week.');
+		expect(text(minutes.querySelector('figcaption'))).toContain('Your engaged minutes divided by accepted outcomes; source: your time active in CORSIA and accepted outcomes; lower is better. n is accepted outcomes per week.');
 		expect(minutes.querySelectorAll('svg .bar').length).toBeGreaterThan(0);
 		expect(text(firstTry.querySelector('h3'))).toBe('First-try rate (agent-graded)');
 		expect(text(firstTry.querySelector('.stat'))).toBe('90% first try, Oct 5 to Nov 1, n 160, +13% vs Sep 7 to Oct 4 (n 160)');

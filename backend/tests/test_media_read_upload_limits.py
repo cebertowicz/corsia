@@ -136,7 +136,7 @@ async def test_upload_records_detected_media_mime_not_client_declaration(
         thread_id="main-1",
     )
 
-    artifact = models.resolve("upload", "upload", result["file_id"])
+    artifact = models.resolve_upload(result["file_id"])
     assert result["mime_type"] == "image/png"
     assert result["is_image"] is True
     assert artifact is not None

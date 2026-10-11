@@ -456,10 +456,9 @@ _MEASUREMENT_WEEKS = (
     ("2026-09-16", 100, 70, 100, 31, 65, 18_000_000),
     ("2026-09-23", 762, 594, 100, 43, 40, 114_300_000),
 )
-# Human messages per settlement week, ten minutes apart (a gap the active-time
-# rule counts in full), so the Attention estimate has both activity and >= 20
-# settled outcomes and its proxy state is reachable. Week 2026-09-07 has none.
-_MEASUREMENT_ACTIVE_MESSAGES = {"2026-09-16": 60, "2026-09-23": 120}
+# Recorded presence minutes per settlement week. The attention proxy needs both
+# active time and >= 20 settled outcomes; week 2026-09-07 deliberately has none.
+_MEASUREMENT_ACTIVE_MINUTES = {"2026-09-16": 60, "2026-09-23": 120}
 _MEASUREMENT_PLAN_ID = "measurement-fixture-plan"
 
 
@@ -479,6 +478,7 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
         "VALUES (?, 'thread', ?, 'active', ?, ?)",
         (_MEASUREMENT_PLAN_ID, thread_id, stamp, stamp),
     )
+    owner = wt.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
     for week, outcomes, first_try, answered, took, other, tokens in _MEASUREMENT_WEEKS:
         for index in range(outcomes):
             node_id = f"measurement-fixture-{week}-{index}"
@@ -538,13 +538,15 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
                 (f"measurement-fixture-usage-{week}-{index}", thread_id, per_row,
                  f"{week}T13:00:00Z"),
             )
-        for index in range(_MEASUREMENT_ACTIVE_MESSAGES.get(week, 0)):
-            sent_at = datetime.fromisoformat(f"{week}T14:00:00") + timedelta(minutes=10 * index)
+        minutes = _MEASUREMENT_ACTIVE_MINUTES.get(week, 0)
+        if minutes:
+            entered_at = datetime.fromisoformat(f"{week}T14:00:00")
+            exited_at = entered_at + timedelta(minutes=minutes)
             wt.execute(
-                "INSERT INTO messages (id, thread_id, role, content, metadata, created_at) "
-                "VALUES (?, ?, 'user', 'Fixture human message', '{}', ?)",
-                (f"measurement-fixture-message-{week}-{index}", thread_id,
-                 sent_at.strftime("%Y-%m-%dT%H:%M:%SZ")),
+                "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+                "VALUES (?, 'chat', ?, ?, ?, ?, 1, 'hidden')",
+                (owner, thread_id, entered_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 exited_at.strftime("%Y-%m-%dT%H:%M:%SZ"), minutes * 60),
             )
     # The nodes above were written straight to the table, so compute their stored aggregates.
     plans_public.rebuild_plan_aggregates(wt, _MEASUREMENT_PLAN_ID)

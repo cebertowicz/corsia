@@ -92,8 +92,8 @@ async def test_thread_upload_is_canonical_artifact_and_downloads_for_owner(
     result = await uploads.upload_file(
         None,
         UploadFile(
-            filename="report.txt",
-            file=io.BytesIO(b"thread upload"),
+            filename="report.png",
+            file=io.BytesIO(_png_bytes()),
             headers={"content-type": "text/plain"},
         ),
         thread_id="main-1",
@@ -101,13 +101,14 @@ async def test_thread_upload_is_canonical_artifact_and_downloads_for_owner(
 
     canonical = (
         workspace / ".threads" / "main-1" / "uploads"
-        / result["file_id"] / "report.txt"
+        / result["file_id"] / "report.png"
     ).resolve()
-    assert canonical.read_bytes() == b"thread upload"
+    assert canonical.read_bytes() == _png_bytes()
     assert not (legacy_uploads / "steve" / result["file_id"] / "report.txt").exists()
 
-    artifact = models.resolve("upload", "upload", result["file_id"])
+    artifact = models.resolve_upload(result["file_id"])
     assert artifact is not None
+    assert artifact["type"] == "image"
     assert artifact["parent_thread_id"] == "main-1"
     assert artifact["path"] == str(canonical)
     assert artifact["retention"] == "durable"
@@ -119,10 +120,17 @@ async def test_thread_upload_is_canonical_artifact_and_downloads_for_owner(
         [result],
         source_input_id="accepted-upload",
     )
-    assert models.resolve("upload", "upload", result["file_id"])["path"] == str(canonical)
+    preserved = models.resolve_upload(result["file_id"])
+    assert preserved is not None
+    assert preserved["type"] == "image"
+    assert preserved["path"] == str(canonical)
+    assert main_db.execute(
+        "SELECT COUNT(*) FROM artifact_identities WHERE integration='upload' AND external_id=?",
+        (result["file_id"],),
+    ).fetchone()[0] == 1
 
     response = await uploads.serve_upload(
-        "steve", result["file_id"], "report.txt", None,
+        "steve", result["file_id"], "report.png", None,
     )
     assert response.path == str(canonical)
 
@@ -204,15 +212,15 @@ async def test_agent_artifact_reference_includes_registered_upload_path(
     uploaded = await uploads.upload_file(
         None,
         UploadFile(
-            filename="evidence.txt",
-            file=io.BytesIO(b"upload reference"),
-            headers={"content-type": "text/plain"},
+            filename="evidence.png",
+            file=io.BytesIO(_png_bytes()),
+            headers={"content-type": "image/png"},
         ),
         thread_id="main-1",
     )
     canonical = (
         workspace / ".threads" / "main-1" / "uploads"
-        / uploaded["file_id"] / "evidence.txt"
+        / uploaded["file_id"] / "evidence.png"
     ).resolve()
     insert_message(
         "main-1",
@@ -230,3 +238,106 @@ async def test_agent_artifact_reference_includes_registered_upload_path(
     )[0]["content"]
 
     assert str(canonical) in rendered
+
+
+def test_upload_identity_resolves_for_chat_cards_by_its_canonical_path(main_db):
+    """A message link to a durable upload resolves its typed identity for a chat card."""
+    from infra import config
+    from registry import service
+
+    path = config.WORKSPACE / ".threads" / "main-1" / "uploads" / "image-id" / "card.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_png_bytes())
+    artifact = service.register_upload(
+        "main-1", file_id="image-id", filename=path.name,
+        mime_type="application/octet-stream", size=path.stat().st_size, path=path,
+    )
+
+    resolved = service.resolve_file_identity(str(path), db=main_db)
+
+    assert resolved is not None
+    assert resolved["id"] == artifact["id"]
+    assert resolved["type"] == "image"
+
+
+def test_workspace_path_miss_skips_upload_path_lookup(main_db, monkeypatch):
+    """Workspace misses retain their logical-identity-only lookup semantics."""
+    from infra import config
+    from registry import registration_events, service
+
+    path = config.WORKSPACE / "not-registered.md"
+    path.write_text("not registered")
+    monkeypatch.setattr(
+        registration_events,
+        "resolve_upload_path",
+        lambda *_args, **_kwargs: pytest.fail("workspace miss queried uploads"),
+    )
+
+    assert service.resolve_file_identity(str(path), db=main_db) is None
+
+
+def test_register_upload_classifies_only_the_canonical_path_suffix(main_db, tmp_path):
+    """Upload identity type follows its canonical file suffix, never MIME metadata."""
+    from registry import models, service
+
+    cases = [
+        ("photo.png", "application/zip", "image"),
+        ("archive.zip", "image/png", "upload"),
+        ("no-suffix", "image/png", "upload"),
+        ("diagram.svg", "application/octet-stream", "image"),
+    ]
+    for index, (filename, mime_type, expected_type) in enumerate(cases):
+        path = tmp_path / filename
+        path.write_bytes(b"upload")
+        row = service.register_upload(
+            "main-1",
+            file_id=f"upload-{index}",
+            filename=filename,
+            mime_type=mime_type,
+            size=path.stat().st_size,
+            path=path,
+        )
+
+        assert row["type"] == expected_type
+        resolved = models.resolve_upload(f"upload-{index}", db=main_db)
+        assert resolved is not None
+        assert resolved["type"] == expected_type
+
+
+@pytest.mark.parametrize(
+    ("archived_type", "active_type"),
+    [
+        pytest.param("image", "upload", id="archived-image-active-upload"),
+        pytest.param("upload", "image", id="archived-upload-active-image"),
+    ],
+)
+def test_resolve_upload_ignores_archived_twin(main_db, archived_type, active_type):
+    """The active typed identity wins when a file id has an archived twin."""
+    from registry import models
+
+    file_id = f"twin-{archived_type}-{active_type}"
+    archived = models.register_artifact(
+        integration="upload",
+        type=archived_type,
+        external_id=file_id,
+        parent_thread_id="archived-owner",
+        db=main_db,
+    )
+    active = models.register_artifact(
+        integration="upload",
+        type=active_type,
+        external_id=file_id,
+        parent_thread_id="active-owner",
+        db=main_db,
+    )
+    main_db.execute(
+        "UPDATE artifact_identities SET state='archived' WHERE id=?",
+        (archived["id"],),
+    )
+    main_db.commit()
+
+    resolved = models.resolve_upload(file_id, db=main_db)
+
+    assert resolved is not None
+    assert resolved["id"] == active["id"]
+    assert resolved["type"] == active_type
