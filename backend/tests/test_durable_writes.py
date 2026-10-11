@@ -671,7 +671,7 @@ def test_scope_conductor_can_write_inside_another_threads_directory(durable_scop
 
 def test_thread_root_write_is_durable_while_working_write_is_tmp(durable_scope):
     """Thread-root state surfaces in the pane; working/ stays ephemeral."""
-    from registry.service import is_tmp
+    from registry.file_resolution import is_tmp
 
     _workspace, project_root, thread_id, _db = durable_scope
     thread_root = project_root / ".threads" / thread_id
