@@ -1,13 +1,18 @@
 <script lang="ts">
 	// The image viewer with comments on parts of the image (DCOL-FR13.3-13.9):
 	// numbered tags over the image, a Comment button and the comments pill in its
-	// bar, and the document's own cards, composer and drawer beside it.
+	// bar, and the document's own cards, composer and drawer beside it. An image
+	// inside a document shows the document's comments on that one image.
 	import { onMount, tick } from 'svelte';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageRegionLayer from './ImageRegionLayer.svelte';
 	import ImageCommentBar from './ImageCommentBar.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
+	import DocFeedbackControls from './DocFeedbackControls.svelte';
+	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { createImageComments } from '$lib/imageComments.svelte';
+	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
+	import type { ImageRegion } from '$lib/imageRegions';
 	import { regionColor, revealCentre } from '$lib/imageRegions';
 	import { FIT_MARGIN } from '$lib/imageZoom';
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
@@ -16,13 +21,29 @@
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
-	let { src, alt, artifactId, projectId = null, readOnly = false, draftOpen = $bindable(false), onLoaded, onFailed, onRetry }: {
+	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
-		/** Comments need the image's artifact; until it is known the viewer shows the image alone. */
+		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
 		artifactId: string | null;
 		projectId?: string | null;
 		readOnly?: boolean;
+		/** The document the image is in, and the way back to it. */
+		docName?: string;
+		onBack?: () => void;
+		/** An image inside a document: where its markdown is, and how a comment anchors on it. */
+		inDocument?: {
+			occurrence: ImageOccurrence;
+			post: (region: ImageRegion, text: string) => Promise<string>;
+			failure?: (error: unknown) => string;
+		} | null;
+		/** Opened on this comment: its card shows at its tag, or with `move` its pin is placed again. */
+		focus?: { id: string; move?: boolean } | null;
+		/**
+		 * The batch the bar shows pending-send status and Send for (DCOL-FR13.12): the document's, for an image inside
+		 * one (so going Back is not leaving it), or an image artifact's own, held by its tab (so a reload is not either).
+		 */
+		feedback?: DocFeedback | null;
 		/** A new comment has text, so the review bar must not answer over it. */
 		draftOpen?: boolean;
 		onLoaded?: () => void;
@@ -33,10 +54,18 @@
 	let root = $state<HTMLElement>();
 	let lightbox = $state<ReturnType<typeof ImageLightbox>>();
 	let layer = $state<ReturnType<typeof ImageRegionLayer>>();
-	const comments = $derived(artifactId ? $docComments[artifactId] ?? [] : []);
+	const all = $derived(artifactId ? $docComments[artifactId] ?? [] : []);
+	const comments = $derived(inDocument ? commentsAtImage(all, inDocument.occurrence) : all);
 	const accent = $derived($projects.find((project) => project.id === projectId)?.accent_color ?? null);
 	const colorOf = (comment: DocComment) => regionColor(comment, projectId, accent);
 	const canComment = $derived(!readOnly && !!artifactId);
+	function reload(id: string) {
+		void loadComments(id).then((current) => feedback?.sync(id, current)).catch(() => undefined);
+	}
+	/** Reads the comments (and their batch) again: the user came back to the browser tab. */
+	export function refresh() {
+		if (artifactId) reload(artifactId);
+	}
 	const image = createImageComments({
 		artifactId: () => artifactId,
 		readOnly: () => !canComment,
@@ -48,16 +77,39 @@
 			const centre = revealCentre(region, tag, frame);
 			lightbox?.revealFraction(centre.x, centre.y);
 		},
+		post: () => (inDocument ? { create: inDocument.post, failure: inDocument.failure } : null),
+		onCreated: () => feedback?.commentCreated(),
 	});
+
+	// Opened from a comment in the document: once the image has drawn, its card shows at its tag, once.
+	let focused = false;
+	async function showFocus() {
+		const wanted = focus;
+		if (focused || !wanted) return;
+		await tick();
+		const comment = comments.find((item) => item.id === wanted.id);
+		if (!comment) return;
+		if (wanted.move) { focused = true; image.movePin(wanted.id); return; }
+		const tag = root?.querySelector<HTMLElement>(`[data-region-tag][data-comment-id="${wanted.id}"]`);
+		if (!tag) return;
+		focused = true;
+		image.select(wanted.id, tag, comment.region);
+	}
+	let loaded = $state(false);
+	function imageLoaded() {
+		loaded = true;
+		onLoaded?.();
+	}
+	$effect(() => { if (loaded && comments.length) void showFocus(); });
 
 	$effect(() => { draftOpen = image.hasDraftText; });
 	// A new revision of the image comes with a new `src`: read the comments again, so pins placed on the old one show as stale.
 	$effect(() => {
 		void src;
-		if (artifactId) void loadComments(artifactId).catch(() => undefined);
+		if (artifactId) reload(artifactId);
 	});
 	// An agent's comment arrives while the image is open: its pin appears, sweeping in.
-	$effect(() => subscribeToDocumentCommentChanges(() => artifactId, (id) => void loadComments(id).catch(() => undefined)));
+	$effect(() => subscribeToDocumentCommentChanges(() => artifactId, reload));
 
 	function toggleBoxMode() {
 		image.toggleBoxMode();
@@ -99,7 +151,7 @@
 <div class="image-comments">
 <div class="layout" class:drawer-open={drawerOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
 	<div class="viewer-cell">
-		<ImageLightbox bind:this={lightbox} {src} {alt} {onLoaded} {onFailed} {onRetry}>
+		<ImageLightbox bind:this={lightbox} {src} {alt} {docName} {onBack} onLoaded={imageLoaded} {onFailed} {onRetry}>
 			{#snippet barActions({ loaded })}
 				{#if artifactId}
 					<ImageCommentBar
@@ -114,6 +166,10 @@
 						onToggle={toggleBoxMode}
 						onOpenList={image.ui.openList}
 					/>
+					<!-- The bar is narrow at any window size (a canvas panel beside the chat): Send is short here, read out in full. -->
+					{#if feedback}
+						<DocFeedbackControls {feedback} compact />
+					{/if}
 				{/if}
 			{/snippet}
 			{#snippet overlay({ scale })}

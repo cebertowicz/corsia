@@ -17,7 +17,7 @@ from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
 from api.measurement_registry import REGISTRY, instrument_period, period_measured
-from api.measurement_models import models_read
+from api.measurement_models import models_read, task_chain_costs
 from api.measurement_partial import current_period_outcomes
 from api.measurement_queries import prepare_outcome_periods, query_family
 from api.measurement_size import size_family, size_rows
@@ -334,6 +334,9 @@ async def measurement_agents(
 async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str, metric: str, dollars: bool,
                          user: dict) -> dict[str, Any]:
     """The ``/agents`` body for one resolved grain and an already validated metric and sort."""
+    # The dollars per hour read the task chains Models reads for the same page load: awaited here, outside the
+    # lane, so this read holds no worker while it waits for them.
+    cost_rows = (await task_chain_costs(project, agent, page_grain, user))["cost_rows"] if dollars else []
 
     def query() -> dict[str, Any]:
         db = get_db()
@@ -344,7 +347,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             prepare_outcome_periods(db, params, roots=True)
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain, period_comparable,
-                lambda name, period: period_measured(name, period, page_grain), with_dollars=dollars)
+                lambda name, period: period_measured(name, period, page_grain), cost_rows, with_dollars=dollars)
             return {
                 "definition_version": 1,
                 "scope": selected_scope.response(),

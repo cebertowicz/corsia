@@ -1,9 +1,11 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+	import { groupRows } from '$lib/docImageComments';
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, decisionErrors = {}, readOnly = false, reopenReachesOwner = false }: {
+	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false }: {
 		comments: Comment[];
 		documentOrder?: boolean;
 		focusedId?: string | null;
@@ -21,6 +23,9 @@
 		/** Image comments: place a pin again, and the colour of each one's numbered tag. */
 		onMovePin?: (id: string) => void;
 		tagColor?: (comment: Comment) => string;
+		/** In document order, comments with the same key (one image's) sit together under `groupHead`. */
+		groupOf?: (comment: Comment) => string | null;
+		groupHead?: Snippet<[Comment[]]>;
 		decisionErrors?: Record<string, string>;
 		readOnly?: boolean;
 		reopenReachesOwner?: boolean;
@@ -32,6 +37,7 @@
 		const rank = (id: string) => { const index = heldOrder!.indexOf(id); return index < 0 ? Infinity : index; };
 		return rank(a.id) - rank(b.id);
 	}) : comments);
+	const rows = $derived(groupRows(ordered, groupOf ?? (() => null)));
 	function holdCardOrder(event: FocusEvent) {
 		if (heldOrder !== null) return;
 		if ((event.target as HTMLElement)?.closest('[data-comment-id]')) heldOrder = comments.map((comment) => comment.id);
@@ -53,7 +59,9 @@
 {#if comments.length === 0}<p class="empty">No comments yet.</p>{/if}
 <div class="list" role="region" aria-label="Comment threads" onfocusin={holdCardOrder} onfocusout={releaseCardOrder}>
 	{#if documentOrder}
-		{#each ordered as comment (comment.id)}
+		{#each rows as row (row.key ?? row.comments[0].id)}
+			{#if row.key !== null}{@render groupHead?.(row.comments)}{/if}
+			{#each row.comments as comment (comment.id)}
 			{@const region = comment.regionNumber != null}
 			<!-- An image comment's card and its mark light up together; the card itself selects its tag, so it needs no link. -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -71,6 +79,7 @@
 				{/if}
 				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
 			</div>
+			{/each}
 		{/each}
 	{:else}
 	{#if reviews.length}<h3>Review comments</h3>{#each reviews as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} />{/each}{/if}

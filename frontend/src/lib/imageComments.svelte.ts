@@ -26,6 +26,11 @@ export function createImageComments(context: {
 	reveal?: (id: string, region: ImageRegion) => void;
 	/** A comment or reply was posted, so the review status may change. */
 	onCreated?: () => void;
+	/**
+	 * Posts a new region comment; an image inside a document anchors it on the image's markdown. Without it the
+	 * comment goes on the image artifact. `failure` words what went wrong for the toast.
+	 */
+	post?: () => { create: (region: ImageRegion, text: string) => Promise<string>; failure?: (error: unknown) => string } | null;
 }) {
 	// Its own draft scope, so closing a card here never aborts a document's comment capture elsewhere.
 	const ui = createCommentSurfaceState(context.restoreFocus, () => `image-comments:${context.artifactId() ?? ''}`);
@@ -82,7 +87,10 @@ export function createImageComments(context: {
 		const artifact = context.artifactId(), region = draftRegion, anchor = ui.anchor;
 		if (!artifact || !region) return;
 		// The composer keeps the text when this rejects.
-		const id = await submitDocumentComment(() => addRegionComment(artifact, region, text), retryToast.remember);
+		const post = context.post?.();
+		const id = await submitDocumentComment(
+			() => (post ? post.create(region, text) : addRegionComment(artifact, region, text)), retryToast.remember, post?.failure,
+		);
 		retryToast.dismissAfterSuccess();
 		draftRegion = null;
 		draftBody = '';
@@ -98,6 +106,12 @@ export function createImageComments(context: {
 		draftRegion = null;
 		if (ui.state?.kind === 'list') { focusedDocComment.set(id); listPicks += 1; return; }
 		ui.focusMarker([id], opener, anchor);
+	}
+	/** Open a comment's card at its tag, as a pick would: the viewer was opened on it from the document. */
+	function select(id: string, tag: HTMLElement, region: ImageRegion | null | undefined) {
+		draftRegion = null;
+		if (region) context.reveal?.(id, region);
+		ui.focusMarker([id], tag, () => (tag.isConnected ? tag.getBoundingClientRect() : null));
 	}
 	/** A card in the drawer was selected: the drawer stays, the tag is picked and scrolled into view. */
 	function showFromList(id: string, region: ImageRegion | null | undefined) {
@@ -148,7 +162,7 @@ export function createImageComments(context: {
 		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody } : null; },
 		setDraftBody(text: string) { draftBody = text; },
 		threads,
-		close, toggleBoxMode, draw, submit, pick, showFromList, movePin, onKeydownCapture,
+		close, toggleBoxMode, draw, submit, pick, select, showFromList, movePin, onKeydownCapture,
 	};
 }
 export type ImageComments = ReturnType<typeof createImageComments>;

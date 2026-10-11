@@ -280,6 +280,7 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     """Run the same build the served route runs, with the route's registry and its two period predicates."""
     from api.measurement import REGISTRY, period_comparable, period_measured
     from api.measurement_agents import build_agents
+    from api.measurement_chain_costs import chain_costs
     from api.measurement_findings import derive_findings_state
     from api.measurement_queries import prepare_outcome_periods
     from api.measurement_scope import resolve_grain
@@ -294,7 +295,7 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
         prepare_outcome_periods(db, {**params, "grain": grain}, roots=True)
         rows, findings, summaries, count, _overall = build_agents(
             db, params, REGISTRY, metric, sort, grain, comparable or period_comparable,
-            measured or (lambda name, period: period_measured(name, period, grain)))
+            measured or (lambda name, period: period_measured(name, period, grain)), chain_costs(db, params, grain)["cost_rows"])
         return {"rows": rows, "findings": findings, "project_summaries": summaries["active"],
                 "agent_count": count, "findings_state": derive_findings_state(rows, findings, count)}
     finally:

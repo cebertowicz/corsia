@@ -32,6 +32,31 @@ def path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
     )
 
 
+class ReadRefused(Exception):
+    """Why ``checked_read`` refused a path: ``missing``, ``outside`` the scope, or ``not_file``."""
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        super().__init__(detail or reason)
+        self.reason = reason
+
+
+def checked_read(raw_path: str, bases: list[Path], *, db=None) -> Path:
+    """The one read-scope gate: ``raw_path`` as it resolves now, an existing file inside ``bases``.
+
+    Every read of a file's bytes passes through here (a document open, raw image
+    serving, the image a region comment is on), so the answers cannot differ.
+    """
+    try:
+        path = Path(raw_path).expanduser().resolve(strict=True)
+    except OSError as exc:
+        raise ReadRefused("missing", str(exc)) from exc
+    if not path_allowed(path, bases, db=db):
+        raise ReadRefused("outside")
+    if not path.is_file():
+        raise ReadRefused("not_file")
+    return path
+
+
 def lookup_file(raw_path: str, bases: list[Path], *, db=None) -> FileLookup:
     """Resolve a path to its file and registered identity within the scope."""
     try:
