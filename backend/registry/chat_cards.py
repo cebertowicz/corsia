@@ -75,7 +75,13 @@ def card_for(
     gone = artifact is None
     retired = gone or row.get("state") not in ("active", "archived")
     title = None if gone else (row.get("title") or _file_name(row))
-    shown = None if gone else resolve_descriptor(row.get("integration"), row.get("type"))
+    shown = None if gone else resolve_descriptor(
+        row.get("integration"),
+        row.get("type"),
+        path=row.get("path"),
+        metadata=row.get("metadata"),
+        title=row.get("title"),
+    )
     card: dict[str, Any] = {
         "kind": kind,
         "artifact_id": artifact_id,

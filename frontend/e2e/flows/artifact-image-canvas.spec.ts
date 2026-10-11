@@ -109,4 +109,35 @@ test.describe('@flow:artifact-image @surface:documents image artifacts open as i
 		}
 	});
 	}
+
+	test('opens an uploaded PNG from the 393px artifact list', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+		await page.setViewportSize({ width: 393, height: 852 });
+		const stamp = Date.now();
+		const sessionTitle = `artifact-upload-${stamp}`;
+		const sessionId = await createSession(request, sessionTitle);
+		const name = `uploaded-${stamp}.png`;
+		const tok = encodeURIComponent(TEST_TOKEN);
+
+		const upload = await request.post(`/api/upload?token=${tok}&thread_id=${sessionId}`, {
+			multipart: {
+				file: { name, mimeType: 'image/png', buffer: syntheticPng(640, 400) },
+			},
+		});
+		expect(upload.ok(), `upload failed: ${upload.status()} ${await upload.text()}`).toBeTruthy();
+
+		await loginByUrl(page);
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await page.getByText(sessionTitle).first().click();
+		await page.getByRole('button', { name: 'Toggle panel' }).click();
+
+		const row = page.getByRole('button', { name: new RegExp(name) });
+		await expect(row).toBeVisible();
+		await row.click();
+
+		const image = page.getByRole('img', { name });
+		await expect(image).toBeVisible();
+		await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+		await saveEvidenceScreenshot(page, testInfo, 'artifact-upload-image-393', { fullPage: false });
+	});
 });

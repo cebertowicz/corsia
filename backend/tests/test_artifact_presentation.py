@@ -59,3 +59,48 @@ def test_claude_code_session_and_codex_thread_are_non_pane_types():
 def test_workspace_image_descriptor_is_labelled_and_iconned():
     descriptor = presentation.resolve_descriptor("workspace", "image")
     assert (descriptor.label, descriptor.icon) == ("Image", "image")
+
+
+def test_existing_local_image_upload_resolves_to_image_descriptor(tmp_path):
+    image = tmp_path / "receipt.png"
+    image.write_bytes(b"png")
+
+    descriptor = presentation.resolve_descriptor(
+        "upload", "upload", path=str(image), metadata={"mime": "image/png"}, title=image.name,
+    )
+
+    assert (descriptor.label, descriptor.icon, descriptor.capability) == (
+        "Image", "image", presentation.CAPABILITY_LEAF_PACKAGE,
+    )
+
+
+def test_existing_local_image_upload_uses_filename_when_mime_is_missing(tmp_path):
+    image = tmp_path / "photo.JPEG"
+    image.write_bytes(b"jpeg")
+
+    descriptor = presentation.resolve_descriptor(
+        "upload", "upload", path=str(image), metadata={}, title=image.name,
+    )
+
+    assert descriptor.capability == presentation.CAPABILITY_LEAF_PACKAGE
+
+
+def test_existing_local_pdf_upload_stays_downloadable(tmp_path):
+    pdf = tmp_path / "receipt.pdf"
+    pdf.write_bytes(b"%PDF")
+
+    descriptor = presentation.resolve_descriptor(
+        "upload", "upload", path=str(pdf), metadata={"mime": "application/pdf"}, title=pdf.name,
+    )
+
+    assert descriptor.capability == presentation.CAPABILITY_DOWNLOAD
+
+
+def test_missing_image_upload_stays_downloadable(tmp_path):
+    missing = tmp_path / "missing.webp"
+
+    descriptor = presentation.resolve_descriptor(
+        "upload", "upload", path=str(missing), metadata={"mime": "image/webp"}, title=missing.name,
+    )
+
+    assert descriptor.capability == presentation.CAPABILITY_DOWNLOAD
