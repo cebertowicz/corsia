@@ -180,10 +180,11 @@ def test_version_mismatch_warns_in_report_only_and_exits_two_when_enforcing(tmp_
 
 
 def test_a_small_route_moving_by_measured_noise_is_not_growth():
-    # /api/vendor-accounts was seen at 2400 and 2700 steps across runs of one tree.
+    # The floor keeps a route of a few thousand steps from being flagged for a couple of hundred more.
     base = baseline_for({"/a": cost(2_400)})
     assert ratchet.compare(result({"/a": cost(2_700)}), base).status == "pass"
-    # A regression of interest (pre-691 /api/projects added 724k steps) is far above the floor.
+    # A regression of interest (per-project usage rollups read on every /api/projects call added ~720k steps)
+    # is far above the floor.
     assert ratchet.compare(result({"/a": cost(2_400 + 724_000)}), base).status == "would_fail"
 
 
@@ -213,7 +214,7 @@ def test_a_difference_between_runs_names_the_statement_and_thread_that_differ():
     assert lines == ["    only in run 1: db_0: SELECT 3 (x1)"]
 
 
-MANIFEST = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s", "excluded": {}}
+MANIFEST = {"size_bytes": 1, "sqlite_version": VERSION, "builder_sha256": "x", "schema": "s", "excluded": {}, "short": {}}
 
 
 def disagreements(first, second):
@@ -395,6 +396,74 @@ def test_the_one_worker_per_lane_proof_fails_on_a_second_worker_and_on_no_lane_a
         harness.assert_one_worker_per_lane(counters)
 
 
+HEAVY = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x<20000) SELECT count(*) FROM c"
+
+
+@pytest.fixture
+def counted(monkeypatch):
+    """``(counters, connect)``: connections made through the harness's own ``sqlite3.connect`` wrapper."""
+    counters = harness.Counters()
+    monkeypatch.setattr(sqlite3, "connect", sqlite3.connect)  # undone after the test
+    monkeypatch.setattr(harness, "COUNTING_CLASSES", {}, raising=False)
+    harness.install_counting(counters)
+    return counters, lambda: sqlite3.connect(":memory:")
+
+
+def run_heavy(counters, db):
+    before = counters.steps
+    db.execute(HEAVY).fetchone()
+    return counters.steps - before
+
+
+def test_an_application_progress_handler_neither_replaces_nor_clears_the_count(counted):
+    counters, connect = counted
+    db = connect()
+    baseline = run_heavy(counters, db)
+    assert baseline > 100_000
+    calls: list[int] = []
+    db.set_progress_handler(lambda: calls.append(1) or 0, 1_000)  # a deadline check, as the audit and log reads set
+    assert run_heavy(counters, db) == baseline
+    assert len(calls) == baseline // 1_000
+    db.set_progress_handler(None, 0)  # the lesson report clears its handler when it is done
+    seen = len(calls)
+    assert run_heavy(counters, db) == baseline
+    assert len(calls) == seen
+
+
+def test_an_application_handler_still_aborts_a_statement_through_the_counter(counted):
+    counters, connect = counted
+    db = connect()
+    db.set_progress_handler(lambda: True, 1_000)
+    with pytest.raises(sqlite3.OperationalError, match="interrupted"):
+        db.execute(HEAVY).fetchone()
+    assert counters.steps > 0
+
+
+def test_an_application_trace_callback_is_chained_and_clearing_it_keeps_the_statement_count(counted):
+    counters, connect = counted
+    db = connect()
+    seen: list[str] = []
+    db.set_trace_callback(seen.append)
+    db.execute("SELECT 1")
+    assert counters.statements == 1 and seen == ["SELECT 1"]
+    db.set_trace_callback(None)
+    db.execute("SELECT 2")
+    assert counters.statements == 2 and seen == ["SELECT 1"]
+
+
+def test_a_live_connection_the_counter_does_not_own_is_an_error_no_verdict(counted, monkeypatch):
+    counters, connect = counted
+    owned = connect()
+    foreign = sqlite3.Connection(":memory:")  # not made by sqlite3.connect, so nothing counts it
+    closed = sqlite3.Connection(":memory:")
+    closed.close()
+    monkeypatch.setattr(harness.gc, "get_objects", lambda: [owned, closed])
+    harness.assert_all_counted()
+    monkeypatch.setattr(harness.gc, "get_objects", lambda: [owned, closed, foreign])
+    with pytest.raises(harness.GuardError, match=r"1 live SQLite connection\(s\) are not counted"):
+        harness.assert_all_counted()
+
+
 def test_the_harness_refuses_a_sqlite_that_is_not_the_pinned_build(monkeypatch):
     fake = SimpleNamespace(sqlite_version="3.45.1", dbapi2=object())
     monkeypatch.setitem(sys.modules, "sqlean", fake)
@@ -419,3 +488,36 @@ def test_the_build_fails_on_an_empty_table_with_no_listed_reason_and_records_the
     with pytest.raises(fixture_build.FixtureCoverageError, match="brand_new_table .*other_new \\(IntegrityError: x\\)"):
         fixture_build._account_for_empty_tables(manifest)
     assert all(reason.strip() for reason in fixture_excluded.EXCLUDED.values())
+
+
+def row_target_db(monkeypatch, counts, targets, short):
+    db = sqlite3.connect(":memory:")
+    for table, count in counts.items():
+        db.execute(f"CREATE TABLE {table} (id INTEGER)")
+        db.executemany(f"INSERT INTO {table} VALUES (?)", [(i,) for i in range(count)])
+    monkeypatch.setattr(fixture_build.spec, "target_rows", targets.get)
+    monkeypatch.setattr(fixture_excluded, "SHORT", short)
+    return db
+
+
+def test_a_table_below_its_census_target_fails_the_build_unless_listed_with_its_exact_count(monkeypatch):
+    targets = {"full": 3, "wide": 3, "short": 5}
+    manifest = {"tables": {}}
+    db = row_target_db(monkeypatch, {"full": 3, "wide": 9, "short": 2, "untargeted": 0}, targets,
+                       {"short": (2, "bounded by the thread count")})
+    fixture_build._check_row_targets(db, manifest)
+    assert manifest["short"] == {"short": {"target": 5, "rows": 2, "reason": "bounded by the thread count"}}
+    for short, message in (({}, r"short has 2 row\(s\), target 5, not listed"),
+                           ({"short": (3, "x")}, r"short has 2 row\(s\), target 5, listed as 3"),
+                           ({"short": (2, "x"), "full": (3, "x")}, r"full has 3 row\(s\), at its target of 3"),
+                           ({"short": (2, "x"), "ghost": (1, "x")}, r"ghost is listed as short but has no census target")):
+        db = row_target_db(monkeypatch, {"full": 3, "wide": 9, "short": 2}, targets, short)
+        with pytest.raises(fixture_build.FixtureCoverageError, match=message):
+            fixture_build._check_row_targets(db, {"tables": {}})
+
+
+def test_the_report_lists_fixture_tables_below_their_target_with_the_reason():
+    current = result({"/a": cost()}, fixture_manifest={"short": {"wakes": {"target": 966, "rows": 553, "reason": "thread_id is UNIQUE"}}})
+    text = report.render(current, ratchet.compare(current, baseline_for({"/a": cost()})), baseline_for({"/a": cost()}),
+                         report_only=True, base_label="the baseline")
+    assert "`wakes` | 966 | 553 | thread_id is UNIQUE" in text

@@ -79,7 +79,7 @@ def measure_tree(backend: Path, repeats: int, keep_runs: Path | None = None, *, 
     runs, manifest, timings = runner.build_and_measure(backend, repeats)
     first = runs[0]
     first["fixture_manifest"] = {key: manifest[key] for key in
-                                 ("size_bytes", "sqlite_version", "builder_sha256", "schema", "excluded")}
+                                 ("size_bytes", "sqlite_version", "builder_sha256", "schema", "excluded", "short")}
     first["info"] = {**timings, "repeats": len(runs)}
     differences = [item for other in runs[1:] for item in ratchet.compare_runs(first, other)]
     if not differences:

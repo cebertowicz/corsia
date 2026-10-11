@@ -7,7 +7,7 @@ it in the report, it is never skipped silently.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
@@ -28,7 +28,6 @@ NOT_A_READ = {
 class Target:
     template: str
     url: str | None
-    query_names: list[str] = field(default_factory=list)
     reason: str | None = None  # why it cannot be called
 
 
@@ -116,4 +115,4 @@ def build_target(template: str, route, ids: dict[str, str], extra: dict[str, str
             return Target(template, None, reason=f"no fixture value for required query parameter '{name}'")
         if value is not None:
             query.append(f"{name}={quote(value, safe=',')}")
-    return Target(template, url + ("?" + "&".join(query) if query else ""), query_names=[])
+    return Target(template, url + ("?" + "&".join(query) if query else ""))

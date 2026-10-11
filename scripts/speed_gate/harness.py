@@ -7,13 +7,18 @@ recorded as measurements. Wall time is logged in ``info`` for people to read and
 is never an input to a verdict.
 
 Counting: a progress handler every ``PROGRESS_EVERY`` VM instructions on every
-SQLite connection the process opens (installed by wrapping ``sqlite3.connect``
-before the application is imported), so a request that uses several
+SQLite connection the process opens, so a request that uses several
 connections or threads is counted in full. A trace callback counts statements.
+Every connection is made by ``sqlite3.connect`` with a counting connection class (installed before the
+application is imported). SQLite keeps one progress handler per connection, so the class owns that slot:
+when the application sets its own handler (a deadline, a cancellation check) or clears it, the class stores
+it and calls it from the counter's handler at its own interval, and clearing it restores the counter alone.
+Application code therefore cannot replace or clear the count, and ``assert_all_counted`` fails the run if a
+live connection exists that is not of that class.
 The SQLite build is the pinned one (``sqlite_pin``).
 
-Two guards make a count mean one thing on every run, and a violated guard is an error with no verdict:
-``Background`` (work the application starts that outlives the request is drained inside the measured
+Three guards make a count mean one thing on every run, and a violated guard is an error with no verdict:
+``assert_all_counted`` (no connection escaped the counter), ``Background`` (work the application starts that outlives the request is drained inside the measured
 window, and anything it cannot trace to the measured request stops the run) and
 ``assert_one_worker_per_lane`` (the database lanes ran on a single pooled connection each).
 """
@@ -22,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import importlib.util
 import json
 import os
@@ -77,16 +83,81 @@ class Counters:
             return self.steps, self.statements
 
 
+def counting_class(counters: Counters, base: type) -> type:
+    """``base`` (a connection class) with the counter's handlers, and ``set_*`` methods that chain the application's.
+
+    SQLite holds one progress handler and one trace callback per connection. The application replaces or
+    clears them (a read deadline, a cancellation check); done to a plain connection that would silently end
+    the count for the rest of that connection's life, and the pooled connections live for the whole run.
+    """
+
+    class CountingConnection(base):  # type: ignore[valid-type, misc]
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self._app_progress = None
+            self._app_interval = 0
+            self._app_elapsed = 0
+            self._app_trace = None
+            super().set_progress_handler(self._on_progress, PROGRESS_EVERY)
+            super().set_trace_callback(self._on_trace)
+
+        def _on_progress(self) -> int:
+            counters.on_progress()
+            handler = self._app_progress
+            if handler is None:
+                return 0
+            self._app_elapsed += PROGRESS_EVERY
+            if self._app_elapsed < self._app_interval:
+                return 0
+            self._app_elapsed = 0
+            return 1 if handler() else 0  # a truthy result aborts the statement, as it does for the application
+
+        def _on_trace(self, sql: str) -> None:
+            counters.on_statement(sql)
+            if self._app_trace is not None:
+                self._app_trace(sql)
+
+        def set_progress_handler(self, progress_handler, n) -> None:
+            """The application's handler runs every ``n`` instructions, rounded up to the counter's interval."""
+            self._app_progress, self._app_interval, self._app_elapsed = progress_handler, n, 0
+
+        def set_trace_callback(self, trace_callback) -> None:
+            self._app_trace = trace_callback
+
+    CountingConnection.__name__ = CountingConnection.__qualname__ = f"Counting{base.__name__}"
+    return CountingConnection
+
+
+#: The counting class made for each connection class passed to ``sqlite3.connect`` (``factory=``).
+COUNTING_CLASSES: dict[type, type] = {}
+
+
 def install_counting(counters: Counters) -> None:
     real_connect = sqlite3.connect
 
     def counting_connect(*args, **kwargs):
-        connection = real_connect(*args, **kwargs)
-        connection.set_progress_handler(counters.on_progress, PROGRESS_EVERY)
-        connection.set_trace_callback(counters.on_statement)
-        return connection
+        base = kwargs.pop("factory", None) or sqlite3.Connection
+        if base not in COUNTING_CLASSES:
+            COUNTING_CLASSES[base] = counting_class(counters, base)
+        return real_connect(*args, factory=COUNTING_CLASSES[base], **kwargs)
 
     sqlite3.connect = counting_connect  # type: ignore[assignment]
+
+
+def assert_all_counted() -> None:
+    """Every live connection is one the counter owns; one made another way (``sqlite3.Connection(...)``) is not counted."""
+    counted = tuple(COUNTING_CLASSES.values())
+    foreign = []
+    for item in gc.get_objects():
+        if isinstance(item, sqlite3.Connection) and not isinstance(item, counted):
+            try:
+                item.in_transaction  # raises once closed; a closed connection runs nothing
+            except sqlite3.ProgrammingError:
+                continue
+            foreign.append(type(item).__name__)
+    if foreign:
+        raise GuardError(f"{len(foreign)} live SQLite connection(s) are not counted ({', '.join(sorted(set(foreign)))}): "
+                         "they were not made by sqlite3.connect, so their steps and statements are missing from the run")
 
 
 class Background:
@@ -235,6 +306,7 @@ def measure_route(client, counters: Counters, background: Background, headers: d
         client.get(url, headers=headers)
         background.drain()
     background.assert_quiet()
+    assert_all_counted()
     steps0, statements0 = counters.snapshot()
     trace_from = len(counters.trace)
     started = time.monotonic()
@@ -275,6 +347,7 @@ def run(backend: Path, db_file: Path) -> dict:
             not_called[template] = (f"HTTP {result['status']} from the fixture request "
                                     f"({result['info']['detail'][:100]}), so the read it guards is not exercised")
     assert_one_worker_per_lane(counters)
+    assert_all_counted()
     return {"sqlite_version": sqlite3.sqlite_version, "sqlite_package": PINNED_PACKAGE,
             "progress_every": PROGRESS_EVERY, "routes": measured, "not_called": not_called,
             "clock": clock.FROZEN_NOW.isoformat()}

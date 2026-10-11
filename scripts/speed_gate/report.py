@@ -69,6 +69,13 @@ def render(current: dict, verdict: ratchet.Verdict, baseline: dict, *, report_on
         lines += [f"<details><summary>{len(excluded)} fixture tables left unseeded, each with its reason</summary>", ""]
         lines += _table(["Table", "Reason"], [[f"`{table}`", reason] for table, reason in sorted(excluded.items())])
         lines += ["", "</details>", ""]
+    short = current.get("fixture_manifest", {}).get("short", {})
+    if short:
+        lines += [f"<details><summary>{len(short)} fixture table(s) below the census target</summary>", ""]
+        lines += _table(["Table", "Target", "Rows", "Reason"],
+                        [[f"`{table}`", _cell(item["target"]), _cell(item["rows"]), item["reason"]]
+                         for table, item in sorted(short.items())])
+        lines += ["", "</details>", ""]
     return "\n".join(lines)
 
 

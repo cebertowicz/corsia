@@ -47,3 +47,11 @@ EXCLUDED: dict[str, str] = {
         "plan_status_dirty", "provider_availability", "vendor_account_billing_facts",
         "vendor_account_billing_revisions")},
 }
+
+#: table -> (rows the fixture ends up with, why that is below its census target). The build compares every
+#: table's stored rows with ``fixture_spec.target_rows``: a table below target fails the build unless it is
+#: listed here with its exact actual count, so a shortfall is never an accident and a stale entry fails too.
+SHORT: dict[str, tuple[int, str]] = {
+    "plan_liveness_wakes": (553, "one row per thread (thread_id is UNIQUE) and the fixture has 553 threads, "
+                                 "so it cannot hold the census's 966 at this scale"),
+}

@@ -18,7 +18,7 @@
     "/api/threads/{thread_id}/context-snapshot/next-turn"
   ],
   "progress_every": 100,
-  "reason": "Re-recorded at the merge of dev 4248085: the Measurement reads changed in dev (#410, #414), so Measurement Agents, Cost, Models and Series moved; hosted three-run measurement, runs agreed exactly, SQLite 3.50.4 (sqlean.py 3.50.4.5)",
+  "reason": "Counter keeps counting when the application sets its own progress handler: the three routes that replace or clear it no longer drop to zero steps; recorded from the hosted artifact of the same tree",
   "routes": {
     "/api/agents": {
       "bytes": 221,
@@ -123,7 +123,7 @@
     "/api/measurement/lessons": {
       "bytes": 70408,
       "statements": 568,
-      "steps": 0
+      "steps": 5331100
     },
     "/api/measurement/limits": {
       "bytes": 509,
@@ -276,7 +276,7 @@
       "steps": 0
     },
     "/api/system/update-status": {
-      "bytes": 234,
+      "bytes": 238,
       "statements": 1,
       "steps": 0
     },
@@ -341,7 +341,7 @@
       "steps": 0
     },
     "/api/version": {
-      "bytes": 684,
+      "bytes": 662,
       "statements": 0,
       "steps": 0
     }

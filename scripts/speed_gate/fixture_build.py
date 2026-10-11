@@ -10,7 +10,9 @@ the census skew; the remaining tables with a census figure are filled by
 ``fixture_rows``. A table whose constraints reject a generated row is recorded
 in the manifest's ``unseeded`` list. Every table the build leaves empty, because the census has no figure
 for it or its rows were rejected, must be listed with a reason in ``fixture_excluded``; one that is not
-fails the build (``FixtureCoverageError``), and the listed ones are reported in the manifest.
+fails the build (``FixtureCoverageError``), and the listed ones are reported in the manifest. Likewise every
+table's stored rows are compared with its census target: one below it fails unless ``fixture_excluded.SHORT``
+lists it with its exact count and reason, and the listed shortfalls are reported in the manifest too.
 """
 
 from __future__ import annotations
@@ -103,6 +105,42 @@ def _account_for_empty_tables(manifest: dict) -> None:
     manifest["excluded"] = {table: excluded.EXCLUDED[table] for table in empty}
 
 
+def _check_row_targets(db: sqlite3.Connection, manifest: dict) -> None:
+    """Every table with a census target holds at least that many rows, or is listed in ``fixture_excluded.SHORT``.
+
+    Counted from the stored rows, not from what the build meant to insert. A listed table must hold exactly the
+    listed count, so a fixed or changed shortfall makes the entry stale and fails the build. Shortfalls are
+    carried into the manifest (``short``) and from there into the report.
+    """
+    short: dict[str, dict] = {}
+    problems: list[str] = []
+    tables = [r[0] for r in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        " AND sql NOT LIKE 'CREATE VIRTUAL%' ORDER BY name")]
+    for table in tables:
+        want = spec.target_rows(table)
+        if want is None:
+            continue
+        have = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        listed = excluded.SHORT.get(table)
+        if have >= want:
+            if listed:
+                problems.append(f"{table} has {have} row(s), at its target of {want}, but is listed as short at {listed[0]}")
+        elif listed is None or listed[0] != have:
+            problems.append(f"{table} has {have} row(s), target {want}, "
+                            + (f"listed as {listed[0]}" if listed else "not listed"))
+        else:
+            short[table] = {"target": want, "rows": have, "reason": listed[1]}
+    problems += [f"{table} is listed as short but has no census target in this schema"
+                 for table in sorted(excluded.SHORT) if table not in tables or spec.target_rows(table) is None]
+    if problems:
+        raise FixtureCoverageError(
+            "table row counts disagree with the census targets: " + "; ".join(problems)
+            + ". Make the build reach the target, or list the table with its actual count and reason "
+            "in fixture_excluded.SHORT.")
+    manifest["short"] = short
+
+
 def build_into(db: sqlite3.Connection) -> dict:
     """Fill an initialised database; returns the build manifest."""
     rng = random.Random(spec.SEED)
@@ -131,6 +169,7 @@ def build_into(db: sqlite3.Connection) -> dict:
                                               "rows": plans.seed_node_events(db, rng)}
     _seed_generic(db, rng, pools, manifest)
     _account_for_empty_tables(manifest)
+    _check_row_targets(db, manifest)
     db.commit()
     manifest["top_thread"] = {"id": "thread-00000", "messages": message_counts[0],
                               "llm_usage": usage_counts[0]}
