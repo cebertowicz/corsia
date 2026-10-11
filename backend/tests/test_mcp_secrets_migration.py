@@ -86,7 +86,7 @@ def _migrate(path) -> None:
 
 
 def test_the_step_is_registered_and_current():
-    assert SCHEMA_VERSION == FROM_VERSION + 4
+    assert SCHEMA_VERSION == FROM_VERSION + 5
     assert MIGRATIONS[FROM_VERSION] is migrate_mcp_secrets
     assert FROM_VERSION - 1 in MIGRATIONS  # the ladder has no gap below it
 
