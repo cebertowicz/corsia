@@ -155,6 +155,11 @@ async def update_provider_key(name: str, body: ProviderKeyUpdate, user: dict = D
 
     meta = PROVIDER_META[name]
     _refuse_unsupported_provider(name, meta)
+    if body.api_key and meta.get("type") == "network":
+        raise HTTPException(
+            400, "api_key is not saved for a network provider; set each server's key with "
+            "PUT /api/settings/network-servers/{server_id}.",
+        )
     if body.api_key:
         require_person_for_key(user, kind="provider", name=name, action="write")
 

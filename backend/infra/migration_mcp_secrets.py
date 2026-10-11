@@ -47,11 +47,14 @@ _MIGRATION_CREDENTIAL_RE = re.compile(
 )
 
 
+def _migration_slug(text: str, limit: int) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:limit].strip("-") or "x"
+
+
 def _migration_entry_name(server: str, field: str, var: str) -> str:
     kind = _MIGRATION_KINDS.get(field, field)
     digest = hashlib.sha256(f"{kind}\0{server}\0{var}".encode()).hexdigest()[:10]
-    slug = lambda text, limit: re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:limit].strip("-") or "x"
-    return f"mcp-{slug(server, 10)}-{slug(var, 14)}-{digest}"
+    return f"mcp-{_migration_slug(server, 10)}-{_migration_slug(var, 14)}-{digest}"
 
 
 def _migration_listed(config: dict, field: str) -> list[str]:
