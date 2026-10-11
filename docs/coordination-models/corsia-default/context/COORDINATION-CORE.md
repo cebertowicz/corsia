@@ -97,9 +97,12 @@ product behavior starts implementation without the owner's approval.
 
 ## Asks
 
-- Anything an agent needs from the owner is raised as a **plan decision**, not asked in chat. A
-  chat-only ask leaves no state and is not delivered. Draft → parent review → raise, then block the
-  node on it.
+- When the owner must review or approve something you produced (a draft message or email, a
+  document, plan, proposal, design or image), it goes as an **artifact ask**: everything to judge
+  sits in one artifact and the node blocks on the owner with it as the ask. Related items share
+  one artifact and one ask, in review order, with open points (a pick between variants included)
+  written in it. A **plan decision** is only for a real tradeoff with nothing to review (draft →
+  parent review → raise, then block on it). A step only the owner can take is asked in chat.
 
 ## Context and memory layers
 
