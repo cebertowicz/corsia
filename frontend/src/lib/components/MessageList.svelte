@@ -23,7 +23,7 @@
 	import { hasLandingTarget as hasLandingTargetIn, landOnNewContent, observeLayoutGrowth } from './messageListLayout';
 	import { runHasMore, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { needsWakeRetry } from './pendingWakeRetry';
-
+	import { isHumanMessage } from './transcriptRowKinds';
 	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
 		userIsNearBottom: boolean;
@@ -167,7 +167,7 @@
 	const pendingEntries = $derived([
 		...(presentation.pendingContextDigest && !focusMode
 			? buildTranscriptPresentation([presentation.pendingContextDigest], focusMode, null, 'run:pending-context') : []),
-		...buildTranscriptPresentation(pendingDeliveryMessages.filter((msg) => !focusMode || msg.role !== 'system'), focusMode),
+		...buildTranscriptPresentation(pendingDeliveryMessages.filter((msg) => !focusMode || isHumanMessage(msg)), focusMode),
 	]);
 	const NEAR_BOTTOM_PX = 80;
 	// Programmatic scrolling ends on any real gesture; never undo a user's reread.
