@@ -46,8 +46,8 @@ async function serve(page: Page, project: { id: string; name: string }, agentId:
 		}
 		if (url.pathname.endsWith('/agents')) {
 			const body = agentsBody(project, agentId, agentName, url);
-			const base = body.rows[0];
-			const more = [['b', 'Zed lane', 2, 0.5, 30], ['c', 'Amy lane', 3, 0.9, 10]] as const;
+			const base = { ...body.rows[0], n: 20, agent: { ...body.rows[0].agent, name: 'Infrastructure' }, metrics: { ...body.rows[0].metrics, first_try_acceptance: { ...body.rows[0].metrics.first_try_acceptance, value: 0.9 } } };
+			const more = [['b', 'Self-Improvement Infrastructure', 2, 0.5, 30], ['c', 'Local Inference Optimization', 3, 0.7, 10]] as const;
 			body.rows = [base, ...more.map(([id, name, rank, first, outcomes]) => ({
 				...base, rank, n: outcomes, agent: { ...base.agent, id: `${agentId}-${id}`, name },
 				metrics: { ...base.metrics, first_try_acceptance: { ...base.metrics.first_try_acceptance, value: first } },
@@ -136,22 +136,26 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 			const names = () => agents.locator('tbody th .name').allTextContents();
 			expect(await agents.locator('thead th').allTextContents(), 'the approved columns, no asks').toEqual([
 				'Agent', 'Outcomes', 'First try', '$ per hour of work', 'Change in minutes per outcome, vs the previous window']);
-			expect(await names(), 'the served order, no column sorted').toEqual([expect.stringContaining('Biggest changes agent'), 'Zed lane', 'Amy lane']);
-			const zed = agents.locator('tbody tr').filter({ hasText: 'Zed lane' });
-			await expect(zed.locator('td.n').nth(1)).toContainText('50%');
-			await expect(zed.locator('td.n').nth(3)).toContainText('-50%');
+			const servedNames = await names();
+			expect(servedNames, 'the served order, no column sorted').toEqual(['Self-Improvement Infrastructure', 'Infrastructure', 'Local Inference Optimization']);
+			const selfImprovement = agents.locator('tbody tr').filter({ hasText: 'Self-Improvement Infrastructure' });
+			await expect(selfImprovement.locator('td.n').nth(1)).toContainText('50%');
+			await expect(selfImprovement.locator('td.n').nth(3)).toContainText('-50%');
 			const hourly = agents.getByRole('button', { name: 'First try' });
 			await hourly.click();
 			await expect(hourly.locator('xpath=..')).toHaveAttribute('aria-sort', 'ascending');
-			expect(await names()).toEqual(['Zed lane', expect.stringContaining('Biggest changes agent'), 'Amy lane']);
+			const ascendingNames = await names();
+			expect(ascendingNames).toEqual(['Self-Improvement Infrastructure', 'Local Inference Optimization', 'Infrastructure']);
 			await hourly.click();
-			expect(await names()).toEqual(['Amy lane', expect.stringContaining('Biggest changes agent'), 'Zed lane']);
+			const descendingNames = await names();
+			expect(descendingNames).toEqual(['Infrastructure', 'Local Inference Optimization', 'Self-Improvement Infrastructure']);
 			await hourly.click();
-			expect((await names())[0], 'a third click returns the served order').toContain('Biggest changes agent');
+			const resetNames = await names();
+			expect(resetNames, 'a third click returns the served order').toEqual(servedNames);
 
 			// The page itself never scrolls sideways; the card holds its content at both widths.
 			const shot = (name: string) => (process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/${name}` : testInfo.outputPath(name));
-			for (const width of [393, 1280] as const) {
+			for (const width of [393, 412, 1280] as const) {
 				await page.setViewportSize({ width, height: 4000 });
 				await atRest(page, card);
 				const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -161,7 +165,7 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 				const clipped = await card.locator('.tb-wrap').evaluateAll((wraps) => wraps.map((wrap) => wrap.scrollWidth - wrap.clientWidth));
 				expect(Math.max(...clipped), `${scheme}: at ${width} every Overall column is fully inside its card`).toBeLessThanOrEqual(0);
 				const subject = lists.nth(0).locator('tbody tr').first().locator('td.subj');
-				if (width === 393) {
+				if (width <= 412) {
 					// A phone shows the measure under the subject, in one cell; the measure column is gone.
 					await expect(lists.nth(0).locator('th.measure')).toBeHidden();
 					await expect(subject.locator('div.stacked')).toBeVisible();
@@ -184,6 +188,10 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 						return [...el.querySelectorAll('tbody th .name')].map((name) => name.getBoundingClientRect().left >= box.left - 0.5);
 					});
 					expect(starts, `${scheme}: every agent name starts inside the unscrolled box`).toEqual([true, true, true]);
+					const overflowingCells = await region.locator('tbody th, tbody td').evaluateAll((cells) => cells
+						.filter((cell) => cell.scrollWidth > cell.clientWidth)
+						.map((cell) => cell.textContent?.replace(/\s+/g, ' ').trim()));
+					expect(overflowingCells, `${scheme}: no Agents body cell overflows its own column at ${width}`).toEqual([]);
 					const lines = await region.locator('thead th').evaluateAll((cells) => cells.map((cell) => {
 						const tops = new Set<number>();
 						const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
@@ -194,11 +202,11 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 						}
 						return tops.size;
 					}));
-					console.log(`${scheme} ${testInfo.project.name}: Agents header lines at 393: ${lines.join(', ')}`);
-					expect(Math.max(...lines), `${scheme}: no Agents header runs past three lines at 393 (lines: ${lines.join(', ')})`).toBeLessThanOrEqual(3);
-					await agents.screenshot({ path: shot(`agents-table-${scheme}-393.png`) });
+					console.log(`${scheme} ${testInfo.project.name}: Agents header lines at ${width}: ${lines.join(', ')}`);
+					expect(Math.max(...lines), `${scheme}: no Agents header runs past three lines at ${width} (lines: ${lines.join(', ')})`).toBeLessThanOrEqual(3);
+					await agents.screenshot({ path: shot(`agents-table-${scheme}-${width}.png`) });
 					await region.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
-					await agents.screenshot({ path: shot(`agents-table-${scheme}-393-scrolled-end.png`) });
+					await agents.screenshot({ path: shot(`agents-table-${scheme}-${width}-scrolled-end.png`) });
 					await region.evaluate((el) => { el.scrollLeft = 0; });
 				} else {
 					await expect(subject.locator('div.stacked')).toBeHidden();
