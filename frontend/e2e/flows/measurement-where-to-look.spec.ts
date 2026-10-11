@@ -19,7 +19,7 @@ const BODY = {
 	minimum_n: 20,
 	worse: [
 		row('a1', 'Tech Debt', 'agent', 'minutes_per_outcome', 'Minutes per outcome', 'minutes', 0.9, 4.4, 3.62, 65, 1.8, 'Review its recent send-backs and how it asks you.'),
-		row('a2', 'Providers & Inference', 'agent', 'fresh_tokens_per_outcome', 'Fresh tokens per outcome', 'tokens', 120_000, 190_000, 0.58, 103, 150_000, 'Check which tasks used the most tokens.'),
+		row('a2', 'Providers & Inference', 'agent', 'dollars_per_hour', '$ per hour of work', 'dollars', 1.1, 1.9, 0.73, 103, 1.5, 'Check which size class and model drive the cost.'),
 		row('a3', 'Bugs', 'agent', 'first_try', 'First try', 'percent', 0.92, 0.81, -0.12, 52, 0.89, 'Read its last rejected outcomes.'),
 	],
 	improved: [

@@ -57,12 +57,11 @@ def test_the_largest_worse_move_leads_and_improvements_are_listed_apart():
     result = _build(
         _agent("a", "Alpha", first_try_acceptance=(0.90, 30, 0.60, 30)),
         _agent("b", "Beta", first_try_acceptance=(0.50, 30, 0.80, 30), asks_per_outcome=(0.10, 25, 0.30, 25)),
-        _agent("c", "Gamma", fresh_tokens_per_outcome=(100.0, 40, 130.0, 40)),
-        windows=_windows("first_try_acceptance", 0.7, 0.75),
+        windows=_windows("first_try_acceptance", 0.6, 0.75),
     )
-    assert _ids(result["worse"]) == [
-        ("Beta", "asks_per_outcome"), ("Alpha", "first_try_acceptance"), ("Gamma", "fresh_tokens_per_outcome")]
-    assert _ids(result["improved"]) == [("Beta", "first_try_acceptance")]
+    assert _ids(result["worse"]) == [("Beta", "asks_per_outcome"), ("Alpha", "first_try_acceptance")]
+    # Improved is the scope's own page measures: Beta's better first try is an agent row, which only the worse list carries.
+    assert _ids(result["improved"]) == [("Project One", "first_try_acceptance")]
     first = result["worse"][1]
     assert (first["previous"], first["latest"], first["n"], first["overall"]) == (0.90, 0.60, 30, 0.75)
     assert round(first["change"], 4) == -0.3333
@@ -85,12 +84,12 @@ def test_the_scope_itself_is_a_subject_and_minutes_are_converted_from_hours():
 
 def test_an_agent_row_carries_minutes_converted_from_hours_with_the_scope_figure_as_overall():
     result = _build(
-        _agent("a", "Alpha", active_hours_per_outcome=(0.10, 30, 0.05, 30)),
+        _agent("a", "Alpha", active_hours_per_outcome=(0.05, 30, 0.10, 30)),
         windows=_windows("active_hours_per_outcome", 0.04, 0.04),
     )
-    (better,) = result["improved"]
-    assert (better["measure"], round(better["previous"], 6), round(better["latest"], 6), round(better["overall"], 6)) == (
-        "minutes_per_outcome", 6.0, 3.0, 2.4)
+    (worse,) = result["worse"]
+    assert (worse["measure"], round(worse["previous"], 6), round(worse["latest"], 6), round(worse["overall"], 6)) == (
+        "minutes_per_outcome", 3.0, 6.0, 2.4)
 
 
 def test_a_move_under_ten_percent_or_under_the_minimum_n_in_either_window_is_not_a_row():
@@ -125,7 +124,7 @@ def test_an_agent_dollars_per_hour_row_reads_against_the_scope_pooled_figure():
     assert (worse["subject"]["name"], worse["measure"], worse["label"], worse["format"]) == (
         "Alpha", "dollars_per_hour", "$ per hour of work", "dollars")
     assert (worse["previous"], worse["latest"], worse["n"], worse["overall"]) == (1.0, 1.5, 30, 1.2)
-    assert _ids(result["improved"]) == [("Beta", "dollars_per_hour")]
+    assert result["improved"] == []
     # Neither dollars measure is a /series id, so the series read is never asked for one.
     assert not {"dollars_per_work_hour", "cost_per_task"} & set(SERIES_IDS)
 
@@ -147,8 +146,8 @@ def test_a_model_row_is_its_biggest_size_class_priced_in_both_windows_against_th
         {"id": "opus", "name": "Opus", "kind": "model"}, "cost_per_task", "M $ per task", "dollars")
     assert (worse["previous"], worse["latest"], worse["n"], worse["overall"]) == (8.0, 12.0, 40, 8.0)
     assert worse["action"] == ACTIONS_BY_MEASURE["cost_per_task"]
-    (better,) = result["improved"]
-    assert (better["subject"]["name"], better["label"], better["overall"]) == ("Mid", "S $ per task", 2.0)
+    # Mid got cheaper, and a model's better move is not listed: Improved is the page's own measures.
+    assert result["improved"] == []
     # A model's failed turns are not a Biggest changes measure.
     assert not any("failed" in row["measure"] for row in (*result["worse"], *result["improved"]))
 
@@ -158,6 +157,48 @@ def test_a_model_cost_row_is_not_compared_across_a_definition_break():
         models={"size_overall": [{"size": "S", "cost_per_task": 2.0}], "rows": [_model("Opus", _cell("S", 20, 2.0, 3.0))]},
         comparable=lambda series, first: first != GRAIN.previous.first)
     assert result["worse"] == []
+
+
+def test_a_subject_has_one_row_its_largest_worse_move():
+    result = _build(
+        _agent("a", "Alpha", active_hours_per_outcome=(0.10, 30, 0.12, 30), first_try_acceptance=(0.90, 30, 0.60, 30),
+               dollars_per_work_hour=(1.0, 30, 1.2, 30)),
+        _agent("b", "Beta", active_hours_per_outcome=(0.10, 30, 0.15, 30), dollars_per_work_hour=(1.0, 30, 1.3, 30)),
+        models={"size_overall": [{"size": "S", "cost_per_task": 2.0}],
+                "rows": [_model("Alpha", _cell("S", 20, 2.0, 3.0))]},
+    )
+    # Alpha's first try (-33%) beats its minutes (+20%) and dollars (+20%); Beta's minutes (+50%) beat its dollars (+30%);
+    # a model that shares the name is its own subject.
+    assert [(row["subject"]["kind"], row["subject"]["name"], row["measure"]) for row in result["worse"]] == [
+        ("model", "Alpha", "cost_per_task"), ("agent", "Beta", "minutes_per_outcome"), ("agent", "Alpha", "first_try_acceptance")]
+
+
+def test_the_scope_rows_are_not_one_per_subject_and_the_other_subjects_rows_leave_them_alone():
+    result = _build(
+        _agent("a", "Alpha", asks_per_outcome=(0.1, 30, 0.5, 30)),
+        windows={**_windows("asks_per_outcome", 0.1, 0.5), **_windows("active_hours_per_outcome", 0.02, 0.04)},
+    )
+    assert sorted(_ids(result["worse"])) == [
+        ("Alpha", "asks_per_outcome"), ("Project One", "asks_per_outcome"), ("Project One", "minutes_per_outcome")]
+
+
+def test_fresh_tokens_per_outcome_is_not_a_biggest_changes_measure():
+    assert "fresh_tokens_per_outcome" not in MEASURES and "fresh_tokens_per_outcome" not in SERIES_IDS
+    result = _build(
+        _agent("c", "Gamma", fresh_tokens_per_outcome=(100.0, 40, 130.0, 40)),
+        windows=_windows("fresh_tokens_per_outcome", 100.0, 60.0),
+    )
+    assert result["worse"] == [] and result["improved"] == []
+
+
+def test_improved_lists_only_the_page_measures_of_the_scope():
+    result = _build(
+        _agent("a", "Alpha", active_hours_per_outcome=(0.10, 30, 0.05, 30), dollars_per_work_hour=(2.0, 30, 1.0, 30)),
+        windows={**_windows("estimated_human_hours_per_active_hour", 30.0, 92.0), **_windows("asks_per_outcome", 0.5, 0.1)},
+        models={"size_overall": [{"size": "S", "cost_per_task": 2.0}], "rows": [_model("Mid", _cell("S", 20, 4.0, 2.0))]},
+    )
+    assert result["worse"] == []
+    assert sorted(_ids(result["improved"])) == [("Project One", "asks_per_outcome"), ("Project One", "hours_per_hour")]
 
 
 def test_every_measure_has_one_fixed_action_and_no_internal_reference():
@@ -195,7 +236,7 @@ async def test_the_served_route_ranks_a_seeded_scope(isolated_db, monkeypatch):
         project="p1", agent="none", grain="weeks", timezone_name="UTC", user={"id": "steve"})
     agent_firsts = lambda rows: [row["subject"]["id"] for row in rows
                                  if row["measure"] == "first_try_acceptance" and row["subject"]["kind"] == "agent"]
-    assert agent_firsts(result["worse"]) == ["worse"] and agent_firsts(result["improved"]) == ["better"]
+    assert agent_firsts(result["worse"]) == ["worse"] and agent_firsts(result["improved"]) == []
     assert result["period"]["latest"] == {"from": "2026-10-19", "to": "2026-11-15"}
     scoped = await measurement_where_to_look(
         project="p1", agent="worse", grain="weeks", timezone_name="UTC", user={"id": "steve"})

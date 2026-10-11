@@ -15,7 +15,8 @@ The rules are fixed so the page reads the same on every install:
   table's own 14-task floor), and the measure must be comparable across them (no
   definition break between the two windows);
 * a move counts from ``MINIMUM_CHANGE`` (10 percent) in either direction;
-* the worse list leads with the largest move; the improved list is the same rows the
+* the worse list leads with the largest move and holds one row per agent or model, its
+  largest worse move; the improved list is the scope's own page measures that moved the
   other way, largest first;
 * each measure carries one fixed action line, identical for every subject.
 """
@@ -64,9 +65,6 @@ MEASURES: dict[str, Measure] = {
     "first_try_acceptance": Measure(
         "first_try_acceptance", "First try", True, "percent",
         "Read the latest rejected outcomes for the shared cause."),
-    "fresh_tokens_per_outcome": Measure(
-        "fresh_tokens_per_outcome", "Fresh tokens per outcome", False, "tokens",
-        "Check which tasks use the most tokens, and whether a lighter model fits."),
     # Agents only: the scope's figure is every agent's tasks pooled, served beside the rows.
     "dollars_per_hour": Measure(
         DOLLARS_PER_HOUR, "$ per hour of work", False, "dollars",
@@ -97,25 +95,11 @@ def _item(subject: dict[str, str], key: str, before: float, after: float, n: int
     }
 
 
-def build_where_to_look(
-    scope: dict[str, str], windows: dict[str, dict[str, Any]], agents: dict[str, Any] | None,
-    comparable: Any, grain: Grain, models: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Rank the scope's and its agents' moves into the worse and the improved lists.
-
-    ``windows`` is the ``/series`` windows block for the scope itself (series id ->
-    ``{latest, previous}`` pooled ``{value, n}``), ``agents`` the ``/agents`` payload (None
-    in an agent view, where there is no list of agents), ``comparable(series, period)``
-    the page's definition-break check, and ``grain`` the one window rule: its latest
-    window against its previous one. The scope's latest figure per series is the "overall"
-    an agent row is read against, except a measure with no series (``/agents`` ``overall``).
-    ``models`` is the ``/models`` payload: each model row is ranked on its biggest size class
-    that the Models table prices in both windows, read against that class pooled across models.
-    """
+def _scope_items(
+    scope: dict[str, str], windows: dict[str, dict[str, Any]], comparable: Any, firsts: tuple[str, str],
+) -> list[dict[str, Any]]:
+    """The scope's own page measures, read from the ``/series`` windows."""
     items: list[dict[str, Any]] = []
-    firsts = (grain.previous.first, grain.latest.first)
-    averages = {series: (pair.get("latest") or {}).get("value") for series, pair in windows.items()}
-    averages.update({series: cell.get("value") for series, cell in ((agents or {}).get("overall") or {}).items()})
     for key, measure in MEASURES.items():
         if not measure.from_series:
             continue
@@ -128,6 +112,16 @@ def build_where_to_look(
         item = _item(scope, key, before["value"] * measure.scale, after["value"] * measure.scale, after["n"], None)
         if item:
             items.append(item)
+    return items
+
+
+def _agent_items(
+    agents: dict[str, Any] | None, windows: dict[str, dict[str, Any]], comparable: Any, firsts: tuple[str, str],
+) -> list[dict[str, Any]]:
+    """Each agent's moves, read against the scope's figure for the measure (the agents' own pooled one where it has no series)."""
+    averages = {series: (pair.get("latest") or {}).get("value") for series, pair in windows.items()}
+    averages.update({series: cell.get("value") for series, cell in ((agents or {}).get("overall") or {}).items()})
+    items: list[dict[str, Any]] = []
     for row in (agents or {}).get("rows", []):
         subject = {"id": row["agent"]["id"], "name": row["agent"]["name"], "kind": "agent"}
         for key, measure in MEASURES.items():
@@ -144,6 +138,12 @@ def build_where_to_look(
                          average * measure.scale if average is not None else None)
             if item:
                 items.append(item)
+    return items
+
+
+def _model_items(models: dict[str, Any] | None, comparable: Any, firsts: tuple[str, str]) -> list[dict[str, Any]]:
+    """Each named model's biggest size class priced in both windows, read against that class pooled across models."""
+    items: list[dict[str, Any]] = []
     overall_by_size = {cell["size"]: cell["cost_per_task"] for cell in (models or {}).get("size_overall", [])}
     for row in (models or {}).get("rows", []):
         # The floor row pools unnamed models, so it is not a subject to look at.
@@ -160,11 +160,41 @@ def build_where_to_look(
                      overall_by_size.get(cell["size"]), label=f"{cell['size']} $ per task")
         if item:
             items.append(item)
+    return items
+
+
+def build_where_to_look(
+    scope: dict[str, str], windows: dict[str, dict[str, Any]], agents: dict[str, Any] | None,
+    comparable: Any, grain: Grain, models: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Rank the scope's, its agents' and its models' moves into the worse and the improved lists.
+
+    ``windows`` is the ``/series`` windows block for the scope itself (series id ->
+    ``{latest, previous}`` pooled ``{value, n}``), ``agents`` the ``/agents`` payload (None
+    in an agent view, where there is no list of agents), ``comparable(series, period)``
+    the page's definition-break check, and ``grain`` the one window rule: its latest
+    window against its previous one. The scope's latest figure per series is the "overall"
+    an agent row is read against, except a measure with no series (``/agents`` ``overall``).
+    ``models`` is the ``/models`` payload: each model row is ranked on its biggest size class
+    that the Models table prices in both windows, read against that class pooled across models.
+
+    The worse list holds each agent's and each model's largest worse move once, beside the
+    scope's own worse page measures; the improved list holds only the scope's own page measures.
+    """
+    firsts = (grain.previous.first, grain.latest.first)
+    scope_items = _scope_items(scope, windows, comparable, firsts)
+    subject_items = _agent_items(agents, windows, comparable, firsts) + _model_items(models, comparable, firsts)
     order = lambda item: (-abs(item["change"]), item["subject"]["name"], item["measure"])
-    worse = sorted((item for item in items if item["worse"]), key=order)
-    better = sorted((item for item in items if not item["worse"]), key=order)
+    seen: set[tuple[str, str]] = set()
+    worse = [item for item in scope_items if item["worse"]]
+    for item in sorted((item for item in subject_items if item["worse"]), key=order):
+        who = (item["subject"]["kind"], item["subject"]["id"])
+        if who not in seen:
+            seen.add(who)
+            worse.append(item)
+    better = sorted((item for item in scope_items if not item["worse"]), key=order)
     return {
-        "worse": worse[:MAX_ROWS], "improved": better[:MAX_ROWS],
+        "worse": sorted(worse, key=order)[:MAX_ROWS], "improved": better[:MAX_ROWS],
         "minimum_n": MINIMUM_N, "minimum_change": MINIMUM_CHANGE, "period": grain.describe(),
     }
 
