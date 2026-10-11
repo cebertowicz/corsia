@@ -437,10 +437,21 @@ def test_concurrent_readers_join_single_flight(agent, monkeypatch, tmp_path):
     monkeypatch.setenv("API_GATE", str(gate))
     _signed_in()
     views = []
+    joined = []
+    start = github_agent._start
+
+    def counting_start(*args):
+        future = start(*args)
+        joined.append(future)
+        return future
+
+    monkeypatch.setattr(github_agent, "_start", counting_start)
     readers = [threading.Thread(target=lambda: views.append(github_agent.verify_now())) for _ in range(4)]
     for reader in readers:
         reader.start()
-    _wait(lambda: len(github_agent._inflight) == 1)
+    # Every reader must be in the flight before it can finish; a reader that arrives after it runs its own.
+    _wait(lambda: len(joined) == 4)
+    assert len(set(joined)) == 1
     gate.write_text("open")
     for reader in readers:
         reader.join(15)
