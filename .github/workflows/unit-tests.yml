@@ -9,6 +9,9 @@ concurrency:
   group: unit-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UNIT_TEST_RELEVANCE_PATTERNS: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$|^\.github/actions/relevance/action\.yml$'
+
 jobs:
   backend:
     name: Backend unit tests
@@ -41,7 +44,7 @@ jobs:
         with:
           event_name: ${{ github.event_name }}
           base_ref: ${{ github.base_ref }}
-          patterns: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$|^\.github/actions/relevance/action\.yml$'
+          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
 
       # uv's managed CPython bundles the same current SQLite the Mac Python
       # does; setup-python on Ubuntu links the distro's older SQLite, whose
@@ -284,7 +287,7 @@ jobs:
         with:
           event_name: ${{ github.event_name }}
           base_ref: ${{ github.base_ref }}
-          patterns: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$|^\.github/actions/relevance/action\.yml$'
+          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
 
       - uses: actions/setup-python@v5
         if: ${{ steps.relevance.outputs.relevant == 'true' }}
@@ -340,7 +343,7 @@ jobs:
         with:
           event_name: ${{ github.event_name }}
           base_ref: ${{ github.base_ref }}
-          patterns: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$|^\.github/actions/relevance/action\.yml$'
+          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
 
       - uses: actions/setup-node@v4
         if: ${{ steps.relevance.outputs.relevant == 'true' }}

@@ -24,6 +24,32 @@ RELEVANCE_CONSUMER_JOBS = {
     "lint.yml": ("ruff", "mypy"),
     "unit-tests.yml": ("backend", "backend-macos", "frontend"),
 }
+RELEVANCE_PATTERN_ENV = {
+    "lint.yml": "LINT_RELEVANCE_PATTERNS",
+    "unit-tests.yml": "UNIT_TEST_RELEVANCE_PATTERNS",
+}
+RELEVANCE_PATTERN_CASES = {
+    "antipatterns.yml": {
+        "must_run": ("backend/module.py", "frontend/app.ts", "tools/check.py", "scripts/check", "infra/config"),
+        "must_skip": ("README.md",),
+    },
+    "code-health.yml": {
+        "must_run": ("root_module.py", "frontend/app.ts", "frontend/App.svelte", "quality/file-size-limits.json"),
+        "must_skip": ("README.md",),
+    },
+    "integration.yml": {
+        "must_run": ("backend/module.py", "requirements-test.txt"),
+        "must_skip": ("frontend/app.ts",),
+    },
+    "lint.yml": {
+        "must_run": ("backend/module.py", "tools/check.py", "pyproject.toml"),
+        "must_skip": ("frontend/app.ts",),
+    },
+    "unit-tests.yml": {
+        "must_run": ("backend/module.py", "frontend/app.ts", "requirements-test.txt", "frontend/package-lock.json"),
+        "must_skip": ("README.md",),
+    },
+}
 HISTORICAL_SCENARIO_TESTS = (
     REPO_ROOT / "backend/tests/test_yaml_scenario_loading.py",
     REPO_ROOT / "backend/tests/test_yaml_scenario_solver.py",
@@ -184,6 +210,27 @@ def _workflow_job(workflow: str, job_name: str) -> str:
     return workflow[start:end]
 
 
+def _workflow_pattern_env_value(workflow: str, env_name: str) -> str:
+    match = re.search(rf"^env:\n  {env_name}: '([^']+)'$", workflow, re.MULTILINE)
+    assert match, env_name
+    return match.group(1)
+
+
+def _consumer_pattern(workflow: str, job_name: str) -> str:
+    job = _workflow_job(workflow, job_name)
+    match = re.search(r"^          patterns: (.+)$", job, re.MULTILINE)
+    assert match, job_name
+    pattern_reference = match.group(1)
+    env_reference = re.fullmatch(r"\$\{\{ env\.([A-Z_]+) \}\}", pattern_reference)
+    return _workflow_pattern_env_value(workflow, env_reference.group(1)) if env_reference else pattern_reference.strip("'")
+
+
+def _grep_matches(pattern: str, changed_path: str) -> int:
+    return subprocess.run(
+        ["grep", "-Eq", pattern], input=f"{changed_path}\n", text=True, check=False
+    ).returncode
+
+
 def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job() -> None:
     action = RELEVANCE_ACTION.read_text()
     assert "event_name:" in action
@@ -206,8 +253,32 @@ def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job
             assert "event_name: ${{ github.event_name }}" in job, (filename, job_name)
             assert "base_ref: ${{ github.base_ref }}" in job, (filename, job_name)
             assert "patterns:" in job, (filename, job_name)
-            assert RELEVANCE_ACTION_PATH in job, (filename, job_name)
+            assert RELEVANCE_ACTION_PATH in _consumer_pattern(workflow, job_name), (filename, job_name)
             assert "steps.relevance.outputs.relevant" in job, (filename, job_name)
+
+
+def test_relevance_patterns_are_shared_only_within_identical_workflows() -> None:
+    workflow_root = REPO_ROOT / ".github/workflows"
+    for filename, env_name in RELEVANCE_PATTERN_ENV.items():
+        workflow = (workflow_root / filename).read_text()
+        pattern = _workflow_pattern_env_value(workflow, env_name)
+        assert workflow.count(pattern) == 1, filename
+        expected_reference = f"patterns: ${{{{ env.{env_name} }}}}"
+        for job_name in RELEVANCE_CONSUMER_JOBS[filename]:
+            assert expected_reference in _workflow_job(workflow, job_name), (filename, job_name)
+
+
+def test_every_relevance_consumer_pattern_matches_its_required_paths() -> None:
+    workflow_root = REPO_ROOT / ".github/workflows"
+    for filename, jobs in RELEVANCE_CONSUMER_JOBS.items():
+        workflow = (workflow_root / filename).read_text()
+        cases = RELEVANCE_PATTERN_CASES[filename]
+        for job_name in jobs:
+            pattern = _consumer_pattern(workflow, job_name)
+            for changed_path in (*cases["must_run"], f".github/workflows/{filename}", ".github/actions/relevance/action.yml"):
+                assert _grep_matches(pattern, changed_path) == 0, (filename, job_name, changed_path, pattern)
+            for changed_path in cases["must_skip"]:
+                assert _grep_matches(pattern, changed_path) == 1, (filename, job_name, changed_path, pattern)
 
 
 def _run_git(repo: Path, *args: str) -> None:

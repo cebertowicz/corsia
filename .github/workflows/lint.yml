@@ -9,6 +9,9 @@ concurrency:
   group: lint-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  LINT_RELEVANCE_PATTERNS: '^backend/|^tools/|^pyproject\.toml$|^\.github/workflows/lint\.yml$|^\.github/actions/relevance/action\.yml$'
+
 jobs:
   ruff:
     name: ruff (advisory)
@@ -28,7 +31,7 @@ jobs:
         with:
           event_name: ${{ github.event_name }}
           base_ref: ${{ github.base_ref }}
-          patterns: '^backend/|^tools/|^pyproject\.toml$|^\.github/workflows/lint\.yml$|^\.github/actions/relevance/action\.yml$'
+          patterns: ${{ env.LINT_RELEVANCE_PATTERNS }}
 
       - uses: actions/setup-python@v5
         if: ${{ steps.relevance.outputs.relevant == 'true' }}
@@ -68,7 +71,7 @@ jobs:
         with:
           event_name: ${{ github.event_name }}
           base_ref: ${{ github.base_ref }}
-          patterns: '^backend/|^tools/|^pyproject\.toml$|^\.github/workflows/lint\.yml$|^\.github/actions/relevance/action\.yml$'
+          patterns: ${{ env.LINT_RELEVANCE_PATTERNS }}
 
       - uses: actions/setup-python@v5
         if: ${{ steps.relevance.outputs.relevant == 'true' }}
