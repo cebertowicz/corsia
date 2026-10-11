@@ -37,7 +37,8 @@ def registration_default(base_url: str) -> str:
     forbid unattended use. The endpoint's name is free text and never decides it. This
     is a default written once, as data; runtime reads only the stored value, and a
     registration that names a restriction keeps its own.
-    Migration 109→110 applied the same rule to endpoints that already existed.
+    Migration 109→110 applied the same rule to endpoints that already existed, and
+    110→111 cleared the restriction an earlier name match had stored.
     """
     host = urlsplit(base_url).hostname or ""
     if "token-plan" in host.casefold():

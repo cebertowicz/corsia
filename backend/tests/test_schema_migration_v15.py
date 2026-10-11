@@ -80,7 +80,7 @@ def _registrations(db) -> dict[str, tuple]:
 def test_fresh_schema_is_current_version() -> None:
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 110
+    assert SCHEMA_VERSION == 111
 
 
 def test_schema_fourteen_archives_each_active_codex_thread_handle_and_nothing_else() -> None:
