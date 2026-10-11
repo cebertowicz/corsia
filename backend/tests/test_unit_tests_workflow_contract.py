@@ -69,7 +69,7 @@ LINUX_WORKFLOW_JOBS = {
     "e2e.yml": 2,
     "evals.yml": 1,
 }
-MACOS_WORKFLOW_JOBS = {}
+MACOS_WORKFLOW_JOBS: dict[str, int] = {}
 MIXED_RUNNER_WORKFLOW_JOBS = {
     "integration.yml": (1, 1),
 }
