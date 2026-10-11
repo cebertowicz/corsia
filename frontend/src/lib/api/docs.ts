@@ -171,7 +171,20 @@ export interface ServerComment {
 	updated_at: string;
 	reply_waiting?: boolean;
 	replies?: ServerComment[];
+	/** A region comment on an image (DCOL-FR13.3): fractions of the image; w = h = 0 is a point. */
+	region_x?: number | null;
+	region_y?: number | null;
+	region_w?: number | null;
+	region_h?: number | null;
+	/** Numbered per image in creation order, never reused. */
+	region_number?: number | null;
+	image_rev?: string | null;
+	/** The image changed after this pin was placed. */
+	region_stale?: boolean;
 }
+
+/** A box or point on an image, in fractions of its width and height; w = h = 0 is a point. */
+export type ImageRegion = { x: number; y: number; w: number; h: number };
 
 export interface CommentFeedback {
 	open_count: number;
@@ -192,7 +205,7 @@ export async function fetchComments(artifactId: string): Promise<CommentList> {
 
 export async function postComment(
 	artifactId: string,
-	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean }
+	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion }
 ): Promise<ServerComment> {
 	const data = await ok(await fetchWithTimeout(
 		`/api/artifacts/${artifactId}/comments?token=${tok()}`,
@@ -202,7 +215,7 @@ export async function postComment(
 	return data.comment;
 }
 
-export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; body: string; from_off: number; to_off: number; anchor_text: string }>): Promise<ServerComment> {
+export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; body: string; from_off: number; to_off: number; anchor_text: string; region: ImageRegion }>): Promise<ServerComment> {
 	const data = await ok(await fetch(`/api/comments/${commentId}?token=${tok()}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },

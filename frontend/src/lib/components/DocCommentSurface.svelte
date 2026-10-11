@@ -6,6 +6,7 @@
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import CommentList from './comments/CommentList.svelte';
+	import ImageRegionThumb from './ImageRegionThumb.svelte';
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
@@ -13,7 +14,9 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry }: {
+	/** Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour. */
+	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void };
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -21,7 +24,8 @@
 		narrow: boolean;
 		comments: DocComment[];
 		focusedId: string | null;
-		draft: { text: string; body?: string } | null;
+		/** `label` names what a non-text comment is on, in place of the quote. */
+		draft: { text: string; body?: string; label?: string } | null;
 		draftReason?: string;
 		onDraftBody?: (text: string) => void;
 		onCancelDraft?: () => void;
@@ -43,12 +47,18 @@
 		onDocumentChanged?: () => void;
 		load?: CommentLoad;
 		onRetry?: () => void;
+		image?: ImageCommentSurface | null;
 	} = $props();
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let drawer = $state<HTMLElement>();
 	let navigationNotice = $state('');
-	const displayed = $derived.by(() => surfaceState?.kind === 'thread' ? comments.filter((comment) => comment.id === surfaceState.id)
-		: comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved)));
+	const byNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
+	const displayed = $derived.by(() => {
+		if (surfaceState?.kind === 'thread') return comments.filter((comment) => comment.id === surfaceState.id);
+		const shown = comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved));
+		// An image's comments read in number order, like its tags.
+		return image ? [...shown].sort(byNumber) : shown;
+	});
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
@@ -177,7 +187,7 @@
 </script>
 
 {#snippet content()}
-	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={onCancelDraft ?? onClose} />
+	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} label={draft.label} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={onCancelDraft ?? onClose} />
 	{:else}
 		{#if !readOnly && surfaceState?.kind !== 'thread'}
 			<div class="suggestion-status">
@@ -188,7 +198,7 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf} onMovePin={image?.onMovePin} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 
@@ -205,11 +215,12 @@
 			{#if load?.state === 'error'}<div class="drawer-status" role="status">Couldn't load comments. {load.error}<Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 			{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
 			<div class="drawer-comments">
+				{#if image && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 				{#if displayed.length}{@render content()}
 				{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
 			</div>
 		</section>
-	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} {onClose}>{@render content()}</AdaptiveDrawer>
+	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard={!!image} {onClose}>{@render content()}</AdaptiveDrawer>
 	{:else}<Popover anchor={cardAnchor} {bounds} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 

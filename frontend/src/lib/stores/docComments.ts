@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import {
-	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ServerComment
+	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ImageRegion, type ServerComment
 } from '$lib/api/docs';
 import { relLabel } from '$lib/time';
 import { trackPlacements, type Placement } from './docCommentPlacement';
@@ -69,6 +69,12 @@ export interface DocComment {
 	/** The latest user-requested live placement reload was refused. */
 	placementReloadError?: boolean;
 	drawn?: boolean;
+	/** A comment on part of an image (DCOL-FR13.3); null for a text comment. */
+	region?: ImageRegion | null;
+	/** Its number on that image (FR13.4). */
+	regionNumber?: number | null;
+	/** The image changed after the pin was placed (FR13.9). */
+	regionStale?: boolean;
 }
 
 export const docComments = writable<Record<string, DocComment[]>>({});
@@ -110,7 +116,17 @@ export function fromServer(r: ServerComment): DocComment {
 		decision: r.decision,
 		decidedBy: r.decided_by,
 		replyWaiting: !!r.reply_waiting,
-		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, at: relLabel(x.created_at) }))
+		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, at: relLabel(x.created_at) })),
+		...regionFromServer(r)
+	};
+}
+
+function regionFromServer(r: ServerComment): Pick<DocComment, 'region' | 'regionNumber' | 'regionStale'> {
+	if (r.region_number == null || r.region_x == null || r.region_y == null) return {};
+	return {
+		region: { x: r.region_x, y: r.region_y, w: r.region_w ?? 0, h: r.region_h ?? 0 },
+		regionNumber: r.region_number,
+		regionStale: !!r.region_stale
 	};
 }
 
@@ -186,6 +202,22 @@ export async function addComment(artifactId: string, from: number, to: number, a
 	return row.id;
 }
 
+
+/** Comment on part of an image artifact: a box, or a point when its width and height are 0. */
+export async function addRegionComment(artifactId: string, region: ImageRegion, text: string): Promise<string> {
+	const row = await postReconciled(artifactId, newClientId(), { body: text, region, author: 'you', author_kind: 'user' });
+	upsertTop(artifactId, row);
+	return row.id;
+}
+
+/** Move a pin. The server places it on the image as it is now, so it is no longer stale. */
+export async function moveRegion(artifactId: string, commentId: string, region: ImageRegion): Promise<void> {
+	const row = await patchComment(commentId, { region });
+	docComments.update((all) => ({
+		...all,
+		[artifactId]: (all[artifactId] ?? []).map((c) => (c.id === commentId ? { ...c, ...regionFromServer(row) } : c))
+	}));
+}
 
 export async function addReply(artifactId: string, commentId: string, text: string, author: CommentAuthor = 'you') {
 	const cid = newClientId();

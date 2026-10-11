@@ -3,7 +3,7 @@
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, documentOrder = false, focusedId = null, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, decisionErrors = {}, readOnly = false, reopenReachesOwner = false }: {
+	let { comments, documentOrder = false, focusedId = null, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, decisionErrors = {}, readOnly = false, reopenReachesOwner = false }: {
 		comments: Comment[];
 		documentOrder?: boolean;
 		focusedId?: string | null;
@@ -13,6 +13,9 @@
 		onAgree?: (id: string, agreed: boolean) => void;
 		onDecision?: (id: string, decision: 'accept' | 'reject') => Promise<void>;
 		onViewed?: (id: string, replyId: string) => Promise<void>;
+		/** Image comments: place a pin again, and the colour of each one's numbered tag. */
+		onMovePin?: (id: string) => void;
+		tagColor?: (comment: Comment) => string;
 		decisionErrors?: Record<string, string>;
 		readOnly?: boolean;
 		reopenReachesOwner?: boolean;
@@ -43,17 +46,21 @@
 	{#if documentOrder}
 		{#each ordered as comment (comment.id)}
 			<div data-comment-id={comment.id}>
-				<button type="button" class="comment-jump" data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={() => onFocus?.(comment.id)} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : `Go to text: ${comment.anchor}`}>
-					{comment.review ? 'Review comment' : comment.orphaned ? 'Text changed' : 'Go to text'}{comment.anchor ? `: “${comment.anchor}”` : ''}
-				</button>
-				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} {readOnly} {reopenReachesOwner} />
+				{#if comment.regionNumber != null}
+					<button type="button" class="comment-jump" data-comment-jump onclick={() => onFocus?.(comment.id)} aria-label="Show comment {comment.regionNumber} on the image">Show on image</button>
+				{:else}
+					<button type="button" class="comment-jump" data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={() => onFocus?.(comment.id)} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : `Go to text: ${comment.anchor}`}>
+						{comment.review ? 'Review comment' : comment.orphaned ? 'Text changed' : 'Go to text'}{comment.anchor ? `: “${comment.anchor}”` : ''}
+					</button>
+				{/if}
+				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
 			</div>
 		{/each}
 	{:else}
-	{#if reviews.length}<h3>Review comments</h3>{#each reviews as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} {readOnly} />{/each}{/if}
-	{#if open.length}<h3>Open comments</h3>{#each open as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} {readOnly} />{/each}{/if}
-	{#if orphaned.length}<h3>Text changed</h3>{#each orphaned as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} {readOnly} />{/each}{/if}
-	{#if resolved.length}<details><summary>Resolved · {resolved.length}</summary>{#each resolved as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} {readOnly} {reopenReachesOwner} />{/each}</details>{/if}
+	{#if reviews.length}<h3>Review comments</h3>{#each reviews as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} />{/each}{/if}
+	{#if open.length}<h3>Open comments</h3>{#each open as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} />{/each}{/if}
+	{#if orphaned.length}<h3>Text changed</h3>{#each orphaned as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} />{/each}{/if}
+	{#if resolved.length}<details><summary>Resolved · {resolved.length}</summary>{#each resolved as comment (comment.id)}<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />{/each}</details>{/if}
 	{/if}
 </div>
 

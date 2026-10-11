@@ -1,0 +1,69 @@
+<script lang="ts">
+	// The comments drawer's row for one image (DCOL-FR13.6): the whole image at
+	// most 72 px tall, with the listed comments' boxes and points drawn and
+	// numbered, so the numbers below it can be found on it.
+	import { onMount } from 'svelte';
+	import type { DocComment } from '$lib/stores/docComments';
+	import { isPoint, placeTag, type ImageRegion } from '$lib/imageRegions';
+
+	type Pinned = DocComment & { region: ImageRegion; regionNumber: number };
+	let { src, alt = '', comments, colorOf, onOpen }: {
+		src: string;
+		alt?: string;
+		comments: DocComment[];
+		colorOf: (comment: DocComment) => string;
+		/** Show the image itself, at Fit. */
+		onOpen?: () => void;
+	} = $props();
+
+	let frame = $state<HTMLElement>();
+	let width = $state(0);
+	let height = $state(0);
+	const pinned = $derived(comments.filter((comment): comment is Pinned => !!comment.region && comment.regionNumber != null).sort((a, b) => a.regionNumber - b.regionNumber));
+	const marks = $derived(width && height ? pinned.map((comment) => ({ comment, ...placeTag(comment.region, { width, height }, 7, 2) })) : []);
+	function measure() {
+		const rect = frame?.getBoundingClientRect();
+		if (rect) { width = rect.width; height = rect.height; }
+	}
+	onMount(() => {
+		const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+		if (frame) observer?.observe(frame);
+		measure();
+		return () => observer?.disconnect();
+	});
+	const pct = (value: number) => `${value * 100}%`;
+	const numbers = $derived(pinned.map((comment) => comment.regionNumber).join(', '));
+</script>
+
+<button type="button" class="thumb" data-region-thumb onclick={() => onOpen?.()} aria-label={`${alt ? `${alt}: ` : ''}image with comment${pinned.length === 1 ? '' : 's'} ${numbers}`} disabled={!onOpen}>
+	<span class="frame" bind:this={frame}>
+		<img {src} alt="" draggable="false" onload={measure} />
+		{#each pinned as comment (comment.id)}
+			{#if isPoint(comment.region)}
+				<span class="dot" style:left={pct(comment.region.x)} style:top={pct(comment.region.y)} style:--c={colorOf(comment)}></span>
+			{:else}
+				<span class="box" class:stale={comment.regionStale} style:left={pct(comment.region.x)} style:top={pct(comment.region.y)} style:width={pct(comment.region.w)} style:height={pct(comment.region.h)} style:--c={colorOf(comment)}></span>
+			{/if}
+		{/each}
+		{#each marks as { comment, x, y } (comment.id)}
+			<span class="num" class:stale={comment.regionStale} style:left="{x}px" style:top="{y}px" style:--c={colorOf(comment)} data-thumb-number={comment.regionNumber}>{comment.regionNumber}</span>
+		{/each}
+	</span>
+</button>
+
+<style>
+	.thumb { display: flex; justify-content: flex-start; width: 100%; padding: 2px 0 6px; border: 0; background: none; cursor: pointer; }
+	.thumb:disabled { cursor: default; }
+	.thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+	.frame { position: relative; display: inline-block; max-width: 100%; line-height: 0; border-radius: 2px; box-shadow: 0 0 0 1px var(--border); }
+	img { display: block; max-width: 100%; max-height: 72px; width: auto; height: auto; border-radius: inherit; user-select: none; }
+	.box { position: absolute; box-sizing: border-box; border: 1.5px solid var(--c); box-shadow: 0 0 0 1px #fff; pointer-events: none; }
+	.box.stale { border-style: dashed; opacity: 0.55; }
+	.dot { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1px #fff; }
+	.num {
+		position: absolute; box-sizing: border-box; display: grid; place-items: center; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+		background: var(--c); color: #111; border: 1px solid color-mix(in srgb, var(--c) 70%, #000); box-shadow: 0 0 0 1px #fff;
+		font-size: 8px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+	}
+	.num.stale { opacity: 0.55; border-style: dashed; }
+</style>

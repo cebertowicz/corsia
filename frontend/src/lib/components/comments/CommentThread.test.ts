@@ -210,9 +210,38 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-res-head .ct-check')).not.toBeNull();
 		expect(host.querySelector('.ct-res-head .ct-cross')).toBeNull();
 	});
+
+	it("shows an image comment's number in its tag colour, open and resolved", () => {
+		render(thread({ anchor: '', regionNumber: 3 }), false, { tagColor: '#e5484d' });
+		const num = host.querySelector<HTMLElement>('.ct-head .ct-num')!;
+		expect(num.textContent).toBe('3');
+		expect(num.getAttribute('aria-label')).toBe('Comment 3');
+		expect(num.style.getPropertyValue('--c')).toBe('#e5484d');
+		unmount(component!); host.remove();
+		render(thread({ anchor: '', regionNumber: 3, resolved: true }));
+		expect(host.querySelector('.ct-res-head .ct-num')?.textContent).toBe('3');
+	});
+
+	it('says when the image changed under a pin and offers Move pin', () => {
+		const onMovePin = vi.fn();
+		render(thread({ anchor: '', regionNumber: 1, regionStale: true }), false, { onMovePin });
+		expect(host.querySelector('[data-region-stale]')?.textContent).toContain('Image changed since this comment');
+		button('[data-move-pin]').click();
+		expect(onMovePin).toHaveBeenCalledWith('c1');
+		unmount(component!); host.remove();
+		render(thread({ anchor: '', regionNumber: 1, regionStale: true }), true, { onMovePin });
+		expect(host.querySelector('[data-move-pin]')).toBeNull();
+	});
 });
 
 describe('CommentComposer', () => {
+	it('names a region instead of quoting text', () => {
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(CommentComposer, { target: host, props: { quote: '', label: 'Box on the image', onSubmit: vi.fn(), onCancel: vi.fn() } });
+		flushSync();
+		expect(host.querySelector('.quote')?.textContent).toBe('Box on the image');
+	});
+
 	it('submits trimmed text and cancels on Escape', async () => {
 		host = document.createElement('div'); document.body.appendChild(host);
 		const onSubmit = vi.fn().mockResolvedValue(undefined); const onCancel = vi.fn();

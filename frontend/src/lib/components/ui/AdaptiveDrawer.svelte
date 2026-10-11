@@ -18,6 +18,7 @@
 		children,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
+		followKeyboard = false,
 	}: {
 		ariaLabel: string;
 		/**
@@ -36,6 +37,12 @@
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
+		/**
+		 * Sit on the visible part of the screen, above an on-screen keyboard, for a
+		 * drawer whose text field must stay in view while typing. It reads the
+		 * visual viewport the app already publishes as CSS variables.
+		 */
+		followKeyboard?: boolean;
 	} = $props();
 
 	let panel = $state<HTMLElement | null>(null);
@@ -113,6 +120,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="drawer-backdrop"
+	class:follow-keyboard={followKeyboard}
 	data-adaptive-drawer
 	onclick={onBackdrop}
 	transition:fade={fadeParams}
@@ -168,6 +176,14 @@
 		background: color-mix(in srgb, var(--glass-scrim) 88%, transparent);
 		overscroll-behavior: contain;
 		pointer-events: auto;
+	}
+	.drawer-backdrop.follow-keyboard {
+		bottom: auto;
+		top: var(--doc-visual-viewport-offset, 0px);
+		height: var(--doc-visual-viewport-height, 100dvh);
+	}
+	.follow-keyboard .drawer-panel {
+		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, env(safe-area-inset-top, 0px))));
 	}
 	.drawer-motion {
 		width: 100%;
