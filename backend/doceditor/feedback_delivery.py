@@ -139,6 +139,7 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
     artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
     image_regions.annotate_delivery(
         db, items, path=artifact["path"] if artifact else None, reader_thread_id=recipient,
+        batch_id=str(_value(batch, "id")),
     )
     created = create_feedback_node(db, recipient, batch, items=items)
     queued_note(db, recipient, batch, items=items)

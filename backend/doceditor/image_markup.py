@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Sequence
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -178,6 +179,23 @@ def _draw_tag(draw: ImageDraw.ImageDraw, mark: Mark, img: Image.Image, scale: _S
     draw.text((cx, cy), str(mark.number), fill="white", font=scale.font, anchor="mm")
 
 
+def _check_budget(source: Image.Image) -> None:
+    budget = image_decode_pixel_budget(MAX_CONCURRENT_IMAGE_NORMALIZATIONS)
+    if source.width * source.height > budget:
+        raise ValueError(f"image is too large to mark up ({source.width}x{source.height})")
+
+
+def check_markable(path: Path) -> None:
+    """Raise what ``render_marked_image`` would for the file at ``path``, from its header alone.
+
+    Opening reads only the header, so a caller holding a lock can learn whether
+    a copy can be drawn without decoding the image.
+    """
+    heif_supported()
+    with Image.open(path) as source:
+        _check_budget(source)
+
+
 def render_marked_image(data: bytes, marks: Sequence[Mark]) -> bytes:
     """Return a PNG of ``data`` with each mark's region and numbered tag drawn.
 
@@ -185,9 +203,7 @@ def render_marked_image(data: bytes, marks: Sequence[Mark]) -> bytes:
     """
     heif_supported()
     with Image.open(io.BytesIO(data)) as source:
-        budget = image_decode_pixel_budget(MAX_CONCURRENT_IMAGE_NORMALIZATIONS)
-        if source.width * source.height > budget:
-            raise ValueError(f"image is too large to mark up ({source.width}x{source.height})")
+        _check_budget(source)
         source.draft("RGB", (MAX_RENDER_SIDE, MAX_RENDER_SIDE))
         source.load()
         # Upright, as the viewer's <img> shows it, so fractions land on the same pixels.

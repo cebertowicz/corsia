@@ -241,6 +241,10 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
         blocks.append(
             USER_FRAMING if _batch_value(batch, "author_kind") == "user" else AGENT_FRAMING
         )
+    # One marked-up copy per image, set by delivery on the batch's region comments.
+    # It leads, so a handoff cap that cuts the tail never drops it.
+    marked = (str(item["marked_image_line"]) for item in items if item.get("marked_image_line"))
+    blocks.extend(dict.fromkeys(marked))
     for item in items:
         if item["kind"] == "comment":
             lines = [
@@ -277,8 +281,6 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
                     f"{item['actor_display']}'s change. Read the current file before acting."
                 )
         blocks.append("\n".join(lines))
-    # One marked-up copy per image, set by delivery on the batch's region comments.
-    blocks.extend(dict.fromkeys(str(item["marked_image_line"]) for item in items if item.get("marked_image_line")))
     return "\n\n".join(blocks)
 
 

@@ -19,7 +19,8 @@ from typing import Any, Iterable, Mapping
 from PIL import Image
 
 from doceditor.comment_action_errors import CommentActionError
-from doceditor.image_markup import Mark, Region, render_marked_image
+from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
+from infra.write_effects import after_commit
 from registry import models as registry_models
 from registry.file_types import image_media_type
 from registry.identity_metadata import sha256_file
@@ -197,21 +198,30 @@ def write_marked_image(db, *, image: Path, rows: Iterable[Mapping[str, Any]], re
     """
     png = render_marked_image(image.read_bytes(), marks_for(db, rows))
     digest = hashlib.sha256(png).hexdigest()
-    tray = _working_tray(db, reader_thread_id)
-    tray.mkdir(parents=True, exist_ok=True)
-    target = tray / f"{label}-{digest[:16]}.png"
-    if not target.exists():
-        partial = target.with_suffix(".png.partial")
-        partial.write_bytes(png)
-        partial.replace(target)
+    target = _working_tray(db, reader_thread_id) / f"{label}-{digest[:16]}.png"
+    _save(png, target)
     return MarkedImage(target, digest, len(png))
 
 
-def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_id: str) -> None:
+def _save(png: bytes, target: Path) -> None:
+    """Write ``png`` to ``target`` whole, keeping a copy that is already there."""
+    if target.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(".png.partial")
+    partial.write_bytes(png)
+    partial.replace(target)
+
+
+def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_id: str, batch_id: str) -> None:
     """Give a batch's region comments their wake lines and one marked-up copy (FR13.8).
 
-    The copy shows only this batch's boxes, so its numbers match the lines. A
-    copy that cannot be made leaves the reason in its place; the text still goes.
+    The copy shows only this batch's boxes, so its numbers match the lines.
+    Delivery holds the SQLite writer, so here only the marks and the image's
+    header are read; the copy is drawn once the delivery commits, and a
+    rolled-back delivery draws none. It is named for the batch, which delivers
+    once. A copy that cannot be made leaves the reason in its place; the text
+    still goes.
     """
     regional = [item for item in items if item["kind"] == "comment" and item.get("region_number") is not None]
     if not regional:
@@ -219,17 +229,30 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
     annotate_stale(regional, path)
     for item in regional:
         item["region_line"] = describe_region(item)
-    try:
+    problem = _unmarkable(path)
+    if problem is not None:
+        line = f"Marked-up image unavailable: {problem}"
+    else:
         image = Path(str(path))
-        marked = write_marked_image(db, image=image, rows=regional, reader_thread_id=reader_thread_id,
-                                    label=f"{image.stem}-feedback")
-        line = f"Marked-up image (numbered boxes): {marked.path} (open it with read_file to see each region)"
-    except OSError:
-        line = "Marked-up image unavailable: the image file could not be read."
-    except RENDER_ERRORS as exc:
-        line = f"Marked-up image unavailable: {exc}"
+        target = _working_tray(db, reader_thread_id) / f"{image.stem}-feedback-{batch_id}.png"
+        marks = marks_for(db, regional)
+        after_commit(db, lambda: _save(render_marked_image(image.read_bytes(), marks), target))
+        line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
     for item in regional:
         item["marked_image_line"] = line
+
+
+def _unmarkable(path: str | None) -> str | None:
+    """Why no marked-up copy of the image at ``path`` can be drawn, or ``None`` when one can."""
+    if not path:
+        return "the artifact has no image file."
+    try:
+        check_markable(Path(path))
+    except (ValueError, Image.DecompressionBombError) as exc:
+        return str(exc)
+    except OSError:
+        return "the image file could not be read."
+    return None
 
 
 def describe_region(row: Mapping[str, Any]) -> str | None:
