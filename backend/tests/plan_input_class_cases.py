@@ -489,7 +489,7 @@ _CASES = {
     # --- plans/size_fields.py ---
     (
         "size_fields.py",
-        'f"size must be one of: {\', \'.join(SIZE_CLASSES)}. {SIZE_SCALE_DESCRIPTION}."',
+        'f"size must be one of: {\', \'.join(SIZE_CLASSES)}. {SIZE_MEANING} {SIZE_SCALE_DESCRIPTION}."',
     ): _operation(
         "add", {"kind": "task", "title": "T", "acceptance_criteria": "DOD", "size": "large"},
     ),

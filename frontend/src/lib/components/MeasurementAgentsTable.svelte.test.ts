@@ -289,13 +289,18 @@ describe('MeasurementAgentsTable', () => {
 		expect(at, 'a phone block exists').toBeGreaterThan(-1);
 		const phone = css.slice(at, css.indexOf('\n\t}', at));
 		// No floor on the table or the headers, so the columns share the width instead of scrolling past the edge.
-		expect(phone).toContain('table { min-width: 0; font-size: var(--text-footnote); }');
+		expect(phone).toContain('table { width: 100%; min-width: 0; table-layout: fixed; font-size: var(--text-footnote); }');
 		expect(phone).not.toContain('min-width: 11ch');
 		expect(phone).not.toContain('min-width: 20ch');
 		// A name wraps between its words and a header wraps too; neither may break inside a word.
 		expect(phone).toContain('tbody th { white-space: normal; }');
 		expect(phone).toMatch(/\.filter \{[^}]*white-space: normal;[^}]*word-break: normal;/);
 		expect(phone).toMatch(/thead th \{[^}]*white-space: normal;[^}]*word-break: normal;/);
-		expect(phone).toContain('thead th.change { width: 25%; }');
+		// Every fixed-layout column is allocated explicitly so the Agent column
+		// retains room for a complete unbroken name at phone widths.
+		expect(phone).toContain('thead th:first-child { width: 28%; }');
+		expect(phone).toContain('thead th:nth-child(2), thead th:nth-child(3) { width: 10%; }');
+		expect(phone).toContain('thead th.cost { width: 17%; }');
+		expect(phone).toContain('thead th.change { width: 35%; }');
 	});
 });
