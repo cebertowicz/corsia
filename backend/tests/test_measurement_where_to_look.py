@@ -36,8 +36,14 @@ def _windows(series: str, before: float | None, after: float | None, n: int = 30
 
 
 def _build(*rows: dict, windows: dict | None = None, comparable=lambda series, period: True,
-           overall: dict | None = None, models: dict | None = None) -> dict:
-    return build_where_to_look(SCOPE, windows or {}, {"rows": list(rows), "overall": overall or {}}, comparable, GRAIN, models)
+           overall: dict | None = None, models: dict | None = None, cost: dict | None = None) -> dict:
+    return build_where_to_look(SCOPE, windows or {}, {"rows": list(rows), "overall": overall or {}}, comparable, GRAIN, models, cost)
+
+
+def _cost(before: float | None, after: float | None, n: int = 30, n_before: int | None = None) -> dict:
+    """The ``/cost`` payload's pooled windows: ``per_hour`` is its headline, ``sized`` the outcomes behind it."""
+    return {"previous": {"per_hour": before, "sized": n if n_before is None else n_before},
+            "latest": {"per_hour": after, "sized": n}}
 
 
 def _cell(size: str, tasks: int, before: float | None, after: float) -> dict:
@@ -56,10 +62,10 @@ def _ids(rows: list[dict]) -> list[tuple[str, str]]:
 def test_the_largest_worse_move_leads_and_improvements_are_listed_apart():
     result = _build(
         _agent("a", "Alpha", first_try_acceptance=(0.90, 30, 0.60, 30)),
-        _agent("b", "Beta", first_try_acceptance=(0.50, 30, 0.80, 30), asks_per_outcome=(0.10, 25, 0.30, 25)),
+        _agent("b", "Beta", first_try_acceptance=(0.50, 30, 0.80, 30), active_hours_per_outcome=(0.10, 25, 0.30, 25)),
         windows=_windows("first_try_acceptance", 0.6, 0.75),
     )
-    assert _ids(result["worse"]) == [("Beta", "asks_per_outcome"), ("Alpha", "first_try_acceptance")]
+    assert _ids(result["worse"]) == [("Beta", "minutes_per_outcome"), ("Alpha", "first_try_acceptance")]
     # Improved is the scope's own page measures: Beta's better first try is an agent row, which only the worse list carries.
     assert _ids(result["improved"]) == [("Project One", "first_try_acceptance")]
     first = result["worse"][1]
@@ -97,8 +103,8 @@ def test_a_move_under_ten_percent_or_under_the_minimum_n_in_either_window_is_not
         _agent("a", "Small", first_try_acceptance=(0.80, 30, 0.75, 30)),
         _agent("b", "ThinLatest", first_try_acceptance=(0.90, 30, 0.40, 19)),
         _agent("c", "ThinBefore", first_try_acceptance=(0.90, 19, 0.40, 30)),
-        _agent("d", "Unmeasured", asks_per_outcome=(None, 0, 0.5, 30)),
-        _agent("e", "FromZero", asks_per_outcome=(0.0, 30, 0.5, 30)),
+        _agent("d", "Unmeasured", active_hours_per_outcome=(None, 0, 0.5, 30)),
+        _agent("e", "FromZero", active_hours_per_outcome=(0.0, 30, 0.5, 30)),
         windows=_windows("first_try_acceptance", 0.9, 0.4, n=19),
     )
     assert result["worse"] == [] and result["improved"] == []
@@ -106,7 +112,7 @@ def test_a_move_under_ten_percent_or_under_the_minimum_n_in_either_window_is_not
 
 def test_a_measure_across_a_definition_break_is_never_compared():
     result = _build(
-        _agent("a", "Alpha", asks_per_outcome=(0.1, 30, 0.5, 30)),
+        _agent("a", "Alpha", active_hours_per_outcome=(0.1, 30, 0.5, 30)),
         windows=_windows("asks_per_outcome", 0.1, 0.5),
         comparable=lambda series, first: first != GRAIN.previous.first,
     )
@@ -175,11 +181,41 @@ def test_a_subject_has_one_row_its_largest_worse_move():
 
 def test_the_scope_rows_are_not_one_per_subject_and_the_other_subjects_rows_leave_them_alone():
     result = _build(
-        _agent("a", "Alpha", asks_per_outcome=(0.1, 30, 0.5, 30)),
+        _agent("a", "Alpha", first_try_acceptance=(0.9, 30, 0.5, 30)),
         windows={**_windows("asks_per_outcome", 0.1, 0.5), **_windows("active_hours_per_outcome", 0.02, 0.04)},
     )
     assert sorted(_ids(result["worse"])) == [
-        ("Alpha", "asks_per_outcome"), ("Project One", "asks_per_outcome"), ("Project One", "minutes_per_outcome")]
+        ("Alpha", "first_try_acceptance"), ("Project One", "asks_per_outcome"), ("Project One", "minutes_per_outcome")]
+
+
+def test_agents_do_not_rank_asks_per_outcome_but_the_scope_keeps_it_as_a_page_measure():
+    result = _build(
+        _agent("a", "Alpha", asks_per_outcome=(0.1, 30, 0.5, 30), first_try_acceptance=(0.9, 30, 0.5, 30)),
+        windows=_windows("asks_per_outcome", 0.1, 0.5),
+    )
+    assert sorted(_ids(result["worse"])) == [("Alpha", "first_try_acceptance"), ("Project One", "asks_per_outcome")]
+
+
+def test_all_work_cost_per_hour_is_a_page_measure_worse_when_it_rises():
+    result = _build(cost=_cost(1.0, 1.5))
+    (worse,) = result["worse"]
+    assert _ids([worse]) == [("Project One", "cost_per_hour")]
+    assert (worse["previous"], worse["latest"], worse["n"]) == (1.0, 1.5, 30)
+    assert worse["action"] == ACTIONS_BY_MEASURE["cost_per_hour"]
+    assert _build(cost=_cost(1.5, 1.0))["improved"][0]["measure"] == "cost_per_hour"
+    # It reads the served Cost value, so it is not a /series id and no agent or model is ranked on it.
+    assert "cost_per_hour" not in SERIES_IDS and MEASURES["cost_per_hour"].per_agent is False
+
+
+def test_cost_per_hour_needs_a_served_figure_twenty_outcomes_in_both_windows_a_ten_percent_move_and_a_comparable_period():
+    assert _build(cost=_cost(None, 1.5))["worse"] == []
+    assert _build(cost=_cost(1.0, None))["worse"] == []
+    assert _build(cost=_cost(1.0, 1.5, n=19))["worse"] == []
+    assert _build(cost=_cost(1.0, 1.5, n=30, n_before=19))["worse"] == []
+    assert _build(cost=_cost(1.0, 1.05))["worse"] == []
+    assert _build(cost=_cost(0.0, 1.5))["worse"] == []
+    assert _build(cost=_cost(1.0, 1.5), comparable=lambda series, first: first != GRAIN.previous.first)["worse"] == []
+    assert _build()["worse"] == []
 
 
 def test_fresh_tokens_per_outcome_is_not_a_biggest_changes_measure():

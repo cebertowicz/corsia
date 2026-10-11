@@ -17,11 +17,15 @@ from fastapi import Depends, Query
 from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
 from api.measurement_actual import build_actual
 from api.measurement_average import cost_average
-from api.measurement_queries import PREPARED_OUTCOMES, PREPARED_SCOPE
+from api.measurement_join import joined_read
+from api.measurement_queries import PREPARED_OUTCOMES, PREPARED_SCOPE, prepare_outcome_periods
+from api.measurement_scope import validate_scope
 from api.measurement_registry import REGISTRY, period_measured
 from api.measurement_size import size_period_totals
 from api.usage_rollup import usage_params, usage_source
 from core.measurement_scope import Grain, Window, query_params
+from infra.database import get_db
+from infra.db_async import run_bulk
 from llm.api_equivalent import (
     api_equivalent, has_public_long_context_price, has_unpublished_cache_rate, is_not_api_priced, price_identity,
 )
@@ -103,9 +107,30 @@ _EXCLUDED_TEXT = {
 }
 
 
-def register_cost_route(
-    router, *, require_user, resolve_grain, get_db, validate_scope, prepare_outcome_periods, run_in_db,
-) -> None:
+@joined_read
+async def cost_read(project: str, agent: str, page_grain: Grain, user: dict) -> dict[str, Any]:
+    """The Cost payload for one viewer, scope and calendar, joined with an identical read in flight.
+
+    The page's Cost panel and ``/where-to-look`` (which ranks the Cost headline's $ per hour of
+    work) both read it, so one page load reads the ledger once.
+    """
+    def query() -> dict[str, Any]:
+        db = get_db()
+        try:
+            selected_scope = validate_scope(db, user["id"], project, agent)
+            params = {**selected_scope.params(user["id"]), "grain": page_grain}
+            prepare_outcome_periods(db, params)
+            cost = build_cost(db, params)
+            # The series' moving average spans the grain's own window, served so the chart names it without a copy.
+            return {"scope": selected_scope.response(), "period": page_grain.describe(),
+                    "average_periods": page_grain.average_periods, **cost}
+        finally:
+            db.close()
+
+    return await run_bulk(query)
+
+
+def register_cost_route(router, *, require_user, resolve_grain) -> None:
     """Attach Cost to the shared Measurement router without growing its module."""
     @router.get("/cost")
     async def measurement_cost(
@@ -113,21 +138,7 @@ def register_cost_route(
         timezone_name: str = Query(..., alias="timezone"), user: dict = Depends(require_user),
     ):
         """Return the known API-equivalent subtotal with retained-usage-record coverage and Actual completeness."""
-        page_grain = resolve_grain(grain, timezone_name, averaged=True)
-
-        def query() -> tuple[dict[str, str | None], dict[str, Any]]:
-            db = get_db()
-            try:
-                selected_scope = validate_scope(db, user["id"], project, agent)
-                params = {**selected_scope.params(user["id"]), "grain": page_grain}
-                prepare_outcome_periods(db, params)
-                return selected_scope.response(), build_cost(db, params)
-            finally:
-                db.close()
-
-        selected_scope, cost = await run_in_db(query)
-        # The series' moving average spans the grain's own window, served so the chart names it without a copy.
-        return {"scope": selected_scope, "period": page_grain.describe(), "average_periods": page_grain.average_periods, **cost}
+        return await cost_read(project, agent, resolve_grain(grain, timezone_name, averaged=True), user)
 
 
 def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
