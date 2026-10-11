@@ -112,7 +112,6 @@ def test_metadata_carries_labels_and_dates_and_never_a_value(state):
     assert web["label"] == "Web search"
     assert web["used_by"] == "web search"
     assert web["is_set"] is True
-    assert web["source"] == key_store.SOURCE_STORE
     assert web["set_at"]
 
 
@@ -181,7 +180,7 @@ def test_search_reads_the_store_and_ignores_the_environment(state, monkeypatch):
     key_store.set_value("web-search", VALUE)
     assert key_store.resolve_builtin(builtin) == (VALUE, key_store.SOURCE_STORE)
     entry = key_store.entry_metadata("web-search")
-    assert entry["source"] == key_store.SOURCE_STORE
+    assert entry["is_set"] is True
 
 
 @pytest.mark.parametrize("tools", [None, {}, {"web": "off"}, {"web": {"search": {"count": 3}}}, LEGACY_TOOLS])

@@ -120,7 +120,7 @@ def test_every_source_lands_in_the_store_and_the_old_homes_are_cleared(state, tm
         assert key_store.resolve_provider("openai", db=db) == "store-openai-0009"
         assert key_store.resolve_provider("groq", db=db) == "settings-groq-0003"
         assert key_store.resolve_provider("gemini", db=db) is None
-        assert key_store.resolve_provider("omlx", db=db) == "lm-studio"
+        assert key_store.resolve_provider("omlx", db=db) is None
         assert key_store.resolve_builtin(key_store.WEB_SEARCH, db=db) == ("settings-search-0004", key_store.SOURCE_STORE)
         assert key_store.resolve_builtin(key_store.GITHUB_WEBHOOK, db=db) == ("settings-hook-0005", key_store.SOURCE_STORE)
         assert _file_keys() == _live_refs(db)
@@ -134,6 +134,7 @@ def test_every_source_lands_in_the_store_and_the_old_homes_are_cleared(state, tm
 
         rows = {r["name"] for r in db.execute("SELECT name FROM key_store_entries WHERE set_at IS NOT NULL")}
         assert {"provider-anthropic", "provider-openai", "provider-groq", "web-search", "github-webhook"} <= rows
+        assert "provider-omlx" not in rows
 
     message = "\n".join(record.getMessage() for record in caplog.records)
     assert "providers=" in message

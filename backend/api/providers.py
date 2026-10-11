@@ -168,12 +168,9 @@ async def update_provider_key(name: str, body: ProviderKeyUpdate, user: dict = D
             update["autoDiscover"] = body.auto_discover
         if body.auto_start is not None:
             update["autoStart"] = body.auto_start
-        key = (body.api_key.strip() or "lm-studio") if body.api_key else None
-        await run_in_db(_save, name, key, update)
-        if key is not None:
-            audit_key_write(user, kind="provider", name=name, action="write")
+        await run_in_db(_save, name, None, update)
         notify_models_changed()
-        return {"ok": True, "name": name, "has_key": True}
+        return {"ok": True, "name": name, "has_key": False}
 
     update = {}
     new_key = body.api_key.strip() if body.api_key else None
