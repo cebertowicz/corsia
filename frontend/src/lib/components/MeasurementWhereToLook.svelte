@@ -44,7 +44,7 @@
 						{#each rows(list.id) as row (`${row.subject.id}:${row.measure}`)}
 							<tr>
 								<!-- On a phone the measure column is hidden and the measure sits under the subject, in this cell. -->
-								<td class="subj"><b>{row.subject.kind === 'agent' ? agentLabel(row.subject.name) : row.subject.name}</b>{#if row.subject.kind === 'agent'}<span class="kind">Agent</span>{/if}<div class="stacked">{row.label}<div class="act">{row.action}</div></div></td>
+								<td class="subj"><b>{row.subject.kind === 'agent' ? agentLabel(row.subject.name) : row.subject.name}</b>{#if row.subject.kind === 'agent'}<span class="kind">Agent</span>{:else if row.subject.kind === 'model'}<span class="kind">Model</span>{/if}<div class="stacked">{row.label}<div class="act">{row.action}</div></div></td>
 								<td class="measure">{row.label}<div class="act">{row.action}</div></td>
 								<td class="n"><span class="v">{formatWhereToLookValue(row.previous, row.format)}</span> to <span class="v">{formatWhereToLookValue(row.latest, row.format)}</span></td>
 								<td class="n">{formatChange(row.change)}</td>

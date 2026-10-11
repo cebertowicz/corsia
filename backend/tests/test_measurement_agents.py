@@ -292,7 +292,7 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     db = get_db()
     try:
         prepare_outcome_periods(db, {**params, "grain": grain}, roots=True)
-        rows, findings, summaries, count = build_agents(
+        rows, findings, summaries, count, _overall = build_agents(
             db, params, REGISTRY, metric, sort, grain, comparable or period_comparable,
             measured or (lambda name, period: period_measured(name, period, grain)))
         return {"rows": rows, "findings": findings, "project_summaries": summaries["active"],

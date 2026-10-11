@@ -64,12 +64,13 @@ def query_task_hour_cost(db, params: dict[str, Any]) -> dict[tuple[str, str], di
     return dict(by_root)
 
 
-def _pooled(costs: dict[tuple[str, str], dict[str, float]], root_id: str, periods: list[str]) -> dict[str, float]:
-    """One agent's dollars, hours and tasks summed over some periods."""
+def _pooled(costs: dict[tuple[str, str], dict[str, float]], root_id: str | None, periods: list[str]) -> dict[str, float]:
+    """One agent's dollars, hours and tasks summed over some periods; every agent's when ``root_id`` is None."""
     total = {"dollars": 0.0, "hours": 0.0, "n": 0}
-    for period in periods:
-        for key, value in (costs.get((root_id, period)) or {}).items():
-            total[key] += value
+    for (root, period), figures in costs.items():
+        if period in periods and root_id in (None, root):
+            for key, value in figures.items():
+                total[key] += value
     return total
 
 
@@ -80,9 +81,12 @@ def _value(figures: dict[str, float], minimum_n: int) -> float | None:
     return figures["dollars"] / figures["hours"]
 
 
-def dollars_metric(costs: dict[tuple[str, str], dict[str, float]], root_id: str, grain: Grain, minimum_n: int,
+def dollars_metric(costs: dict[tuple[str, str], dict[str, float]], root_id: str | None, grain: Grain, minimum_n: int,
                    ) -> dict[str, Any]:
-    """The Agents table's dollars-per-hour cell: pooled dollars over pooled hours per window, withheld under the floor."""
+    """The Agents table's dollars-per-hour cell: pooled dollars over pooled hours per window, withheld under the floor.
+
+    ``root_id=None`` is the same cell for all the scope's agents pooled: the figure an agent's own is read against.
+    """
     latest, previous = _pooled(costs, root_id, list(grain.latest.periods)), _pooled(costs, root_id, list(grain.previous.periods))
     return {
         "value": _value(latest, minimum_n), "n": int(latest["n"]), "minimum_n": minimum_n,
