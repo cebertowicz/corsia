@@ -72,7 +72,7 @@
 				axisTitle="Hours of work per hour you spend"
 				unit={chart.unit}
 				averageName={chart.averageName}
-				caption={`Estimated hours of work delivered divided by time you had CORSIA open; source: size-rated accepted outcomes and recorded open time; higher is better. n is size-rated accepted outcomes per ${chart.unit}.`}
+				caption={`Estimated hours of work delivered divided by your engaged hours; source: size-rated accepted outcomes and your time active in CORSIA; higher is better. n is size-rated accepted outcomes per ${chart.unit}.`}
 				minN={20}
 				minNText="fewer than 20 outcomes"
 				ariaLabel={`Hours of work per hour you spend, ${chart.rangeText}`}
