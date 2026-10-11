@@ -1,0 +1,18 @@
+# Dev and CI only: the read-cost speed gate measures on one SQLite build so counts match on every host.
+# Never a runtime dependency and never imported by product code. Install with:
+#   pip install --require-hashes --only-binary :all: -r scripts/speed_gate/requirements.txt
+# Wheels listed: CPython 3.11-3.13 on macOS (arm64, x86_64) and Linux manylinux_2_28 (x86_64, aarch64).
+# A new Python version or platform needs its wheel hash added here (pip refuses an unlisted wheel).
+sqlean.py==3.50.4.5 \
+    --hash=sha256:3775efae4c6aac64dd29b8495518f13c129bae5692476cb8b654caf62ce43447 \
+    --hash=sha256:80ea9019bbbfb76914934f600e376393a25bb5318f76279e07448dde2d4b986d \
+    --hash=sha256:501606e6cdcf72c476ff1f1416542b99134656a92c4c95897284de0fee00e07f \
+    --hash=sha256:2b54d55c25646bf4a161de48077cd16f17d45fadc374e960d0687278e7b916d7 \
+    --hash=sha256:2fc2b1949ad65c770af13a3c740cd15d57fcf7a98a07a71373fcef15e2839f0a \
+    --hash=sha256:2d5a62013c7483fc8ca20c6f346f7190dc184e40ac7584b32e0c3c854bebf707 \
+    --hash=sha256:95c5154b8ef576bc4775d3eac36f949c3556fbed5ef918c6652b1caee542e3a7 \
+    --hash=sha256:410ba1d4532b5b090c9696686fdd7e95484409ffb9fcd035be371bc6d8aaa18d \
+    --hash=sha256:89233ad3640b1442eaf2d44a07debd17e23a1bde48d15c9b77a423ce7823b6a2 \
+    --hash=sha256:e63b246ceb0eb48d37abeada97b2a7695dfe79655b7a8285c001e5ad9e79711b \
+    --hash=sha256:3725a94c80a64740489aa5765f9c6d11fa428b7d557c53c2197d51305cbe70a8 \
+    --hash=sha256:05eb8d758104339c8d8ecf99238e15bbf6ba07a572f770f1a92589d487a8282c
