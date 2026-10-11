@@ -22,19 +22,22 @@ type Range = { from: string; to: string };
 
 /** The messages to re-read: those showing cards, and after a turn ends, that turn's own steps. */
 export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Range[] {
-	const own = rows.filter((row) => row.thread_id === threadId && !row._optimistic);
-	const ranges: Range[] = [];
+	// A range read is capped at TURN_RANGE_LIMIT, so do not make a request that cannot include every selected row.
+	const own = rows.filter((row) => row.thread_id === threadId && !row._optimistic).slice(-TURN_RANGE_LIMIT);
+	const selected = new Set<number>();
 	let turnFirst = -1;
 	if (turnEnded) {
 		const lastUser = own.map((row) => row.role).lastIndexOf('user');
 		turnFirst = own.findIndex((row, index) => index > lastUser && row.role === 'assistant');
-		const last = own.at(-1);
-		if (turnFirst >= 0 && last) ranges.push({ from: own[turnFirst].id, to: last.id });
+		if (turnFirst >= 0) for (let index = turnFirst; index < own.length; index++) selected.add(index);
 	}
-	own.filter((row, index) => row.role === 'assistant' && Array.isArray(row.cards) && (turnFirst < 0 || index < turnFirst))
-		.slice(-MAX_CARDED)
-		.forEach((row) => ranges.push({ from: row.id, to: row.id }));
-	return ranges;
+	const carded = own.flatMap((row, index) => (
+		row.role === 'assistant' && Array.isArray(row.cards) && (turnFirst < 0 || index < turnFirst) ? [index] : []
+	)).slice(-MAX_CARDED);
+	for (const index of carded) selected.add(index);
+	if (!selected.size) return [];
+	const indexes = [...selected];
+	return [{ from: own[Math.min(...indexes)].id, to: own[Math.max(...indexes)].id }];
 }
 
 async function read(threadId: string, bearer: string, range: Range): Promise<unknown[]> {
