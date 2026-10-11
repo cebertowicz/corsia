@@ -244,7 +244,7 @@ async def update_external_server(server_id: str, body) -> dict:
                 set_server_key(server_id, supplied_key, db=db)
             if body.cache_warm_seconds is not None:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
-            if limit := body.agent_use_restriction or (moved and relocation_restriction(server["instance_name"], base)):
+            if limit := body.agent_use_restriction or (moved and relocation_restriction(base)):
                 fields["agent_use_restriction"] = limit
             if declared:
                 fields[META_KEY] = declared
@@ -298,7 +298,7 @@ async def add_external_server(body) -> dict:
             fields: dict = {"base_url": base}
             if body.cache_warm_seconds:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
-            if restriction := body.agent_use_restriction or registration_restriction(db, sid, body.name, base):
+            if restriction := body.agent_use_restriction or registration_restriction(db, sid, base):
                 fields["agent_use_restriction"] = restriction
             if key:
                 set_server_key(sid, key, db=db)

@@ -1,112 +1,86 @@
-"""Schema v111 adds image-region anchors to document comments (DCOL-FR13.3/13.4)."""
+"""Schema v111 clears an agent-use restriction from endpoints off a Token Plan host.
+
+The claims: an endpoint on an ordinary host marked ``interactive_only`` by the
+earlier name-or-host rule reads ``allowed`` again, including one renamed since it
+was marked; an endpoint on a Token Plan host keeps its restriction; an explicit
+``allowed`` stays; non-object metadata is left alone; and the upgraded store
+matches what a fresh registration stores. Every value here is synthetic.
+"""
 
 from __future__ import annotations
 
-import sqlite3
+import json
 
-import pytest
+from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.migration_110_to_111_token_plan_by_host import migrate_110_to_111
+from infra.schema import SCHEMA_VERSION
 
-from infra.database_migrations import MIGRATIONS
-from infra.migration_110_to_111_image_regions import REGION_COLUMNS, migrate_110_to_111
-from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
+_ORDINARY = "https://api.example.com/compatible-mode/v1"
+_TOKEN_PLAN = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 
-_V110_DOC_COMMENTS = """
-    CREATE TABLE doc_comments (
-        id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, parent_id TEXT, author TEXT NOT NULL,
-        author_kind TEXT NOT NULL DEFAULT 'user', author_thread_id TEXT, body TEXT NOT NULL,
-        anchor_text TEXT, from_off INTEGER, to_off INTEGER, anchor_prefix TEXT, anchor_suffix TEXT,
-        review INTEGER NOT NULL DEFAULT 0, resolved INTEGER NOT NULL DEFAULT 0, acked INTEGER NOT NULL DEFAULT 0,
-        replacement TEXT, decision TEXT, decided_by TEXT, decided_by_thread_id TEXT, decided_at TEXT,
-        decision_event_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+
+def _insert(db, sid: str, name: str, metadata) -> None:
+    db.execute(
+        "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+        "VALUES (?,'external','external',?,?,443,'online','t','t','t',?)",
+        (sid, sid, name, metadata if isinstance(metadata, str) else json.dumps(metadata)),
     )
-"""
 
 
-def _columns(db: sqlite3.Connection) -> list[str]:
-    return [row[1] for row in db.execute("PRAGMA table_info(doc_comments)")]
-
-
-def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 111
+def test_the_step_is_registered_and_current():
+    assert SCHEMA_VERSION == 112
     assert MIGRATIONS[110] is migrate_110_to_111
 
 
-def test_adds_nullable_region_columns_and_keeps_existing_rows():
-    db = sqlite3.connect(":memory:")
-    db.execute(_V110_DOC_COMMENTS)
-    db.execute(
-        "INSERT INTO doc_comments (id,artifact_id,author,body,created_at,updated_at) "
-        "VALUES ('c1','a1','you','text comment','t','t')"
-    )
-
-    migrate_110_to_111(db)
-    migrate_110_to_111(db)  # a second start changes nothing
-
-    assert _columns(db)[-len(REGION_COLUMNS):] == list(REGION_COLUMNS)
-    row = db.execute("SELECT body, region_number, region_x, image_rev, image_src FROM doc_comments").fetchone()
-    assert row == ("text comment", None, None, None, None)
-
-
-def test_one_number_per_image_is_enforced():
-    db = sqlite3.connect(":memory:")
-    db.execute(_V110_DOC_COMMENTS)
-    migrate_110_to_111(db)
-    insert = (
-        "INSERT INTO doc_comments (id,artifact_id,author,body,created_at,updated_at,region_number,image_src) "
-        "VALUES (?,?,?,?,?,?,?,?)"
-    )
-    db.execute(insert, ("c1", "a1", "you", "b", "t", "t", 1, None))
-    db.execute(insert, ("c2", "a1", "you", "b", "t", "t", 1, "shots/one.png"))
-    db.execute(insert, ("c3", "a2", "you", "b", "t", "t", 1, None))
-    with pytest.raises(sqlite3.IntegrityError):
-        db.execute(insert, ("c4", "a1", "you", "b", "t", "t", 1, None))
-
-
-def test_fresh_schema_matches_a_migrated_one():
-    fresh = sqlite3.connect(":memory:")
-    fresh.executescript(SCHEMA_SQL)
-    migrated = sqlite3.connect(":memory:")
-    migrated.execute(_V110_DOC_COMMENTS)
-    migrate_110_to_111(migrated)
-
-    assert _columns(fresh) == _columns(migrated)
-    index = "idx_doc_comments_region_number"
-    assert fresh.execute("SELECT 1 FROM sqlite_master WHERE name=?", (index,)).fetchone()
-    assert migrated.execute("SELECT 1 FROM sqlite_master WHERE name=?", (index,)).fetchone()
-
-
-def test_a_database_without_doc_comments_passes():
-    db = sqlite3.connect(":memory:")
-    migrate_110_to_111(db)
-    assert db.execute("SELECT 1 FROM sqlite_master WHERE name='doc_comments'").fetchone() is None
-
-
-def test_a_v110_database_with_agent_use_terms_upgrades_to_v111(isolated_db):
-    import json
-
+def test_v110_upgrade_unmarks_every_ordinary_host(isolated_db):
     from infra.database import get_db
-    from infra.database_migrations import migrate_to_current
     from llm.endpoint_policy import endpoint_agent_use
 
     db = get_db()
-    # A v110 database: the agent-use terms recorded by step 109, and no region columns yet.
-    db.execute(
-        "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
-        "VALUES ('legacy','external','external','legacy','Alibaba Token Plan',443,'online','t','t','t',?)",
-        (json.dumps({"base_url": "https://token-plan.example.com/v1", "agent_use_restriction": "interactive_only"}),),
-    )
-    db.execute("DROP TABLE doc_comments")
-    db.execute(_V110_DOC_COMMENTS)
-    db.execute(
-        "INSERT INTO doc_comments (id,artifact_id,author,body,created_at,updated_at) VALUES ('c1','a1','you','text comment','t','t')"
-    )
+    _insert(db, "named-only", "Token Plan (Beijing)", {"base_url": _ORDINARY, "agent_use_restriction": "interactive_only"})
+    _insert(db, "by-host", "Alibaba Token Plan", {"base_url": _TOKEN_PLAN, "agent_use_restriction": "interactive_only"})
+    # Marked while named "Token Plan", then re-added under a new name: the mark survives the rename.
+    _insert(db, "renamed", "Workspace", {"base_url": _ORDINARY, "agent_use_restriction": "interactive_only"})
+    _insert(db, "named-allowed", "Token Plan", {"base_url": _ORDINARY, "agent_use_restriction": "allowed"})
     db.execute("PRAGMA user_version=110")
     db.commit()
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 111)
-    assert _columns(db)[-len(REGION_COLUMNS):] == list(REGION_COLUMNS)
-    assert tuple(db.execute("SELECT body, region_number FROM doc_comments").fetchone()) == ("text comment", None)
-    assert endpoint_agent_use("external@legacy/glm-5.3") == "interactive_only"
+    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 112)
+    rows = {sid: json.loads(raw) for sid, raw in db.execute("SELECT id, metadata_json FROM network_servers")}
+    assert rows["named-only"] == rows["renamed"] == {"base_url": _ORDINARY}
+    assert endpoint_agent_use("external@named-only/glm-5.3") == "allowed"
+    assert endpoint_agent_use("external@renamed/glm-5.3") == "allowed"
+    assert endpoint_agent_use("external@by-host/glm-5.3") == "interactive_only"
+    assert endpoint_agent_use("external@named-allowed/glm-5.3") == "allowed"
     assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+
+
+def test_v110_upgrade_skips_metadata_that_is_not_an_object(isolated_db):
+    from infra.database import get_db
+
+    db = get_db()
+    for sid, raw in (("null-meta", "null"), ("list-meta", "[1]"), ("text-meta", '"x"'), ("bad-meta", "{broken")):
+        _insert(db, sid, "Alibaba Token Plan", raw)
+
+    migrate_110_to_111(db)
+
+    rows = dict(db.execute("SELECT id, metadata_json FROM network_servers").fetchall())
+    assert rows == {"null-meta": "null", "list-meta": "[1]", "text-meta": '"x"', "bad-meta": "{broken"}
+
+
+def test_an_upgraded_store_matches_a_fresh_one(isolated_db):
+    """The same endpoint ends with the same stored terms, whichever rule first ran."""
+    from infra.database import get_db
+    from infra.migration_109_to_110_agent_use_restriction import migrate_109_to_110
+
+    db = get_db()
+    _insert(db, "upgraded", "Token Plan (Beijing)", {"base_url": _ORDINARY, "agent_use_restriction": "interactive_only"})
+    _insert(db, "fresh", "Token Plan (Beijing)", {"base_url": _ORDINARY})
+
+    migrate_109_to_110(db)
+    migrate_110_to_111(db)
+
+    rows = {sid: json.loads(raw) for sid, raw in db.execute("SELECT id, metadata_json FROM network_servers")}
+    assert rows["upgraded"] == rows["fresh"] == {"base_url": _ORDINARY}
