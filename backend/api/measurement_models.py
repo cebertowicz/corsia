@@ -283,8 +283,9 @@ def models_payload(
     prepare_outcome_periods(db, params)
     resolve = IdentityResolver(db)
     turn_rows, error_rows = query_model_turns(db, params)
-    # Every share of spend divides ledger dollars of every call by the window's ledger total, as Cost adds it up.
-    ledger_rows = ledger_shapes(db, params)
+    # Every share of spend divides ledger dollars of every call by the window's ledger total, as Cost adds it up;
+    # only the latest window is read, as a row's share is of that window alone.
+    ledger_rows = ledger_shapes(db, _latest_window_params(params))
     chain = materialize_chain(db, params)
     try:
         cost_rows = query_model_costs(db, params, resolve, chain_rows=chain)
