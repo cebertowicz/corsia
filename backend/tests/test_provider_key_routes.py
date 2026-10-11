@@ -271,16 +271,22 @@ def test_a_failed_base_write_keeps_the_old_key(client, monkeypatch, provider, ol
     assert list(values_after_a_sweep().values()) == [old_value]
 
 
-def test_network_provider_never_stores_an_unread_api_key(client):
+def test_network_provider_refuses_an_api_key_it_would_not_store(client):
     response = client.put(
         "/api/settings/providers/omlx",
         json={"api_key": VALUE, "api_base": "http://127.0.0.1:8000/v1"},
         headers=_header(SESSION),
     )
 
+    assert response.status_code == 400
+    assert "network-servers" in response.json()["detail"]
+    assert key_store.resolve_provider("omlx") is None
+
+    response = client.put(
+        "/api/settings/providers/omlx", json={"api_base": "http://127.0.0.1:8000/v1"}, headers=_header(SESSION),
+    )
     assert response.status_code == 200
     assert response.json()["has_key"] is False
-    assert key_store.resolve_provider("omlx") is None
 
 
 @pytest.mark.parametrize("failure", ["host", "commit"])
