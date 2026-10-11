@@ -20,6 +20,7 @@ from PIL import Image
 
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.image_markup import Mark, Region, render_marked_image
+from registry import models as registry_models
 from registry.file_types import image_media_type
 from registry.identity_metadata import sha256_file
 
@@ -149,12 +150,14 @@ def author_color(db, row: Mapping[str, Any]) -> str:
     """An agent's own colour; a person's is the accent of the image owner's project."""
     if row.get("author_kind") == "agent" and row.get("author_thread_id"):
         return agent_color(str(row["author_thread_id"]))
+    # The owner thread lives on the artifact's registration, which the registry resolves.
+    artifact = registry_models.get_artifact(str(row["artifact_id"]), db=db)
+    owner = artifact.get("parent_thread_id") if artifact else None
     found = db.execute(
-        """SELECT p.id, p.accent_color FROM artifact_identities a
-           JOIN threads t ON t.id=a.parent_thread_id
-           JOIN projects p ON p.id=t.project_id WHERE a.id=?""",
-        (row["artifact_id"],),
-    ).fetchone()
+        """SELECT p.id, p.accent_color FROM threads t
+           JOIN projects p ON p.id=t.project_id WHERE t.id=?""",
+        (owner,),
+    ).fetchone() if owner else None
     return _project_color(found["id"], found["accent_color"]) if found else _NO_PROJECT_COLOR
 
 

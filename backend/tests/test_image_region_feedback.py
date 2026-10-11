@@ -74,6 +74,36 @@ def test_delivered_batch_names_each_region_and_carries_the_marked_up_image(isola
         assert img.size == (800, 500)
 
 
+def test_a_persons_regions_are_delivered_in_the_image_owners_project_colour(isolated_db, tmp_path):
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO projects (id,name,accent_color,created_at,updated_at) VALUES (?,?,?,?,?)",
+            ("proj-red", "Red", "#ff0000", "2026-09-29T00:00:00+00:00", "2026-09-29T00:00:00+00:00"),
+        )
+        seed_thread(db, "owner")
+        db.execute("UPDATE threads SET project_id='proj-red' WHERE id='owner'")
+        artifact_id, _path = _image_artifact(db, "owner", tmp_path)
+        with write_transaction(db, scope="test_region_comment") as connection:
+            row, created = comments.create_with_status(
+                artifact_id, body="The header wraps.", author="you", author_kind="user",
+                region=(0.1, 0.2, 0.3, 0.1), image_rev="rev-1", client_id=uuid.uuid4().hex[:12], db=connection,
+            )
+            feedback_batches.record_comment(connection, row, created=created)
+
+        feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
+        description = _node_description(db)
+    finally:
+        db.close()
+
+    match = re.search(r"Marked-up image \(numbered boxes\): (\S+\.png)", description)
+    assert match, description
+    with Image.open(match.group(1)) as img:
+        # The box's left edge, at x 10% of 800 px, is drawn in the project's accent.
+        edge = [img.convert("RGB").getpixel((x, 125)) for x in range(74, 88)]
+    assert any(r > 200 and g < 80 and b < 80 for r, g, b in edge), edge
+
+
 def test_a_missing_image_still_delivers_the_region_text(isolated_db, tmp_path):
     db = get_db()
     try:
