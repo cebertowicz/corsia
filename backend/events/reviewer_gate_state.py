@@ -54,31 +54,3 @@ def release_in_flight(pr_key: str, head_sha: str) -> None:
     """Release an eligible reviewer run after its terminal attempt."""
     with _IN_FLIGHT_LOCK:
         _IN_FLIGHT.discard((pr_key, head_sha))
-
-
-def is_in_flight(pr_key: str, head_sha: str) -> bool:
-    """Return whether this process already owns an eligible reviewer run."""
-    with _IN_FLIGHT_LOCK:
-        return (pr_key, head_sha) in _IN_FLIGHT
-
-
-def claim_reconciliation_action(pr_key: str, head_sha: str, action: str) -> bool:
-    """Durably claim one reconciliation reviewer recovery for the exact PR head."""
-    return _claim_action(f"{pr_key}:reconciliation:{head_sha}:{action}")
-
-
-def claim_required_context_rerun(pr_key: str, head_sha: str, context: str) -> bool:
-    """Durably claim a single retry for one required context on the exact PR head."""
-    return _claim_action(f"{pr_key}:rerun:{head_sha}:{context}")
-
-
-def _claim_action(action_key: str) -> bool:
-    """Insert one namespaced action receipt into the existing gate state table."""
-    from infra.database import write_transaction
-
-    with write_transaction(None, scope="claim_reviewer_reconciliation_action") as conn:
-        cursor = conn.execute(
-            "INSERT OR IGNORE INTO reviewer_gate_state (pr_key, reviewed_sha) VALUES (?, ?)",
-            (action_key, "claimed"),
-        )
-        return cursor.rowcount == 1

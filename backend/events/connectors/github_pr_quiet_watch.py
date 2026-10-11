@@ -44,6 +44,7 @@ _status: dict[str, Any] = {
     "state": "starting", "reason": None, "last_run": None, "fired_count": 0, "last_error": None,
 }
 _etags: dict[str, tuple[str, Any]] = {}
+_OVERDUE_GATE_TASKS: set[asyncio.Task[None]] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,11 +194,42 @@ async def _repo_runs_actions(runner: feed.GhRunner, repo: str) -> bool:
     return isinstance(body, dict) and (body.get("total_count") or 0) > 0
 
 
+def _log_overdue_gate_failure(
+    repo: str, pr_number: int, head_sha: str, task: asyncio.Task[None],
+) -> None:
+    """Retrieve a detached gate failure so it cannot disappear in the event loop."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        log.info("pr-quiet-watch: overdue reviewer gate cancelled for %s#%s", repo, pr_number)
+    except Exception:
+        log.exception(
+            "pr-quiet-watch: overdue reviewer gate failed for %s#%s sha=%s",
+            repo, pr_number, head_sha[:8],
+        )
+
+
+def _dispatch_overdue_gate(
+    repo: str, head_sha: str, pr_number: int, loop: asyncio.AbstractEventLoop,
+) -> None:
+    """Hand a claimed overdue marker to the canonical reviewer gate without waiting."""
+    from events import reviewer_gate
+
+    task = asyncio.create_task(asyncio.to_thread(
+        reviewer_gate.evaluate_overdue, repo, head_sha, pr_number, loop,
+    ))
+    _OVERDUE_GATE_TASKS.add(task)
+    task.add_done_callback(_OVERDUE_GATE_TASKS.discard)
+    task.add_done_callback(
+        lambda completed: _log_overdue_gate_failure(repo, pr_number, head_sha, completed),
+    )
+
+
 async def _wake(
     candidate: Candidate, view: reasons.PrView, ci: reasons.CiState, reason: str,
-    now: datetime, reviewer_state: str | None,
+    now: datetime, reviewer_state: str | None, marker: str,
 ) -> bool:
-    """Claim the reason durably, then send; a send refused before any row releases the claim.
+    """Send an already-claimed wake; a pre-commit refusal releases its claim.
 
     Claiming first means a retry or restart never wakes twice for one reason:
     the delivery key hashes the summary, which changes between sweeps. Once the
@@ -206,9 +238,6 @@ async def _wake(
     (``infra.failed_wake_surface``), and it is never sent again (report and
     expire, as for refused continuation wakes).
     """
-    marker = reasons.fired_marker(reason, ci)
-    if not await run_in_db(rows.update_head_state, candidate.external_id, view.head, fired=marker):
-        return False
     details = {
         "reason": reason, "head_sha": view.head, "conclusion": ci.conclusion or "none",
         "mergeable": view.mergeable, "url": view.url,
@@ -267,7 +296,14 @@ async def sweep_candidate(
         reviewer_state = (
             await _reviewer_state(runner, view) if reason == reasons.REVIEW_MISSING else None
         )
-        if not await _wake(candidate, view, ci, reason, now, reviewer_state):
+        marker = reasons.fired_marker(reason, ci)
+        if not await run_in_db(rows.update_head_state, candidate.external_id, view.head, fired=marker):
+            continue
+        if reason in (reasons.CI_EVENT_MISSING, reasons.REVIEW_MISSING):
+            _dispatch_overdue_gate(
+                view.repo, view.head, view.number, asyncio.get_running_loop(),
+            )
+        if not await _wake(candidate, view, ci, reason, now, reviewer_state, marker):
             continue
         fired.append(reasons.fired_marker(reason, ci))
         # The wake tells the owner CORSIA reported these, so the report must happen.

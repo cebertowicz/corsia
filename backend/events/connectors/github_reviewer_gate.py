@@ -18,18 +18,15 @@ def checks_green(
     repo: str,
     pr_number: int,
     head_sha: str,
-    checks: list[dict[str, Any]] | None = None,
 ) -> bool | None:
     """Return True when every non-reviewer PR check is terminal-green.
 
-    A reconciliation pass may supply the raw newest check runs it already read;
-    the webhook path keeps its one-read behavior. None means checks are
-    unreadable and False means they are readable but not yet eligible.
+    None means checks are unreadable and False means they are readable but not
+    yet eligible.
     """
-    if checks is None:
-        from reviewer.gh_helpers import get_check_runs_for_sha
+    from reviewer.gh_helpers import get_check_runs_for_sha
 
-        checks = get_check_runs_for_sha(repo, head_sha)
+    checks = get_check_runs_for_sha(repo, head_sha)
     if checks is None:
         log.warning(
             "reviewer-gate: PR #{} sha={} — check fetch unreadable "
@@ -60,47 +57,6 @@ def checks_green(
         return False
     return True
 
-
-def fetch_open_pull_requests(repo: str, base_ref: str) -> list[dict[str, Any]] | None:
-    """Read open pull requests for one target branch through the gate connector."""
-    from reviewer.gh_reconciliation import get_open_pull_requests
-
-    return get_open_pull_requests(repo, base_ref)
-
-
-def fetch_required_check_contexts(repo: str, base_ref: str) -> set[str] | None:
-    """Read required branch contexts rather than hard-coding merge policy."""
-    from reviewer.gh_reconciliation import get_branch_required_contexts
-
-    return get_branch_required_contexts(repo, base_ref)
-
-
-def fetch_check_runs(repo: str, head_sha: str) -> list[dict[str, Any]] | None:
-    """Read newest raw check runs so reconciliation can classify cancellations."""
-    from reviewer.gh_reconciliation import get_check_runs
-
-    return get_check_runs(repo, head_sha)
-
-
-def reviewer_status(repo: str, head_sha: str) -> dict[str, str] | None:
-    """Read the standing reviewer commit status for restart-safe de-duplication."""
-    from reviewer.gh_helpers import get_commit_status_for_context
-
-    return get_commit_status_for_context(repo, head_sha, _REVIEWER_CHECK_NAME)
-
-
-def fetch_workflow_run(repo: str, check: dict[str, Any]) -> dict[str, Any] | None:
-    """Resolve the Actions run backing a cancelled required check."""
-    from reviewer.gh_reconciliation import get_workflow_run_for_check
-
-    return get_workflow_run_for_check(repo, check)
-
-
-def rerun_failed_jobs(repo: str, run_id: int) -> bool:
-    """Re-run only failed Actions jobs through the supported endpoint."""
-    from reviewer.gh_reconciliation import rerun_failed_jobs as rerun
-
-    return rerun(repo, run_id)
 
 
 def fetch_pr_info(repo: str, pr_number: int) -> dict[str, Any] | None:

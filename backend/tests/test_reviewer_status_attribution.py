@@ -78,24 +78,6 @@ def test_unattributed_success_is_returned_as_success_and_logged(
     assert "un-attributed" in caplog.text
 
 
-@patch("reviewer.gh_helpers._run_gh")
-def test_pending_status_preserves_its_created_timestamp(mock_run: MagicMock):
-    """Reconciliation can prove a pending reviewer status is stranded."""
-    from reviewer.gh_helpers import get_commit_status_for_context
-
-    mock_run.return_value = json.dumps({
-        "context": "qa/llm-reviewer",
-        "state": "pending",
-        "description": "Review in progress",
-        "created_at": "2026-10-11T16:00:00Z",
-    })
-
-    assert get_commit_status_for_context("owner/repo", "a" * 40, "qa/llm-reviewer") == {
-        "state": "pending",
-        "description": "Review in progress",
-        "created_at": "2026-10-11T16:00:00Z",
-    }
-
 
 @patch("reviewer.gh_helpers._run_gh")
 def test_attributed_status_is_not_logged_as_unattributed(

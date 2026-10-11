@@ -14,8 +14,9 @@ import json
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -113,6 +114,8 @@ def _received(head: str, at: datetime = T0, repo: str = REPO, *, suite: int = 1)
 def gh(isolated_db, monkeypatch):
     watch._etags.clear()
     watch._status.update({"fired_count": 0})
+    # Gate behavior is covered separately; quiet-watch tests only need its detached handoff.
+    monkeypatch.setattr("events.reviewer_gate.evaluate_overdue", lambda *_args: None)
     _received("0" * 40, T0 - timedelta(days=30), suite=0)  # the log has recorded suites for a month
     return FakeGitHub()
 
@@ -1079,6 +1082,98 @@ async def test_cancelled_then_rerun_green_reads_green(gh, wakes, parked, monkeyp
     await _sweep(gh, T0 + timedelta(minutes=46), monkeypatch)
 
     assert _reasons(wakes) == [reasons.REVIEW_MISSING]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", [reasons.CI_EVENT_MISSING, reasons.REVIEW_MISSING])
+async def test_missing_event_dispatches_one_non_blocking_canonical_gate(
+    reason, gh, wakes, parked, monkeypatch,
+):
+    _webhook()
+    _owner(50 if reason == reasons.CI_EVENT_MISSING else 51)
+    number = 50 if reason == reasons.CI_EVENT_MISSING else 51
+    gh.pr(number)
+    if reason == reasons.CI_EVENT_MISSING:
+        gh.runs(H, run("failure"))
+        due_at = T0 + timedelta(minutes=11)
+    else:
+        _reviewer_runs_here()
+        gh.runs(H, run("success"))
+        gh.reviewer(H, "pending")
+        _received(H)
+        due_at = T0 + timedelta(minutes=46)
+
+    started, release = Event(), Event()
+    calls: list[tuple[str, str, int, asyncio.AbstractEventLoop]] = []
+
+    def blocked_gate(repo, head_sha, pr_number, loop):
+        calls.append((repo, head_sha, pr_number, loop))
+        started.set()
+        release.wait(5)
+
+    monkeypatch.setattr("events.reviewer_gate.evaluate_overdue", blocked_gate)
+    await _sweep(gh, due_at, monkeypatch)
+    assert await asyncio.to_thread(started.wait, 1), "the canonical handoff was not scheduled"
+    assert len(calls) == 1 and calls[0][:3] == (REPO, H, number)
+    assert parked, "the sweep completed its ingress report while the gate was blocked"
+
+    await _sweep(gh, due_at + timedelta(minutes=5), monkeypatch)
+    assert len(calls) == 1, "the durable fired marker must suppress a second handoff"
+
+    release.set()
+    await asyncio.gather(*list(watch._OVERDUE_GATE_TASKS))
+
+
+@pytest.mark.asyncio
+async def test_neighbouring_overdue_reason_does_not_dispatch_reviewer_gate(gh, wakes, parked, monkeypatch):
+    _webhook()
+    _owner(52)
+    gh.pr(52)
+    gh.runs(H, run("cancelled"))
+    _received(H)
+    unexpected = Mock(side_effect=AssertionError("cancelled CI must not invoke reviewer gate"))
+    monkeypatch.setattr("events.reviewer_gate.evaluate_overdue", unexpected)
+
+    await _sweep(gh, T0 + timedelta(minutes=11), monkeypatch)
+
+    unexpected.assert_not_called()
+    assert _reasons(wakes) == [reasons.CI_CANCELLED]
+
+
+@pytest.mark.asyncio
+async def test_committed_refused_owner_wake_does_not_prevent_gate_handoff(
+    gh, wakes, parked, monkeypatch,
+):
+    _webhook()
+    _owner(53)
+    gh.pr(53)
+    gh.runs(H, run("failure"))
+    wakes.return_value = False
+    monkeypatch.setattr(watch.rows, "wake_committed", lambda _message_id: True)
+    calls: list[tuple[str, str, int]] = []
+    monkeypatch.setattr(
+        "events.reviewer_gate.evaluate_overdue",
+        lambda repo, head_sha, pr_number, _loop: calls.append((repo, head_sha, pr_number)),
+    )
+
+    await _sweep(gh, T0 + timedelta(minutes=11), monkeypatch)
+    await asyncio.gather(*list(watch._OVERDUE_GATE_TASKS))
+
+    assert wakes.await_count == 1
+    assert calls == [(REPO, H, 53)]
+
+
+@pytest.mark.asyncio
+async def test_overdue_gate_preserves_the_canonical_already_reviewed_noop(isolated_db, monkeypatch):
+    from events import reviewer_gate, reviewer_gate_state
+
+    reviewer_gate_state.mark_reviewed(reviewer_gate_state.pr_key(REPO, 54), H)
+    checks_green = Mock()
+    monkeypatch.setattr(reviewer_gate.github_reviewer_gate, "checks_green", checks_green)
+
+    reviewer_gate.evaluate_overdue(REPO, H, 54, asyncio.get_running_loop())
+
+    checks_green.assert_not_called()
 
 
 # -- Test 10: the wake never touches plans --

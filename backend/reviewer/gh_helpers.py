@@ -181,11 +181,7 @@ def get_commit_status_for_context(
                     sha[:8],
                     state,
                 )
-            result = {"state": state, "description": description}
-            created_at = status.get("created_at") or status.get("updated_at")
-            if isinstance(created_at, str) and created_at:
-                result["created_at"] = created_at
-            return result
+            return {"state": state, "description": description}
     return {}  # sha has no status on this context yet
 
 
