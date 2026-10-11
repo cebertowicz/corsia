@@ -74,6 +74,15 @@ export async function showImage(page: Page, title: string, naturalWidth = NATURA
 	const img = page.locator(`.image-viewer .frame img[src*="${encodeURIComponent(`${title}.png`)}"]`);
 	await expect(img).toBeVisible();
 	await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(naturalWidth);
+	// The frame lays out wider than the viewer first and fits once the panel settles; measuring before that aims off the image.
+	let last = '';
+	await expect.poll(async () => {
+		const [box, view] = await Promise.all([frame(page), viewer(page).boundingBox()]);
+		const now = JSON.stringify(box);
+		const same = now === last && !!view && inside(box, view);
+		last = now;
+		return same;
+	}, { intervals: [150] }).toBe(true);
 }
 export async function openThread(page: Page, title: string, width: number) {
 	await loginByUrl(page);
