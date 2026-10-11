@@ -2,7 +2,7 @@
 
 from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
 from infra.doc_review_schema import DOC_REVIEW_SCHEMA_SQL
-from infra.migration_109_to_110_image_regions import REGION_NUMBER_INDEX_SQL
+from infra.migration_110_to_111_image_regions import REGION_NUMBER_INDEX_SQL
 
 DOC_COMMENTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_comments (

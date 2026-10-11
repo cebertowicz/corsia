@@ -1,81 +1,106 @@
-"""Schema v110 adds image-region anchors to document comments (DCOL-FR13.3/13.4)."""
+"""Schema v110 records an endpoint's agent-use terms as data.
+
+The claims: an existing endpoint that matched the retired vendor rule becomes
+``interactive_only`` once; an explicit value is never overwritten; every other
+endpoint stays ``allowed``; and metadata that is not a JSON object is left alone
+instead of aborting the upgrade. Every value here is synthetic.
+"""
 
 from __future__ import annotations
 
-import sqlite3
+import json
 
-import pytest
-
-from infra.database_migrations import MIGRATIONS
-from infra.migration_109_to_110_image_regions import REGION_COLUMNS, migrate_109_to_110
-from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
-
-_V109_DOC_COMMENTS = """
-    CREATE TABLE doc_comments (
-        id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, parent_id TEXT, author TEXT NOT NULL,
-        author_kind TEXT NOT NULL DEFAULT 'user', author_thread_id TEXT, body TEXT NOT NULL,
-        anchor_text TEXT, from_off INTEGER, to_off INTEGER, anchor_prefix TEXT, anchor_suffix TEXT,
-        review INTEGER NOT NULL DEFAULT 0, resolved INTEGER NOT NULL DEFAULT 0, acked INTEGER NOT NULL DEFAULT 0,
-        replacement TEXT, decision TEXT, decided_by TEXT, decided_by_thread_id TEXT, decided_at TEXT,
-        decision_event_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-    )
-"""
+from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.migration_109_to_110_agent_use_restriction import migrate_109_to_110
+from infra.schema import SCHEMA_VERSION
 
 
-def _columns(db: sqlite3.Connection) -> list[str]:
-    return [row[1] for row in db.execute("PRAGMA table_info(doc_comments)")]
-
-
-def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 110
+def test_the_step_is_registered_and_current():
+    assert SCHEMA_VERSION >= 110
     assert MIGRATIONS[109] is migrate_109_to_110
 
 
-def test_adds_nullable_region_columns_and_keeps_existing_rows():
-    db = sqlite3.connect(":memory:")
-    db.execute(_V109_DOC_COMMENTS)
+def test_v109_upgrade_marks_a_legacy_token_plan_endpoint_interactive_only(isolated_db):
+    from infra.database import get_db
+    from llm.endpoint_policy import endpoint_agent_use
+
+    db = get_db()
     db.execute(
-        "INSERT INTO doc_comments (id,artifact_id,author,body,created_at,updated_at) "
-        "VALUES ('c1','a1','you','text comment','t','t')"
+        "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+        "VALUES ('legacy','external','external','legacy','Alibaba Token Plan',443,'online','t','t','t',?)",
+        (json.dumps({"base_url": "https://token-plan.example.com/v1"}),),
     )
+    db.execute("PRAGMA user_version=108")
+    db.commit()
 
-    migrate_109_to_110(db)
-    migrate_109_to_110(db)  # a second start changes nothing
+    result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert _columns(db)[-len(REGION_COLUMNS):] == list(REGION_COLUMNS)
-    row = db.execute("SELECT body, region_number, region_x, image_rev, image_src FROM doc_comments").fetchone()
-    assert row == ("text comment", None, None, None, None)
+    assert (result.from_version, result.to_version) == (108, 111)
+    assert endpoint_agent_use("external@legacy/glm-5.3") == "interactive_only"
 
 
-def test_one_number_per_image_is_enforced():
-    db = sqlite3.connect(":memory:")
-    db.execute(_V109_DOC_COMMENTS)
-    migrate_109_to_110(db)
-    insert = (
-        "INSERT INTO doc_comments (id,artifact_id,author,body,created_at,updated_at,region_number,image_src) "
-        "VALUES (?,?,?,?,?,?,?,?)"
+def test_v110_upgrade_restricts_legacy_endpoints_without_overwriting_explicit_allowed(isolated_db):
+    from infra.database import get_db
+    from llm.endpoint_policy import endpoint_agent_use
+
+    db = get_db()
+    db.execute(
+        "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+        "VALUES ('legacy-v109','external','external','legacy-v109','Alibaba Token Plan',443,'online','t','t','t',?)",
+        (json.dumps({"base_url": "https://token-plan.example.com/v1"}),),
     )
-    db.execute(insert, ("c1", "a1", "you", "b", "t", "t", 1, None))
-    db.execute(insert, ("c2", "a1", "you", "b", "t", "t", 1, "shots/one.png"))
-    db.execute(insert, ("c3", "a2", "you", "b", "t", "t", 1, None))
-    with pytest.raises(sqlite3.IntegrityError):
-        db.execute(insert, ("c4", "a1", "you", "b", "t", "t", 1, None))
+    db.execute(
+        "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+        "VALUES ('allowed-v109','external','external','allowed-v109','Alibaba Token Plan',443,'online','t','t','t',?)",
+        (json.dumps({"agent_use_restriction": "allowed"}),),
+    )
+    db.execute("PRAGMA user_version=109")
+    db.commit()
+
+    result = migrate_to_current(db, SCHEMA_VERSION)
+
+    assert SCHEMA_VERSION == 111
+    assert (result.migrated, result.from_version, result.to_version) == (True, 109, 111)
+    assert endpoint_agent_use("external@legacy-v109/glm-5.3") == "interactive_only"
+    assert endpoint_agent_use("external@allowed-v109/glm-5.3") == "allowed"
+    assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
-def test_fresh_schema_matches_a_migrated_one():
-    fresh = sqlite3.connect(":memory:")
-    fresh.executescript(SCHEMA_SQL)
-    migrated = sqlite3.connect(":memory:")
-    migrated.execute(_V109_DOC_COMMENTS)
-    migrate_109_to_110(migrated)
 
-    assert _columns(fresh) == _columns(migrated)
-    index = "idx_doc_comments_region_number"
-    assert fresh.execute("SELECT 1 FROM sqlite_master WHERE name=?", (index,)).fetchone()
-    assert migrated.execute("SELECT 1 FROM sqlite_master WHERE name=?", (index,)).fetchone()
+def test_v109_upgrade_skips_metadata_that_is_not_an_object(isolated_db):
+    from infra.database import get_db
+
+    db = get_db()
+    for sid, raw in (("null-meta", "null"), ("list-meta", "[1]"), ("text-meta", '"x"')):
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES (?,'external','external',?,'Alibaba Token Plan',443,'online','t','t','t',?)",
+            (sid, sid, raw),
+        )
+    db.execute("PRAGMA user_version=109")
+    db.commit()
+
+    result = migrate_to_current(db, SCHEMA_VERSION)
+
+    assert (result.migrated, result.to_version) == (True, 111)
+    rows = dict(db.execute("SELECT id, metadata_json FROM network_servers").fetchall())
+    assert rows == {"null-meta": "null", "list-meta": "[1]", "text-meta": '"x"'}
 
 
-def test_a_database_without_doc_comments_passes():
-    db = sqlite3.connect(":memory:")
-    migrate_109_to_110(db)
-    assert db.execute("SELECT 1 FROM sqlite_master WHERE name='doc_comments'").fetchone() is None
+def test_v109_upgrade_leaves_existing_endpoint_allowed(isolated_db):
+    from infra.database import get_db
+    from llm.endpoint_policy import endpoint_agent_use
+
+    db = get_db()
+    db.execute(
+        "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+        "VALUES ('existing','external','external','existing','Existing endpoint',443,'online','t','t','t',?)",
+        (json.dumps({"base_url": "https://existing.example/v1"}),),
+    )
+    db.execute("PRAGMA user_version=108")
+    db.commit()
+
+    result = migrate_to_current(db, SCHEMA_VERSION)
+
+    assert (result.from_version, result.to_version) == (108, 111)
+    assert endpoint_agent_use("external@existing/model") == "allowed"

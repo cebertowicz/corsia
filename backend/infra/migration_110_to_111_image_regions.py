@@ -1,4 +1,4 @@
-"""Schema 109 -> 110: image-region anchors on document comments (DCOL-FR13.3/13.4)."""
+"""Schema 110 -> 111: image-region anchors on document comments (DCOL-FR13.3/13.4)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ REGION_NUMBER_INDEX_SQL = (
 )
 
 
-def migrate_109_to_110(conn: sqlite3.Connection) -> None:
+def migrate_110_to_111(conn: sqlite3.Connection) -> None:
     """Add the nullable region columns and the one-number-per-image index."""
     table = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='doc_comments'"
