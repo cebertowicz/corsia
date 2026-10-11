@@ -11,7 +11,7 @@
 	const order: { id: KpiTile['id']; label: string }[] = [
 		{ id: 'work', label: 'Work per hour of your attention' },
 		{ id: 'first-try', label: 'First-try rate (agent-graded)' },
-		{ id: 'cost', label: 'Cost per hour of delivered work' },
+		{ id: 'cost', label: 'Cost per person-hour of work delivered' },
 		{ id: 'minutes', label: 'Your minutes per outcome' },
 		{ id: 'tokens', label: 'Tokens' },
 	];

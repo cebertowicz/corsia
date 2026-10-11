@@ -460,7 +460,7 @@ const MEASUREMENT_READY: Target['ready'] = async (page, data, timeout = 20_000) 
 		{ message: 'the Measurement sections read key figures, size headline, Cost, Models, kept charts, Biggest changes, then Agents', timeout },
 	).toBe(true);
 	const apiCost = page.getByRole('region', { name: 'Cost', exact: true });
-	await expect(apiCost.getByRole('heading', { name: 'Cost per hour of delivered work', exact: true }), 'the API-equivalent Cost section is showing').toBeVisible({ timeout });
+	await expect(apiCost.getByRole('heading', { name: 'Cost per person-hour of work delivered', exact: true }), 'the API-equivalent Cost section is showing').toBeVisible({ timeout });
 	await expect(apiCost.locator('.chart'), 'the API-equivalent Cost chart is populated').toHaveCount(1, { timeout });
 	await expect(page.locator('section.models'), 'the Models section shows the seeded resolved model').toContainText('Claude Opus 5.5', { timeout });
 	await expect(page.locator('section.models th[scope="row"]').filter({ hasText: LOCAL_MODEL }), 'the Models table shows the local model selector').toHaveCount(1, { timeout });

@@ -19,7 +19,7 @@ const BODY = {
 	minimum_n: 20,
 	worse: [
 		row('a1', 'Tech Debt', 'agent', 'minutes_per_outcome', 'Minutes per outcome', 'minutes', 0.9, 4.4, 3.62, 65, 1.8, 'Review its recent send-backs and how it asks you.'),
-		row('a2', 'Providers & Inference', 'agent', 'dollars_per_hour', '$ per hour of work', 'dollars', 1.1, 1.9, 0.73, 103, 1.5, 'Check which size class and model drive the cost.'),
+		row('a2', 'Providers & Inference', 'agent', 'dollars_per_hour', '$ per person-hour of work delivered', 'dollars', 1.1, 1.9, 0.73, 103, 1.5, 'Check which size class and model drive the cost.'),
 		row('a3', 'Bugs', 'agent', 'first_try', 'First try', 'percent', 0.92, 0.81, -0.12, 52, 0.89, 'Read its last rejected outcomes.'),
 	],
 	improved: [
@@ -135,7 +135,7 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 			await expect(card.getByLabel('Order')).toHaveCount(0);
 			const names = () => agents.locator('tbody th .name').allTextContents();
 			expect(await agents.locator('thead th').allTextContents(), 'the approved columns, no asks').toEqual([
-				'Agent', 'Outcomes', 'First try', '$ per hour of work', 'Change in minutes per outcome, vs the previous window']);
+				'Agent', 'Outcomes', 'First try', '$ per person-hour of work delivered', 'Change in minutes per outcome, vs the previous window']);
 			const servedNames = await names();
 			expect(servedNames, 'the served order, no column sorted').toEqual(['Self-Improvement Infrastructure', 'Infrastructure', 'Local Inference Optimization']);
 			const selfImprovement = agents.locator('tbody tr').filter({ hasText: 'Self-Improvement Infrastructure' });
