@@ -13,7 +13,27 @@ permissions:
   contents: read
 
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: '(^|/).+\.(py|ts|svelte)$|^quality/file-size-limits\.json$|^\.github/workflows/code-health\.yml$|^\.github/actions/relevance/action\.yml$'
+
   file-sizes:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: File size ratchet
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -22,21 +42,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine whether code health is relevant
-        id: relevance
-        uses: ./.github/actions/relevance
-        with:
-          event_name: ${{ github.event_name }}
-          base_ref: ${{ github.base_ref }}
-          patterns: '(^|/).+\.(py|ts|svelte)$|^quality/file-size-limits\.json$|^\.github/workflows/code-health\.yml$|^\.github/actions/relevance/action\.yml$'
-
       - uses: actions/setup-python@v5
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       - name: Test the ratchet itself
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         # scripts/tests/ is outside backend/, so the "Unit tests (L1)" job's
         # `cd backend && pytest` (rootdir=backend/pytest.ini) never collects
         # it -- confirmed empirically, not assumed: that exact invocation
@@ -50,7 +60,6 @@ jobs:
           "$RUNNER_TEMP/ratchet-test-venv/bin/python" -m pytest scripts/tests/ -q
 
       - name: No file grows past its recorded size
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         # GitHub's default shell for `run:` is `bash -e {0}` -- errexit ON by
         # default, from the shell invocation itself, not from anything below.
         # `shell: bash {0}` (no `-e`) is what actually lets a failing check

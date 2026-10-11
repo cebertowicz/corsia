@@ -60,14 +60,15 @@ MACOS_ONLY_TESTS = REPO_ROOT / "backend/tests/macos_only_tests.txt"
 # Every job runs on a GitHub-hosted runner. macOS only where a job needs it:
 # the L3 contract suite (Seatbelt + Safehouse) and the macOS-only L1 files.
 LINUX_WORKFLOW_JOBS = {
-    "antipatterns.yml": 1,
-    "code-health.yml": 1,
+    "antipatterns.yml": 2,
+    "code-health.yml": 2,
     "docs-drift.yml": 1,
-    "lint.yml": 2,
+    "lint.yml": 3,
     "large-files.yml": 1,
     "close-on-dev-merge.yml": 1,
     "e2e.yml": 2,
     "evals.yml": 1,
+    "integration.yml": 1,
 }
 MACOS_WORKFLOW_JOBS = {
     "integration.yml": 1,
@@ -149,7 +150,7 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert "--durations=50 --durations-min=0.25" in workflow
     assert '--junitxml="$RUNNER_TEMP/backend-junit-${shard}.xml"' in workflow
     assert "actions/upload-artifact@v4" in workflow
-    assert "if: ${{ always() && steps.relevance.outputs.relevant == 'true' }}" in workflow
+    assert "if: ${{ always() }}" in workflow
     assert "backend-junit-*.xml" in workflow
     assert "backend-*.log" in workflow
     assert "Summarize backend test shards" in workflow
@@ -198,9 +199,8 @@ def test_blocking_contexts_are_created_for_every_pull_request() -> None:
         assert "branches: [main, dev]" in pull_request, filename
         assert "paths:" not in pull_request, filename
         assert "paths-ignore:" not in pull_request, filename
-        assert workflow.count("id: relevance") == expected_relevance_steps, filename
-        assert workflow.count("steps.relevance.outputs.relevant") >= expected_relevance_steps, filename
-        assert "\n    if:" not in workflow, filename
+        assert workflow.count("uses: ./.github/actions/relevance") == 1, filename
+        assert workflow.count("\n    if: ${{ needs.relevance.outputs.relevant == 'true' }}") == expected_relevance_steps, filename
 
 
 def _workflow_job(workflow: str, job_name: str) -> str:
@@ -216,10 +216,10 @@ def _workflow_pattern_env_value(workflow: str, env_name: str) -> str:
     return match.group(1)
 
 
-def _consumer_pattern(workflow: str, job_name: str) -> str:
-    job = _workflow_job(workflow, job_name)
-    match = re.search(r"^          patterns: (.+)$", job, re.MULTILINE)
-    assert match, job_name
+def _relevance_pattern(workflow: str) -> str:
+    preflight = _workflow_job(workflow, "relevance")
+    match = re.search(r"^          patterns: (.+)$", preflight, re.MULTILINE)
+    assert match, "relevance"
     pattern_reference = match.group(1)
     env_reference = re.fullmatch(r"\$\{\{ env\.([A-Z_]+) \}\}", pattern_reference)
     return _workflow_pattern_env_value(workflow, env_reference.group(1)) if env_reference else pattern_reference.strip("'")
@@ -244,17 +244,25 @@ def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job
     workflow_root = REPO_ROOT / ".github/workflows"
     for filename, jobs in RELEVANCE_CONSUMER_JOBS.items():
         workflow = (workflow_root / filename).read_text()
+        preflight = _workflow_job(workflow, "relevance")
         assert "git diff --name-only" not in workflow, filename
-        assert "grep -Eq" not in workflow, filename
+        assert "steps.relevance.outputs.relevant" not in workflow, filename
+        assert "uses: ./.github/actions/relevance" in preflight, filename
+        assert workflow.count("uses: ./.github/actions/relevance") == 1, filename
+        assert "runs-on: ubuntu-24.04" in preflight, filename
+        assert "fetch-depth: 0" in preflight, filename
+        assert "id: detect" in preflight, filename
+        assert "event_name: ${{ github.event_name }}" in preflight, filename
+        assert "base_ref: ${{ github.base_ref }}" in preflight, filename
+        assert "relevant: ${{ steps.detect.outputs.relevant }}" in preflight, filename
+        assert RELEVANCE_ACTION_PATH in _relevance_pattern(workflow), filename
         for job_name in jobs:
             job = _workflow_job(workflow, job_name)
-            assert "id: relevance" in job, (filename, job_name)
-            assert "\n        uses: ./.github/actions/relevance\n" in job, (filename, job_name)
-            assert "event_name: ${{ github.event_name }}" in job, (filename, job_name)
-            assert "base_ref: ${{ github.base_ref }}" in job, (filename, job_name)
-            assert "patterns:" in job, (filename, job_name)
-            assert RELEVANCE_ACTION_PATH in _consumer_pattern(workflow, job_name), (filename, job_name)
-            assert "steps.relevance.outputs.relevant" in job, (filename, job_name)
+            assert "needs: relevance" in job, (filename, job_name)
+            assert "if: ${{ needs.relevance.outputs.relevant == 'true' }}" in job, (filename, job_name)
+            assert "uses: ./.github/actions/relevance" not in job, (filename, job_name)
+            assert "steps.relevance.outputs.relevant" not in job, (filename, job_name)
+            assert "id: relevance" not in job, (filename, job_name)
 
 
 def test_relevance_patterns_are_shared_only_within_identical_workflows() -> None:
@@ -264,8 +272,9 @@ def test_relevance_patterns_are_shared_only_within_identical_workflows() -> None
         pattern = _workflow_pattern_env_value(workflow, env_name)
         assert workflow.count(pattern) == 1, filename
         expected_reference = f"patterns: ${{{{ env.{env_name} }}}}"
+        assert expected_reference in _workflow_job(workflow, "relevance"), filename
         for job_name in RELEVANCE_CONSUMER_JOBS[filename]:
-            assert expected_reference in _workflow_job(workflow, job_name), (filename, job_name)
+            assert expected_reference not in _workflow_job(workflow, job_name), (filename, job_name)
 
 
 def test_every_relevance_consumer_pattern_matches_its_required_paths() -> None:
@@ -273,8 +282,8 @@ def test_every_relevance_consumer_pattern_matches_its_required_paths() -> None:
     for filename, jobs in RELEVANCE_CONSUMER_JOBS.items():
         workflow = (workflow_root / filename).read_text()
         cases = RELEVANCE_PATTERN_CASES[filename]
+        pattern = _relevance_pattern(workflow)
         for job_name in jobs:
-            pattern = _consumer_pattern(workflow, job_name)
             for changed_path in (*cases["must_run"], f".github/workflows/{filename}", ".github/actions/relevance/action.yml"):
                 assert _grep_matches(pattern, changed_path) == 0, (filename, job_name, changed_path, pattern)
             for changed_path in cases["must_skip"]:
@@ -448,12 +457,10 @@ def test_every_workflow_uses_its_hosted_runner() -> None:
     for filename, expected_jobs in LINUX_WORKFLOW_JOBS.items():
         workflow = (workflow_root / filename).read_text()
         assert workflow.count(LINUX_RUNNER) == expected_jobs, filename
-        assert MACOS_RUNNER not in workflow, filename
 
     for filename, expected_jobs in MACOS_WORKFLOW_JOBS.items():
         workflow = (workflow_root / filename).read_text()
         assert workflow.count(MACOS_RUNNER) == expected_jobs, filename
-        assert LINUX_RUNNER not in workflow, filename
 
     integration = (workflow_root / "integration.yml").read_text()
     assert "scripts/install-ci-safehouse" in integration

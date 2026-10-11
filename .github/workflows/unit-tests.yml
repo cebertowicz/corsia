@@ -13,7 +13,27 @@ env:
   UNIT_TEST_RELEVANCE_PATTERNS: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$|^\.github/actions/relevance/action\.yml$'
 
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
+
   backend:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: Backend unit tests
     runs-on: ubuntu-24.04
     # The Mac Studios finished the three shards in about 6 minutes; a hosted
@@ -38,22 +58,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine whether backend unit tests are relevant
-        id: relevance
-        uses: ./.github/actions/relevance
-        with:
-          event_name: ${{ github.event_name }}
-          base_ref: ${{ github.base_ref }}
-          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
-
       # uv's managed CPython bundles the same current SQLite the Mac Python
       # does; setup-python on Ubuntu links the distro's older SQLite, whose
       # parser and query planner differ from what CORSIA runs on.
       - uses: astral-sh/setup-uv@v6
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
 
       - name: Install deps
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         run: |
           # The search tests assert real ripgrep semantics.
           sudo apt-get update --quiet
@@ -66,7 +78,7 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Use in-memory test root
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         # Each SQLite-backed test builds its schema with ~240 commits, and every
         # commit flushes to disk. Test state needs no durability, so keep it in
         # the runner's tmpfs; fall back to RUNNER_TEMP if /dev/shm is missing.
@@ -82,7 +94,7 @@ jobs:
           echo "Backend test state root: $root"
 
       - name: Run backend tests
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         run: |
           set -uo pipefail
 
@@ -154,7 +166,7 @@ jobs:
           exit "$status"
 
       - name: Summarize backend test shards
-        if: ${{ always() && steps.relevance.outputs.relevant == 'true' }}
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           .venv/bin/python - <<'PY'
@@ -253,7 +265,7 @@ jobs:
           PY
 
       - name: Upload backend timing report
-        if: ${{ always() && steps.relevance.outputs.relevant == 'true' }}
+        if: ${{ always() }}
         # Diagnostics only: a failed upload must not turn a passing job red.
         continue-on-error: true
         uses: actions/upload-artifact@v4
@@ -265,6 +277,8 @@ jobs:
           if-no-files-found: warn
 
   backend-macos:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: Backend unit tests (macOS-only files)
     # Only the files that need macOS run here; macOS minutes cost more than
     # Linux, so everything else stays in the Linux job above.
@@ -281,26 +295,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine whether macOS-only unit tests are relevant
-        id: relevance
-        uses: ./.github/actions/relevance
-        with:
-          event_name: ${{ github.event_name }}
-          base_ref: ${{ github.base_ref }}
-          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
-
       - uses: actions/setup-python@v5
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         with:
           python-version: '3.11'
 
       # The jailed-export cases require the real Safehouse sandbox.
       - name: Install Safehouse
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         run: scripts/install-ci-safehouse
 
       - name: Install deps
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
@@ -308,7 +314,7 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Run macOS-only backend tests
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         run: |
           set -euo pipefail
           files=()
@@ -329,6 +335,8 @@ jobs:
             -o tmp_path_retention_policy=failed
 
   frontend:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: Frontend unit tests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -337,34 +345,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine whether frontend unit tests are relevant
-        id: relevance
-        uses: ./.github/actions/relevance
-        with:
-          event_name: ${{ github.event_name }}
-          base_ref: ${{ github.base_ref }}
-          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
-
       - uses: actions/setup-node@v4
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         with:
           # Active LTS; the frontend declares no engines constraint.
           node-version: '24'
 
       - name: Install deps + run tests
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         working-directory: frontend
         run: |
           npm ci
           npm run test
 
       - name: Build
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         working-directory: frontend
         run: npm run build
 
       - name: Type check (svelte-check) — ADVISORY during calibration
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
+
         working-directory: frontend
         continue-on-error: true
         run: npm run check

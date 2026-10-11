@@ -13,7 +13,27 @@ permissions:
   contents: read
 
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: '^(backend/|frontend/|tools/|scripts/|infra/|\.github/workflows/antipatterns\.yml$|\.github/actions/relevance/action\.yml$)'
+
   antipatterns:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: Anti-pattern detector (error-severity, blocking)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -31,21 +51,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine whether the antipattern gate is relevant
-        id: relevance
-        uses: ./.github/actions/relevance
-        with:
-          event_name: ${{ github.event_name }}
-          base_ref: ${{ github.base_ref }}
-          patterns: '^(backend/|frontend/|tools/|scripts/|infra/|\.github/workflows/antipatterns\.yml$|\.github/actions/relevance/action\.yml$)'
-
       - uses: actions/setup-python@v5
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       - name: Run full error-severity antipattern gate (whole repo, blocking)
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -o pipefail
           PYTHONPATH=tools python -m antipatterns \

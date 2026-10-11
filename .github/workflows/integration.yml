@@ -16,7 +16,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: '^backend/|^requirements[^/]*\.txt$|^\.github/workflows/integration\.yml$|^\.github/actions/relevance/action\.yml$'
+
   integration:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: ${{ inputs.live_reviewer && 'Live host reviewer proof (Haiku)' || 'Integration tests (L3)' }}
     # macOS: the L3 contract suite runs agent shells under Seatbelt
     # (sandbox-exec) and requires Safehouse, neither of which exists on Linux.
@@ -38,14 +58,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine whether integration is relevant
-        id: relevance
-        uses: ./.github/actions/relevance
-        with:
-          event_name: ${{ github.event_name }}
-          base_ref: ${{ github.base_ref }}
-          patterns: '^backend/|^requirements[^/]*\.txt$|^\.github/workflows/integration\.yml$|^\.github/actions/relevance/action\.yml$'
-
       - name: Prepare isolated workspace
         run: |
           set -e
@@ -54,23 +66,19 @@ jobs:
           mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
 
       - uses: actions/setup-python@v5
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       - name: Install Safehouse
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: scripts/install-ci-safehouse
 
       # The stock-CLI receipt proofs drive the real Claude and Codex CLIs
       # against loopback peers; pin the versions they are tested with.
       - uses: actions/setup-node@v4
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           node-version: '24'
 
       - name: Install stock agent CLIs
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -e
           npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.160.0
@@ -78,7 +86,6 @@ jobs:
           codex --version
 
       - name: Install backend deps
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -e
           if [ ! -x .venv/bin/python ]; then
@@ -89,7 +96,6 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Check required models loaded
-        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -e
           cd backend
@@ -110,7 +116,7 @@ jobs:
           "
 
       - name: Run integration tests
-        if: ${{ steps.relevance.outputs.relevant == 'true' && !inputs.live_reviewer }}
+        if: ${{ !inputs.live_reviewer }}
         run: |
           set -e
           cd backend
@@ -120,7 +126,7 @@ jobs:
             -x
 
       - name: Run bounded live Haiku reviewer proof
-        if: ${{ steps.relevance.outputs.relevant == 'true' && github.event_name == 'workflow_dispatch' && inputs.live_reviewer }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_reviewer }}
         run: |
           set -e
           CORSIA_WORKSPACE="$(mktemp -d "$RUNNER_TEMP/reviewer-workspace.XXXXXX")"
