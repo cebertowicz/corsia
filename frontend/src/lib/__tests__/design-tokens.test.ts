@@ -27,6 +27,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--depth',
 	// The comment rail width: DocViewer's `style:--doc-rail` and the editor's rail, both from railWidth().
 	'--doc-rail',
+	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
+	'--region-color',
 ]);
 
 /**
@@ -120,5 +122,11 @@ describe('design tokens', () => {
 		}
 		expect(defined.has('--surface-1')).toBe(false);
 		expect(references.some((reference) => reference.token === '--surface-1')).toBe(false);
+	});
+
+	it('registers the theme-independent image-region contrast tokens', () => {
+		for (const token of ['--image-region-ink', '--image-region-halo', '--image-region-edge']) {
+			expect(defined.has(token), `${token} must be defined`).toBe(true);
+		}
 	});
 });

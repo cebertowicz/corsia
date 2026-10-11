@@ -14,6 +14,8 @@ class CommentCreate(BaseModel):
     replacement: str | None = None
     client_id: str | None = None
     live_capture: StrictBool = False
+    # {x, y, w, h} in fractions of an image artifact; w = h = 0 (or omitted) is a point.
+    region: dict | None = None
 
     @field_validator("client_id")
     @classmethod

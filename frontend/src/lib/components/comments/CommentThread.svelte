@@ -22,15 +22,24 @@
 		/** Live documents only (4.2): a row never `drawn` shows its placement on the card. */
 		placement?: 'placed' | 'placing' | 'not_placed';
 		drawn?: boolean;
+		/** On part of an image (DCOL-FR13.4): its number there, and whether the image changed after it was pinned (FR13.9). */
+		regionNumber?: number | null;
+		regionStale?: boolean;
 	};
 	import { userParticipant, resolveParticipant, agentTag } from '$lib/stores/participants';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import { retryPlacement } from '$lib/stores/docComments';
 
-	let { comment, focused = false, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
+	let { comment, focused = false, linked = false, selectable = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
 		comment: CommentThreadData;
 		focused?: boolean;
+		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
+		linked?: boolean;
+		/** An image comment in the drawer: its number is a button that selects its tag. */
+		selectable?: boolean;
+		/** Off where the caller scrolls its own list to the focused card. */
+		scrollOnFocus?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
 		onReply?: (commentId: string, text: string) => Promise<void>;
@@ -39,6 +48,10 @@
 		/** Settles when the decision does and never rejects: a refusal comes back as `decisionError`. */
 		onDecision?: (commentId: string, decision: 'accept' | 'reject') => Promise<void>;
 		onViewed?: (commentId: string, replyId: string) => Promise<void>;
+		/** Place an image comment's pin again, on the image as it is now. */
+		onMovePin?: (commentId: string) => void;
+		/** The colour of an image comment's numbered tag, which the card's number shares. */
+		tagColor?: string | null;
 		/** Why the last decision was refused. The caller owns it, so it outlives a card that moves groups. */
 		decisionError?: string;
 		/** The document has an owner thread, so a re-open reaches someone and the card may say so. */
@@ -67,7 +80,7 @@
 	let retryOnVisible = false;
 
 	$effect(() => { if (focused) showReplies = true; });
-	$effect(() => { if (focused && el) el.scrollIntoView({ block: 'nearest' }); });
+	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	function stampRenderedReply() {
 		const latest = comment.replies.at(-1)?.id;
 		if (!comment.replyWaiting || !showReplies || !latest || document.visibilityState !== 'visible') return;
@@ -159,6 +172,7 @@
 	<div class="ct resolved" class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}">
 		<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 			<svg class="ct-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+			{#if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<span class="ct-res-text">Resolved · {comment.replies.length + 1} message{comment.replies.length ? 's' : ''}</span>
 			<svg class="ct-chev" class:open={resolvedOpen} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg>
 		</button>
@@ -175,8 +189,10 @@
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct" class:focused class:acked={comment.acked} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus}>
+	<div class="ct" class:focused class:linked class:acked={comment.acked} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus}>
 		<div class="ct-head">
+			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
+			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<span class="ct-author">{author.name}</span>
 			{#if author.kind === 'agent' && agentTag(author)}<span class="ct-tag" title="via {author.provider} · {author.thread}">{agentTag(author)}</span>{/if}
@@ -212,6 +228,9 @@
 			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else}
 			{#if comment.orphaned}<div class="ct-orphan">The text this comment was on has changed</div>{/if}
+			{#if comment.regionStale}
+				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
+			{/if}
 			<p class="ct-body">{clamp(comment.text, headOpen)}</p>
 		{/if}
 		{#if isLong(comment.text)}<button class="ct-more" onclick={(e) => { e.stopPropagation(); headOpen = !headOpen; }}>{headOpen ? 'Show less' : 'Show more'}</button>{/if}
@@ -246,8 +265,10 @@
 	.ct {
 		background: color-mix(in srgb, var(--text-primary) 4%, transparent); border: 1px solid transparent; border-radius: var(--radius-sm);
 		padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
-		transition: border-color var(--dur-tight), box-shadow var(--dur-tight); cursor: pointer;
+		transition: border-color var(--dur-tight), box-shadow var(--dur-tight), background-color var(--dur-tight) var(--ease-snap); cursor: pointer;
 	}
+	/* Lit with its mark on the image while either is hovered or focused; lighter than selected. */
+	.ct.linked:not(.focused) { background: color-mix(in srgb, var(--text-primary) 8%, transparent); border-color: color-mix(in srgb, var(--text-primary) 14%, transparent); }
 	.ct.read-only .ct-act, .ct.read-only .ct-compose, .ct.read-only .ct-res-acts { display: none; }
 	.ct.focused { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glass-rim), 0 0 0 3px var(--accent-subtle); }
 	.ct.acked { border-color: color-mix(in srgb, var(--green) 30%, transparent); }
@@ -269,6 +290,16 @@
 	.ct-act.resolve:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
+	/* An image comment's number, in its tag's colour and shape. */
+	.ct-num {
+		box-sizing: border-box; flex-shrink: 0; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-2xs);
+		background: var(--region-color, var(--accent)); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color, var(--accent)) 70%, var(--image-region-edge));
+		font-size: var(--text-caption); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; line-height: 1;
+	}
+	button.ct-num { position: relative; font-family: inherit; cursor: pointer; }
+	button.ct-num:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	/* A 44 px target around the 18 px number on touch. */
+	@media (pointer: coarse) { button.ct-num::before { content: ''; position: absolute; inset: -13px; } }
 	.ct-suggestion-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
 	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: #fff; background: var(--accent); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
 	.ct-suggestion-accept:disabled, .ct-link:disabled { opacity: 0.55; cursor: not-allowed; }

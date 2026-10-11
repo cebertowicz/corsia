@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from doceditor import comments as store
+from core.media_reads import IMAGE_KIND, MediaReadReference, MediaToolResult
+from doceditor import comments as store, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentInput
@@ -66,14 +67,52 @@ def _resolve_doc_target(
     return None, canonical, {"path": canonical}
 
 
-def _validate_comment_request(body, parent_id, review, quote, replacement, doc_path, artifact_id, client_id):
+def _validate_comment_request(body, parent_id, review, quote, replacement, doc_path, artifact_id, client_id,
+                              region=None):
     """Map shared creation validation to the native-tool error surface."""
     try:
         text = validate_create(body=body, parent_id=parent_id, review=review, quote=quote,
-                               replacement=replacement, doc_path=doc_path, artifact_id=artifact_id)
+                               replacement=replacement, doc_path=doc_path, artifact_id=artifact_id, region=region)
         return None, text, validate_client_id(client_id)
     except (CommentActionError, ValueError) as exc:
         return f"Error: {exc}", "", None
+
+
+_REGION_SCHEMA = {
+    "type": ["object", "null"],
+    "properties": {"x": {"type": "number"}, "y": {"type": "number"},
+                   "w": {"type": "number"}, "h": {"type": "number"}},
+    "required": ["x", "y"],
+    "description": ("On an image artifact: a box {x, y, w, h} (or a point {x, y}) in fractions 0..1 "
+                    "of the image, origin top-left. Pass it instead of quote. The result includes the "
+                    "image with your box drawn, so you can check it and move it with doc_comment_update."),
+}
+
+
+async def _region_result(
+    payload: dict[str, Any], row: dict[str, Any], path: str | None, reader: str,
+) -> str | MediaToolResult:
+    """The JSON result plus the image with this comment's numbered box drawn (DCOL-FR13.7)."""
+    def _render():
+        db = get_db()
+        try:
+            return image_regions.write_marked_image(
+                db, image=Path(str(path)), rows=[row], reader_thread_id=reader,
+                label=f"{Path(str(path)).stem}-region-{row['region_number']}",
+            )
+        finally:
+            db.close()
+
+    try:
+        marked = await run_in_db(_render)
+    except image_regions.RENDER_ERRORS as exc:
+        return _json({**payload, "marked_image_error": str(exc)})
+    reference = MediaReadReference(
+        path=str(marked.path), mime_type="image/png", kind=IMAGE_KIND,
+        byte_size=marked.byte_size, sha256=marked.sha256,
+    )
+    text = _json({**payload, "marked_image": str(marked.path)})
+    return MediaToolResult(f"{text}\n{reference.placeholder_text()}", reference)
 
 
 def _resolve_comment_target(db, actor_thread_id, actor, parent_id, kwargs):
@@ -187,6 +226,7 @@ class DocCommentCreateTool(Tool):
             "review": {"type": "boolean"},
             "client_id": {"type": ["string", "null"]},
             "replacement": {"type": ["string", "null"]},
+            "region": _REGION_SCHEMA,
             "submit": {
                 "type": "boolean",
                 "description": "Send this document's open feedback batch to its owner now.",
@@ -209,9 +249,11 @@ class DocCommentCreateTool(Tool):
             kwargs.get("doc_path"),
             kwargs.get("artifact_id"),
             kwargs.get("client_id"),
+            kwargs.get("region"),
         )
         if error is not None:
             return error
+        region = image_regions.parse_region(kwargs["region"]) if kwargs.get("region") is not None else None
         if kwargs.get("doc_path"):
             kwargs = {**kwargs, "doc_path": tool_path(kwargs["doc_path"], self._workspace)}
 
@@ -232,7 +274,7 @@ class DocCommentCreateTool(Tool):
                 artifact_id=target[0], path=target[1], body=text, author=author, author_kind="agent", user_id=actor["user_id"],
                 author_thread_id=actor_thread_id, parent_id=parent_id, review=review,
                 replacement=kwargs.get("replacement"), quote=kwargs.get("quote"), near=kwargs.get("near"),
-                registration=target[2], submit=bool(kwargs.get("submit")),
+                registration=target[2], submit=bool(kwargs.get("submit")), region=region,
             )
             row, registered, feedback = await create_validated_comment(request, client_id)
         except QuoteResolveError as exc:
@@ -249,6 +291,8 @@ class DocCommentCreateTool(Tool):
             from plans import public
 
             await public.drive_threads(feedback["woken"])
+        if region is not None:
+            return await _region_result({"comment": row, **feedback}, row, target[1], actor_thread_id)
         return _json({"comment": row, **feedback})
 
 
@@ -276,6 +320,9 @@ class DocCommentUpdateTool(Tool):
             "from_off": {"type": ["integer", "null"]},
             "to_off": {"type": ["integer", "null"]},
             "anchor_text": {"type": ["string", "null"]},
+            "region": {**_REGION_SCHEMA, "description": (
+                "Move your own image comment's box or point, in fractions 0..1 of the image. "
+                "The result includes the image with the moved box drawn.")},
             "decision": {"type": ["string", "null"], "enum": ["accept", "reject"]},
             "all_from_author": {"type": "boolean"},
             "reason": {
@@ -312,7 +359,7 @@ class DocCommentUpdateTool(Tool):
             return _json(row if kwargs.get("all_from_author") else {"comment": row})
         fields = {
             k: kwargs.get(k)
-            for k in ("resolved", "acked", "body", "from_off", "to_off", "anchor_text")
+            for k in ("resolved", "acked", "body", "from_off", "to_off", "anchor_text", "region")
             if kwargs.get(k) is not None
         }
         if not fields:
@@ -332,16 +379,20 @@ class DocCommentUpdateTool(Tool):
                 check_agent_update(
                     comment, fields, actor_thread_id=actor_thread_id,
                     owner_thread_id=art["parent_thread_id"], db=db)
-                patch = reopen_fields(comment, fields)
+                moved = image_regions.move_fields(comment, fields, art["path"]) if "region" in fields else fields
+                patch = reopen_fields(comment, moved)
                 with write_transaction(db, scope="patch_agent_comment") as connection:
-                    return update_comment(connection, comment_id, patch, actor_thread_id=actor_thread_id)
+                    return update_comment(connection, comment_id, patch, actor_thread_id=actor_thread_id), art["path"]
             finally:
                 db.close()
 
         try:
-            row = await run_in_db(_update)
+            updated = await run_in_db(_update)
         except CommentActionError as exc:
             return f"Error: {exc.message}"
+        row, path = updated or (None, None)
         if row is None:
             return "Error: Comment not found"
+        if "region" in fields:
+            return await _region_result({"comment": row}, row, path, actor_thread_id)
         return _json({"comment": row})

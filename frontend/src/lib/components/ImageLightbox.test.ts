@@ -1,11 +1,15 @@
 import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const viewport = vi.hoisted(() => ({ mobile: null as unknown as import('svelte/store').Writable<boolean> }));
+const viewport = vi.hoisted(() => ({
+	mobile: null as unknown as import('svelte/store').Writable<boolean>,
+	reduced: null as unknown as import('svelte/store').Writable<boolean>,
+}));
 vi.mock('$lib/stores/viewport', async () => {
 	const { writable: make } = await import('svelte/store');
 	viewport.mobile = make(false);
-	return { isMobile: viewport.mobile, prefersReducedMotion: make(false) };
+	viewport.reduced = make(false);
+	return { isMobile: viewport.mobile, prefersReducedMotion: viewport.reduced };
 });
 
 import ImageLightbox from './ImageLightbox.svelte';
@@ -201,14 +205,16 @@ describe('ImageLightbox', () => {
 		expect([frame.style.width, frame.style.height]).toEqual(['1000px', '500px']);
 	});
 
-	it('scrolls a fraction of the image to the centre of the viewport on request, and stays put when nothing is loaded', async () => {
+	it('glides a fraction of the image to the centre of the viewport on request, and stays put when nothing is loaded', async () => {
 		let api: { revealFraction: (x: number, y: number) => void } | undefined;
 		component = mount(ImageLightbox, { target: host, props: { src: '/a.png', alt: 'a' } });
 		api = component as unknown as typeof api;
 		flushSync();
 		const region = host.querySelector<HTMLElement>('.viewport')!;
+		const scrollTo = vi.fn();
+		region.scrollTo = scrollTo as unknown as typeof region.scrollTo;
 		api!.revealFraction(0.5, 0.5);
-		expect([region.scrollLeft, region.scrollTop]).toEqual([0, 0]);
+		expect(scrollTo).not.toHaveBeenCalled();
 
 		const img = host.querySelector<HTMLImageElement>('.pad img')!;
 		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: NATURAL.width });
@@ -220,8 +226,12 @@ describe('ImageLightbox', () => {
 		vi.spyOn(img, 'getBoundingClientRect').mockReturnValue({ left: -300, top: -100, width: 1000, height: 500, right: 700, bottom: 400, x: -300, y: -100, toJSON() {} } as DOMRect);
 		api!.revealFraction(0.9, 2);
 		// 0.9 of the width is at x 600, to be centred at 274; the vertical fraction clamps to the bottom edge, y 400 to 200.
-		expect(region.scrollLeft).toBeCloseTo(326);
-		expect(region.scrollTop).toBeCloseTo(200);
+		expect(scrollTo).toHaveBeenLastCalledWith({ left: expect.closeTo(326), top: expect.closeTo(200), behavior: 'smooth' });
+		// Reduced motion moves there at once.
+		viewport.reduced.set(true);
+		api!.revealFraction(0.9, 2);
+		expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: 'auto' }));
+		viewport.reduced.set(false);
 	});
 
 	it('ignores a delayed failure detail after the source changes', async () => {

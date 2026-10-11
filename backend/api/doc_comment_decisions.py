@@ -11,6 +11,9 @@ COMMENT_ACTION_HTTP_STATUS = {
     "decision": 400,
     "not_author": 403,
     "not_owner": 403,
+    "region_shape": 400,
+    "region_bounds": 400,
+    "region_target": 400,
 }
 
 

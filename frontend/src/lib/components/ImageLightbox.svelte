@@ -18,8 +18,8 @@
 		/** The document this image belongs to; with `onBack` the bar offers a way back to it. */
 		docName?: string;
 		onBack?: () => void;
-		/** Room in the bar for more actions, drawn before the zoom controls. */
-		barActions?: Snippet;
+		/** Room in the bar for more actions, drawn before the zoom controls; `loaded` says the image is ready to act on. */
+		barActions?: Snippet<[{ loaded: boolean }]>;
 		/** Drawn over the image in a frame of its exact size, so it follows zoom and scrolling as part of the image. */
 		overlay?: Snippet<[{ scale: number }]>;
 		onLoaded?: () => void;
@@ -116,7 +116,11 @@
 		if (!imgEl) return;
 		place(next, fractionOnImage(pivot, imgEl.getBoundingClientRect()), pivot);
 	}
-	/** Scrolls so the given fraction of the image (0..1 on each axis) is centred in the viewport, keeping the zoom. */
+	/** The shown image's live bounds, for an anchored card to avoid covering its tags. */
+	export function imageBounds(): DOMRect | null { return imgEl?.isConnected ? imgEl.getBoundingClientRect() : null; }
+	/** The image's own pixel size once it has loaded, for a caller sizing the space around the viewer. */
+	export function naturalSize(): Size | null { return natural; }
+	/** Glides the given fraction of the image (0..1 on each axis) to the viewport's centre, keeping the zoom; at once with reduced motion. */
 	export function revealFraction(x: number, y: number) {
 		const el = viewportEl;
 		const image = imgEl;
@@ -124,8 +128,7 @@
 		const at = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
 		const view = el.getBoundingClientRect();
 		const delta = scrollToHold(at, { x: view.left + view.width / 2, y: view.top + view.height / 2 }, image.getBoundingClientRect());
-		el.scrollLeft += delta.x;
-		el.scrollTop += delta.y;
+		el.scrollTo({ left: el.scrollLeft + delta.x, top: el.scrollTop + delta.y, behavior: $prefersReducedMotion ? 'auto' : 'smooth' });
 	}
 	function toFit() {
 		free = null;
@@ -273,7 +276,7 @@
 			</button>
 		{/if}
 		<span class="spacer"></span>
-		{@render barActions?.()}
+		{@render barActions?.({ loaded })}
 		<div class="zoom" role="group" aria-label="Zoom">
 			<button type="button" class="control" aria-pressed={free === null} disabled={!loaded} onclick={toFit}>Fit</button>
 			{#if !$isMobile}
@@ -332,16 +335,23 @@
 	.spacer { flex: 1; }
 	.zoom { display: flex; align-items: center; gap: 2px; }
 	.level { min-width: 4ch; text-align: center; font-size: var(--text-footnote); font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
-	.control {
+	/* The one control look for the whole bar, including actions drawn into it, so they read and respond as one row. */
+	.lightbox :global(.control) {
 		display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 28px; padding: 0 8px; border: 0;
 		border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary);
-		font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer;
+		font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer;
+		transition: background-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap);
 	}
-	.control.icon { width: 28px; padding: 0; }
-	.control:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
-	.control[aria-pressed='true'] { background: var(--accent-bg); color: var(--accent); }
-	.control:disabled { opacity: 0.4; cursor: default; }
-	.control:focus-visible, .viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.lightbox :global(.control.icon) { width: 28px; padding: 0; }
+	/* Hover only where a pointer hovers, and never over a pressed, open or held control, so the accent and press tint show. */
+	@media (hover: hover) {
+		.lightbox :global(.control:hover:not(:disabled):not(:active):not([aria-pressed='true']):not([aria-expanded='true'])) { background: var(--bg-hover); color: var(--text-primary); }
+	}
+	.lightbox :global(.control[aria-pressed='true']), .lightbox :global(.control[aria-expanded='true']) { background: var(--accent-bg); color: var(--accent); }
+	.lightbox :global(.control:disabled) { opacity: 0.4; cursor: default; }
+	/* Press-down tints at once, in place of the app's press scale. */
+	.lightbox :global(.control:not(:disabled):active) { scale: none; background: var(--press-bg); transition-duration: 0s; }
+	.lightbox :global(.control:focus-visible), .viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 	.back { padding-left: 4px; max-width: 60%; }
 	.back-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -365,11 +375,11 @@
 	.load-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 24px 4px; color: var(--text-secondary); }
 	.load-error p { margin: 0; font-size: var(--text-subhead); color: var(--red); font-weight: var(--fw-medium); }
 	.load-error code { font-size: var(--text-caption); color: var(--text-tertiary); word-break: break-all; }
-	.load-error .control { background: var(--amber-bg); color: var(--amber-text); }
+	.load-error :global(.control) { background: var(--amber-bg); color: var(--amber-text); }
 
 	@media (max-width: 768px) {
 		.bar { min-height: 44px; }
-		.control { min-height: 44px; padding: 0 12px; }
+		.lightbox :global(.control) { min-height: 44px; padding: 0 12px; }
 		.back { padding-left: 8px; }
 		.viewport { border-radius: 0; }
 	}
