@@ -166,14 +166,14 @@
 			</div>
 		</div>
 		<p class="note">
+			Models{windowSuffix}.
 			{#if state.minTasks !== null && rows.some((row) => row.other)}Models with under {state.minTasks} accepted tasks share the last table row.{/if}
-			Share of spend is the model's priced API-equivalent dollars over every row's; a row with no priced calls shows a dash.
 			{#if sizeColumns.length}
-				Each size column is the $ per accepted task for that size class, shown at {state.minTasks ?? 14} or more tasks of the class;
-				its change is against the previous window, or new when that window had fewer. First try is graded by the agents.
+				$ per task within each size class, whole chain, API-equivalent; a class shows only with {state.minTasks ?? 14} or more tasks.
+				A change compares one named size class that has {state.minTasks ?? 14} or more tasks in both windows, otherwise n/a, mix changed.
+			{:else}
+				$ per accepted task, whole chain, API-equivalent.
 			{/if}
-			API-equivalent: list price of recorded tokens, not a charge; local models have no list price and are left out of it.
-			Includes the task's workers and sent-back attempts; each model is charged for its own share.
 		</p>
 		{#if blendedRows.some(partial) || cells.some((entry) => entry.partial)}
 			<p class="note">* Some calls were unpriced; the figure covers priced calls only.</p>

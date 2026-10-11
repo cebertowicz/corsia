@@ -24,8 +24,8 @@ def _argv(monkeypatch, tmp_path: Path, gws_home: Path | None) -> list[str]:
     safehouse = tmp_path / "safehouse"
     safehouse.write_text("")
     monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: str(safehouse))
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path / "rw"])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path / "rw"])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     return shell_guard.safehouse_argv("true", tmp_path, tmp_path / "p.sb", gws_home=gws_home)
 
 

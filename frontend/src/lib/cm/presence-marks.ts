@@ -2,6 +2,9 @@ import { Facet, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view';
 import type { DocActivityKind, DocSpan } from '$lib/docPresence';
 
+/** The name label fades this long after the agent's last visible change. */
+export const LABEL_FADE_MS = 2_000;
+
 export interface PresenceRange {
 	threadId: string;
 	name: string;
@@ -11,6 +14,8 @@ export interface PresenceRange {
 	highlightKind?: DocActivityKind | null;
 	/** Ends this lane's wait and shows its pending arrival now, as any user click in an arrival highlight does. */
 	revealPending?: () => void;
+	/** When the agent last did anything here; the caret's name label fades LABEL_FADE_MS after it. */
+	lastAtMs?: number;
 }
 
 export const setPresenceRanges = StateEffect.define<PresenceRange[]>();
@@ -28,19 +33,26 @@ export class PresenceCursor extends WidgetType {
 		private readonly color: string,
 		private readonly typing = false,
 		private readonly quiet = false,
+		/** Set for a caret no typing lane draws: its label fades from this time instead of a lane's quiet flag. */
+		private readonly since: number | null = null,
 	) { super(); }
 
 	eq(other: PresenceCursor): boolean {
 		return this.threadId === other.threadId && this.name === other.name
-			&& this.color === other.color && this.typing === other.typing && this.quiet === other.quiet;
+			&& this.color === other.color && this.typing === other.typing && this.quiet === other.quiet && this.since === other.since;
 	}
 
 	toDOM(): HTMLElement {
 		const cursor = document.createElement('span');
-		const states = [this.typing ? 'cm-presence-cursor-typing' : '', this.quiet ? 'cm-presence-cursor-quiet' : ''];
+		// The fade is a CSS delay counted from `since`, so a rebuilt caret never restarts it and no timer runs.
+		const fadeIn = this.since === null ? 0 : LABEL_FADE_MS - (Date.now() - this.since);
+		const quiet = this.quiet || (this.since !== null && fadeIn <= 0);
+		const states = [this.typing ? 'cm-presence-cursor-typing' : '', quiet ? 'cm-presence-cursor-quiet' : '',
+			!quiet && this.since !== null ? 'cm-presence-cursor-fading' : ''];
 		cursor.className = ['cm-presence-cursor', ...states].filter(Boolean).join(' ');
 		cursor.dataset.threadId = this.threadId;
 		cursor.style.setProperty('--presence-color', this.color);
+		if (fadeIn > 0 && !quiet) cursor.style.setProperty('--presence-label-fade-in', `${fadeIn}ms`);
 		cursor.setAttribute('aria-label', `${this.name} recently active here`);
 		const label = document.createElement('span');
 		label.className = 'cm-presence-cursor-label';
@@ -80,7 +92,7 @@ function decorations(ranges: PresenceRange[], docLength: number): DecorationSet 
 		const cursorFrom = Math.min(Math.max(0, range.span.from), docLength);
 		const cursorTo = Math.min(Math.max(cursorFrom, range.span.to), docLength);
 		const cursor = Decoration.widget({
-			widget: new PresenceCursor(range.threadId, range.name, range.color),
+			widget: new PresenceCursor(range.threadId, range.name, range.color, false, false, range.lastAtMs ?? null),
 			side: 1,
 		}).range(cursorTo);
 		if (!range.highlightSpan) return [cursor];
@@ -131,6 +143,11 @@ const presenceTheme = EditorView.baseTheme({
 	},
 	'.cm-presence-cursor-quiet .cm-presence-cursor-label': { opacity: '0', transition: 'opacity 300ms ease-out' },
 	'.cm-presence-cursor-quiet:hover .cm-presence-cursor-label': { opacity: '1' },
+	'.cm-presence-cursor-fading .cm-presence-cursor-label': {
+		animation: 'cm-presence-label-fade 300ms ease-out var(--presence-label-fade-in) forwards',
+	},
+	'.cm-presence-cursor-fading:hover .cm-presence-cursor-label': { animation: 'none' },
+	'@keyframes cm-presence-label-fade': { to: { opacity: '0' } },
 	'@keyframes cm-presence-blink': {
 		'0%, 50%': { backgroundColor: 'var(--presence-color)' },
 		'50.01%, 100%': { backgroundColor: 'transparent' },

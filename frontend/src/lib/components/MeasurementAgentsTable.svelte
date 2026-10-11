@@ -12,19 +12,19 @@
 
 	type Row = AgentsState['rows'][number];
 
-	/** The most rows the table shows: the server's top ten. */
+	/** The most rows the table shows: the ten agents with the most outcomes in the latest window. */
 	const LIMIT = 10;
 
 	/** The windows the heading and the change column name; without an echoed period the table names none. */
 	const latestName = $derived(agents.period ? periodName(agents.period.latest) : null);
 	const previousName = $derived(agents.period ? periodName(agents.period.previous) : null);
 
-	/** The column the reader sorted by. The table opens in the order the server ranked it. */
+	/** The column the reader sorted by. The table opens with the most outcomes first. */
 	type SortKey = 'agent' | 'outcomes' | AgentsMetric;
 	let sortKey = $state<SortKey | null>(null);
 	let descending = $state(true);
 
-	/** Click cycles ascending, descending, then back to the served order. */
+	/** Click cycles ascending, descending, then back to the opening order. */
 	function sortBy(key: SortKey): void {
 		if (sortKey !== key) { sortKey = key; descending = false; return; }
 		if (!descending) { descending = true; return; }
@@ -54,9 +54,16 @@
 		return row.metrics[key]?.value ?? null;
 	}
 
-	/** The server's top ten, in the reader's order; a row with no value for the column goes last in either direction. */
+	/**
+	 * The ten agents with the most outcomes in the latest window, in the reader's order. The server ranks by
+	 * a quality metric, so the row set and the opening order are decided here; a row with no value for the
+	 * column goes last in either direction.
+	 */
 	const shown = $derived.by(() => {
-		const top = agents.rows.slice(0, LIMIT);
+		const top = agents.rows
+			.filter((row) => row.n > 0)
+			.sort((a, b) => b.n - a.n || a.agent.name.localeCompare(b.agent.name))
+			.slice(0, LIMIT);
 		const key = sortKey;
 		if (key === null) return top;
 		const direction = descending ? -1 : 1;
@@ -100,7 +107,7 @@
 		<div class="table-wrap" role="region" aria-label="Agents table, scrolls sideways when it is wider than the screen" tabindex="0">
 		<table>
 			<caption class="sr-only">
-				Agents in the latest window, in the order the server ranked them until a column header is chosen. A value is
+				The ten agents with the most outcomes in the latest window, most first until a column header is chosen. A value is
 				hidden until the agent has enough outcomes for it, and an unmeasured figure is never shown as zero.
 			</caption>
 			<thead>

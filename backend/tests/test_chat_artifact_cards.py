@@ -225,8 +225,10 @@ def test_a_recorded_verdict_and_feedback_counts_survive_in_the_card(db):
         "INSERT INTO plan_node_events (id,node_id,provenance,event,payload_json,created_at)"
         " VALUES (?,?, 'test','hold_cleared',?, 't')",
         (event_id, node_id, json.dumps({
-            "hold_id": hold_id, "verdict": "approved_with_changes",
-            "feedback_counts": {"comments": 2, "suggestions": 1, "edits": 0},
+            "hold_id": hold_id, "kind": "blocked", "detail": {
+                "verdict": "approved_with_changes", "note": None,
+                "feedback_counts": {"comments": 2, "suggestions": 1, "edits": 0},
+            },
         })),
     )
     db.execute(

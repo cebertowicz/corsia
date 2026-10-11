@@ -62,10 +62,8 @@ describe('MeasurementModels', () => {
 		const page = render({ rows: [{ ...row, model: 'codex/gpt-5.6-sol', label: 'gpt-5.6-sol', not_offered_now: true }] });
 		expect(page.textContent).toContain('not offered now');
 	});
-	it('says $ per accepted task counts the whole chain, with each model charged for its own share', () => {
-		expect(render().textContent).toContain(
-			"Includes the task's workers and sent-back attempts; each model is charged for its own share."
-		);
+	it('says $ per accepted task counts the whole chain, in API-equivalent dollars', () => {
+		expect(render().textContent).toContain('$ per accepted task, whole chain, API-equivalent.');
 	});
 	/** The rate cell of one row rendered alone. */
 	function rateCell(r: Partial<ModelsState['rows'][number]>): string {
@@ -160,8 +158,8 @@ describe('MeasurementModels', () => {
 		expect(first).toEqual(['S $1.07 new · 100% first try', 'M $3.09 -7% · 92% first try', '—']);
 		expect(second).toEqual(['—', '—', 'L $8.56 +24% · 92% first try']);
 		expect(page.querySelector('td.blended')).toBeNull();
-		expect(page.textContent).toContain('First try is graded by the agents.');
-		expect(page.textContent).toContain('shown at 14 or more tasks of the class');
+		expect(page.textContent).toContain('$ per task within each size class, whole chain, API-equivalent; a class shows only with 14 or more tasks.');
+		expect(page.textContent).toContain('A change compares one named size class that has 14 or more tasks in both windows, otherwise n/a, mix changed.');
 	});
 	it('shows the blended rate across the size columns for a row with no size cell', () => {
 		const page = render({ rows: [{ ...row, sizes: [cell] }, { ...row, model: 'b', label: 'B', recorded_cost_per_task: 0.5 }, { ...row, model: 'c', label: 'C', recorded_cost_per_task: null, cost_class: 'local', rate_reason: 'local' }] });
