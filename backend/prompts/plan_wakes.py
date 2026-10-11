@@ -10,10 +10,11 @@ from __future__ import annotations
 from typing import Literal
 
 #: What a thread is told when a plan result it did not cause reaches it. The
-#: facts that follow each line are the same `next` block a close returns.
+#: ask-answer wake carries ``next: null`` because an answer does not change
+#: selection; other wakes carry the same `next` block a close returns.
 WAKE_TASK_CLOSED = "[CORSIA plan] {title} was closed by another actor."
 WAKE_WORK_SELECTED = "[CORSIA plan] {title} is now your current task."
-WAKE_ASK_RELEASED = "[CORSIA plan] {summary}"
+WAKE_ASK_RELEASED = "[CORSIA plan] {summary}\n{{\"next\": null}}"
 WAKE_CHILD_RETURNED = (
     "[CORSIA plan] The work delegated for {title} has returned and awaits your verdict."
 )

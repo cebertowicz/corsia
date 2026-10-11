@@ -209,75 +209,16 @@ RETURNED_EVIDENCE_MAX_BYTES = 480
 def notify_returned(
     db, *, node_id: str, child_plan_id: str, worker_thread_id: str, reply: str = "",
 ) -> str | None:
-    """Tell the parent its delegated work has returned, with the result to judge.
+    """Tell the parent its delegated work has returned, with the result to judge."""
+    from plans import plan_wake_returned
 
-    One wake per attachment epoch: the harvest that calls this fires once per
-    epoch. It carries the worker's steps, each one's state, the evidence it was
-    put up for review with and the result artifacts that evidence names, so no
-    second harvest is needed to learn the outcome. Bulky evidence stays where
-    it is; the parent retrieves it when verification needs it. The wake is
-    bounded like every default read: at most ``RETURNED_STEPS_MAX`` steps in
-    plan order, titles and evidence cut to their byte caps, and a truthful
-    ``omitted_count`` for the rest -- the child's plan is one read away.
-
-    Returns the accepted input's id, or None when the parent could not take
-    it (no model, or nothing left to act on). The harvest is one unit with
-    this wake: a return the parent cannot take is not harvested yet, and
-    waits, whole, for a later sweep.
-    """
-    from plans import delegation_harvest, delegation_reply, review_evidence, service
-    from plans.close_next_bounds import bounded
-    from prompts import plan_wakes as wakes
-
-    node = read_node(db, node_id)
-    plan = service._plan_row(db, node["plan_id"])
-    if plan["owner_kind"] != "thread":
-        return None
-    leaves = delegation_harvest.return_rows(db, child_plan_id, delegation_harvest.attached_since(db, node_id))
-    steps = [delegation_reply.reply_step(reply)] if reply and not leaves else []
-    for leaf in leaves[:RETURNED_STEPS_MAX]:
-        evidence = review_evidence.latest(
-            leaf["id"], requirements_revision=leaf["requirements_revision"], db=db,
-        )
-        said = _close_reason(db, leaf) if evidence is None else evidence["evidence"]
-        steps.append({
-            "id": leaf["id"],
-            "title": bounded(str(leaf["title"]), RETURNED_TITLE_MAX_BYTES),
-            "state": leaf["state"],
-            "evidence": None if said is None else bounded(
-                str(said), RETURNED_EVIDENCE_MAX_BYTES,
-            ),
-            "artifact_ids": [] if evidence is None else list(evidence["artifact_ids"]),
-        })
-    owner = str(plan["owner_id"])
-    return append(
+    return plan_wake_returned.notify(
         db,
-        recipient=owner,
-        kind=CHILD_RETURNED,
-        subject_id=node_id,
-        revision=int(node["revision"]),
-        plan_id=str(plan["id"]),
-        content=with_next(
-            db, str(plan["id"]), owner,
-            wakes.WAKE_CHILD_RETURNED.format(title=str(node["title"])),
-            returned={
-                "child_plan_id": child_plan_id,
-                "worker_thread_id": worker_thread_id,
-                "steps": steps,
-                "omitted_count": max(0, len(leaves) - RETURNED_STEPS_MAX),
-                "total_count": len(leaves) or len(steps),
-            },
-        ),
-        delegated_step_id=node_id,
-        delegated_worker=worker_thread_id,
+        node_id=node_id,
+        child_plan_id=child_plan_id,
+        worker_thread_id=worker_thread_id,
+        reply=reply,
     )
-
-
-def _close_reason(db, leaf) -> str | None:
-    """A closed step's whole content is why it closed; that is its evidence."""
-    from plans import closure
-
-    return closure.close_reasons(db, [leaf]).get(str(leaf["id"]))
 
 
 def notify_revision(
@@ -294,7 +235,7 @@ def notify_revision(
     from prompts import plan_wakes as wakes
 
     with service._connection(db) as connection:
-        node = read_node(connection, node_id)
+        node = _node(connection, node_id)
         own_plan = service.ensure_plan("thread", recipient, db=connection)
         to_worker = node["spawned_thread_id"] == recipient
         field = handoff_brief.bounded_field(connection, node, own_plan.id)
@@ -327,6 +268,40 @@ def notify_revision(
         )
 
 
+def notify_selected(
+    db, reconciled, *, plan_id: str, causing_executor: str | None,
+    from_worker: bool = False,
+) -> None:
+    """Tell each executor whose slot this write filled that it has current work.
+
+    A delegated step its worker's side hands back is the notification
+    matrix's news (``delegated_selection.told_elsewhere``), not this wake's.
+    A task its executor did not write brings its description, bounded, beside
+    the block (``handoff_brief``).
+    """
+    from plans import delegated_selection, handoff_brief
+    from prompts import plan_wakes as wakes
+
+    for node_id, executor in reconciled.selected:
+        if not executor or executor == causing_executor:
+            continue
+        node = _node(db, node_id)
+        if delegated_selection.told_elsewhere(db, executor, node, from_worker=from_worker):
+            continue
+        append(
+            db,
+            recipient=executor,
+            kind=WORK_SELECTED,
+            subject_id=node_id,
+            revision=int(node["revision"]),
+            plan_id=plan_id,
+            content=with_next(
+                db, plan_id, executor,
+                wakes.WAKE_WORK_SELECTED.format(title=str(node["title"])),
+                **handoff_brief.fact(db, node_id, executor),
+            ),
+        )
+
 
 def notify_closed(
     db, node_id: str, *, plan_id: str, executor: str | None, causing_executor: str | None,
@@ -345,7 +320,7 @@ def notify_closed(
 
     if not executor or executor == causing_executor:
         return
-    node = read_node(db, node_id)
+    node = _node(db, node_id)
     if node["state"] in node_order.OPEN_TASK_STATES:
         return
     append(
@@ -362,8 +337,7 @@ def notify_closed(
     )
 
 
-def read_node(db, node_id: str):
-    """Return the plan-node row needed to compose a wake."""
+def _node(db, node_id: str):
     from plans import service
 
     return service._node_row(db, node_id)

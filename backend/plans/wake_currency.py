@@ -107,8 +107,8 @@ def is_current(thread_id: str, condition: dict, *, db) -> bool:
     # another plan's failed task -- is the owner's to act on while that task
     # is open, even though a blocked task is not actionable work (#1552).
     node_id = details.get("open_node_id")
-    if isinstance(node_id, str):
-        return _node_open(db, plan_id, node_id)
+    if isinstance(node_id, str) and _node_open(db, plan_id, node_id):
+        return True
     actionable, _projected = projections.actionable_leaves(
         db, plan, executor=thread_id,
     )

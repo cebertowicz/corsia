@@ -14,9 +14,7 @@ user clears that ask, the holds it placed clear and the agent is told
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass
-from typing import Callable
 
 import plans.service as service
 from plans.node_states import open_user_block_sql
@@ -53,12 +51,11 @@ ASKABLE_TYPES = ("document", "image")
 class AskRelease:
     """What the answering side hands Plans when it clears an ask, opaque to Plans.
 
-    ``detail`` rides in the clearance event; ``text(ask, kind, title)`` is the notice the
-    asking agent wakes on, given the artifact's title and the held task's kind and title.
+    ``detail`` rides in the clearance event. Plans owns the one durable wake
+    summary, so every ask answer names the task, answer, and remaining holds.
     """
 
     detail: dict
-    text: Callable[[str, str, str], str]
 
 
 def raised_asks(db, artifact_id: str) -> list:
@@ -273,13 +270,18 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
 def _release(
     db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
 ) -> int:
-    from plans import admission, admission_projection, holds, plan_wake
+    from plans import admission, holds, plan_wake
+    from plans.plan_events import append_owner_event
+    from plans.user_steering import CHANGE_KIND
     from prompts import plan_wakes as wakes
 
     rows = db.execute(
         f"""SELECT h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,
-                  n.revision, n.executor_thread_id, n.owner_thread_id,
-                  p.owner_kind, p.owner_id, i.title AS ask
+                  n.revision, p.owner_id,
+                  EXISTS (SELECT 1 FROM plan_node_holds other
+                          WHERE other.node_id=n.id AND other.id<>h.id
+                            AND other.cleared_at IS NULL) AS other_holds,
+                  i.title AS ask
              FROM plan_node_artifact_links l
              JOIN plan_nodes n ON n.id = l.node_id
              JOIN plans p ON p.id = n.plan_id
@@ -290,37 +292,56 @@ def _release(
             ORDER BY h.created_at, h.id""",
         (artifact_id,),
     ).fetchall()
-    released_by_plan: dict[str, list[tuple[sqlite3.Row, str]]] = {}
     for row in rows:
-        holds.clear_write(
+        cause_id, cause_at = holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",
             actor_id=None, provenance=_PROVENANCE, db=db,
             detail=release.detail if release else None,
         )
-        ask = row["ask"] or "your ask"
-        summary = (
-            f'Your ask "{ask}" became unavailable, so {row["kind"]} '
-            f'"{row["title"]}" no longer waits on it: pick it up.'
-            if retired else
-            release.text(ask, row["kind"], row["title"]) if release else
-            f'The user {done} "{ask}", so {row["kind"]} '
-            f'"{row["title"]}" no longer waits on them: pick it up.'
+        summary = _release_summary(row, done, retired=retired, release=release)
+        wake_id = plan_wake.append(
+            db,
+            recipient=str(row["owner_id"]),
+            kind=plan_wake.ASK_RELEASED,
+            subject_id=str(row["node_id"]),
+            revision=int(row["revision"]),
+            about=str(row["hold_id"]),
+            plan_id=str(row["plan_id"]),
+            content=wakes.WAKE_ASK_RELEASED.format(summary=summary),
+            open_node_id=str(row["node_id"]),
         )
-        released_by_plan.setdefault(str(row["plan_id"]), []).append((row, summary))
-    for plan_id, released in released_by_plan.items():
-        summaries = {str(row["node_id"]): summary for row, summary in released}
-        reconciled = admission.reconcile_plan(
-            plan_id, actor_id=None, provenance=_PROVENANCE,
-            selection_wake_summaries=summaries, db=db,
+        append_owner_event(
+            db,
+            plan_id=str(row["plan_id"]),
+            event_id=cause_id,
+            actor_id=None,
+            event_type=CHANGE_KIND,
+            summary=summary,
+            details={
+                "node_id": str(row["node_id"]),
+                "action": "ask_cleared",
+                "ask_wake_id": wake_id,
+            },
+            created_at=cause_at,
         )
-        for row, summary in released:
-            node_id = str(row["node_id"])
-            executor = admission_projection.executor_of(row, row)
-            if executor is None or node_id in reconciled.selection_woken:
-                continue
-            plan_wake.append(
-                db, recipient=executor, kind=plan_wake.ASK_RELEASED, subject_id=node_id,
-                revision=int(row["revision"]), plan_id=plan_id,
-                content=wakes.WAKE_ASK_RELEASED.format(summary=summary), open_node_id=node_id,
-            )
+    for plan_id in dict.fromkeys(str(row["plan_id"]) for row in rows):
+        admission.reconcile_plan(plan_id, actor_id=None, provenance=_PROVENANCE, db=db)
     return len(rows)
+
+
+def _release_summary(row, done: str, *, retired: bool, release: AskRelease | None) -> str:
+    """Return the complete one-line answer a wake carries without a selection snapshot."""
+    ask = str(row["ask"] or "your ask")
+    verdict = "none"
+    answer = "none"
+    if release is not None:
+        value = release.detail.get("verdict")
+        verdict = str(value).replace("_", " ") if value else verdict
+        value = release.detail.get("note")
+        answer = " ".join(str(value).split()) if value else answer
+    event = f'Your ask "{ask}" became unavailable' if retired else f'The user {done} "{ask}"'
+    return (
+        f'{event} for {row["kind"]} "{row["title"]}" (node {row["node_id"]}). '
+        f'Verdict: {verdict}. User answer: {answer}. '
+        f'Other holds remain: {"yes" if row["other_holds"] else "no"}.'
+    )

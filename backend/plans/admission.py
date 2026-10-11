@@ -124,7 +124,6 @@ class Reconciled:
 
     released: tuple[tuple[str, str], ...] = ()
     selected: tuple[tuple[str, str], ...] = ()
-    selection_woken: frozenset[str] = frozenset()
 
 
 def reconcile_plan(
@@ -134,7 +133,6 @@ def reconcile_plan(
     provenance: str,
     causing_executor: str | None = None,
     candidate_ids: tuple[str, ...] | None = None,
-    selection_wake_summaries: dict[str, str] | None = None,
     from_worker: bool = False,
     db,
 ) -> Reconciled:
@@ -196,31 +194,17 @@ def reconcile_plan(
         if attempt is not None and str(attempt["id"]) not in held_before:
             selected.append((node_id, str(attempt["executor_thread_id"])))
     reconciled = Reconciled(tuple(released), tuple(selected))
-    reconciled = _with_selection_wakes(
+    from plans import plan_wake
+
+    plan_wake.notify_selected(
         db, reconciled, plan_id=plan_id, causing_executor=causing_executor,
-        selection_wake_summaries=selection_wake_summaries, from_worker=from_worker,
+        from_worker=from_worker,
     )
     if not from_worker and plan["parent_plan_id"] is not None:
         from plans import delegated_selection
 
         delegated_selection.reconcile_delegator(plan_id, db=db)
     return reconciled
-
-
-def _with_selection_wakes(
-    db, reconciled: Reconciled, *, plan_id: str, causing_executor: str | None,
-    selection_wake_summaries: dict[str, str] | None, from_worker: bool,
-) -> Reconciled:
-    """Write selection wakes and retain the nodes whose wake was accepted."""
-    from plans import selection_wake
-
-    selection_woken = selection_wake.notify(
-        db, reconciled, plan_id=plan_id, causing_executor=causing_executor,
-        selection_wake_summaries=selection_wake_summaries, from_worker=from_worker,
-    )
-    return Reconciled(
-        reconciled.released, reconciled.selected, frozenset(selection_woken),
-    )
 
 
 def reselect_and_reconcile(

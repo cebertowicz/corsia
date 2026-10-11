@@ -83,6 +83,33 @@ def _ask_release_wakes(db) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def _ask_receipts(db) -> list[sqlite3.Row]:
+    """Return the durable plan-owner receipts for cleared artifact asks."""
+    return db.execute(
+        "SELECT id,content,metadata FROM messages WHERE thread_id='owner' "
+        "AND id LIKE 'plan-event:%' ORDER BY input_order",
+    ).fetchall()
+
+
+def _ask_receipt_content(node, *, event: str, verdict: str = "none", answer: str = "none",
+                         other_holds: str = "no") -> str:
+    return (
+        f'{event} for task "{node.title}" (node {node.id}). '
+        f'Verdict: {verdict}. User answer: {answer}. Other holds remain: {other_holds}.'
+    )
+
+
+def _ask_wake_content(node, *, event: str, verdict: str = "none", answer: str = "none",
+                      other_holds: str = "no") -> str:
+    return (
+        "[CORSIA plan] "
+        + _ask_receipt_content(
+            node, event=event, verdict=verdict, answer=answer, other_holds=other_holds,
+        )
+        + '\n{"next": null}'
+    )
+
+
 def _document_ask(db, external_id: str) -> str:
     from registry import models
 
@@ -316,7 +343,14 @@ def test_answering_a_pending_document_ask_wakes_the_owner_once(db):
 
     [wake] = _ask_release_wakes(db)
     assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
-    assert 'The user acknowledged "Read the proposal"' in wake["content"]
+    assert wake["content"] == _ask_wake_content(
+        node, event='The user acknowledged "Read the proposal"',
+    )
+    [receipt] = _ask_receipts(db)
+    assert receipt["content"] == _ask_receipt_content(
+        node, event='The user acknowledged "Read the proposal"',
+    )
+    assert json.loads(receipt["metadata"])["ask_wake_id"] == wake["id"]
 
 
 def test_answering_a_review_requested_document_ask_wakes_the_owner_once(db):
@@ -330,10 +364,49 @@ def test_answering_a_review_requested_document_ask_wakes_the_owner_once(db):
 
     [wake] = _ask_release_wakes(db)
     assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
-    assert 'The user acknowledged "Read the proposal"' in wake["content"]
+    assert wake["content"] == _ask_wake_content(
+        node, event='The user acknowledged "Read the proposal"',
+    )
 
 
-def test_answering_an_active_document_ask_only_wakes_the_selected_work_once(db):
+def test_answering_an_ask_that_still_has_another_hold_reports_that_hold(db):
+    from plans import holds
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="pending", external_id="second-hold-wake.md")
+    holds.place_hold(
+        node.id, kind="blocked", reason_key="external", reason="Waiting on CI",
+        owner_kind="external", owner_id=None,
+        expected_revision=service._node_row(db, node.id)["revision"],
+        actor_id="owner", provenance="test.blocked_wait", db=db,
+    )
+
+    attention.clear_attention(ask, outcome="acknowledge", db=db)
+
+    [wake] = _ask_release_wakes(db)
+    assert wake["content"] == _ask_wake_content(
+        node, event='The user acknowledged "Read the proposal"', other_holds="yes",
+    )
+    assert "pick it up" not in wake["content"]
+
+
+def test_answering_an_ask_for_a_model_less_owner_keeps_only_the_receipt(db):
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="pending", external_id="model-less-wake.md")
+    db.execute("UPDATE threads SET model='' WHERE id='owner'")
+
+    attention.clear_attention(ask, outcome="acknowledge", db=db)
+
+    assert _ask_release_wakes(db) == []
+    [receipt] = _ask_receipts(db)
+    assert receipt["content"] == _ask_receipt_content(
+        node, event='The user acknowledged "Read the proposal"',
+    )
+    assert json.loads(receipt["metadata"])["ask_wake_id"] is None
+
+
+def test_answering_an_active_document_ask_wakes_the_asker_and_selects_work(db):
     from registry import attention
 
     node, ask = _ask_held_node(db, state="active", external_id="active-wake.md")
@@ -342,15 +415,19 @@ def test_answering_an_active_document_ask_only_wakes_the_selected_work_once(db):
         ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", db=db,
     )
 
-    wakes = db.execute(
-        "SELECT id,content FROM messages WHERE thread_id='owner' "
-        "AND id LIKE 'plan-wake:%' ORDER BY input_order",
-    ).fetchall()
-    assert len(wakes) == 1
-    [wake] = wakes
-    assert wake["id"].startswith(f"plan-wake:work_selected:{node.id}:")
-    assert "requested changes" in wake["content"]
-    assert "Their note: Cut section 3." in wake["content"]
+    [wake] = _ask_release_wakes(db)
+    assert wake["content"] == _ask_wake_content(
+        node,
+        event='The user answered "Read the proposal"',
+        verdict="changes requested",
+        answer="Cut section 3.",
+    )
+    selection = db.execute(
+        "SELECT content FROM messages WHERE thread_id='owner' "
+        "AND id LIKE 'plan-wake:work_selected:%' ORDER BY input_order DESC LIMIT 1",
+    ).fetchone()
+    assert selection is not None
+    assert "Cut section 3." not in selection["content"]
 
 
 def test_selected_delegated_ask_release_wakes_when_worker_news_is_queued(db):
@@ -384,7 +461,12 @@ def test_selected_delegated_ask_release_wakes_when_worker_news_is_queued(db):
 
     [wake] = _ask_release_wakes(db)
     assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
-    assert wake["content"].count("Their note: Cut section 3.") == 1
+    assert wake["content"] == _ask_wake_content(
+        node,
+        event='The user answered "Read the proposal"',
+        verdict="changes requested",
+        answer="Cut section 3.",
+    )
 
 
 def test_retiring_a_document_ask_releases_its_hold_through_attention(db):

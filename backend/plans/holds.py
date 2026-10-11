@@ -170,11 +170,13 @@ def clear(
 def clear_write(
     node_id: str, hold_id: str, *, expected_kind: str, actor_id: str | None,
     provenance: str, db, detail: dict | None = None,
-) -> None:
+) -> tuple[str, str]:
     """Clear exactly one cause and record it; the caller reconciles, if needed.
 
     ``detail`` rides in the append-only clearance event under its own ``detail`` key,
     for what the clearing decided (a review verdict); it can never shadow the event's fields.
+    Return the clearance event's id and timestamp so a caller can report that
+    exact durable event without rereading it.
     """
     hold = db.execute(
         """SELECT * FROM plan_node_holds
@@ -204,6 +206,7 @@ def clear_write(
     if changed.rowcount != 1:
         raise service.PlanError("plan hold clearance conflict")
     service.touch_node(db, node_id, at=now)
+    return event_id, now
 
 
 def pause_hold(
