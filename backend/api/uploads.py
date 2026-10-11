@@ -117,7 +117,7 @@ def _thread_upload_root(thread_id: str, user_id: str) -> Path | None:
 
 def _canonical_upload_path(file_id: str, user_id: str, filename: str) -> Path | None:
     """Resolve a registered upload only when it stays in its owner's uploads root."""
-    artifact = models.resolve("upload", "upload", file_id)
+    artifact = models.resolve_upload(file_id)
     if artifact is None or not artifact.get("path"):
         return None
     root = _thread_upload_root(artifact["parent_thread_id"], user_id)

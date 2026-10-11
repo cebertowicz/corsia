@@ -14,7 +14,7 @@ import uuid
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from infra.database import get_db  # noqa: E402
-from registry import models, pinning, reconcile, view  # noqa: E402
+from registry import chat_cards, models, pinning, reconcile, view  # noqa: E402
 from tests.registry_helpers import make_session  # noqa: E402
 
 
@@ -54,6 +54,29 @@ class TestHierarchicalPaneShape:
         }
         assert pane["needs_attention"] == []
         assert pane["history"] == []
+
+    def test_typed_image_upload_opens_as_an_image_in_pane_and_card(self):
+        db = get_db()
+        parent = _mk_parent(db)
+        art = models.register_artifact(
+            integration="upload",
+            type="image",
+            external_id=f"upload-{uuid.uuid4().hex[:8]}",
+            parent_thread_id=parent,
+            title="uploaded.png",
+            path="/workspace/uploaded.png",
+            db=db,
+        )
+
+        pane = view.pane_for_thread(parent)
+        item = next(node for node in pane["nodes"] if node["id"] == art["id"])
+        card = chat_cards.card_for(art, art["id"], kind="artifact")
+
+        assert item["presentation"] == {
+            "label": "Image", "icon": "image", "capability": "leaf-package",
+        }
+        assert item["action"]["capability"] == "leaf-package"
+        assert (card["type"], card["icon"], card["opens"]) == ("image", "image", True)
 
     def test_pane_payload_reports_owner_pin_state(self):
         db = get_db()

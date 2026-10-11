@@ -4,9 +4,11 @@ import { expect, test } from '@playwright/test';
 import {
 	createSession,
 	loginByUrl,
+	openAppByUrl,
 	saveEvidenceScreenshot,
 	TEST_TOKEN,
 } from '../support/corsia';
+import { injectMessage } from '../support/mock';
 import { syntheticGif, syntheticPng } from '../support/syntheticImages';
 
 const WIDTHS = [1440, 393];
@@ -109,4 +111,94 @@ test.describe('@flow:artifact-image @surface:documents image artifacts open as i
 		}
 	});
 	}
+
+	test('opens an uploaded PNG from the 393px artifact list', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+		await page.setViewportSize({ width: 393, height: 852 });
+		const stamp = Date.now();
+		const sessionTitle = `artifact-upload-${stamp}`;
+		const sessionId = await createSession(request, sessionTitle);
+		const name = `uploaded-${stamp}.png`;
+		const tok = encodeURIComponent(TEST_TOKEN);
+
+		const upload = await request.post(`/api/upload?token=${tok}&thread_id=${sessionId}`, {
+			multipart: {
+				file: { name, mimeType: 'image/png', buffer: syntheticPng(640, 400) },
+			},
+		});
+		expect(upload.ok(), `upload failed: ${upload.status()} ${await upload.text()}`).toBeTruthy();
+
+		await loginByUrl(page);
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await page.getByText(sessionTitle).first().click();
+		await page.getByRole('button', { name: 'Toggle panel' }).click();
+
+		const row = page.getByRole('button', { name: new RegExp(name) });
+		await expect(row).toBeVisible();
+		await row.click();
+
+		const image = page.getByRole('img', { name });
+		await expect(image).toBeVisible();
+		await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+		await saveEvidenceScreenshot(page, testInfo, 'artifact-upload-image-393', { fullPage: false });
+	});
+
+	for (const width of WIDTHS) {
+		test(`shows a thumbnailed uploaded PNG chat card and opens it at ${width}px`, async ({ page, request }, testInfo) => {
+			test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+			await page.setViewportSize({ width, height: width > 768 ? 1000 : 852 });
+			const stamp = Date.now();
+			const sessionTitle = `artifact-upload-card-${width}-${stamp}`;
+			const sessionId = await createSession(request, sessionTitle);
+			const tree = await (await request.get(`/api/files/tree?token=${encodeURIComponent(TEST_TOKEN)}`)).json();
+			const roots: Array<{ kind: string; path: string }> = tree.roots ?? [];
+			const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
+			expect(workspaceRoot).toEqual(expect.any(String));
+			const name = `chat-upload-${stamp}.png`;
+			const upload = await request.post(`/api/upload?token=${encodeURIComponent(TEST_TOKEN)}&thread_id=${sessionId}`, {
+				multipart: { file: { name, mimeType: 'application/octet-stream', buffer: syntheticPng(640, 400) } },
+			});
+			expect(upload.ok(), `upload failed: ${upload.status()} ${await upload.text()}`).toBeTruthy();
+			const uploaded = await upload.json();
+			const uploadPath = path.join(workspaceRoot, '.threads', sessionId, 'uploads', uploaded.file_id, name);
+			await injectMessage(request, sessionId, {
+				role: 'assistant', content: `Open [${name}](${uploadPath}).`, metadata: { for_user: true },
+			}, TEST_TOKEN);
+
+			await openAppByUrl(page);
+			if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+			await page.getByText(sessionTitle).first().click();
+			const card = page.getByRole('button', { name: new RegExp(`${name}, image`) });
+			await expect(card).toBeVisible();
+			await expect(card.locator('img.thumb')).toBeVisible();
+			await card.click();
+			const image = page.getByRole('img', { name });
+			await expect(image).toBeVisible();
+			await expect.poll(() => image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+			await saveEvidenceScreenshot(page, testInfo, `artifact-upload-chat-card-${width}`, { fullPage: false });
+		});
+	}
+
+	test('keeps a non-image upload downloadable', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'The download action is shared across layouts');
+		await page.setViewportSize({ width: 393, height: 852 });
+		const stamp = Date.now();
+		const sessionTitle = `artifact-upload-download-${stamp}`;
+		const sessionId = await createSession(request, sessionTitle);
+		const name = `archive-${stamp}.zip`;
+		const upload = await request.post(`/api/upload?token=${encodeURIComponent(TEST_TOKEN)}&thread_id=${sessionId}`, {
+			multipart: { file: { name, mimeType: 'image/png', buffer: Buffer.from('not an image') } },
+		});
+		expect(upload.ok(), `upload failed: ${upload.status()} ${await upload.text()}`).toBeTruthy();
+
+		await openAppByUrl(page);
+		await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+		await page.getByText(sessionTitle).first().click();
+		await page.getByRole('button', { name: 'Toggle panel' }).click();
+		const row = page.getByRole('button', { name: new RegExp(name) });
+		await expect(row).toBeVisible();
+		const download = page.waitForEvent('download');
+		await row.click();
+		expect((await download).suggestedFilename()).toBe(name);
+	});
 });
