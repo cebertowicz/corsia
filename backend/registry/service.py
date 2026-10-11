@@ -13,11 +13,7 @@ from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_writer
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type
-from registry.identity_bridge import (
-    OWNER_REGISTRATION_STATES,
-    PANE_REGISTRATION_STATES,
-    resolve_normalized_owners,
-)
+from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
@@ -130,74 +126,23 @@ def prepare_file_identity(
 
 def find_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, Any] | None:
     """Resolve a workspace/repository file logical-first, then by legacy path."""
-    identity = prepare_file_identity(abs_path, db=db)
-    if identity is None:
-        return None
-    _db = db or get_db()
-    try:
-        return models.find_identity_by_external_ids(
-            "workspace",
-            identity.artifact_type,
-            (identity.external_id, identity.canonical),
-            db=_db,
-        )
-    finally:
-        if not db:
-            _db.close()
+    from registry.file_resolution import find_file_identity as _find_file_identity
+
+    return _find_file_identity(abs_path, db=db)
 
 
 def resolve_file_identities(abs_paths, *, db=None) -> dict[str, dict[str, Any]]:
     """Resolve active file owners for many physical paths in one registry read."""
-    paths = list(dict.fromkeys(abs_paths))
-    if not paths:
-        return {}
-    roots = get_allowed_dirs_rw(db=db)
-    identities = {
-        path: prepare_file_identity(path, db=db, allowed_roots=roots)
-        for path in paths
-    }
-    candidates = [
-        (identity.artifact_type, external_id)
-        for identity in identities.values() if identity is not None
-        for external_id in dict.fromkeys((identity.external_id, identity.canonical))
-    ]
-    owners = resolve_normalized_owners(db, "workspace", candidates)
-    found: dict[str, dict[str, Any]] = {}
-    for path, identity in identities.items():
-        if identity is None:
-            continue
-        for external_id in dict.fromkeys((identity.external_id, identity.canonical)):
-            artifact = owners.get((identity.artifact_type, external_id))
-            if artifact is not None:
-                found[path] = artifact
-                break
-    return found
+    from registry.file_resolution import resolve_file_identities as _resolve_file_identities
+
+    return _resolve_file_identities(abs_paths, db=db)
 
 
 def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
-    """Resolve an active file owner from a physical path.
+    """Resolve an active file owner from a physical path."""
+    from registry.file_resolution import resolve_file_identity as _resolve_file_identity
 
-    Workspace paths prefer their relocatable logical identity and retain the
-    absolute identity only as a compatibility fallback during cutover.
-    """
-    identity = prepare_file_identity(abs_path, db=db)
-    if identity is None:
-        return None
-    _db = db or get_db()
-    try:
-        for candidate in dict.fromkeys((identity.external_id, identity.canonical)):
-            artifact = models.resolve(
-                "workspace",
-                identity.artifact_type,
-                candidate,
-                db=_db,
-            )
-            if artifact is not None:
-                return artifact
-        return None
-    finally:
-        if not db:
-            _db.close()
+    return _resolve_file_identity(abs_path, db=db)
 
 
 def retire_missing_temporary_under(

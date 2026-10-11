@@ -8,11 +8,11 @@ from typing import Any
 from loguru import logger
 
 from infra.database import get_db, write_transaction
+from registry.batch_projection import normalized_rows_by_ids as _normalized_rows_by_ids
 from registry.identity_bridge import (
     OWNER_REGISTRATION_STATES as _OWNER_REGISTRATION_STATES,
     PANE_REGISTRATION_STATES as _PANE_REGISTRATION_STATES,
     normalized_row_by_id as _normalized_row_by_id,
-    normalized_rows_by_ids as _normalized_rows_by_ids,
 )
 from registry.registration_events import (
     _append_registration_event,  # noqa: F401 — re-exported for callers
