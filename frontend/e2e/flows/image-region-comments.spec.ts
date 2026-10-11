@@ -425,6 +425,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(sheet).toBeVisible();
 			await expect(sheet.getByText('Too much padding on phones')).toBeVisible();
 			await shoot(page, testInfo, '393-05-tag-opens-sheet', true);
+
+			// The phone sheet's own close and open motion, for review.
+			await page.keyboard.press('Escape');
+			await motionFrames(page, testInfo, '393-05b-sheet-close');
+			await expect(sheet).toHaveCount(0);
+			await tag(page, 1).tap();
+			await motionFrames(page, testInfo, '393-05c-sheet-open');
+			await expect(sheet).toBeVisible();
 		} finally {
 			fs.rmSync(seeded.imagePath, { force: true });
 		}
@@ -443,7 +451,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 				{ x: .37, y: .46, w: 0, h: 0 }, { x: .57, y: .44, w: .14, h: .18 }, { x: .82, y: .48, w: 0, h: 0 },
 				{ x: .05, y: .78, w: .16, h: .16 }, { x: .42, y: .8, w: 0, h: 0 }, { x: .78, y: .76, w: .18, h: .17 },
 			];
-			const ids = await Promise.all(regions.map((region, index) => apiComment(request, seeded.artifactId, `Dense review note ${index + 1}`, region)));
+			// One at a time, so note N is always tag N and every run frames the same layout.
+			const ids: string[] = [];
+			for (const [index, region] of regions.entries()) ids.push(await apiComment(request, seeded.artifactId, `Dense review note ${index + 1}`, region));
 			await apiComment(request, seeded.artifactId, 'Text comment beside the image comments');
 			for (const index of [2, 7]) {
 				isolatedDb([
