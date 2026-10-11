@@ -20,7 +20,7 @@ RELEVANCE_ACTION_PATH_PATTERN = rf"^{RELEVANCE_ACTION_PATH}"
 RELEVANCE_CONSUMER_JOBS = {
     "antipatterns.yml": ("antipatterns",),
     "code-health.yml": ("file-sizes",),
-    "integration.yml": ("integration",),
+    "integration.yml": ("integration", "live-reviewer"),
     "lint.yml": ("ruff", "mypy"),
     "unit-tests.yml": ("backend", "backend-macos", "frontend"),
 }
@@ -71,7 +71,7 @@ LINUX_WORKFLOW_JOBS = {
 }
 MACOS_WORKFLOW_JOBS: dict[str, int] = {}
 MIXED_RUNNER_WORKFLOW_JOBS = {
-    "integration.yml": (1, 1),
+    "integration.yml": (1, 2),
 }
 BLOCKING_CONTEXTS = {
     "antipatterns.yml": {"Anti-pattern detector (error-severity, blocking)"},
@@ -89,7 +89,7 @@ BLOCKING_CONTEXTS = {
 RELEVANCE_CONSUMER_JOB_COUNTS = {
     "antipatterns.yml": 1,
     "code-health.yml": 1,
-    "integration.yml": 1,
+    "integration.yml": 2,
     "lint.yml": 2,
     "unit-tests.yml": 3,
 }
@@ -192,7 +192,7 @@ def test_blocking_contexts_are_created_for_every_pull_request() -> None:
     for filename, contexts in BLOCKING_CONTEXTS.items():
         workflow = (workflow_root / filename).read_text()
         for context in contexts:
-            assert f"name: {context}" in workflow, (filename, context)
+            assert f"\n    name: {context}\n" in workflow, (filename, context)
 
     for filename, expected_consumer_jobs in RELEVANCE_CONSUMER_JOB_COUNTS.items():
         workflow = (workflow_root / filename).read_text()
@@ -203,7 +203,25 @@ def test_blocking_contexts_are_created_for_every_pull_request() -> None:
         assert "paths:" not in pull_request, filename
         assert "paths-ignore:" not in pull_request, filename
         assert workflow.count("uses: ./.github/actions/relevance") == 1, filename
-        assert workflow.count("\n    if: ${{ needs.relevance.outputs.relevant == 'true' }}") == expected_consumer_jobs, filename
+        assert workflow.count("\n    needs: relevance\n") == expected_consumer_jobs, filename
+
+
+def test_live_reviewer_proof_is_a_separate_static_workflow_dispatch_job() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/integration.yml").read_text()
+    integration = _workflow_job(workflow, "integration")
+    live_reviewer = _workflow_job(workflow, "live-reviewer")
+
+    assert "name: Integration tests (L3)" in integration
+    assert "timeout-minutes: 15" in integration
+    assert "Run integration tests" in integration
+    assert "Run bounded live Haiku reviewer proof" not in integration
+    assert "!(github.event_name == 'workflow_dispatch' && inputs.live_reviewer)" in integration
+
+    assert "name: Live host reviewer proof (Haiku)" in live_reviewer
+    assert "github.event_name == 'workflow_dispatch'" in live_reviewer
+    assert "inputs.live_reviewer" in live_reviewer
+    assert "timeout-minutes: 30" in live_reviewer
+    assert "Run bounded live Haiku reviewer proof" in live_reviewer
 
 
 def _workflow_job(workflow: str, job_name: str) -> str:
@@ -211,6 +229,15 @@ def _workflow_job(workflow: str, job_name: str) -> str:
     next_job = re.search(r"^  [A-Za-z][A-Za-z0-9_-]*:\n", workflow[start + 1 :], re.MULTILINE)
     end = start + 1 + next_job.start() if next_job else len(workflow)
     return workflow[start:end]
+
+
+def _workflow_jobs(workflow: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"^  ([A-Za-z][A-Za-z0-9_-]*):\n", workflow, re.MULTILINE))
+    jobs = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(workflow)
+        jobs.append((match.group(1), workflow[match.start() : end]))
+    return jobs
 
 
 def _workflow_pattern_env_value(workflow: str, env_name: str) -> str:
@@ -246,7 +273,16 @@ def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job
     assert 'echo "relevant=false"' in action
 
     workflow_root = REPO_ROOT / ".github/workflows"
-    for filename, jobs in RELEVANCE_CONSUMER_JOBS.items():
+    actual_consumers = {
+        path.name: tuple(
+            name for name, job in _workflow_jobs(path.read_text()) if "needs: relevance" in job
+        )
+        for path in sorted(workflow_root.glob("*.yml"))
+    }
+    actual_consumers = {filename: jobs for filename, jobs in actual_consumers.items() if jobs}
+    assert actual_consumers == RELEVANCE_CONSUMER_JOBS
+
+    for filename, jobs in actual_consumers.items():
         workflow = (workflow_root / filename).read_text()
         preflight = _workflow_job(workflow, "relevance")
         assert "uses: ./.github/actions/relevance" in preflight, filename
@@ -261,7 +297,16 @@ def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job
         for job_name in jobs:
             job = _workflow_job(workflow, job_name)
             assert "needs: relevance" in job, (filename, job_name)
-            assert "if: ${{ needs.relevance.outputs.relevant == 'true' }}" in job, (filename, job_name)
+            assert "if: ${{ !cancelled() && (" in job, (filename, job_name)
+            assert "needs.relevance.result != 'success'" in job, (filename, job_name)
+            assert "needs.relevance.outputs.relevant == 'true'" in job, (filename, job_name)
+            steps = job.split("    steps:\n", 1)[1]
+            assert steps.startswith(
+                "      - name: Fail when relevance preflight did not succeed\n"
+                "        if: ${{ needs.relevance.result != 'success' }}\n"
+                "        run: |\n"
+            ), (filename, job_name)
+            assert "exit 1" in steps.split("\n      - ", 1)[0], (filename, job_name)
             assert "fetch-depth: 1" in job, (filename, job_name)
             assert "fetch-depth: 0" not in job, (filename, job_name)
 
