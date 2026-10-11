@@ -85,6 +85,13 @@ def outcome_ctes(grain: Grain | None = None, *, plans: str = "top_plans", limite
     """
 
 
+def prepare_scope_threads(db, params: dict[str, Any]) -> None:
+    """Materialize the scope's threads alone, for a read of the usage ledger that needs no outcome periods."""
+    db.execute(_DDL[PREPARED_SCOPE])
+    db.execute("DELETE FROM measurement_scope_threads")
+    db.execute(scope_cte() + "INSERT INTO measurement_scope_threads(id,root_id) SELECT id,root_id FROM scope_threads", query_params(params))
+
+
 def _materialize_outcome_periods(db, params: dict[str, Any], *, roots: bool) -> None:
     """Materialize the shared scope and outcome aggregate for one request connection.
 
@@ -97,9 +104,7 @@ def _materialize_outcome_periods(db, params: dict[str, Any], *, roots: bool) -> 
     feeds both. With ``roots`` the settlement is therefore evaluated twice, and
     that second evaluation is a real cost this request pays.
     """
-    db.execute(_DDL[PREPARED_SCOPE])
-    db.execute("DELETE FROM measurement_scope_threads")
-    db.execute(scope_cte() + "INSERT INTO measurement_scope_threads(id,root_id) SELECT id,root_id FROM scope_threads", query_params(params))
+    prepare_scope_threads(db, params)
     db.execute(_DDL[PREPARED_OUTCOMES])
     db.execute("DELETE FROM measurement_outcome_periods")
     if not roots:

@@ -475,3 +475,21 @@ def test_cells_read_each_tasks_declared_size_and_first_try_from_the_outcome(db):
     (cell,) = row["sizes"]
     assert (cell["size"], cell["tasks"], cell["first_try"]) == ("M", 14, pytest.approx(13 / 14))
     assert cell["cost_per_task"] == pytest.approx(row["recorded_cost_per_task"])
+
+
+async def test_the_served_read_shares_the_ledger_with_cost_and_prices_the_same_shares_as_one_connection(db, monkeypatch):
+    from api.measurement_join import _flights
+    from core import measurement_scope
+
+    monkeypatch.setattr(measurement_scope, "_now", lambda: datetime(2026, 10, 5, 12, tzinfo=timezone.utc))
+    _flights.clear()
+    for index in range(14):
+        _task(db, f"t{index}")
+        _usage(db, f"u{index}", f"t{index}", "claude-code/claude-opus-5-5")
+    db.commit()
+    grain = resolve_grain("weeks", "UTC")
+    served = await measurement_models.models_read("all", "none", grain, {"id": "steve"})
+    alone = models_payload(db, SCOPE, grain, [])
+    assert served["total_spend_usd"] == alone["total_spend_usd"] > 0
+    assert [(row["model"], row["spend_usd"], row["tasks"]) for row in served["rows"]] == [
+        (row["model"], row["spend_usd"], row["tasks"]) for row in alone["rows"]]
