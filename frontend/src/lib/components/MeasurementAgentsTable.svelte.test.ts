@@ -283,6 +283,8 @@ describe('MeasurementAgentsTable', () => {
 		render(state([agentRow()]));
 		const headers = [...host.querySelectorAll('thead th')];
 		expect(headers[3].classList.contains('cost') && headers[3].textContent).toBe('$ per person-hour of work delivered');
+		expect(headers[3].querySelector('button')?.getAttribute('aria-label'), 'a phone reader still hears the full name').toBe('$ per person-hour of work delivered');
+		expect(headers[3].querySelector('.long')?.textContent, 'only the tail of the name drops on a phone').toBe('of work delivered');
 		expect(headers[4].classList.contains('change') && headers[4].textContent).toBe('Change in minutes per outcome, vs Sep 21 to Sep 27');
 		const css = source.slice(source.indexOf('<style>'));
 		const at = css.indexOf('@media (max-width: 430px)');
