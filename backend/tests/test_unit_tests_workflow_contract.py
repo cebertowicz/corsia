@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path
@@ -13,6 +14,16 @@ RUNTIME_REQUIREMENTS = REPO_ROOT / "backend/requirements.txt"
 TEST_REQUIREMENTS = REPO_ROOT / "backend/requirements-test.txt"
 LOCKED_REQUIREMENTS = REPO_ROOT / "backend/requirements.lock"
 E2E_PORT_HELPER = REPO_ROOT / "scripts/assign-e2e-runner-ports"
+RELEVANCE_ACTION = REPO_ROOT / ".github/actions/relevance/action.yml"
+RELEVANCE_ACTION_PATH = r"\.github/actions/relevance/action\.yml$"
+RELEVANCE_ACTION_PATH_PATTERN = rf"^{RELEVANCE_ACTION_PATH}"
+RELEVANCE_CONSUMER_JOBS = {
+    "antipatterns.yml": ("antipatterns",),
+    "code-health.yml": ("file-sizes",),
+    "integration.yml": ("integration",),
+    "lint.yml": ("ruff", "mypy"),
+    "unit-tests.yml": ("backend", "backend-macos", "frontend"),
+}
 HISTORICAL_SCENARIO_TESTS = (
     REPO_ROOT / "backend/tests/test_yaml_scenario_loading.py",
     REPO_ROOT / "backend/tests/test_yaml_scenario_solver.py",
@@ -164,6 +175,169 @@ def test_blocking_contexts_are_created_for_every_pull_request() -> None:
         assert workflow.count("id: relevance") == expected_relevance_steps, filename
         assert workflow.count("steps.relevance.outputs.relevant") >= expected_relevance_steps, filename
         assert "\n    if:" not in workflow, filename
+
+
+def _workflow_job(workflow: str, job_name: str) -> str:
+    start = workflow.index(f"  {job_name}:\n")
+    next_job = re.search(r"^  [A-Za-z][A-Za-z0-9_-]*:\n", workflow[start + 1 :], re.MULTILINE)
+    end = start + 1 + next_job.start() if next_job else len(workflow)
+    return workflow[start:end]
+
+
+def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job() -> None:
+    action = RELEVANCE_ACTION.read_text()
+    assert "event_name:" in action
+    assert "base_ref:" in action
+    assert "patterns:" in action
+    assert "value: ${{ steps.detect.outputs.relevant }}" in action
+    assert "git fetch --no-tags origin" in action
+    assert "git merge-base" in action
+    assert 'echo "relevant=false"' in action
+
+    workflow_root = REPO_ROOT / ".github/workflows"
+    for filename, jobs in RELEVANCE_CONSUMER_JOBS.items():
+        workflow = (workflow_root / filename).read_text()
+        assert "git diff --name-only" not in workflow, filename
+        assert "grep -Eq" not in workflow, filename
+        for job_name in jobs:
+            job = _workflow_job(workflow, job_name)
+            assert "id: relevance" in job, (filename, job_name)
+            assert "\n        uses: ./.github/actions/relevance\n" in job, (filename, job_name)
+            assert "event_name: ${{ github.event_name }}" in job, (filename, job_name)
+            assert "base_ref: ${{ github.base_ref }}" in job, (filename, job_name)
+            assert "patterns:" in job, (filename, job_name)
+            assert RELEVANCE_ACTION_PATH in job, (filename, job_name)
+            assert "steps.relevance.outputs.relevant" in job, (filename, job_name)
+
+
+def _run_git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def _scratch_relevance_repo(tmp_path: Path, changed_path: str) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _run_git(repo, "init")
+    _run_git(repo, "config", "user.email", "ci@example.test")
+    _run_git(repo, "config", "user.name", "CI test")
+    (repo / "README.md").write_text("base\n")
+    _run_git(repo, "add", "README.md")
+    _run_git(repo, "commit", "-m", "base")
+    _run_git(repo, "branch", "-M", "main")
+    _run_git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    changed = repo / changed_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("change\n")
+    _run_git(repo, "add", changed_path)
+    _run_git(repo, "commit", "-m", "change")
+    return repo
+
+
+def _run_relevance_action(
+    repo: Path, tmp_path: Path, *, base_ref: str, patterns: str, event_name: str = "pull_request"
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    action = RELEVANCE_ACTION.read_text()
+    run = textwrap.dedent(action.split("      run: |\n", 1)[1])
+    github_output = tmp_path / "github-output"
+    github_output.parent.mkdir(parents=True, exist_ok=True)
+    environment = {
+        **os.environ,
+        "EVENT_NAME": event_name,
+        "BASE_REF": base_ref,
+        "PATTERNS": patterns,
+        "GITHUB_OUTPUT": str(github_output),
+    }
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-c", run],
+        cwd=repo,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, github_output
+
+
+def test_relevance_action_fails_closed_and_emits_only_successful_results(tmp_path: Path) -> None:
+    bogus_repo = _scratch_relevance_repo(tmp_path / "bogus", "README.md")
+    bogus, bogus_output = _run_relevance_action(
+        bogus_repo, tmp_path / "bogus", base_ref="missing", patterns="^backend/"
+    )
+    assert bogus.returncode != 0
+    assert "::error::unable to fetch pull_request base ref origin/missing" in bogus.stderr
+    assert not bogus_output.exists() or not bogus_output.read_text()
+
+    unrelated_repo = _scratch_relevance_repo(tmp_path / "unrelated", "README.md")
+    unrelated, unrelated_output = _run_relevance_action(
+        unrelated_repo, tmp_path / "unrelated", base_ref="main", patterns="^backend/"
+    )
+    assert unrelated.returncode == 0, unrelated.stderr
+    assert unrelated_output.read_text() == "relevant=false\n"
+
+    matching_repo = _scratch_relevance_repo(tmp_path / "matching", "backend/example.py")
+    matching, matching_output = _run_relevance_action(
+        matching_repo, tmp_path / "matching", base_ref="main", patterns="^backend/"
+    )
+    assert matching.returncode == 0, matching.stderr
+    assert matching_output.read_text() == "relevant=true\n"
+
+    action_repo = _scratch_relevance_repo(
+        tmp_path / "action", ".github/actions/relevance/action.yml"
+    )
+    action_change, action_change_output = _run_relevance_action(
+        action_repo,
+        tmp_path / "action",
+        base_ref="main",
+        patterns=RELEVANCE_ACTION_PATH_PATTERN,
+    )
+    assert action_change.returncode == 0, action_change.stderr
+    assert action_change_output.read_text() == "relevant=true\n"
+
+    dispatched, dispatched_output = _run_relevance_action(
+        matching_repo,
+        tmp_path / "dispatched",
+        base_ref="",
+        patterns="[",
+        event_name="workflow_dispatch",
+    )
+    assert dispatched.returncode == 0, dispatched.stderr
+    assert dispatched_output.read_text() == "relevant=true\n"
+
+
+def test_relevance_action_fails_closed_when_diff_fails(tmp_path: Path) -> None:
+    repo = _scratch_relevance_repo(tmp_path, "backend/example.py")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    real_git = shutil.which("git")
+    assert real_git is not None
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [[ \"$1\" == \"diff\" ]]; then exit 42; fi\n"
+        f"exec {real_git} \"$@\"\n"
+    )
+    fake_git.chmod(0o755)
+
+    action = RELEVANCE_ACTION.read_text()
+    run = textwrap.dedent(action.split("      run: |\n", 1)[1])
+    github_output = tmp_path / "github-output"
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-c", run],
+        cwd=repo,
+        env={
+            **os.environ,
+            "EVENT_NAME": "pull_request",
+            "BASE_REF": "main",
+            "PATTERNS": "^backend/",
+            "GITHUB_OUTPUT": str(github_output),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert not github_output.exists() or not github_output.read_text()
 
 
 def test_every_workflow_uses_its_hosted_runner() -> None:

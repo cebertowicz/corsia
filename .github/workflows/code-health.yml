@@ -24,17 +24,11 @@ jobs:
 
       - name: Determine whether code health is relevant
         id: relevance
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '(^|/).+\.(py|ts|svelte)$|^quality/file-size-limits\.json$|^\.github/workflows/code-health\.yml$'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: '(^|/).+\.(py|ts|svelte)$|^quality/file-size-limits\.json$|^\.github/workflows/code-health\.yml$|^\.github/actions/relevance/action\.yml$'
 
       - uses: actions/setup-python@v5
         if: ${{ steps.relevance.outputs.relevant == 'true' }}

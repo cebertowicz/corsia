@@ -40,17 +40,11 @@ jobs:
 
       - name: Determine whether integration is relevant
         id: relevance
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '^backend/|^requirements[^/]*\.txt$|^\.github/workflows/integration\.yml$'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: '^backend/|^requirements[^/]*\.txt$|^\.github/workflows/integration\.yml$|^\.github/actions/relevance/action\.yml$'
 
       - name: Prepare isolated workspace
         run: |
