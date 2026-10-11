@@ -18,10 +18,12 @@ or rolls back.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 import sqlite3
+from typing import Any
 
 from infra.migration_secure_delete import secure_delete
 from infra.time import utc_now_iso
@@ -34,6 +36,79 @@ FROM_VERSION = 108
 
 # Copied, not imported, so this step keeps judging storable values as it was written to.
 _VALUE_PATTERN = re.compile(r"^[\x21-\x7e]{1,4096}$")
+_MIGRATION_KINDS = {"secret_env": "env", "secret_headers": "headers"}
+_MIGRATION_REFUSED_HEADERS = frozenset({"authorization", "proxy-authorization", "cookie"})
+_MIGRATION_CREDENTIAL_KEY = (
+    r"(?:pgpassword|(?:[A-Za-z0-9]+[-_])*(?:api[-_]?key|token|secret|password|passwd|credentials?|"
+    r"private[-_]?key|secret[-_]access[-_]key))"
+)
+_MIGRATION_CREDENTIAL_RE = re.compile(
+    rf"^(?:{_MIGRATION_CREDENTIAL_KEY}|authorization|cookie)$", re.IGNORECASE,
+)
+
+
+def _migration_entry_name(server: str, field: str, var: str) -> str:
+    kind = _MIGRATION_KINDS.get(field, field)
+    digest = hashlib.sha256(f"{kind}\0{server}\0{var}".encode()).hexdigest()[:10]
+    slug = lambda text, limit: re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:limit].strip("-") or "x"
+    return f"mcp-{slug(server, 10)}-{slug(var, 14)}-{digest}"
+
+
+def _migration_listed(config: dict, field: str) -> list[str]:
+    from tools.mcp_config import MCPConfigError
+
+    names = config.get(field, [])
+    if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names):
+        raise MCPConfigError(f"{field} must be a list of variable names")
+    return names
+
+
+def _migration_literals(config: dict, source: str) -> dict:
+    from tools.mcp_config import MCPConfigError
+
+    values = config.get(source) or {}
+    if not isinstance(values, dict):
+        raise MCPConfigError(f"{source} must be an object of string values")
+    return values
+
+
+def _migration_split_secrets(server: str, config: dict) -> tuple[dict, dict[str, str]]:
+    from tools.mcp_config import MCPConfigError
+
+    for field, source in (("secret_env", "env"), ("secret_headers", "headers")):
+        names = _migration_listed(config, field)
+        if len(names) != len(set(names)):
+            raise MCPConfigError(f"{field} lists a name twice")
+        if set(names) & set(_migration_literals(config, source)):
+            raise MCPConfigError(f"{field} and {source} both set the same name")
+    if any(name.lower() in _MIGRATION_REFUSED_HEADERS for name in _migration_listed(config, "secret_headers")):
+        raise MCPConfigError("literal credential headers are refused; use bearer_file for bearer authentication")
+
+    result = dict(config)
+    lifted: dict[str, str] = {}
+    for field, source in (("secret_env", "env"), ("secret_headers", "headers")):
+        values = _migration_literals(config, source)
+        keep: dict[str, Any] = {}
+        names = list(_migration_listed(config, field))
+        for var, value in values.items():
+            credential = isinstance(var, str) and bool(
+                _MIGRATION_CREDENTIAL_RE.fullmatch(var.strip().strip("\"'").casefold())
+            )
+            movable = isinstance(value, str) and value.strip() and credential and not (
+                source == "headers" and var.lower() in _MIGRATION_REFUSED_HEADERS
+            )
+            if movable:
+                lifted[_migration_entry_name(server, field, var)] = value
+                names.append(var)
+            else:
+                keep[var] = value
+        if values:
+            result[source] = keep
+            if not keep:
+                del result[source]
+        if names:
+            result[field] = names
+    return result, lifted
 
 
 def _read_tools(conn: sqlite3.Connection) -> dict | None:
@@ -53,7 +128,6 @@ def _read_tools(conn: sqlite3.Connection) -> dict | None:
 def migrate_mcp_secrets(conn: sqlite3.Connection) -> None:
     """Move each server's credential values into the store, then drop them from config."""
     from infra import key_store_values
-    from tools import mcp_secrets
     from tools.mcp_config import MCPConfigError
 
     tools = _read_tools(conn)
@@ -68,7 +142,7 @@ def migrate_mcp_secrets(conn: sqlite3.Connection) -> None:
         if not isinstance(config, dict):
             continue
         try:
-            clean, values = mcp_secrets.split_secrets(server, config, headers=True)
+            clean, values = _migration_split_secrets(server, config)
         except MCPConfigError:
             skipped += 1  # malformed: left as it is rather than lost
             continue

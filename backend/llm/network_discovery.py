@@ -197,7 +197,7 @@ def remove_server(server_id: str) -> bool:
             (_now_iso(), server_id),
         )
         _mark_server_models_unavailable(server_id, row["provider"], db=db)
-    remove_server_key(server_id)
+        remove_server_key(server_id, db=db)
     _LOADED_BY_SERVER.pop(server_id, None)
     return True
 

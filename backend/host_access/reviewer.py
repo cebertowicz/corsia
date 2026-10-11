@@ -31,9 +31,9 @@ from host_access.review_policy import (
     ACTION_REVIEW_POLICY,
     APPLICATION_REVIEW_SYSTEM_POLICY,
 )
-from host_access import review_limits, review_models
+from host_access import review_limits, review_models, review_telemetry
 from host_access.review_validation import validate_review_payload
-from host_access.review_telemetry import _failure_terminal, _ReviewTelemetry, _usage_thread_id
+from host_access.review_telemetry import ReviewTelemetry, failure_terminal
 from host_access.reviewer_target import reviewer_invocation_binding
 from llm.isolated_structured import invoke_isolated_structured
 from llm.resolution import ExecutionTarget
@@ -234,8 +234,8 @@ async def review_application(
     """Review one immutable application; retry a malformed verdict once."""
     identity = _identity(target, binary=binary)
     runner = invoke or invoke_isolated_structured
-    telemetry = _ReviewTelemetry(
-        "application", _usage_thread_id(application_payload, usage_thread_id),
+    telemetry = ReviewTelemetry(
+        "application", review_telemetry.usage_thread_id(application_payload, usage_thread_id),
         reviewer_fallback=getattr(target, "reviewer_fallback", False),
     )
     terminal: ReviewTerminal = "transport_failure"
@@ -267,7 +267,7 @@ async def review_application(
         terminal = "allow" if result.allowed else "block"
         return result
     except BaseException as exc:
-        terminal = _failure_terminal(exc)
+        terminal = failure_terminal(exc)
         raise
     finally:
         await telemetry.emit_completion(terminal)
@@ -285,8 +285,8 @@ async def review_action(
     """Review one normalized action; retry a malformed verdict once."""
     identity = _identity(target, binary=binary)
     runner = invoke or invoke_isolated_structured
-    telemetry = _ReviewTelemetry(
-        "action", _usage_thread_id(application_payload, usage_thread_id),
+    telemetry = ReviewTelemetry(
+        "action", review_telemetry.usage_thread_id(application_payload, usage_thread_id),
     )
     terminal: ReviewTerminal = "transport_failure"
     try:
@@ -318,7 +318,7 @@ async def review_action(
         terminal = result.verdict
         return result
     except BaseException as exc:
-        terminal = _failure_terminal(exc)
+        terminal = failure_terminal(exc)
         raise
     finally:
         await telemetry.emit_completion(terminal)
