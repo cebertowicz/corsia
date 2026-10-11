@@ -83,6 +83,18 @@ describe('ImageCommentLightbox', () => {
 		expect(tags.map((tag) => tag.dataset.regionTag)).toEqual(['1', '3']);
 	});
 
+	it('keeps Comment disabled until the image has loaded, like Fit and zoom', async () => {
+		component = mount(ImageCommentLightbox, { target: host, props: { src: SRC, alt: 'Mock screen', artifactId: 'art-img' } });
+		await settle();
+		expect(commentButton()!.disabled).toBe(true);
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: 1000 });
+		Object.defineProperty(img, 'naturalHeight', { configurable: true, value: 500 });
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		expect(commentButton()!.disabled).toBe(false);
+	});
+
 	it('comments on the whole image from the keyboard, and holds the review bar while the comment has text', async () => {
 		const props = $state({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', draftOpen: false });
 		await render(props);

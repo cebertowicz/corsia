@@ -68,10 +68,11 @@
 <div class="layout" bind:this={root}>
 	<div class="viewer-cell">
 		<ImageLightbox bind:this={lightbox} {src} {alt} {onLoaded} {onFailed} {onRetry}>
-			{#snippet barActions()}
+			{#snippet barActions({ loaded })}
 				{#if artifactId}
 					<ImageCommentBar
 						boxMode={image.boxMode}
+						ready={loaded}
 						moving={!!image.moving}
 						savingMove={image.moveSaving}
 						count={comments.length}
