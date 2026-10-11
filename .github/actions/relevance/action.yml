@@ -61,7 +61,7 @@ runs:
           exit 1
         fi
 
-        if printf '%s\n' "$changed_paths" | grep -Eq "$PATTERNS"; then
+        if grep -Eq "$PATTERNS" <<< "$changed_paths"; then
           echo "relevant=true" >> "$GITHUB_OUTPUT"
           exit 0
         else

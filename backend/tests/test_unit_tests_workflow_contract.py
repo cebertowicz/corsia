@@ -281,6 +281,31 @@ def test_relevance_action_fails_closed_and_emits_only_successful_results(tmp_pat
     assert matching.returncode == 0, matching.stderr
     assert matching_output.read_text() == "relevant=true\n"
 
+    # A matching path comes first and is followed by more than a typical pipe
+    # buffer of unrelated names. A producer-side pipe can receive SIGPIPE when
+    # grep exits after this early match under `set -o pipefail`.
+    large_repo = _scratch_relevance_repo(tmp_path / "large", "backend/match.py")
+    bulk_dir = large_repo / "docs"
+    bulk_dir.mkdir()
+    for index in range(2_048):
+        (bulk_dir / f"unrelated-change-{index:05d}-abcdefghijklmnopqrstuvwxyz.md").write_text("x\n")
+    _run_git(large_repo, "add", "docs")
+    _run_git(large_repo, "commit", "-m", "large unrelated change set")
+    changed_paths = subprocess.run(
+        ["git", "diff", "--name-only", "origin/main...HEAD"],
+        cwd=large_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert changed_paths.splitlines()[0] == "backend/match.py"
+    assert len(changed_paths) > 65_536
+    large_match, large_match_output = _run_relevance_action(
+        large_repo, tmp_path / "large", base_ref="main", patterns="^backend/"
+    )
+    assert large_match.returncode == 0, large_match.stderr
+    assert large_match_output.read_text() == "relevant=true\n"
+
     action_repo = _scratch_relevance_repo(
         tmp_path / "action", ".github/actions/relevance/action.yml"
     )
