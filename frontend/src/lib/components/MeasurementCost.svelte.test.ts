@@ -301,7 +301,6 @@ describe('MeasurementCost', () => {
 		expect(text(markup)).toContain('The series starts at Sep 21, the first week with size-rated accepted work.');
 		expect(text(markup)).toContain('Hours of work delivered');
 		// Two weeks serve no moving average, so no line is drawn and the caption does not name one.
-		expect(text(markup)).toContain('Each bar is one week.');
 		expect(text(markup)).not.toContain('moving average');
 	});
 	it('prints where the series starts only when it opens inside the shown window', () => {
@@ -331,7 +330,7 @@ describe('MeasurementCost', () => {
 		unmount(component!); host?.remove();
 		const days = render({ data: { ...withAverage, averagePeriods: 7, period: { ...withAverage.period!, grain: 'days' } } });
 		expect(days.querySelector('.cost .lg')?.textContent).toContain('7-day moving average');
-		expect(text(days)).toContain('Each bar is one day; the line is the 7-day moving average.');
+		expect(text(days)).not.toContain('the line is the 7-day moving average');
 		unmount(component!); host?.remove();
 		expect(render().querySelector('.cost .lg')?.textContent).not.toContain('moving average');
 	});

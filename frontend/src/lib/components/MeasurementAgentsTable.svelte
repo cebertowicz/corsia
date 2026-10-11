@@ -184,18 +184,17 @@
 	.table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* Phone: every column stays in view. Names and headers wrap between words (never inside one), the figures stay on one line, and the long change header gets a narrow column of its own. */
 	@media (max-width: 430px) {
-		table { min-width: 0; }
+		table { min-width: 0; font-size: var(--text-footnote); }
 		th, td { padding: 6px 3px; }
 		tbody th { white-space: normal; }
 		.filter { white-space: normal; overflow-wrap: normal; word-break: normal; }
-		thead th { white-space: normal; overflow-wrap: normal; word-break: normal; }
+		thead th { white-space: normal; overflow-wrap: normal; word-break: normal; font-size: var(--text-caption); }
 		.sort { white-space: normal; }
 		thead th.cost { width: 17%; }
 		thead th.change { width: 25%; }
 	}
-	/* The narrowest phones: a smaller body size keeps the longest name ("Infrastructure") from pushing the last column out. */
+	/* The narrowest phones: tighter padding keeps the longest name ("Infrastructure") from pushing the last column out. */
 	@media (max-width: 380px) {
-		table { font-size: var(--text-footnote); }
 		th, td { padding: 6px 2px; }
 	}
 	@keyframes pulse { to { opacity: .55; } }

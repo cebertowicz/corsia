@@ -62,5 +62,10 @@
 	tbody th { overflow-wrap: anywhere; min-width: 15ch; }
 	.n { text-align: right; font-variant-numeric: tabular-nums; }
 	.unmeasured { color: var(--text-secondary); font-style: italic; }
+	/* Phone: the table sets at r2.7's 13px with 11px headers, the same as Biggest changes. */
+	@media (max-width: 480px) {
+		table { font-size: var(--text-footnote); }
+		thead th { font-size: var(--text-caption); }
+	}
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>

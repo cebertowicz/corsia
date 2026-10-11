@@ -58,11 +58,11 @@ class Measure:
 #: measure id -> definition. The action lines are the page's fixed wording.
 MEASURES: dict[str, Measure] = {
     "hours_per_hour": Measure(
-        "estimated_human_hours_per_active_hour", "Work per hour of your attention", True, "hours",
+        "estimated_human_hours_per_active_hour", "Work per hour you spend", True, "hours",
         "Check which outcomes took the most of your time.", per_agent=False),
     "minutes_per_outcome": Measure(
         "active_hours_per_outcome", "Minutes per outcome", False, "minutes",
-        "Review recent send-backs and how work is asked of you.", scale=60.0),
+        "Review its recent send-backs and how it asks you.", scale=60.0),
     "asks_per_outcome": Measure(
         "asks_per_outcome", "Asks per outcome", False, "ratio",
         "Review what keeps being asked, and whether guidance answers it.", per_agent=False),
@@ -83,6 +83,8 @@ MEASURES: dict[str, Measure] = {
         "Check whether this model is the right fit for this size class.",
         per_agent=False, from_series=False, per_model=True),
 }
+#: The scope row names its measure as the render does ("All work: your minutes per outcome"); an agent row keeps the plain label.
+SCOPE_LABELS = {"minutes_per_outcome": "Your minutes per outcome"}
 ACTIONS_BY_MEASURE = {key: measure.action for key, measure in MEASURES.items()}
 SERIES_IDS = tuple(dict.fromkeys(measure.series for measure in MEASURES.values() if measure.from_series))
 
@@ -125,7 +127,7 @@ def _scope_items(
             continue
         if before["n"] < MINIMUM_N or after["n"] < MINIMUM_N or not all(comparable(measure.series, first) for first in firsts):
             continue
-        item = _item(scope, key, before["value"] * measure.scale, after["value"] * measure.scale, after["n"], None)
+        item = _item(scope, key, before["value"] * measure.scale, after["value"] * measure.scale, after["n"], None, SCOPE_LABELS.get(key))
         if item:
             items.append(item)
     return items

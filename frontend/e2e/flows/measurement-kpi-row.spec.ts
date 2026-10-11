@@ -38,7 +38,7 @@ const days: Scenario = {
 		previous: { start: 's', end: 'e', from: '2026-09-21', to: '2026-09-27', tokens: tokens(15_300_000_000, 1, 1, 1, 1) },
 	},
 	expected: {
-		work: 'Hours of work per hour of your attention 92 h Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)',
+		work: 'Work per hour of your attention 92 h Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)',
 		'first-try': 'First-try rate (agent-graded) 89% Sep 28 to Oct 4, n 1,377, +5% vs Sep 21 to Sep 27 (n 451)',
 		cost: 'Cost per hour of delivered work $1.49 Sep 28 to Oct 4, n 1,187, -4% vs Sep 21 to Sep 27 (n 399)',
 		minutes: 'Your minutes per outcome 1.8 min Sep 28 to Oct 4, n 1,377, -69% vs Sep 21 to Sep 27 (n 451)',
@@ -54,7 +54,7 @@ const weeksScenario: Scenario = {
 		previous: { start: 's', end: 'e', from: '2026-08-10', to: '2026-09-06', tokens: { ...tokens(0, 0, 0, 0, 0) } },
 	},
 	expected: {
-		work: 'Hours of work per hour of your attention 53 h Sep 7 to Oct 4, n 2,317, new',
+		work: 'Work per hour of your attention 53 h Sep 7 to Oct 4, n 2,317, new',
 		'first-try': 'First-try rate (agent-graded) 89% Sep 7 to Oct 4, n 2,345, new',
 		cost: 'Cost per hour of delivered work $1.51 Sep 7 to Oct 4, n 1,742, new',
 		minutes: 'Your minutes per outcome 3.7 min Sep 7 to Oct 4, n 2,345, new',

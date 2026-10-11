@@ -181,7 +181,7 @@ describe('where-to-look store helpers', () => {
 		expect(() => decodeWhereToLook({ worse: [], improved: [], minimum_n: 20 })).toThrow('period shape');
 	});
 
-	it('reads a model subject and a dollars row, and shows the model label in the table', () => {
+	it('reads a model subject and a dollars row, and shows no Agent or Model tag under the subject', () => {
 		const model = { subject: { id: 'opus', name: 'Opus 5.5', kind: 'model' }, measure: 'cost_per_task', label: 'M $ per task', action: 'x', format: 'dollars', previous: 8, latest: 12, change: 0.5, n: 40, overall: 8.5 };
 		const decoded = decodeWhereToLook({
 			worse: [model], improved: [], period: { grain: 'weeks' as const, timezone: 'America/Los_Angeles', current: '2026-10-05', range: { from: '2026-07-13', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } }, minimum_n: 20,
@@ -190,7 +190,7 @@ describe('where-to-look store helpers', () => {
 		render(state({ worse: decoded.worse }));
 		const text = host.textContent ?? '';
 		expect(text).toContain('Opus 5.5');
-		expect(text).toContain('Model');
+		expect(host.querySelector('.kind')).toBeNull();
 		expect(text).toContain('M $ per task');
 		expect(text).toContain('$8.00 to $12.00');
 		expect(text).toContain('$8.50');

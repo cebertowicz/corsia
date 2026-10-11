@@ -122,9 +122,9 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 			await expect(lists.nth(1).locator('tbody tr').first().locator('td.n').last(), 'a scope row shows a dash for Overall, never zero or blank').toHaveText('–');
 			const first = lists.nth(0).locator('tbody tr').first();
 			await expect(first.locator('td').nth(0).locator('b'), 'the subject is its own bold cell').toHaveText('Tech Debt');
-			await expect(first.locator('td').nth(0).locator('.kind'), 'an agent carries its kind tag').toHaveText('Agent');
+			await expect(first.locator('.kind'), 'an agent carries no kind tag, as in r2.7').toHaveCount(0);
 			await expect(first.locator('td').nth(1), 'the measure is its own cell').toContainText('Minutes per outcome');
-			await expect(lists.nth(1).locator('tbody tr').first().locator('.kind'), 'All work has no kind tag').toHaveCount(0);
+			await expect(lists.nth(1).locator('.act'), 'an improved row carries no hint').toHaveCount(0);
 			await expect(lists.nth(0).locator('thead th').last()).toHaveText('Overall');
 			expect(await card.textContent(), 'no run-together subject, no failed turns, no old column name').not.toMatch(/All work work|failed turn|Page average/i);
 			expect(await card.textContent(), 'no internal names reach the reader').not.toMatch(/fresh_tokens|llm_usage|#\d|plan/i);
