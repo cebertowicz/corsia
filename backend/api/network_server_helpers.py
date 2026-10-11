@@ -9,6 +9,10 @@ from fastapi import HTTPException
 
 from infra.db_async import run_in_db
 from infra.database import get_db, write_transaction
+from infra.key_store import KeyStoreError
+from infra.key_store_servers import (
+    clean_key, remove_server_key, resolve_server, set_server_key,
+)
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
@@ -22,14 +26,25 @@ from llm.providers.omlx_public_auth import public_headers
 log = logging.getLogger(__name__)
 
 
+def _entered_key(raw: str | None) -> str:
+    """The key typed in a request, cleaned, or a named 400; empty when none was entered."""
+    if not (raw or "").strip():
+        return ""
+    try:
+        return clean_key(raw)
+    except KeyStoreError as exc:
+        raise HTTPException(400, detail=str(exc)) from None
+
+
 async def _add_omlx_server(body) -> dict:
-    """Probe oMLX and register on success."""
+    """Probe oMLX and register on success. The key, if any, goes to the key store."""
+    key = _entered_key(body.api_key)
     # oMLX owns its health surface; the catalog probe comes from the
     # same owner that answers the call, so add-flow and sweep agree.
     health_url = omlx_health_url(body.hostname, body.port)
     catalog_url = ne.models_probe_url(ne.lan_base(body.hostname, body.port))
     try:
-        candidate_cfg = {"api_key": body.api_key}
+        candidate_cfg = {"api_key": key}
         health_headers = await public_headers(candidate_cfg, url=health_url)
         catalog_headers = await public_headers(candidate_cfg, url=catalog_url)
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -57,8 +72,8 @@ async def _add_omlx_server(body) -> dict:
                 status="online",
                 db=db,
             )
-            if body.api_key:
-                nd.set_server_metadata(sid, db=db, api_key=body.api_key)
+            if key:
+                set_server_key(sid, key, db=db)
         return sid
 
     sid = await run_in_db(_persist_registration)
@@ -187,10 +202,11 @@ async def update_external_server(server_id: str, body) -> dict:
 
     base, dialect = _validated_external_request(body)
     stored = await run_in_db(nd.get_server_metadata, server_id)
-    supplied_key = (body.api_key or "").strip()
-    api_key = supplied_key or stored.get("api_key")
+    supplied_key = _entered_key(body.api_key)
+    stored_key = await run_in_db(resolve_server, server_id)
+    api_key = supplied_key or stored_key
     moved = _origin(stored.get("base_url")) != _origin(base)
-    if moved and not supplied_key and stored.get("api_key"):
+    if moved and not supplied_key and stored_key:
         raise _refuse_endpoint(
             dialect, "key_required_for_new_host",
             "Enter the API key for the new host. A saved key is only sent to "
@@ -224,7 +240,7 @@ async def update_external_server(server_id: str, body) -> dict:
             ne.upsert_endpoint(server_id, host, ok=True, db=db)
             fields: dict = {"base_url": base}
             if supplied_key:
-                fields["api_key"] = supplied_key
+                set_server_key(server_id, supplied_key, db=db)
             if body.cache_warm_seconds is not None:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
             if declared:
@@ -256,7 +272,8 @@ async def add_external_server(body) -> dict:
     base, dialect = _validated_external_request(body)
     declared = _declared_ids(body, dialect, "register") or []
     host, port, instance_id = _external_identity(base)
-    headers = auth_headers(dialect, body.api_key)
+    key = _entered_key(body.api_key)
+    headers = auth_headers(dialect, key)
     observed = await _probe_external(base, dialect, headers, declared=declared)
 
     def _persist_registration() -> str:
@@ -278,11 +295,13 @@ async def add_external_server(body) -> dict:
             fields: dict = {"base_url": base}
             if body.cache_warm_seconds:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
-            if body.api_key:
-                fields["api_key"] = body.api_key
+            if key:
+                set_server_key(sid, key, db=db)
+            else:
+                remove_server_key(sid, db=db)
             if declared:
                 fields[META_KEY] = declared
-            owned = ("cache_warm_seconds", "api_key", META_KEY)
+            owned = ("cache_warm_seconds", META_KEY)
             nd.set_server_metadata(
                 sid, db=db, clear=tuple(k for k in owned if k not in fields), **fields,
             )
@@ -342,7 +361,7 @@ async def list_daemon_models(server_id: str, server: dict) -> dict:
 
     try:
         canonical_models, _ = await _fetch_omlx_canonical_models(
-            api_base, mgmt_base, server.get("api_key"), server_id,
+            api_base, mgmt_base, None, server_id,
         )
     except Exception as exc:
         log.debug("list_models canonical fetch failed: %s", exc)

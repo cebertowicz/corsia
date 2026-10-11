@@ -189,10 +189,10 @@
       "sha256": "46dbae3937f7f532d33a216c4db64f3b85aeeecd606e3575841cfede0cede84e"
     },
     {
-      "bytes": 6438,
+      "bytes": 6778,
       "kind": "skill",
       "path": "skills/conductor-api/SKILL.md",
-      "sha256": "2a571fc9153884def19f29d511792e68706483001fe9f81e3db1740226824744"
+      "sha256": "f49824603ef17cac31076d3d065c2f4e22893c0bef898c779c8e7d41644b54e8"
     },
     {
       "bytes": 8275,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 from typing import (
     Annotated,
@@ -21,14 +20,12 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from loguru import logger
 
 from host_access.failure_reasons import (
     ApplicationReasonCategory,
     HostAccessReviewError,
     HostAccessReviewValidationError,
     ReviewTerminal,
-    classify_failure,
 )
 from host_access.review_policy import (
     ACTION_REVIEW_POLICY,
@@ -36,11 +33,9 @@ from host_access.review_policy import (
 )
 from host_access import review_limits, review_models
 from host_access.review_validation import validate_review_payload
+from host_access.review_telemetry import _failure_terminal, _ReviewTelemetry, _usage_thread_id
 from host_access.reviewer_target import reviewer_invocation_binding
-from infra.db_async import run_in_db
-from infra.llm_usage import record_llm_usage
-from infra.product_events import emit_product_event
-from llm.isolated_structured import IsolatedStructuredTelemetry, invoke_isolated_structured
+from llm.isolated_structured import invoke_isolated_structured
 from llm.resolution import ExecutionTarget
 
 
@@ -205,87 +200,6 @@ async def _invoke_review_with_retry(
             retried = True
 
 
-ReviewKind = Literal["application", "action"]
-
-
-def _usage_thread_id(
-    application_payload: Mapping[str, Any],
-    supplied: str | None,
-) -> str | None:
-    value = supplied if supplied is not None else application_payload.get(
-        "root_thread_id"
-    )
-    normalized = str(value or "").strip()
-    return normalized or None
-
-
-_USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "cache_creation_tokens",
-                 "cache_read_tokens", "total_tokens", "cost_usd")
-
-
-@dataclass(slots=True)
-class _ReviewTelemetry:
-    review_kind: ReviewKind
-    thread_id: str | None
-    observed: IsolatedStructuredTelemetry | None = None
-    unrecorded: list[IsolatedStructuredTelemetry] = field(default_factory=list)
-
-    def record(self, telemetry: IsolatedStructuredTelemetry) -> None:
-        self.observed = telemetry
-        if telemetry.usage_available and self.thread_id is not None:
-            self.unrecorded.append(telemetry)  # written by ``record_usage``, off the loop
-
-    async def record_usage(self) -> None:
-        while self.unrecorded:
-            telemetry = self.unrecorded.pop(0)
-            usage = {name: getattr(telemetry, name) for name in _USAGE_FIELDS}
-            try:
-                await run_in_db(
-                    record_llm_usage, self.thread_id, telemetry.catalog_id, usage,
-                    source=f"host_access_{self.review_kind}_review",
-                    ttft_ms=None, harness=telemetry.harness,
-                )
-            except Exception as exc:
-                logger.warning("host-access review usage telemetry failed for {}: {}",
-                               telemetry.catalog_id, type(exc).__name__)
-
-    async def emit_completion(self, terminal: ReviewTerminal) -> None:
-        await self.record_usage()
-        telemetry = self.observed
-        if telemetry is None:
-            return
-        try:
-            emit_product_event(
-                "host_access_review",
-                "completed",
-                thread_id=self.thread_id,
-                properties={
-                    "catalog_id": telemetry.catalog_id,
-                    "harness": telemetry.harness,
-                    "transport_model": telemetry.transport_model,
-                    "reported_model": telemetry.reported_model,
-                    "review_kind": self.review_kind,
-                    "usage_available": telemetry.usage_available,
-                    "elapsed_ms": telemetry.elapsed_ms,
-                    "cost_source": telemetry.cost_source or "unavailable",
-                    "terminal": terminal,
-                },
-            )
-        except Exception as exc:
-            logger.warning(
-                "host-access review completion telemetry failed for {}: {}",
-                telemetry.catalog_id,
-                type(exc).__name__,
-            )
-
-
-def _failure_terminal(exc: BaseException) -> ReviewTerminal:
-    # Telemetry keeps its original closed vocabulary: an unrecognised failure
-    # is reported as transport loss here, while the durable holder-visible
-    # reason withholds the cause instead of guessing.
-    return classify_failure(exc) or "transport_failure"
-
-
 def application_review_system_policy(*, auto_approve: bool) -> str:
     """Bind the trusted effect of an allow verdict into the reviewer policy."""
     if auto_approve:
@@ -322,6 +236,7 @@ async def review_application(
     runner = invoke or invoke_isolated_structured
     telemetry = _ReviewTelemetry(
         "application", _usage_thread_id(application_payload, usage_thread_id),
+        reviewer_fallback=getattr(target, "reviewer_fallback", False),
     )
     terminal: ReviewTerminal = "transport_failure"
     try:
@@ -347,6 +262,7 @@ async def review_application(
             reason_category=payload.reason_category,
             reason=payload.reason,
             user_attestation=payload.user_attestation,
+            reviewer_fallback=getattr(target, "reviewer_fallback", False),
         )
         terminal = "allow" if result.allowed else "block"
         return result

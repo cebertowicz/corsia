@@ -47,7 +47,7 @@ def test_unsupported_provider_with_a_saved_key_stays_listed():
     from api import providers
 
     hidden = HIDDEN[0]
-    listed = providers._visible_providers({hidden: {"apiKey": "sk-stale"}})
+    listed = providers._visible_providers({}, {hidden: "saved-secret-value-1234"})
     names = {entry["name"] for entry in listed}
     assert hidden in names, "a hidden provider holding a key must remain removable"
     entry = next(e for e in listed if e["name"] == hidden)
@@ -59,5 +59,5 @@ def test_unsupported_provider_without_a_key_stays_hidden():
     from api import providers
 
     hidden = HIDDEN[0]
-    listed = providers._visible_providers({})
+    listed = providers._visible_providers({}, {})
     assert hidden not in {entry["name"] for entry in listed}

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from api.network_server_billing import billing_views, router as network_server_billing_router
 from api.network_server_jobs import router as network_server_jobs_router
 from api.network_server_lifecycle import router as network_server_lifecycle_router
+from api.key_session_guard import audit_key_write, require_person_for_key
 from api.providers import mask_key
 from api.network_server_helpers import (
     _add_omlx_server,
@@ -26,6 +27,7 @@ from api.network_server_helpers import (
 )
 from infra.auth import require_user
 from infra.db_async import run_in_db
+from infra.key_store_servers import server_keys
 from infra.product_events import emit_product_event
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
@@ -44,22 +46,22 @@ router.include_router(network_server_jobs_router)
 router.include_router(network_server_lifecycle_router)
 
 
-# ``network_servers.metadata_json`` holds a live credential (the External API key)
-# and ``get_servers``/``get_server`` are ``SELECT *``. Handing that blob to the
-# client ships the key in plaintext, so the routes below strip it and report only
-# its presence plus the provider list's own tail mask.
+# A server's key lives in the key store, never in ``network_servers`` (whose rows are
+# ``SELECT *``). The routes below report only its presence plus the tail mask, and still
+# strip any credential-shaped field a hand-edited metadata blob might carry.
 _SECRET_META_KEYS = ("api_key", "token", "secret")
 
 
-def _public_server_view(row: dict) -> dict:
+def _public_server_view(row: dict, keys: dict[str, str] | None = None) -> dict:
     """Return ``row`` without credential-bearing metadata, annotated for the UI."""
     # Unreadable metadata is logged by the one parser; the view then shows none.
     meta = nd.parse_server_metadata(str(row.get("id")), row.pop("metadata_json", None)) or {}
-    secrets = {k: meta.pop(k, None) for k in _SECRET_META_KEYS}
-    present = next((v for v in secrets.values() if v), None)
+    for field in _SECRET_META_KEYS:
+        meta.pop(field, None)
+    stored = (keys if keys is not None else server_keys([str(row.get("id"))])).get(str(row.get("id")))
     row["metadata"] = meta
-    row["has_key"] = bool(present)
-    row["masked_key"] = mask_key(str(present)) if present else ""
+    row["has_key"] = bool(stored)
+    row["masked_key"] = mask_key(stored) if stored else ""
     return row
 
 
@@ -80,7 +82,8 @@ async def list_servers():
     for s in servers:
         s.update(await run_in_db(_network_view, s["id"]))
         s.update(billing[s["id"]])
-    return {"servers": [_public_server_view(s) for s in servers]}
+    keys = await run_in_db(server_keys, [s["id"] for s in servers])
+    return {"servers": [_public_server_view(s, keys) for s in servers]}
 
 
 class AddServerBody(BaseModel):
@@ -115,25 +118,40 @@ class UpdateExternalServerBody(BaseModel):
 
 
 @router.put("/{server_id}")
-async def update_server(server_id: str, body: UpdateExternalServerBody):
+async def update_server(
+    server_id: str, body: UpdateExternalServerBody, user: dict = Depends(require_user),
+):
     """Update a user-owned External endpoint after validating its new settings."""
-    return await update_external_server(server_id, body)
+    if (body.api_key or "").strip():
+        require_person_for_key(user, kind="server", name=server_id, action="write")
+    result = await update_external_server(server_id, body)
+    if (body.api_key or "").strip():
+        audit_key_write(user, kind="server", name=server_id, action="write")
+    return result
 
 
 @router.post("")
-async def add_server(body: AddServerBody):
+async def add_server(body: AddServerBody, user: dict = Depends(require_user)):
     """Manually register an inference server.
 
     A ``base_url`` means a user-owned cloud endpoint and takes the External path;
     without one this stays exactly the oMLX host+port flow it has always been.
     """
+    if (body.api_key or "").strip():
+        require_person_for_key(user, kind="server", name=body.name, action="write")
     if (body.base_url or "").strip():
-        return await add_external_server(body)
+        result = await add_external_server(body)
+        if (body.api_key or "").strip():
+            audit_key_write(user, kind="server", name=result["server_id"], action="write")
+        return result
     if not body.hostname.strip():
         # Both paths need something to reach. Reporting "host is required" when
         # the user pasted a full URL would send them in circles.
         raise HTTPException(400, detail="Provide a hostname or a full base_url")
-    return await _add_omlx_server(body)
+    result = await _add_omlx_server(body)
+    if (body.api_key or "").strip():
+        audit_key_write(user, kind="server", name=result["server_id"], action="write")
+    return result
 
 
 @router.get("/{server_id}")

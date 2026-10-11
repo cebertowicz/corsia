@@ -24,6 +24,7 @@ from infra.settings import (
     get_corrections_checker_model,
     get_feature_flags,
     get_host_access_auto_approve,
+    get_host_access_reviewer_fallback,
     is_alibaba_token_plan_model,
     save_agent_defaults,
     save_setting_merge,
@@ -31,6 +32,13 @@ from infra.settings import (
 
 router = APIRouter(prefix="/api", tags=["system"])
 router.include_router(system_admin_router)
+
+# Host-access review settings change what activates, so only a human session may
+# save them. The reviewer model has its own conductor rule in update_settings.
+_HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
+    "host_access_auto_approve",
+    "host_access_reviewer_fallback",
+})
 
 
 def _ready_public_litellm_models() -> set[str]:
@@ -138,6 +146,7 @@ def _settings_snapshot() -> dict:
         "workspace_context_files": context_rows,
         "host_access_auto_approve": get_host_access_auto_approve(),
         "corrections_checker_model": get_corrections_checker_model(),
+        "host_access_reviewer_fallback": get_host_access_reviewer_fallback(),
         "features": _features_snapshot(flags),
         "capabilities": {"browser_automation": browser_available()},
         "live_bulletins": live_bulletins,
@@ -228,7 +237,11 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
             "Core Agent model settings have been removed. Choose a model for each thread.",
         )
 
-    if "host_access_auto_approve" in body or "live_bulletins" in body or "corrections_checker_model" in body:
+    if (
+        _HUMAN_ONLY_HOST_ACCESS_SETTINGS.intersection(body)
+        or "live_bulletins" in body
+        or "corrections_checker_model" in body
+    ):
         require_human_user(user)
     if "host_access_reviewer_model" in body and not _conductor_sets_reviewer(user, body):
         require_human_user(user)
@@ -243,6 +256,13 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
             raise HTTPException(400, "host_access_auto_approve must be a boolean")
         save_agent_defaults({"host_access_auto_approve": auto_approve})
         updated["host_access_auto_approve"] = auto_approve
+
+    if "host_access_reviewer_fallback" in body:
+        fallback = body["host_access_reviewer_fallback"]
+        if not isinstance(fallback, bool):
+            raise HTTPException(400, "host_access_reviewer_fallback must be a boolean")
+        await run_in_db(save_agent_defaults, {"host_access_reviewer_fallback": fallback})
+        updated["host_access_reviewer_fallback"] = fallback
 
     if "live_bulletins" in body:
         live_bulletins = body["live_bulletins"]

@@ -145,6 +145,11 @@
 	// An in-app dialog, not window.confirm: an embedded web view may never show the
 	// native one and answer false, so Remove silently did nothing.
 	let confirmingRemove = $state(false);
+	const removeDescription = $derived(
+		provider.type === 'cloud'
+			? "This disconnects the provider from CORSIA and removes its models from the picker. Its saved key is deleted too; you'll need to enter it again to add it back."
+			: 'This disconnects the provider from CORSIA and removes its models from the picker.',
+	);
 
 	async function handleDelete() {
 		confirmingRemove = false;
@@ -290,7 +295,7 @@
 <ConfirmDialog
 	open={confirmingRemove}
 	title="Remove {provider.server?.instance_name || provider.label}?"
-	description="This disconnects the provider from CORSIA and removes its models from the picker."
+	description={removeDescription}
 	confirmLabel="Remove"
 	destructive
 	icon="delete"

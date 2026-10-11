@@ -163,6 +163,10 @@ from infra.migration_102_to_103_recovered_errors import migrate_102_to_103
 from infra.migration_103_to_104_retype_legacy_images import migrate_103_to_104
 from infra.migration_104_to_105_review_time import migrate_104_to_105
 from infra.migration_105_to_106_plan_aggregates import migrate_105_to_106
+from infra.migration_106_to_107_key_store_credentials import migrate_106_to_107
+from infra.migration_107_to_108_server_keys import migrate_107_to_108
+from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
+from infra.migration_mcp_secrets import migrate_mcp_secrets
 
 log = logging.getLogger(__name__)
 
@@ -742,6 +746,9 @@ MIGRATIONS[102] = migrate_102_to_103
 MIGRATIONS[103] = migrate_103_to_104
 MIGRATIONS[104] = migrate_104_to_105
 MIGRATIONS[105] = migrate_105_to_106
+MIGRATIONS[106] = migrate_106_to_107
+MIGRATIONS[107] = migrate_107_to_108
+MIGRATIONS[MCP_SECRETS_FROM_VERSION] = migrate_mcp_secrets
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -901,6 +908,9 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     target = source.with_name(f"{source.name}.pre-migration-v{from_version}-{stamp}.bak")
     if target.exists():
         raise MigrationError(f"backup path already exists, refusing to overwrite: {target}")
+    # The copy holds whatever the database holds, credentials included before
+    # the key-store migrations move them, so only the owner may read it.
+    os.close(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
     reader = sqlite3.connect(source, timeout=_BACKUP_TIMEOUT_SECONDS)
     try:
         backup = sqlite3.connect(target)

@@ -113,6 +113,11 @@ def _is_credential_key(name: object) -> bool:
     return isinstance(name, str) and bool(_SENSITIVE_KEY_RE.fullmatch(name.strip()))
 
 
+def is_credential_name(name: object) -> bool:
+    """Whether a variable or header name is credential-keyed, by the rule data sanitizing applies."""
+    return isinstance(name, str) and _is_credential_key(name.strip().strip("\"'").casefold())
+
+
 def _redact_assignment(match: re.Match[str]) -> str:
     value = match.group("quoted")
     if value is None:

@@ -347,7 +347,6 @@ def test_startup_calls_converter_after_database_initialization(tmp_path, monkeyp
     monkeypatch.setattr(conversion, "convert_legacy_project_paths", record("convert"))
     monkeypatch.setattr(durable_writes, "recover_write_intents", record("write_intents"))
     monkeypatch.setattr(relocate, "recover_interrupted_relocations", record("relocations"))
-    monkeypatch.setattr(settings, "bootstrap_env", record("env"))
     monkeypatch.setattr(system_projection, "ensure_system_projection", record("projection"))
     monkeypatch.setattr(skill_key_conversion, "convert_legacy_skill_keys", record("skill_keys"))
     monkeypatch.setattr(guidance_git, "startup_sweep", record("sweep"))

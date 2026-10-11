@@ -6,16 +6,23 @@
 		clearKeyValue,
 		KEYS_NOT_SAVED,
 		KeyWriteError,
+		ignoredEnvironmentFact,
+		ignoredEnvironmentNote,
 		listKeys,
 		removeKey,
 		saveKeyValue,
 		type CheckResult,
 		type KeyEntry,
+		type ProviderKeyRow,
+		type ServerKeyRow,
 	} from '$lib/stores/keys';
+	import { requestProviderCard, requestServerCard } from '$lib/stores/settingsNavigation';
 
 	type Action = 'set' | 'clear' | 'remove';
 
 	let entries = $state<KeyEntry[]>([]);
+	let providerRows = $state<ProviderKeyRow[]>([]);
+	let serverRows = $state<ServerKeyRow[]>([]);
 	let loadError = $state('');
 	let open = $state<{ name: string; action: Action } | null>(null);
 	// Both fields are write-only: emptied after every submit and never restored.
@@ -35,7 +42,10 @@
 
 	async function load() {
 		try {
-			entries = await listKeys();
+			const listing = await listKeys();
+			entries = listing.keys;
+			providerRows = listing.providerKeys;
+			serverRows = listing.serverKeys;
 			loadError = '';
 		} catch {
 			loadError = KEYS_NOT_SAVED;
@@ -46,8 +56,6 @@
 
 	function status(entry: KeyEntry): string {
 		if (!entry.is_set) return 'Not set';
-		if (entry.source === 'settings') return "Set in CORSIA's settings file";
-		if (entry.source === 'environment') return 'Set in the environment';
 		if (!entry.set_at) return 'Set';
 		const date = new Date(entry.set_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 		return `Set ${date}`;
@@ -132,6 +140,40 @@
 	<Message variant="err">{loadError}</Message>
 {/if}
 
+{#snippet keyForm()}
+	{#if open}
+	<form class="key-form" onsubmit={submit}>
+		{#if open.action === 'set'}
+			<Field label="Key">
+				<input
+					type="password"
+					aria-label="Key"
+					autocomplete="off"
+					data-1p-ignore
+					data-lpignore="true"
+					data-bwignore
+					data-form-type="other"
+					spellcheck="false"
+					bind:value={keyValue}
+				/>
+			</Field>
+		{/if}
+		<Field label="CORSIA password">
+			<input type="password" aria-label="CORSIA password" autocomplete="current-password" bind:value={password} />
+		</Field>
+		{#if formError}
+			<Message variant="err">{formError}</Message>
+		{/if}
+		<div class="card-actions">
+			<Button type="submit" variant={open.action === 'set' ? 'primary' : 'danger'} loading={busy}>
+				{open.action === 'set' ? 'Save' : open.action === 'clear' ? 'Clear' : 'Remove'}
+			</Button>
+			<Button variant="ghost" disabled={busy} onclick={closeForm}>Cancel</Button>
+		</div>
+	</form>
+	{/if}
+{/snippet}
+
 {#each entries as entry (entry.name)}
 	<div class="settings-card" data-key-entry={entry.name}>
 		<h3>{entry.label}</h3>
@@ -147,37 +189,12 @@
 			{/if}
 			<span class="key-status">{status(entry)}</span>
 		</div>
+		{#if entry.ignored_env_var}
+			<p class="row-note" data-ignored-env>{ignoredEnvironmentNote(entry.ignored_env_var)}</p>
+		{/if}
 
 		{#if open?.name === entry.name}
-			<form class="key-form" onsubmit={submit}>
-				{#if open.action === 'set'}
-					<Field label="Key">
-						<input
-							type="password"
-							aria-label="Key"
-							autocomplete="off"
-							data-1p-ignore
-							data-lpignore="true"
-							data-bwignore
-							data-form-type="other"
-							spellcheck="false"
-							bind:value={keyValue}
-						/>
-					</Field>
-				{/if}
-				<Field label="CORSIA password">
-					<input type="password" aria-label="CORSIA password" autocomplete="current-password" bind:value={password} />
-				</Field>
-				{#if formError}
-					<Message variant="err">{formError}</Message>
-				{/if}
-				<div class="card-actions">
-					<Button type="submit" variant={open.action === 'set' ? 'primary' : 'danger'} loading={busy}>
-						{open.action === 'set' ? 'Save' : open.action === 'clear' ? 'Clear' : 'Remove'}
-					</Button>
-					<Button variant="ghost" disabled={busy} onclick={closeForm}>Cancel</Button>
-				</div>
-			</form>
+			{@render keyForm()}
 		{:else}
 			{#if checkResults[entry.name]}
 				<Message variant={checkResults[entry.name].ok ? 'ok' : 'err'}>{checkResults[entry.name].text}</Message>
@@ -186,7 +203,7 @@
 				<Button variant="primary" onclick={() => openForm(entry.name, 'set')}>
 					{entry.is_set ? 'Replace' : 'Set'}
 				</Button>
-				{#if entry.source === 'keys'}
+				{#if entry.is_set}
 					<Button onclick={() => openForm(entry.name, 'clear')}>Clear</Button>
 				{/if}
 				{#if entry.checkable && entry.is_set}
@@ -200,10 +217,56 @@
 	</div>
 {/each}
 
+{#if providerRows.length || serverRows.length}
+	<h3 class="subhead">Provider keys</h3>
+	<div class="settings-card provider-keys">
+		{#each providerRows as row (row.name)}
+			<div class="provider-row" data-provider-key={row.provider}>
+				<div class="row-line">
+					<span class="row-label">{row.label}</span>
+					<span class="row-sep" aria-hidden="true">·</span>
+					<span class="key-status">{row.is_set ? 'Set' : 'Not set'}</span>
+					<span class="row-actions">
+						{#if !row.unsupported}
+							<Button variant="ghost" size="sm" onclick={() => requestProviderCard(row.provider)}>
+								{row.is_set ? 'Change in Providers' : 'Add in Providers'}
+							</Button>
+						{:else if row.is_set && open?.name !== row.name}
+							<Button variant="danger" size="sm" onclick={() => openForm(row.name, 'remove')}>Remove</Button>
+						{/if}
+					</span>
+				</div>
+				{#if row.ignored_env_var}
+					<p class="row-note" data-ignored-env>{ignoredEnvironmentFact(row.ignored_env_var)}</p>
+				{/if}
+				{#if open?.name === row.name}
+					{@render keyForm()}
+				{/if}
+			</div>
+		{/each}
+		{#each serverRows as row (row.name)}
+			<div class="provider-row" data-server-key={row.server_id}>
+				<div class="row-line">
+					<span class="row-label">{row.label}</span>
+					<span class="row-sep" aria-hidden="true">·</span>
+					<span class="key-status">{row.is_set ? 'Set' : 'Not set'}</span>
+					<span class="row-actions">
+						<Button variant="ghost" size="sm" onclick={() => requestServerCard(row.server_id)}>
+							{row.is_set ? 'Change in Providers' : 'Add in Providers'}
+						</Button>
+					</span>
+				</div>
+			</div>
+		{/each}
+	</div>
+{/if}
+
 <style>
 	.section-header { margin-bottom: 24px; }
 	.section-header h2 { font-size: var(--text-title2); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
 	.section-header p { font-size: var(--text-subhead); color: var(--text-muted); margin: 0; }
+
+	.subhead { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 24px 0 12px; }
 
 	.settings-card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 20px 24px; margin-bottom: 16px; }
 	.settings-card h3 { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
@@ -212,4 +275,13 @@
 	.key-status { color: var(--text-primary); }
 	.key-form { margin-top: 12px; }
 	.card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+
+	.provider-keys { padding: 8px 24px; }
+	.provider-row { padding: 10px 0; }
+	.provider-row + .provider-row { border-top: 1px solid var(--border-subtle); }
+	.row-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: var(--text-subhead); color: var(--text-primary); }
+	.row-label { font-weight: 600; }
+	.row-sep, .provider-row .key-status { color: var(--text-secondary); }
+	.row-actions { display: flex; gap: 8px; margin-left: auto; }
+	.row-note { font-size: var(--text-footnote); color: var(--text-muted); margin: 4px 0 0; line-height: 1.5; }
 </style>

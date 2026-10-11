@@ -116,7 +116,6 @@ def store(isolated_db, tmp_path, monkeypatch):
     root = tmp_path / "state"
     root.mkdir()
     monkeypatch.setattr("infra.config.STATE_ROOT", root)
-    monkeypatch.delenv(key_store.WEB_SEARCH.env_var, raising=False)
 
 
 @pytest.mark.asyncio

@@ -5,9 +5,8 @@ Subcommands:
     corsia providers list                          providers and endpoints, with status
     corsia providers models [--provider P] [--all] catalog rows (--all adds hidden ones)
     corsia providers add --name N --base-url URL [--dialect D] [--model ID ...]
-                          [--key-stdin | --key-env VAR]
     corsia providers edit <endpoint> [--base-url URL] [--dialect D]
-                          [--model ID ... | --clear-models] [--key-stdin | --key-env VAR]
+                          [--model ID ... | --clear-models]
     corsia providers remove <endpoint>
     corsia providers test <endpoint>              probe now and rediscover its models
     corsia providers enable|disable <endpoint>
@@ -17,15 +16,13 @@ Subcommands:
 
 ``<endpoint>`` is an External endpoint's id or its exact name. The credential is
 read from ``$CORSIA_API_TOKEN`` or the token file and sent only as a ``Bearer``
-header. An endpoint's API key is read from stdin or a named environment variable,
-never from an argument, and no key is ever printed.
+header. Add the key in Providers: no option here accepts or prints a key.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from urllib.parse import quote
 
@@ -71,20 +68,6 @@ def _endpoint(api: _Api, ref: str) -> dict:
     reason = "is ambiguous" if named else "was not found"
     _fail(f"Endpoint '{ref}' {reason}. Known endpoints: {known}")
     raise AssertionError("unreachable")
-
-
-def _read_key(args) -> str | None:
-    if getattr(args, "key_env", None):
-        value = os.environ.get(args.key_env, "").strip()
-        if not value:
-            _fail(f"${args.key_env} is empty or unset")
-        return value
-    if getattr(args, "key_stdin", False):
-        value = sys.stdin.readline().strip()
-        if not value:
-            _fail("No key on stdin")
-        return value
-    return None
 
 
 def _endpoint_view(row: dict) -> dict:
@@ -173,9 +156,6 @@ def cmd_add(api: _Api, args) -> None:
     body: dict = {"name": args.name, "base_url": args.base_url, "dialect": args.dialect}
     if args.model:
         body["model_ids"] = args.model
-    key = _read_key(args)
-    if key:
-        body["api_key"] = key
     result = api("POST", _SERVERS, body)
     _emit(args, result, [f"Added {result.get('server_id')}: {result.get('models', '?')} models"])
 
@@ -193,9 +173,6 @@ def cmd_edit(api: _Api, args) -> None:
         body["model_ids"] = []
     elif args.model:
         body["model_ids"] = args.model
-    key = _read_key(args)
-    if key:
-        body["api_key"] = key
     result = api("PUT", f"{_SERVERS}/{row['id']}", body)
     _emit(args, result, [f"Updated {row['id']}: {result.get('models', '?')} models"])
 
@@ -251,12 +228,6 @@ def cmd_window(api: _Api, args) -> None:
     _emit(args, result, [f"Context window for {args.model} {shown}"])
 
 
-def _add_key_options(p: argparse.ArgumentParser) -> None:
-    group = p.add_mutually_exclusive_group()
-    group.add_argument("--key-stdin", action="store_true", help="read the endpoint's API key from stdin")
-    group.add_argument("--key-env", metavar="VAR", help="read the endpoint's API key from $VAR")
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser; no option accepts a credential."""
     parser = argparse.ArgumentParser(prog="corsia providers", description=__doc__.split("\n")[0])
@@ -269,21 +240,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provider", help="filter by provider, harness or endpoint id")
     p.add_argument("--all", action="store_true", help="include hidden models")
 
-    p = sub.add_parser("add", help="register an External endpoint")
+    p = sub.add_parser("add", help="register an External endpoint (add the key in Providers)")
     p.add_argument("--name", required=True)
     p.add_argument("--base-url", required=True)
     p.add_argument("--dialect", choices=("openai", "anthropic"), default="openai")
     p.add_argument("--model", action="append", help="a model id it serves, if it cannot list them (repeatable)")
-    _add_key_options(p)
 
-    p = sub.add_parser("edit", help="change an External endpoint (omitted fields are kept)")
+    p = sub.add_parser("edit", help="change an External endpoint; omitted fields are kept (add the key in Providers)")
     p.add_argument("endpoint")
     p.add_argument("--base-url")
     p.add_argument("--dialect", choices=("openai", "anthropic"))
     models = p.add_mutually_exclusive_group()
     models.add_argument("--model", action="append", help="replace the declared model ids (repeatable)")
     models.add_argument("--clear-models", action="store_true", help="drop the declared model ids")
-    _add_key_options(p)
 
     for name, text in (("remove", "remove an endpoint"), ("test", "probe an endpoint now"),
                        ("enable", "switch an endpoint on"), ("disable", "switch an endpoint off")):

@@ -134,12 +134,16 @@ def parked(monkeypatch):
 
 
 def _webhook(on: bool = True) -> None:
-    set_setting("webhook", {"github_webhook_secret": "configured"} if on else {})
+    from infra import key_store
     from infra.database import write_transaction
 
+    if not on:
+        key_store.clear_value("github-webhook")
+        return
+    key_store.set_value("github-webhook", "hook-value-for-tests")
     with write_transaction(None, scope="test_webhook_time") as db:  # configured a month ago
-        db.execute("UPDATE settings SET updated_at=? WHERE key='webhook'",
-                   (_z(T0 - timedelta(days=30)),))
+        db.execute("UPDATE key_store_entries SET set_at=? WHERE name='github-webhook'",
+                   ((T0 - timedelta(days=30)).replace(tzinfo=None).isoformat(),))  # naive, as stored
 
 
 def _logged_without_suite_id(at: datetime) -> None:

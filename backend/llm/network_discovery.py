@@ -13,6 +13,7 @@ import httpx
 
 from infra.db_async import run_in_db
 from infra.database import get_db, write_transaction
+from infra.key_store_servers import remove_server_key
 from llm.network_endpoints import (
     get_endpoints,
     is_cloud_external,
@@ -53,7 +54,7 @@ def upsert_server(
     reachable server is never silently registered as offline (a caller that just
     verified reachability passes ``"online"``). ``kind`` ∈ {``managed``,
     ``external``}; ``dialect`` ∈ {``openai``, ``anthropic``} for external rows
-    (NULL for managed). ``metadata_json`` (api_key + capability overrides) is
+    (NULL for managed). ``metadata_json`` (capability overrides) is
     owned by :func:`set_server_metadata` and is never written here — so a re-add
     can't wipe a stored token.
     """
@@ -196,6 +197,7 @@ def remove_server(server_id: str) -> bool:
             (_now_iso(), server_id),
         )
         _mark_server_models_unavailable(server_id, row["provider"], db=db)
+    remove_server_key(server_id)
     _LOADED_BY_SERVER.pop(server_id, None)
     return True
 

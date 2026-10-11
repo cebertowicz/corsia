@@ -46,6 +46,7 @@
 <div
 	class="pr"
 	data-provider-card={provider.name}
+	data-server-card={provider.server?.id}
 	class:expanded
 	class:has-loaded={hasLoaded}
 	style="--accent: {accentVar}"

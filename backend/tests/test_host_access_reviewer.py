@@ -115,15 +115,17 @@ def _telemetry(target, **overrides: Any):
 
 
 def _patch_review_accounting(monkeypatch, reviewer):
+    from host_access import review_telemetry
+
     recorded = []
     events = []
     monkeypatch.setattr(
-        reviewer,
+        review_telemetry,
         "record_llm_usage",
         lambda *args, **kwargs: recorded.append((args, kwargs)),
     )
     monkeypatch.setattr(
-        reviewer,
+        review_telemetry,
         "emit_product_event",
         lambda *args, **kwargs: events.append((args, kwargs)),
     )
@@ -667,6 +669,7 @@ async def test_provider_usage_is_recorded_before_strict_schema_failure(
         "elapsed_ms": 7,
         "cost_source": "unavailable",
         "terminal": "invalid_output",
+        "reviewer_fallback": False,
     }
     assert not recorded and not events
 
@@ -795,6 +798,7 @@ async def test_zero_usage_emits_bounded_completion_without_ledger_row(
         "elapsed_ms",
         "cost_source",
         "terminal",
+        "reviewer_fallback",
     }
     assert (event["usage_available"], event["cost_source"], event["terminal"]) == (
         False,

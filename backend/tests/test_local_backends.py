@@ -66,8 +66,7 @@ def test_external_openai_dialect_params(monkeypatch):
     monkeypatch.setattr(network_discovery, "get_server", lambda sid: {
         "id": sid, "port": 1234, "dialect": "openai",
     })
-    monkeypatch.setattr(network_discovery, "get_server_metadata",
-                        lambda sid: {"api_key": "sk-tok"})
+    monkeypatch.setattr("llm.external_provider.resolve_server", lambda sid: "sk-tok")
     monkeypatch.setattr(network_endpoints, "build_api_base",
                         lambda sid: "http://127.0.0.1:1234/v1")
 
@@ -85,7 +84,6 @@ def test_external_openai_keyless_uses_nonempty_sentinel(monkeypatch):
     monkeypatch.setattr(network_discovery, "get_server", lambda sid: {
         "id": sid, "port": 8090, "dialect": "openai",
     })
-    monkeypatch.setattr(network_discovery, "get_server_metadata", lambda sid: {})  # no key
     monkeypatch.setattr(network_endpoints, "build_api_base",
                         lambda sid: "http://127.0.0.1:8090/v1")
 
@@ -99,7 +97,7 @@ def test_external_openai_keyed_uses_real_key(monkeypatch):
     monkeypatch.setattr(network_discovery, "get_server", lambda sid: {
         "id": sid, "port": 443, "dialect": "openai",
     })
-    monkeypatch.setattr(network_discovery, "get_server_metadata", lambda sid: {"api_key": "sk-real"})
+    monkeypatch.setattr("llm.external_provider.resolve_server", lambda sid: "sk-real")
     monkeypatch.setattr(network_endpoints, "build_api_base",
                         lambda sid: "https://api.example.com/v1")
     params = ExternalBackend().make_provider_params("external@ns-1/gpt")
@@ -115,7 +113,6 @@ def test_external_anthropic_keyless_uses_nonempty_sentinel(monkeypatch):
     monkeypatch.setattr(network_discovery, "get_server", lambda sid: {
         "id": sid, "port": 8787, "dialect": "anthropic",
     })
-    monkeypatch.setattr(network_discovery, "get_server_metadata", lambda sid: {})
     monkeypatch.setattr(
         network_endpoints, "get_active_endpoint", lambda sid: {"host": "10.0.0.4"}
     )
@@ -130,8 +127,7 @@ def test_external_anthropic_dialect_params(monkeypatch):
     monkeypatch.setattr(network_discovery, "get_server", lambda sid: {
         "id": sid, "port": 8787, "dialect": "anthropic",
     })
-    monkeypatch.setattr(network_discovery, "get_server_metadata",
-                        lambda sid: {"api_key": "sk-ant"})
+    monkeypatch.setattr("llm.external_provider.resolve_server", lambda sid: "sk-ant")
     monkeypatch.setattr(network_endpoints, "get_active_endpoint",
                         lambda sid: {"host": "10.0.0.4"})
     monkeypatch.setattr(network_endpoints, "_server_port", lambda sid: 8787)
@@ -210,7 +206,6 @@ def test_omlx_cfg_builds_from_network_server_row(monkeypatch):
     monkeypatch.setattr(network_endpoints, "get_active_endpoint", lambda sid: {
         "host": "127.0.0.1",
     } if sid == "ns-1" else None)
-    monkeypatch.setattr(network_discovery, "get_server_metadata", lambda sid: {})
 
     cfg = OmlxBackend()._cfg("ns-1")
     assert cfg == {
@@ -222,7 +217,7 @@ def test_omlx_cfg_builds_from_network_server_row(monkeypatch):
     }
 
 
-def test_omlx_cfg_pulls_api_key_from_metadata(monkeypatch):
+def test_omlx_cfg_pulls_api_key_from_the_key_store(monkeypatch):
     from llm import network_discovery, network_endpoints
 
     monkeypatch.setattr(network_discovery, "get_server", lambda sid: {
@@ -230,8 +225,7 @@ def test_omlx_cfg_pulls_api_key_from_metadata(monkeypatch):
     })
     monkeypatch.setattr(network_endpoints, "get_active_endpoint",
                         lambda sid: {"host": "127.0.0.1"})
-    monkeypatch.setattr(network_discovery, "get_server_metadata",
-                        lambda sid: {"api_key": "sk-stored"})
+    monkeypatch.setattr("infra.key_store_servers.resolve_server", lambda sid: "sk-stored")
 
     cfg = OmlxBackend()._cfg("ns-1")
     assert cfg["api_key"] == "sk-stored"
