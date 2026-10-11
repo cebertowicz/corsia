@@ -114,10 +114,13 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 	const failed = await readerPosition();
 	expect(Math.abs(failed.line! - before.line!), `failed save moved the target line from y=${before.line} to y=${failed.line}`).toBeLessThanOrEqual(1);
 	await expect(page.getByPlaceholder('Comment…'), 'a failed save must keep the draft').toHaveValue('Preserve this viewport.');
-	// At phone width the error toast sits over the drawer's Comment button; on
-	// desktop it does not, and touching it would close the comment popover.
 	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		await page.getByRole('status').filter({ hasText: "Couldn't post the comment" }).getByRole('button', { name: 'Dismiss' }).click();
+		const retry = page.getByRole('button', { name: 'Comment', exact: true }).last();
+		await expect(retry).toBeVisible();
+		expect(await retry.evaluate((button) => {
+			const rect = button.getBoundingClientRect();
+			return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === button;
+		}), 'the failure toast must not cover Comment').toBe(true);
 	}
 	await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
 	const submitted = await readerPosition();

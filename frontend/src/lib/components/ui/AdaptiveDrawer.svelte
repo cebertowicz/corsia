@@ -7,6 +7,7 @@
 	import { portal } from '$lib/actions/portal';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
+	import { toastClearance } from '$lib/stores/toastClearance';
 
 	let {
 		ariaLabel,
@@ -51,6 +52,7 @@
 	let dragPointer: number | null = null;
 	let dragStartY = 0;
 	let dragStartedAt = 0;
+	let stopToastClearance: (() => void) | undefined;
 
 	const flyParams = $derived(
 		$prefersReducedMotion
@@ -93,7 +95,22 @@
 		dragY = 0;
 	}
 
+	function restingViewportBottomOccupancy(node: HTMLElement): number {
+		const bottomMargin = Number.parseFloat(getComputedStyle(node).marginBottom) || 0;
+		return node.offsetHeight + bottomMargin;
+	}
+
+	function releaseToastClearance(): void {
+		stopToastClearance?.();
+		stopToastClearance = undefined;
+	}
+
 	onMount(() => {
+		stopToastClearance = panel
+			? toastClearance.register(panel, {
+				measure: () => restingViewportBottomOccupancy(panel),
+			})
+			: undefined;
 		const removeBackLayer = pushBackLayer(() => {
 			onClose();
 			return true;
@@ -105,6 +122,7 @@
 		});
 		return () => {
 			mounted = false;
+			releaseToastClearance();
 			removeBackLayer();
 		};
 	});
@@ -123,6 +141,7 @@
 	class:follow-keyboard={followKeyboard}
 	data-adaptive-drawer
 	onclick={onBackdrop}
+	onoutrostart={releaseToastClearance}
 	transition:fade={fadeParams}
 	use:portal
 >
