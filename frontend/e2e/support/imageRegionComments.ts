@@ -70,7 +70,8 @@ export async function appScreenshotPng(page: Page): Promise<Buffer> {
 
 export async function showImage(page: Page, title: string, naturalWidth = NATURAL.width) {
 	await page.getByText(title).first().click();
-	const img = page.locator('.image-viewer .frame img');
+	// This thread's own image, named for it: the previous thread's viewer can still be on screen with the same size.
+	const img = page.locator(`.image-viewer .frame img[src*="${encodeURIComponent(`${title}.png`)}"]`);
 	await expect(img).toBeVisible();
 	await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(naturalWidth);
 }
