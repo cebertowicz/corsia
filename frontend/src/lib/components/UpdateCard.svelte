@@ -32,17 +32,8 @@
 </script>
 
 {#if ask}
-	<!-- One fact, one row: an ask's blocked update and its artifact are the same hold (C4a), so the row is the artifact.
-	     Keep the update's navigation and collapsed-history context above that row. -->
+	<!-- One fact, one row: an ask's blocked update and its artifact are the same hold (C4a), so the row is the artifact. -->
 	<div class="update-card {card.kind} merged" data-update-id={card.id}>
-		<div class="update-meta">
-			{#if opens}
-				<button type="button" class="title" onclick={openPlanNode}>{title}</button>
-			{:else}
-				<span class="title">{title}</span>
-			{/if}
-			{#if earlier > 0}<span class="earlier">{earlier} earlier</span>{/if}
-		</div>
 		<div class="update-ask"><AttachmentRow card={ask} threadId={card.thread_id} task={title} time={card.created_at} /></div>
 	</div>
 {:else}
@@ -77,7 +68,6 @@
 	}
 	/* The merged row is flat: no box of its own, the artifact row inside it carries the look. */
 	.update-card.merged { display: block; padding: 0; border: 0; background: transparent; }
-	.update-meta { display: flex; align-items: baseline; gap: 6px; max-width: 480px; padding: 0 2px; }
 	.update-card.merged .update-ask { max-width: 480px; }
 	.title {
 		min-width: 0;

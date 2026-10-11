@@ -239,14 +239,13 @@ describe('UpdateCard ask row', () => {
 		expect(row.querySelector('time')).not.toBeNull();
 	});
 
-	it('keeps the plan link and collapsed-history count above a merged ask', () => {
+	it('keeps a merged ask to one artifact row without duplicated update metadata', () => {
 		mountCard(blocked, 2);
 
-		const link = host.querySelector<HTMLButtonElement>('.update-meta .title')!;
-		expect(link.textContent).toBe('Ship the export');
-		expect(host.querySelector('.update-meta .earlier')?.textContent).toBe('2 earlier');
-		link.click();
-		expect(focusPlanNode).toHaveBeenCalledWith('t1', 'n1');
+		expect(host.querySelector('.update-meta')).toBeNull();
+		expect(host.querySelector('.earlier')).toBeNull();
+		expect(host.querySelectorAll('.update-card.merged .tile')).toHaveLength(1);
+		expect(focusPlanNode).not.toHaveBeenCalled();
 	});
 
 	it('puts the time on the title line and the feedback counts in the task\'s place, in the accessible name too', () => {
