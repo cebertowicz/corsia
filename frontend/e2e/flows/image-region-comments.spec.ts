@@ -100,6 +100,14 @@ async function postComment(page: Page, text: string) {
 	await expect(composer(page)).toHaveCount(0);
 }
 
+/** Seed a comment through the disposable mock API, bypassing UI repetition only for many-of-N evidence. */
+async function apiComment(request: APIRequestContext, artifactId: string, body: string, region?: { x: number; y: number; w: number; h: number }): Promise<string> {
+	const tok = encodeURIComponent(TEST_TOKEN);
+	const response = await request.post(`/api/artifacts/${artifactId}/comments?token=${tok}`, { data: { body, ...(region ? { region } : {}) } });
+	expect(response.ok(), `comment seed failed: ${response.status()}`).toBeTruthy();
+	return (await response.json()).comment.id as string;
+}
+
 test.describe('@flow:image-region-comments @surface:documents comments on parts of an image', () => {
 	test.use({ hasTouch: true });
 
@@ -378,6 +386,106 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(sheet).toBeVisible();
 			await expect(sheet.getByText('Too much padding on phones')).toBeVisible();
 			await shoot(page, testInfo, '393-05-tag-opens-sheet', true);
+		} finally {
+			fs.rmSync(seeded.imagePath, { force: true });
+		}
+	});
+
+	test('review evidence: dense, neighbouring, motion and move-pin states', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		test.setTimeout(180_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const seeded = await seedImage(page, request, 'region-review-evidence', 1200);
+		try {
+			const regions = [
+				{ x: .08, y: .12, w: 0, h: 0 }, { x: .22, y: .16, w: .12, h: .1 }, { x: .44, y: .1, w: 0, h: 0 },
+				{ x: .68, y: .14, w: .2, h: .12 }, { x: .91, y: .1, w: .08, h: .15 }, { x: .1, y: .42, w: .16, h: .18 },
+				{ x: .37, y: .46, w: 0, h: 0 }, { x: .57, y: .44, w: .14, h: .18 }, { x: .82, y: .48, w: 0, h: 0 },
+				{ x: .05, y: .78, w: .16, h: .16 }, { x: .42, y: .8, w: 0, h: 0 }, { x: .78, y: .76, w: .18, h: .17 },
+			];
+			const ids = await Promise.all(regions.map((region, index) => apiComment(request, seeded.artifactId, `Dense review note ${index + 1}`, region)));
+			await apiComment(request, seeded.artifactId, 'Text comment beside the image comments');
+			for (const index of [2, 7]) {
+				isolatedDb([
+					'connection.execute("UPDATE doc_comments SET author=?, author_kind=\'agent\', author_thread_id=? WHERE id=?", ("Reviewer", sys.argv[2], sys.argv[3]))',
+				], seeded.sessionId, ids[index]);
+			}
+			await openThread(page, seeded.sessionTitle, 1440);
+			await expect(pill(page)).toHaveAttribute('aria-label', '13 comments');
+			await rest(page);
+			await shoot(page, testInfo, '1440-15-dense-12-tags-rest', true);
+			await tag(page, 7).hover();
+			await shoot(page, testInfo, '1440-16-dense-12-hover', true);
+			await tag(page, 8).focus();
+			await page.keyboard.press('Enter');
+			await expect(tag(page, 8)).toHaveAttribute('aria-pressed', 'true');
+			await expect(page.locator('.ct')).toBeVisible();
+			await shoot(page, testInfo, '1440-17-dense-12-selected', true);
+			await page.keyboard.press('Escape');
+			await pill(page).click();
+			const drawer = page.locator('.canvas-comment-drawer');
+			await expect(drawer.getByText('Text comment beside the image comments')).toBeVisible();
+			await expect(drawer.getByText('Dense review note 1', { exact: true })).toBeVisible();
+			await shoot(page, testInfo, '1440-18-text-and-region-neighbours', true);
+			await page.keyboard.press('Escape');
+
+			// Responsive interaction mode is selected as the viewer mounts, so remount at phone width.
+			await page.setViewportSize({ width: 393, height: 852 });
+			await page.reload();
+			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+			await showImage(page, seeded.sessionTitle);
+			await rest(page);
+			await shoot(page, testInfo, '393-06-dense-12-tags-rest', true);
+			await tag(page, 8).tap();
+			await expect(page.locator('.drawer-panel .ct')).toBeVisible();
+			await shoot(page, testInfo, '393-07-dense-12-selected', true);
+			await page.keyboard.press('Escape');
+
+			await page.setViewportSize({ width: 1440, height: 900 });
+			await tag(page, 7).hover();
+			const animationCount = await page.evaluate(() => {
+				const animations = document.getAnimations();
+				for (const animation of animations) animation.pause();
+				return animations.length;
+			});
+			expect(animationCount).toBeGreaterThan(0);
+			for (const [name, ratio] of [['start', 0], ['mid', .5], ['end', 1]] as const) {
+				await page.evaluate((fraction) => {
+					for (const animation of document.getAnimations()) {
+						const timing = animation.effect?.getComputedTiming();
+						animation.currentTime = (timing?.activeDuration ?? 0) * fraction;
+					}
+				}, ratio);
+				await shoot(page, testInfo, `1440-19-tag-motion-${name}`, true);
+			}
+			await page.emulateMedia({ reducedMotion: 'reduce' });
+			expect(Number.parseFloat(await tag(page, 7).locator('.disc').evaluate((el) => getComputedStyle(el).transitionDuration))).toBeLessThan(0.001);
+			await shoot(page, testInfo, '1440-20-tag-motion-reduced', true);
+			await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+			fs.writeFileSync(seeded.imagePath, syntheticPng(NATURAL.width, NATURAL.height + 2));
+			await page.reload();
+			await showImage(page, seeded.sessionTitle);
+			await tag(page, 1).focus();
+			await page.keyboard.press('Enter');
+			const staleCard = page.locator('.ct:has([data-move-pin])');
+			await expect(staleCard.getByRole('button', { name: 'Move pin' })).toBeVisible();
+			let releasePatch: (() => void) | null = null;
+			const patchHeld = new Promise<void>((resolve) => { releasePatch = resolve; });
+			await page.route('**/api/comments/**', async (route) => {
+				if (route.request().method() === 'PATCH') await patchHeld;
+				await route.continue();
+			});
+			await staleCard.getByRole('button', { name: 'Move pin' }).click();
+			const moveTo = await at(page, .62, .64);
+			await page.mouse.click(moveTo.x, moveTo.y);
+			await expect(commentButton(page)).toContainText('Moving pin…');
+			await shoot(page, testInfo, '1440-21-move-pin-pending', true);
+			releasePatch?.();
+			await expect(commentButton(page)).not.toContainText('Moving pin…');
+			await expect(tag(page, 1)).not.toHaveClass(/stale/);
+			await shoot(page, testInfo, '1440-22-move-pin-settled', true);
 		} finally {
 			fs.rmSync(seeded.imagePath, { force: true });
 		}
