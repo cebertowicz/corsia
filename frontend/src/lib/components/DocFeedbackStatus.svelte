@@ -60,6 +60,7 @@
 		return Math.max(0, Math.ceil((Date.parse(graceDeadline) - countdownNow) / 60_000));
 	});
 	const sendingGrace = $derived(pendingCount > 0 && graceMinutes !== null);
+	const graceText = $derived(`Sending to ${ownerName ?? 'the owner'} in ${graceMinutes} min`);
 
 	$effect(() => {
 		if (activeArtifactId === artifactId && activeTargetInstanceId === targetInstanceId) return;
@@ -153,8 +154,10 @@
 
 {#if pendingCount > 0}
 	{#if sendingGrace}
-		<span class="sending-grace" role="status">Sending to {ownerName ?? 'the owner'} in {graceMinutes} min</span>
-		<Button size="sm" onclick={sendCurrentDocument} loading={sending}>Send now</Button>
+		<span class="sending-now">
+			<span class="sending-grace" role="status" title={graceText}>Sending to <span class="grace-owner">{ownerName ?? 'the owner'}</span> in {graceMinutes} min</span>
+			<Button size="sm" onclick={sendCurrentDocument} loading={sending}>Send now</Button>
+		</span>
 	{:else}
 		<Button size="sm" onclick={sendCurrentDocument} loading={sending}>{sendLabel}</Button>
 	{/if}
@@ -168,11 +171,16 @@
 
 <style>
 	.sending-grace {
+		display: inline-flex;
+		gap: 0.25em;
 		min-width: 0;
-		overflow-wrap: anywhere;
+		overflow: hidden;
+		white-space: nowrap;
 		font-size: var(--text-footnote);
 		color: var(--text-secondary);
 	}
+	/* Only the owner name gives way; "Sending to" and the countdown stay whole. */
+	.grace-owner { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 	.undelivered {
 		display: inline-flex;
 		flex-wrap: wrap;

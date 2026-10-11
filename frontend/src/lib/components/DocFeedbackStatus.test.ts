@@ -126,6 +126,8 @@ describe('DocFeedbackStatus', () => {
 
 		expect(host.textContent).toContain('Sending to Documents & Artifacts in 2 min');
 		expect(host.textContent).not.toContain('Send 2 comments');
+		const grace = host.querySelector('[role="status"].sending-grace')!;
+		expect(grace.getAttribute('title')).toBe('Sending to Documents & Artifacts in 2 min');
 		host.querySelector<HTMLButtonElement>('button')!.click();
 		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/doc-feedback/send', expect.anything()));
 	});
