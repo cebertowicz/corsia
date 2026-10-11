@@ -2,14 +2,18 @@
 
 A row compares one subject's latest window (7 days or 4 weeks) with the window before it:
 the scope itself on the pooled windows ``/series`` serves, and each agent on the pooled
-windows the Agents table already serves. Nothing here selects rows, sums or divides across
-outcomes (a unit change aside): it reads what ``/series`` and ``/agents`` return, and ranks
-the change. An agent row's "overall" is the scope's own figure for the measure; a scope row has none.
+windows the Agents table already serves, and each model on its biggest size class in the
+Models table. Nothing here selects rows, sums or divides across outcomes (a unit change
+aside): it reads what ``/series``, ``/agents`` and ``/models`` return, and ranks the change.
+An agent row's "overall" is the scope's own figure for the measure (all its agents' tasks
+pooled for $ per hour of work); a model row's is every model's tasks of that size class
+pooled; a scope row has none.
 
 The rules are fixed so the page reads the same on every install:
 
-* both windows need at least ``MINIMUM_N`` outcomes, and the measure must be comparable
-  across them (no definition break between the two windows);
+* both windows need at least ``MINIMUM_N`` outcomes (a model's size class: the Models
+  table's own 14-task floor), and the measure must be comparable across them (no
+  definition break between the two windows);
 * a move counts from ``MINIMUM_CHANGE`` (10 percent) in either direction;
 * the worse list leads with the largest move; the improved list is the same rows the
   other way, largest first;
@@ -21,6 +25,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
+from api.measurement_agent_cost import DOLLARS_PER_HOUR
 from api.measurement_scope import resolve_grain, validate_scope
 from core.measurement_scope import Grain
 from infra.auth import require_user
@@ -38,9 +43,11 @@ class Measure:
     """One comparable measure: its series, direction, display and fixed action line."""
 
     def __init__(self, series: str, label: str, higher_is_better: bool, fmt: str, action: str,
-                 *, scale: float = 1.0, per_agent: bool = True) -> None:
+                 *, scale: float = 1.0, per_agent: bool = True, from_series: bool = True, per_model: bool = False) -> None:
         self.series, self.label, self.higher_is_better, self.format = series, label, higher_is_better, fmt
         self.action, self.scale, self.per_agent = action, scale, per_agent
+        # ``from_series``: the scope's own windows come from ``/series``; otherwise the measure has no series id.
+        self.from_series, self.per_model = from_series, per_model
 
 
 #: measure id -> definition. The action lines are the page's fixed wording.
@@ -60,13 +67,22 @@ MEASURES: dict[str, Measure] = {
     "fresh_tokens_per_outcome": Measure(
         "fresh_tokens_per_outcome", "Fresh tokens per outcome", False, "tokens",
         "Check which tasks use the most tokens, and whether a lighter model fits."),
+    # Agents only: the scope's figure is every agent's tasks pooled, served beside the rows.
+    "dollars_per_hour": Measure(
+        DOLLARS_PER_HOUR, "$ per hour of work", False, "dollars",
+        "Check which size class and model drive the cost.", from_series=False),
+    # Models only: the label names the size class, and each row reads its model's biggest comparable class.
+    "cost_per_task": Measure(
+        "cost_per_task", "$ per task", False, "dollars",
+        "Check whether this model is the right fit for this size class.",
+        per_agent=False, from_series=False, per_model=True),
 }
 ACTIONS_BY_MEASURE = {key: measure.action for key, measure in MEASURES.items()}
-SERIES_IDS = tuple(dict.fromkeys(measure.series for measure in MEASURES.values()))
+SERIES_IDS = tuple(dict.fromkeys(measure.series for measure in MEASURES.values() if measure.from_series))
 
 
 def _item(subject: dict[str, str], key: str, before: float, after: float, n: int, average: float | None,
-          ) -> dict[str, Any] | None:
+          label: str | None = None) -> dict[str, Any] | None:
     """One ranked row, or None when the move is under the minimum change or starts at zero."""
     if not before:
         return None
@@ -75,7 +91,7 @@ def _item(subject: dict[str, str], key: str, before: float, after: float, n: int
         return None
     measure = MEASURES[key]
     return {
-        "subject": subject, "measure": key, "label": measure.label, "format": measure.format,
+        "subject": subject, "measure": key, "label": label or measure.label, "format": measure.format,
         "previous": before, "latest": after, "change": change, "n": n, "overall": average,
         "action": measure.action, "worse": (change < 0) == measure.higher_is_better,
     }
@@ -83,7 +99,7 @@ def _item(subject: dict[str, str], key: str, before: float, after: float, n: int
 
 def build_where_to_look(
     scope: dict[str, str], windows: dict[str, dict[str, Any]], agents: dict[str, Any] | None,
-    comparable: Any, grain: Grain,
+    comparable: Any, grain: Grain, models: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Rank the scope's and its agents' moves into the worse and the improved lists.
 
@@ -92,12 +108,17 @@ def build_where_to_look(
     in an agent view, where there is no list of agents), ``comparable(series, period)``
     the page's definition-break check, and ``grain`` the one window rule: its latest
     window against its previous one. The scope's latest figure per series is the "overall"
-    an agent row is read against.
+    an agent row is read against, except a measure with no series (``/agents`` ``overall``).
+    ``models`` is the ``/models`` payload: each model row is ranked on its biggest size class
+    that the Models table prices in both windows, read against that class pooled across models.
     """
     items: list[dict[str, Any]] = []
     firsts = (grain.previous.first, grain.latest.first)
     averages = {series: (pair.get("latest") or {}).get("value") for series, pair in windows.items()}
+    averages.update({series: cell.get("value") for series, cell in ((agents or {}).get("overall") or {}).items()})
     for key, measure in MEASURES.items():
+        if not measure.from_series:
+            continue
         pair = windows.get(measure.series) or {}
         before, after = pair.get("previous"), pair.get("latest")
         if not before or not after or before["value"] is None or after["value"] is None:
@@ -123,6 +144,22 @@ def build_where_to_look(
                          average * measure.scale if average is not None else None)
             if item:
                 items.append(item)
+    overall_by_size = {cell["size"]: cell["cost_per_task"] for cell in (models or {}).get("size_overall", [])}
+    for row in (models or {}).get("rows", []):
+        # The floor row pools unnamed models, so it is not a subject to look at.
+        if row.get("other"):
+            continue
+        cells = [cell for cell in row.get("sizes", []) if cell.get("previous_cost_per_task")]
+        if not cells:
+            continue
+        cell = max(cells, key=lambda cell: cell["tasks"])
+        if not all(comparable(MEASURES["cost_per_task"].series, first) for first in firsts):
+            continue
+        item = _item({"id": row["model"], "name": row["label"], "kind": "model"}, "cost_per_task",
+                     cell["previous_cost_per_task"], cell["cost_per_task"], cell["tasks"],
+                     overall_by_size.get(cell["size"]), label=f"{cell['size']} $ per task")
+        if item:
+            items.append(item)
     order = lambda item: (-abs(item["change"]), item["subject"]["name"], item["measure"])
     worse = sorted((item for item in items if item["worse"]), key=order)
     better = sorted((item for item in items if not item["worse"]), key=order)
@@ -171,9 +208,11 @@ async def measurement_where_to_look(
     scope = await run_in_db(scope_of)
     requested = page.requested_series(",".join(dict.fromkeys([*(ids or "").split(","), *SERIES_IDS])))
     series = await page.series_payload(requested, project, agent, page_grain, user, reuse_finished=True)
+    # The page's Models table request, so a page load that drew it shares the read.
+    models = await page.models_read(project, agent, page_grain.unaveraged(), user, reuse_finished=True)
     agents = None
     if scope["kind"] != "agent":
         # The page's default Agents table: its dollars column is not a measure ranked here.
         agents = await page.agents_payload(project, agent, page_grain.unaveraged(), "ranked", "fresh_tokens_per_outcome",
                                            True, user, reuse_finished=True)
-    return build_where_to_look(scope, series["windows"], agents, page.period_comparable, page_grain)
+    return build_where_to_look(scope, series["windows"], agents, page.period_comparable, page_grain, models)

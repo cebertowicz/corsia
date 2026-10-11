@@ -3,11 +3,11 @@ import { measurementScope, panelSeriesIds, type MeasurementScope } from './measu
 import { grainScopeParams, measurementGrain } from './measurementGrain';
 import { decodePeriod, type MeasurementPeriod } from './measurementPeriod';
 
-export type WhereToLookFormat = 'percent' | 'hours' | 'minutes' | 'ratio' | 'tokens';
-const FORMATS: ReadonlySet<unknown> = new Set(['percent', 'hours', 'minutes', 'ratio', 'tokens']);
+export type WhereToLookFormat = 'percent' | 'hours' | 'minutes' | 'ratio' | 'tokens' | 'dollars';
+const FORMATS: ReadonlySet<unknown> = new Set(['percent', 'hours', 'minutes', 'ratio', 'tokens', 'dollars']);
 
 export interface WhereToLookRow {
-	subject: { id: string; name: string; kind: 'scope' | 'agent' };
+	subject: { id: string; name: string; kind: 'scope' | 'agent' | 'model' };
 	measure: string;
 	label: string;
 	format: WhereToLookFormat;
@@ -44,7 +44,7 @@ function decodeRow(raw: unknown): WhereToLookRow {
 		throw new Error('where-to-look row carried an invalid measure');
 	}
 	return {
-		subject: { id: subject.id, name: subject.name, kind: subject.kind === 'agent' ? 'agent' : 'scope' },
+		subject: { id: subject.id, name: subject.name, kind: subject.kind === 'agent' || subject.kind === 'model' ? subject.kind : 'scope' },
 		measure: row.measure, label: row.label, format: row.format as WhereToLookFormat, action: row.action,
 		previous: finite(row.previous), latest: finite(row.latest), change: finite(row.change), n: finite(row.n),
 		overall: typeof row.overall === 'number' && Number.isFinite(row.overall) ? row.overall : null,
@@ -103,6 +103,7 @@ function compact(value: number): string {
 export function formatWhereToLookValue(value: number, format: WhereToLookFormat): string {
 	if (format === 'percent') return `${Math.round(value * 100)}%`;
 	if (format === 'tokens') return compact(value);
+	if (format === 'dollars') return `$${value.toFixed(2)}`;
 	if (format === 'hours') return `${Number(value.toFixed(value < 10 ? 1 : 0)).toLocaleString('en-US')} h`;
 	if (format === 'minutes') return value.toFixed(1);
 	return String(Number(value.toFixed(2)));

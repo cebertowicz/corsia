@@ -17,7 +17,7 @@ from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
 from api.measurement_registry import REGISTRY, instrument_period, period_measured
-from api.measurement_models import models_payload
+from api.measurement_models import models_read
 from api.measurement_agent_attention import MAX_ACTIVE_GAP_SECONDS
 from api.measurement_partial import current_period_outcomes
 from api.measurement_queries import prepare_outcome_periods, query_family
@@ -330,7 +330,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
             # One prepared window covers every period the grain draws, so nothing reads live plans.
             prepare_outcome_periods(db, params, roots=True)
-            rows, findings, summaries, agent_count = build_agents(
+            rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain, period_comparable,
                 lambda name, period: period_measured(name, period, page_grain), with_dollars=dollars)
             return {
@@ -343,6 +343,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
                 "rows": rows,
                 "findings": findings,
                 "findings_state": derive_findings_state(rows, findings, agent_count),
+                "overall": overall,
                 "project_summaries": summaries["active"],
                 "inactive_projects": summaries["inactive"],
             }
@@ -367,25 +368,7 @@ async def measurement_models(
     grain's latest window (and the previous window for the change), with model identity
     and price from Cost's owners; see ``api.measurement_models``.
     """
-    page_grain = resolve_grain(grain, timezone_name)
-
-    def query() -> dict[str, Any]:
-        db = get_db()
-        try:
-            from llm.model_status import catalog_base_rows
-
-            selected_scope = validate_scope(db, user["id"], project, agent)
-            models = models_payload(db, selected_scope.params(user["id"]), page_grain, catalog_base_rows())
-            return {
-                "definition_version": 3,
-                "scope": selected_scope.response(),
-                "period": page_grain.describe(),
-                **models,
-            }
-        finally:
-            db.close()
-
-    return await run_bulk(query)
+    return await models_read(project, agent, resolve_grain(grain, timezone_name), user)
 
 
 register_cost_route(

@@ -18,15 +18,19 @@ from datetime import date, timedelta
 from typing import Any
 
 from api.cost_identity import IdentityResolver, ModelIdentity
+from api.measurement_join import joined_read
 from api.measurement_model_cost import materialize_chain, query_model_costs, query_recording_gaps
 from api.measurement_model_turns import query_model_turns
 from api.measurement_queries import prepare_outcome_periods, query_family
+from api.measurement_scope import validate_scope
 from api.measurement_size import outcome_sizes
 from api.model_groups import (
     MIN_TASKS, ModelTally, PeriodTasks, cost_class, group_shares, includes_local, other_label, rest_label, split_by_spend,
 )
 from core.measurement_scope import Grain
 from core.size_rating import CLASS_MIDPOINT_HOURS
+from infra.database import get_db
+from infra.db_async import run_bulk
 from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
 
 #: Turns a row needs before its failed-turn rate is shown.
@@ -85,6 +89,7 @@ def _size_cell(size: str, tally: ModelTally, first_try: Mapping[str, int]) -> di
         "size": size,
         "tasks": len(tasks),
         "cost_per_task": round(rate, 10),
+        "previous_cost_per_task": round(prior, 10) if prior else None,
         "cost_change": round((rate - prior) / prior, 10) if prior else None,
         "change_reason": "none" if prior else "new",
         "first_try": sum(first_try.get(task, 0) for task in tasks) / len(tasks),
@@ -96,6 +101,15 @@ def _size_cell(size: str, tally: ModelTally, first_try: Mapping[str, int]) -> di
 def _size_cells(sizes: Mapping[str, ModelTally], first_try: Mapping[str, int]) -> list[dict[str, Any]]:
     cells = (_size_cell(size, sizes[size], first_try) for size in CLASS_MIDPOINT_HOURS if size in sizes)
     return [cell for cell in cells if cell is not None]
+
+
+def _pooled_sizes(by_model: Iterable[Mapping[str, ModelTally]]) -> dict[str, ModelTally]:
+    """Several models' per-class tallies merged into one tally per class."""
+    pooled: dict[str, ModelTally] = defaultdict(ModelTally)
+    for sizes in by_model:
+        for size, tally in sizes.items():
+            pooled[size].merge(tally)
+    return pooled
 
 
 def _row(
@@ -132,11 +146,9 @@ def _other_row(
 ) -> dict[str, Any]:
     # The other row's cells pool its members' tasks, as its own rate does.
     pooled = ModelTally()
-    pooled_sizes: dict[str, ModelTally] = defaultdict(ModelTally)
     for key in rest:
         pooled.merge(tallies[key])
-        for size, tally in sizes[key].items():
-            pooled_sizes[size].merge(tally)
+    pooled_sizes = _pooled_sizes(sizes[key] for key in rest)
     return {**_row("", other_label(len(rest)), pooled, False, pooled_sizes, first_try), "other": True}
 
 
@@ -204,6 +216,8 @@ def build_models(
     total = sum(tokens.values())
     return {
         "rows": rows,
+        # Every model's tasks of one class pooled: the figure a row's class is read against.
+        "size_overall": _size_cells(_pooled_sizes(sizes.values()), first_try),
         "min_tasks": MIN_TASKS,
         "token_shares": group_shares([
             {"model": key, "label": identities[key].label, "share_of_tokens": amount / total, "tokens": amount}
@@ -260,3 +274,26 @@ def models_payload(
         offered=resolve.offered_now(catalog_entries), gaps=gaps,
         outcomes=outcome_sizes(db, params),
     )
+
+
+@joined_read
+async def models_read(project: str, agent: str, page_grain: Grain, user: dict) -> dict[str, Any]:
+    """The ``/models`` body for one resolved grain; Biggest changes reads the same one."""
+
+    def query() -> dict[str, Any]:
+        db = get_db()
+        try:
+            from llm.model_status import catalog_base_rows
+
+            selected_scope = validate_scope(db, user["id"], project, agent)
+            models = models_payload(db, selected_scope.params(user["id"]), page_grain, catalog_base_rows())
+            return {
+                "definition_version": 3,
+                "scope": selected_scope.response(),
+                "period": page_grain.describe(),
+                **models,
+            }
+        finally:
+            db.close()
+
+    return await run_bulk(query)

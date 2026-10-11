@@ -120,6 +120,20 @@ def test_the_figure_is_withheld_under_the_table_floor_and_pools_across_periods()
     assert dollars_metric({("a", periods[0]): {"dollars": 1.0, "hours": 0.0, "n": 25}}, "a", GRAIN, RANKING_MINIMUM_N)["value"] is None
 
 
+def test_the_scope_figure_pools_every_agents_tasks_by_the_same_function():
+    latest, before = list(GRAIN.latest.periods), list(GRAIN.previous.periods)
+    costs = {
+        ("a", latest[0]): {"dollars": 10.0, "hours": 10.0, "n": 25},
+        ("b", latest[1]): {"dollars": 30.0, "hours": 10.0, "n": 25},
+        ("a", before[0]): {"dollars": 5.0, "hours": 10.0, "n": 25},
+    }
+    overall = dollars_metric(costs, None, GRAIN, RANKING_MINIMUM_N)
+    assert (overall["value"], overall["n"]) == (2.0, 50)
+    assert (overall["previous_value"], overall["previous_n"]) == (0.5, 25)
+    # One agent's own cell is unchanged by the other's tasks.
+    assert dollars_metric(costs, "a", GRAIN, RANKING_MINIMUM_N)["value"] == 1.0
+
+
 @pytest.mark.asyncio
 async def test_the_agents_route_serves_dollars_per_hour_and_attention_minutes(isolated_db, monkeypatch):
     from test_measurement_agents import POST_BREAK, _freeze, _read, _seed_agent, _seed_project, _seed_period, _seeded
@@ -145,3 +159,6 @@ async def test_the_agents_route_serves_dollars_per_hour_and_attention_minutes(is
     # Each S task is 1 h of work carrying one 1M-token Opus call, so dollars per hour is that call's price.
     assert cell["value"] == pytest.approx(8.0)
     assert row["active_minutes"] == pytest.approx(1.0)
+    # The one agent is all the work there is, so the scope's pooled figure is its own.
+    overall = (await _read())["overall"]["dollars_per_work_hour"]
+    assert (overall["value"], overall["n"]) == (cell["value"], cell["n"])

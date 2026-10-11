@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from api.measurement_where_to_look import ACTIONS_BY_MEASURE, MEASURES, build_where_to_look
+from api.measurement_where_to_look import ACTIONS_BY_MEASURE, MEASURES, SERIES_IDS, build_where_to_look
 from core.measurement_scope import resolve_grain
 from test_measurement_agents import (
     POST_BREAK, _freeze, _seed_agent, _seed_project, _seed_period, _seeded,
@@ -35,8 +35,18 @@ def _windows(series: str, before: float | None, after: float | None, n: int = 30
     return {series: {"previous": {"value": before, "n": n}, "latest": {"value": after, "n": n}}}
 
 
-def _build(*rows: dict, windows: dict | None = None, comparable=lambda series, period: True) -> dict:
-    return build_where_to_look(SCOPE, windows or {}, {"rows": list(rows)}, comparable, GRAIN)
+def _build(*rows: dict, windows: dict | None = None, comparable=lambda series, period: True,
+           overall: dict | None = None, models: dict | None = None) -> dict:
+    return build_where_to_look(SCOPE, windows or {}, {"rows": list(rows), "overall": overall or {}}, comparable, GRAIN, models)
+
+
+def _cell(size: str, tasks: int, before: float | None, after: float) -> dict:
+    """One Models size cell as the Models table serves it; ``before`` None is a class new this window."""
+    return {"size": size, "tasks": tasks, "cost_per_task": after, "previous_cost_per_task": before}
+
+
+def _model(label: str, *cells: dict, other: bool = False) -> dict:
+    return {"model": "" if other else label.lower(), "label": label, "sizes": list(cells), **({"other": True} if other else {})}
 
 
 def _ids(rows: list[dict]) -> list[tuple[str, str]]:
@@ -101,6 +111,52 @@ def test_a_measure_across_a_definition_break_is_never_compared():
         windows=_windows("asks_per_outcome", 0.1, 0.5),
         comparable=lambda series, first: first != GRAIN.previous.first,
     )
+    assert result["worse"] == []
+
+
+def test_an_agent_dollars_per_hour_row_reads_against_the_scope_pooled_figure():
+    result = _build(
+        _agent("a", "Alpha", dollars_per_work_hour=(1.0, 30, 1.5, 30)),
+        _agent("b", "Beta", dollars_per_work_hour=(2.0, 30, 1.0, 30)),
+        _agent("c", "Thin", dollars_per_work_hour=(1.0, 30, 3.0, 19)),
+        overall={"dollars_per_work_hour": {"value": 1.2, "n": 80}},
+    )
+    (worse,) = result["worse"]
+    assert (worse["subject"]["name"], worse["measure"], worse["label"], worse["format"]) == (
+        "Alpha", "dollars_per_hour", "$ per hour of work", "dollars")
+    assert (worse["previous"], worse["latest"], worse["n"], worse["overall"]) == (1.0, 1.5, 30, 1.2)
+    assert _ids(result["improved"]) == [("Beta", "dollars_per_hour")]
+    # Neither dollars measure is a /series id, so the series read is never asked for one.
+    assert not {"dollars_per_work_hour", "cost_per_task"} & set(SERIES_IDS)
+
+
+def test_a_model_row_is_its_biggest_size_class_priced_in_both_windows_against_that_class_pooled():
+    result = _build(models={
+        "size_overall": [{"size": "S", "cost_per_task": 2.0}, {"size": "M", "cost_per_task": 8.0}],
+        "rows": [
+            # M has more tasks than S, so M is the class read; L is new this window and is skipped.
+            _model("Opus", _cell("S", 20, 2.0, 3.0), _cell("M", 40, 8.0, 12.0), _cell("L", 90, None, 30.0)),
+            _model("Mid", _cell("S", 20, 4.0, 2.0)),
+            _model("Flat", _cell("S", 20, 2.0, 2.1)),
+            _model("New", _cell("S", 20, None, 2.0)),
+            _model("Other (3 more models)", _cell("S", 50, 1.0, 9.0), other=True),
+        ],
+    })
+    (worse,) = result["worse"]
+    assert (worse["subject"], worse["measure"], worse["label"], worse["format"]) == (
+        {"id": "opus", "name": "Opus", "kind": "model"}, "cost_per_task", "M $ per task", "dollars")
+    assert (worse["previous"], worse["latest"], worse["n"], worse["overall"]) == (8.0, 12.0, 40, 8.0)
+    assert worse["action"] == ACTIONS_BY_MEASURE["cost_per_task"]
+    (better,) = result["improved"]
+    assert (better["subject"]["name"], better["label"], better["overall"]) == ("Mid", "S $ per task", 2.0)
+    # A model's failed turns are not a Biggest changes measure.
+    assert not any("failed" in row["measure"] for row in (*result["worse"], *result["improved"]))
+
+
+def test_a_model_cost_row_is_not_compared_across_a_definition_break():
+    result = _build(
+        models={"size_overall": [{"size": "S", "cost_per_task": 2.0}], "rows": [_model("Opus", _cell("S", 20, 2.0, 3.0))]},
+        comparable=lambda series, first: first != GRAIN.previous.first)
     assert result["worse"] == []
 
 
