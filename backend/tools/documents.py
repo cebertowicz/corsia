@@ -97,10 +97,10 @@ async def _region_result(
         name = Path(str(image_regions.image_of(row, path))).stem
         db = get_db()
         try:
+            image = image_regions.comment_image(db, row, path, image_regions.reader_bases(db, reader))
+            label = f"{name}-region-{row['region_number']}"
             return image_regions.write_marked_image(
-                db, image=image_regions.current_image(db, row, path, reader), rows=[row], reader_thread_id=reader,
-                label=f"{name}-region-{row['region_number']}",
-            )
+                db, image=image_regions.require_image(image), rows=[row], reader_thread_id=reader, label=label)
         finally:
             db.close()
 

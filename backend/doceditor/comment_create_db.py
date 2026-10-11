@@ -76,7 +76,8 @@ def _image(db, request: CommentInput, quote: str | None) -> tuple[str | None, st
         owner = artifact["parent_thread_id"] if artifact else None
     else:
         owner = request.author_thread_id
-    image = doc_images.image_file(db, doc_path=request.path, markdown=quote, owner_thread_id=owner)
+    bases = image_regions.reader_bases(db, owner)
+    image = doc_images.image_file(db, doc_path=request.path, markdown=quote, bases=bases)
     return str(image), image_regions.image_revision(image)
 
 

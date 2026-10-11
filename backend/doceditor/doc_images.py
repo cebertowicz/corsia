@@ -18,8 +18,9 @@ from typing import Any, Mapping
 from urllib.parse import unquote
 
 from doceditor.comment_action_errors import CommentActionError
-from doceditor.image_regions import current_image, is_image_path, move_fields
-from doceditor.image_scope import checked_image
+from doceditor.image_regions import (
+    checked_image, comment_image, is_image_path, move_fields, reader_bases, require_image,
+)
 from doceditor.quote_anchor import _cp_at_u16, _span16, anchor_context
 
 
@@ -93,11 +94,11 @@ def widen_to_image(text: str, from16: int, to16: int) -> tuple[str, int, int, st
     raise CommentActionError("region_target", NOT_AN_IMAGE)
 
 
-def image_file(db, *, doc_path: str | None, markdown: str | None, owner_thread_id: str | None) -> Path:
+def image_file(db, *, doc_path: str | None, markdown: str | None, bases: list[Path]) -> Path:
     """The image file the anchored markdown shows, by the path the editor draws it from.
 
-    It passes the same checks as the file route that serves the editor its
-    bytes: an existing file inside a root the document's owner can read.
+    It passes the file route's read-scope gate with the reader's ``bases``
+    (``image_regions.reader_bases``): an existing file inside a root they cover.
     """
     url = image_url(markdown or "")
     if url is None:
@@ -107,7 +108,7 @@ def image_file(db, *, doc_path: str | None, markdown: str | None, owner_thread_i
         raise CommentActionError("region_target", "a region goes only on an image stored in the workspace, never a web image.")
     if not is_image_path(path):
         raise CommentActionError("region_target", f"{path} is not an image, so a region cannot be placed on it.")
-    checked_image(db, path, owner_thread_id)
+    checked_image(db, path, bases)
     return Path(path)
 
 
@@ -119,11 +120,12 @@ def region_patch(db, comment: Mapping[str, Any], fields: dict[str, Any], *, doc_
     name that image; a moved pin is placed on the image as it is now.
     """
     image_src = comment.get("image_src")
+    bases = reader_bases(db, owner_thread_id) if image_src else []
     if image_src and "anchor_text" in fields:
-        named = image_file(db, doc_path=doc_path, markdown=fields["anchor_text"], owner_thread_id=owner_thread_id)
+        named = image_file(db, doc_path=doc_path, markdown=fields["anchor_text"], bases=bases)
         if str(named) != image_src:
             raise CommentActionError(
                 "region_target", "a comment on part of an image stays on its image; comment on the other image instead.")
     if "region" not in fields:
         return fields
-    return move_fields(comment, fields, current_image(db, comment, doc_path, owner_thread_id))
+    return move_fields(comment, fields, require_image(comment_image(db, comment, doc_path, bases)))

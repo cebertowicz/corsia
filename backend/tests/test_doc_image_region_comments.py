@@ -322,3 +322,57 @@ async def test_agent_region_comment_stays_on_its_image(integration_client, doc):
     )
 
     assert str(moved).startswith("Error:") and "stays on its image" in str(moved), moved
+
+
+def _project_root(client, integration_workspace) -> tuple[str, Path]:
+    from core.workspace_layout import resolve_project_root
+    from infra.database import get_db
+
+    r = client.post(_url("/api/projects"), json={"name": f"Regions {uuid.uuid4().hex[:6]}"})
+    assert r.status_code == 200, r.text
+    project_id = r.json()["project"]["id"]
+    db = get_db()
+    try:
+        root = resolve_project_root(integration_workspace, project_id, db=db)
+    finally:
+        db.close()
+    assert root is not None
+    root.mkdir(parents=True, exist_ok=True)
+    return project_id, root
+
+
+@pytest.mark.asyncio
+async def test_a_project_document_never_reads_an_image_in_another_project(integration_client, integration_workspace):
+    """A document's images are read in its reader's scope, as the file route reads them: one project, never another."""
+    from tools.documents import DocCommentCreateTool
+
+    project, root = _project_root(integration_client, integration_workspace)
+    _, other_root = _project_root(integration_client, integration_workspace)
+    secret = other_root / "secret.png"
+    secret.write_bytes(_png_bytes(color=(200, 0, 0), size=(320, 200)))
+    doc = root / "notes.md"
+    doc.write_text(f"# Notes\n\n![Secret]({secret})\n")
+    r = integration_client.post(_url("/api/threads"), json={"title": "Design Reviewer", "project_id": project})
+    assert r.status_code == 200, r.text
+
+    created = await DocCommentCreateTool().execute(
+        doc_path=str(doc), quote=str(secret), region={"x": 0.1, "y": 0.1}, body="b", _thread_id=r.json()["thread_id"],
+    )
+
+    assert str(created).startswith("Error") and "outside" in str(created), created
+
+
+def test_listing_scopes_its_reader_once_however_many_images(integration_client, doc, monkeypatch):
+    """The reader's roots are the same for every image in one list, so they are resolved once."""
+    from doceditor import document_scope, image_regions
+
+    artifact_id = _register(integration_client, doc)
+    _region_comment(integration_client, artifact_id, doc, LOGIN, {"x": 0.1, "y": 0.1})
+    _region_comment(integration_client, artifact_id, doc, CART, {"x": 0.3, "y": 0.3})
+    calls = []
+    real = document_scope.scope_bases
+    monkeypatch.setattr(image_regions, "scope_bases", lambda *a, **k: calls.append(a) or real(*a, **k), raising=False)
+
+    _threads(integration_client, artifact_id)
+
+    assert len(calls) == 1

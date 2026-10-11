@@ -21,14 +21,15 @@ from PIL import Image
 
 from doceditor import live_events
 from doceditor.comment_action_errors import CommentActionError
+from doceditor.document_scope import ProjectNotFound, scope_bases
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
-from doceditor.image_scope import checked_image
 from infra.database import write_transaction
 from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
 from registry import models as registry_models
 from registry.file_types import image_media_type
 from registry.identity_metadata import sha256_file
+from registry.path_access import ReadRefused, checked_read
 
 # Mirrors the viewer's AGENT_COLORS and agentColor() (frontend/src/lib/docPresence.ts),
 # so a tag is the same colour in the picture an agent reads and on screen.
@@ -42,6 +43,7 @@ _EPSILON = 1e-6
 # What a marked-up copy can fail with: a missing or unreadable file, a format
 # Pillow cannot decode, or an image past the decode budget.
 RENDER_ERRORS = (OSError, ValueError, Image.DecompressionBombError)
+_REFUSED = {"missing": "could not be found", "outside": "is outside this document's scope", "not_file": "is not a file"}
 
 
 def parse_region(value: Any) -> tuple[float, float, float, float]:
@@ -118,30 +120,37 @@ def require_image(path: str | None) -> Path:
     return Path(str(path))
 
 
-def readable_image(db, row: Mapping[str, Any], path: str | None, reader_thread_id: str | None) -> tuple[str | None, Path | None]:
-    """The image a region comment is on, as ``reader_thread_id`` may read it now, or why it cannot.
+def reader_bases(db, thread_id: str | None) -> list[Path]:
+    """The roots ``thread_id`` reads files from, scoped as the file route scopes them; resolved once per request.
 
-    The one way from a comment row to its image's bytes. The artifact's own file
-    was checked when the artifact was; an image inside a document is named by a
-    stored path, which passes the scope check again on every read (image_scope).
+    A thread in a project reads that project's roots; a thread outside any project, the workspace's.
     """
-    image_path = image_of(row, path)
-    if not image_path:
-        return "the artifact has no image file.", None
-    if not row.get("image_src"):
-        return None, Path(image_path)
+    row = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone() if thread_id else None
     try:
-        return None, checked_image(db, image_path, reader_thread_id)
-    except CommentActionError as exc:
-        return exc.message, None
+        return scope_bases(row["project_id"] if row else None, db)
+    except ProjectNotFound:
+        return []
 
 
-def current_image(db, row: Mapping[str, Any], path: str | None, owner_thread_id: str | None) -> Path:
-    """The image a region comment is on as it is now, or the error that it cannot be read."""
-    problem, image = readable_image(db, row, path, owner_thread_id)
-    if image is None and row.get("image_src"):
-        raise CommentActionError("region_target", problem or "the image could not be read.")
-    return require_image(str(image) if image else path)
+def checked_image(db, path: str, bases: list[Path]) -> Path:
+    """The file at ``path`` as the read-scope gate passes it for ``bases``, or the region error."""
+    try:
+        return checked_read(path, bases, db=db)
+    except ReadRefused as exc:
+        raise CommentActionError("region_target", f"the image {path} {_REFUSED[exc.reason]}.") from exc
+
+
+def comment_image(db, row: Mapping[str, Any], path: str | None, bases: list[Path]) -> Path | None:
+    """The image a region comment is on, or ``None`` when its artifact has none. An artifact is its own
+    file; a document's image is a stored path, not a grant, so each read takes it through the gate again."""
+    if row.get("image_src"):
+        return checked_image(db, row["image_src"], bases)
+    return Path(path) if path else None
+
+
+def _bases_for(db, groups: Iterable[list[dict]], thread_id: str | None) -> list[Path]:
+    """The reader's roots, resolved only when some image in ``groups`` sits inside a document."""
+    return reader_bases(db, thread_id) if any(group[0].get("image_src") for group in groups) else []
 
 
 def image_revision(path: Path) -> str:
@@ -166,8 +175,7 @@ def move_fields(comment: Mapping[str, Any], fields: dict[str, Any], image: Path)
         raise CommentActionError("region_target", "only a comment placed on an image region can be moved.")
     x, y, w, h = parse_region(fields["region"])
     rest = {key: value for key, value in fields.items() if key != "region"}
-    return {**rest, "region_x": x, "region_y": y, "region_w": w, "region_h": h,
-            "image_rev": image_revision(image)}
+    return {**rest, "region_x": x, "region_y": y, "region_w": w, "region_h": h, "image_rev": image_revision(image)}
 
 
 def region_of(row: Mapping[str, Any]) -> Region | None:
@@ -199,8 +207,14 @@ def _mark_stale(group: list[dict], image: Path | None) -> None:
 
 def annotate_stale(db, threads: list[dict], path: str | None, reader_thread_id: str | None) -> None:
     """Mark each region comment whose image changed since it was placed (FR13.9), reading each image once."""
-    for group in _by_image(threads, path).values():
-        _mark_stale(group, readable_image(db, group[0], path, reader_thread_id)[1])
+    groups = list(_by_image(threads, path).values())
+    bases = _bases_for(db, groups, reader_thread_id)
+    for group in groups:
+        try:
+            image = comment_image(db, group[0], path, bases)
+        except CommentActionError:
+            image = None
+        _mark_stale(group, image)
 
 
 def agent_color(thread_id: str) -> str:
@@ -314,11 +328,14 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
         tray = _working_tray(db, reader_thread_id)
     except (ValueError, OSError) as exc:
         tray_problem = f"the reader's working folder could not be used ({exc})."
+    bases = _bases_for(db, by_image.values(), reader_thread_id)
     for image_path, group in by_image.items():
-        problem, image = readable_image(db, group[0], path, reader_thread_id)
+        try:
+            image = comment_image(db, group[0], path, bases)
+            problem = _unmarkable(str(image) if image else None)
+        except CommentActionError as exc:
+            image, problem = None, exc.message
         _mark_stale(group, image)
-        if image is not None:
-            problem = _unmarkable(str(image))
         problem = problem or tray_problem
         if problem is not None or tray is None or image is None:
             line = f"Marked-up image unavailable: {problem}"
