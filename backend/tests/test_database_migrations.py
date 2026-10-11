@@ -467,7 +467,11 @@ def test_a_crash_restart_loop_halts_before_the_host_runs_out(
         with pytest.raises(MigrationError):
             _attempt(path)
 
-    assert len(_backups(tmp_path)) == 2
+    # The third attempt freed the oldest superseded backup and still lacked
+    # room; the newest is never pruned, so later attempts refuse with it intact.
+    assert [p.name for p in _backups(tmp_path)] == [
+        "test.db.pre-migration-v1-20260909T230022Z.bak"
+    ]
     assert _digest(path) == before
 
 
@@ -590,3 +594,190 @@ def test_a_real_failure_after_a_backup_still_names_it(tmp_path, ladder):
     written = _backups(tmp_path)
     assert len(written) == 1
     assert f"A pre-migration backup is at {written[0]}." in str(failure.value)
+
+
+# --- pre-migration backups are bounded, not accumulated -----------------------
+
+
+def _seed_backups(directory: Path, *names: str) -> None:
+    for name in names:
+        (directory / name).write_bytes(b"old backup")
+
+
+def _names(directory: Path) -> list[str]:
+    return sorted(p.name for p in directory.iterdir())
+
+
+_LOOK_ALIKES = (
+    "other.db.pre-migration-v3-20260101T000000Z.bak",
+    "test.db.pre-migration-vX-20260101T000000Z.bak",
+    "test.db.pre-migration-v3-20260101T000000Z.bak.keep",
+    "test.db.archive-20260101T000000Z.json",
+)
+
+
+def _seed_look_alikes(directory: Path) -> None:
+    _seed_backups(directory, *_LOOK_ALIKES)
+    (directory / "backups").mkdir()
+    (directory / "backups" / "daily.db").write_bytes(b"daily")
+
+
+def test_a_successful_migration_keeps_only_the_newest_backups(
+    tmp_path, ladder, restart_clock,
+):
+    ladder[1] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    path = _database(tmp_path, 1)
+    _seed_look_alikes(tmp_path)
+    _seed_backups(
+        tmp_path,
+        "test.db.pre-migration-v10-20260101T000000Z.bak",
+        "test.db.pre-migration-v11-20260201T000000Z.bak",
+        "test.db.pre-migration-v12-20260301T000000Z.bak",
+        "test.db.pre-migration-v9-20260401T000000Z.bak",
+    )
+
+    _attempt(path)
+
+    assert _names(tmp_path) == sorted(
+        [
+            "test.db",
+            "backups",
+            "test.db.pre-migration-v9-20260401T000000Z.bak",
+            "test.db.pre-migration-v1-20260909T230011Z.bak",
+            *_LOOK_ALIKES,
+        ]
+    )
+    assert (tmp_path / "backups" / "daily.db").read_bytes() == b"daily"
+
+
+def test_the_keep_count_is_overridable(tmp_path, ladder, restart_clock, monkeypatch):
+    import infra.database_migrations as migrations
+
+    monkeypatch.setattr(migrations, "_PRE_MIGRATION_BACKUPS_KEEP", 1)
+    ladder[1] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    path = _database(tmp_path, 1)
+    _seed_backups(tmp_path, "test.db.pre-migration-v10-20260101T000000Z.bak")
+
+    _attempt(path)
+
+    assert _names(tmp_path) == [
+        "test.db",
+        "test.db.pre-migration-v1-20260909T230011Z.bak",
+    ]
+
+
+def test_a_failed_migration_prunes_nothing(tmp_path, ladder, restart_clock):
+    ladder[1] = _fail_every_time
+    path = _database(tmp_path, 1)
+    seeded = [
+        "test.db.pre-migration-v10-20260101T000000Z.bak",
+        "test.db.pre-migration-v11-20260201T000000Z.bak",
+        "test.db.pre-migration-v12-20260301T000000Z.bak",
+    ]
+    _seed_backups(tmp_path, *seeded)
+
+    with pytest.raises(MigrationError):
+        _attempt(path)
+
+    assert _names(tmp_path) == sorted(
+        ["test.db", "test.db.pre-migration-v1-20260909T230011Z.bak", *seeded]
+    )
+
+
+def test_short_room_prunes_oldest_superseded_backups_then_migrates(
+    tmp_path, ladder, restart_clock, monkeypatch,
+):
+    import infra.database_migrations as migrations
+
+    ladder[1] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    path = _database(tmp_path, 1)
+    _seed_look_alikes(tmp_path)
+    _seed_backups(
+        tmp_path,
+        "test.db.pre-migration-v10-20260101T000000Z.bak",
+        "test.db.pre-migration-v11-20260201T000000Z.bak",
+        "test.db.pre-migration-v12-20260301T000000Z.bak",
+        "test.db.pre-migration-v13-20260401T000000Z.bak",
+    )
+    required = (
+        int(migrations._database_bytes(path) * migrations._BACKUP_MIN_FREE_RATIO)
+        + migrations._BACKUP_FREE_FLOOR_BYTES
+    )
+    # Short on the first check and after the first deletion, enough after the second.
+    monkeypatch.setattr(
+        migrations.shutil,
+        "disk_usage",
+        _shrinking_disk(required - 1, required - 1, required + 1),
+    )
+
+    _attempt(path)
+
+    assert _names(tmp_path) == sorted(
+        [
+            "test.db",
+            "backups",
+            "test.db.pre-migration-v13-20260401T000000Z.bak",
+            "test.db.pre-migration-v1-20260909T230011Z.bak",
+            *_LOOK_ALIKES,
+        ]
+    )
+
+
+def test_short_room_with_only_the_newest_backup_refuses_as_before(
+    tmp_path, ladder, restart_clock, monkeypatch,
+):
+    ladder[1] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    path = _database(tmp_path, 1)
+    _seed_backups(tmp_path, "test.db.pre-migration-v10-20260101T000000Z.bak")
+    import infra.database_migrations as migrations
+
+    monkeypatch.setattr(
+        migrations.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(total=1, used=1, free=1),
+    )
+
+    with pytest.raises(MigrationError, match="not enough free space"):
+        _attempt(path)
+
+    assert _names(tmp_path) == ["test.db", "test.db.pre-migration-v10-20260101T000000Z.bak"]
+
+
+def test_pruning_logs_one_info_line_with_bytes_reclaimed(
+    tmp_path, ladder, restart_clock, caplog,
+):
+    ladder[1] = lambda conn: conn.execute("CREATE TABLE migrated (x)")
+    path = _database(tmp_path, 1)
+    _seed_backups(
+        tmp_path,
+        "test.db.pre-migration-v10-20260101T000000Z.bak",
+        "test.db.pre-migration-v11-20260201T000000Z.bak",
+        "test.db.pre-migration-v12-20260301T000000Z.bak",
+    )
+
+    with caplog.at_level("INFO", logger="infra.database_migrations"):
+        _attempt(path)
+
+    pruned = [r.getMessage() for r in caplog.records if "Pruned" in r.getMessage()]
+    assert pruned == [
+        "Pruned 2 pre-migration backup(s), reclaimed 20 bytes (retention after migration)"
+    ]
+
+
+def test_only_this_databases_backups_match(tmp_path):
+    import infra.database_migrations as migrations
+
+    _seed_look_alikes(tmp_path)
+    _seed_backups(
+        tmp_path,
+        "test.db-wal",
+        "test.db-shm",
+        "test.db.pre-migration-v10-20260301T000000Z.bak",
+        "test.db.pre-migration-v9-20260101T000000Z.bak",
+    )
+    (tmp_path / "test.db.pre-migration-v8-20250101T000000Z.bak").mkdir()
+
+    assert [p.name for p in migrations._pre_migration_backups(tmp_path / "test.db")] == [
+        "test.db.pre-migration-v9-20260101T000000Z.bak",
+        "test.db.pre-migration-v10-20260301T000000Z.bak",
+    ]

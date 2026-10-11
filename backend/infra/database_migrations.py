@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import sqlite3
 from collections.abc import Callable
@@ -195,6 +196,16 @@ _BACKUP_MIN_FREE_RATIO = 1.25
 #: condition by freeing space anywhere rather than by picking a file to delete.
 _BACKUP_FREE_FLOOR_BYTES = int(
     os.getenv("CORSIA_BACKUP_FREE_FLOOR_BYTES", str(10 * 1024**3))
+)
+
+#: How many pre-migration backups of a database survive a successful migration.
+#:
+#: Nothing else ever removes them, and each is a full copy: left alone they
+#: accumulate until the room check above refuses the next copy and startup
+#: fails on space our own stale backups hold. At least one is always kept (the
+#: backup just taken), so a value below 1 is read as 1.
+_PRE_MIGRATION_BACKUPS_KEEP = max(
+    1, int(os.getenv("CORSIA_PRE_MIGRATION_BACKUPS_KEEP", "2"))
 )
 
 #: How long a losing starter waits for the migration's write lock.
@@ -784,6 +795,87 @@ def _require_backup_room(source: Path, from_version: int) -> None:
         )
 
 
+def _pre_migration_backups(source: Path) -> list[Path]:
+    """This database's pre-migration backups, oldest first.
+
+    Matches only ``<db name>.pre-migration-v<digits>-<UTC stamp>.bak`` beside
+    the database, so the live file, its ``-wal``/``-shm``, other databases'
+    backups, ``.archive-*`` files and the ``backups/`` directory never match.
+    Ordered by the stamp in the name, not mtime, which a restore or copy
+    rewrites.
+    """
+    pattern = re.compile(
+        re.escape(source.name) + r"\.pre-migration-v(\d+)-(\d{8}T\d{6}Z)\.bak"
+    )
+    found: list[tuple[str, int, Path]] = []
+    for path in source.parent.iterdir():
+        match = pattern.fullmatch(path.name)
+        if match and path.is_file():
+            found.append((match.group(2), int(match.group(1)), path))
+    return [path for _, _, path in sorted(found)]
+
+
+def _delete_backups(victims: list[Path], reason: str) -> None:
+    """Delete backups, logging one INFO line with the count and bytes reclaimed."""
+    removed = 0
+    reclaimed = 0
+    for path in victims:
+        try:
+            size = path.stat().st_size
+            path.unlink()
+        except OSError as error:
+            log.warning("Could not remove pre-migration backup %s: %s", path, error)
+            continue
+        removed += 1
+        reclaimed += size
+    if removed:
+        log.info(
+            "Pruned %d pre-migration backup(s), reclaimed %d bytes (%s)",
+            removed, reclaimed, reason,
+        )
+
+
+def _prune_backups(source: Path, keep_path: Path | None) -> None:
+    """After a verified migration, keep the newest N backups and drop the rest."""
+    backups = _pre_migration_backups(source)
+    survivors = backups[-_PRE_MIGRATION_BACKUPS_KEEP:]
+    victims = [path for path in backups if path not in survivors and path != keep_path]
+    _delete_backups(victims, "retention after migration")
+
+
+def _ensure_backup_room(source: Path, from_version: int) -> None:
+    """Run the room check, first freeing superseded backups when it fails.
+
+    Deletes pre-migration backups oldest-first, never the newest, only while
+    the room check still fails, so an Update does not die on space that our own
+    stale backups hold. When room is still short with only the newest left, the
+    refusal is the room check's own.
+    """
+    try:
+        _require_backup_room(source, from_version)
+        return
+    except MigrationError:
+        stale = _pre_migration_backups(source)[:-1]
+        if not stale:
+            raise
+    removed: list[Path] = []
+    reclaimed = 0
+    for path in stale:
+        reclaimed += path.stat().st_size
+        path.unlink()
+        removed.append(path)
+        try:
+            _require_backup_room(source, from_version)
+            break
+        except MigrationError:
+            continue
+    log.info(
+        "Pruned %d pre-migration backup(s), reclaimed %d bytes (making room for the backup)",
+        len(removed), reclaimed,
+    )
+    _require_backup_room(source, from_version)
+
+
 def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     """Copy the database beside itself, called only by the migration's winner.
 
@@ -802,7 +894,7 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     source = _connection_database_path(conn)
     if source is None:
         return None
-    _require_backup_room(source, from_version)
+    _ensure_backup_room(source, from_version)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     target = source.with_name(f"{source.name}.pre-migration-v{from_version}-{stamp}.bak")
     if target.exists():
@@ -929,4 +1021,10 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
             conn.execute("PRAGMA foreign_keys=ON")
 
     log.info("Schema migrated %d -> %d", current, target_version)
+    source = _connection_database_path(conn)
+    if backup_path is not None and source is not None:
+        try:
+            _prune_backups(source, backup_path)
+        except OSError as error:
+            log.warning("Pre-migration backup pruning failed: %s", error)
     return MigrationResult(True, current, target_version, backup_path)
