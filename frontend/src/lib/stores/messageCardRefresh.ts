@@ -20,29 +20,31 @@ const TURN_RANGE_LIMIT = 50;
 
 type Range = { from: string; to: string };
 
-/** The messages to re-read: those showing cards, and after a turn ends, that turn's own steps. */
-export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Range[] {
+/** One bounding read for the messages showing cards and, after a turn ends, that turn's own steps. */
+export function rangeToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Range | null {
 	const own = rows.filter((row) => row.thread_id === threadId && !row._optimistic);
-	const ranges: Range[] = [];
+	const selected: Message[] = [];
 	let turnFirst = -1;
 	if (turnEnded) {
 		const lastUser = own.map((row) => row.role).lastIndexOf('user');
 		turnFirst = own.findIndex((row, index) => index > lastUser && row.role === 'assistant');
 		const last = own.at(-1);
-		if (turnFirst >= 0 && last) ranges.push({ from: own[turnFirst].id, to: last.id });
+		if (turnFirst >= 0 && last) selected.push(own[turnFirst], last);
 	}
 	own.filter((row, index) => row.role === 'assistant' && Array.isArray(row.cards) && (turnFirst < 0 || index < turnFirst))
 		.slice(-MAX_CARDED)
-		.forEach((row) => ranges.push({ from: row.id, to: row.id }));
-	return ranges;
+		.forEach((row) => selected.push(row));
+	if (!selected.length) return null;
+	const indexes = selected.map((row) => own.indexOf(row));
+	return { from: own[Math.min(...indexes)].id, to: own[Math.max(...indexes)].id };
 }
 
-async function read(threadId: string, bearer: string, range: Range): Promise<unknown[]> {
+export async function readCardRefreshPage(threadId: string, bearer: string, range: Range): Promise<unknown[]> {
 	const params = new URLSearchParams({
 		limit: String(TURN_RANGE_LIMIT), from_id: range.from, to_id: range.to, token: bearer,
 	});
 	const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/messages?${params}`);
-	if (!res.ok) return [];
+	if (!res.ok) throw new Error(`Card refresh failed (${res.status})`);
 	const page = await res.json();
 	return Array.isArray(page?.messages) ? page.messages : [];
 }
@@ -56,13 +58,12 @@ async function refresh(): Promise<void> {
 	const ended = turnEnded;
 	turnEnded = false;
 	if (!threadId || !bearer) return;
-	const ranges = rangesToRefresh(get(messages), threadId, ended);
-	if (!ranges.length) return;
+	const range = rangeToRefresh(get(messages), threadId, ended);
+	if (!range) return;
 	try {
-		const pages = await Promise.all(ranges.map((range) => read(threadId, bearer, range)));
+		const rows = await readCardRefreshPage(threadId, bearer, range);
 		// A read that returns after the thread on screen changed is dropped.
 		if (get(activeThreadId) !== threadId) return;
-		const rows = pages.flat();
 		if (rows.length) messages.update((current) => mergeFetchedHistoryRows(current, hydrateFetchedMessages(rows as never)));
 	} catch (error) {
 		console.error('[message cards] refresh failed', threadId, error);

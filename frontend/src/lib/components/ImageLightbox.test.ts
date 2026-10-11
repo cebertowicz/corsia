@@ -240,6 +240,19 @@ describe('ImageLightbox', () => {
 		expect(host.querySelector('.load-error')).toBeNull();
 	});
 
+	it('drops an old image failure after retry changes the attempt', async () => {
+		let finish!: (response: { status: number; body: null }) => void;
+		vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { finish = resolve; })));
+		const img = render();
+		img.dispatchEvent(new Event('error'));
+		await vi.waitFor(() => expect(button('Try again')).toBeDefined());
+		button('Try again').click();
+		await settle();
+		finish({ status: 404, body: null });
+		await settle();
+		expect(host.querySelector('.load-error')).toBeNull();
+	});
+
 	it('hands the retry to the host when it has its own reload', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ status: 500, body: null })));
 		const retry = vi.fn();
