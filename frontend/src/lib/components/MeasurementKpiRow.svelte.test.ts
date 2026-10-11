@@ -119,8 +119,8 @@ describe('MeasurementKpiRow', () => {
 		seedPanels(body, { size: panel });
 		component = mount(MeasurementKpiRow, { target: host, props: { state: state({ current: period(), previous: before }), onRetry: vi.fn() } });
 		flushSync(); await tick();
-		expect(tile('work')).toContain('92 h Sep 28 to Oct 4, n 1,349, new');
-		expect(sizeHeadline()).toBe('92 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new');
+		expect(tile('work')).toContain('92 h Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
+		expect(sizeHeadline()).toBe('92 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('first-try')).toContain('+5% vs Sep 21 to Sep 27 (n 451)');
 	});
 
