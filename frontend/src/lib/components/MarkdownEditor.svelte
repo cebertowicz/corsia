@@ -9,7 +9,7 @@
 	import { GFM } from '@lezer/markdown';
 	import { docTheme, docHighlight } from '$lib/cm/theme';
 	import { markdownLivePreview } from '$lib/cm/markdown-live';
-	import { imageContext } from '$lib/cm/markdown-image';
+	import { imageContext, imageOpener, type OpenImageRequest } from '$lib/cm/markdown-image';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
@@ -30,6 +30,7 @@
 		previews = null,
 		readOnly = false,
 		imageBase = null,
+		onOpenImage,
 		onSave,
 		onSelect,
 		onAnchorFocus,
@@ -49,6 +50,8 @@
 		readOnly?: boolean;
 		/** Where this document lives, so its markdown images resolve against it; none means they stay links. */
 		imageBase?: { path: string; projectId: string | null } | null;
+		/** Opens a drawn image larger in the canvas; without it an image is only selected. */
+		onOpenImage?: (request: OpenImageRequest) => void;
 		onSave?: () => void;
 		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
@@ -180,6 +183,7 @@
 				docHighlight,
 				markdownLivePreview,
 				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '' }),
+				...(onOpenImage ? [imageOpener.of((request) => onOpenImage?.(request))] : []),
 				markdownTasks,
 				commentMarks,
 				pendingCommentMark,

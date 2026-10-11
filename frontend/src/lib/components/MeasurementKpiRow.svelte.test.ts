@@ -29,11 +29,11 @@ const windowsBody = (extra: Record<string, unknown> = {}) => ({
 		...extra,
 	},
 });
-const costPeriod = (per_hour: number | null, sized: number) => ({ from: '2026-09-28', to: '2026-10-04', dollars: per_hour === null ? null : per_hour * 1_000, priced_records: 1, api_records: 1, outcomes: sized, per_outcome: 1, sized, hours: 1_000, per_hour });
+const costPeriod = (per_hour: number | null, sized: number) => ({ from: '2026-09-28', to: '2026-10-04', dollars: per_hour === null ? null : per_hour * 1_000, priced_records: 1, usage_records: 1, outcomes: sized, per_outcome: 1, sized, hours: 1_000, per_hour });
 const costData = (previous: ReturnType<typeof costPeriod> | null) => ({
 	definition_version: 1 as const, period: { grain: 'days' as const, timezone: 'x', current: '2026-10-04', range: span.latest, ...span },
 	// One served day per day of both windows: a previous window the series covers in full is compared, not read as new.
-	series: Array.from({ length: 14 }, (_, i) => ({ ...costPeriod(1.49, 1187), period: new Date(Date.parse('2026-09-21T00:00:00Z') + i * 86_400_000).toISOString().slice(0, 10), average: null })), latest: costPeriod(1.49, 1187), previous, coverage: { priced_records: 1, api_records: 1 }, not_api_priced_records: 0, excluded: [],
+	series: Array.from({ length: 14 }, (_, i) => ({ ...costPeriod(1.49, 1187), period: new Date(Date.parse('2026-09-21T00:00:00Z') + i * 86_400_000).toISOString().slice(0, 10), average: null })), latest: costPeriod(1.49, 1187), previous, coverage: { priced_records: 1, usage_records: 1 }, not_api_priced_records: 0, excluded: [],
 	actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null },
 });
 
@@ -91,7 +91,7 @@ describe('MeasurementKpiRow', () => {
 		expect([...host.querySelectorAll('[data-kpi]')].map((node) => (node as HTMLElement).dataset.kpi)).toEqual(['work', 'first-try', 'cost', 'minutes', 'tokens']);
 		expect(tile('work')).toBe('Work per hour of your attention 92 h Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('first-try')).toBe('First-try rate (agent-graded) 89% Sep 28 to Oct 4, n 1,377, +5% vs Sep 21 to Sep 27 (n 451)');
-		expect(tile('cost')).toBe('Cost per hour of delivered work $1.49 Sep 28 to Oct 4, n 1,187, -4% vs Sep 21 to Sep 27 (n 399)');
+		expect(tile('cost')).toBe('Cost per person-hour of work delivered $1.49 Sep 28 to Oct 4, n 1,187, -4% vs Sep 21 to Sep 27 (n 399)');
 		expect(tile('minutes')).toBe('Your minutes per outcome 1.8 min Sep 28 to Oct 4, n 1,377, -69% vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('tokens')).toBe('Tokens 34.6B Sep 28 to Oct 4, +126% vs Sep 21 to Sep 27 Uncached input526MCache write278MCache read33.7BOutput119M');
 		expect(host.querySelector('h2')).toBeNull();

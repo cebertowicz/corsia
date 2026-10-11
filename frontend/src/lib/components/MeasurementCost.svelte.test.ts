@@ -10,7 +10,7 @@ let host: HTMLElement | undefined;
 afterEach(() => { if (component) unmount(component); component = null; host?.remove(); host = undefined; });
 
 const period = (day: string, dollars: number | null, outcomes = 100, priced = 80, total = 100, hours = 2120, sized = 25, average: number | null = null): CostPeriod => ({
-	period: day, dollars, priced_records: priced, api_records: total, outcomes, per_outcome: dollars === null ? null : dollars / outcomes, sized, hours,
+	period: day, dollars, priced_records: priced, usage_records: total, outcomes, per_outcome: dollars === null ? null : dollars / outcomes, sized, hours,
 	per_hour: dollars === null || sized < 20 ? null : dollars / hours, average,
 });
 /** A pooled comparison window as the Cost payload serves it: named by the days it covers, with no `period` key. */
@@ -22,7 +22,7 @@ const data = (overrides: Partial<CostData> = {}): CostData => ({
 	definition_version: 1,
 	period: { grain: 'weeks', timezone: 'America/Los_Angeles', current: '2026-10-05', range: { from: '2026-07-13', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } },
 	averagePeriods: 4, series: [first, second], latest: pooled(second), previous: pooled(first),
-	coverage: { priced_records: 160, api_records: 200 }, not_api_priced_records: 7,
+	coverage: { priced_records: 160, usage_records: 200 }, not_api_priced_records: 7,
 	excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 40 }],
 	actual: { subscription_records: 12, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: workspace() }, ...overrides,
 });
@@ -34,7 +34,7 @@ describe('MeasurementCost', () => {
 	it('labels every figure as a known subtotal and states retained-record coverage and exclusions', () => {
 		const content = text(render());
 		expect(content).not.toContain('API-equivalent: list price of recorded tokens');
-		expect(content).toContain('$5.00 per hour of delivered work, Sep 28 to Oct 4, n 25, +100% vs Sep 21 to Sep 27 (n 25)');
+		expect(content).toContain('$5.00 per person-hour of work delivered, Sep 28 to Oct 4, n 25, +100% vs Sep 21 to Sep 27 (n 25)');
 		expect(text(host!.querySelector('.spendcard') as HTMLElement)).toBe('Total spend, Sep 28 to Oct 4$10,600API-equivalent, every priced call in the windowHours of work delivered2,120');
 		expect(content).not.toContain('per accepted outcome');
 		expect(content).not.toContain('not in this rate');
@@ -59,7 +59,7 @@ describe('MeasurementCost', () => {
 		(host.querySelectorAll('button')[1] as HTMLButtonElement).click(); flushSync();
 		expect(text(host)).toContain('Actual is recorded for the whole workspace, not this view.');
 		expect(text(host.querySelector('.actual') as HTMLElement)).not.toMatch(/\$|Direct charges/);
-		expect(text(host.querySelector('.stat') as HTMLElement)).toContain('per hour of delivered work');
+		expect(text(host.querySelector('.stat') as HTMLElement)).toContain('per person-hour of work delivered');
 		(host.querySelector('.actual button') as HTMLButtonElement).click();
 		expect(opened).toBe(1);
 		expect(text(host.querySelector('.actual button') as HTMLElement)).toBe('Open All work');
@@ -211,11 +211,11 @@ describe('MeasurementCost', () => {
 		unmount(component!); host?.remove();
 		const thinPeriod = period('2026-09-28', 5_300, 100, 80, 100, 2120, 19);
 		const thin = text(render({ data: data({ series: [thinPeriod], latest: pooled(thinPeriod), previous: null }) }));
-		expect(thin).toContain('– per hour of delivered work, Sep 28 to Oct 4, n 19, n/a');
+		expect(thin).toContain('– per person-hour of work delivered, Sep 28 to Oct 4, n 19, n/a');
 	});
 	it('decodes an unknown weekly total without coercing it to zero and rejects a malformed count', () => {
-		const unknown = { period: '2026-09-28', dollars: null, priced_records: 0, api_records: 3, outcomes: 3, per_outcome: null };
-		const body = { definition_version: 1, series: [unknown], latest: { ...unknown, from: '2026-09-28', to: '2026-09-28' }, previous: null, coverage: { priced_records: 0, api_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: false, workspace_subscription: workspace() } };
+		const unknown = { period: '2026-09-28', dollars: null, priced_records: 0, usage_records: 3, outcomes: 3, per_outcome: null };
+		const body = { definition_version: 1, series: [unknown], latest: { ...unknown, from: '2026-09-28', to: '2026-09-28' }, previous: null, coverage: { priced_records: 0, usage_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: false, workspace_subscription: workspace() } };
 		expect(decodeMeasurementCost(body).latest?.dollars).toBeNull();
 		// A response without the per-hour fields reads as unknown, never as zero.
 		expect(decodeMeasurementCost(body).series[0]).toMatchObject({ sized: 0, hours: 0, per_hour: null });
@@ -314,7 +314,7 @@ describe('MeasurementCost', () => {
 	});
 	it('decodes the served latest and previous windows, which are named by the days they cover and carry no period key', () => {
 		// The shape the backend serves (backend/api/measurement_cost.py): a series row has `period`; a window has `from` and `to`.
-		const figures = { dollars: 40.19478, priced_records: 21, api_records: 21, outcomes: 166, sized: 142, hours: 299.9, per_outcome: 0.2421372289, per_hour: 0.1340272758 };
+		const figures = { dollars: 40.19478, priced_records: 21, usage_records: 21, outcomes: 166, sized: 142, hours: 299.9, per_outcome: 0.2421372289, per_hour: 0.1340272758 };
 		const served = { ...data(), series: [{ period: '2026-10-07', ...figures }], latest: { from: '2026-10-02', to: '2026-10-08', ...figures }, previous: { from: '2026-09-25', to: '2026-10-01', ...figures } };
 		const decoded = decodeMeasurementCost(served);
 		expect(decoded.latest).toMatchObject({ from: '2026-10-02', to: '2026-10-08', dollars: 40.19478, sized: 142, hours: 299.9 });
@@ -335,7 +335,7 @@ describe('MeasurementCost', () => {
 		expect(render().querySelector('.cost .lg')?.textContent).not.toContain('moving average');
 	});
 	it('decodes the served moving average of a cost row: a number or null, an absent one as null, anything else rejected', () => {
-		const row = { period: '2026-09-28', dollars: 10, priced_records: 1, api_records: 1, outcomes: 1, per_outcome: 10, sized: 25, hours: 5, per_hour: 2 };
+		const row = { period: '2026-09-28', dollars: 10, priced_records: 1, usage_records: 1, outcomes: 1, per_outcome: 10, sized: 25, hours: 5, per_hour: 2 };
 		const body = (average?: unknown) => ({ ...data(), series: [average === undefined ? row : { ...row, average }] });
 		expect(decodeMeasurementCost(body(1.5)).series[0].average).toBe(1.5);
 		expect(decodeMeasurementCost(body(null)).series[0].average).toBeNull();
@@ -360,7 +360,7 @@ describe('MeasurementCost', () => {
 	it('is one card, as Work per hour is, with the priced-records line as its caption', () => {
 		const markup = render();
 		const card = markup.querySelector('section.card.cost') as HTMLElement;
-		expect(card.querySelector('h3')?.textContent).toBe('Cost per hour of delivered work');
+		expect(card.querySelector('h3')?.textContent).toBe('Cost per person-hour of work delivered');
 		expect(card.querySelector('.spendcard')).not.toBeNull();
 		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
 		expect(markup.querySelector('.missing')).toBeNull();

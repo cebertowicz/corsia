@@ -1,13 +1,19 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import DocViewer from './DocViewer.svelte';
 	import ImageViewer from './ImageViewer.svelte';
+	import ImageLightbox from './ImageLightbox.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
+	import { pushBackLayer } from '$lib/historyBackLayer';
+	import type { OpenImageRequest } from '$lib/cm/markdown-image';
+	import { closeDocumentImage, documentImageViewers, openDocumentImage } from '$lib/stores/documentImageViewer';
+	import { widenForImageViewer } from '$lib/imageViewerPane';
+	import { restoreDocumentPlace } from '$lib/documentImagePlace';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { docSaveDrafts, relocateDraftTarget } from '$lib/stores/docSaveQueue';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
@@ -61,6 +67,41 @@
 
 	let viewer = $state<DocViewer | undefined>(undefined);
 	let imageViewer = $state<ImageViewer | undefined>(undefined);
+	let leafEl = $state<HTMLElement | undefined>(undefined);
+	let leafBodyEl = $state<HTMLElement | undefined>(undefined);
+
+	// An image of the open document shown larger. The document stays mounted beneath it, so closing the viewer
+	// returns to the same live document; the viewer belongs to the tab it was opened from.
+	const shownImage = $derived(threadId && target ? ($documentImageViewers[threadId] ?? null) : null);
+	const imageOpen = $derived(shownImage !== null && shownImage.instanceId === target?.instanceId);
+	function openImage(request: OpenImageRequest) {
+		if (threadId && target) openDocumentImage(threadId, { ...request, instanceId: target.instanceId });
+	}
+	function closeImage() {
+		const tid = threadId;
+		const image = shownImage;
+		if (!tid || !image) return;
+		closeDocumentImage(tid);
+		void restoreDocumentPlace(leafBodyEl, image);
+	}
+	// Every other way out (another tab, the leaf collapsing or going away, another thread) drops the viewer too.
+	$effect(() => {
+		const tid = threadId;
+		if (tid && $documentImageViewers[tid] && (!imageOpen || mode === 'rail')) closeDocumentImage(tid);
+	});
+	$effect(() => {
+		const tid = threadId;
+		return () => { if (tid) closeDocumentImage(tid); };
+	});
+	$effect(() => {
+		if (!imageOpen || mode !== 'expanded') return;
+		return widenForImageViewer(untrack(() => leafEl?.getBoundingClientRect().width ?? 0));
+	});
+	// Back (a phone's or the browser's) closes the viewer before it leaves the document.
+	$effect(() => {
+		if (!imageOpen) return;
+		return pushBackLayer(() => { closeImage(); return true; });
+	});
 
 	// One timing sample per artifact this leaf actually brings on screen (#2280).
 	// Keyed on the tab instance, not on re-renders, so a reactive re-run can only
@@ -181,7 +222,7 @@
 	</button>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="leaf" class:compact={mode === 'compact'} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
+	<div class="leaf" class:compact={mode === 'compact'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
 		{#if mode === 'expanded'}
 			<ArtifactTabStrip
 				tabs={workspace.tabs}
@@ -192,7 +233,7 @@
 				onCollapse={collapse}
 			/>
 		{/if}
-		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget}>
+		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} bind:this={leafBodyEl}>
 			{#if activeTab?.kind === 'subagent' && activeTab.threadId}
 				<SubagentConversationLeaf threadId={activeTab.threadId} {onOpenLightbox} />
 				{:else if activeTab?.kind === 'legacy-discussion' && activeTab.artifactId}
@@ -215,15 +256,24 @@
 			{:else if target}
 				<!-- DocViewer owns Escape precedence (comment draft, then selection),
 				     so handing it onClose keeps that order intact in compact. -->
-				<DocViewer
-					bind:this={viewer}
-					{target}
-					{escapeCloses}
-					onClose={() => onEscapeClose?.()}
-					{onSignal}
-					stale={activeStale}
-					onReload={() => viewer?.reload()}
-				/>
+				<div class="doc-host" class:covered={imageOpen} inert={imageOpen}>
+					<DocViewer
+						bind:this={viewer}
+						{target}
+						{escapeCloses}
+						onClose={() => onEscapeClose?.()}
+						{onSignal}
+						stale={activeStale}
+						onReload={() => viewer?.reload()}
+						onOpenImage={openImage}
+						covered={imageOpen}
+					/>
+				</div>
+				{#if imageOpen && shownImage}
+					<div class="image-overlay">
+						<ImageLightbox src={shownImage.src} alt={shownImage.alt} docName={target.name} onBack={closeImage} />
+					</div>
+				{/if}
 			{/if}
 		</div>
 	</div>
@@ -266,6 +316,11 @@
 	@media (max-width: 768px) { .leaf { padding-top: calc(var(--header-height, 56px) + env(safe-area-inset-top, 0px)); } }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
 	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; }
+	.leaf-body.document-canvas { position: relative; }
+	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
+	.doc-host { display: contents; }
+	.doc-host.covered { visibility: hidden; }
+	.image-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: 8px 12px 12px; box-sizing: border-box; background: var(--bg-primary); }
 	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
 	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }

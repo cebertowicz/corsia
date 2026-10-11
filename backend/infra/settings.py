@@ -79,41 +79,6 @@ def get_corrections_checker_model(*, db=None) -> str | None:
     return _exact_agent_default("corrections_checker_model", db=db)
 
 
-def is_alibaba_token_plan_model(model_id: str, *, db=None) -> bool:
-    """Whether this exact catalog model is attached to an Alibaba Token Plan server."""
-    from urllib.parse import urlsplit
-
-    close = db is None
-    connection = db if db is not None else get_db()
-    try:
-        row = connection.execute(
-            "SELECT provider,litellm_model FROM models WHERE id=? OR litellm_model=?",
-            (model_id, model_id),
-        ).fetchone()
-        if row is None or row["provider"] != "external":
-            return False
-        transport = str(row["litellm_model"] or "")
-        if not transport.startswith("external@") or "/" not in transport:
-            return False
-        server_id = transport[len("external@") :].split("/", 1)[0]
-        server = connection.execute(
-            "SELECT instance_name,metadata_json FROM network_servers WHERE id=?", (server_id,)
-        ).fetchone()
-        if server is None:
-            return False
-        if "token plan" in str(server["instance_name"] or "").casefold():
-            return True
-        try:
-            metadata = json.loads(server["metadata_json"] or "{}")
-        except (TypeError, json.JSONDecodeError):
-            metadata = {}
-        base_url = metadata.get("base_url") if isinstance(metadata, dict) else None
-        hostname = urlsplit(base_url).hostname if isinstance(base_url, str) else None
-        return bool(hostname and "token-plan" in hostname.casefold())
-    finally:
-        if close:
-            connection.close()
-
 
 def _exact_agent_default(key: str, *, db=None) -> str | None:
     if db is None:

@@ -1,9 +1,10 @@
 <script lang="ts">
-	// Renders a workspace image file inside the artifact leaf. Read-only: no
-	// editor, comments or draft. The bytes come from the authenticated file
-	// route and are only ever shown through <img>, so an SVG can never run
-	// script or reach the DOM.
+	// Renders a workspace image file inside the artifact leaf, with comments on
+	// parts of it and no editor. The bytes come from the authenticated file
+	// route and are only ever shown through <img> (inside the lightbox, which
+	// zooms and pans it), so an SVG can never run script or reach the DOM.
 	import './DocViewer.css';
+	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { untrack } from 'svelte';
 	import { fetchRevision } from '$lib/api/docs';
@@ -29,6 +30,7 @@
 	let resolvedArtifactId = $state<string | null>(null);
 	let reloadNonce = $state(0);
 	let loadSeq = 0;
+	let draftOpen = $state(false);
 
 	export function reload() {
 		reloadNonce += 1;
@@ -90,13 +92,13 @@
 </script>
 
 <div class="image-viewer">
-	<ReviewBar artifactId={resolvedArtifactId ?? target.artifactId ?? null} />
+	<ReviewBar artifactId={resolvedArtifactId ?? target.artifactId ?? null} {draftOpen} />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
 			<button type="button" class="stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
 		</div>
 	{/if}
-	{#if imageState === 'loading'}
+	{#if imageState === 'loading' && !src}
 		<div class="loadbar"><span></span></div>
 	{:else if imageState === 'error'}
 		<div class="load-error" role="alert">
@@ -105,18 +107,12 @@
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<div class="stage" class:pending={imageState !== 'ready'}>
-			<img {src} alt={target.name} onload={onLoaded} onerror={onFailed} draggable="false" />
-		</div>
+		<ImageCommentLightbox {src} alt={target.name} artifactId={resolvedArtifactId ?? target.artifactId ?? null} projectId={target.projectId ?? null} bind:draftOpen onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 
 <style>
 	.image-viewer { --doc-rail: 0px; position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; }
-	.stage { flex: 1; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-	.stage.pending { visibility: hidden; position: absolute; }
-	/* max-* sizing scales the image down to the canvas and never past its natural size. */
-	.stage img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: var(--radius-sm); }
 	.stale-row { display: flex; }
 	.stale-control {
 		display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 0;

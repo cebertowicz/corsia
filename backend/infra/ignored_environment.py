@@ -1,4 +1,4 @@
-"""Which key environment variables are set but no longer read.
+"""Which key environment variables CORSIA ignores.
 
 CORSIA reads keys from the key store only. A person who still has one of these
 variables set would otherwise wonder why it does nothing, so startup notes
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 
-#: Key store entry -> the variable that no longer feeds it.
+#: Key store entry -> the environment variable CORSIA ignores.
 IGNORED_VARIABLES: dict[str, str] = {
     "provider-anthropic": "ANTHROPIC_API_KEY",
     "provider-openai": "OPENAI_API_KEY",

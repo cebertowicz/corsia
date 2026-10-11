@@ -22,7 +22,7 @@ const coverage = (i: number) => ({
 });
 /** A pooled comparison window as the Cost payload serves it: named by the days it covers, with no `period` key. */
 const pooled = ({ period: from, average: _average, ...figures }: ReturnType<typeof costPeriod>) => ({ from, to: from, ...figures });
-const costPeriod = (day: string) => ({ period: day, dollars: 900, priced_records: 80, api_records: 100, outcomes: 30, per_outcome: 30, sized: 25, hours: 120, per_hour: 7.5, average: 7.5 });
+const costPeriod = (day: string) => ({ period: day, dollars: 900, priced_records: 80, usage_records: 100, outcomes: 30, per_outcome: 30, sized: 25, hours: 120, per_hour: 7.5, average: 7.5 });
 
 function serve(grain: Grain) {
 	return vi.fn(async (url: string) => ({ ok: true, json: async () => {
@@ -30,7 +30,7 @@ function serve(grain: Grain) {
 		if (parsed.pathname.endsWith('/cost')) {
 			const series = Array.from({ length: COUNT }, (_, i) => costPeriod(at(grain, i)));
 			return {
-				definition_version: 1, period: period(grain), average_periods: grain === 'days' ? 7 : 4, series, latest: pooled(series[COUNT - 1]), previous: pooled(series[COUNT - 2]), coverage: { priced_records: 80, api_records: 100 }, not_api_priced_records: 0, excluded: [],
+				definition_version: 1, period: period(grain), average_periods: grain === 'days' ? 7 : 4, series, latest: pooled(series[COUNT - 1]), previous: pooled(series[COUNT - 2]), coverage: { priced_records: 80, usage_records: 100 }, not_api_priced_records: 0, excluded: [],
 				actual: { subscription_records: 10, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4, complete: true, workspace_subscription: null },
 			};
 		}

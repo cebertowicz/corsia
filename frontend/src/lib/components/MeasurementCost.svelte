@@ -45,13 +45,13 @@
 </script>
 
 <section class="card cost" aria-labelledby="cost-title">
-	<div class="heading"><h3 id="cost-title">Cost per hour of delivered work</h3>
+	<div class="heading"><h3 id="cost-title">Cost per person-hour of work delivered</h3>
 		<div class="toggle" aria-label="Cost view"><button class:active={view === 'equivalent'} aria-pressed={view === 'equivalent'} onclick={() => view = 'equivalent'}>API-equivalent</button><button class:active={view === 'actual'} aria-pressed={view === 'actual'} onclick={() => view = 'actual'}>Actual</button></div>
 	</div>
 	{#if costState.loading && !costState.data}<div class="skeleton" aria-label="Loading Cost"></div>
 	{:else if costState.error && !costState.data}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>
 	{:else if costState.data}
-		{#if headline}<p class="stat"><b>{rate === null ? '–' : money(rate)}</b> per hour of delivered work, {headline.nowText}, n {group(headline.current.sized)}, {headline.change}</p>{/if}
+		{#if headline}<p class="stat"><b>{rate === null ? '–' : money(rate)}</b> per person-hour of work delivered, {headline.nowText}, n {group(headline.current.sized)}, {headline.change}</p>{/if}
 		{#if view === 'actual' && (scoped || !costState.data.actual.workspace_subscription)}
 			<div class="actual"><h4>{actualTitle}</h4><p>Actual is recorded for the whole workspace, not this view.</p><p><button type="button" class="billing-link" onclick={onOpenAllWork}>Open All work</button></p><p class="note">The API-equivalent figures stay on the other view.</p></div>
 		{:else if view === 'actual'}
@@ -67,17 +67,17 @@
 				{#if workspaceSubscription.subscription_coverage === 'absent' || workspaceSubscription.subscription_coverage === 'partial'}<p>Subscription prices don't cover {periodText}. <button class="billing-link" onclick={() => openPrices((workspaceSubscription.subscription_unrecorded_accounts ?? 1) > 0)}>Set them in each provider's settings.</button></p>{:else if workspaceSubscription.subscription_coverage === 'complete'}{#if overageNotRecorded}{#if !overageReadsNone}<p>Overage is recorded for only part of this period.</p>{/if}{:else if actualComplete}<p>Subscriptions, overage and direct charges complete</p>{/if}{/if}<p class="note">The API-equivalent figures stay on the other view.</p></div>
 		{:else}
 			{#if headline}
-				<h4>API-equivalent $ per hour of delivered work, {chart.rangeText}, by {unit}</h4>
+				<h4>API-equivalent $ per person-hour of work delivered, {chart.rangeText}, by {unit}</h4>
 				<div class="chartrow"><div class="chartcol">
 				<MeasurementBarChart
 					points={chart.points}
-					axisTitle="API-equivalent $ per hour of delivered work"
+					axisTitle="API-equivalent $ per person-hour of work delivered"
 					{unit}
 					averageName={chart.averageName}
-					caption={`API-equivalent dollars of every priced call divided by the estimated hours of size-rated accepted work; lower is better. n is size-rated accepted outcomes per ${unit}.${startsAt ? ` The series starts at ${startsAt}, the first ${unit} with size-rated accepted work.` : ''}`}
+					caption={`API-equivalent dollars of every priced call divided by the person-hours the accepted work would take a capable person by hand; lower is better. n is size-rated accepted outcomes per ${unit}.${startsAt ? ` The series starts at ${startsAt}, the first ${unit} with size-rated accepted work.` : ''}`}
 					minN={20}
 					minNText="fewer than 20 outcomes"
-					ariaLabel={`API-equivalent dollars per hour of delivered work, ${chart.rangeText}`}
+					ariaLabel={`API-equivalent dollars per person-hour of work delivered, ${chart.rangeText}`}
 					tickFormat={(value, decimals) => `$${value.toFixed(decimals)}`}
 					valueFormat={(value) => value.toFixed(2)}
 				/></div>
@@ -85,7 +85,7 @@
 			{:else}
 				<p class="sentence">No usage records could be priced in this range.</p>
 			{/if}
-			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.api_records)} in {periodText} are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.</p>
+			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.</p>
 		{/if}
 		{#if costState.error}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>{/if}
 	{/if}

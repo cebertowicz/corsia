@@ -328,7 +328,7 @@ async function seed(
 	await page.route('**/api/measurement/cost**', async (route) => {
 		await costHold;
 		const period = (day: string, dollars: number, outcomes: number, perOutcome: number) => ({
-			period: day, dollars, priced_records: 800, api_records: 1_000, outcomes, per_outcome: perOutcome,
+			period: day, dollars, priced_records: 800, usage_records: 1_000, outcomes, per_outcome: perOutcome,
 			sized: 120, hours: 2_400, per_hour: dollars / 2_400, average: dollars / 2_400,
 		});
 		const previous = period('2026-09-21', 5_300_000_000.5, 1425, 3_719_298.25);
@@ -336,7 +336,7 @@ async function seed(
 		const pooled = ({ period: from, average: _average, ...figures }: ReturnType<typeof period>) => ({ from, to: from, ...figures });
 		return route.fulfill({ json: {
 			definition_version: 1, period: mockPeriod(new URL(route.request().url()).searchParams.get('grain')), series: [previous, latest], latest: pooled(latest), previous: pooled(previous),
-			coverage: { priced_records: 1_600, api_records: 2_000 }, not_api_priced_records: 3,
+			coverage: { priced_records: 1_600, usage_records: 2_000 }, not_api_priced_records: 3,
 			excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 400 }],
 			actual: { subscription_records: 1_600, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: { subscription_dollars: null, overage_dollars: null, subscription_facts: 0, overage_facts: 0, subscription_coverage: 'none', overage_coverage: 'none', overlapping_overage: [], allocation: 'unavailable' } },
 		} });
@@ -460,7 +460,7 @@ const MEASUREMENT_READY: Target['ready'] = async (page, data, timeout = 20_000) 
 		{ message: 'the Measurement sections read key figures, size headline, Cost, Models, kept charts, Biggest changes, then Agents', timeout },
 	).toBe(true);
 	const apiCost = page.getByRole('region', { name: 'Cost', exact: true });
-	await expect(apiCost.getByRole('heading', { name: 'Cost per hour of delivered work', exact: true }), 'the API-equivalent Cost section is showing').toBeVisible({ timeout });
+	await expect(apiCost.getByRole('heading', { name: 'Cost per person-hour of work delivered', exact: true }), 'the API-equivalent Cost section is showing').toBeVisible({ timeout });
 	await expect(apiCost.locator('.chart'), 'the API-equivalent Cost chart is populated').toHaveCount(1, { timeout });
 	await expect(page.locator('section.models'), 'the Models section shows the seeded resolved model').toContainText('Claude Opus 5.5', { timeout });
 	await expect(page.locator('section.models th[scope="row"]').filter({ hasText: LOCAL_MODEL }), 'the Models table shows the local model selector').toHaveCount(1, { timeout });

@@ -128,7 +128,7 @@ def test_an_agent_dollars_per_hour_row_reads_against_the_scope_pooled_figure():
     )
     (worse,) = result["worse"]
     assert (worse["subject"]["name"], worse["measure"], worse["label"], worse["format"]) == (
-        "Alpha", "dollars_per_hour", "$ per hour of work", "dollars")
+        "Alpha", "dollars_per_hour", "$ per person-hour of work delivered", "dollars")
     assert (worse["previous"], worse["latest"], worse["n"], worse["overall"]) == (1.0, 1.5, 30, 1.2)
     assert result["improved"] == []
     # Neither dollars measure is a /series id, so the series read is never asked for one.

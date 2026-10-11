@@ -116,7 +116,7 @@
 					<th scope="col" aria-sort={ariaSort('agent')}><button class="sort" onclick={() => sortBy('agent')}>Agent</button></th>
 					<th scope="col" class="n" aria-sort={ariaSort('outcomes')}><button class="sort" onclick={() => sortBy('outcomes')}>Outcomes</button></th>
 					<th scope="col" class="n" aria-sort={ariaSort('first_try_acceptance')}><button class="sort" onclick={() => sortBy('first_try_acceptance')}>First try</button></th>
-					<th scope="col" class="n cost" aria-sort={ariaSort('dollars_per_work_hour')}><button class="sort" onclick={() => sortBy('dollars_per_work_hour')}>$ per hour of work</button></th>
+					<th scope="col" class="n cost" aria-sort={ariaSort('dollars_per_work_hour')}><button class="sort" aria-label="$ per person-hour of work delivered" onclick={() => sortBy('dollars_per_work_hour')}>$ per person-hour{' '}<span class="long">of work delivered</span></button></th>
 					<th scope="col" class="n change" aria-sort={ariaSort('active_hours_per_outcome')}><button class="sort" onclick={() => sortBy('active_hours_per_outcome')}>Change in minutes per outcome, vs {previousName ?? 'the previous window'}</button></th>
 				</tr>
 			</thead>
@@ -184,14 +184,20 @@
 	.table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* Phone: every column stays in view. Names and headers wrap between words (never inside one), the figures stay on one line, and the long change header gets a narrow column of its own. */
 	@media (max-width: 430px) {
-		table { min-width: 0; font-size: var(--text-footnote); }
+		table { width: 100%; min-width: 0; table-layout: fixed; font-size: var(--text-footnote); }
 		th, td { padding: 6px 3px; }
 		tbody th { white-space: normal; }
 		.filter { white-space: normal; overflow-wrap: normal; word-break: normal; }
 		thead th { white-space: normal; overflow-wrap: normal; word-break: normal; font-size: var(--text-caption); }
 		.sort { white-space: normal; }
+		/* Fixed table layout otherwise divides the unconstrained first three columns
+		   evenly, leaving too little room for an unbroken agent-name word. */
+		thead th:first-child { width: 28%; }
+		thead th:nth-child(2), thead th:nth-child(3) { width: 10%; }
 		thead th.cost { width: 17%; }
-		thead th.change { width: 25%; }
+		thead th.change { width: 35%; }
+		/* The full cost name runs past three lines in its column; the phone header keeps its first words. */
+		.long { display: none; }
 	}
 	/* The narrowest phones: tighter padding keeps the longest name ("Infrastructure") from pushing the last column out. */
 	@media (max-width: 380px) {

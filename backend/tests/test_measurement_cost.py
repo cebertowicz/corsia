@@ -176,8 +176,8 @@ def test_api_equivalent_prices_only_the_proven_short_context_bound_before_weekly
     period = result["latest"]
     assert result["definition_version"] == 1
     assert period["dollars"] == pytest.approx(10.544 + 0.8)
-    assert (period["priced_records"], period["api_records"]) == (3, 5)
-    assert result["coverage"] == {"priced_records": 3, "api_records": 5}
+    assert (period["priced_records"], period["usage_records"]) == (3, 5)
+    assert result["coverage"] == {"priced_records": 3, "usage_records": 5}
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "context_tier_unproven": 1, "cache_rate_unpublished": 1}
 
@@ -206,8 +206,8 @@ def test_admission_prices_only_rows_with_proven_buckets_and_contract(isolated_db
         db.close()
     period = result["latest"]
     assert period["dollars"] == pytest.approx(SONNET.input_per_million * 3 + SONNET.cache_read_per_million)
-    assert (period["priced_records"], period["api_records"]) == (3, 11)
-    assert result["coverage"] == {"priced_records": 3, "api_records": 11}
+    assert (period["priced_records"], period["usage_records"]) == (3, 11)
+    assert result["coverage"] == {"priced_records": 3, "usage_records": 11}
     assert result["not_api_priced_records"] == 2
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "contract_unproven": 3, "tokens_unreported": 1, "tokens_inconsistent": 1, "no_list_price": 1}
@@ -273,7 +273,7 @@ def test_alibaba_usage_prices_by_hour_and_names_unpublished_cache_rates(isolated
     period = result["latest"]
     assert period["dollars"] == pytest.approx(0.3 + 0.03 + 0.15 + 0.15)
     assert (result["coverage"], result["not_api_priced_records"]) == (
-        {"priced_records": 3, "api_records": 8}, 4)
+        {"priced_records": 3, "usage_records": 8}, 4)
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "cache_rate_unpublished": 1}
 
@@ -297,7 +297,7 @@ def test_coverage_counts_the_headline_window_not_the_drawn_range(isolated_db):
     finally:
         db.close()
     assert GRAIN.latest.first == "2026-08-31" and "2026-08-10" in GRAIN.served
-    assert result["coverage"] == {"priced_records": 1, "api_records": 1}
+    assert result["coverage"] == {"priced_records": 1, "usage_records": 1}
     assert result["not_api_priced_records"] == 0
     assert result["excluded"] == []
 
@@ -312,8 +312,8 @@ def test_a_local_record_stays_in_the_denominator_and_is_named_not_api_priced(iso
         result = build_cost(db, PARAMS)
     finally:
         db.close()
-    assert result["coverage"] == {"priced_records": 1, "api_records": 2}
-    assert result["latest"]["api_records"] == 2
+    assert result["coverage"] == {"priced_records": 1, "usage_records": 2}
+    assert result["latest"]["usage_records"] == 2
     assert result["not_api_priced_records"] == 1
 
 
@@ -330,7 +330,7 @@ def test_a_record_is_classified_by_its_resolved_model_identity_not_its_raw_selec
     finally:
         db.close()
     # The alias selector alone has no list price; the identity its turn resolved to does.
-    assert result["coverage"] == {"priced_records": 1, "api_records": 1}
+    assert result["coverage"] == {"priced_records": 1, "usage_records": 1}
     assert result["latest"]["dollars"] == pytest.approx(SONNET.input_per_million)
     assert result["excluded"] == []
 

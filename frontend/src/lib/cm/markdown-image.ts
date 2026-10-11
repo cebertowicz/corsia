@@ -1,8 +1,11 @@
-import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, keymap, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Facet, RangeSet, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
+import { Facet, Prec, RangeSet, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { imageContentUrl } from '$lib/artifactImage';
+import { FAILED_IMAGE, imageFailureReason, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE } from '$lib/imageFailure';
+
+export { FAILED_IMAGE, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE };
 
 /** Where the document lives and how to reach its files; supplied by the editor, never read from global state here. */
 export interface ImageContext {
@@ -10,11 +13,6 @@ export interface ImageContext {
 	projectId: string | null;
 	token: string;
 }
-
-export const MISSING_IMAGE = 'Image not found';
-export const UNAVAILABLE_IMAGE = 'Image not available here';
-export const NOT_AN_IMAGE = 'Not an image';
-export const FAILED_IMAGE = "Couldn't load this image";
 
 /** Resolves lazily so a widget built later sees the editor's current document and sign-in. */
 export const imageContext = Facet.define<() => ImageContext | null, () => ImageContext | null>({
@@ -102,14 +100,7 @@ class ImageWidget extends WidgetType {
 		return wrap;
 	}
 	private async showFailure(wrap: HTMLElement) {
-		let reason = FAILED_IMAGE;
-		try {
-			const res = await fetch(this.src);
-			void res.body?.cancel();
-			if (res.status === 404) reason = MISSING_IMAGE;
-			else if (res.status === 400) reason = UNAVAILABLE_IMAGE;
-			else if (res.status === 415) reason = NOT_AN_IMAGE;
-		} catch { /* Offline or aborted: the answer is unknown, so it stays a plain failure. */ }
+		const reason = await imageFailureReason(this.src);
 		const note = document.createElement('div');
 		note.className = 'cm-md-image-note';
 		note.textContent = this.alt ? `${this.alt} · ${reason}` : reason;
@@ -176,11 +167,53 @@ export const markdownImages = StateField.define<Images>({
 	],
 });
 
-/** A click on an image selects its markdown whole, which the document's Comment control anchors a comment to. */
+/** What the canvas needs to show one image of the document larger, and to put the document back as it was. */
+export interface OpenImageRequest {
+	src: string;
+	alt: string;
+	/** The image's markdown range in the document. */
+	from: number;
+	to: number;
+	scrollTop: number;
+	/** How far below the top of the scrolled text the image sits; it is held there when the document is put back. */
+	top: number;
+}
+
+/** Supplied by the editor's host; with none, an image is only selected and never opens. */
+export const imageOpener = Facet.define<(request: OpenImageRequest) => void, ((request: OpenImageRequest) => void) | null>({
+	combine: (openers) => openers[0] ?? null,
+});
+
+/** The widget of an image that has drawn; one still loading or failed has nothing to enlarge. */
+function loadedImageWidget(target: EventTarget | null): HTMLElement | null {
+	const wrap = (target as Element | null)?.closest?.<HTMLElement>('.cm-md-image') ?? null;
+	const img = wrap?.querySelector('img');
+	return wrap && img && img.complete && img.naturalWidth > 0 ? wrap : null;
+}
+
+function openFromWidget(view: EditorView, wrap: HTMLElement): boolean {
+	const open = view.state.facet(imageOpener);
+	const [from, to] = [Number(wrap.dataset.from), Number(wrap.dataset.to)];
+	if (!open || !(to > from) || to > view.state.doc.length) return false;
+	const top = wrap.getBoundingClientRect().top - view.scrollDOM.getBoundingClientRect().top;
+	open({ src: wrap.dataset.src ?? '', alt: wrap.dataset.alt ?? '', from, to, scrollTop: view.scrollDOM.scrollTop, top });
+	return true;
+}
+
+/**
+ * A click on a drawn image opens it larger in the canvas. An image that did not draw, or an editor with no canvas to
+ * open it in, keeps the older behavior: the click selects its markdown whole, which the Comment control anchors to.
+ */
 export const selectImageOnClick = EditorView.domEventHandlers({
 	mousedown(event, view) {
 		const wrap = (event.target as Element | null)?.closest?.<HTMLElement>('.cm-md-image');
 		if (!wrap || event.button !== 0) return false;
+		if (view.state.facet(imageOpener) && loadedImageWidget(wrap)) {
+			// The click that follows opens it; the caret and selection stay where they were.
+			event.preventDefault();
+			view.focus();
+			return true;
+		}
 		const [from, to] = [Number(wrap.dataset.from), Number(wrap.dataset.to)];
 		if (!(to > from) || to > view.state.doc.length) return false;
 		event.preventDefault();
@@ -188,4 +221,20 @@ export const selectImageOnClick = EditorView.domEventHandlers({
 		view.focus();
 		return true;
 	},
+	click(event, view) {
+		const wrap = event.button === 0 ? loadedImageWidget(event.target) : null;
+		if (!wrap || !openFromWidget(view, wrap)) return false;
+		event.preventDefault();
+		return true;
+	},
 });
+
+/** Enter on an image that is the whole selection opens it, so the keyboard reaches what a click does. */
+export const openSelectedImageOnEnter = Prec.high(keymap.of([{
+	key: 'Enter',
+	run(view) {
+		const selected = view.dom.querySelectorAll<HTMLElement>('.cm-md-image-selected');
+		const wrap = selected.length === 1 ? loadedImageWidget(selected[0]) : null;
+		return wrap ? openFromWidget(view, wrap) : false;
+	},
+}]));

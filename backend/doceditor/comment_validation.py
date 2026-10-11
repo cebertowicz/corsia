@@ -1,15 +1,19 @@
 """Pure creation rules shared by document-comment adapters."""
 from __future__ import annotations
 
+from typing import Any
+
 from doceditor.comment_action_errors import CommentActionError
+from doceditor.image_regions import check_region_shape
 
 
 def validate_create(
     *, body: str | None, parent_id: str | None, review: bool, quote: str | None,
-    replacement: str | None, doc_path: str | None, artifact_id: str | None,
+    replacement: str | None, doc_path: str | None, artifact_id: str | None, region: Any = None,
 ) -> str:
     """Validate the common create shape and return normalized body text."""
     text = (body or "").strip()
+    check_region_shape(region=region, parent_id=parent_id, review=review, quote=quote, replacement=replacement)
     if replacement is not None:
         if parent_id or review:
             raise CommentActionError(
@@ -36,6 +40,9 @@ def validate_create(
         raise CommentActionError("reply_target", "replies derive their document target from parent_id")
     if not parent_id and bool(doc_path) == bool(artifact_id):
         raise CommentActionError("target", "exactly one of doc_path or artifact_id is required")
-    if not parent_id and not review and not (quote or "").strip():
-        raise CommentActionError("quote_required", "quote is required to anchor a top-level comment")
+    if not parent_id and not review and region is None and not (quote or "").strip():
+        raise CommentActionError(
+            "quote_required",
+            "quote is required to anchor a top-level comment (on an image, pass region instead)",
+        )
     return text
