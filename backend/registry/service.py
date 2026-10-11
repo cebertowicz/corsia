@@ -18,6 +18,7 @@ from registry.identity_metadata import last_written_sha256, merge_identity_metad
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
 from registry.origin_telemetry import emit_committed_origin
+from registry.upload_registration import register_accepted_upload
 from tools.sandbox_config import get_allowed_dirs_rw
 
 
@@ -465,24 +466,8 @@ def register_uploads(
             fid = att.get("file_id") or att.get("url") or att.get("filename")
             if not fid:
                 continue
-            existing = models.resolve_upload(str(fid))
-            row = models.register_artifact(
-                integration="upload",
-                type=existing["type"] if existing is not None else "upload",
-                external_id=str(fid),
-                parent_thread_id=thread_id,
-                title=att.get("filename", "upload"),
-                description=att.get("filename"),
-                path=None if existing is not None else att.get("url"),
-                retention=(
-                    None if existing is not None else models.RETENTION_EPHEMERAL
-                ),
-                metadata={"mime": att.get("mime_type"), "size": att.get("size")},
-                causal_event_id=(
-                    f"accepted-send:{thread_id}:{source_input_id}:{fid}"
-                    if source_input_id
-                    else None
-                ),
+            row = register_accepted_upload(
+                thread_id, att, str(fid), source_input_id=source_input_id,
             )
             notify_changed(row or {
                 "integration": "upload",
