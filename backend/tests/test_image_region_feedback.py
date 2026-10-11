@@ -198,11 +198,15 @@ def test_a_rolled_back_delivery_draws_no_copy(isolated_db, tmp_path, renders):
     assert renders == []
 
 
-def test_a_copy_that_fails_to_draw_after_commit_tells_the_reader(isolated_db, tmp_path, monkeypatch):
-    def broken(_data, _marks):
-        raise ValueError("image is too large to mark up (9000x9000)")
+@pytest.mark.parametrize(("step", "error"), [
+    ("render_marked_image", ValueError("image is too large to mark up (9000x9000)")),
+    ("_save", PermissionError("the working tray is not writable")),
+])
+def test_a_copy_that_fails_to_draw_after_commit_tells_the_reader(isolated_db, tmp_path, monkeypatch, step, error):
+    def broken(*_args):
+        raise error
 
-    monkeypatch.setattr(image_regions, "render_marked_image", broken)
+    monkeypatch.setattr(image_regions, step, broken)
     db = get_db()
     try:
         _seeded_regions(db, tmp_path)
@@ -218,8 +222,7 @@ def test_a_copy_that_fails_to_draw_after_commit_tells_the_reader(isolated_db, tm
     assert named and not Path(named.group(1)).exists()
     assert [row["summary"] for row in notes if Path(named.group(1)).name in row["summary"]] == [
         f"The marked-up image {Path(named.group(1)).name} named in your feedback task could not be drawn "
-        "(image is too large to mark up (9000x9000)); the region lines in the task still say where each "
-        "comment is."
+        f"({error}); the region lines in the task still say where each comment is."
     ]
 
 

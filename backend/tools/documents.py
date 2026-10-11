@@ -89,7 +89,9 @@ _REGION_SCHEMA = {
 }
 
 
-async def _region_result(payload: dict[str, Any], row: dict[str, Any], path: str | None, reader: str) -> str:
+async def _region_result(
+    payload: dict[str, Any], row: dict[str, Any], path: str | None, reader: str,
+) -> str | MediaToolResult:
     """The JSON result plus the image with this comment's numbered box drawn (DCOL-FR13.7)."""
     def _render():
         db = get_db()

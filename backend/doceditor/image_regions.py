@@ -167,10 +167,15 @@ def author_color(db, row: Mapping[str, Any]) -> str:
 def marks_for(db, rows: Iterable[Mapping[str, Any]]) -> list[Mark]:
     """Numbered, author-coloured marks for the rows that carry a region, by number."""
     marks = []
+    colors: dict[tuple[str, str], str] = {}  # a person's colour costs two reads per artifact
     for row in rows:
         region = region_of(row)
         if region is not None:
-            marks.append(Mark(int(row["region_number"]), region, author_color(db, row)))
+            agent = row.get("author_kind") == "agent" and row.get("author_thread_id")
+            key = ("agent", str(row["author_thread_id"])) if agent else ("artifact", str(row["artifact_id"]))
+            if key not in colors:
+                colors[key] = author_color(db, row)
+            marks.append(Mark(int(row["region_number"]), region, colors[key]))
     return sorted(marks, key=lambda mark: mark.number)
 
 
