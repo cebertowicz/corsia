@@ -131,7 +131,8 @@ async function expectLayout(page: Page, mode: Mode) {
 	expect(buttons.length).toBeGreaterThanOrEqual(2);
 	if (mode === 'closed') {
 		await expect(bar(page).locator('.rb-narrow')).toBeHidden();
-		expect(box.height, 'one row').toBeLessThanOrEqual(52);
+		// The slim integrated ask row reserves its status/action line; it is not the old one-line floating card.
+		expect(box.height, 'integrated ask row').toBeLessThanOrEqual(64);
 	}
 	if (mode === 'phone') {
 		for (const button of buttons) expect(button.h, 'touch target').toBeGreaterThanOrEqual(44);
@@ -315,24 +316,13 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await open(page, doc, mode, theme);
 	await expectLayout(page, mode);
 	const line = bar(page).locator('.rb-line');
-	const ask = bar(page).locator('.rb-wide .rb-ask');
-	await expect(ask).toBeVisible();
-	// What shows is the part of the ask inside the clipped line, not its full unclipped box.
-	const visible = await ask.evaluate((el) => {
-		const box = el.getBoundingClientRect(), edge = el.closest('.rb-line')!.getBoundingClientRect().right;
-		return Math.max(0, Math.min(box.right, edge) - box.left);
-	});
-	expect(visible, 'the ask keeps a readable minimum next to a long name').toBeGreaterThanOrEqual(100);
-	await shot(page, 'long-name-closed', info);
+	await expect(line).toContainText('Is the rollout plan right for every region');
+	await shot(page, 'long-name-collapsed', info);
 
-	// Keyboard focus unclamps the whole line in place, so the full ask is readable without a hover title.
-	const closedHeight = (await bar(page).boundingBox())!.height;
-	for (let step = 0; step < 12 && !(await line.evaluate((el) => el === document.activeElement)); step += 1) await page.keyboard.press('Tab');
-	await expect(line).toBeFocused();
-	await expect(line).toHaveCSS('white-space', 'normal');
-	await expect(line).toHaveCSS('overflow', 'visible');
-	await expect(ask).toHaveText(reason);
-	expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'no horizontal clipping once focused').toBe(true);
-	expect((await bar(page).boundingBox())!.height).toBeGreaterThan(closedHeight);
-	await shot(page, 'long-name-focused', info);
+	// The integrated row expands its full ask below the tool line, keeping the header controls in place.
+	const collapsedHeight = (await bar(page).boundingBox())!.height;
+	await line.click();
+	await expect(bar(page).locator('.rb-ask-full')).toHaveText(reason);
+	expect((await bar(page).boundingBox())!.height).toBeGreaterThan(collapsedHeight);
+	await shot(page, 'long-name-expanded', info);
 });
