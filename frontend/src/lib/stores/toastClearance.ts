@@ -1,13 +1,6 @@
 import { writable } from 'svelte/store';
 
-export type ToastClearanceEligibility = () => boolean;
 export type ToastClearanceMeasurement = () => number;
-
-export const mobileSheetMedia = '(max-width: 768px)';
-
-export function isMobileSheetPresentation(): boolean {
-	return window.matchMedia(mobileSheetMedia).matches;
-}
 
 interface ToastClearanceRegistration {
 	clearance: number;
@@ -22,7 +15,6 @@ function viewportBottomOccupancy(node: HTMLElement): number {
 }
 
 export interface ToastClearanceRegistrationOptions {
-	isEligible?: ToastClearanceEligibility;
 	measure?: ToastClearanceMeasurement;
 }
 
@@ -36,15 +28,12 @@ export function createToastClearanceStore() {
 
 	function register(
 		node: HTMLElement,
-		{
-			isEligible = () => true,
-			measure = () => viewportBottomOccupancy(node),
-		}: ToastClearanceRegistrationOptions = {},
+		{ measure = () => viewportBottomOccupancy(node) }: ToastClearanceRegistrationOptions = {},
 	): () => void {
 		const update = () => {
 			const registration = registrations.get(node);
 			if (!registration) return;
-			registration.clearance = isEligible() ? measure() : 0;
+			registration.clearance = measure();
 			publish();
 		};
 		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
