@@ -13,8 +13,6 @@ from core.corrections_recording import (
 )
 from core.measurement_scope import scope_cte
 
-MAX_PENDING_SCAN_MULTIPLIER = 8
-
 
 @dataclass(frozen=True)
 class PendingCandidateKey:
@@ -67,7 +65,7 @@ def pending_candidate_keys(
                 "model_id": version.model_id,
                 "rubric_sha256": version.rubric_sha256,
                 "prompt_sha256": version.prompt_sha256,
-                "scan_limit": batch_size * MAX_PENDING_SCAN_MULTIPLIER,
+                "scan_limit": batch_size,
                 "before_created_at": before[0] if before else None,
                 "before_message_id": before[1] if before else None,
             },
@@ -112,12 +110,3 @@ def hydrate_candidates(keys: list[PendingCandidateKey]) -> list[CorrectionCandid
         return candidates
     finally:
         db.close()
-
-
-def pending_candidates(
-    version: CheckerVersion, batch_size: int, owner_user_id: str,
-    before: tuple[str, str] | None = None,
-) -> list[CorrectionCandidate]:
-    """Compatibility helper for callers that need one owner's hydrated batch."""
-    keys = pending_candidate_keys(version, batch_size, owner_user_id, before)
-    return hydrate_candidates(keys[:batch_size])

@@ -102,61 +102,9 @@ def test_owner_message_filter_accepts_a_real_user_message():
     assert is_owner_authored_message(role="user", content="That claim is wrong.", metadata="{}")
 
 
-def test_pending_candidates_exclude_another_users_root_and_subtree(isolated_db):
-    from core.corrections_recording import checker_version
-    from jobs import corrections_recording as job
 
-    db = _db()
-    try:
-        _thread(db, "owner-root", "owner-project")
-        _thread(db, "owner-child", "owner-project-child", parent_thread_id="owner-root")
-        _thread(db, "other-root", "other-project", user_id="other")
-        _thread(db, "other-child", "other-project-child", user_id="other", parent_thread_id="other-root")
-        _message(db, "owner-root-message", "user", "That delivery is wrong.", thread_id="owner-root", at="2026-10-01T00:01:00Z")
-        _message(db, "owner-child-message", "user", "Please redo this.", thread_id="owner-child", at="2026-10-01T00:02:00Z")
-        _message(db, "other-root-message", "user", "Do not classify me.", thread_id="other-root", at="2026-10-01T00:03:00Z")
-        _message(db, "other-child-message", "user", "Do not classify me either.", thread_id="other-child", at="2026-10-01T00:04:00Z")
-        db.commit()
-    finally:
-        db.close()
-
-    candidates = job._pending_candidates(checker_version("model-a"), 20, OWNER)
-
-    assert [candidate.message_id for candidate in candidates] == [
-        "owner-child-message", "owner-root-message",
-    ]
-
-
-def test_pending_candidates_scan_past_non_owner_rows(isolated_db):
-    from core.corrections_recording import checker_version
-    from jobs import corrections_recording as job
-
-    db = _db()
-    try:
-        _thread(db)
-        for index in range(job.MAX_PENDING_SCAN_MULTIPLIER + 1):
-            role, content = (
-                ("assistant", "Not a correction candidate.")
-                if index % 2 == 0 else ("user", "[EVENT: wake]")
-            )
-            _message(
-                db, f"non-owner-{index}", role, content,
-                at=f"2026-10-01T00:00:{index:02d}Z",
-            )
-        _message(
-            db, "owner-message", "user", "That result is wrong.",
-            at="2026-10-01T00:01:00Z",
-        )
-        db.commit()
-    finally:
-        db.close()
-
-    candidates = job._pending_candidates(checker_version("model-a"), 1, OWNER)
-
-    assert [candidate.message_id for candidate in candidates] == ["owner-message"]
-
-
-def test_pending_candidate_prefilter_matches_wrapper_prefixes_case_sensitively(isolated_db):
+@pytest.mark.asyncio
+async def test_pending_candidate_prefilter_matches_wrapper_prefixes_case_sensitively(isolated_db):
     from core.corrections_recording import checker_version
     from jobs import corrections_recording as job
 
@@ -169,33 +117,14 @@ def test_pending_candidate_prefilter_matches_wrapper_prefixes_case_sensitively(i
     finally:
         db.close()
 
-    candidates = job._pending_candidates(checker_version("model-a"), 20, OWNER)
+    batch = await job._next_pending_batch(checker_version("model-a"), 20, None)
 
-    assert [candidate.message_id for candidate in candidates] == ["lowercase-owner"]
-
-
-def test_pending_candidates_honors_batch_size(isolated_db):
-    from core.corrections_recording import checker_version
-    from jobs import corrections_recording as job
-
-    db = _db()
-    try:
-        _thread(db)
-        for index in range(3):
-            _message(
-                db, f"message-{index}", "user", f"correction {index}",
-                at=f"2026-10-01T00:0{index}:00Z",
-            )
-        db.commit()
-    finally:
-        db.close()
-
-    candidates = job._pending_candidates(checker_version("model-a"), 1, OWNER)
-
-    assert [candidate.message_id for candidate in candidates] == ["message-2"]
+    assert [candidate.message_id for candidate in batch.candidates] == ["lowercase-owner"]
 
 
-def test_pending_candidates_keyset_breaks_equal_timestamp_ties_by_message_id(isolated_db):
+
+@pytest.mark.asyncio
+async def test_pending_candidates_keyset_breaks_equal_timestamp_ties_by_message_id(isolated_db):
     from core.corrections_recording import checker_version
     from jobs import corrections_recording as job
 
@@ -208,11 +137,11 @@ def test_pending_candidates_keyset_breaks_equal_timestamp_ties_by_message_id(iso
     finally:
         db.close()
 
-    candidates = job._pending_candidates(
-        checker_version("model-a"), 20, OWNER, before=("2026-10-01T00:01:00Z", "b"),
+    batch = await job._next_pending_batch(
+        checker_version("model-a"), 20, ("2026-10-01T00:01:00Z", "b"),
     )
 
-    assert [candidate.message_id for candidate in candidates] == ["a"]
+    assert [candidate.message_id for candidate in batch.candidates] == ["a"]
 
 
 @pytest.mark.asyncio
@@ -361,10 +290,9 @@ async def test_run_drains_multiple_newest_first_batches_and_records_empty_stop(i
 
 
 @pytest.mark.asyncio
-async def test_run_continues_to_older_rows_after_a_transient_failure(isolated_db, monkeypatch):
+async def test_run_continues_to_older_rows_after_a_per_message_failure(isolated_db, monkeypatch):
     from infra.settings import set_setting
     from jobs import corrections_recording as job
-    from llm.isolated_structured import IsolatedStructuredUnavailableError
 
     db = _db()
     try:
@@ -382,12 +310,12 @@ async def test_run_continues_to_older_rows_after_a_transient_failure(isolated_db
         prompt = kwargs["user_prompt"]
         seen.append(prompt)
         if "newer correction" in prompt:
-            raise IsolatedStructuredUnavailableError("unavailable")
+            return kwargs["validator"]({"label": "wrong-shape", "reason": "Malformed."})
         return kwargs["validator"]({"label": "correction", "reason": "It corrects the delivery."})
 
     result = await job.run_corrections_recording(batch_size=1, invoke=classify)
 
-    assert result == {"status": "partial", "processed": 2, "recorded": 1, "refused": 0, "failed": 1}
+    assert result == {"status": "ok", "processed": 2, "recorded": 1, "refused": 1, "failed": 0}
     assert ["newer correction" in prompt for prompt in seen] == [True, False]
 
 
@@ -417,7 +345,8 @@ async def test_run_stops_at_the_budget_and_leaves_remaining_candidates_pending(i
 
     assert result == {"status": "ok", "processed": 1, "recorded": 1, "refused": 0, "failed": 0}
     assert get_setting("corrections_recording_status")["stop_reason"] == "budget"
-    assert len(job._pending_candidates(job.checker_version("model-a"), 20, OWNER)) == 2
+    pending = await job._next_pending_batch(job.checker_version("model-a"), 20, None)
+    assert len(pending.candidates) == 2
 
 
 @pytest.mark.asyncio
@@ -450,7 +379,8 @@ async def test_cancellation_between_calls_writes_a_truthful_status_and_keeps_pen
     status = get_setting("corrections_recording_status")
     assert status["status"] == "cancelled" and status["processed"] == 1
     assert status["stop_reason"] == "shutdown"
-    assert len(job._pending_candidates(job.checker_version("model-a"), 20, OWNER)) == 1
+    pending = await job._next_pending_batch(job.checker_version("model-a"), 20, None)
+    assert len(pending.candidates) == 1
 
 
 def test_interactive_only_checker_setting_is_refused(isolated_db, monkeypatch):
@@ -662,28 +592,68 @@ async def test_unusable_output_records_a_typed_refusal_once(isolated_db, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_a_transient_provider_failure_writes_no_fact_and_is_counted(isolated_db, monkeypatch):
-    from infra.settings import set_setting
+async def test_provider_outage_stops_after_one_call_and_leaves_the_backlog_pending(isolated_db, monkeypatch):
+    from infra.settings import get_setting, set_setting
     from jobs import corrections_recording as job
     from llm.isolated_structured import IsolatedStructuredUnavailableError
 
-    _seed_one_message()
-    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
-    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
-
-    async def down(*args, **kwargs):
-        raise IsolatedStructuredUnavailableError("down")
-
-    result = await job.run_corrections_recording(batch_size=1, invoke=down)
-    assert result == {"status": "partial", "processed": 1, "recorded": 0, "refused": 0, "failed": 1}
-    assert _facts() == []
     db = _db()
     try:
-        assert db.execute(
-            "SELECT n FROM outcome_event_counters WHERE counter='mapping_failed' AND event_name='measurement.correction'"
-        ).fetchone()[0] == 1
+        _thread(db)
+        _message(db, "older", "user", "older correction", at="2026-10-01T00:00:01Z")
+        _message(db, "newer", "user", "newer correction", at="2026-10-01T00:00:02Z")
+        db.commit()
     finally:
         db.close()
+    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
+    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+    calls = 0
+
+    async def down(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise IsolatedStructuredUnavailableError("down")
+
+    result = await job.run_corrections_recording(batch_size=2, invoke=down)
+
+    assert result == {"status": "provider_unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
+    assert calls == 1 and _facts() == []
+    pending = await job._next_pending_batch(job.checker_version("model-a"), 20, None)
+    assert [candidate.message_id for candidate in pending.candidates] == ["newer", "older"]
+    assert get_setting("corrections_recording_status")["stop_reason"] == "provider_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_timeout_skips_one_pending_message_and_continues_to_the_next(isolated_db, monkeypatch):
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+    from llm.isolated_structured import IsolatedStructuredTimeoutError
+
+    db = _db()
+    try:
+        _thread(db)
+        _message(db, "older", "user", "older correction", at="2026-10-01T00:00:01Z")
+        _message(db, "newer", "user", "newer correction", at="2026-10-01T00:00:02Z")
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
+    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+    calls: list[str] = []
+
+    async def timeout_then_record(*args, **kwargs):
+        prompt = kwargs["user_prompt"]
+        calls.append(prompt)
+        if "newer correction" in prompt:
+            raise IsolatedStructuredTimeoutError("slow")
+        return kwargs["validator"]({"label": "correction", "reason": "It corrects the delivery."})
+
+    result = await job.run_corrections_recording(batch_size=2, invoke=timeout_then_record)
+
+    assert result == {"status": "ok", "processed": 1, "recorded": 1, "refused": 0, "failed": 0}
+    assert ["newer correction" in prompt for prompt in calls] == [True, False]
+    pending = await job._next_pending_batch(job.checker_version("model-a"), 20, None)
+    assert [candidate.message_id for candidate in pending.candidates] == ["newer"]
 
 
 @pytest.mark.asyncio
@@ -763,7 +733,7 @@ async def test_a_failed_write_does_not_abort_the_rest_of_the_batch(isolated_db, 
 
 
 @pytest.mark.asyncio
-async def test_a_rate_limit_is_a_counted_failure_with_no_fact(isolated_db, monkeypatch):
+async def test_a_rate_limit_stops_the_run_with_no_fact(isolated_db, monkeypatch):
     from infra.settings import set_setting
     from jobs import corrections_recording as job
     from llm.isolated_structured import IsolatedStructuredRateLimitError
@@ -776,7 +746,7 @@ async def test_a_rate_limit_is_a_counted_failure_with_no_fact(isolated_db, monke
         raise IsolatedStructuredRateLimitError("limited")
 
     result = await job.run_corrections_recording(batch_size=1, invoke=limited)
-    assert result == {"status": "partial", "processed": 1, "recorded": 0, "refused": 0, "failed": 1}
+    assert result == {"status": "provider_unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
     assert _facts() == []
 
 

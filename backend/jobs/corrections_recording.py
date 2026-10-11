@@ -30,23 +30,22 @@ from core.corrections_recording import (
 )
 from infra.db_async import run_in_db
 from jobs.corrections_scanning import (
-    MAX_PENDING_SCAN_MULTIPLIER,
     PendingCandidateKey,
     hydrate_candidates,
     pending_candidate_keys,
-    pending_candidates as _pending_candidates,
 )
 from llm.isolated_contract import IsolatedStructuredTelemetry
 from llm.isolated_structured import (
     IsolatedStructuredContextOverflowError,
     IsolatedStructuredError,
     IsolatedStructuredOutputTruncatedError,
+    IsolatedStructuredTimeoutError,
     invoke_isolated_structured,
 )
 
 DEFAULT_BATCH_SIZE = 20
-# Four hours leave room for nightly maintenance and process at least 240 calls
-# even at the 60-second per-call timeout, while keeping a manual request bounded.
+# Four hours bounds a deliberate drain while the scheduler continues to service
+# maintenance triggers; at the 60-second call timeout it permits at least 240 calls.
 RUN_TIME_BUDGET_SECONDS = 4 * 60 * 60
 # Fortissimo reasons by default (as in the gated run), so the cap must leave room
 # for thinking plus the verdict; the 60s call timeout bounds it (~80 tok/s).
@@ -123,8 +122,6 @@ def _owner_user_ids() -> list[str]:
     finally:
         db.close()
 
-
-# `_pending_candidates` is re-exported from corrections_scanning for existing callers.
 
 def request_manual_corrections_recording() -> None:
     """Durably ask the existing nightly loop to drain for up to four hours."""
@@ -206,8 +203,8 @@ async def _classify_and_record(
 ) -> str:
     """Classify one candidate and write its fact.
 
-    Returns "recorded", "refused", "failed", or "duplicate" when the fact
-    already existed and nothing was inserted.
+    Returns "recorded", "refused", "failed", "skipped", "provider_unavailable",
+    or "duplicate" when the fact already existed and nothing was inserted.
     """
     try:
         classification = await invoke(
@@ -233,13 +230,18 @@ async def _classify_and_record(
         logger.warning(
             "corrections recording refused {}: {}", candidate.message_id, classification["reason"],
         )
-    except Exception as exc:
-        # Rate limit, provider, timeout, unavailable or anything unexpected:
-        # no fact, so the next run retries this message.
-        if isinstance(exc, IsolatedStructuredError):
-            logger.warning("corrections recording skipped {}: {}", candidate.message_id, type(exc).__name__)
-        else:
-            logger.exception("corrections recording failed {}", candidate.message_id)
+    except IsolatedStructuredTimeoutError as exc:
+        # One slow request is retryable per-message; keep it pending while this
+        # bounded run continues so newer-first selection cannot starve the backlog.
+        logger.warning("corrections recording skipped {}: {}", candidate.message_id, type(exc).__name__)
+        return "skipped"
+    except IsolatedStructuredError as exc:
+        # Provider failures affect the whole backlog: leave this message pending
+        # and stop the run so a temporary outage cannot consume its time budget.
+        logger.warning("corrections recording provider unavailable {}: {}", candidate.message_id, type(exc).__name__)
+        return "provider_unavailable"
+    except Exception:
+        logger.exception("corrections recording failed {}", candidate.message_id)
         await run_in_db(_record_failure)
         return "failed"
     try:
@@ -285,6 +287,8 @@ async def _finish_run(
     reason = None if status == "ok" else "One or more classifications failed and will retry"
     if status == "cancelled":
         reason = "Run stopped by shutdown; pending candidates will retry"
+    elif status == "provider_unavailable":
+        reason = "Provider unavailable; pending candidates will retry"
     result: dict[str, int | str | None] = {
         "status": status, "processed": sum(counts.values()), "recorded": recorded,
         "refused": refused, "failed": failed,
@@ -342,7 +346,12 @@ async def run_corrections_recording(
             before = batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id
             for candidate in batch.candidates:
                 outcome = await _classify_and_record(candidate, target, binary, version, invoke)
-                counts[outcome] += 1
+                if outcome == "provider_unavailable":
+                    return await _finish_run(
+                        counts, "provider_unavailable", status="provider_unavailable",
+                    )
+                if outcome != "skipped":
+                    counts[outcome] += 1
     except asyncio.CancelledError:
         await _finish_run(counts, "shutdown", status="cancelled")
         raise
