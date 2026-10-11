@@ -65,7 +65,6 @@ jobs:
 
 
       - name: Install deps
-
         run: |
           # The search tests assert real ripgrep semantics.
           sudo apt-get update --quiet
@@ -94,7 +93,6 @@ jobs:
           echo "Backend test state root: $root"
 
       - name: Run backend tests
-
         run: |
           set -uo pipefail
 
@@ -166,7 +164,7 @@ jobs:
           exit "$status"
 
       - name: Summarize backend test shards
-        if: ${{ always() }}
+        if: always()
         continue-on-error: true
         run: |
           .venv/bin/python - <<'PY'
@@ -265,7 +263,7 @@ jobs:
           PY
 
       - name: Upload backend timing report
-        if: ${{ always() }}
+        if: always()
         # Diagnostics only: a failed upload must not turn a passing job red.
         continue-on-error: true
         uses: actions/upload-artifact@v4
@@ -296,17 +294,14 @@ jobs:
           fetch-depth: 1
 
       - uses: actions/setup-python@v5
-
         with:
           python-version: '3.11'
 
       # The jailed-export cases require the real Safehouse sandbox.
       - name: Install Safehouse
-
         run: scripts/install-ci-safehouse
 
       - name: Install deps
-
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
@@ -314,7 +309,6 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Run macOS-only backend tests
-
         run: |
           set -euo pipefail
           files=()
@@ -346,25 +340,21 @@ jobs:
           fetch-depth: 1
 
       - uses: actions/setup-node@v4
-
         with:
           # Active LTS; the frontend declares no engines constraint.
           node-version: '24'
 
       - name: Install deps + run tests
-
         working-directory: frontend
         run: |
           npm ci
           npm run test
 
       - name: Build
-
         working-directory: frontend
         run: npm run build
 
       - name: Type check (svelte-check) — ADVISORY during calibration
-
         working-directory: frontend
         continue-on-error: true
         run: npm run check

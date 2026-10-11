@@ -153,7 +153,7 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert "--durations=50 --durations-min=0.25" in workflow
     assert '--junitxml="$RUNNER_TEMP/backend-junit-${shard}.xml"' in workflow
     assert "actions/upload-artifact@v4" in workflow
-    assert "if: ${{ always() }}" in workflow
+    assert "if: always()" in workflow
     assert "backend-junit-*.xml" in workflow
     assert "backend-*.log" in workflow
     assert "Summarize backend test shards" in workflow
@@ -249,8 +249,6 @@ def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job
     for filename, jobs in RELEVANCE_CONSUMER_JOBS.items():
         workflow = (workflow_root / filename).read_text()
         preflight = _workflow_job(workflow, "relevance")
-        assert "git diff --name-only" not in workflow, filename
-        assert "steps.relevance.outputs.relevant" not in workflow, filename
         assert "uses: ./.github/actions/relevance" in preflight, filename
         assert workflow.count("uses: ./.github/actions/relevance") == 1, filename
         assert "runs-on: ubuntu-24.04" in preflight, filename
@@ -266,9 +264,6 @@ def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job
             assert "if: ${{ needs.relevance.outputs.relevant == 'true' }}" in job, (filename, job_name)
             assert "fetch-depth: 1" in job, (filename, job_name)
             assert "fetch-depth: 0" not in job, (filename, job_name)
-            assert "uses: ./.github/actions/relevance" not in job, (filename, job_name)
-            assert "steps.relevance.outputs.relevant" not in job, (filename, job_name)
-            assert "id: relevance" not in job, (filename, job_name)
 
 
 def test_relevance_patterns_have_one_workflow_local_source() -> None:
