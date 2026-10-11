@@ -32,7 +32,7 @@ Plan the experiment as stages of growing size. Start with the fewest samples tha
 
 After each stage, read the results, including failures and cost, and apply the rules as written. Do not move a threshold after seeing data. Do not rerun a stage hoping for a better number.
 
-The consequence sets the size. Rewording a grading rubric you can revert tomorrow can stop once a handful of cases point clearly one way. A line every agent reads on every turn, or a price change customers will see, earns a larger and more varied stage first, because a wrong call repeats everywhere until someone notices. Any number you set carries the consequence example that justifies it.
+The consequence sets the size. Rewording a grading rubric you can revert tomorrow can stop once a handful of cases point clearly one way. A line every agent reads on every turn, or a price change customers will see, earns a larger and more varied stage first, because a wrong call repeats everywhere until someone notices.
 
 ## 3. Keep the stages honest
 
