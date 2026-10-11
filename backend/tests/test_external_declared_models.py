@@ -355,18 +355,36 @@ def test_a_registration_that_names_a_restriction_keeps_it(isolated_db, monkeypat
 
 
 @pytest.mark.parametrize(
-    ("name", "base_url", "expected"),
+    ("base_url", "expected"),
     [
-        ("Token Plan (Beijing)", "https://api.example.com/v1", "interactive_only"),
-        ("Workspace", "https://token-plan.example.com/v1", "interactive_only"),
-        ("Workspace", "https://api.example.com/v1", "allowed"),
-        (None, "not a url", "allowed"),
+        ("https://token-plan.example.com/v1", "interactive_only"),
+        ("https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1", "interactive_only"),
+        ("https://api.example.com/v1", "allowed"),
+        ("not a url", "allowed"),
     ],
 )
-def test_registration_default_reads_name_and_host(name, base_url, expected) -> None:
+def test_registration_default_reads_the_host(base_url, expected) -> None:
     from llm.endpoint_policy import registration_default
 
-    assert registration_default(name, base_url) == expected
+    assert registration_default(base_url) == expected
+
+
+def test_a_token_plan_name_on_an_ordinary_host_stays_allowed(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Token Plan (Beijing)", base_url="https://api.example.com/compatible-mode/v1",
+            dialect="openai", model_ids=["glm-5.3"],
+        ),
+    ))["server_id"]
+
+    assert "agent_use_restriction" not in _server_meta(isolated_db, sid)
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
 
 
 # ── removal stays removed ────────────────────────────────────────────────────
