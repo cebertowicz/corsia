@@ -156,7 +156,7 @@
 </section>
 
 <style>
-	.agents { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 16px; display: grid; gap: 6px; }
+	.agents { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 0; padding: 16px; display: grid; gap: 6px; }
 	h3, p { margin: 0; }
 	h3 { margin-top: 20px; color: var(--text-secondary); font-size: var(--text-footnote); letter-spacing: 0.05em; text-transform: uppercase; }
 	p { color: var(--text-secondary); font-size: var(--text-subhead); }

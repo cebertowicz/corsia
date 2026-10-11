@@ -38,8 +38,8 @@ describe('weekly outcome rates', () => {
 		// The server pooled 105 outcomes (the 5 behind the withheld week included); the drawn weeks alone would pool to 100.
 		const view = periodView(rows, SERIES, 1, win([2.5, 105], [null, 0]));
 		expect(view.current).toEqual({ value: 2.5, n: 105, periods: [0, 1, 2, 3].map(periodAt) });
-		expect(view.previous).toBeNull();
-		expect(periodChange(view)).toBe('new');
+		expect(view.previous).toEqual({ value: null, n: 0, periods: [] });
+		expect(periodChange(view)).toBe(`new vs ${view.prevText}`);
 		expect(view.nowText).toBe('Aug 10 to Sep 6');
 		// A window the server pooled only in part (a break left one week) is named by the dates it pooled, not the 4 weeks around them.
 		const narrowed: SeriesWindows = { latest: { value: 2, n: 20, from: periodAt(3), to: '2026-09-06' }, previous: { value: null, n: 0 } };
@@ -53,10 +53,19 @@ describe('weekly outcome rates', () => {
 		const rows = Array.from({ length: 8 }, (_, i) => row(i, i < 4 ? 2 : 1, 25));
 		const view = periodView(rows, SERIES, 1, win([1, 100], [2, 100]));
 		expect(periodChange(view)).toBe(`-50% vs ${view.prevText}`);
-		expect(periodChange(periodView([row(0, 1, 6), row(1, 1, 6)], SERIES, 1, win([1, 12], [null, 0])))).toBe('low n');
+		expect(periodChange(periodView([row(0, 1, 6), row(1, 1, 6)], SERIES, 1, win([1, 12], [null, 0])))).toBe('low n vs Jun 29 to Jul 26');
 		const partlyCovered = periodView([row(0, 2, 25), row(1, 2, 25), row(2, 1, 25), row(3, 1, 25), row(4, 1, 25), row(5, 1, 25)], SERIES, 1, win([1, 100], [1.5, 100]));
 		expect(periodChange(partlyCovered)).toBe(`new vs ${partlyCovered.prevText}`);
 		expect(changeOnly(partlyCovered)).toBe('new');
+	});
+
+	it('names the previous window and its n when the series drew none of it, as it does for a part-covered one', () => {
+		// The series begins inside the latest window (the first-try rate on Weeks): nothing is drawn for the previous window, which the server still served.
+		const rows = [4, 5, 6, 7].map((i) => row(i, 0.9, 30));
+		const view = viewOf(rows, SERIES, 1, periodsPeriod(periodAt(7)), win([0.9, 120], [null, 0]));
+		expect(view.prevText).not.toBe('');
+		expect(periodChange(view, true)).toBe(`new vs ${view.prevText} (n 0)`);
+		expect(changeOnly(view)).toBe('new');
 	});
 
 	it('draws a week the server withheld as unknown, and the served moving average with a gap where it serves none', () => {

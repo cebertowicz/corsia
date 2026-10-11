@@ -56,11 +56,13 @@ const served = (figure: WindowFigure | undefined, periods: string[], scale: numb
  */
 export function windowPair(drawn: string[], period?: MeasurementPeriod, windows?: SeriesWindows, scale = 1): WindowPair {
 	const cur = period ? drawn.filter((key) => inSpan(key, period.latest)) : [], prev = period ? drawn.filter((key) => inSpan(key, period.previous)) : [];
+	// A served previous window is named even when the series drew none of it: the comparison then reads "new vs <window> (n N)", as it does for a part-covered one.
+	const hasPrevious = !!(period && windows?.previous);
 	return {
-		current: served(windows?.latest, cur, scale), previous: prev.length && windows?.previous ? served(windows.previous, prev, scale) : null,
+		current: served(windows?.latest, cur, scale), previous: hasPrevious ? served(windows!.previous, prev, scale) : null,
 		// The latest figure is named by the dates the server pooled for it, never by a wider window it did not pool.
 		nowText: period ? periodName(windows?.latest?.from && windows.latest.to ? { from: windows.latest.from, to: windows.latest.to } : period.latest) : '',
-		prevText: period && prev.length ? periodName(period.previous) : '',
+		prevText: period && hasPrevious ? periodName(period.previous) : '',
 		// With no served period there is no previous window to cover, so nothing reads new for covering it in part.
 		previousExpected: period ? spanPeriods(period, period.previous) : 0,
 	};
