@@ -11,12 +11,14 @@ import { drag, shoot } from '../support/imageRegionComments';
 const NATURAL = { width: 1600, height: 1000 };
 const filler = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => `Paragraph ${from + i}: the walkthrough continues with enough words to wrap across a few lines of the document column.\n`).join('\n');
 const DOC = ['# Design walkthrough', '', filler(1, 4), '![Mock screen](shots/screen.png)', '', filler(4, 12)].join('\n');
+/** Two images, for many comments on each and a drawer with more than one image group. */
+const DOC_TWO = ['# Design walkthrough', '', filler(1, 2), '![Mock screen](shots/screen.png)', '', filler(2, 4), '![Settings screen](shots/settings.png)', '', filler(4, 12)].join('\n');
 const query = `?token=${encodeURIComponent(TEST_TOKEN)}`;
 
 interface Seeded { sessionTitle: string; artifactId: string }
 
 /** A document with one image near its top, open in its thread's canvas. */
-async function seedDocument(page: Page, request: APIRequestContext, label: string, splitWidth: number | null): Promise<Seeded> {
+async function seedDocument(page: Page, request: APIRequestContext, label: string, splitWidth: number | null, doc = DOC): Promise<Seeded> {
 	const stamp = Date.now();
 	const sessionTitle = `${label}-${stamp}`;
 	const sessionId = await createSession(request, sessionTitle);
@@ -27,8 +29,8 @@ async function seedDocument(page: Page, request: APIRequestContext, label: strin
 	const dir = path.join(workspaceRoot, `${label}-${stamp}`);
 	const docPath = path.join(dir, 'walkthrough.md');
 	fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
-	fs.writeFileSync(path.join(dir, 'shots', 'screen.png'), syntheticPng(NATURAL.width, NATURAL.height));
-	fs.writeFileSync(docPath, DOC);
+	for (const name of ['screen.png', 'settings.png']) fs.writeFileSync(path.join(dir, 'shots', name), syntheticPng(NATURAL.width, NATURAL.height));
+	fs.writeFileSync(docPath, doc);
 	const registered = await request.post(`/api/files/register${query}`, { data: { path: docPath, thread_id: sessionId } });
 	expect(registered.ok(), `register failed: ${registered.status()}`).toBeTruthy();
 	const artifactId = (await registered.json()).artifact.id as string;
@@ -66,8 +68,8 @@ async function openDocument(page: Page, seeded: Seeded, width: number) {
 	await expect.poll(() => docImage(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(NATURAL.width);
 }
 /** Opens the document's image in the viewer and waits until it has drawn and fitted. */
-async function openImage(page: Page) {
-	await docImage(page).click();
+async function openImage(page: Page, which = 0) {
+	await page.locator('.cm-md-image img').nth(which).click();
 	await expect(overlay(page)).toBeVisible();
 	const img = overlay(page).locator('.frame img');
 	await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(NATURAL.width);
@@ -80,11 +82,11 @@ async function openImage(page: Page) {
 	}, { intervals: [150] }).toBe(true);
 }
 /** Draws a box over part of the image and posts a comment on it. */
-async function commentOnRegion(page: Page, text: string) {
+async function commentOnRegion(page: Page, text: string, at = { x: 0.2, y: 0.25 }) {
 	await bar(page).locator('[data-image-comment]').click();
 	const box = (await surface(page).boundingBox())!;
-	const from = { x: box.x + box.width * 0.2, y: box.y + box.height * 0.25 };
-	const to = { x: box.x + box.width * 0.45, y: box.y + box.height * 0.5 };
+	const from = { x: box.x + box.width * at.x, y: box.y + box.height * at.y };
+	const to = { x: box.x + box.width * (at.x + 0.25), y: box.y + box.height * (at.y + 0.25) };
 	await drag(page, from, to);
 	const composer = page.locator('textarea[placeholder="Comment…"]');
 	await expect(composer).toBeVisible();
@@ -232,5 +234,44 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(page.locator('.drawer-panel[role="dialog"], .canvas-comment-drawer').getByText('Tap target too small')).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
 		await shoot(page, testInfo, 'doc-393-05-drawer-image-group', true);
+	});
+
+	test('many comments on two images: tags in the viewer, a marker per image, a drawer group per image (1440)', async ({ page, request }, testInfo) => {
+		mockOnly(testInfo);
+		test.setTimeout(240_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		const seeded = await seedDocument(page, request, 'doc-image-regions-many', null, DOC_TWO);
+		await openDocument(page, seeded, 1440);
+		const notes = [
+			['The header crowds the logo', { x: 0.05, y: 0.05 }], ['Search needs a label', { x: 0.4, y: 0.1 }],
+			['This card is too tall', { x: 0.1, y: 0.5 }], ['Footer links are low contrast', { x: 0.55, y: 0.6 }],
+		] as const;
+		await openImage(page, 0);
+		for (const [text, at] of notes) await commentOnRegion(page, text, at);
+		await page.keyboard.press('Escape');
+		await expect(tag(page, 4)).toBeVisible();
+		await shoot(page, testInfo, 'doc-1440-many-01-viewer-four-tags', true);
+		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
+		await expect(overlay(page)).toHaveCount(0);
+
+		await openImage(page, 1);
+		await commentOnRegion(page, 'Toggle labels are unclear', { x: 0.1, y: 0.2 });
+		await commentOnRegion(page, 'Save should be primary', { x: 0.6, y: 0.65 });
+		await page.keyboard.press('Escape');
+		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
+		await expect(overlay(page)).toHaveCount(0);
+		// A marker beside each image, and the document's row counting all six.
+		await expect(page.locator('.cm-comment-marker')).toHaveCount(2);
+		await expect(docSend(page)).toHaveText(/^\s*Send 6 comments to /);
+		await shoot(page, testInfo, 'doc-1440-many-02-document-two-markers', true);
+
+		// The drawer: one group per image, each under one thumbnail, comments in number order; scrolled to the second.
+		await docComments(page).click();
+		const thumbs = page.locator('.canvas-comment-drawer [data-region-thumb]');
+		await expect(thumbs).toHaveCount(2);
+		await shoot(page, testInfo, 'doc-1440-many-03-drawer-two-groups', true);
+		await thumbs.nth(1).scrollIntoViewIfNeeded();
+		await expect(page.locator('.canvas-comment-drawer').getByText('Save should be primary')).toBeVisible();
+		await shoot(page, testInfo, 'doc-1440-many-04-drawer-scrolled', true);
 	});
 });
