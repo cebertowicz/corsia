@@ -8,7 +8,7 @@
 	import { openArtifactTab } from '$lib/stores/artifactWorkspace';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
-	import { pendingAnswers } from '$lib/stores/cardAnswers';
+	import { submittedAnswers } from '$lib/stores/cardAnswers';
 	import ArtifactGlyph from './ArtifactGlyph.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
 
@@ -29,9 +29,9 @@
 		time?: string;
 	} = $props();
 
-	// An answer sent from the review bar and not yet confirmed shows at once; it belongs to this Plans-owned
-	// hold only, so a later ask for the same artifact remains open.
-	const sent = $derived(card.state === 'needs_review' && card.hold_id ? $pendingAnswers[card.hold_id] : undefined);
+	// A review-bar submission shows at once and stays for this session because cards are not refetched; it belongs
+	// to this Plans-owned hold only, so a later ask for the same artifact remains open.
+	const sent = $derived(card.state === 'needs_review' && card.hold_id ? $submittedAnswers[card.hold_id] : undefined);
 	const cardState = $derived(sent?.state ?? card.state);
 	const feedback = $derived(sent ? sent.feedback : card.feedback);
 	// A row's tile is a filled type tile; a chip carries the bare coloured glyph, the pill being its container.

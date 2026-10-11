@@ -3,9 +3,10 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ReviewBar from './ReviewBar.svelte';
+import ReviewBarHarness from '$lib/__tests__/fixtures/ReviewBarHarness.svelte';
 import { DRAFT_OPEN, SEND_FAILED } from '$lib/reviewBarState.svelte';
 import { ReviewRefusal, type ReviewBarRead } from '$lib/api/reviewBar';
-import { pendingAnswers } from '$lib/stores/cardAnswers';
+import { submittedAnswers } from '$lib/stores/cardAnswers';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
@@ -34,7 +35,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	api.fetchReviewBar.mockReset();
 	api.answerReview.mockReset();
-	pendingAnswers.set({});
+	submittedAnswers.set({});
 });
 afterEach(() => {
 	if (component) unmount(component);
@@ -121,7 +122,7 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(document.activeElement).toBe(button('Approve')));
 	});
 
-	it('marks the matching card answer pending before the request and clears it when the request fails', async () => {
+	it('keeps the submitted verdict on a duplicate click while sending and clears it on actual failure', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		let fail!: (error: Error) => void;
 		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
@@ -129,11 +130,46 @@ describe('ReviewBar', () => {
 
 		button('Approve')!.click();
 		flushSync();
-		expect(get(pendingAnswers)).toEqual({ h1: { state: 'approved', feedback: counts(0) } });
+		button('Approve')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+		flushSync();
+		expect(api.answerReview).toHaveBeenCalledTimes(1);
+		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: counts(0) } });
 
 		fail(new Error('500'));
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
-		expect(get(pendingAnswers)).toEqual({});
+		expect(get(submittedAnswers)).toEqual({});
+	});
+
+	it('does not flash a submitted verdict for an empty required note', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		await render();
+
+		button('Request changes')!.click();
+		flushSync();
+		button('Request changes')!.click();
+		flushSync();
+
+		expect(api.answerReview).not.toHaveBeenCalled();
+		expect(get(submittedAnswers)).toEqual({});
+	});
+
+	it('keeps the original hold verdict when the ReviewBar switches artifacts before a successful send resolves', async () => {
+		const response = { verdict: 'approved' as const, note: null, feedback_counts: counts(0) };
+		api.fetchReviewBar.mockResolvedValueOnce(read(0)).mockResolvedValueOnce({ ...read(0), hold_ids: ['h2'] });
+		let succeed!: (value: typeof response) => void;
+		api.answerReview.mockReturnValue(new Promise<typeof response>((resolve) => { succeed = resolve; }));
+		const harness = mount(ReviewBarHarness, { target: host });
+		component = harness as Record<string, unknown>;
+		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
+
+		button('Approve')!.click();
+		flushSync();
+		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: counts(0) } });
+		harness.switchArtifact('doc-2');
+		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
+		succeed(response);
+
+		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: counts(0) } }));
 	});
 
 	it('announces the send through a status region that is already mounted when it starts', async () => {

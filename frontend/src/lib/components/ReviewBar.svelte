@@ -4,7 +4,7 @@
 	import { agentColor } from '$lib/docPresence';
 	import { on } from '$lib/ws';
 	import { createReviewBarState, DRAFT_OPEN } from '$lib/reviewBarState.svelte';
-	import { answerFailed, answerPending } from '$lib/stores/cardAnswers';
+	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
 
 	/**
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
@@ -71,11 +71,19 @@
 	}
 	/** The answer closes the user's feedback batch on the server; the viewer's pending-batch state re-reads it. */
 	async function settle(verdict: 'approved' | 'approved_with_changes' | 'changes_requested') {
-		if (!artifactId) return;
-		answerPending(holdIds, { state: verdict, feedback: bar.read?.round_feedback_counts });
-		if (await bar.answer(verdict)) { onAnswered?.(); return; }
-		answerFailed(holdIds);
-		// A send that came back without a receipt leaves focus on the control that sent it.
+		const targetId = artifactId;
+		if (!targetId) return;
+		const targetHoldIds = [...holdIds];
+		const outcome = await bar.answer(verdict, () => {
+			answerSubmitted(targetHoldIds, { state: verdict, feedback: bar.read?.round_feedback_counts });
+		});
+		if (outcome === 'sent') {
+			if (bar.artifactId === targetId) onAnswered?.();
+			return;
+		}
+		if (outcome === 'failed') answerSubmissionFailed(targetHoldIds);
+		if (outcome === 'ignored') return;
+		// A failed send that came back without a receipt leaves focus on the control that sent it.
 		await tick();
 		if (bar.phase === 'noting') noteInput?.focus();
 		else if (bar.phase === 'ask') approveButton?.focus();

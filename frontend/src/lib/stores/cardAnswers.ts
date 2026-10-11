@@ -1,31 +1,33 @@
 /**
- * Answers submitted in the review bar that the server has not confirmed yet, by ask hold.
+ * Submitted review-bar answers by ask hold for cards that do not refetch after a send.
  *
- * An ask card shows the verdict the moment the person answers (CCR-4d) instead of staying "Needs your
- * review" until the next refresh. The review bar calls `answerPending` when it sends and `answerFailed`
- * when the send fails, which returns the card to its server state; the review bar's own error is the one
- * explanation. Holds, rather than artifacts, identify review rounds, so a later ask for the same document
- * never inherits an earlier optimistic verdict.
+ * State table:
+ * pending -> kept on confirm
+ * pending -> removed on failure
+ * ignored -> untouched
+ *
+ * Holds, rather than artifacts, identify review rounds, so a later ask for the same document never inherits
+ * an earlier submitted verdict.
  */
 import { writable } from 'svelte/store';
 import type { MessageCard, MessageCardState } from '$lib/api/messageCards';
 
-export interface PendingAnswer {
+export interface SubmittedAnswer {
 	state: Exclude<MessageCardState, 'needs_review'>;
 	feedback?: MessageCard['feedback'];
 }
 
-export const pendingAnswers = writable<Record<string, PendingAnswer>>({});
+export const submittedAnswers = writable<Record<string, SubmittedAnswer>>({});
 
-export function answerPending(holdIds: readonly string[], answer: PendingAnswer): void {
-	pendingAnswers.update((all) => ({
+export function answerSubmitted(holdIds: readonly string[], answer: SubmittedAnswer): void {
+	submittedAnswers.update((all) => ({
 		...all,
 		...Object.fromEntries(holdIds.map((holdId) => [holdId, answer])),
 	}));
 }
 
-export function answerFailed(holdIds: readonly string[]): void {
-	pendingAnswers.update((all) => {
+export function answerSubmissionFailed(holdIds: readonly string[]): void {
+	submittedAnswers.update((all) => {
 		const rest = { ...all };
 		for (const holdId of holdIds) delete rest[holdId];
 		return rest;

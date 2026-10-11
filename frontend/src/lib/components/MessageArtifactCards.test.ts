@@ -9,7 +9,7 @@ import type { MessageCard } from '$lib/api/messageCards';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { token } from '$lib/stores/auth';
 import { paneOpen } from '$lib/stores/paneOpen';
-import { answerFailed, answerPending, pendingAnswers } from '$lib/stores/cardAnswers';
+import { answerSubmissionFailed, answerSubmitted, submittedAnswers } from '$lib/stores/cardAnswers';
 import { focusPlanNode } from '$lib/planNodeFocus';
 import UpdateCard from './UpdateCard.svelte';
 import type { UpdateCard as Card } from '$lib/api/threadUpdates';
@@ -34,7 +34,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	paneOpen.set(false);
 	threadWorkspaces.set({});
-	pendingAnswers.set({});
+	submittedAnswers.set({});
 });
 
 afterEach(() => {
@@ -173,13 +173,13 @@ describe('MessageArtifactCards', () => {
 		const state = () => host.querySelector('.state')?.textContent;
 		expect(state()).toBe('Needs your review');
 
-		answerPending(['h1'], { state: 'approved_with_changes', feedback: { comments: 2 } });
+		answerSubmitted(['h1'], { state: 'approved_with_changes', feedback: { comments: 2 } });
 		flushSync();
 		expect(state()).toBe('Approved with changes');
 		expect(host.querySelector('.name')?.textContent).toBe('2 comments');
 		expect(tiles()[0].getAttribute('aria-label')).toBe('Launch plan, document, Approved with changes, 2 comments');
 
-		answerFailed(['h1']);
+		answerSubmissionFailed(['h1']);
 		flushSync();
 		expect(state()).toBe('Needs your review');
 	});
@@ -187,7 +187,7 @@ describe('MessageArtifactCards', () => {
 	it('ignores a sent answer once the server state has moved on', () => {
 		render({ cards: [ask({ state: 'changes_requested', feedback: { comments: 1 } })] });
 
-		answerPending(['h1'], { state: 'approved' });
+		answerSubmitted(['h1'], { state: 'approved' });
 		flushSync();
 		expect(host.querySelector('.state')?.textContent).toBe('Changes requested');
 	});
@@ -195,7 +195,7 @@ describe('MessageArtifactCards', () => {
 	it('does not apply an answered round to a later open ask for the same artifact', () => {
 		render({ cards: [ask({ state: 'approved', hold_id: 'h1' }), ask({ hold_id: 'h2' })] });
 
-		answerPending(['h1'], { state: 'approved' });
+		answerSubmitted(['h1'], { state: 'approved' });
 		flushSync();
 		expect(tiles()[1].querySelector('.state')?.textContent).toBe('Needs your review');
 	});
