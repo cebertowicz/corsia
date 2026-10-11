@@ -279,10 +279,10 @@
       "sha256": "2909468bcf8b92791a37a5199e3c063f44e95cd03c389a9518c883528798a554"
     },
     {
-      "bytes": 3930,
+      "bytes": 4344,
       "kind": "skill",
       "path": "skills/experiment-design/SKILL.md",
-      "sha256": "742bb5e42574318c22d288f4f395eb89aed3c2ed357290e7b33db9a7d993d5a6"
+      "sha256": "cba56a20ad58a4e38f980860ff707ea472a6623abce468322c1ea07f9610bf8f"
     },
     {
       "bytes": 3647,

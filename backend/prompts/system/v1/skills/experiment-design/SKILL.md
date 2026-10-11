@@ -24,7 +24,7 @@ Reuse what already exists as the baseline (current outputs, historical labels, p
 
 ## 2. Stage it: every stage must earn the next
 
-Plan the experiment as stages of growing size, for example 5, then 20, then 50 samples. Never launch the full size first. Before each stage, write three rules:
+Plan the experiment as stages of growing size. Start with the fewest samples that could show the direction, and size each later stage by what a wrong conclusion would cost, never by a habitual number. Never launch the full size first. Before each stage, write three rules:
 
 - **Stop, it works:** the signal already meets the bar from section 1. Stop and decide; more samples add cost, not confidence the decision needs.
 - **Stop, it doesn't:** the signal is absent, weak, or pointing the wrong way. Stop, record it, and change the idea instead of buying more samples to rescue it.
@@ -32,7 +32,7 @@ Plan the experiment as stages of growing size, for example 5, then 20, then 50 s
 
 After each stage, read the results, including failures and cost, and apply the rules as written. Do not move a threshold after seeing data. Do not rerun a stage hoping for a better number.
 
-A reversible change usually ends at the first or second stage: at most 20 samples, one run.
+The consequence sets the size. Rewording a grading rubric you can revert tomorrow can stop once a handful of cases point clearly one way. A line every agent reads on every turn, or a price change customers will see, earns a larger and more varied stage first, because a wrong call repeats everywhere until someone notices. Any number you set carries the consequence example that justifies it.
 
 ## 3. Keep the stages honest
 
