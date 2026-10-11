@@ -175,6 +175,8 @@
 	/* No box: a 2 px rule down the left edge shows where the block starts and ends. */
 	.fold-details { margin: 8px 0 0 5px; padding: 2px 0 0 16px; border-left: 2px solid var(--border-subtle); }
 	.fold-details :global(.message) { margin-bottom: 12px; }
+	/* The region's own entrance carries its rows; a message rising 8px on its 380ms entrance would keep moving after it settles. */
+	.fold-details :global(.message.assistant), .fold-details :global(.message.system) { animation: none; }
 	.fold-state { display: flex; align-items: center; gap: 8px; padding: 0 0 12px; color: var(--text-muted); font-size: var(--text-footnote); }
 	.fold-error { color: var(--red-text); }
 	.fold-error .fold-action { min-height: 32px; padding: 0 4px; }

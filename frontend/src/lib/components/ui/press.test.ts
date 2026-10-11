@@ -54,4 +54,10 @@ describe('press', () => {
 		expect(css).toContain('scale: none');
 		expect(css).not.toMatch(/transform\s*:/);
 	});
+
+	it('paints the tint under the control content, so an opaque tint cannot hide the label', () => {
+		const css = readFileSync(join(process.cwd(), 'src/lib/components/ui/press.css'), 'utf8');
+		expect(css).toMatch(/\[data-press\] \{[^}]*isolation: isolate/);
+		expect(css).toMatch(/\[data-press\]::after \{[^}]*z-index: -1/);
+	});
 });

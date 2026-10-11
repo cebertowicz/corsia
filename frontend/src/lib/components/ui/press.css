@@ -1,8 +1,9 @@
-/* Press feedback for `use:press` controls. The tint is an overlay fading in, never a size change. */
-[data-press] { -webkit-tap-highlight-color: transparent; }
+/* Press feedback for `use:press` controls. The tint fades in over the control's own background and under its content, never a size change. */
+[data-press] { -webkit-tap-highlight-color: transparent; isolation: isolate; }
 [data-press]::after {
-	content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-	background: var(--press-bg); opacity: 0;
+	content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+	/* A step past the row's hover fill, so pressed reads against hover as well as against rest. */
+	background: color-mix(in srgb, var(--text-primary) 8%, var(--press-bg)); opacity: 0;
 	transition: opacity var(--dur-tight) var(--ease-snap);
 }
 [data-press][data-pressing]::after { opacity: 1; }

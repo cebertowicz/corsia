@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -120,5 +122,10 @@ describe('WorkBlock new marker (F2)', () => {
 
 		expect(host.querySelector('[data-new-capsule]')).toBeNull();
 		expect(toggle().getAttribute('aria-label')).not.toContain('new since');
+	});
+
+	it('does not move its rows after the region settles: no message entrance runs inside the details', () => {
+		const source = readFileSync(join(process.cwd(), 'src/lib/components/WorkBlock.svelte'), 'utf8');
+		expect(source).toContain('.fold-details :global(.message.assistant), .fold-details :global(.message.system) { animation: none; }');
 	});
 });

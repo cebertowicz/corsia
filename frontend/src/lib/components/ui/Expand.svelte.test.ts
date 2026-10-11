@@ -110,6 +110,12 @@ describe('Expand', () => {
 		expect(region()).toBeNull();
 	});
 
+	it('caps its column at the parent width so a settled region cannot grow around nowrap content', () => {
+		const source = readFileSync(join(process.cwd(), 'src/lib/components/ui/Expand.svelte'), 'utf8');
+		expect(source).toContain('grid-template-columns: minmax(0, 1fr)');
+		expect(source).toMatch(/\.expand-inner \{[^}]*min-width: 0/);
+	});
+
 	it('has no size transition under reduced motion, only an opacity crossfade', () => {
 		const source = readFileSync(join(process.cwd(), 'src/lib/components/ui/Expand.svelte'), 'utf8');
 		const reduced = source.slice(source.indexOf('@media (prefers-reduced-motion: reduce)'));

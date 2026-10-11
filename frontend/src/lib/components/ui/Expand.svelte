@@ -81,7 +81,8 @@
 
 <style>
 	.expand {
-		display: grid; grid-template-rows: 0fr;
+		/* The column is capped at the parent's width so the overflow switch at settle cannot widen it. */
+		display: grid; grid-template-rows: 0fr; grid-template-columns: minmax(0, 1fr);
 		/* An exit is about 70% of its entrance. */
 		transition: grid-template-rows calc(var(--dur-standard) * 0.7) var(--ease-snap);
 	}
@@ -91,7 +92,7 @@
 		transition-timing-function: var(--ease-entrance);
 	}
 	.expand-inner {
-		min-height: 0; overflow: hidden; opacity: 0;
+		min-height: 0; min-width: 0; overflow: hidden; opacity: 0;
 		transition: opacity calc(var(--dur-standard) * 0.7) var(--ease-snap);
 	}
 	.expand.open > .expand-inner { opacity: 1; transition-duration: var(--dur-standard); transition-timing-function: var(--ease-entrance); }
