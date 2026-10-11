@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import date, datetime, timedelta, timezone
 from threading import Event
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
@@ -16,7 +16,7 @@ from api.measurement_findings import derive_findings_state
 from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
-from api.measurement_presence import first_presence_at, first_presence_period
+from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_registry import REGISTRY, instrument_period, period_measured
 from api.measurement_models import models_read, task_chain_costs
 from api.measurement_partial import current_period_outcomes
@@ -196,7 +196,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     # total (and, on Days, the outcome count) also shows this one, flagged partial, so a first period is not an empty page.
     current_period = page_grain.current
 
-    def query() -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, str | None]:
+    def query() -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
@@ -204,17 +204,18 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
             params = {**scope_params, "grain": page_grain}
             so_far = current_period_outcomes(db, scope_params, page_grain) if "outcomes" in requested and page_grain.kind == "days" else None
             families = {REGISTRY[metric].family for metric in requested}
-            first_presence = first_presence_period(db, user["id"], page_grain)
+            coverage = presence_coverage(db, user["id"], page_grain.zone)
             first_limit_period = first_recorded_period(db, params) if "limits" in families else None
             prepare_outcome_periods(db, params)
             return selected_scope.response(), {family: (size_family(db, params) if family == "size" else
                                                       [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
                                                       query_family(db, family, params))
-                                               for family in families}, first_limit_period, so_far, first_presence
+                                               for family in families}, first_limit_period, so_far, coverage
         finally:
             db.close()
 
-    selected_scope, family_rows, first_limit_period, outcomes_so_far, first_presence = await run_bulk(query)
+    selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage = await run_bulk(query)
+    first_presence = coverage.start_period(page_grain)
     rows: list[dict[str, Any]] = []
     windows: dict[str, dict[str, Any]] = {}
     spine = list(page_grain.periods)
@@ -231,14 +232,14 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         # Sized hours run from the instrument's start, but the size rate divides them by presence
         # time, which exists only from the first recorded presence. Before that the rate is not
         # measured: no row or window may divide earlier work by later time.
-        rate_start = max(REGISTRY[metric].start, first_presence) if family == "size" and first_presence else REGISTRY[metric].start
+        rate_start = coverage.rate_start(REGISTRY[metric].start) if family == "size" else REGISTRY[metric].start
         rate_period = instrument_period(rate_start, page_grain) if family == "size" else ""
 
         def rate_measured(name: str, period: str, start: str = rate_period) -> bool:
             return measured(name, period) and period >= start
         if family == "size":
             rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, drawn, family_rows[family], period_comparable, rate_measured,
-                                   dates={"data_start": rate_start, "comparability_before": _COMPARABILITY_BREAK}))
+                                   dates={"data_start": rate_period, "comparability_before": _COMPARABILITY_BREAK}))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
             periods = [*drawn, current_period] if metric == "fresh_tokens" else drawn
@@ -264,9 +265,15 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
 
 
 @router.get("/series/index")
-async def measurement_index(project: str = Query(...), agent: str = Query(...), user: dict = Depends(require_user)):
-    """Return the registry and scoped cost metadata for the composite scope."""
-    def query() -> tuple[dict[str, str | None], dict[str, float | int], str | None]:
+async def measurement_index(project: str = Query(...), agent: str = Query(...),
+                            timezone_name: Annotated[str, Query(alias="timezone")] = "UTC", user: dict = Depends(require_user)):
+    """Return the registry and scoped cost metadata for the composite scope.
+
+    Presence-backed and size-rate starts are the viewer-local days ``PresenceCoverage`` gives the series.
+    """
+    zone = resolve_grain("days", timezone_name).zone
+
+    def query() -> tuple[dict[str, str | None], dict[str, float | int], PresenceCoverage]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
@@ -278,15 +285,20 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...), 
             """, params).fetchone()
             total = int(cost["n"] or 0)
             return selected_scope.response(), {"known_cost_usd": float(cost["known_cost_usd"] or 0),
-                                               "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, first_presence_at(db, user["id"])
+                                               "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone)
         finally:
             db.close()
 
-    selected_scope, cost_metadata, first_presence = await run_bulk(query)
+    selected_scope, cost_metadata, coverage = await run_bulk(query)
+
+    def data_start(item: Any) -> str:
+        if item.presence_backed:
+            return coverage.start_day or item.start
+        return coverage.rate_start(item.start) if item.family == "size" else item.start
     definitions = [{"id": name, "display_name": name.replace("_", " ").title(),
                     "definition": f"Weekly aggregate for {name.replace('_', ' ')}.", "unit": item.unit,
                     "minimum_n": item.minimum_n, "owner": "Self-Improvement Infrastructure",
-                    "data_start": first_presence[:10] if item.presence_backed and first_presence else item.start, "proxy": item.proxy,
+                    "data_start": data_start(item), "proxy": item.proxy,
                     "proxy_explanation": "Proxy measurement" if item.proxy else None,
                     "comparability": {"before": _COMPARABILITY_BREAK, "restricted": name != "outcomes"},
                     "breaks": [{"period": _ASKS_BREAK, "kind": "definition"}] if name == "asks_per_outcome" else [],
@@ -339,7 +351,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
-            first_presence = first_presence_period(db, user["id"], page_grain)
+            first_presence = presence_coverage(db, user["id"], page_grain.zone).start_period(page_grain)
             # One prepared window covers every period the grain draws, so nothing reads live plans.
             prepare_outcome_periods(db, params, roots=True)
             rows, findings, summaries, agent_count, overall = build_agents(

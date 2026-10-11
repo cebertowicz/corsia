@@ -228,3 +228,81 @@ async def test_an_exit_pending_live_visit_ends_where_the_user_left(isolated_db):
     finally:
         db.close()
     assert [row["value"] for row in rows] == [pytest.approx(0.5)]
+
+
+@pytest.mark.asyncio
+async def test_a_project_level_visit_counts_before_the_user_has_a_thread_there(isolated_db):
+    """A project-level visit belongs to its recorded user, as coverage says; a project with
+    no thread of theirs yet is still a real scope with that time in it."""
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('fresh','fresh','t','t')")
+        _seed_visit(db, "project-level", project_id="fresh")
+        db.commit()
+    finally:
+        db.close()
+    assert await _hours(measurement_series, project="fresh") == pytest.approx(1.0)
+
+
+def test_a_measured_period_with_outcomes_and_no_presence_counts_at_zero_time(isolated_db):
+    """Inside coverage no presence is a true zero: the outcomes are served and pooled, with no time."""
+    from api.measurement import _row
+    from api.measurement_queries import prepare_outcome_periods
+    from infra.database import get_db
+    from tests.test_measurement_api import _family_in_range, _grained, _seed_outcomes
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','t','t')")
+        _seed_thread(db, "agent-a", project_id="one", agent=True)
+        _seed_outcomes(db, "agent-a", count=25)
+        db.commit()
+        params = {"user_id": USER["id"], "scope_project": "all", "scope_agent": None,
+                  "from": LEGACY_WEEK_TO, "to": LEGACY_WEEK_TO}
+        prepare_outcome_periods(db, _grained(params))
+        rows = _family_in_range(db, "active", params)
+    finally:
+        db.close()
+    assert [(row["period"], row["active_hours"], row["outcomes"]) for row in rows] == [(LEGACY_WEEK_TO, 0, 25)]
+    served = _row("active_hours_per_outcome", LEGACY_WEEK_TO, rows[0], False, first_presence_period=LEGACY_WEEK_FROM)
+    assert (served["value"], served["n"]) == (0.0, 25)
+
+
+def test_agent_minutes_pool_a_measured_period_without_presence_as_zero():
+    from api.measurement_agents import _active_minutes, _pooled_value
+    from api.measurement_registry import REGISTRY
+
+    window = [{"period": "2026-09-21", "outcomes": 20, "active_hours": 2.0},
+              {"period": "2026-09-28", "outcomes": 20, "active_hours": None}]
+    assert _pooled_value(REGISTRY, "active_hours_per_outcome", window) == pytest.approx(0.05)
+    assert _active_minutes(window, lambda _metric, _period: True) == pytest.approx(120.0)
+
+
+def test_the_index_and_the_series_start_coverage_on_the_same_local_day(isolated_db):
+    """A first visit just after UTC midnight is the previous evening for a Pacific viewer."""
+    from api.measurement_presence import first_presence_period
+    from api.measurement_scope import resolve_grain
+    from infra.database import get_db
+    from tests.test_measurement_api import _measurement_client
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('one','one','t','t')")
+        db.execute(
+            "INSERT INTO presence_visits (user_id,surface,thread_id,project_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+            "VALUES ('steve','project-level',NULL,'one','2026-09-21T03:00:00Z','2026-09-21T04:00:00Z',3600,1,'hidden')"
+        )
+        db.commit()
+        series_start = first_presence_period(db, "steve", resolve_grain("days", "America/Los_Angeles"))
+    finally:
+        db.close()
+    response = _measurement_client().get(
+        "/api/measurement/series/index?project=all&agent=none&timezone=America/Los_Angeles")
+    assert response.status_code == 200, response.text
+    starts = {item["id"]: item["data_start"] for item in response.json()["definitions"]}
+    assert series_start == "2026-09-20"
+    assert starts["active_hours_per_outcome"] == starts["time_on_platform_h"] == series_start
+    assert starts["estimated_human_hours_per_active_hour"] == "2026-09-20"

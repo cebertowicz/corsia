@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -56,8 +57,6 @@ def presence_allocation_cte(grain: Grain) -> str:
         WHERE v.thread_id IS NULL AND v.project_id IS NOT NULL
           AND v.user_id=:user_id
           AND v.entered_at<:to_ts AND v.exited_at>:from_ts
-          AND EXISTS (SELECT 1 FROM threads project_thread
-            WHERE project_thread.project_id=v.project_id AND project_thread.user_id=:user_id)
         UNION ALL
         SELECT p.thread_id,t.project_id,
           MAX(datetime(p.last_entered_at),datetime(:from_ts)) AS began,
@@ -91,8 +90,45 @@ def presence_allocation_cte(grain: Grain) -> str:
       )"""
 
 
-def first_presence_at(db, user_id: str) -> str | None:
-    """Return the user's first recorded presence instant across retained sources.
+@dataclass(frozen=True)
+class PresenceCoverage:
+    """The one owner of presence coverage: when it starts and what an empty period means.
+
+    A presence-backed measure is measured from the viewer-local day (or that day's
+    week) of the user's first recorded presence. Inside a measured period, no presence
+    is a true zero -- the user was not there -- so a period with outcomes and no
+    presence still counts, with zero time. A rate that divides by presence time (the
+    size rate) starts at the later of its own instrument start and that day. The series,
+    the Agents table and the index all read these answers from here.
+    """
+
+    started_at: str | None
+    zone: str
+
+    @property
+    def start_day(self) -> str | None:
+        """The viewer-local date of the first recorded presence."""
+        if self.started_at is None:
+            return None
+        instant = datetime.fromisoformat(self.started_at).replace(tzinfo=timezone.utc)
+        return instant.astimezone(ZoneInfo(self.zone)).date().isoformat()
+
+    def start_period(self, grain: Grain) -> str | None:
+        """The first local day, or the week holding it, a presence-backed measure covers."""
+        day = self.start_day
+        if day is None or grain.kind == "days":
+            return day
+        local = datetime.fromisoformat(day).date()
+        return (local - timedelta(days=local.weekday())).isoformat()
+
+    def rate_start(self, instrument_start: str) -> str:
+        """The first day a rate over presence time is measured, given its own instrument start."""
+        day = self.start_day
+        return max(instrument_start, day) if day else instrument_start
+
+
+def presence_coverage(db, user_id: str, zone: str) -> PresenceCoverage:
+    """Read the user's first recorded presence across retained sources.
 
     Ownership follows ``presence_intervals``: a threaded visit belongs to its thread's
     owner, a project-level visit to its recorded user.
@@ -110,18 +146,12 @@ def first_presence_at(db, user_id: str) -> str | None:
           WHERE t.user_id=:user_id
         ) WHERE instant IS NOT NULL
     """, {"user_id": user_id}).fetchone()
-    return row["instant"] if row and row["instant"] else None
+    return PresenceCoverage(row["instant"] if row and row["instant"] else None, zone)
 
 
 def first_presence_period(db, user_id: str, grain: Grain) -> str | None:
-    """Return the first local day or week whose presence recording is observable."""
-    instant = first_presence_at(db, user_id)
-    if instant is None:
-        return None
-    local_day = datetime.fromisoformat(instant).replace(tzinfo=timezone.utc).astimezone(ZoneInfo(grain.zone)).date()
-    if grain.kind == "days":
-        return local_day.isoformat()
-    return (local_day - timedelta(days=local_day.weekday())).isoformat()
+    """Return the first local day or week a presence-backed measure covers."""
+    return presence_coverage(db, user_id, grain.zone).start_period(grain)
 
 
 def scoped_presence_cte(grain: Grain, scope_threads: str) -> str:
@@ -159,11 +189,18 @@ def presence_family_sql(grain: Grain, scope_threads: str) -> str:
 
 
 def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
-    """Return each scope's union-presence time and outcome count by period."""
+    """Return each scope's union-presence time and outcome count by period.
+
+    A period with outcomes and no presence is served with zero time (``PresenceCoverage``);
+    the caller withholds periods before coverage starts.
+    """
     return f"""
       WITH {scoped_presence_cte(grain, scope_threads)}, active_periods AS (
         SELECT {grain.bucket('began')} AS period,SUM(seconds)/3600.0 AS active_hours
         FROM scoped_attention WHERE {grain.bucket('began')} IS NOT NULL GROUP BY period
-      ) SELECT a.period,a.active_hours,COALESCE(o.outcomes,0) AS outcomes FROM active_periods a
-        LEFT JOIN {outcomes} o USING(period) ORDER BY a.period
+      ), active_spine AS (
+        SELECT period FROM active_periods UNION SELECT period FROM {outcomes}
+      ) SELECT s.period,COALESCE(a.active_hours,0) AS active_hours,COALESCE(o.outcomes,0) AS outcomes
+        FROM active_spine s LEFT JOIN active_periods a USING(period) LEFT JOIN {outcomes} o USING(period)
+        ORDER BY s.period
     """
