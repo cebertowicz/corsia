@@ -140,8 +140,12 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
 		await settle();
 		expect(rendered()).toEqual(['Open task', '[12 completed]']);
+		const actions = () => host.querySelector('.fold-row .row-actions')!;
+		// A level never opened draws still; its controls animate only when they move.
+		expect(actions().classList.contains('returned')).toBe(false);
 
 		await press('Show 5');
+		expect(actions().classList.contains('expanded')).toBe(true);
 		expect(rendered()).toEqual([
 			'Open task', 'Done 0', 'Done 1', 'Done 2', 'Done 3', 'Done 4', '[12 completed]',
 		]);
@@ -153,6 +157,8 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 
 		await press('Collapse');
 		expect(rendered()).toEqual(['Open task', '[12 completed]']);
+		// The return animates like the arrival, so the move back beside the summary never pops.
+		expect(actions().classList.contains('returned')).toBe(true);
 	});
 
 	it('keeps an expanded fold label whole instead of giving it truncation chrome', async () => {
