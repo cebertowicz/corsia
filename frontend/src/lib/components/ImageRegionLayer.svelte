@@ -6,7 +6,7 @@
 	import { onMount } from 'svelte';
 	import type { DocComment } from '$lib/stores/docComments';
 	import {
-		describeRegion, isPoint, nearestTarget, placeTag, regionFromDrag, regionRect, type ImageRegion, type Point,
+		describeRegion, isPoint, nearestTarget, placeTags, regionFromDrag, regionRect, type ImageRegion, type Point,
 	} from '$lib/imageRegions';
 
 	type Pinned = DocComment & { region: ImageRegion; regionNumber: number };
@@ -43,6 +43,8 @@
 	// Agent comments that arrive while the viewer is open sweep in; those already there do not.
 	let known: Set<string> | null = null;
 	let sweeping = $state<Set<string>>(new Set());
+	/** Agent labels stay present for their measured footprint, but hide at rest when they cover another tag or label. */
+	let hiddenAgentNames = $state<Set<string>>(new Set());
 
 	const pinned = $derived(
 		comments
@@ -50,8 +52,32 @@
 			.sort((a, b) => a.regionNumber - b.regionNumber),
 	);
 	const size = $derived({ width, height });
-	const tags = $derived(width && height ? pinned.map((comment) => ({ comment, ...placeTag(comment.region, size) })) : []);
+	const tags = $derived.by(() => {
+		if (!width || !height) return [];
+		const positions = placeTags(pinned.map((comment) => comment.region), size);
+		return pinned.map((comment, index) => ({ comment, ...positions[index] }));
+	});
 	const preview = $derived(stroke ? regionFromDrag(stroke.from, stroke.to, size) : draft);
+	const intersects = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+	const sameIds = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((id) => b.has(id));
+	function showAgentName(comment: Pinned) {
+		return comment.authorKind === 'agent' && (comment.id === selectedId || comment.id === hoveredId || comment.id === focusedTag || !hiddenAgentNames.has(comment.id));
+	}
+
+	$effect(() => {
+		void tags;
+		if (!layer) return;
+		const tagsOnScreen = [...layer.querySelectorAll<HTMLElement>('[data-region-tag]')];
+		const hidden = new Set<string>();
+		for (const tag of tagsOnScreen) {
+			const name = tag.querySelector<HTMLElement>('.name');
+			const id = tag.dataset.commentId;
+			if (!name || !id) continue;
+			const nameRect = name.getBoundingClientRect();
+			if (tagsOnScreen.some((other) => other !== tag && intersects(nameRect, other.getBoundingClientRect()))) hidden.add(id);
+		}
+		if (!sameIds(hiddenAgentNames, hidden)) hiddenAgentNames = hidden;
+	});
 
 	$effect(() => {
 		const ids = pinned.map((comment) => comment.id);
@@ -194,13 +220,14 @@
 			aria-label={label(comment)}
 			aria-pressed={comment.id === selectedId}
 			data-region-tag={comment.regionNumber}
+			data-comment-id={comment.id}
 			onpointerdown={onTagDown}
 			onclick={(event) => pick(event, comment.id)}
 			onpointerenter={() => onHover(comment.id)}
 			onpointerleave={() => onHover(null)}
 			onfocus={() => { focusedTag = comment.id; onHover(comment.id); }}
 			onblur={() => { if (focusedTag === comment.id) focusedTag = null; onHover(null); }}
-		><span class="disc">{comment.regionNumber}</span>{#if agent}<span class="name">{comment.author}</span>{/if}</button>
+		><span class="disc">{comment.regionNumber}</span>{#if agent}<span class="name" class:hidden={!showAgentName(comment)}>{comment.author}</span>{/if}</button>
 	{/each}
 </div>
 
@@ -246,6 +273,7 @@
 		background: var(--region-color); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); box-shadow: 0 0 0 1.5px var(--image-region-halo);
 		font-size: var(--text-caption); font-weight: var(--fw-semibold); line-height: 14px;
 	}
+	.name.hidden { opacity: 0; pointer-events: none; }
 	/* Faint until hovered, focused or picked: only the fill fades; the digit, border and white ring stay solid. */
 	.tag.faint .disc, .tag.faint .name { background: color-mix(in srgb, var(--region-color) 80%, transparent); }
 	.tag.selected .disc { box-shadow: 0 0 0 1.5px var(--image-region-halo), 0 0 0 4px var(--region-color); }

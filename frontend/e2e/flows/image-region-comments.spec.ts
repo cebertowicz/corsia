@@ -2,9 +2,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
+import { openSuggestionDocument } from '../support/docSuggestions';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const NATURAL = { width: 1600, height: 1000 };
@@ -93,11 +94,49 @@ async function shoot(page: Page, testInfo: Parameters<typeof saveEvidenceScreens
 	await saveEvidenceScreenshot(page, testInfo, `${name}-dark`, { fullPage: false });
 }
 
+/** Screenshots a paused transition without Playwright fast-forwarding it. */
+async function shootMotion(page: Page, testInfo: Parameters<typeof saveEvidenceScreenshot>[1], name: string) {
+	await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: false, animations: 'allow' });
+}
+/** Captures an exact start/mid/end triplet, or records the end state when the interaction is instant. */
+async function motionFrames(page: Page, testInfo: Parameters<typeof saveEvidenceScreenshot>[1], name: string): Promise<'animated' | 'instant'> {
+	const count = await page.evaluate(() => {
+		const animations = document.getAnimations();
+		for (const animation of animations) animation.pause();
+		return animations.length;
+	});
+	if (!count) { await shootMotion(page, testInfo, `${name}-instant`); return 'instant'; }
+	for (const [state, fraction] of [['start', 0], ['mid', .5], ['end', 1]] as const) {
+		await page.evaluate((ratio) => {
+			for (const animation of document.getAnimations()) {
+				const duration = animation.effect?.getComputedTiming().activeDuration ?? 0;
+				animation.currentTime = duration * ratio;
+			}
+		}, fraction);
+		await shootMotion(page, testInfo, `${name}-${state}`);
+	}
+	return 'animated';
+}
+
 async function postComment(page: Page, text: string) {
 	await expect(composer(page)).toBeVisible();
 	await composer(page).fill(text);
 	await page.keyboard.press('ControlOrMeta+Enter');
 	await expect(composer(page)).toHaveCount(0);
+}
+
+/** Records native pressed feedback without letting the release click change the state captured next. */
+async function pressFrame(page: Page, target: Locator, testInfo: Parameters<typeof saveEvidenceScreenshot>[1], name: string) {
+	const box = await target.boundingBox();
+	expect(box, `${name} has a box`).not.toBeNull();
+	await page.evaluate(() => window.addEventListener('click', (event) => {
+		event.preventDefault();
+		event.stopImmediatePropagation();
+	}, { capture: true, once: true }));
+	await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+	await page.mouse.down();
+	await shootMotion(page, testInfo, name);
+	await page.mouse.up();
 }
 
 /** Seed a comment through the disposable mock API, bypassing UI repetition only for many-of-N evidence. */
@@ -441,24 +480,15 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(page.locator('.drawer-panel .ct')).toBeVisible();
 			await shoot(page, testInfo, '393-07-dense-12-selected', true);
 			await page.keyboard.press('Escape');
+			await pill(page).tap();
+			const phoneDrawer = page.locator('.canvas-comment-drawer');
+			await expect(phoneDrawer.locator('.ct')).toHaveCount(13);
+			await shoot(page, testInfo, '393-08-dense-12-drawer', true);
+			await page.keyboard.press('Escape');
 
 			await page.setViewportSize({ width: 1440, height: 900 });
 			await tag(page, 7).hover();
-			const animationCount = await page.evaluate(() => {
-				const animations = document.getAnimations();
-				for (const animation of animations) animation.pause();
-				return animations.length;
-			});
-			expect(animationCount).toBeGreaterThan(0);
-			for (const [name, ratio] of [['start', 0], ['mid', .5], ['end', 1]] as const) {
-				await page.evaluate((fraction) => {
-					for (const animation of document.getAnimations()) {
-						const timing = animation.effect?.getComputedTiming();
-						animation.currentTime = (timing?.activeDuration ?? 0) * fraction;
-					}
-				}, ratio);
-				await shoot(page, testInfo, `1440-19-tag-motion-${name}`, true);
-			}
+			expect(await motionFrames(page, testInfo, '1440-19-tag-hover-motion')).toBe('animated');
 			await page.emulateMedia({ reducedMotion: 'reduce' });
 			expect(Number.parseFloat(await tag(page, 7).locator('.disc').evaluate((el) => getComputedStyle(el).transitionDuration))).toBeLessThan(0.001);
 			await shoot(page, testInfo, '1440-20-tag-motion-reduced', true);
@@ -478,6 +508,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 				await route.continue();
 			});
 			await staleCard.getByRole('button', { name: 'Move pin' }).click();
+			await motionFrames(page, testInfo, '1440-20b-move-pin-start');
 			const moveTo = await at(page, .62, .64);
 			await page.mouse.click(moveTo.x, moveTo.y);
 			await expect(commentButton(page)).toContainText('Moving pin…');
@@ -489,5 +520,93 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 		} finally {
 			fs.rmSync(seeded.imagePath, { force: true });
 		}
+	});
+
+	test('review evidence: transition matrix and press feedback (1440)', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		test.setTimeout(180_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'no-preference' });
+		const seeded = await seedImage(page, request, 'region-motion', 1200);
+		try {
+			await openThread(page, seeded.sessionTitle, 1440);
+			await pressFrame(page, commentButton(page), testInfo, '1440-23-press-comment');
+			await commentButton(page).click();
+			await motionFrames(page, testInfo, '1440-24-comment-box-mode-on');
+			await commentButton(page).click();
+			await motionFrames(page, testInfo, '1440-25-comment-box-mode-off');
+			await commentButton(page).click();
+			const from = await at(page, .2, .25);
+			const to = await at(page, .45, .5);
+			await page.mouse.move(from.x, from.y);
+			await page.mouse.down();
+			await page.mouse.move(to.x, to.y, { steps: 8 });
+			await shootMotion(page, testInfo, '1440-26-draft-drawing-instant');
+			await page.mouse.up();
+			await expect(composer(page)).toBeVisible();
+			await motionFrames(page, testInfo, '1440-27-composer-open');
+			await postComment(page, 'A transition-matrix comment');
+			const card = page.locator('.ct').filter({ hasText: 'A transition-matrix comment' });
+			await expect(card).toBeVisible();
+			await motionFrames(page, testInfo, '1440-28-card-open');
+			await pressFrame(page, tag(page, 1), testInfo, '1440-29-press-tag');
+			await page.keyboard.press('Escape');
+			await motionFrames(page, testInfo, '1440-30-card-close');
+			let releaseCommentReload: (() => void) | null = null;
+			const commentReloadHeld = new Promise<void>((resolve) => { releaseCommentReload = resolve; });
+			await page.route(`**/api/artifacts/${seeded.artifactId}/comments**`, async (route) => {
+				if (route.request().method() === 'GET') await commentReloadHeld;
+				await route.continue();
+			});
+			const incomingAgent = await apiComment(request, seeded.artifactId, 'An arriving agent pin', { x: .72, y: .3, w: .16, h: .12 });
+			await expect.poll(() => Boolean(releaseCommentReload)).toBe(true);
+			isolatedDb([
+				'connection.execute("UPDATE doc_comments SET author=?, author_kind=\'agent\', author_thread_id=? WHERE id=?", ("Reviewer", sys.argv[2], sys.argv[3]))',
+			], seeded.sessionId, incomingAgent);
+			releaseCommentReload?.();
+			const sweep = page.locator(`[data-region-box="${incomingAgent}"]`);
+			await expect(sweep).toHaveClass(/sweep/);
+			expect(await motionFrames(page, testInfo, '1440-30b-agent-pin-sweep')).toBe('animated');
+			await tag(page, 1).hover();
+			await motionFrames(page, testInfo, '1440-31-tag-hover');
+			await tag(page, 1).focus();
+			await page.keyboard.press('Enter');
+			await motionFrames(page, testInfo, '1440-32-tag-select');
+			await page.keyboard.press('Escape');
+			await pressFrame(page, pill(page), testInfo, '1440-33-press-pill');
+			await pill(page).click();
+			await expect(page.locator('.canvas-comment-drawer')).toBeVisible();
+			await motionFrames(page, testInfo, '1440-34-drawer-open');
+			await page.keyboard.press('Escape');
+			await motionFrames(page, testInfo, '1440-35-drawer-close');
+		} finally {
+			fs.rmSync(seeded.imagePath, { force: true });
+		}
+	});
+
+	test('review evidence: text comment neighbour card and phone composer', async ({ page, request }, testInfo) => {
+		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
+		test.setTimeout(120_000);
+		const text = '# Review target\n\nThe text comment is beside the image-comment surface.';
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.emulateMedia({ colorScheme: 'light' });
+		const desktop = await openSuggestionDocument(page, request, text, [{ quote: 'text comment is beside', body: 'Text review note beside an image comment.' }]);
+		const marker = page.locator(`.cm-comment-marker[data-comment-ids*="${desktop.ids[0]}"]`);
+		await marker.click();
+		await expect(page.locator('[data-popover]')).toBeVisible();
+		await shootMotion(page, testInfo, '1440-36-text-comment-card-light');
+
+		await page.setViewportSize({ width: 393, height: 852 });
+		await page.emulateMedia({ colorScheme: 'light' });
+		await openSuggestionDocument(page, request, text, []);
+		const line = page.locator('.cm-line', { hasText: 'text comment is beside' });
+		await expect(line).toBeVisible();
+		await line.dblclick({ position: { x: 40, y: 8 } });
+		await page.locator('.sel-comment').click();
+		const sheet = page.locator('.drawer-panel[role="dialog"]');
+		await expect(sheet.locator('textarea[placeholder="Comment…"]')).toBeVisible();
+		await shootMotion(page, testInfo, '393-09-text-comment-composer-sheet-light');
 	});
 });

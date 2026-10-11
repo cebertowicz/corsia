@@ -56,6 +56,29 @@ describe('ImageRegionLayer', () => {
 		expect(tag.getAttribute('aria-label')).toContain('image changed since this comment');
 	});
 
+	it('hides an agent name at rest only when it overlaps another tag, then reveals it on focus', () => {
+		vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+			if (this.classList.contains('name')) {
+				return this.closest('[data-comment-id]')?.getAttribute('data-comment-id') === 'a'
+					? new DOMRect(155, 110, 50, 18) : new DOMRect(210, 110, 50, 18);
+			}
+			if (this.getAttribute('data-region-tag') === '1') return new DOMRect(110, 110, 22, 22);
+			if (this.getAttribute('data-region-tag') === '2') return new DOMRect(160, 110, 22, 22);
+			return FRAME;
+		});
+		render({ comments: [
+			comment('a', 1, { x: 0.1, y: 0.1, w: 0, h: 0 }, { author: 'Reviewer one', authorKind: 'agent' }),
+			comment('b', 2, { x: 0.2, y: 0.1, w: 0, h: 0 }, { author: 'Reviewer two', authorKind: 'agent' }),
+		] });
+		flushSync();
+		const [first, second] = host.querySelectorAll<HTMLElement>('[data-region-tag]');
+		expect(first.querySelector('.name')?.classList.contains('hidden')).toBe(true);
+		expect(second.querySelector('.name')?.classList.contains('hidden')).toBe(false);
+		first.dispatchEvent(new FocusEvent('focus'));
+		flushSync();
+		expect(first.querySelector('.name')?.classList.contains('hidden')).toBe(false);
+	});
+
 	it('hides a resolved pin unless it is the one picked', () => {
 		const resolved = comment('r', 1, { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, { resolved: true });
 		render({ comments: [resolved] });
@@ -125,11 +148,11 @@ describe('ImageRegionLayer', () => {
 	});
 
 	it('gives overlapping tag targets to the nearer centre and a key press to the focused tag', () => {
-		// Two points close together: tag 1 sits up-right of (0.5, 0.5), tag 2 up-right of (0.52, 0.5).
 		const { onPick } = render({ comments: [comment('a', 1, { x: 0.5, y: 0.5, w: 0, h: 0 }), comment('b', 2, { x: 0.52, y: 0.5, w: 0, h: 0 })] });
 		const [first, second] = host.querySelectorAll<HTMLElement>('[data-region-tag]');
-		// On screen tag 2's centre is at 100 + 416 + 15.4 = 531.4; a press there on tag 1's element goes to tag 2.
-		first.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1, clientX: 531, clientY: 285 }));
+		// The 44 px targets still overlap after collision-avoiding placement; use the rendered second centre.
+		const secondCentre = { x: FRAME.left + Number.parseFloat(second.style.left), y: FRAME.top + Number.parseFloat(second.style.top) };
+		first.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1, clientX: secondCentre.x, clientY: secondCentre.y }));
 		expect(onPick.mock.calls[0][0]).toBe('b');
 		second.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
 		expect(onPick.mock.calls[1][0]).toBe('b');

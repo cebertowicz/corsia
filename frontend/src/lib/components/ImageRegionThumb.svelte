@@ -4,7 +4,7 @@
 	// numbered, so the numbers below it can be found on it.
 	import { onMount } from 'svelte';
 	import type { DocComment } from '$lib/stores/docComments';
-	import { isPoint, placeTag, type ImageRegion } from '$lib/imageRegions';
+	import { isPoint, placeTags, type ImageRegion } from '$lib/imageRegions';
 
 	type Pinned = DocComment & { region: ImageRegion; regionNumber: number };
 	let { src, alt = '', comments, colorOf, onOpen }: {
@@ -20,7 +20,11 @@
 	let width = $state(0);
 	let height = $state(0);
 	const pinned = $derived(comments.filter((comment): comment is Pinned => !!comment.region && comment.regionNumber != null).sort((a, b) => a.regionNumber - b.regionNumber));
-	const marks = $derived(width && height ? pinned.map((comment) => ({ comment, ...placeTag(comment.region, { width, height }, 7, 2) })) : []);
+	const marks = $derived.by(() => {
+		if (!width || !height) return [];
+		const positions = placeTags(pinned.map((comment) => comment.region), { width, height }, 7, 2);
+		return pinned.map((comment, index) => ({ comment, ...positions[index] }));
+	});
 	function measure() {
 		const rect = frame?.getBoundingClientRect();
 		if (rect) { width = rect.width; height = rect.height; }
