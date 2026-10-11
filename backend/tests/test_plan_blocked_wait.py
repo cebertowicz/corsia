@@ -75,6 +75,14 @@ def _open_holds(db, node_id: str) -> int:
     ).fetchone()[0]
 
 
+def _ask_release_wakes(db) -> list[sqlite3.Row]:
+    """Return the durable wake records emitted when an artifact ask clears."""
+    return db.execute(
+        "SELECT id,content FROM messages WHERE thread_id='owner' "
+        "AND id LIKE 'plan-wake:ask_released:%' ORDER BY input_order",
+    ).fetchall()
+
+
 def _document_ask(db, external_id: str) -> str:
     from registry import models
 
@@ -86,6 +94,42 @@ def _document_ask(db, external_id: str) -> str:
         "SELECT id FROM artifact_identities WHERE integration='workspace' "
         "AND type='document' AND external_id=?", (external_id,),
     ).fetchone()["id"])
+
+
+def _ask_held_node(db, *, state: str, external_id: str):
+    """Create an ask-held task in one state whose release needs an owner wake."""
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    if state == "active":
+        admission.activate(
+            node.id, expected_revision=service._node_row(db, node.id)["revision"],
+            actor_id="owner", provenance="test.blocked_wait", db=db,
+        )
+    elif state == "review_requested":
+        admission.activate(
+            node.id, expected_revision=service._node_row(db, node.id)["revision"],
+            actor_id="owner", provenance="test.blocked_wait", db=db,
+        )
+        mutate(
+            plan.id, "request_review", {
+                "node_id": node.id, "evidence": "Focused proof passed",
+                "expected_revision": service._node_row(db, node.id)["revision"],
+            }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+        )
+    else:
+        assert state == "pending"
+    ask = _document_ask(db, external_id)
+    db.commit()
+    mutate(
+        plan.id, "block_node", {
+            "node_id": node.id, "reason_key": "review", "reason": "Review it",
+            "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+    )
+    return node, ask
 
 
 def test_an_external_blocker_is_a_24_hour_wait_and_no_hold(db):
@@ -261,6 +305,52 @@ def test_a_document_ask_holds_the_task_until_the_user_acts(db):
     assert shown["artifacts"][0]["attention_state"] == "cleared"
 
 
+def test_answering_a_pending_document_ask_wakes_the_owner_once(db):
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="pending", external_id="pending-wake.md")
+
+    attention.clear_attention(ask, outcome="acknowledge", db=db)
+
+    [wake] = _ask_release_wakes(db)
+    assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
+    assert 'The user acknowledged "Read the proposal"' in wake["content"]
+
+
+def test_answering_a_review_requested_document_ask_wakes_the_owner_once(db):
+    from registry import attention
+
+    node, ask = _ask_held_node(
+        db, state="review_requested", external_id="review-requested-wake.md",
+    )
+
+    attention.clear_attention(ask, outcome="acknowledge", db=db)
+
+    [wake] = _ask_release_wakes(db)
+    assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
+    assert 'The user acknowledged "Read the proposal"' in wake["content"]
+
+
+def test_answering_an_active_document_ask_only_wakes_the_selected_work_once(db):
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="active", external_id="active-wake.md")
+
+    attention.clear_attention(ask, outcome="acknowledge", db=db)
+
+    wakes = db.execute(
+        "SELECT id,content FROM messages WHERE thread_id='owner' "
+        "AND id LIKE 'plan-wake:%' ORDER BY input_order",
+    ).fetchall()
+    assert [wake for wake in wakes if wake["id"].startswith("plan-wake:ask_released:")] == []
+    selected = [
+        wake for wake in wakes
+        if wake["id"].startswith(f"plan-wake:work_selected:{node.id}:")
+    ]
+    assert len(selected) == 1
+    assert 'Review is now your current task.' in selected[0]["content"]
+
+
 def test_retiring_a_document_ask_releases_its_hold_through_attention(db):
     from registry import attention, models
 
@@ -284,6 +374,9 @@ def test_retiring_a_document_ask_releases_its_hold_through_attention(db):
     assert attention.get_attention_state(ask, db=db) == "cleared"
     assert _open_holds(db, node.id) == 0
     assert admission.project(node.id, db=db)["condition"] != "blocked"
+    [wake] = _ask_release_wakes(db)
+    assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
+    assert "became unavailable" in wake["content"]
     event = db.execute(
         "SELECT content FROM messages WHERE thread_id='owner' ORDER BY seq DESC LIMIT 1",
     ).fetchone()

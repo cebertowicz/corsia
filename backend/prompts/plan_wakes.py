@@ -13,6 +13,8 @@ from typing import Literal
 #: facts that follow each line are the same `next` block a close returns.
 WAKE_TASK_CLOSED = "[CORSIA plan] {title} was closed by another actor."
 WAKE_WORK_SELECTED = "[CORSIA plan] {title} is now your current task."
+#: An ask-release wake carries the same summary formerly used for the passive receipt.
+WAKE_ASK_RELEASED = "{summary}"
 WAKE_CHILD_RETURNED = (
     "[CORSIA plan] The work delegated for {title} has returned and awaits your verdict."
 )
@@ -245,6 +247,7 @@ WAKE_CHILD_DECISION_DRAFTED = (
 WAKE_CHIPS = {
     "plan.task_closed": "Task closed by another actor",
     "plan.work_selected": "New current task",
+    "plan.ask_released": "Artifact ask released work",
     "plan.child_returned": "Delegated work returned for your review",
     "plan.revision_requested": "Returned work was rejected",
     "plan.prerequisite_settled": "A task you depend on settled",

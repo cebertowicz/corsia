@@ -90,7 +90,7 @@ def test_a_plain_approval_reaches_the_agent_with_its_note(db):
     _answer(db, artifact, "approved", "Ship it.")
 
     text = _notices(db)[-1]
-    assert text == (
+    assert text.split("\n{", 1)[0] == (
         'The user approved "proposal.md", so task "Review the proposal" '
         "no longer waits on them: pick it up.\nTheir note: Ship it."
     )
@@ -138,7 +138,7 @@ def test_approve_with_changes_and_the_feedback_task_pointer(db):
     task = db.execute(
         "SELECT title FROM plan_nodes WHERE title LIKE 'Steve left%'",
     ).fetchone()["title"]
-    assert _notices(db)[-1] == (
+    assert _notices(db)[-1].split("\n{", 1)[0] == (
         'The user approved with changes "proposal.md" (1 comment, 1 suggestion, '
         f'in task "{task}"), so task "Review the proposal" no longer waits on '
         "them: pick it up.\nTheir note: Mostly fine."
@@ -171,8 +171,9 @@ def test_request_changes_with_no_feedback_needs_a_note(db):
     assert attention.get_attention_state(artifact, db=db) == "raised"
 
     _answer(db, artifact, "changes_requested", "Cut section 3.")
-    assert _notices(db)[-1].startswith('The user requested changes on "proposal.md", so')
-    assert _notices(db)[-1].endswith("\nTheir note: Cut section 3.")
+    summary = _notices(db)[-1].split("\n{", 1)[0]
+    assert summary.startswith('The user requested changes on "proposal.md", so')
+    assert summary.endswith("\nTheir note: Cut section 3.")
 
 
 def test_request_changes_with_round_feedback_needs_no_note(db):

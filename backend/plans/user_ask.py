@@ -272,9 +272,8 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
 def _release(
     db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
 ) -> int:
-    from plans import admission, holds, plan_wake
-    from plans.plan_events import append_owner_event
-    from plans.user_steering import CHANGE_KIND
+    from plans import admission, admission_projection, holds, plan_wake, service
+    from prompts import plan_wakes as wakes
 
     rows = db.execute(
         f"""SELECT h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,
@@ -288,17 +287,13 @@ def _release(
             ORDER BY h.created_at, h.id""",
         (artifact_id,),
     ).fetchall()
+    released_by_plan: dict[str, list[tuple[str, str]]] = {}
     for row in rows:
         holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",
             actor_id=None, provenance=_PROVENANCE, db=db,
             detail=release.detail if release else None,
         )
-        cause = db.execute(
-            """SELECT id, created_at FROM plan_node_events
-               WHERE node_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1""",
-            (row["node_id"],),
-        ).fetchone()
         ask = row["ask"] or "your ask"
         summary = (
             f'Your ask "{ask}" became unavailable, so {row["kind"]} '
@@ -308,15 +303,25 @@ def _release(
             f'The user {done} "{ask}", so {row["kind"]} '
             f'"{row["title"]}" no longer waits on them: pick it up.'
         )
-        append_owner_event(
-            db, plan_id=str(row["plan_id"]), event_id=str(cause["id"]),
-            actor_id=None, event_type=CHANGE_KIND, summary=summary,
-            details={"node_id": str(row["node_id"]), "action": "ask_cleared"},
-            created_at=cause["created_at"],
+        released_by_plan.setdefault(str(row["plan_id"]), []).append(
+            (str(row["node_id"]), summary),
         )
-    for plan_id in dict.fromkeys(row["plan_id"] for row in rows):
+    for plan_id, released in released_by_plan.items():
         reconciled = admission.reconcile_plan(
             plan_id, actor_id=None, provenance=_PROVENANCE, db=db,
         )
-        plan_wake.notify_selected(db, reconciled, plan_id=plan_id, causing_executor=None)
+        plan = service._plan_row(db, plan_id)
+        for node_id, summary in released:
+            node = service._node_row(db, node_id)
+            executor = admission_projection.executor_of(node, plan)
+            if executor is None or (node_id, executor) in reconciled.selected:
+                continue
+            plan_wake.append(
+                db, recipient=executor, kind="ask_released", subject_id=node_id,
+                revision=int(node["revision"]), plan_id=plan_id,
+                content=plan_wake.with_next(
+                    db, plan_id, executor, wakes.WAKE_ASK_RELEASED.format(summary=summary),
+                ),
+                open_node_id=node_id,
+            )
     return len(rows)
