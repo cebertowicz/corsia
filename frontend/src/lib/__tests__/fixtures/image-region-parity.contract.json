@@ -1,0 +1,183 @@
+{
+	"_comment": "Backend ports of viewer rules (doceditor/image_regions.py agent_color, _project_color; doceditor/image_markup.py place_tag) must match the viewer (docPresence.ts agentColor, projectColors.ts projectColor, imageRegions.ts placeTag). Both sides test against this file.",
+	"agent_colors": [
+		{
+			"thread_id": "author",
+			"color": "#22c55e"
+		},
+		{
+			"thread_id": "4ca80a9e-1440-4b97-bc49-34c318c2230a",
+			"color": "#22c55e"
+		},
+		{
+			"thread_id": "6362be75",
+			"color": "#ef4444"
+		},
+		{
+			"thread_id": "f358e5af",
+			"color": "#22c55e"
+		},
+		{
+			"thread_id": "a",
+			"color": "#2dd4bf"
+		},
+		{
+			"thread_id": "Zürich-ü",
+			"color": "#22c55e"
+		},
+		{
+			"thread_id": "",
+			"color": "#8b5cf6"
+		}
+	],
+	"project_colors": [
+		{
+			"project_id": null,
+			"color": "hsl(260, 70%, 62%)"
+		},
+		{
+			"project_id": "proj-red",
+			"color": "hsl(280, 70%, 62%)"
+		},
+		{
+			"project_id": "f54e9e47-0000-4000-8000-000000000000",
+			"color": "hsl(175, 70%, 62%)"
+		},
+		{
+			"project_id": "corsia",
+			"color": "hsl(210, 70%, 62%)"
+		},
+		{
+			"project_id": "x",
+			"color": "hsl(210, 70%, 62%)"
+		}
+	],
+	"tag_placements": [
+		{
+			"case": "box with room on the left",
+			"region": {
+				"x": 0.4,
+				"y": 0.4,
+				"w": 0.2,
+				"h": 0.1
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 304.0,
+				"y": 213.0,
+				"side": "left"
+			}
+		},
+		{
+			"case": "box at the left edge takes above",
+			"region": {
+				"x": 0.0,
+				"y": 0.4,
+				"w": 0.2,
+				"h": 0.1
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 13.0,
+				"y": 184.0,
+				"side": "above"
+			}
+		},
+		{
+			"case": "box at the top-left corner takes right",
+			"region": {
+				"x": 0.0,
+				"y": 0.0,
+				"w": 0.2,
+				"h": 0.1
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 176.0,
+				"y": 13.0,
+				"side": "right"
+			}
+		},
+		{
+			"case": "box filling the image goes inside",
+			"region": {
+				"x": 0.0,
+				"y": 0.0,
+				"w": 1.0,
+				"h": 1.0
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 14.0,
+				"y": 14.0,
+				"side": "inside"
+			}
+		},
+		{
+			"case": "point in the middle",
+			"region": {
+				"x": 0.5,
+				"y": 0.5,
+				"w": 0.0,
+				"h": 0.0
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 415.4,
+				"y": 234.6,
+				"side": "up-right"
+			}
+		},
+		{
+			"case": "point at the top-right corner",
+			"region": {
+				"x": 1.0,
+				"y": 0.0,
+				"w": 0.0,
+				"h": 0.0
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 784.6,
+				"y": 15.4,
+				"side": "down-left"
+			}
+		},
+		{
+			"case": "point on an image smaller than the tag",
+			"region": {
+				"x": 0.5,
+				"y": 0.5,
+				"w": 0.0,
+				"h": 0.0
+			},
+			"width": 12,
+			"height": 12,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 6.0,
+				"y": 6.0,
+				"side": "up-right"
+			}
+		}
+	]
+}
