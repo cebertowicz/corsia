@@ -76,7 +76,7 @@ const span = (window: { from: string; to: string }): string => periodName(window
 /** The total over the latest window beside the previous one, with the four parts that add up to it. */
 export function tokensTile(kpi: Kpi): KpiTile {
 	const total = kpi.current.tokens.total, before = kpi.previous.tokens.total;
-	const change = before.value > 0 ? percentChange(total.value, before.value) : 'new';
+	const change = before.value > 0 && kpi.previous.tokens_recorded !== false ? percentChange(total.value, before.value) : 'new';
 	const parts = kpi.current.tokens;
 	return {
 		id: 'tokens', label: 'Tokens', value: tokens(total),

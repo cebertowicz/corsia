@@ -3,7 +3,7 @@
 It is the series' own figure over the trailing span (7 days, or 4 weeks), the one the comparison
 windows serve, so it weighs each period by its own denominator. It sits on the chart's own axis, a
 per-period figure: a rate is pooled over the span, a count is the span's total over k. A span that
-reaches before the instrument existed, or that includes the period still in progress, has no average.
+reaches before the instrument existed or before the first drawn period, or that includes the period still in progress, has no average.
 """
 from __future__ import annotations
 
@@ -17,13 +17,15 @@ TOTALS = frozenset({"outcomes", "fresh_tokens", "limit_hits", "time_on_platform_
 
 
 def span_ending(grain: Grain, period: str) -> Window | None:
-    """The k completed periods ending at ``period``, or None for the period in progress and for a span the lead-in cannot fill."""
+    """The k completed periods ending at ``period``, or None for the period in progress and for a span that starts before the drawn range."""
     if period not in grain.periods:
         return None
     size, index = grain.average_periods, grain.periods.index(period)
     if index < size - 1:
         return None
     keys = grain.periods[index - size + 1:index + 1]
+    if keys[0] not in grain.served:
+        return None
     return Window(keys[0], keys[-1], keys)
 
 

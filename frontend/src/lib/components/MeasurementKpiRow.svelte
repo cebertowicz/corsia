@@ -53,10 +53,12 @@
 
 <style>
 	.frame { container-type: inline-size; min-width: 0; }
-	/* Tiles keep their own height, so a taller Tokens tile never leaves a blank block under the others. */
-	.kpis { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; align-items: start; }
+	/* Tiles in a row share the tallest one's height, as in r2.7, so no grey shows under a short tile. */
+	.kpis { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
 	/* Five tiles share the row only when the frame is wide. */
 	@container (min-width: 720px) { .kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+	/* From 900px the Tokens tile gets a 270px track, enough for its four parts in one row; below that the five tiles are equal and the parts take two by two. */
+	@container (min-width: 900px) { .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)) 270px; } }
 	.tile { container: kpi-tile / inline-size; display: flex; flex-direction: column; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; min-width: 0; }
 	/* One type scale on every tile: label 12px/650, value 28px/750, sub-line 12px/400. */
 	.label { color: var(--text-secondary); font-size: 12px; font-weight: 650; }
@@ -66,7 +68,7 @@
 	/* The Tokens parts sit in one row of four, as in r2.7, when the tile is about 210px or wider (186px inside its padding and border); a narrower tile takes them two by two so no word breaks. It follows the dl rule, which it overrides. */
 	@container kpi-tile (max-width: 185.98px) { dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 	dl > div { display: flex; flex-direction: column; min-width: 0; }
-	dt { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+	dt { color: var(--text-secondary); font-size: 11px; }
 	dd { margin: 0; overflow-wrap: anywhere; color: var(--text-primary); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; }
 	.error { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--red-text); font-size: 12px; }
 	.error button { font: inherit; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); padding: 5px 9px; cursor: pointer; }

@@ -70,7 +70,7 @@ describe('MeasurementWhereToLook', () => {
 	it('says what the threshold is rather than showing an empty table', () => {
 		render(state());
 		expect(host.querySelectorAll('table')).toHaveLength(0);
-		expect(host.textContent).toContain('Nothing moved the wrong way by 10% or more');
+		expect(host.textContent).toContain('Nothing got worse by 10% or more with at least 20 outcomes (or turns, or tasks) in both Sep 28 to Oct 4 and Sep 21 to Sep 27.');
 		expect(host.querySelector('.stat')?.textContent?.trim()).toBe('Sep 28 to Oct 4 against Sep 21 to Sep 27, worst change first');
 	});
 
@@ -81,6 +81,15 @@ describe('MeasurementWhereToLook', () => {
 		unmount(component!); host.remove();
 		render(state({ improved: [row({ change: 0.25 })] }));
 		expect([...host.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['Largest changes for the worse', 'Improved']);
+	});
+
+	it('capitalises an agent subject and leaves a scope subject as served', () => {
+		render(state({ worse: [
+			row({ subject: { id: 'a1', name: 'conductor', kind: 'agent' } }),
+			row({ subject: { id: 'p1', name: 'corsia', kind: 'scope' }, measure: 'm2' }),
+		] }));
+		const subjects = [...host.querySelectorAll('tbody td.subj b')].map((node) => node.textContent);
+		expect(subjects).toEqual(['Conductor', 'corsia']);
 	});
 
 	it('shows an en dash in Overall for a scope row, never zero or blank', () => {

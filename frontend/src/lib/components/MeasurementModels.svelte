@@ -167,7 +167,6 @@
 		</div>
 		<p class="note">
 			Models{windowSuffix}.
-			{#if state.minTasks !== null && rows.some((row) => row.other)}Models with under {state.minTasks} accepted tasks share the last table row.{/if}
 			{#if sizeColumns.length}
 				$ per task within each size class, whole chain, API-equivalent; a class shows only with {state.minTasks ?? 14} or more tasks.
 				A change compares one named size class that has {state.minTasks ?? 14} or more tasks in both windows, otherwise n/a, mix changed.

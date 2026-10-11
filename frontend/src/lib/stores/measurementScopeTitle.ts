@@ -1,4 +1,5 @@
 import { derived } from 'svelte/store';
+import { agentLabel } from './measurementAgentLabel';
 import { measurementAgents } from './measurementAgents';
 import { measurementScope } from './measurement';
 import { projects } from './projects';
@@ -11,9 +12,9 @@ export function measurementAgentName(
 	measured: { agent: { id: string; name: string } }[],
 	lanes: { id: string; title: string }[],
 ): string {
-	return measured.find((row) => row.agent.id === agentId)?.agent.name
+	return agentLabel(measured.find((row) => row.agent.id === agentId)?.agent.name
 		?? lanes.find((thread) => thread.id === agentId)?.title
-		?? 'Selected agent';
+		?? 'Selected agent');
 }
 
 /**
