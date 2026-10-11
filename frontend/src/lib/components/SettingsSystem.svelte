@@ -192,12 +192,10 @@
 
 <div class="settings-card" data-settings-anchor="host-access-review">
 	<div class="card-title-row">
-		<div>
-			<h3>Host Access Review</h3>
-			<p class="card-desc">Independently reviews temporary access requests and each elevated action.</p>
-		</div>
+		<h3>Host Access Review</h3>
 		<StatePill state={hostAccessReviewerPill.state} label={hostAccessReviewerPill.label} size="sm" />
 	</div>
+	<p class="card-desc">Independently reviews temporary access requests and each elevated action.</p>
 
 	<div class="field-row">
 		<label for="host-access-reviewer-model">Reviewer model</label>
@@ -376,8 +374,8 @@
 	.theme-opt:hover { color: var(--text-primary); }
 	.theme-opt.active { background: var(--accent); color: #fff; }
 	.settings-card h3 { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
-	.card-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-	.card-title-row > div { min-width: 0; }
+	.card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+	.card-title-row h3 { min-width: 0; margin: 0; }
 	.card-desc { font-size: var(--text-subhead); color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
 	.settings-status { margin: -2px 0 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.45; }
 	.settings-status.error { color: var(--red); }
