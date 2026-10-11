@@ -26,7 +26,7 @@ UNKNOWN_INFRASTRUCTURE = "The runner has received a shutdown signal."
 
 @pytest.fixture
 def reconciliation(isolated_db):
-    import events.reviewer_reconciliation as reconciliation_mod
+    import events.connectors.reviewer_reconciliation as reconciliation_mod
 
     return importlib.reload(reconciliation_mod)
 
