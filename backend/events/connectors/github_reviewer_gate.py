@@ -14,15 +14,11 @@ MERGEABILITY_POLL_INTERVAL_S = 4.0
 _TRANSIENT_MERGEABLE = "UNKNOWN"
 
 
-def checks_green(
-    repo: str,
-    pr_number: int,
-    head_sha: str,
-) -> bool | None:
+def checks_green(repo: str, pr_number: int, head_sha: str) -> bool | None:
     """Return True when every non-reviewer PR check is terminal-green.
 
-    None means checks are unreadable and False means they are readable but not
-    yet eligible.
+    None means checks are unreadable and must be reported as retryable; False
+    means checks are readable but pending, failing, or reviewer-only.
     """
     from reviewer.gh_helpers import get_check_runs_for_sha
 
@@ -34,29 +30,37 @@ def checks_green(
             pr_number, head_sha[:8],
         )
         return None
+
     if not checks:
-        log.info("reviewer-gate: PR #{} sha={} — no check runs yet", pr_number, head_sha[:8])
+        log.info(
+            "reviewer-gate: PR #{} sha={} — no check runs yet",
+            pr_number, head_sha[:8],
+        )
         return False
+
     non_reviewer_checks = [
-        check for check in checks if check.get("name") != _REVIEWER_CHECK_NAME
+        check for check in checks
+        if check.get("name") != _REVIEWER_CHECK_NAME
     ]
     if not non_reviewer_checks:
-        log.info("reviewer-gate: PR #{} — only reviewer check is present, holding", pr_number)
+        log.info(
+            "reviewer-gate: PR #{} — only reviewer check is present, holding",
+            pr_number,
+        )
         return False
+
     not_green = [
         check for check in non_reviewer_checks
-        if str(check.get("state") or check.get("conclusion") or check.get("status") or "").upper()
-        not in _TERMINAL_GREEN_STATES
+        if str(check.get("state") or "").upper() not in _TERMINAL_GREEN_STATES
     ]
     if not_green:
         log.info(
             "reviewer-gate: PR #{} — holding on non-green checks: {}",
             pr_number,
-            [(check.get("name"), check.get("state") or check.get("conclusion")) for check in not_green],
+            [(check.get("name"), check.get("state")) for check in not_green],
         )
         return False
     return True
-
 
 
 def fetch_pr_info(repo: str, pr_number: int) -> dict[str, Any] | None:

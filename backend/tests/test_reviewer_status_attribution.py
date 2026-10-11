@@ -78,7 +78,6 @@ def test_unattributed_success_is_returned_as_success_and_logged(
     assert "un-attributed" in caplog.text
 
 
-
 @patch("reviewer.gh_helpers._run_gh")
 def test_attributed_status_is_not_logged_as_unattributed(
     mock_run: MagicMock, caplog,

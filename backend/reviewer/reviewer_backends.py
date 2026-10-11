@@ -33,7 +33,6 @@ from reviewer.reviewer_exact_source import (
 log = logging.getLogger(__name__)
 
 
-
 def _resolve_cc_binary() -> str:
     """Resolve the Claude Code CLI binary, mirroring the cc_runtime path.
 
