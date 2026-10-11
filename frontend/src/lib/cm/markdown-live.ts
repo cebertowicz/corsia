@@ -4,7 +4,7 @@ import { StateField, type EditorState, type Extension, type Range } from '@codem
 import type { SyntaxNodeRef } from '@lezer/common';
 import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
-import { markdownImages, renderableImage } from './markdown-image';
+import { markdownImages, renderableImage, selectImageOnClick } from './markdown-image';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -257,5 +257,6 @@ export const markdownLivePreview: Extension = [
 	markdownInlinePreview,
 	markdownTableDecorations,
 	markdownMermaidDecorations,
-	markdownImages
+	markdownImages,
+	selectImageOnClick
 ];

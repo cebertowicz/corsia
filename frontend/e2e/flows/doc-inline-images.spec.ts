@@ -23,10 +23,11 @@ const DOC = [
 ].join('\n');
 
 test.describe('@flow:doc-inline-images @surface:documents markdown images render inside a document', () => {
+	test.use({ hasTouch: true });
 	for (const width of WIDTHS) {
 		test(`draws relative images in the document canvas at ${width}px without contacting a web server`, async ({ page, request }, testInfo) => {
 			test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
-			await page.setViewportSize({ width, height: width > 768 ? 1000 : 852 });
+			await page.setViewportSize({ width, height: width > 768 ? 900 : 852 });
 			const stamp = Date.now();
 			const sessionTitle = `inline-images-${width}-${stamp}`;
 			const sessionId = await createSession(request, sessionTitle);
@@ -115,15 +116,35 @@ test.describe('@flow:doc-inline-images @surface:documents markdown images render
 					await saveEvidenceScreenshot(page, testInfo, `doc-inline-images-${width}-${scheme}`, { fullPage: false });
 				}
 
-				// A click on the image puts the caret on its line: the source shows, editable, and the image stays.
-				await images.first().click();
-				await expect(content).toContainText(SOURCE.png);
+				// A click selects the image whole, with a selected state, and its markdown never shows.
+				// On the phone width the image is tapped, so the touch path is proven, not only a mouse click.
+				if (width <= 768) await images.first().tap();
+				else await images.first().click();
+				await saveEvidenceScreenshot(page, testInfo, `doc-inline-images-${width}-selected`, { fullPage: false });
+				await expect(page.locator('.cm-md-image-selected img')).toHaveCount(1);
+				await expect(page.getByRole('button', { name: 'Comment', exact: true }).last()).toBeVisible();
+				await expect(page.locator('.cm-md-image-selected img')).toHaveAttribute('alt', 'Mock screen');
+				await expect(content).not.toContainText('![Mock screen]');
+				await expect(content).not.toContainText('shots/screen.png');
 				await expect(images.first()).toBeVisible();
-				await saveEvidenceScreenshot(page, testInfo, `doc-inline-images-${width}-caret-on-line`, { fullPage: false });
-				await page.keyboard.press('End');
-				await page.keyboard.type(' ');
-				await expect(content).toContainText(`${SOURCE.png} `);
+
+				// The image is one unit for the caret: arrows step over it, and the source stays hidden throughout.
+				await page.keyboard.press('ArrowDown');
+				await expect(page.locator('.cm-md-image-selected')).toHaveCount(0);
+				await expect(content).not.toContainText('![Mock screen]');
+				await page.keyboard.press('ArrowUp');
+				await page.keyboard.press('ArrowUp');
+				await expect(content).not.toContainText('![Mock screen]');
 				await expect(images.first()).toBeVisible();
+
+				// Backspace right after the image removes the whole image from the document.
+				await page.getByText('Text between the images').click({ position: { x: 2, y: 2 } });
+				await page.keyboard.press('Home');
+				await page.keyboard.press('ArrowUp');
+				await page.keyboard.press('Backspace');
+				await expect(images).toHaveCount(1);
+				await expect(page.getByRole('img', { name: 'Mock screen' })).toHaveCount(0);
+				await expect(content).not.toContainText('![Mock screen]');
 
 				await note.scrollIntoViewIfNeeded();
 				await expect(page.locator('.cm-md-link', { hasText: 'Remote' })).toBeInViewport();
