@@ -40,7 +40,7 @@ const days: Scenario = {
 	expected: {
 		work: 'Work per hour of your attention 92 h Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)',
 		'first-try': 'First-try rate (agent-graded) 89% Sep 28 to Oct 4, n 1,377, +5% vs Sep 21 to Sep 27 (n 451)',
-		cost: 'Cost per hour of delivered work $1.49 Sep 28 to Oct 4, n 1,187, -4% vs Sep 21 to Sep 27 (n 399)',
+		cost: 'Cost per person-hour of work delivered $1.49 Sep 28 to Oct 4, n 1,187, -4% vs Sep 21 to Sep 27 (n 399)',
 		minutes: 'Your minutes per outcome 1.8 min Sep 28 to Oct 4, n 1,377, -69% vs Sep 21 to Sep 27 (n 451)',
 		tokens: 'Tokens 34.6B Sep 28 to Oct 4, +126% vs Sep 21 to Sep 27 Uncached input 526M Cache write 278M Cache read 33.7B Output 119M',
 	},
@@ -56,7 +56,7 @@ const weeksScenario: Scenario = {
 	expected: {
 		work: 'Work per hour of your attention 53 h Sep 7 to Oct 4, n 2,317, new vs Aug 10 to Sep 6 (n 450)',
 		'first-try': 'First-try rate (agent-graded) 89% Sep 7 to Oct 4, n 2,345, new vs Aug 10 to Sep 6 (n 450)',
-		cost: 'Cost per hour of delivered work $1.51 Sep 7 to Oct 4, n 1,742, new vs Aug 10 to Sep 6 (n 0)',
+		cost: 'Cost per person-hour of work delivered $1.51 Sep 7 to Oct 4, n 1,742, new vs Aug 10 to Sep 6 (n 0)',
 		minutes: 'Your minutes per outcome 3.7 min Sep 7 to Oct 4, n 2,345, new vs Aug 10 to Sep 6 (n 450)',
 		tokens: 'Tokens 58B Sep 7 to Oct 4, new vs Aug 10 to Sep 6 Uncached input 838M Cache write 549M Cache read 56.5B Output 204M',
 	},

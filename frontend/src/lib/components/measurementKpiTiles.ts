@@ -60,7 +60,7 @@ export function measureTiles(panels: Record<string, PanelState>, cost: Measureme
 	if (cost && costPeriod) {
 		const view = costView({ ...cost, period: costPeriod });
 		const rate = view ? view.current.perHour : null;
-		tiles.cost = { id: 'cost', label: 'Cost per hour of delivered work', value: rate === null ? '–' : money(rate), sub: windowLine(periodName(costPeriod.latest), { n: view?.current.sized ?? 0 }, view?.change ?? 'n/a') };
+		tiles.cost = { id: 'cost', label: 'Cost per person-hour of work delivered', value: rate === null ? '–' : money(rate), sub: windowLine(periodName(costPeriod.latest), { n: view?.current.sized ?? 0 }, view?.change ?? 'n/a') };
 	}
 	return tiles;
 }

@@ -34,7 +34,7 @@ describe('MeasurementCost', () => {
 	it('labels every figure as a known subtotal and states retained-record coverage and exclusions', () => {
 		const content = text(render());
 		expect(content).not.toContain('API-equivalent: list price of recorded tokens');
-		expect(content).toContain('$5.00 per hour of delivered work, Sep 28 to Oct 4, n 25, +100% vs Sep 21 to Sep 27 (n 25)');
+		expect(content).toContain('$5.00 per person-hour of work delivered, Sep 28 to Oct 4, n 25, +100% vs Sep 21 to Sep 27 (n 25)');
 		expect(text(host!.querySelector('.spendcard') as HTMLElement)).toBe('Total spend, Sep 28 to Oct 4$10,600API-equivalent, every priced call in the windowHours of work delivered2,120');
 		expect(content).not.toContain('per accepted outcome');
 		expect(content).not.toContain('not in this rate');
@@ -59,7 +59,7 @@ describe('MeasurementCost', () => {
 		(host.querySelectorAll('button')[1] as HTMLButtonElement).click(); flushSync();
 		expect(text(host)).toContain('Actual is recorded for the whole workspace, not this view.');
 		expect(text(host.querySelector('.actual') as HTMLElement)).not.toMatch(/\$|Direct charges/);
-		expect(text(host.querySelector('.stat') as HTMLElement)).toContain('per hour of delivered work');
+		expect(text(host.querySelector('.stat') as HTMLElement)).toContain('per person-hour of work delivered');
 		(host.querySelector('.actual button') as HTMLButtonElement).click();
 		expect(opened).toBe(1);
 		expect(text(host.querySelector('.actual button') as HTMLElement)).toBe('Open All work');
@@ -211,7 +211,7 @@ describe('MeasurementCost', () => {
 		unmount(component!); host?.remove();
 		const thinPeriod = period('2026-09-28', 5_300, 100, 80, 100, 2120, 19);
 		const thin = text(render({ data: data({ series: [thinPeriod], latest: pooled(thinPeriod), previous: null }) }));
-		expect(thin).toContain('– per hour of delivered work, Sep 28 to Oct 4, n 19, n/a');
+		expect(thin).toContain('– per person-hour of work delivered, Sep 28 to Oct 4, n 19, n/a');
 	});
 	it('decodes an unknown weekly total without coercing it to zero and rejects a malformed count', () => {
 		const unknown = { period: '2026-09-28', dollars: null, priced_records: 0, api_records: 3, outcomes: 3, per_outcome: null };
@@ -360,7 +360,7 @@ describe('MeasurementCost', () => {
 	it('is one card, as Work per hour is, with the priced-records line as its caption', () => {
 		const markup = render();
 		const card = markup.querySelector('section.card.cost') as HTMLElement;
-		expect(card.querySelector('h3')?.textContent).toBe('Cost per hour of delivered work');
+		expect(card.querySelector('h3')?.textContent).toBe('Cost per person-hour of work delivered');
 		expect(card.querySelector('.spendcard')).not.toBeNull();
 		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.');
 		expect(markup.querySelector('.missing')).toBeNull();

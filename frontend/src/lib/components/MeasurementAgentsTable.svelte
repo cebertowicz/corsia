@@ -116,7 +116,7 @@
 					<th scope="col" aria-sort={ariaSort('agent')}><button class="sort" onclick={() => sortBy('agent')}>Agent</button></th>
 					<th scope="col" class="n" aria-sort={ariaSort('outcomes')}><button class="sort" onclick={() => sortBy('outcomes')}>Outcomes</button></th>
 					<th scope="col" class="n" aria-sort={ariaSort('first_try_acceptance')}><button class="sort" onclick={() => sortBy('first_try_acceptance')}>First try</button></th>
-					<th scope="col" class="n cost" aria-sort={ariaSort('dollars_per_work_hour')}><button class="sort" onclick={() => sortBy('dollars_per_work_hour')}>$ per hour of work</button></th>
+					<th scope="col" class="n cost" aria-sort={ariaSort('dollars_per_work_hour')}><button class="sort" onclick={() => sortBy('dollars_per_work_hour')}>$ per person-hour of work delivered</button></th>
 					<th scope="col" class="n change" aria-sort={ariaSort('active_hours_per_outcome')}><button class="sort" onclick={() => sortBy('active_hours_per_outcome')}>Change in minutes per outcome, vs {previousName ?? 'the previous window'}</button></th>
 				</tr>
 			</thead>
