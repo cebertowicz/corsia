@@ -54,17 +54,17 @@ const weeksScenario: Scenario = {
 		previous: { start: 's', end: 'e', from: '2026-08-10', to: '2026-09-06', tokens: { ...tokens(0, 0, 0, 0, 0) } },
 	},
 	expected: {
-		work: 'Work per hour of your attention 53 h Sep 7 to Oct 4, n 2,317, new',
-		'first-try': 'First-try rate (agent-graded) 89% Sep 7 to Oct 4, n 2,345, new',
-		cost: 'Cost per hour of delivered work $1.51 Sep 7 to Oct 4, n 1,742, new',
-		minutes: 'Your minutes per outcome 3.7 min Sep 7 to Oct 4, n 2,345, new',
-		tokens: 'Tokens 58B Sep 7 to Oct 4, new Uncached input 838M Cache write 549M Cache read 56.5B Output 204M',
+		work: 'Work per hour of your attention 53 h Sep 7 to Oct 4, n 2,317, new vs Aug 10 to Sep 6 (n 450)',
+		'first-try': 'First-try rate (agent-graded) 89% Sep 7 to Oct 4, n 2,345, new vs Aug 10 to Sep 6 (n 450)',
+		cost: 'Cost per hour of delivered work $1.51 Sep 7 to Oct 4, n 1,742, new vs Aug 10 to Sep 6 (n 0)',
+		minutes: 'Your minutes per outcome 3.7 min Sep 7 to Oct 4, n 2,345, new vs Aug 10 to Sep 6 (n 450)',
+		tokens: 'Tokens 58B Sep 7 to Oct 4, new vs Aug 10 to Sep 6 Uncached input 838M Cache write 549M Cache read 56.5B Output 204M',
 	},
 };
 
-const costPeriod = (figure: { value: number | null; n: number }) => ({ period: '2026-09-28', dollars: figure.value === null ? null : figure.value * 1_000, priced_records: 1, api_records: 1, outcomes: figure.n, per_outcome: figure.value === null ? null : 1, sized: figure.n, hours: 1_000, per_hour: figure.value });
+const costPeriod = (figure: { value: number | null; n: number }, period: string, n = figure.n) => ({ period, dollars: figure.value === null ? null : figure.value * 1_000, priced_records: 1, api_records: 1, outcomes: n, per_outcome: figure.value === null ? null : 1, sized: n, hours: 1_000, per_hour: figure.value });
 /** A pooled comparison window as the Cost payload serves it: named by the days it covers, with no `period` key. */
-const pooled = ({ period: from, ...figures }: ReturnType<typeof costPeriod>) => ({ from, to: from, ...figures });
+const pooled = ({ period: _period, ...figures }: ReturnType<typeof costPeriod>, bounds: { from: string; to: string }) => ({ from: bounds.from, to: bounds.to, ...figures });
 
 const stepDays = (grain: string) => (grain === 'days' ? 1 : 7);
 const addDays = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
@@ -75,6 +75,20 @@ const sizeCoverage = (estimated_hours: number, sized: number, data_start: string
 });
 
 /** The rows behind a windowed measure: one per period of the grain across both served windows, the window's n split over its periods, so the section headline and its tile read the same rows. */
+function costRows(period: { latest: { from: string; to: string }; previous: { from: string; to: string } }, grain: string, served: { value: number | null; n: number }[]) {
+	const step = stepDays(grain);
+	const dates: string[] = [];
+	for (let date = period.previous.from; date <= period.latest.to; date = addDays(date, step)) dates.push(date);
+	return dates.map((date) => {
+		const inPrevious = date <= period.previous.to;
+		const figure = served[inPrevious ? 1 : 0];
+		const bounds = inPrevious ? period.previous : period.latest;
+		const count = dates.filter((d) => (d <= period.previous.to) === inPrevious).length;
+		const n = Math.floor(figure.n / count) + (date === bounds.from ? figure.n % count : 0);
+		return costPeriod(figure, date, n);
+	});
+}
+
 function rowsFor(series: string, grain: string, period: { latest: { from: string; to: string }; previous: { from: string; to: string } }, served?: ReturnType<typeof window>[]) {
 	const step = stepDays(grain);
 	const dates: string[] = [];
@@ -103,8 +117,10 @@ async function serve(page: Page, project: { id: string; name: string }, agentId:
 		if (url.pathname.endsWith('/agents')) return route.fulfill({ json: agentsBody(project, agentId, agentName, url) });
 		if (url.pathname.endsWith('/models')) return route.fulfill({ json: { rows: [], min_tasks: 14, token_shares: [], unmatched_failed_turns: 0, unresolved_token_share: 0, total_spend_usd: 0 } });
 		if (url.pathname.endsWith('/cost')) {
-			const [latest, previous] = scenario.cost.map(costPeriod);
-			return route.fulfill({ json: { definition_version: 1, period, series: [previous, latest], latest: pooled(latest), previous: pooled(previous), coverage: { priced_records: 3, api_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null } } });
+			const [latestFigure, previousFigure] = scenario.cost;
+			const latest = costPeriod(latestFigure, scenario.period.latest.from);
+			const previous = costPeriod(previousFigure, scenario.period.previous.from);
+			return route.fulfill({ json: { definition_version: 1, period, series: costRows(scenario.period, grain, scenario.cost), latest: pooled(latest, scenario.period.latest), previous: pooled(previous, scenario.period.previous), coverage: { priced_records: 3, api_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null } } });
 		}
 		const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
 		const served: Record<string, ReturnType<typeof window>[]> = { estimated_human_hours_per_active_hour: scenario.size, first_try_acceptance: scenario.firstTry, active_hours_per_outcome: scenario.minutes };
@@ -198,7 +214,9 @@ async function capture(page: Page, row: Locator, testInfo: TestInfo, width: numb
 	expect(tiles.filter((tile) => tile.overflows), 'no tile clips its content').toEqual([]);
 	if (width >= 1000) {
 		expect(new Set(tiles.map((tile) => tile.y)).size, 'five tiles share one row').toBe(1);
-		expect(Math.max(...tiles.map((tile) => tile.width)) - Math.min(...tiles.map((tile) => tile.width)), 'the five tiles split the row evenly').toBeLessThanOrEqual(1);
+		const regularWidths = tiles.slice(0, 4).map((tile) => tile.width);
+		expect(Math.max(...regularWidths) - Math.min(...regularWidths), 'the first four tiles split the row evenly').toBeLessThanOrEqual(1);
+		expect(tiles[4].width, 'the Tokens tile has its deliberate wide track').toBe(270);
 	} else {
 		expect(new Set(tiles.map((tile) => tile.x)).size, 'tiles stack in one column').toBe(1);
 		expect(new Set(tiles.map((tile) => tile.width)).size, 'every tile is the full width').toBe(1);

@@ -136,18 +136,26 @@ test.describe('@flow:measurement-where-to-look @surface:measurement the Biggest 
 			const names = () => agents.locator('tbody th .name').allTextContents();
 			expect(await agents.locator('thead th').allTextContents(), 'the approved columns, no asks').toEqual([
 				'Agent', 'Outcomes', 'First try', '$ per hour of work', 'Change in minutes per outcome, vs the previous window']);
-			expect(await names(), 'the served order, no column sorted').toEqual([expect.stringContaining('Biggest changes agent'), 'Zed lane', 'Amy lane']);
+			const servedNames = await names();
+			expect(servedNames, 'the served order, no column sorted').toEqual(['Zed lane', expect.any(String), 'Amy lane']);
+			expect(servedNames[1]).toContain('Biggest changes agent');
 			const zed = agents.locator('tbody tr').filter({ hasText: 'Zed lane' });
 			await expect(zed.locator('td.n').nth(1)).toContainText('50%');
 			await expect(zed.locator('td.n').nth(3)).toContainText('-50%');
 			const hourly = agents.getByRole('button', { name: 'First try' });
 			await hourly.click();
 			await expect(hourly.locator('xpath=..')).toHaveAttribute('aria-sort', 'ascending');
-			expect(await names()).toEqual(['Zed lane', expect.stringContaining('Biggest changes agent'), 'Amy lane']);
+			const ascendingNames = await names();
+			expect(ascendingNames).toEqual(['Zed lane', expect.any(String), 'Amy lane']);
+			expect(ascendingNames[1]).toContain('Biggest changes agent');
 			await hourly.click();
-			expect(await names()).toEqual(['Amy lane', expect.stringContaining('Biggest changes agent'), 'Zed lane']);
+			const descendingNames = await names();
+			expect(descendingNames).toEqual(['Amy lane', expect.any(String), 'Zed lane']);
+			expect(descendingNames[1]).toContain('Biggest changes agent');
 			await hourly.click();
-			expect((await names())[0], 'a third click returns the served order').toContain('Biggest changes agent');
+			const resetNames = await names();
+			expect(resetNames, 'a third click returns the served order').toEqual(['Zed lane', expect.any(String), 'Amy lane']);
+			expect(resetNames[1]).toContain('Biggest changes agent');
 
 			// The page itself never scrolls sideways; the card holds its content at both widths.
 			const shot = (name: string) => (process.env.SHOT_DIR ? `${process.env.SHOT_DIR}/${name}` : testInfo.outputPath(name));
