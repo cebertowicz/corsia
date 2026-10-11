@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import urlsplit
+
+from llm.endpoint_policy import registration_default
 
 
 def migrate_109_to_110(conn) -> None:
-    """Preserve the retired endpoint heuristic once as declared metadata."""
+    """Store the registration default on endpoints that existed before it was applied."""
     table = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='network_servers'"
     ).fetchone()
@@ -20,10 +21,7 @@ def migrate_109_to_110(conn) -> None:
             continue
         if not isinstance(metadata, dict):
             continue
-        host = urlsplit(str(metadata.get("base_url") or "")).hostname or ""
-        matches_legacy_endpoint = (
-            "token plan" in str(row[1] or "").casefold() or "token-plan" in host.casefold()
-        )
-        if matches_legacy_endpoint and "agent_use_restriction" not in metadata:
+        default = registration_default(row[1], str(metadata.get("base_url") or ""))
+        if default == "interactive_only" and "agent_use_restriction" not in metadata:
             metadata["agent_use_restriction"] = "interactive_only"
             conn.execute("UPDATE network_servers SET metadata_json=? WHERE id=?", (json.dumps(metadata), row[0]))

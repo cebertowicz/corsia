@@ -261,6 +261,53 @@ def test_a_re_add_without_the_field_keeps_the_stored_restriction(isolated_db, mo
     assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
 
 
+def test_a_new_token_plan_endpoint_is_stored_interactive_only(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(name="Workspace", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"]),
+    ))["server_id"]
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "interactive_only"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+
+def test_a_registration_that_names_a_restriction_keeps_it(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Token Plan", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"],
+            agent_use_restriction="allowed",
+        ),
+    ))["server_id"]
+
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
+
+
+@pytest.mark.parametrize(
+    ("name", "base_url", "expected"),
+    [
+        ("Token Plan (Beijing)", "https://api.example.com/v1", "interactive_only"),
+        ("Workspace", "https://token-plan.example.com/v1", "interactive_only"),
+        ("Workspace", "https://api.example.com/v1", "allowed"),
+        (None, "not a url", "allowed"),
+    ],
+)
+def test_registration_default_reads_name_and_host(name, base_url, expected) -> None:
+    from llm.endpoint_policy import registration_default
+
+    assert registration_default(name, base_url) == expected
+
+
 # ── removal stays removed ────────────────────────────────────────────────────
 
 def _seed_removable(path) -> None:

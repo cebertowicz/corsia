@@ -16,6 +16,7 @@ from infra.key_store_servers import (
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
+from llm.endpoint_policy import registration_restriction
 from llm.external_declared_models import (
     LIST_UNSUPPORTED, META_KEY, clean_model_ids, declared_model_ids, declared_model_refusal,
 )
@@ -293,12 +294,12 @@ async def add_external_server(body) -> dict:
                 db=db,
             )
             # A registration is the user's whole statement: an empty window or key on a
-            # re-add is cleared. An omitted agent-use restriction is kept (no form sends it).
+            # re-add is cleared. An omitted agent-use restriction keeps a stored one.
             fields: dict = {"base_url": base}
             if body.cache_warm_seconds:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
-            if body.agent_use_restriction is not None:
-                fields["agent_use_restriction"] = body.agent_use_restriction
+            if restriction := body.agent_use_restriction or registration_restriction(db, sid, body.name, base):
+                fields["agent_use_restriction"] = restriction
             if key:
                 set_server_key(sid, key, db=db)
             else:
