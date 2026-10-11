@@ -114,7 +114,7 @@ describe('Expand', () => {
 		const source = readFileSync(join(process.cwd(), 'src/lib/components/ui/Expand.svelte'), 'utf8');
 		const reduced = source.slice(source.indexOf('@media (prefers-reduced-motion: reduce)'));
 		expect(reduced).toContain('.expand, .expand.open { transition: none; }');
-		expect(reduced).toContain('transition: opacity var(--dur-tight)');
+		expect(reduced).toContain('transition: opacity var(--dur-tight) var(--ease-snap) !important');
 		expect(reduced).not.toContain('grid-template-rows');
 	});
 });

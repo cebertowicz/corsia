@@ -99,6 +99,7 @@
 	.expand.settled > .expand-inner { overflow: visible; }
 	@media (prefers-reduced-motion: reduce) {
 		.expand, .expand.open { transition: none; }
-		.expand-inner, .expand.open > .expand-inner { transition: opacity var(--dur-tight) var(--ease-snap); }
+		/* The global reduced-motion rule zeroes every duration; the crossfade is the one motion kept. */
+		.expand-inner, .expand.open > .expand-inner { transition: opacity var(--dur-tight) var(--ease-snap) !important; }
 	}
 </style>
