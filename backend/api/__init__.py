@@ -41,6 +41,7 @@ from api.skills import router as skills_router
 from api.host_access import router as host_access_router
 from api.audit_reads import router as audit_reads_router
 from api.plans import router as plans_router
+from api.plans_folded import router as plans_folded_router
 
 __all__ = [
     "auth_router",
@@ -82,5 +83,6 @@ __all__ = [
     "host_access_router",
     "audit_reads_router",
     "plans_router",
+    "plans_folded_router",
     "agents_router",
 ]

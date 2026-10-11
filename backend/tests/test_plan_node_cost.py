@@ -18,6 +18,7 @@ from plans import (
     commitment_cost, mutations, node_cost, operator_node_state, rejection, review_evidence,
     rollup, runner_events, service,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 @pytest.fixture
@@ -311,7 +312,8 @@ def test_a_child_requested_beside_its_archived_delegating_step_folds_once(db):
     child_plan = service.ensure_plan("thread", "child", db=db)
     child_task = _task(db, child_plan.id, "Child work")
     _usage(db, child_task, tokens=500, cost=0.50, usage_id="u-child", thread_id="child")
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (delegate.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (delegate.id,))
 
     costs = node_cost.project_many([parent_plan.id, child_plan.id], db=db)
 
@@ -503,7 +505,8 @@ def test_nesting_deeper_than_the_interpreter_stack_still_rolls_up(db):
     parent_id = seed["id"]
     for depth in range(1, 1500):
         row = dict(seed, id=f"deep-{depth}", parent_id=parent_id, title=f"Depth {depth}")
-        db.execute(f"INSERT INTO plan_nodes ({columns}) VALUES ({marks})", tuple(row.values()))
+        with raw_plan_seed(db):
+            db.execute(f"INSERT INTO plan_nodes ({columns}) VALUES ({marks})", tuple(row.values()))
         parent_id = row["id"]
     deepest = service.get_node(parent_id, db=db)
     _usage(db, deepest, tokens=7, cost=0.0, usage_id="u-deep")

@@ -31,6 +31,7 @@ from infra.schema import SCHEMA_SQL
 from plans import delegation, mutations, plan_wake, service
 from plans.projections import liveness_signal
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 NOW = "2026-08-01T00:00:00+00:00"
 
@@ -228,7 +229,8 @@ async def test_a_delegation_with_nothing_returned_is_not_harvested(monkeypatch):
         gone = service.add_node(
             plan.id, kind="task", title="Abandoned", acceptance_criteria="-", db=db,
         )
-        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (gone.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (gone.id,))
         db.commit()
 
         await _sweep(db)
@@ -317,9 +319,10 @@ def test_a_workers_plan_is_its_own_again_once_the_delegated_step_is_archived(mon
         row = service._plan_row(db, plan.id)
         assert projections.live_delegation(db, "worker", row["parent_plan_id"])
 
-        db.execute(
-            "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (delegated.id,),
-        )
+        with raw_plan_seed(db):
+            db.execute(
+                "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (delegated.id,),
+            )
         db.commit()
 
         assert not projections.live_delegation(db, "worker", row["parent_plan_id"])

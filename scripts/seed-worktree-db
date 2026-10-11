@@ -485,6 +485,7 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
         print("Measurement fixture already exists")
         return
     stamp = "2026-09-01T00:00:00Z"
+    plans_public = _import_backend_module("plans.public")
     wt.execute(
         "INSERT INTO plans (id, owner_kind, owner_id, state, created_at, updated_at) "
         "VALUES (?, 'thread', ?, 'active', ?, ?)",
@@ -494,13 +495,15 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
         for index in range(outcomes):
             node_id = f"measurement-fixture-{week}-{index}"
             accepted_at = f"{week}T12:{index % 60:02d}:00Z"
-            wt.execute(
-                "INSERT INTO plan_nodes (id, plan_id, order_key, kind, title, "
-                "acceptance_criteria, state, commitment_id, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'task', ?, 'Fixture outcome', 'accepted', ?, ?, ?)",
-                (node_id, _MEASUREMENT_PLAN_ID, index, f"Fixture outcome {week} {index}",
-                 node_id, stamp, accepted_at),
-            )
+            # A raw node write; the aggregates are rebuilt once the fixture is in.
+            with plans_public.sanctioned_plan_write():
+                wt.execute(
+                    "INSERT INTO plan_nodes (id, plan_id, order_key, kind, title, "
+                    "acceptance_criteria, state, commitment_id, created_at, updated_at) "
+                    "VALUES (?, ?, ?, 'task', ?, 'Fixture outcome', 'accepted', ?, ?, ?)",
+                    (node_id, _MEASUREMENT_PLAN_ID, index, f"Fixture outcome {week} {index}",
+                     node_id, stamp, accepted_at),
+                )
             wt.execute(
                 "INSERT INTO plan_node_events (id, node_id, provenance, event, "
                 "prior_state, new_state, created_at) "
@@ -555,6 +558,8 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
                 (f"measurement-fixture-message-{week}-{index}", thread_id,
                  sent_at.strftime("%Y-%m-%dT%H:%M:%SZ")),
             )
+    # The nodes above were written straight to the table, so compute their stored aggregates.
+    plans_public.rebuild_plan_aggregates(wt, _MEASUREMENT_PLAN_ID)
     print("Seeded Measurement weekly fixture")
 
 

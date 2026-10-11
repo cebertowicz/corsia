@@ -7,6 +7,7 @@ import sys
 
 from infra import thread_updates
 from plans import service
+from plans.public import rebuild_plan_aggregates, sanctioned_plan_write
 
 
 def guarded_db():
@@ -50,7 +51,8 @@ def turn(db, thread, identifier, paused=False):
 
 def node(db, plan, title, assignee="coordinator", state="accepted"):
     row = service.add_node(plan, kind="task", title=title, acceptance_criteria="Synthetic proof", assignee=assignee, db=db)
-    db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, row.id))
+    if state != "pending":  # a new node already is pending; leave its revision alone
+        service.touch_node(db, row.id, state=state)
     if state == "failed":
         db.execute(
             "INSERT INTO plan_node_events (id,node_id,event,prior_state,new_state,provenance,created_at) "
@@ -108,7 +110,8 @@ def seed(db, main, passive, failed):
         if index == 0:
             db.execute("UPDATE plan_nodes SET title='Renamed after outcome' WHERE id=?", (item,))
         if kind == "closed":
-            db.execute("DELETE FROM plan_nodes WHERE id=?", (item,))
+            with sanctioned_plan_write():  # no operation deletes a node; the rebuild below recounts
+                db.execute("DELETE FROM plan_nodes WHERE id=?", (item,))
     live_close = node(db, plan, "Live closure snapshot", state="pending")
     db.execute(
         "INSERT INTO thread_presence (user_id,thread_id,present,last_entered_at,last_exited_at,last_confirmed_at,updated_at) VALUES (?,?,0,?,?,?,?)",
@@ -120,6 +123,10 @@ def seed(db, main, passive, failed):
     failed_plan = service.ensure_plan("thread", failed, db=db).id
     for assignee in ("user", "coordinator", "subagent", None):
         node(db, failed_plan, f"Failure assigned to {assignee or 'nobody'}", assignee, "failed")
+    # The raw delete above removed a node the aggregates still count, and the raw failure
+    # events settle nodes the operations never saw: recount every plan this seeded.
+    for seeded_plan in (plan, passive_plan, failed_plan):
+        rebuild_plan_aggregates(db, seeded_plan)
     db.commit()
     revision = db.execute("SELECT revision FROM plan_nodes WHERE id=?", (live_close,)).fetchone()[0]
     times = [row[0] for row in db.execute("SELECT created_at FROM thread_updates WHERE thread_id=? AND source_kind='plan_event' ORDER BY after_seq, id", (main,))]

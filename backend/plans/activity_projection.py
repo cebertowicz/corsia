@@ -18,6 +18,7 @@ from plans import (
     node_states,
     not_moving,
     operator_nodes,
+    operator_owners,
     operator_plan_display,
     operator_projection,
     service,
@@ -89,6 +90,8 @@ def _reduce_plan(
         )
     buckets = {node_id: item.bucket for node_id, item in reduced.items()}
     branches, counts = operator_nodes.distribution_from_buckets(rows, buckets)
+    # The rows are the open work; the settled leaves are the plan's stored counters (#731 S2-2).
+    counts = {**counts, "done": counts["done"] + plan["top_done"], "failed": counts["failed"] + plan["top_failed"]}
     leaves = node_states.leaves(rows)
     user_ready = sum(
         reduced[str(row["id"])].bucket == "pending_ready" and row["assignee"] == "user"
@@ -144,7 +147,7 @@ def _top_level(plan_rows: list) -> list:
 
 def _shown_owners(top_level: list, actor: PlanActor, *, db) -> dict[str, dict]:
     """The one owner predicate: who owns a top-level plan Activity may show."""
-    return operator_projection._owner_index(
+    return operator_owners.owner_index(
         top_level, actor, db=db, include_archived=False,
         exclude_archived_projects=True,
     )
@@ -242,7 +245,7 @@ def _top_level_rows(
         plan = plans[plan_id]
         node_rows = nodes_by_plan.get(plan_id, [])
         state = states[plan_id]
-        if not node_rows and plan["owner_kind"] != "thread":
+        if not node_rows and not plan["top_roots"] and plan["owner_kind"] != "thread":
             continue
         display = displays[plan_id]
         result.append({
@@ -252,7 +255,7 @@ def _top_level_rows(
                 "open": state.progress.open,
                 "liveness": state.progress.liveness,
             },
-            "has_nodes": bool(node_rows),
+            "has_nodes": bool(node_rows) or plan["top_roots"] > 0,
             "display": {
                 "label_key": display["label_key"],
                 "tone_key": display["tone_key"],

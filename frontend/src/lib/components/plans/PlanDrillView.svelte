@@ -1,16 +1,19 @@
 <script lang="ts">
 	import type { OperatorArtifactLink, OperatorNode } from '$lib/api/plans';
+	import type { FoldedWork } from './planFoldLevels';
 	import PlanTree from './PlanTree.svelte';
 	import { createChildExpansion } from './childExpansion.svelte';
 	import type { PlanKey } from '$lib/stores/planKeys';
 
 	let {
-		nodes, rootId, currentNodeIds = [], nextNodeIds = [], hostKey = null, onBack,
+		nodes, folded = null, rootId, currentNodeIds = [], nextNodeIds = [], hostKey = null, onBack,
 		onOpenChild = () => {},
 		onOpenArtifact = () => {},
 		onOpenLegacyDiscussion = () => {},
 	}: {
 		nodes: OperatorNode[];
+		/** The plan's folds; the drilled subtree reads those beneath its root. */
+		folded?: FoldedWork | null;
 		rootId: string;
 		currentNodeIds?: string[];
 		nextNodeIds?: string[];
@@ -43,19 +46,33 @@
 		const byId = new Map(nodes.map((n) => [n.id, n]));
 		const root = byId.get(rootId);
 		if (!root) return [];
+		// The drilled root is the subtree's own heading, so it never sits under a fold row.
 		return nodes
 			.filter((n) => isDescendantOfRoot(n, byId))
-			.map((n) => ({ ...n, depth: n.depth - root.depth }));
+			.map((n) => ({ ...n, depth: n.depth - root.depth, folded: n.id === rootId ? false : n.folded }));
+	}
+
+	/** The folds beneath the drilled root: those whose parent is one of its rows. */
+	function subtreeFolds(): FoldedWork | null {
+		if (!folded) return null;
+		const ids = new Set(focusedNodes.map((n) => n.id));
+		return { ...folded, levels: folded.levels.filter((level) => level.parent_id !== null && ids.has(level.parent_id)) };
 	}
 
 	const rootNode = $derived(nodes.find((n) => n.id === rootId));
 	const focusedNodes = $derived(subtree());
+	const focusedFolds = $derived(subtreeFolds());
 
 	let tree = $state<PlanTree | null>(null);
 
 	/** Open what hides one row of the drilled subtree (`PlanTree.revealNode`). */
 	export function revealNode(nodeId: string): boolean {
 		return tree?.revealNode(nodeId) ?? false;
+	}
+
+	/** Open an older finished row of the drilled subtree (`PlanTree.revealFolded`). */
+	export async function revealFolded(nodeId: string): Promise<boolean> {
+		return (await tree?.revealFolded(nodeId)) ?? false;
 	}
 
 	/** Focus one rendered row of the drilled subtree (`PlanTree.focusRow`). */
@@ -73,6 +90,7 @@
 	<PlanTree
 		bind:this={tree}
 		nodes={focusedNodes}
+		folded={focusedFolds}
 		{currentNodeIds}
 		{nextNodeIds}
 		maxDepth={Infinity}

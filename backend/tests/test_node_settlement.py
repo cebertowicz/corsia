@@ -32,6 +32,7 @@ from tests.test_attention_queue import (  # noqa: F401 - shared fixtures
     raise_decision,
 )
 from tests.test_attention_queue_api import _DbProxy, _immediate
+from tests.plan_writer_authorizer import raw_plan_seed
 
 ROOT = PlanActor("root", "user-1", "project-1")
 HUMAN = PlanActor(None, "user-1", None, kind="user")
@@ -263,7 +264,8 @@ def _archive(db, thread_id: str) -> None:
 
 def _force_node_state(db, node_id: str, state: str) -> None:
     """Put the node in a state a pre-rule row could already be in."""
-    db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node_id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node_id))
     db.commit()
 
 

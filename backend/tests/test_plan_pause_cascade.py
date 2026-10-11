@@ -23,6 +23,7 @@ import plans.boundary as boundary
 import plans.lifecycle as lifecycle
 import plans.service as service
 from plans.boundary import PlanActor
+from tests.plan_writer_authorizer import raw_plan_seed
 
 TURN = "turn-running"
 USER = PlanActor(None, "user", None, kind="user")
@@ -177,10 +178,11 @@ def test_a_delegated_step_reads_paused_while_its_worker_is_paused():
         _plan(db, "top")["id"], kind="task", title="Delegated work",
         acceptance_criteria="The worker returns it", db=db,
     )
-    db.execute(
-        "UPDATE plan_nodes SET state='active', spawned_thread_id='mid' WHERE id=?",
-        (node.id,),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET state='active', spawned_thread_id='mid' WHERE id=?",
+            (node.id,),
+        )
     db.commit()
 
     _change(db, "mid", "pause")

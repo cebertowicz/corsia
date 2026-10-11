@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get, type Writable } from 'svelte/store';
 import type { OperatorNode } from '$lib/api/plans';
+import { planFoldFields } from './fixtures/planFolds';
 
 let mount: typeof import('svelte').mount;
 let tick: typeof import('svelte').tick;
@@ -42,7 +43,7 @@ function envelope(nodes = [operatorNode({ id: 'node-1', title: 'Choose a model',
 			progress: { done: 0, total: 1, open: 1, liveness: 'advancing', distribution: EMPTY_DISTRIBUTION },
 			display: planDisplay('working', 'active'), oversize: null,
 			current_node_ids: ['node-1'], next_node_ids: [],
-			nodes,
+			nodes, ...planFoldFields(nodes),
 		}],
 	};
 }

@@ -21,8 +21,8 @@ import sqlite3
 from dataclasses import dataclass, field
 
 import plans.admission_attempts as attempts
+import plans.aggregates as aggregates
 import plans.node_order as node_order
-import plans.node_states as node_states
 import plans.selection_validity as validity
 import plans.service as service
 from prompts import plan_tools as text
@@ -74,16 +74,16 @@ class Jump:
 
 
 def position(db, plan_id: str, root_id: str) -> int:
-    """Return a top-level node's position among all unarchived top-level nodes.
+    """Return a top-level node's position among the open top-level nodes.
 
-    The position ``reorder``'s ``order_key`` names: how many unarchived
-    top-level siblings precede it in ``(order_key, id)`` order. One count, so a
-    caller asks only for the nodes it names.
+    The position ``reorder``'s ``order_key`` names: how many open top-level
+    siblings precede it in ``(order_key, id)`` order. One count over the open
+    rows, so a caller asks only for the nodes it names.
     """
     return int(db.execute(
         "SELECT COUNT(*) FROM plan_nodes AS other, plan_nodes AS root "
         "WHERE root.id=? AND other.plan_id=? AND other.parent_id IS NULL "
-        f"AND {node_states.unarchived_sql('other')} "
+        f"AND {aggregates.open_siblings_sql(db, 'other')} "
         "AND (other.order_key < root.order_key "
         "OR (other.order_key = root.order_key AND other.id < root.id))",
         (root_id, plan_id),

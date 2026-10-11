@@ -205,7 +205,7 @@ RETURNED_TITLE_MAX_BYTES = 96
 RETURNED_EVIDENCE_MAX_BYTES = 480
 
 def notify_returned(
-    db, *, node_id: str, child_plan_id: str, worker_thread_id: str,
+    db, *, node_id: str, child_plan_id: str, worker_thread_id: str, reply: str = "",
 ) -> str | None:
     """Tell the parent its delegated work has returned, with the result to judge.
 
@@ -223,7 +223,7 @@ def notify_returned(
     this wake: a return the parent cannot take is not harvested yet, and
     waits, whole, for a later sweep.
     """
-    from plans import delegation_harvest, review_evidence, service
+    from plans import delegation_harvest, delegation_reply, review_evidence, service
     from plans.close_next_bounds import bounded
     from prompts import plan_wakes as wakes
 
@@ -231,8 +231,8 @@ def notify_returned(
     plan = service._plan_row(db, node["plan_id"])
     if plan["owner_kind"] != "thread":
         return None
-    leaves = delegation_harvest.return_rows(db, child_plan_id)
-    steps = []
+    leaves = delegation_harvest.return_rows(db, child_plan_id, delegation_harvest.attached_since(db, node_id))
+    steps = [delegation_reply.reply_step(reply)] if reply and not leaves else []
     for leaf in leaves[:RETURNED_STEPS_MAX]:
         evidence = review_evidence.latest(
             leaf["id"], requirements_revision=leaf["requirements_revision"], db=db,
@@ -263,7 +263,7 @@ def notify_returned(
                 "worker_thread_id": worker_thread_id,
                 "steps": steps,
                 "omitted_count": max(0, len(leaves) - RETURNED_STEPS_MAX),
-                "total_count": len(leaves),
+                "total_count": len(leaves) or len(steps),
             },
         ),
         delegated_step_id=node_id,

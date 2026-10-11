@@ -3,6 +3,7 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { planQuery } from '$lib/stores/planQuery.svelte';
 	import type { OperatorKey } from '$lib/stores/planKeys';
+	import { hasFolded } from './planFoldLevels';
 	import ThreadPlanPane from './ThreadPlanPane.svelte';
 	import PlanHeadControls from './PlanHeadControls.svelte';
 	import { registerPlanSurface } from '$lib/planNodeFocus';
@@ -21,7 +22,7 @@
 	const query = planQuery(() => key);
 	const plan = $derived(query.payload?.plans[0] ?? null);
 	// A plan whose work has all folded reads 0/0 but still has steps to open.
-	const visible = $derived($isMobile && !!plan && plan.nodes.length > 0);
+	const visible = $derived($isMobile && !!plan && (plan.nodes.length > 0 || hasFolded(plan.folds)));
 	let open = $state(false);
 	let openedFor = $state<string | null>(null);
 

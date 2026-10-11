@@ -22,6 +22,7 @@ from tests.plan_execution_helpers import (
     registry_of,
 )
 from tools.plans import PlanReadTool, PlanUpdateTool
+from tests.plan_writer_authorizer import raw_plan_seed
 
 KEY = "related_past_work"
 
@@ -52,7 +53,8 @@ def _settled(db, thread_id: str, title: str) -> str:
     """Settle one task in ``thread_id``'s plan and return its id."""
     plan = service.ensure_plan("thread", thread_id, db=db)
     node = add_task(db, plan.id, title)
-    db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (node.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (node.id,))
     db.commit()
     return node.id
 

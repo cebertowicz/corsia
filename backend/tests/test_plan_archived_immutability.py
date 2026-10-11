@@ -27,6 +27,7 @@ import pytest
 from infra.schema import SCHEMA_SQL
 from plans import delegation, mutations, rejection, service
 from tests.test_attention_queue import _seed
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _ARCHIVED = "plan node is archived"
 
@@ -65,9 +66,10 @@ def _archived_task(db, plan_id: str, title: str = "Stale", *, state="active"):
         service.transition_node(node.id, "active", db=db)
     if state == "review_requested":
         service.transition_node(node.id, "review_requested", db=db)
-    db.execute(
-        "UPDATE plan_nodes SET archived_at=? WHERE id=?", (service._now(), node.id),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at=? WHERE id=?", (service._now(), node.id),
+        )
     db.commit()
     return service.get_node(node.id, db=db)
 

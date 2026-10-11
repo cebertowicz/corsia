@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 
 from plans import admission, operator_stopped, service, wait_causes
@@ -62,7 +63,7 @@ def quiet_from_causes(condition: str, causes: list[dict], open_node_ids) -> bool
     )
 
 
-def after(execution: dict, titles: dict[str, str]) -> str | None:
+def after(execution: dict, titles: Mapping[str, str]) -> str | None:
     """Name the prerequisites a node is only sequenced behind, or ``None``."""
     if not _every_cause(execution, lambda cause: _open_prerequisite(cause, titles)):
         return None
@@ -223,6 +224,8 @@ def project(
     costs: bool = True,
     memo: dict | None = None,
     lean: bool = False,
+    detail_ids: frozenset[str] | None = None,
+    titles: Mapping[str, str] | None = None,
 ) -> dict[str, dict]:
     """Project every node from canonical owners without writing or client inference.
 
@@ -233,32 +236,30 @@ def project(
     one across a continuation). ``costs=False`` leaves both cost fields None for
     the status journal, which runs under the writer lock and shows none (#2489).
 
+    ``detail_ids`` (open-work read, ``plans.open_rollup``; ``titles`` names the other rows): facts are read for the
+    listed rows alone; only these ids get rolled, commitment and initiative costs.
+
     ``lean`` is for a reader that takes only the plan header's and the ask
     list's facts (``execution``, ``display``, ``requires_user_action``). It
     skips the reads behind the rest: ``executor.label``, ``evidence`` and
     ``last_transition_at`` are None, a closed node's recorded reason is not in
     ``status_reason``, and ``execution`` has no attempts and zero counts.
     """
-    plan_ids = [str(item.plan["id"]) for item in projected]
-    node_plans = [
-        (node, item.plan)
-        for item in projected
-        for node in item.nodes
-    ]
-    executor_by_node = {
-        node["id"]: executor_of(node, plan)
-        for node, plan in node_plans
-    }
+    node_plans = [(node, item.plan) for item in projected for node in item.nodes]
+    executor_by_node = {node["id"]: executor_of(node, plan) for node, plan in node_plans}
     labels, history, attempt_counts, evidence, changed, closed_because = (
         facts.NO_DETAIL if lean else facts.detail(
             projected, node_plans, executor_by_node, limit=ATTEMPT_HISTORY_LIMIT, db=db,
+            scoped=detail_ids is not None,
         )
     )
-    titles = {node["id"]: node["title"] for node, _plan in node_plans}
+    if titles is None:
+        titles = {node["id"]: node["title"] for node, _plan in node_plans}
     executions = admission.project_many(node_plans, db=db, memo=memo)
     stops = operator_stopped.nodes(node_plans, executor_by_node, executions, db=db)
     commitment_costs, node_costs, initiatives = facts.project_costs(
         node_plans, db=db, now=now or datetime.now(timezone.utc), wanted=costs,
+        detail_ids=detail_ids,
     )
     states: dict[str, dict] = {}
 
@@ -285,7 +286,7 @@ def project(
                 # The commitment total is true only at its one root; every
                 # other node in the tree would otherwise repeat the whole
                 # commitment's figure on its own row.
-                "commitment_cost": commitment_costs[commitment_id] if is_commitment_root else None,
+                "commitment_cost": commitment_costs.get(commitment_id) if is_commitment_root else None,
                 "node_cost": node_costs[str(item.plan["id"])][node["id"]],
                 "initiative": initiatives.get(node["id"]),
                 "last_transition_at": None if lean else changed[node["id"]],

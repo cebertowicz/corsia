@@ -40,6 +40,7 @@ from tests.plan_close_next_helpers import (
     task,
 )
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixture
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _closable(db, operation: str):
@@ -161,7 +162,8 @@ def test_open_tasks_follow_depth_first_order_with_an_id_tie_break(db):
     })
     # A legacy row: its parent is archived, so it follows the tree in canonical
     # order and is still this executor's open work.
-    db.execute("UPDATE plan_nodes SET archived_at=? WHERE id=?", (service._now(), retired.id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at=? WHERE id=?", (service._now(), retired.id))
     db.commit()
     select(db, plan.id, task_a.id)
     low, high = sorted([tie_x.id, tie_y.id])

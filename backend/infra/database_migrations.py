@@ -162,6 +162,7 @@ from infra.migration_101_to_102_reviewer_awareness import migrate_101_to_102
 from infra.migration_102_to_103_recovered_errors import migrate_102_to_103
 from infra.migration_103_to_104_retype_legacy_images import migrate_103_to_104
 from infra.migration_104_to_105_review_time import migrate_104_to_105
+from infra.migration_105_to_106_plan_aggregates import migrate_105_to_106
 
 log = logging.getLogger(__name__)
 
@@ -740,6 +741,7 @@ MIGRATIONS[101] = migrate_101_to_102
 MIGRATIONS[102] = migrate_102_to_103
 MIGRATIONS[103] = migrate_103_to_104
 MIGRATIONS[104] = migrate_104_to_105
+MIGRATIONS[105] = migrate_105_to_106
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -997,8 +999,11 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                     "Migrating schema %d -> %d (backup: %s)",
                     locked_version, target_version, backup_path,
                 )
+                from plans.public import sanctioned_plan_write  # lazy: plans imports infra
+
                 for version in _plan(locked_version, target_version):
-                    MIGRATIONS[version](conn)
+                    with sanctioned_plan_write():
+                        MIGRATIONS[version](conn)
                 conn.execute(f"PRAGMA user_version={target_version}")
                 _validate(conn)
             except BaseException as error:

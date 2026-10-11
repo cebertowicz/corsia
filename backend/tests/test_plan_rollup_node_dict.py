@@ -7,11 +7,12 @@ must return identical payloads whichever one produces the node dicts.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, fields
 
 import pytest
 
-from plans import mutations, operator_chat_state, operator_projection, rollup, service
+from plans import mutations, node_states, operator_chat_state, operator_projection, rollup, service
 from plans.boundary import PlanActor
 from plans.models import PlanNode
 from tests.plan_close_next_helpers import HUMAN, plan_update, revision, task
@@ -158,22 +159,35 @@ def test_chat_list_batches_child_plan_reads(db, scene):
         if "SELECT n.id AS attached_node_id,p.* FROM plan_nodes n" in statement
     ]
     child_plan_ids = [str(child_plan.id) for child_plan, _step, _id in child_steps]
-    # The rollup reads every shown child's tree in one set; admission's own
-    # single-plan walks of a child are not this read.
+    # The rollup reads each shown child's open rows once (#731 S2-2: a plan's open work,
+    # not the plan); admission's own single-plan walks are not this read.
     tree_queries = [
-        statement for statement in statements
-        if "SELECT * FROM plan_nodes" in statement and "WHERE plan_id IN" in statement
-        and all(plan_id in statement for plan_id in child_plan_ids)
-        and not statement.rstrip().endswith("LIMIT 0")
+        statement for statement in statements if _open_read_of(statement) in child_plan_ids
     ]
     # ``fetch_all`` prepares then executes the one packed result query.
     assert len(child_queries) == 2
-    assert len(tree_queries) == 1
+    assert sorted(_open_read_of(statement) for statement in tree_queries) == sorted(child_plan_ids)
 
     child_plan, child_step, child_id = child_steps[0]
     _activate(db, child_plan.id, child_step.id, PlanActor(child_id, "user", None))
     fresh = operator_chat_state.read_thread_states(["parent"], actor=HUMAN, db=db)
     assert fresh["states"]["parent"]["state"] == "moving"
+
+
+_OPEN_READ = re.compile(
+    r"^WITH q\(.*AS \(SELECT \* FROM plan_nodes WHERE plan_id='(\w+)' AND "
+    + re.escape(node_states.listed_open_sql("plan_nodes")) + r"\)",
+    re.DOTALL,
+)
+
+
+def _open_read_of(statement: str) -> str | None:
+    """The plan whose open rows this statement reads (``open_tree.load``), if it is that read.
+
+    ``fetch_all`` first prepares each read with a ``LIMIT 0`` probe; only the packed read counts.
+    """
+    found = _OPEN_READ.search(statement)
+    return found.group(1) if found else None
 
 
 def _tree_reads_of(db, plan_id: str, read) -> list[str]:
@@ -185,11 +199,7 @@ def _tree_reads_of(db, plan_id: str, read) -> list[str]:
         db.set_trace_callback(None)
     # ``fetch_all`` first prepares each read with a ``LIMIT 0`` probe for its
     # column names; the probe reads no rows, so it is not a read of the tree.
-    return [
-        statement for statement in statements
-        if "SELECT * FROM plan_nodes" in statement and "WHERE plan_id IN" in statement
-        and plan_id in statement and not statement.rstrip().endswith("LIMIT 0")
-    ]
+    return [statement for statement in statements if _open_read_of(statement) == plan_id]
 
 
 @pytest.mark.parametrize("read", [

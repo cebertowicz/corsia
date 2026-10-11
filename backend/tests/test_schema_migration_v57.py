@@ -12,6 +12,7 @@ from infra.database import initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
 from plans import dependencies, rejection, service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _ARCHIVED = "2026-09-20T10:00:00.000000+00:00"
 
@@ -24,7 +25,8 @@ def _node(db, plan_id: str, title: str) -> str:
 
 def _fail(db, node_id: str, *, actor_id: str = "agent", provenance: str = "tool.plans") -> None:
     """Write the failure the way the runtime's transition left it."""
-    db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (node_id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='failed' WHERE id=?", (node_id,))
     service._event(
         db, node_id, "state_transition", actor_id=actor_id, provenance=provenance,
         prior_state="review_requested", new_state="failed",
@@ -73,10 +75,11 @@ def _legacy_db(path):
         _rejected(db, ids["other_actor"], "Mine")
         _fail(db, ids["other_actor"], actor_id="lifecycle:owner", provenance="thread_archive")
         _rejected_before_sent_back(db, ids["rejected_archived"], "Gone")
-        db.execute(
-            "UPDATE plan_nodes SET archived_at=? WHERE id=?",
-            (_ARCHIVED, ids["rejected_archived"]),
-        )
+        with raw_plan_seed(db):
+            db.execute(
+                "UPDATE plan_nodes SET archived_at=? WHERE id=?",
+                (_ARCHIVED, ids["rejected_archived"]),
+            )
         _fail(db, ids["plain_failed"])
         rewind_to_v88_policy(db)
 
@@ -105,7 +108,7 @@ def _plan_revision(db, plan_id: str) -> int:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 105
+    assert SCHEMA_VERSION == 106
 
 
 def test_only_rejection_failures_close_as_sent_back(tmp_path):

@@ -13,6 +13,7 @@ import pytest
 
 from plans import commitment_cost, followups, mutations, node_cost, operator_node_state, rollup, service
 from tests.test_plan_node_cost import _select_statements, _task, _turn, _usage, db  # noqa: F401
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _plan(db, owner="owner"):
@@ -194,7 +195,8 @@ def test_h_archived_follow_up_and_archived_sub_step_are_counted(db):
     follow_up = _follow_up(db, root)
     for index, node in enumerate((root, sub, follow_up)):
         _usage(db, node, tokens=10 ** (index + 1), cost=0.1, usage_id=f"u-{index}")
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id IN (?,?)", (sub.id, follow_up.id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id IN (?,?)", (sub.id, follow_up.id))
     db.commit()
 
     _by_plan, initiatives = _project(db, [plan])
@@ -238,8 +240,9 @@ def test_open_is_true_until_every_member_is_settled_or_archived(db):
 
     assert _project(db, [plan])[1][root.id]["open"] is True
 
-    db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (root.id,))
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (follow_up.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (root.id,))
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (follow_up.id,))
     assert _project(db, [plan])[1][root.id]["open"] is False
 
 

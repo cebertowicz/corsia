@@ -46,6 +46,11 @@ def _settle(db, node_id: str, final: str = "accepted") -> None:
     db.commit()
 
 
+def _listed_open(db, node_id: str) -> bool:
+    """Whether the stored fold answer lists the node as open work (not folded away)."""
+    return db.execute("SELECT folded FROM plan_nodes WHERE id=?", (node_id,)).fetchone()[0] == 0
+
+
 def _whole_plan_standing(db, plan) -> dict:
     """The answer from reading every node of the plan, restated independently."""
     ordered = node_order.ordered_nodes_with_paths(db, str(plan["id"]))
@@ -65,7 +70,10 @@ def _whole_plan_standing(db, plan) -> dict:
         ],
         "ready": {root_of[node_id] for node_id in eligible},
         "root_of": root_of,
-        "positions": {str(row["id"]): index for index, row in enumerate(roots)},
+        "positions": {
+            str(row["id"]): sum(1 for other in roots[:index] if _listed_open(db, str(other["id"])))
+            for index, row in enumerate(roots)
+        },
     }
 
 

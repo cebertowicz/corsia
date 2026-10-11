@@ -30,6 +30,7 @@ from infra.schema import SCHEMA_SQL
 from infra.thread_inputs import start_idle_turn
 from plans import archival, mutations, service
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 NOW = "2026-08-01T00:00:00+00:00"
 TURN = "turn-running"
@@ -208,9 +209,10 @@ def test_an_expiry_whose_task_was_archived_does_not_start_a_turn(monkeypatch):
 
         db.execute("BEGIN")
         watches.expire_watch(watch.id, db=db)
-        db.execute(
-            "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node.id,)
-        )
+        with raw_plan_seed(db):
+            db.execute(
+                "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node.id,)
+            )
         db.commit()
 
         started, row = _claim(db, "parent", message_id)

@@ -37,6 +37,7 @@ from plans import node_waits, service
 from plans.boundary import PlanActor, mutate
 from tests.test_attention_queue import _mid, _seed, raise_decision
 from tests.test_attention_queue_api import _DbProxy, _immediate
+from tests.plan_writer_authorizer import raw_plan_seed
 
 OWNER = PlanActor("root", "user-1", "project-1")
 FOREIGN = PlanActor("foreign", "user-2", "project-2")
@@ -669,10 +670,11 @@ def _delegated(db, *, state="active", child="child"):
 
 def _force_archive(db, node_id: str) -> None:
     """Archive exactly as any foreign writer does: archived_at, never state."""
-    db.execute(
-        "UPDATE plan_nodes SET archived_at=?, revision=revision+1 WHERE id=?",
-        (service._now(), node_id),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at=?, revision=revision+1 WHERE id=?",
+            (service._now(), node_id),
+        )
     db.commit()
 
 

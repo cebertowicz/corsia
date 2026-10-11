@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from tests.test_measurement_api import USER, _freeze_clock, _seed_thread
+from tests.plan_writer_authorizer import raw_plan_seed
 
 MODEL = "claude-code/claude-opus-5-5"
 
@@ -21,8 +22,9 @@ def _seed_tasks(instants: list[str]) -> None:
         db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) VALUES ('plan','thread','root','active',1,'t','t')")
         for index, accepted_at in enumerate(instants):
             node = f"task-{index}"
-            db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,'t','t')", (node, node))
-            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accepted-{node}", node, accepted_at))
+            with raw_plan_seed(db):
+                db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,'t','t')", (node, node))
+                db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accepted-{node}", node, accepted_at))
             db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,source,created_at,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) VALUES (?, 'root',?,1000000,0,0,0,1000000,'external_harness:claude-code',?,'plan',?,'attempt',?,'execution')", (f"usage-{node}", MODEL, accepted_at, node, node))
         db.commit()
     finally:

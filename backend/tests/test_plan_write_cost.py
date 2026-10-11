@@ -38,6 +38,7 @@ from tests.plan_scene import (  # noqa: F401 - shared plan fixtures
     scene,
 )
 from tests.test_attention_queue import _seed
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 class _Fetched:
@@ -302,12 +303,18 @@ def test_touched_plans_are_found_without_probing_every_plan(db, scene, monkeypat
     """Under the writer lock, finding touched plans never probes each plan in turn.
 
     A correlated per-plan probe scanned plan_node_attempts once per plan and
-    held the lock ~1.5 s per write on a 1,600-plan production database.
+    held the lock ~1.5 s per write on a 1,600-plan production database. Nor
+    does it scan a history table: SQLite 3.53 merges a plain UNION in plan_id
+    order and so read every plan_nodes row on every plan write.
     """
     later = "9999-01-01T00:00:00+00:00"
     untouched, plan = _mark_touched(db, later, monkeypatch)
     assert untouched == []
     assert not any("CORRELATED" in step for step in plan)
+    assert not any(
+        step.startswith(("SCAN plan_nodes", "SCAN e", "SCAN plan_node_attempts"))
+        for step in plan
+    ), plan
 
     db.execute("UPDATE plan_nodes SET updated_at=? WHERE id=?", (later, scene.pending))
     touched, _plan = _mark_touched(db, later, monkeypatch)
@@ -338,7 +345,8 @@ def test_rollup_reuses_rows_without_changing_nested_rejected_or_stranded_status(
         scene.plan_id, kind="task", title="Old round", acceptance_criteria="done",
         parent_id=rejected.id, db=db,
     )
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (rejected.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed', sent_back=1 WHERE id=?", (rejected.id,))
     db.execute(
         """INSERT INTO plan_node_events(id,node_id,event,provenance,payload_json,created_at)
            VALUES ('rejected-branch',?,'review_rejected','test','{}','t')""",
@@ -351,7 +359,8 @@ def test_rollup_reuses_rows_without_changing_nested_rejected_or_stranded_status(
         scene.plan_id, kind="task", title="Stranded", acceptance_criteria="done",
         parent_id=stranded_parent.id, db=db,
     )
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (stranded_parent.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (stranded_parent.id,))
     db.commit()
 
     row = service._plan_row(db, scene.plan_id)
@@ -363,7 +372,7 @@ def test_rollup_reuses_rows_without_changing_nested_rejected_or_stranded_status(
     optimized = status_context.projection(db, row, actor=ACTOR, clock="2026-10-04T00:00:00+00:00")
     original = projections._plan_state
 
-    def without_supplied_rows(connection, plan_id, memo, *, plan=None, nodes=None):
+    def without_supplied_rows(connection, plan_id, memo, *, plan=None, nodes=None, **_tree):
         return original(connection, plan_id, memo)
 
     monkeypatch.setattr(projections, "_plan_state", without_supplied_rows)
