@@ -201,6 +201,38 @@ def test_a_review_this_thread_owns_is_work_worth_a_wake():
         db.close()
 
 
+def test_a_closed_named_node_does_not_fall_through_to_other_actionable_work():
+    db = _db()
+    try:
+        from plans import wake_currency
+
+        plan = service.ensure_plan("thread", "owner", db=db)
+        closed = _task(db, plan.id, "Review the proposal")
+        other = _task(db, plan.id, "Write the release note")
+        _submitted(db, plan.id, closed)
+        admission.activate(
+            other.id, expected_revision=_revision(db, other.id), actor_id="owner",
+            provenance="test.plan_wake", db=db,
+        )
+        db.commit()
+        _update(db, plan.id, "accept", {
+            "node_id": closed.id, "verification_result": "passed",
+            "expected_revision": _revision(db, closed.id),
+        }, actor=HUMAN)
+        db.commit()
+
+        assert not wake_currency.is_current(
+            "owner",
+            wake_currency.condition(
+                plan_id=plan.id, kind="ask_released", subject_id=closed.id,
+                revision=_revision(db, closed.id), open_node_id=closed.id,
+            ),
+            db=db,
+        )
+    finally:
+        db.close()
+
+
 def test_an_admission_defect_fails_the_write_rather_than_losing_the_result():
     """Only the two states a caller tolerates by name are skipped.
 

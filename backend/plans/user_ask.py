@@ -273,7 +273,7 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
 def _release(
     db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
 ) -> int:
-    from plans import admission, holds, plan_wake
+    from plans import admission, admission_projection, holds, plan_wake
     from prompts import plan_wakes as wakes
 
     rows = db.execute(
@@ -315,10 +315,7 @@ def _release(
         )
         for row, summary in released:
             node_id = str(row["node_id"])
-            executor = (
-                str(row["owner_id"]) if row["owner_kind"] == "thread"
-                else row["executor_thread_id"] or row["owner_thread_id"]
-            )
+            executor = admission_projection.executor_of(row, row)
             if executor is None or node_id in reconciled.selection_woken:
                 continue
             plan_wake.append(
