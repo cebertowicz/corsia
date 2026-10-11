@@ -91,6 +91,11 @@ async def joined(key: Hashable, compute: Callable[[], Awaitable[T]], *, reuse_fi
             continue
 
 
+def _result_size(result: Any) -> int:
+    """Approximate a joined result's retained payload size without running serialization on the event loop."""
+    return len(json.dumps(result, default=str))
+
+
 async def _lead(flights: dict[Hashable, _Flight], key: Hashable, compute: Callable[[], Awaitable[T]],
                 loop: asyncio.AbstractEventLoop) -> T:
     flight = _Flight(loop.create_future())
@@ -105,7 +110,7 @@ async def _lead(flights: dict[Hashable, _Flight], key: Hashable, compute: Callab
     flight.finished_at = time.monotonic()
     flight.result.set_result(result)
     try:
-        flight.size = len(json.dumps(result, default=str))
+        flight.size = await asyncio.to_thread(_result_size, result)
     except Exception as error:  # e.g. a non-str dict key: the callers have the result, only keeping it is skipped
         logger.warning("Measurement read result not kept for reuse: cannot size it (%s)", type(error).__name__)
         _drop(flights, key, flight)
