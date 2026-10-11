@@ -271,7 +271,7 @@
 	/* A pin being moved: the new place is dashed over a light fill until it saves; the old place is dashed and dimmed. */
 	.box.pending { border-style: dashed; background: color-mix(in srgb, var(--region-color) 10%, transparent); }
 	.box.shown.leaving { border-style: dashed; opacity: 0.55; }
-	.box.sweep { animation: sweep 600ms cubic-bezier(0.22, 1, 0.36, 1); }
+	.box.sweep { animation: sweep var(--dur-hero-plus) var(--ease-entrance); }
 	@keyframes sweep { from { clip-path: inset(0 100% 100% 0); } to { clip-path: inset(0 0 0 0); } }
 
 	/* A point pin is a 14 px dot. */
@@ -321,7 +321,7 @@
 	.tag:focus-visible { outline: none; }
 	.tag:focus-visible .disc { background: var(--region-color); outline: 2px solid var(--accent); outline-offset: 3px; }
 	/* Held: the disc tints and compresses at once; last, so it wins over hover. */
-	.tag:active .disc { scale: 0.97; background: color-mix(in srgb, var(--region-color) 82%, #000); transition-duration: 0s; }
+	.tag:active .disc { scale: 0.97; background: color-mix(in srgb, var(--region-color) 82%, var(--image-region-edge)); transition-duration: 0s; }
 	@media (prefers-reduced-motion: reduce) {
 		.box.sweep { animation: none; }
 		/* Fades stay as short crossfades; a press only tints. */
