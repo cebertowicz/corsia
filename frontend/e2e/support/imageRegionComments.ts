@@ -65,7 +65,11 @@ export async function seedImage(page: Page, request: APIRequestContext, label: s
 export async function appScreenshotPng(page: Page): Promise<Buffer> {
 	await page.setViewportSize(NATURAL);
 	await loginByUrl(page);
-	return page.screenshot({ fullPage: false });
+	// The shell fades in; a capture mid-fade is a near-blank page, not the busy screen the dense test needs.
+	await page.evaluate(() => Promise.allSettled(document.getAnimations()
+		.filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+		.map((animation) => animation.finished)));
+	return page.screenshot({ fullPage: false, animations: 'disabled' });
 }
 
 export async function showImage(page: Page, title: string, naturalWidth = NATURAL.width) {
