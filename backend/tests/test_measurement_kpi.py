@@ -217,65 +217,6 @@ async def test_kpi_says_whether_a_window_began_after_the_tokens_were_fully_recor
 
 
 @pytest.mark.asyncio
-async def test_kpi_token_completeness_uses_a_fresh_installations_first_recorded_day(isolated_db, monkeypatch):
-    measurement = _pin_now(monkeypatch)
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        _seed_scope(db)
-        _usage(db, "first-recorded", "root", "2026-08-01T12:00:00.000000", parts=(1, 1, 1, 1), total=4)
-        db.commit()
-    finally:
-        db.close()
-
-    weeks = (await _response(measurement, "p1", grain="weeks"))["kpi"]
-    assert (weeks["current"]["tokens_recorded"], weeks["previous"]["tokens_recorded"]) == (True, True)
-
-
-@pytest.mark.asyncio
-async def test_kpi_token_completeness_starts_when_an_upgrade_begins_persisting_complete_rows(isolated_db, monkeypatch):
-    measurement = _pin_now(monkeypatch)
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        _seed_scope(db)
-        _usage(db, "old-incomplete", "root", "2026-08-01T12:00:00.000000")
-        _usage(db, "first-complete", "root", "2026-09-07T12:00:00.000000", parts=(1, 1, 1, 1), total=4)
-        db.commit()
-    finally:
-        db.close()
-
-    weeks = (await _response(measurement, "p1", grain="weeks"))["kpi"]
-    assert (weeks["current"]["tokens_recorded"], weeks["previous"]["tokens_recorded"]) == (True, False)
-
-
-def test_tokens_recorded_from_walks_the_created_at_index_instead_of_scanning_the_ledger(isolated_db):
-    from api.measurement_kpi import _tokens_recorded_from
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        _seed_scope(db)
-        _usage(db, "incomplete", "root", "2026-09-01T12:00:00.000000")
-        _usage(db, "complete", "root", "2026-09-07T12:00:00.000000", total=10)
-        _usage(db, "later", "root", "2026-09-08T12:00:00.000000", total=20)
-        db.commit()
-        queries: list[str] = []
-        db.set_trace_callback(queries.append)
-        try:
-            assert _tokens_recorded_from(db) == "2026-09-07"
-        finally:
-            db.set_trace_callback(None)
-        plan = " ".join(str(tuple(row)) for row in db.execute("EXPLAIN QUERY PLAN " + queries[-1]))
-    finally:
-        db.close()
-
-    assert "USING INDEX idx_llm_usage_created_at" in plan, plan
-
-
-@pytest.mark.asyncio
 async def test_kpi_on_the_periods_grain_compares_the_last_four_completed_weeks_with_the_four_before(isolated_db, monkeypatch):
     measurement = _pin_now(monkeypatch)
     from infra.database import get_db

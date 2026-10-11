@@ -10,32 +10,8 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-# Token completeness derives from persisted usage below; there is no install-global date.
+from api.measurement_registry import TOKENS_RECORDED_FROM
 from api.measurement_token_sql import TOKEN_FIGURE_SQL
-
-
-_TOKEN_COMPLETE = """
-    u.total_tokens IS NOT NULL OR (
-      u.prompt_tokens IS NOT NULL AND u.completion_tokens IS NOT NULL
-      AND u.cache_creation_tokens IS NOT NULL AND u.cache_read_tokens IS NOT NULL
-    )
-"""
-
-
-def _tokens_recorded_from(db) -> str | None:
-    """First day whose persisted usage can supply the complete token figure.
-
-    Token-recording completeness is installation history, not a release date:
-    an upgraded installation may begin later, while a fresh one may begin earlier.
-    Walking ``idx_llm_usage_created_at`` from the oldest row stops at the first
-    complete one, so the read stays bounded without scanning the whole ledger.
-    """
-    row = db.execute(
-        f"""SELECT substr(u.created_at, 1, 10) AS day FROM llm_usage u
-            WHERE {_TOKEN_COMPLETE}
-            ORDER BY u.created_at ASC LIMIT 1"""
-    ).fetchone()
-    return str(row["day"]) if row and row["day"] is not None else None
 
 
 class Period(NamedTuple):
@@ -67,11 +43,10 @@ def build_kpi(db, current: Period, previous: Period) -> dict[str, Any]:
     """Build both periods' token figures on a connection whose scope table is already prepared. One read."""
     bounds = {"previous_from": previous.start, "current_from": current.start, "current_to": current.end}
     tokens = {row["period"]: dict(row) for row in db.execute(_TOKEN_SQL, bounds).fetchall()}
-    recorded_from = _tokens_recorded_from(db)
     return {
         name: {
             "start": period.start, "end": period.end,
-            "tokens_recorded": recorded_from is not None and period.start >= recorded_from,
+            "tokens_recorded": period.start >= TOKENS_RECORDED_FROM,
             "tokens": {key: _token_figure(tokens.get(name), key) for key, _, _ in TOKEN_FIGURE_SQL},
         }
         for name, period in (("current", current), ("previous", previous))

@@ -245,6 +245,41 @@ def test_endpoint_agent_use_defaults_allowed_for_existing_endpoint(isolated_db):
     assert endpoint_agent_use("external@existing/model") == "allowed"
 
 
+@pytest.mark.parametrize("raw", ["{not json", json.dumps({"agent_use_restriction": "batch_ok"})])
+def test_endpoint_agent_use_refuses_unattended_use_when_the_terms_cannot_be_read(isolated_db, raw):
+    from llm.endpoint_policy import endpoint_agent_use
+
+    db = _db()
+    try:
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES ('unreadable','external','external','unreadable','Unreadable',443,'online','t','t','t',?)",
+            (raw,),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert endpoint_agent_use("external@unreadable/model") == "interactive_only"
+
+
+def test_owner_message_filter_drops_whitespace_only_messages_in_sql():
+    import sqlite3
+
+    from core.corrections_recording import owner_message_sql_predicate
+
+    where, params = owner_message_sql_predicate()
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE messages (id TEXT, role TEXT, content TEXT, metadata TEXT)")
+    db.executemany(
+        "INSERT INTO messages VALUES (?, 'user', ?, '{}')",
+        [("blank", " \t\r\n "), ("spoken", "  fix the header  ")],
+    )
+    kept = [row[0] for row in db.execute(f"SELECT id FROM messages m WHERE {where} ORDER BY id", params)]
+
+    assert kept == ["spoken"]
+
+
 @pytest.mark.asyncio
 async def test_interactive_only_checker_is_skipped_at_runtime(isolated_db, monkeypatch):
     from infra.settings import set_setting

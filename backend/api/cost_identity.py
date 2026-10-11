@@ -75,16 +75,11 @@ def _current_identity(row: Mapping[str, Any]) -> str | None:
     return base_identity(str(resolved)) if resolved else ""
 
 
-# Person-facing names come only from persisted catalog rows. A retired model without
-# one remains its literal selector; this resolver must not guess a display name.
-
 def _model_name(key: str) -> str:
     """``key`` without its harness prefix: a row names the model, never the harness it ran under."""
     harness, _, name = key.partition("/")
     return name if harness in HARNESS_PROVIDERS and name else key
 
-
-# Display-name projection is owned by the catalog at the call sites below.
 
 def _is_alias(row: Mapping[str, Any]) -> bool:
     """A harness row whose selector names another model, or names none yet."""

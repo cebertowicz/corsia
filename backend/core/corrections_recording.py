@@ -166,7 +166,7 @@ def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
     cannot starve a bounded pending-candidate scan.
     """
     params = {"owner_message_role": "user"}
-    clauses = [f"{alias}.role=:owner_message_role", f"{alias}.content<>''"]
+    clauses = [f"{alias}.role=:owner_message_role", f"length(trim({alias}.content, ' ' || char(9, 10, 13))) > 0"]
     for index, prefix in enumerate(SYSTEM_WRAPPER_PREFIXES):
         # Exact, case-sensitive prefix test like str.startswith; LIKE folds ASCII case.
         key = f"owner_wrapper_prefix_{index}"
