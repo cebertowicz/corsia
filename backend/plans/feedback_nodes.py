@@ -252,6 +252,8 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
             ]
             if item.get("anchor_text"):
                 lines.append(f"Quote: {item['anchor_text']}")
+            if item.get("region_line"):
+                lines.append(str(item["region_line"]))
             lines.append(f"Feedback: {item['body']}")
             if item.get("replacement") is not None:
                 lines.append(f"Suggested replacement: {item['replacement']}")
@@ -275,6 +277,8 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
                     f"{item['actor_display']}'s change. Read the current file before acting."
                 )
         blocks.append("\n".join(lines))
+    # One marked-up copy per image, set by delivery on the batch's region comments.
+    blocks.extend(dict.fromkeys(str(item["marked_image_line"]) for item in items if item.get("marked_image_line")))
     return "\n\n".join(blocks)
 
 

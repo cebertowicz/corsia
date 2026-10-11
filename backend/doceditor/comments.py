@@ -109,23 +109,42 @@ def create_with_status(
     review: bool = False,
     replacement: str | None = None,
     client_id: str | None = None,
+    region: tuple[float, float, float, float] | None = None,
+    image_rev: str | None = None,
+    image_src: str | None = None,
     db=None,
 ) -> tuple[dict[str, Any], bool]:
-    """Insert a comment and return its row plus whether this call created it."""
+    """Insert a comment and return its row plus whether this call created it.
+
+    A ``region`` (x, y, w, h in fractions of the image) takes the next number
+    on its image, counting resolved comments too, so a number is never reused.
+    """
     cid = client_id or str(uuid.uuid4())[:12]
     now = _now()
+    x, y, w, h = region if region is not None else (None, None, None, None)
     with write_transaction(db, scope="create_doc_comment") as connection:
+        number = None
+        if region is not None and connection.execute(
+            "SELECT 1 FROM doc_comments WHERE id=?", (cid,)
+        ).fetchone() is None:
+            number = connection.execute(
+                """SELECT COALESCE(MAX(region_number), 0) + 1 FROM doc_comments
+                   WHERE artifact_id=? AND COALESCE(image_src, '')=COALESCE(?, '')""",
+                (artifact_id, image_src),
+            ).fetchone()[0]
         inserted = connection.execute(
             """INSERT INTO doc_comments
                (id, artifact_id, parent_id, author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                review, resolved, acked, replacement, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?)
+                review, resolved, acked, replacement, created_at, updated_at,
+                region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
                 cid, artifact_id, parent_id, author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
                 1 if review else 0, replacement, now, now,
+                x, y, w, h, number, image_rev, image_src,
             ),
         )
         row = connection.execute(
@@ -163,7 +182,8 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
 
     Resolving drops any unsent re-opened item for the comment, whichever route resolved it.
     """
-    allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id"}
+    allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id",
+               "region_x", "region_y", "region_w", "region_h", "image_rev"}
     sets, params = [], []
     for k, v in fields.items():
         if k not in allowed:

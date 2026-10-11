@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from doceditor import comments, feedback_batches
+from doceditor import comments, feedback_batches, image_regions
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -36,6 +36,8 @@ class CommentInput:
     live_capture: bool = False
     registration: dict | None = None
     submit: bool = False
+    # A checked (x, y, w, h) in fractions of the image (DCOL-FR13.3).
+    region: tuple[float, float, float, float] | None = None
 
 
 def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None) -> tuple:
@@ -46,7 +48,7 @@ def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None
         return anchor.quote, anchor.start, anchor.end, anchor.prefix, anchor.suffix
     if request.live_capture:
         raise CommentSelectionChanged("The live document closed. Reopen it; your draft is kept.")
-    if request.parent_id or request.review or not request.quote:
+    if request.parent_id or request.review or not request.quote or request.region is not None:
         return request.quote, request.start, request.end, None, None
     if request.browser:
         try:
@@ -69,6 +71,9 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 raise CommentAccessDenied('Artifact not found')
         duplicate = comments.get_comment(identifier, db=db)
         quote, start, end, prefix, suffix = _anchor(request, anchor, duplicate)
+        image_rev = None
+        if request.region is not None and duplicate is None:
+            image_rev = image_regions.image_revision(image_regions.require_image(request.path))
         artifact_id = request.artifact_id
         registered = request.registration is not None
         with write_transaction(db, scope="create_document_comment") as connection:
@@ -81,7 +86,8 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 artifact_id, body=request.body, author=request.author, author_kind=request.author_kind,
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
-                review=request.review, replacement=request.replacement, client_id=identifier, db=connection,
+                review=request.review, replacement=request.replacement, client_id=identifier,
+                region=request.region, image_rev=image_rev, db=connection,
             )
             feedback = feedback_batches.record_comment(connection, row, created=created, submit=request.submit)
         return row, registered, feedback

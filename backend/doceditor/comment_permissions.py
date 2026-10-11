@@ -47,7 +47,7 @@ def check_decider(*, user_id: str, actor_thread_id: str | None, artifact: dict, 
         raise CommentActionError("not_owner", accept_refusal(owner_label(str(owner), db=db)))
 
 
-_CONTENT_FIELDS = frozenset({"body", "anchor_text", "from_off", "to_off"})
+_CONTENT_FIELDS = frozenset({"body", "anchor_text", "from_off", "to_off", "region"})
 _STATE_FIELDS = frozenset({"resolved", "acked"})
 
 

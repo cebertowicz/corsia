@@ -2,6 +2,7 @@
 
 from infra.doc_feedback_schema import DOC_FEEDBACK_SCHEMA_SQL
 from infra.doc_review_schema import DOC_REVIEW_SCHEMA_SQL
+from infra.migration_109_to_110_image_regions import REGION_NUMBER_INDEX_SQL
 
 DOC_COMMENTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_comments (
@@ -27,14 +28,24 @@ DOC_COMMENTS_SCHEMA_SQL = """
         decided_at TEXT,
         decision_event_id TEXT,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        -- An image region in fractions of the image (w = h = 0 is a point), numbered
+        -- per image; image_src names the image inside a document, NULL when the
+        -- artifact is the image. image_rev is the image's sha256 when placed.
+        region_x REAL,
+        region_y REAL,
+        region_w REAL,
+        region_h REAL,
+        region_number INTEGER,
+        image_rev TEXT,
+        image_src TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_doc_comments_artifact
         ON doc_comments(artifact_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_doc_comments_decision_event
         ON doc_comments(decision_event_id)
         WHERE decision_event_id IS NOT NULL;
-"""
+""" + f"    {REGION_NUMBER_INDEX_SQL};\n"
 
 # Feedback batches reference doc_comments, so they follow it.
 DOCUMENT_SCHEMA_SQL = DOC_COMMENTS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + DOC_REVIEW_SCHEMA_SQL

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from doceditor import image_regions
 from infra.passive_changes import append_thread_context_note
 from infra.send_types import SendRejected
 from infra.thread_inputs import thread_admission_state
@@ -135,6 +136,10 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
     if problem is not None:
         undelivered_note(db, batch, problem, items=items)
         return DeliveryResult(reason=problem)
+    artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
+    image_regions.annotate_delivery(
+        db, items, path=artifact["path"] if artifact else None, reader_thread_id=recipient,
+    )
     created = create_feedback_node(db, recipient, batch, items=items)
     queued_note(db, recipient, batch, items=items)
     return DeliveryResult(

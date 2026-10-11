@@ -1,0 +1,81 @@
+"""Schema v110 adds image-region anchors to document comments (DCOL-FR13.3/13.4)."""
+
+from __future__ import annotations
+
+import sqlite3
+
+import pytest
+
+from infra.database_migrations import MIGRATIONS
+from infra.migration_109_to_110_image_regions import REGION_COLUMNS, migrate_109_to_110
+from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
+
+_V109_DOC_COMMENTS = """
+    CREATE TABLE doc_comments (
+        id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, parent_id TEXT, author TEXT NOT NULL,
+        author_kind TEXT NOT NULL DEFAULT 'user', author_thread_id TEXT, body TEXT NOT NULL,
+        anchor_text TEXT, from_off INTEGER, to_off INTEGER, anchor_prefix TEXT, anchor_suffix TEXT,
+        review INTEGER NOT NULL DEFAULT 0, resolved INTEGER NOT NULL DEFAULT 0, acked INTEGER NOT NULL DEFAULT 0,
+        replacement TEXT, decision TEXT, decided_by TEXT, decided_by_thread_id TEXT, decided_at TEXT,
+        decision_event_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )
+"""
+
+
+def _columns(db: sqlite3.Connection) -> list[str]:
+    return [row[1] for row in db.execute("PRAGMA table_info(doc_comments)")]
+
+
+def test_registered_as_the_current_step():
+    assert SCHEMA_VERSION == 110
+    assert MIGRATIONS[109] is migrate_109_to_110
+
+
+def test_adds_nullable_region_columns_and_keeps_existing_rows():
+    db = sqlite3.connect(":memory:")
+    db.execute(_V109_DOC_COMMENTS)
+    db.execute(
+        "INSERT INTO doc_comments (id,artifact_id,author,body,created_at,updated_at) "
+        "VALUES ('c1','a1','you','text comment','t','t')"
+    )
+
+    migrate_109_to_110(db)
+    migrate_109_to_110(db)  # a second start changes nothing
+
+    assert _columns(db)[-len(REGION_COLUMNS):] == list(REGION_COLUMNS)
+    row = db.execute("SELECT body, region_number, region_x, image_rev, image_src FROM doc_comments").fetchone()
+    assert row == ("text comment", None, None, None, None)
+
+
+def test_one_number_per_image_is_enforced():
+    db = sqlite3.connect(":memory:")
+    db.execute(_V109_DOC_COMMENTS)
+    migrate_109_to_110(db)
+    insert = (
+        "INSERT INTO doc_comments (id,artifact_id,author,body,created_at,updated_at,region_number,image_src) "
+        "VALUES (?,?,?,?,?,?,?,?)"
+    )
+    db.execute(insert, ("c1", "a1", "you", "b", "t", "t", 1, None))
+    db.execute(insert, ("c2", "a1", "you", "b", "t", "t", 1, "shots/one.png"))
+    db.execute(insert, ("c3", "a2", "you", "b", "t", "t", 1, None))
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(insert, ("c4", "a1", "you", "b", "t", "t", 1, None))
+
+
+def test_fresh_schema_matches_a_migrated_one():
+    fresh = sqlite3.connect(":memory:")
+    fresh.executescript(SCHEMA_SQL)
+    migrated = sqlite3.connect(":memory:")
+    migrated.execute(_V109_DOC_COMMENTS)
+    migrate_109_to_110(migrated)
+
+    assert _columns(fresh) == _columns(migrated)
+    index = "idx_doc_comments_region_number"
+    assert fresh.execute("SELECT 1 FROM sqlite_master WHERE name=?", (index,)).fetchone()
+    assert migrated.execute("SELECT 1 FROM sqlite_master WHERE name=?", (index,)).fetchone()
+
+
+def test_a_database_without_doc_comments_passes():
+    db = sqlite3.connect(":memory:")
+    migrate_109_to_110(db)
+    assert db.execute("SELECT 1 FROM sqlite_master WHERE name='doc_comments'").fetchone() is None
