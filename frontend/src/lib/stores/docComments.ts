@@ -17,7 +17,7 @@ function findById(rows: ServerComment[], id: string): ServerComment | null {
 	return null;
 }
 
-async function postReconciled(
+export async function postReconciled(
 	artifactId: string,
 	clientId: string,
 	c: Parameters<typeof postComment>[1]
@@ -121,7 +121,7 @@ export function fromServer(r: ServerComment): DocComment {
 	};
 }
 
-function regionFromServer(r: ServerComment): Pick<DocComment, 'region' | 'regionNumber' | 'regionStale'> {
+export function regionFromServer(r: ServerComment): Pick<DocComment, 'region' | 'regionNumber' | 'regionStale'> {
 	if (r.region_number == null || r.region_x == null || r.region_y == null) return {};
 	return {
 		region: { x: r.region_x, y: r.region_y, w: r.region_w ?? 0, h: r.region_h ?? 0 },
@@ -183,7 +183,7 @@ function isAgent(author: CommentAuthor): boolean {
 	return author !== 'you';
 }
 
-function upsertTop(artifactId: string, row: ServerComment) {
+export function upsertTop(artifactId: string, row: ServerComment) {
 	docComments.update((all) => {
 		const list = all[artifactId] ? [...all[artifactId]] : [];
 		if (list.some((c) => c.id === row.id)) return all;
@@ -202,22 +202,6 @@ export async function addComment(artifactId: string, from: number, to: number, a
 	return row.id;
 }
 
-
-/** Comment on part of an image artifact: a box, or a point when its width and height are 0. */
-export async function addRegionComment(artifactId: string, region: ImageRegion, text: string): Promise<string> {
-	const row = await postReconciled(artifactId, newClientId(), { body: text, region, author: 'you', author_kind: 'user' });
-	upsertTop(artifactId, row);
-	return row.id;
-}
-
-/** Move a pin. The server places it on the image as it is now, so it is no longer stale. */
-export async function moveRegion(artifactId: string, commentId: string, region: ImageRegion): Promise<void> {
-	const row = await patchComment(commentId, { region });
-	docComments.update((all) => ({
-		...all,
-		[artifactId]: (all[artifactId] ?? []).map((c) => (c.id === commentId ? { ...c, ...regionFromServer(row) } : c))
-	}));
-}
 
 export async function addReply(artifactId: string, commentId: string, text: string, author: CommentAuthor = 'you') {
 	const cid = newClientId();

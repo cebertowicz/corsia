@@ -11,8 +11,9 @@ vi.mock('$lib/api/docs', () => ({
 
 import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
-	docComments, commentLoads, loadComments, flushPositions, remapComments, addRegionComment, moveRegion,
+	docComments, commentLoads, loadComments, flushPositions, remapComments,
 } from './docComments';
+import { addRegionComment, moveRegion } from './imageRegionComments';
 
 afterEach(() => {
 	docComments.set({});

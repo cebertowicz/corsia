@@ -3,7 +3,7 @@ import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSu
 import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { addRegionComment, moveRegion } from '$lib/stores/docComments';
+import { addRegionComment, moveRegion } from '$lib/stores/imageRegionComments';
 import { toasts } from '$lib/stores/toast';
 
 const WHOLE = (region: ImageRegion) => region.x === 0 && region.y === 0 && region.w === 1 && region.h === 1;

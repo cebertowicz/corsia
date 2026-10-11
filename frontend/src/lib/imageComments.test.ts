@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({ addRegionComment: vi.fn(), moveRegion: vi.fn(), show: vi.fn(() => 'toast'), dismiss: vi.fn() }));
-vi.mock('$lib/stores/docComments', async (actual) => ({ ...(await actual<object>()), addRegionComment: mocks.addRegionComment, moveRegion: mocks.moveRegion }));
+vi.mock('$lib/stores/imageRegionComments', () => ({ addRegionComment: mocks.addRegionComment, moveRegion: mocks.moveRegion }));
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.show, dismiss: mocks.dismiss } }));
 
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
