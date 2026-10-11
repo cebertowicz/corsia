@@ -14,6 +14,7 @@ from api.measurement_prepared import (  # noqa: F401 -- the prepared-table names
     DDL as _DDL, PREPARED_OUTCOME_NODES, PREPARED_OUTCOMES, PREPARED_ROOT_DIFFICULTIES,
     PREPARED_ROOT_OUTCOMES, PREPARED_ROOTS, PREPARED_SCOPE, shared_prepare,
 )
+from api.measurement_presence import active_family_sql, presence_family_sql
 from api.measurement_decision_sql import ANY_OTHER, ANY_TOOK, IS_ANY
 from api.measurement_scope import query_params, scope_cte
 from api.measurement_token_sql import ROLLUP_TOKEN_SUM_SQL, CACHED_TOKEN_SQL
@@ -163,64 +164,6 @@ def prepare_outcome_periods(db, params: dict[str, Any], *, roots: bool = False) 
     shared_prepare(db, params, roots, lambda: _materialize_outcome_periods(db, params, roots=roots))
 
 
-def _presence_predicate(scope_project: str, scope_agent: str | None, scope_threads: str) -> str:
-    """Return the presence filter one composite scope owns.
-
-    Project-level visits (recorded without a thread) belong to a project-only
-    query. Once an agent is selected the answer is that agent's thread closure
-    and nothing else, or the same agent reports a different total depending on
-    whether its own project is named.
-    """
-    closure = f"v.thread_id IN (SELECT id FROM {scope_threads})"
-    if scope_project == "all" or scope_agent:
-        return closure
-    return f"({closure} OR v.project_id=:scope_project)"
-
-
-def human_minutes_cte(grain: Grain) -> str:
-    """Return the ``human_minutes(thread_id, created_at, period, seconds)`` CTEs.
-
-    One row per human message in the range: the 60 seconds the message itself is worth
-    plus the gap since the person's previous message when that gap is under
-    ``:max_active_gap_seconds``. The gap is measured across the *user's whole* human
-    stream, not inside a scope, so a thread's minutes are the same whichever page asks:
-    the All-work total, a project, one agent and the Agents table all sum these rows.
-    A caller keeps the threads it scopes to and sums ``seconds`` by ``period``. The
-    caller supplies the leading ``WITH``.
-    """
-    return f"""
-      pre_window_message AS (
-        -- The latest of each thread's latest: one index seek per thread
-        -- instead of sorting every earlier message.
-        SELECT m.id,m.thread_id,m.created_at FROM threads s JOIN messages m ON m.id=(
-          SELECT prior.id FROM messages prior WHERE prior.thread_id=s.id
-            AND prior.role='user' AND COALESCE(json_extract(prior.metadata,'$.sender_kind'),'')='' AND prior.created_at < :from_ts
-          ORDER BY prior.created_at DESC,prior.id DESC LIMIT 1
-        ) WHERE s.user_id=:user_id ORDER BY m.created_at DESC,m.id DESC LIMIT 1
-      ), human_messages AS (
-        SELECT id,thread_id,created_at,LAG(created_at) OVER (ORDER BY created_at,id) AS prior_at FROM (
-          SELECT m.id,m.thread_id,m.created_at FROM messages m JOIN threads s ON s.id=m.thread_id
-            WHERE s.user_id=:user_id
-            AND m.role='user' AND COALESCE(json_extract(m.metadata,'$.sender_kind'),'')='' AND {range_filter("m.created_at")}
-          UNION ALL SELECT id,thread_id,created_at FROM pre_window_message
-        )
-      ), human_minutes AS (
-        SELECT thread_id,{grain.bucket('created_at')} AS period,
-          60 + CASE WHEN prior_at IS NULL THEN 0 WHEN strftime('%s',created_at)-strftime('%s',prior_at)<=:max_active_gap_seconds
-          THEN MAX(0,strftime('%s',created_at)-strftime('%s',prior_at)) ELSE 0 END AS seconds
-        FROM human_messages
-      )"""
-
-
-def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
-    return f"""
-      WITH {human_minutes_cte(grain)}, active_periods AS (
-        SELECT period,SUM(seconds)/3600.0 AS active_hours FROM human_minutes
-        WHERE period IS NOT NULL AND thread_id IN (SELECT id FROM {scope_threads}) GROUP BY period
-      ) SELECT a.period,a.active_hours,COALESCE(o.outcomes,0) AS outcomes FROM active_periods a
-        LEFT JOIN {outcomes} o USING(period) ORDER BY a.period
-    """
-
 
 def _token_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
     """Return the scope's weekly token totals: fresh, cache re-reads and calls with no count.
@@ -368,13 +311,7 @@ def query_family(db, family: str, params: dict[str, Any], *, grouping: str = "sc
     if family == "outcomes":
         sql = f"SELECT period,outcomes,first_try,rejections FROM {outcomes} ORDER BY period"
     elif family == "presence":
-        sql = f"""
-          SELECT {bound["grain"].bucket('v.entered_at')} AS period,
-            SUM(v.seconds)/3600.0 AS value,COUNT(*) AS n
-          FROM presence_visits v WHERE v.user_id=:user_id
-            AND {_presence_predicate(str(bound["scope_project"]), bound["scope_agent"], scope_threads)}
-            AND {range_filter("v.entered_at")} GROUP BY period ORDER BY period
-        """
+        sql = presence_family_sql(grain, scope_threads)
     elif family == "active":
         sql = active_family_sql(grain, scope_threads, outcomes)
     elif family == "decisions":

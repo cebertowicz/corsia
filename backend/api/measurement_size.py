@@ -4,8 +4,9 @@ Reads the canonical accepted-outcome population for the request's scope and
 periods, and for each outcome the newest size-rating fact by server observation
 time. A retracted, malformed, stale, conflicting or explicitly unknown newest
 fact contributes no hours and is counted, so an older favorable rating can never
-resurface. The denominator is the unchanged active family; the outcome count is
-the same task count the outcomes series serves, never a count of ratings.
+resurface. The denominator is the scope's presence time, so the caller measures the
+rate only from the first presence period; the outcome count is the same task count
+the outcomes series serves, never a count of ratings.
 """
 
 from __future__ import annotations
