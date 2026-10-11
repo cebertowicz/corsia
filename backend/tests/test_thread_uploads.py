@@ -260,6 +260,22 @@ def test_upload_identity_resolves_for_chat_cards_by_its_canonical_path(main_db):
     assert resolved["type"] == "image"
 
 
+def test_workspace_path_miss_skips_upload_path_lookup(main_db, monkeypatch):
+    """Workspace misses retain their logical-identity-only lookup semantics."""
+    from infra import config
+    from registry import registration_events, service
+
+    path = config.WORKSPACE / "not-registered.md"
+    path.write_text("not registered")
+    monkeypatch.setattr(
+        registration_events,
+        "resolve_upload_path",
+        lambda *_args, **_kwargs: pytest.fail("workspace miss queried uploads"),
+    )
+
+    assert service.resolve_file_identity(str(path), db=main_db) is None
+
+
 def test_register_upload_classifies_only_the_canonical_path_suffix(main_db, tmp_path):
     """Upload identity type follows its canonical file suffix, never MIME metadata."""
     from registry import models, service

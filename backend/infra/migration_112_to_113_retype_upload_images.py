@@ -20,8 +20,14 @@ from urllib.parse import urlparse
 from registry.file_types import image_media_type
 
 
+_UPLOAD_PATH_INDEX_DDL = (
+    "CREATE INDEX IF NOT EXISTS idx_artifact_identities_upload_path "
+    "ON artifact_identities(path) WHERE integration='upload'"
+)
+
+
 def migrate_112_to_113(conn: sqlite3.Connection) -> None:
-    """Retype each local upload image; a database without identities has nothing to retype."""
+    """Retype local upload images and index active upload-path resolution."""
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifact_identities'").fetchone() is None:
         return
     rows = conn.execute(
@@ -43,3 +49,4 @@ def migrate_112_to_113(conn: sqlite3.Connection) -> None:
             "   WHERE twin.integration = ? AND twin.type = 'image' AND twin.external_id = ?)",
             (identity_id, integration, external_id),
         )
+    conn.execute(_UPLOAD_PATH_INDEX_DDL)

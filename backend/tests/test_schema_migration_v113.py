@@ -64,3 +64,27 @@ def test_twin_image_identity_keeps_legacy_upload_unchanged():
 
     assert _type_for(db, "legacy") == "upload"
     assert _type_for(db, "typed") == "image"
+
+
+def test_upload_path_index_is_added_and_used_for_canonical_lookup():
+    db = sqlite3.connect(":memory:")
+    before_index, _separator, _after_index = ARTIFACT_IDENTITY_SCHEMA_SQL.partition(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_identities_upload_path"
+    )
+    db.executescript(before_index)
+    _insert(
+        db, identity_id="image", type_="image", external_id="image-id",
+        path="/workspace/.threads/main/uploads/image-id/photo.png",
+    )
+
+    migrate_112_to_113(db)
+
+    plan = db.execute(
+        "EXPLAIN QUERY PLAN "
+        "SELECT integration, type, external_id FROM artifact_identities "
+        "WHERE integration='upload' AND type IN (?, ?) AND path=? "
+        "AND state='active' ORDER BY type='image' DESC LIMIT 1",
+        ("upload", "image", "/workspace/.threads/main/uploads/image-id/photo.png"),
+    ).fetchall()
+
+    assert any("idx_artifact_identities_upload_path" in row[-1] for row in plan)

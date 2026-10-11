@@ -8,6 +8,7 @@ from typing import Any
 
 from loguru import logger
 
+from core.workspace_layout import uploads_root_for_path
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_events, registration_writer
@@ -139,7 +140,9 @@ def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
     """Resolve an active file owner from a physical path.
 
     Workspace paths prefer their relocatable logical identity and retain the
-    absolute identity only as a compatibility fallback during cutover.
+    absolute identity only as a compatibility fallback during cutover. A
+    canonical path below a thread uploads root also resolves its active upload
+    identity so callers can open a registered upload from its local path.
     """
     identity = prepare_file_identity(abs_path, db=db)
     if identity is None:
@@ -155,13 +158,9 @@ def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
             )
             if artifact is not None:
                 return artifact
-        upload = _db.execute(
-            "SELECT external_id FROM artifact_identities "
-            "WHERE integration='upload' AND type IN (?, ?) "
-            "AND path=? AND state='active'",
-            (*registration_events.UPLOAD_IDENTITY_TYPES, identity.canonical),
-        ).fetchone()
-        return models.resolve_upload(upload["external_id"], db=_db) if upload else None
+        if uploads_root_for_path(identity.canonical) is None:
+            return None
+        return registration_events.resolve_upload_path(identity.canonical, db=_db)
     finally:
         if not db:
             _db.close()
