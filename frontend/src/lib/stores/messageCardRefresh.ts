@@ -3,9 +3,9 @@
  *
  * A card is computed when its message is read, so its round state and title go stale
  * when a hold clears (`plans_changed`) or an artifact is renamed or retired
- * (`artifacts_changed`), and a message gains cards when its turn ends. Each of those
- * re-reads the affected messages through the range read the transcript already uses,
- * and merges them over the loaded rows.
+ * (`artifacts_changed`), and a message gains cards when its turn ends. Each nudge
+ * re-reads the affected messages through bounded server reads and merges them over
+ * the loaded rows.
  */
 import { get } from 'svelte/store';
 import { on } from '$lib/ws';
@@ -19,7 +19,6 @@ const MAX_CARDED = 12;
 const TURN_RANGE_LIMIT = 50;
 
 type Range = { from: string; to: string };
-
 /** The messages to re-read: those showing cards, and after a turn ends, that turn's own steps. */
 export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: boolean): Range[] {
 	const own = rows.filter((row) => row.thread_id === threadId && !row._optimistic);
@@ -28,12 +27,14 @@ export function rangesToRefresh(rows: Message[], threadId: string, turnEnded: bo
 	if (turnEnded) {
 		const lastUser = own.map((row) => row.role).lastIndexOf('user');
 		turnFirst = own.findIndex((row, index) => index > lastUser && row.role === 'assistant');
-		const last = own.at(-1);
-		if (turnFirst >= 0 && last) ranges.push({ from: own[turnFirst].id, to: last.id });
+		const turn = turnFirst >= 0 ? own.slice(turnFirst).slice(-TURN_RANGE_LIMIT) : [];
+		if (turn.length) ranges.push({ from: turn[0].id, to: turn.at(-1)!.id });
 	}
-	own.filter((row, index) => row.role === 'assistant' && Array.isArray(row.cards) && (turnFirst < 0 || index < turnFirst))
-		.slice(-MAX_CARDED)
-		.forEach((row) => ranges.push({ from: row.id, to: row.id }));
+	for (const row of own.filter((row, index) => (
+		row.role === 'assistant' && Array.isArray(row.cards) && (turnFirst < 0 || index < turnFirst)
+	)).slice(-MAX_CARDED)) {
+		ranges.push({ from: row.id, to: row.id });
+	}
 	return ranges;
 }
 

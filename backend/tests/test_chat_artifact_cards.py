@@ -469,6 +469,31 @@ def test_a_message_gets_a_card_per_registered_file_it_names_and_none_for_others(
     assert more == 0 and strangers not in {c["artifact_id"] for c in cards}
 
 
+def test_a_page_reuses_one_lookup_for_each_duplicate_path(db, ws, monkeypatch):
+    from registry.path_access import lookup_file
+
+    _registered(db, ws, "plan.md")
+    _message(db, 1, text="See [the plan](plan.md).")
+    _message(db, 2, text="See [the plan again](plan.md).")
+    _message(db, 3, text="See [the plan a third time](plan.md).")
+    calls = 0
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return lookup_file(*args, **kwargs)
+
+    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    monkeypatch.setattr("registry.path_cards.lookup_file", counted)
+
+    page = _page(db)
+
+    assert calls == 1
+    assert [card["title"] for card in page["m1"]["cards"]] == ["plan.md"]
+    assert [card["title"] for card in page["m2"]["cards"]] == ["plan.md"]
+    assert [card["title"] for card in page["m3"]["cards"]] == ["plan.md"]
+
+
 def test_a_message_past_the_cap_shows_eight_cards_and_the_count_of_the_rest(db, ws):
     names = [f"f{i}.md" for i in range(MAX_CARDS + 3)]
     for name in names:

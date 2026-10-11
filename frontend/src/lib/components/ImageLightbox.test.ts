@@ -13,6 +13,7 @@ vi.mock('$lib/stores/viewport', async () => {
 });
 
 import ImageLightbox from './ImageLightbox.svelte';
+import ImageLightboxTestHost from './ImageLightboxTestHost.test.svelte';
 
 // The image is 1000 x 500 in a 548 x 400 viewport: Fit is 0.5 (500 of room over 1000).
 const NATURAL = { width: 1000, height: 500 };
@@ -231,6 +232,42 @@ describe('ImageLightbox', () => {
 		api!.revealFraction(0.9, 2);
 		expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: 'auto' }));
 		viewport.reduced.set(false);
+	});
+
+	it('ignores a delayed failure detail after the source changes', async () => {
+		let finish: (value: { status: number; body: null }) => void;
+		vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { finish = resolve; })));
+		component = mount(ImageLightboxTestHost, { target: host });
+		flushSync();
+		host.querySelector<HTMLImageElement>('.pad img')!.dispatchEvent(new Event('error'));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+		(component as unknown as { setSource: (src: string) => void }).setSource('/second.png');
+		await settle();
+		finish!({ status: 404, body: null });
+		await settle();
+		expect(host.querySelector('.load-error')).toBeNull();
+		expect(host.querySelector<HTMLImageElement>('.pad img')?.getAttribute('src')).toBe('/second.png');
+	});
+
+	it('ignores a delayed failure detail after retrying the same source', async () => {
+		let finish: (value: { status: number; body: null }) => void;
+		vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { finish = resolve; })));
+		const failed = render();
+		failed.dispatchEvent(new Event('error'));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+		button('Try again').click();
+		await settle();
+
+		const retried = host.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperty(retried, 'naturalWidth', { configurable: true, value: NATURAL.width });
+		Object.defineProperty(retried, 'naturalHeight', { configurable: true, value: NATURAL.height });
+		retried.dispatchEvent(new Event('load'));
+		await settle();
+		finish!({ status: 404, body: null });
+		await settle();
+
+		expect(host.querySelector('.load-error')).toBeNull();
+		expect(host.querySelector<HTMLImageElement>('.pad img')).toBe(retried);
 	});
 
 	it('shows why an image did not load, with a way to try again, and the bar stays', async () => {
