@@ -316,6 +316,27 @@ def test_a_new_token_plan_endpoint_is_stored_interactive_only(isolated_db, monke
     assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
 
 
+def test_re_adding_a_token_plan_endpoint_with_unreadable_metadata_restricts_it(
+    isolated_db, monkeypatch,
+) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    body = dict(name="Workspace", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"])
+    sid = asyncio.run(add_external_server(AddServerBody(**body)))["server_id"]
+    with closing(sqlite3.connect(str(isolated_db))) as db:
+        db.execute("UPDATE network_servers SET metadata_json='{broken' WHERE id=?", (sid,))
+        db.commit()
+
+    asyncio.run(add_external_server(AddServerBody(**body)))
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "interactive_only"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+
 def test_a_registration_that_names_a_restriction_keeps_it(isolated_db, monkeypatch) -> None:
     from api.network_server_helpers import add_external_server
     from api.network_servers import AddServerBody

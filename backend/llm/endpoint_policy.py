@@ -58,12 +58,12 @@ def registration_restriction(db, server_id: str, instance_name: str | None, base
     """The restriction to write when a registration names none, or None to write nothing.
 
     A stored restriction is kept; an endpoint with none gets ``registration_default``
-    when that restricts it. Unreadable metadata is left alone: it already reads as
-    ``interactive_only``.
+    when that restricts it. Unreadable metadata counts as none: the registration
+    rewrites the blob, so a restriction left to it would be lost.
     """
     row = db.execute("SELECT metadata_json FROM network_servers WHERE id = ?", (server_id,)).fetchone()
     stored = parse_server_metadata(server_id, row["metadata_json"] if row else None)
-    if stored is None or "agent_use_restriction" in stored:
+    if stored and "agent_use_restriction" in stored:
         return None
     default = registration_default(instance_name, base_url)
     return default if default != "allowed" else None
