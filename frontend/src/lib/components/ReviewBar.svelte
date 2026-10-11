@@ -23,6 +23,7 @@
 	const read = $derived(bar.read);
 	const asker = $derived(read?.asker?.name ?? 'An agent');
 	const ask = $derived(read?.ask_reason ?? '');
+	const holdIds = $derived(read?.hold_ids ?? []);
 	const others = $derived(read?.other_askers ?? []);
 	const round = $derived(read?.round_feedback_count ?? 0);
 	const pending = $derived(`${round} comment${round === 1 ? '' : 's'}`);
@@ -71,9 +72,9 @@
 	/** The answer closes the user's feedback batch on the server; the viewer's pending-batch state re-reads it. */
 	async function settle(verdict: 'approved' | 'approved_with_changes' | 'changes_requested') {
 		if (!artifactId) return;
-		answerPending(artifactId, { state: verdict, feedback: bar.read?.round_feedback_counts });
+		answerPending(holdIds, { state: verdict, feedback: bar.read?.round_feedback_counts });
 		if (await bar.answer(verdict)) { onAnswered?.(); return; }
-		answerFailed(artifactId);
+		answerFailed(holdIds);
 		// A send that came back without a receipt leaves focus on the control that sent it.
 		await tick();
 		if (bar.phase === 'noting') noteInput?.focus();

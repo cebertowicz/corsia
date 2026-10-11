@@ -10,7 +10,7 @@
 	import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
 	import { pendingAnswers } from '$lib/stores/cardAnswers';
 	import ArtifactGlyph from './ArtifactGlyph.svelte';
-	import { formatMoment, localDayClock, parseUTC } from '$lib/time';
+	import OutcomeTime from './OutcomeTime.svelte';
 
 	let {
 		card,
@@ -29,20 +29,9 @@
 		time?: string;
 	} = $props();
 
-	// "10:08 PM" today, "Yesterday", else the short date: one short token that never wraps, no time zone.
-	const when = $derived.by(() => {
-		if (!time) return null;
-		const at = parseUTC(time);
-		if (Number.isNaN(at.getTime())) return null;
-		const days = Math.round((new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime()
-			- new Date($localDayClock.getFullYear(), $localDayClock.getMonth(), $localDayClock.getDate()).getTime()) / 86400000);
-		const label = days === 0 ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-			: days === -1 ? 'Yesterday' : formatMoment(at, $localDayClock);
-		return { label, full: at.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) };
-	});
-
-	// An answer sent from the review bar and not yet confirmed shows at once; it only applies while the card is still open.
-	const sent = $derived(card.state === 'needs_review' ? $pendingAnswers[card.artifact_id] : undefined);
+	// An answer sent from the review bar and not yet confirmed shows at once; it belongs to this Plans-owned
+	// hold only, so a later ask for the same artifact remains open.
+	const sent = $derived(card.state === 'needs_review' && card.hold_id ? $pendingAnswers[card.hold_id] : undefined);
 	const cardState = $derived(sent?.state ?? card.state);
 	const feedback = $derived(sent ? sent.feedback : card.feedback);
 	// A row's tile is a filled type tile; a chip carries the bare coloured glyph, the pill being its container.
@@ -104,7 +93,7 @@
 	<span class="text">
 		<span class="head">
 			<span class="title">{card.title}</span>
-			{#if variant === 'row' && when}<time class="when" datetime={time} title={when.full}>{when.label}</time>{/if}
+			{#if variant === 'row' && time}<span class="when"><OutcomeTime value={time} compact /></span>{/if}
 		</span>
 		{#if variant === 'row' && (stateLabel || detail)}
 			<span class="ctx" class:counted={Boolean(counts)}>

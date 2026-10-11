@@ -79,6 +79,7 @@ def test_the_read_carries_the_ask_and_the_round_count(integration_client):
     after = _review(integration_client, artifact)
 
     assert before["ask_raised"] is True and before["ask_reason"] == "Read the proposal"
+    assert len(before["hold_ids"]) == 1
     assert before["asker"]["name"] == "Style"
     assert before["round_feedback_count"] == 0
     assert after["round_feedback_count"] == 1

@@ -10,6 +10,7 @@ import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { token } from '$lib/stores/auth';
 import { paneOpen } from '$lib/stores/paneOpen';
 import { answerFailed, answerPending, pendingAnswers } from '$lib/stores/cardAnswers';
+import { focusPlanNode } from '$lib/planNodeFocus';
 import UpdateCard from './UpdateCard.svelte';
 import type { UpdateCard as Card } from '$lib/api/threadUpdates';
 
@@ -172,13 +173,13 @@ describe('MessageArtifactCards', () => {
 		const state = () => host.querySelector('.state')?.textContent;
 		expect(state()).toBe('Needs your review');
 
-		answerPending('a1', { state: 'approved_with_changes', feedback: { comments: 2 } });
+		answerPending(['h1'], { state: 'approved_with_changes', feedback: { comments: 2 } });
 		flushSync();
 		expect(state()).toBe('Approved with changes');
 		expect(host.querySelector('.name')?.textContent).toBe('2 comments');
 		expect(tiles()[0].getAttribute('aria-label')).toBe('Launch plan, document, Approved with changes, 2 comments');
 
-		answerFailed('a1');
+		answerFailed(['h1']);
 		flushSync();
 		expect(state()).toBe('Needs your review');
 	});
@@ -186,9 +187,17 @@ describe('MessageArtifactCards', () => {
 	it('ignores a sent answer once the server state has moved on', () => {
 		render({ cards: [ask({ state: 'changes_requested', feedback: { comments: 1 } })] });
 
-		answerPending('a1', { state: 'approved' });
+		answerPending(['h1'], { state: 'approved' });
 		flushSync();
 		expect(host.querySelector('.state')?.textContent).toBe('Changes requested');
+	});
+
+	it('does not apply an answered round to a later open ask for the same artifact', () => {
+		render({ cards: [ask({ state: 'approved', hold_id: 'h1' }), ask({ hold_id: 'h2' })] });
+
+		answerPending(['h1'], { state: 'approved' });
+		flushSync();
+		expect(tiles()[1].querySelector('.state')?.textContent).toBe('Needs your review');
 	});
 
 	it('marks the chip strip as scrolled once it leaves its start, so the leading edge fades too', () => {
@@ -212,8 +221,8 @@ describe('UpdateCard ask row', () => {
 		id: 7, thread_id: 't1', kind: 'blocked', node_id: 'n1', title: 'Ship the export', after_seq: 3,
 		created_at: '2026-09-29T10:00:00.000000', node_exists: true, asks_user: true, blocked_asks_user: true, ask: ask(),
 	};
-	const mountCard = (card: Card): void => {
-		component = mount(UpdateCard, { target: host, props: { card } });
+	const mountCard = (card: Card, earlier = 0): void => {
+		component = mount(UpdateCard, { target: host, props: { card, earlier } });
 		flushSync();
 	};
 
@@ -225,9 +234,19 @@ describe('UpdateCard ask row', () => {
 		expect(row.nextElementSibling).toBeNull();
 		expect(host.querySelectorAll('.tile')).toHaveLength(1);
 		expect(row.querySelector('.tile')?.getAttribute('aria-label')).toContain('Needs your review');
-		expect(row.querySelector('.title')?.textContent).toBe('Launch plan');
+		expect(row.querySelector('.tile .title')?.textContent).toBe('Launch plan');
 		expect(row.querySelector('.name')?.textContent).toBe('Ship the export');
 		expect(row.querySelector('time')).not.toBeNull();
+	});
+
+	it('keeps the plan link and collapsed-history count above a merged ask', () => {
+		mountCard(blocked, 2);
+
+		const link = host.querySelector<HTMLButtonElement>('.update-meta .title')!;
+		expect(link.textContent).toBe('Ship the export');
+		expect(host.querySelector('.update-meta .earlier')?.textContent).toBe('2 earlier');
+		link.click();
+		expect(focusPlanNode).toHaveBeenCalledWith('t1', 'n1');
 	});
 
 	it('puts the time on the title line and the feedback counts in the task\'s place, in the accessible name too', () => {

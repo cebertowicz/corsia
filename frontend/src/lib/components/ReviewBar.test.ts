@@ -14,7 +14,7 @@ vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
 const counts = (comments = 0) => ({ comments, suggestions: 0, edits: 0 });
 function read(comments = 0): ReviewBarRead {
 	return {
-		ask_raised: true, ask_reason: 'Is the rollout plan right?', ask_raised_at: '2026-10-10T10:00:00',
+		ask_raised: true, hold_ids: ['h1'], ask_reason: 'Is the rollout plan right?', ask_raised_at: '2026-10-10T10:00:00',
 		asker: { id: 'a1', name: 'Docs agent' }, other_askers: [], other_asks: [], other_request_count: 0,
 		round_feedback_count: comments, round_feedback_counts: counts(comments),
 	};
@@ -129,7 +129,7 @@ describe('ReviewBar', () => {
 
 		button('Approve')!.click();
 		flushSync();
-		expect(get(pendingAnswers)).toEqual({ 'doc-1': { state: 'approved', feedback: counts(0) } });
+		expect(get(pendingAnswers)).toEqual({ h1: { state: 'approved', feedback: counts(0) } });
 
 		fail(new Error('500'));
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
