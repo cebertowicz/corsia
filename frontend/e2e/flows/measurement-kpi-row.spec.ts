@@ -101,7 +101,7 @@ async function serve(page: Page, project: { id: string; name: string }, agentId:
 		const period = { grain, timezone: 'America/Los_Angeles', current: scenario.period.latest.to, range: { from: scenario.period.previous.from, to: scenario.period.latest.to }, ...scenario.period };
 		if (url.pathname.endsWith('/key-figures')) return route.fulfill({ json: { definition_version: 1, scope: { project: url.searchParams.get('project'), agent: null }, today: '2026-10-05', period, kpi: scenario.kpi } });
 		if (url.pathname.endsWith('/agents')) return route.fulfill({ json: agentsBody(project, agentId, agentName, url) });
-		if (url.pathname.endsWith('/models')) return route.fulfill({ json: { rows: [], min_tasks: 14, token_shares: [], unmatched_failed_turns: 0, unresolved_token_share: 0 } });
+		if (url.pathname.endsWith('/models')) return route.fulfill({ json: { rows: [], min_tasks: 14, token_shares: [], unmatched_failed_turns: 0, unresolved_token_share: 0, total_spend_usd: 0 } });
 		if (url.pathname.endsWith('/cost')) {
 			const [latest, previous] = scenario.cost.map(costPeriod);
 			return route.fulfill({ json: { definition_version: 1, period, series: [previous, latest], latest: pooled(latest), previous: pooled(previous), coverage: { priced_records: 3, api_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null } } });

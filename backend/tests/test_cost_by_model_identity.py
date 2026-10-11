@@ -103,6 +103,7 @@ async def test_spend_groups_past_seven_with_the_models_cost_class(monkeypatch, b
         [], [], [], [cost("vendor/model-7", "priced", 3.0), cost(LOCAL_MODEL, "not_api_priced", None)],
         resolve=lambda row: ModelIdentity(row["model"], row["model"], True),
         latest=("2026-09-28",), previous=("2026-09-21",), offered=set(),
+        ledger_rows=[{"period": "2026-09-28", "model": "vendor/model-7", "outcome": "priced", "dollars": 3.0}],
     )
     assert built["rows"][-1]["cost_class"] == rest["cost_class"]
 

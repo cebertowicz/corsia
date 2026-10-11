@@ -171,6 +171,11 @@ def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
     return shapes
 
 
+def ledger_shapes(db, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """The grouped ledger of the prepared periods, each shape priced or told why not: the one read Cost and Models share."""
+    return classify_usage_rows(_usage_rows(db, params), endpoint_listings(db))
+
+
 def endpoint_listings(db) -> dict[str, str]:
     """The regional price list of each External server whose public endpoint is a listed cloud host."""
     servers: dict[str, tuple[str, list[dict[str, Any]]]] = {}
@@ -296,7 +301,7 @@ def build_cost(db, params: dict[str, Any]) -> dict[str, Any]:
     7 before, or 4 weeks against the 4 before), pooled; ``series`` is every completed period.
     """
     grain: Grain = params["grain"]
-    classified = classify_usage_rows(_usage_rows(db, params), endpoint_listings(db))
+    classified = ledger_shapes(db, params)
     every = _series(db, classified, size_period_totals(db, params), grain)
     # The lead-in periods are read only so each drawn period has a full span for its average.
     series = [{**row, "average": cost_average(every, grain, row["period"], MINIMUM_SIZED)} for row in every if row["period"] in grain.served]

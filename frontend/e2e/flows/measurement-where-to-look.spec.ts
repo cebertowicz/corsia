@@ -56,7 +56,7 @@ async function serve(page: Page, project: { id: string; name: string }, agentId:
 			return;
 		}
 		if (url.pathname.endsWith('/models')) {
-			await route.fulfill({ json: { rows: [], min_tasks: 14, token_shares: [], unmatched_failed_turns: 0, unresolved_token_share: 0 } });
+			await route.fulfill({ json: { rows: [], min_tasks: 14, token_shares: [], unmatched_failed_turns: 0, unresolved_token_share: 0, total_spend_usd: 0 } });
 			return;
 		}
 		const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];

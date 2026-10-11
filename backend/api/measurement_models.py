@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from api.cost_identity import IdentityResolver, ModelIdentity
+from api.measurement_cost import ledger_shapes
 from api.measurement_join import joined_read
 from api.measurement_model_cost import materialize_chain, query_model_costs, query_recording_gaps
 from api.measurement_model_turns import query_model_turns
@@ -125,8 +126,9 @@ def _row(
         "tasks": len(latest.tasks),
         "failed_turns_per_100": 100 * tally.failed / tally.turns if tally.turns >= MIN_TURNS else None,
         "recorded_cost_per_task": round(rate, 10) if rate is not None else None,
-        # Priced dollars of the latest window, None (never 0) when nothing was priced.
-        "spend_usd": round(latest.dollars, 10) if rate is not None else None,
+        # Ledger priced dollars of every call in the latest window, None (never 0) when nothing was priced;
+        # the page divides it by ``total_spend_usd``. The rate above stays the chain's dollars per task.
+        "spend_usd": round(tally.ledger, 10) if tally.ledger > 0 else None,
         "cost_class": cost_class(latest.outcomes),
         "includes_local": includes_local(latest.outcomes),
         # A task whose call failed to reach the ledger leaves the figure possibly low.
@@ -152,18 +154,36 @@ def _other_row(
     return {**_row("", other_label(len(rest)), pooled, False, pooled_sizes, first_try), "other": True}
 
 
+def _add_ledger(
+    ledger_rows: Iterable[Mapping[str, Any]], latest: Collection[str], resolve: Callable[[Mapping[str, Any]], ModelIdentity],
+    identities: dict[str, ModelIdentity], tallies: dict[str, ModelTally],
+) -> float:
+    """Add each priced ledger shape of the latest window to its model's ``ledger``; returns the window's total."""
+    total = 0.0
+    for row in ledger_rows:
+        if row["outcome"] != "priced" or row["dollars"] is None or str(row["period"]) not in latest:
+            continue
+        identity = resolve(row)
+        identities[identity.key] = identity
+        tallies[identity.key].ledger += float(row["dollars"])
+        total += float(row["dollars"])
+    return total
+
+
 def build_models(
     token_rows: list[dict[str, Any]], turn_rows: list[dict[str, Any]], error_rows: list[dict[str, Any]],
     cost_rows: list[dict[str, Any]], *, resolve: Callable[[Mapping[str, Any]], ModelIdentity],
     latest: Collection[str], previous: Collection[str], offered: set[str], gaps: Iterable[str] = (),
-    outcomes: Mapping[str, tuple[str | None, int]] | None = None,
+    outcomes: Mapping[str, tuple[str | None, int]] | None = None, ledger_rows: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Collapse resolved rows into Models rows, token shares and their disclosures.
 
     ``cost_rows`` are ``query_model_costs`` output, already carrying their
     identity; ``gaps`` are the task ids with a call that failed to reach the
     ledger; ``outcomes`` maps a task id to its size class (None when unsized)
-    and first-try mark, from ``api.measurement_size.outcome_sizes``. Grouping
+    and first-try mark, from ``api.measurement_size.outcome_sizes``; ``ledger_rows`` are Cost's classified
+    ledger shapes (``ledger_shapes``), whose priced dollars in ``latest`` are every row's spend and,
+    summed, the ``total_spend_usd`` each share divides by. Grouping
     is owned by ``api.model_groups``: rows under ``MIN_TASKS``
     accepted tasks share one floor row (``model`` empty, ``other`` true) rather
     than being dropped, and token shares past the top six share "Other (N more models)".
@@ -199,6 +219,7 @@ def build_models(
         identities[identity.key] = identity
         tallies[identity.key].failed += 1
         unmatched += not identity.resolved
+    total_spend = _add_ledger(ledger_rows, latest, resolve, identities, tallies)
     tokens: dict[str, int] = defaultdict(int)
     for row in token_rows:
         identity = resolve(row)
@@ -219,6 +240,7 @@ def build_models(
         # Every model's tasks of one class pooled: the figure a row's class is read against.
         "size_overall": _size_cells(_pooled_sizes(sizes.values()), first_try),
         "min_tasks": MIN_TASKS,
+        "total_spend_usd": round(total_spend, 10),
         "token_shares": group_shares([
             {"model": key, "label": identities[key].label, "share_of_tokens": amount / total, "tokens": amount}
             for key, amount in sorted(tokens.items(), key=lambda item: (-item[1], item[0])) if total
@@ -261,6 +283,8 @@ def models_payload(
     prepare_outcome_periods(db, params)
     resolve = IdentityResolver(db)
     turn_rows, error_rows = query_model_turns(db, params)
+    # Every share of spend divides ledger dollars of every call by the window's ledger total, as Cost adds it up.
+    ledger_rows = ledger_shapes(db, params)
     chain = materialize_chain(db, params)
     try:
         cost_rows = query_model_costs(db, params, resolve, chain_rows=chain)
@@ -272,7 +296,7 @@ def models_payload(
         turn_rows, error_rows, cost_rows, resolve=resolve,
         latest=grain.latest.periods, previous=grain.previous.periods,
         offered=resolve.offered_now(catalog_entries), gaps=gaps,
-        outcomes=outcome_sizes(db, params),
+        outcomes=outcome_sizes(db, params), ledger_rows=ledger_rows,
     )
 
 
