@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from api import measurement_model_cost, measurement_models
+from api import measurement_chain_costs, measurement_model_cost, measurement_models
 from api.cost_identity import IdentityResolver, ModelIdentity
 from api.measurement_model_cost import query_model_costs
 from api.measurement_models import build_models, models_payload
@@ -341,7 +341,7 @@ def test_a_call_that_failed_to_record_before_acceptance_marks_the_served_rate(db
     assert row["recording_gap"] is True and row["recorded_cost_per_task"] is not None
 
 
-def test_one_models_read_walks_the_chains_once_and_leaves_no_table(db, monkeypatch):
+def test_models_shares_its_gap_walk_and_leaves_no_table(db, monkeypatch):
     walks = []
     ctes = measurement_model_cost.chain_ctes
     monkeypatch.setattr(measurement_model_cost, "chain_ctes", lambda **kwargs: walks.append(kwargs) or ctes(**kwargs))
@@ -383,8 +383,8 @@ def test_token_share_follows_the_selected_range(db):
 
 def test_tasks_and_prices_read_only_the_two_windows_models_shows(db, monkeypatch):
     seen = []
-    walk = measurement_models.materialize_chain
-    monkeypatch.setattr("api.measurement_models.materialize_chain",
+    walk = measurement_chain_costs.materialize_chain
+    monkeypatch.setattr("api.measurement_chain_costs.materialize_chain",
                         lambda _db, params: seen.append(params["grain"]) or walk(_db, params))
     models_payload(db, SCOPE, GRAIN, [])
     (read,) = seen

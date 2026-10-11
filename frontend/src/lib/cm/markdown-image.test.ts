@@ -9,7 +9,7 @@ import { commentMarks, setCommentRanges } from './comment-marks';
 import { commentRail } from './comment-rail';
 import { markdownLivePreview } from './markdown-live';
 import {
-	FAILED_IMAGE, imageContext, imageOpener, MISSING_IMAGE, NOT_AN_IMAGE, resolveImagePath, UNAVAILABLE_IMAGE,
+	FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, resolveImagePath, UNAVAILABLE_IMAGE,
 	type ImageContext, type OpenImageRequest,
 } from './markdown-image';
 
@@ -227,6 +227,30 @@ describe('markdown images in the live preview', () => {
 			view.dispatch({ selection: { anchor: at, head: at + IMAGE.length } });
 			enter(view);
 			expect(open).not.toHaveBeenCalled();
+		});
+
+		it('gives what opening the image a comment is on needs, once it draws, and leaves the opening to the caller', async () => {
+			const open = vi.fn();
+			const view = mount(DOC, 0, CONTEXT, open);
+			const at = DOC.indexOf(IMAGE);
+			const img = view.dom.querySelector<HTMLImageElement>('.cm-md-image img')!;
+			Object.defineProperty(img, 'complete', { configurable: true, value: false });
+			const request = imageRequestAt(document.body, { from: at, to: at + IMAGE.length });
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			Object.defineProperty(img, 'complete', { configurable: true, value: true });
+			Object.defineProperty(img, 'naturalWidth', { value: 640 });
+			img.dispatchEvent(new Event('load'));
+			expect(await request).toMatchObject({ alt: 'Mock screen', from: at, to: at + IMAGE.length });
+			expect(open).not.toHaveBeenCalled();
+		});
+
+		it('gives nothing for a range with no image, or an image that does not draw', async () => {
+			vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, body: null })));
+			const view = mount(DOC, 0, CONTEXT, vi.fn());
+			const at = DOC.indexOf(IMAGE);
+			expect(await imageRequestAt(document.body, { from: 0, to: 6 })).toBeNull();
+			view.dom.querySelector('.cm-md-image img')!.dispatchEvent(new Event('error'));
+			expect(await imageRequestAt(document.body, { from: at, to: at + IMAGE.length })).toBeNull();
 		});
 	});
 

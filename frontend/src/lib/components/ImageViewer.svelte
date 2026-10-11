@@ -9,6 +9,7 @@
 	import { untrack } from 'svelte';
 	import { fetchRevision } from '$lib/api/docs';
 	import { imageContentUrl } from '$lib/artifactImage';
+	import { holdDocFeedback } from '$lib/docFeedback.svelte';
 	import { token } from '$lib/stores/auth';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
@@ -31,6 +32,10 @@
 	let reloadNonce = $state(0);
 	let loadSeq = 0;
 	let draftOpen = $state(false);
+	let lightbox = $state<ReturnType<typeof ImageCommentLightbox>>();
+	const artifactId = $derived(resolvedArtifactId ?? target.artifactId ?? null);
+	// The image's own batch is held by its tab, not the lightbox: a reload remounts that, and is not leaving.
+	const feedback = holdDocFeedback(() => ({ artifactId, targetInstanceId: target.instanceId }), () => lightbox?.refresh());
 
 	export function reload() {
 		reloadNonce += 1;
@@ -92,7 +97,7 @@
 </script>
 
 <div class="image-viewer">
-	<ReviewBar artifactId={resolvedArtifactId ?? target.artifactId ?? null} {draftOpen} />
+	<ReviewBar {artifactId} {draftOpen} />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
 			<button type="button" class="stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
@@ -107,7 +112,7 @@
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<ImageCommentLightbox {src} alt={target.name} artifactId={resolvedArtifactId ?? target.artifactId ?? null} projectId={target.projectId ?? null} bind:draftOpen onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
+		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 

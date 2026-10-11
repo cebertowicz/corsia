@@ -8,6 +8,7 @@ import pytest
 
 from api.cost_identity import IdentityResolver
 from api.measurement_agent_cost import dollars_metric, query_task_hour_cost
+from api.measurement_chain_costs import chain_costs
 from api.measurement_agents import RANKING_MINIMUM_N
 from api.measurement_models import two_windows
 from api.measurement_model_cost import query_model_costs
@@ -53,7 +54,7 @@ def _usage(db, usage_id: str, node: str, model: str, *, source: str = "external_
 
 def _read(db) -> dict:
     prepare_outcome_periods(db, {**SCOPE, "grain": GRAIN}, roots=True)
-    return query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)})
+    return query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)}, chain_costs(db, SCOPE, GRAIN)["cost_rows"])
 
 
 def test_a_task_counts_when_it_has_priced_dollars_and_a_rating_whatever_else_its_chain_holds(db):
@@ -77,7 +78,7 @@ def test_a_task_counts_when_it_has_priced_dollars_and_a_rating_whatever_else_its
               if row["outcome"] == "priced"}
     assert set(priced) == {"m", "l", "unrated", "gap", "mixed", "before"}
 
-    costs = query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)})
+    costs = query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)}, chain_costs(db, SCOPE, GRAIN)["cost_rows"])
     counted = priced["m"] + priced["l"] + priced["gap"] + priced["mixed"]
     assert costs == {
         ("root", LATEST): {"dollars": pytest.approx(counted), "hours": 11.0, "n": 4},

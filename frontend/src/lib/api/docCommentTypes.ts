@@ -32,6 +32,8 @@ export interface ServerComment {
 	image_rev?: string | null;
 	/** The image changed after this pin was placed. */
 	region_stale?: boolean;
+	/** For an image inside a document, the workspace file the image markdown shows; null on an image artifact. */
+	image_src?: string | null;
 }
 
 /** A box or point on an image, in fractions of its width and height; w = h = 0 is a point. */

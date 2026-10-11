@@ -27,6 +27,32 @@ def range_filter(column: str) -> str:
     return f"{column} >= :from_ts AND {column} < :to_ts"
 
 
+_SPAWNED_ROOTS = """, spawned_roots AS (
+          SELECT t.id FROM threads t WHERE t.spawned_by IS NOT NULL
+          UNION SELECT d.spawned_thread_id FROM plan_nodes d WHERE d.spawned_thread_id IS NOT NULL
+        )"""
+
+
+def _rejection_periods(grain: Grain | None) -> str:
+    return f""", rejection_periods AS (
+          SELECT {grain.bucket('e.created_at') if grain else 'NULL'} AS period, COUNT(*) AS rejections
+          FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
+          JOIN plans rp ON rp.id=n.plan_id
+          WHERE e.event='review_rejected' AND n.plan_id IN (SELECT id FROM top_plans)
+            AND rp.owner_id NOT IN (SELECT id FROM spawned_roots)
+            AND {range_filter("e.created_at")} GROUP BY period
+        )"""
+
+
+def rejection_ctes(grain: Grain | None = None) -> str:
+    """Return ``spawned_roots`` and ``rejection_periods`` for the scope's ``top_plans``.
+
+    ``outcome_ctes`` carries the same two CTEs; a reader that wants only the send-backs appends these and
+    never names the settlement.
+    """
+    return _SPAWNED_ROOTS + _rejection_periods(grain)
+
+
 def outcome_ctes(grain: Grain | None = None, *, plans: str = "top_plans", limited_to_range: bool = True) -> str:
     """Return the canonical accepted-task CTEs for one eligible-plan set.
 
@@ -57,10 +83,7 @@ def outcome_ctes(grain: Grain | None = None, *, plans: str = "top_plans", limite
           SELECT node_id FROM rejected
           UNION SELECT node_id FROM released_bad
           UNION SELECT id FROM plan_nodes WHERE state='failed'
-        ), spawned_roots AS (
-          SELECT t.id FROM threads t WHERE t.spawned_by IS NOT NULL
-          UNION SELECT d.spawned_thread_id FROM plan_nodes d WHERE d.spawned_thread_id IS NOT NULL
-        ), outcome_rows AS (
+        ){_SPAWNED_ROOTS}, outcome_rows AS (
           SELECT n.id,n.commitment_id,p.owner_id AS root_id,n.difficulty,s.settled_at,
             {grain.bucket('s.settled_at') if grain else 'NULL'} AS period,
             CASE WHEN n.id IN (SELECT node_id FROM reworked)
@@ -74,14 +97,7 @@ def outcome_ctes(grain: Grain | None = None, *, plans: str = "top_plans", limite
             AND p.owner_id NOT IN (SELECT id FROM spawned_roots)
         ), outcome_periods AS (
           SELECT period, COUNT(*) AS outcomes, SUM(first_try) AS first_try FROM outcome_rows GROUP BY period
-        ), rejection_periods AS (
-          SELECT {grain.bucket('e.created_at') if grain else 'NULL'} AS period, COUNT(*) AS rejections
-          FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
-          JOIN plans rp ON rp.id=n.plan_id
-          WHERE e.event='review_rejected' AND n.plan_id IN (SELECT id FROM top_plans)
-            AND rp.owner_id NOT IN (SELECT id FROM spawned_roots)
-            AND {range_filter("e.created_at")} GROUP BY period
-        )
+        ){_rejection_periods(grain)}
     """
 
 
@@ -95,55 +111,46 @@ def prepare_scope_threads(db, params: dict[str, Any]) -> None:
 def _materialize_outcome_periods(db, params: dict[str, Any], *, roots: bool) -> None:
     """Materialize the shared scope and outcome aggregate for one request connection.
 
-    ``roots`` adds the per-root grains the Agents surface reads: the same settled
-    outcome rows, grouped by the agent that owns the plan instead of by the whole
-    scope. Both grains are built from the **same statement text** -- ``scope_cte()
-    + outcome_ctes()`` runs once into the settled nodes and again into the scope
-    periods -- so the scope totals and the per-agent totals agree because they share
-    one definition and see one snapshot of the data, not because a single pass
-    feeds both. With ``roots`` the settlement is therefore evaluated twice, and
-    that second evaluation is a real cost this request pays.
+    The accepted outcomes are settled **once**, into ``measurement_outcome_nodes``
+    (each with the agent that owns its plan). Every other grain is a ``GROUP BY`` over
+    those rows: the scope totals, and with ``roots`` the per-agent and per-difficulty
+    grains the Agents surface reads. ``api.measurement_size`` reads the same rows to
+    size each outcome, so no reader of this connection settles the scope again, and the
+    totals agree because they are one population, not several runs of one statement.
+    Only the rejection counts come from their own statement: they are not outcomes.
     """
     prepare_scope_threads(db, params)
     db.execute(_DDL[PREPARED_OUTCOMES])
     db.execute("DELETE FROM measurement_outcome_periods")
-    if not roots:
-        db.execute(scope_cte() + outcome_ctes(params["grain"]) + """
-            INSERT INTO measurement_outcome_periods(period,outcomes,first_try,rejections)
-            SELECT o.period,o.outcomes,o.first_try,COALESCE(r.rejections,0)
-            FROM outcome_periods o LEFT JOIN rejection_periods r USING(period)
-        """, query_params(params))
-        return
-
-    db.execute(_DDL[PREPARED_ROOTS])
-    db.execute("DELETE FROM measurement_scope_roots")
-    db.execute(scope_cte() + "INSERT INTO measurement_scope_roots(id) SELECT id FROM scope_roots", query_params(params))
+    if roots:
+        db.execute(_DDL[PREPARED_ROOTS])
+        db.execute("DELETE FROM measurement_scope_roots")
+        db.execute(scope_cte() + "INSERT INTO measurement_scope_roots(id) SELECT id FROM scope_roots", query_params(params))
     db.execute(_DDL[PREPARED_OUTCOME_NODES])
     db.execute("DELETE FROM measurement_outcome_nodes")
-    # One settlement feeds both grains: the settled nodes are materialized with the
-    # agent that owns their plan, and the per-agent and per-difficulty grains read
-    # those rows. The scope totals below stay the statement the series already runs.
     db.execute(scope_cte() + outcome_ctes(params["grain"]) + """
         INSERT INTO measurement_outcome_nodes(node_id,root_id,period,first_try,difficulty)
-        SELECT id,root_id,period,first_try,difficulty FROM outcome_rows WHERE root_id IS NOT NULL
+        SELECT id,root_id,period,first_try,difficulty FROM outcome_rows
     """, query_params(params))
-    db.execute(_DDL[PREPARED_ROOT_OUTCOMES])
-    db.execute("DELETE FROM measurement_root_outcome_periods")
-    db.execute("""
-        INSERT INTO measurement_root_outcome_periods(root_id,period,outcomes,first_try)
-        SELECT root_id,period,COUNT(*),SUM(first_try) FROM measurement_outcome_nodes GROUP BY root_id,period
-    """)
-    db.execute(_DDL[PREPARED_ROOT_DIFFICULTIES])
-    db.execute("DELETE FROM measurement_root_difficulty_periods")
-    db.execute("""
-        INSERT INTO measurement_root_difficulty_periods(root_id,period,difficulty,count)
-        SELECT root_id,period,COALESCE(difficulty,'unclassified'),COUNT(*)
-        FROM measurement_outcome_nodes GROUP BY root_id,period,COALESCE(difficulty,'unclassified')
-    """)
-    db.execute(scope_cte() + outcome_ctes(params["grain"]) + """
+    if roots:
+        db.execute(_DDL[PREPARED_ROOT_OUTCOMES])
+        db.execute("DELETE FROM measurement_root_outcome_periods")
+        db.execute("""
+            INSERT INTO measurement_root_outcome_periods(root_id,period,outcomes,first_try)
+            SELECT root_id,period,COUNT(*),SUM(first_try) FROM measurement_outcome_nodes GROUP BY root_id,period
+        """)
+        db.execute(_DDL[PREPARED_ROOT_DIFFICULTIES])
+        db.execute("DELETE FROM measurement_root_difficulty_periods")
+        db.execute("""
+            INSERT INTO measurement_root_difficulty_periods(root_id,period,difficulty,count)
+            SELECT root_id,period,COALESCE(difficulty,'unclassified'),COUNT(*)
+            FROM measurement_outcome_nodes GROUP BY root_id,period,COALESCE(difficulty,'unclassified')
+        """)
+    db.execute(scope_cte() + rejection_ctes(params["grain"]) + """
         INSERT INTO measurement_outcome_periods(period,outcomes,first_try,rejections)
         SELECT o.period,o.outcomes,o.first_try,COALESCE(r.rejections,0)
-        FROM outcome_periods o LEFT JOIN rejection_periods r USING(period)
+        FROM (SELECT period,COUNT(*) AS outcomes,SUM(first_try) AS first_try
+              FROM measurement_outcome_nodes GROUP BY period) o LEFT JOIN rejection_periods r USING(period)
     """, query_params(params))
 
 

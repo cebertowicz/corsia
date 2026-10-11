@@ -6,6 +6,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from doceditor import comments
+from doceditor.doc_images import check_image_quote, widen_to_image
+from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from infra import app_loop, write_effects
@@ -62,6 +64,12 @@ def quote_anchor(live, quote: str, near: str | None) -> Anchor:
     text = live.text
     start, end = resolve_quote(text, quote, near)
     return Anchor(quote, start, end, *(anchor_context(text, start, end, quote) or (None, None)))
+
+
+def image_anchor(live, quote: str, near: str | None) -> Anchor:
+    """An agent's region in a document: the whole markdown of the image its quote is inside."""
+    start, end = resolve_quote(live.text, quote, near)
+    return Anchor(*widen_to_image(live.text, start, end))
 
 
 async def create_comment_owned(*, path: str | None, artifact_id: str | None,
@@ -135,10 +143,16 @@ async def create_validated_comment(request, client_id):
     from functools import partial
     from doceditor.comment_create_db import create_in_db
 
+    if request.region is not None:
+        check_region_target(request.path, request.quote)
+        if request.browser and request.quote:
+            check_image_quote(request.quote)
     prepare = None
     if request.quote and not request.parent_id and not request.review:
         if request.browser:
             prepare = lambda live: browser_anchor(live, client_id, request.quote)
+        elif request.region is not None:
+            prepare = lambda live: image_anchor(live, request.quote, request.near)
         else:
             prepare = lambda live: quote_anchor(live, request.quote, request.near)
     return await create_comment_owned(

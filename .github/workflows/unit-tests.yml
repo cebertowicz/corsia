@@ -3,20 +3,37 @@ name: Unit tests (L1)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'requirements*.txt'
-      - 'frontend/package*.json'
-      - '.github/workflows/unit-tests.yml'
   workflow_dispatch:
 
 concurrency:
   group: unit-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UNIT_TEST_RELEVANCE_PATTERNS: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$|^\.github/actions/relevance/action\.yml$'
+
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
+
   backend:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: Backend unit tests
     runs-on: ubuntu-24.04
     # The Mac Studios finished the three shards in about 6 minutes; a hosted
@@ -38,11 +55,14 @@ jobs:
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       # uv's managed CPython bundles the same current SQLite the Mac Python
       # does; setup-python on Ubuntu links the distro's older SQLite, whose
       # parser and query planner differ from what CORSIA runs on.
       - uses: astral-sh/setup-uv@v6
+
 
       - name: Install deps
         run: |
@@ -57,6 +77,7 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Use in-memory test root
+
         # Each SQLite-backed test builds its schema with ~240 commits, and every
         # commit flushes to disk. Test state needs no durability, so keep it in
         # the runner's tmpfs; fall back to RUNNER_TEMP if /dev/shm is missing.
@@ -254,6 +275,8 @@ jobs:
           if-no-files-found: warn
 
   backend-macos:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: Backend unit tests (macOS-only files)
     # Only the files that need macOS run here; macOS minutes cost more than
     # Linux, so everything else stays in the Linux job above.
@@ -267,6 +290,8 @@ jobs:
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-python@v5
         with:
@@ -304,11 +329,15 @@ jobs:
             -o tmp_path_retention_policy=failed
 
   frontend:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: Frontend unit tests
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-node@v4
         with:
