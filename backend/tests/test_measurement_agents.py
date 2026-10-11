@@ -282,6 +282,7 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     from api.measurement_agents import build_agents
     from api.measurement_chain_costs import chain_costs
     from api.measurement_findings import derive_findings_state
+    from api.measurement_presence import first_presence_period
     from api.measurement_queries import prepare_outcome_periods
     from api.measurement_scope import resolve_grain
     from infra.database import get_db
@@ -293,9 +294,10 @@ def _build(db_seed, *, metric="fresh_tokens_per_outcome", sort="ranked", compara
     db = get_db()
     try:
         prepare_outcome_periods(db, {**params, "grain": grain}, roots=True)
+        first_presence = first_presence_period(db, params["user_id"], grain)
         rows, findings, summaries, count, _overall = build_agents(
             db, params, REGISTRY, metric, sort, grain, comparable or period_comparable,
-            measured or (lambda name, period: period_measured(name, period, grain)), chain_costs(db, params, grain)["cost_rows"])
+            measured or (lambda name, period: period_measured(name, period, grain, first_presence)), chain_costs(db, params, grain)["cost_rows"])
         return {"rows": rows, "findings": findings, "project_summaries": summaries["active"],
                 "agent_count": count, "findings_state": derive_findings_state(rows, findings, count)}
     finally:

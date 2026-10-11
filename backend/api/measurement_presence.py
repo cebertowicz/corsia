@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 from core.measurement_scope import Grain
 
 
@@ -29,9 +32,14 @@ def presence_allocation_cte(grain: Grain) -> str:
     divides a threaded slice evenly across the active threads. The latter is the only
     source for agent attribution, so agent rows add to the threaded All-work total.
     """
+    def boundary(name: str) -> str:
+        # Grain boundaries deliberately omit seconds; normalize them before they join
+        # interval instants so SQLite can order and subtract one timestamp format.
+        return f"datetime({name} || CASE length({name}) WHEN 13 THEN ':00' ELSE '' END)"
+
     boundaries = " UNION ALL ".join(
-        [*(f"SELECT :gb{index} AS instant,0 AS delta" for index in range(len(grain.starts))),
-         "SELECT :gend_partial AS instant,0 AS delta"]
+        [*(f"SELECT {boundary(f':gb{index}')} AS instant,0 AS delta" for index in range(len(grain.starts))),
+         f"SELECT {boundary(':gend_partial')} AS instant,0 AS delta"]
     )
     return f"""
       presence_intervals AS (
@@ -46,6 +54,7 @@ def presence_allocation_cte(grain: Grain) -> str:
           MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended
         FROM presence_visits v
         WHERE v.thread_id IS NULL AND v.project_id IS NOT NULL
+          AND v.user_id=:user_id
           AND v.entered_at<:to_ts AND v.exited_at>:from_ts
           AND EXISTS (SELECT 1 FROM threads project_thread
             WHERE project_thread.project_id=v.project_id AND project_thread.user_id=:user_id)
@@ -80,6 +89,31 @@ def presence_allocation_cte(grain: Grain) -> str:
           COUNT(*) OVER (PARTITION BY a.began,a.ended) AS seconds
         FROM presence_active_threads a
       )"""
+
+
+def first_presence_at(db, user_id: str) -> str | None:
+    """Return the user's first recorded presence instant across retained sources."""
+    row = db.execute("""
+        SELECT MIN(instant) AS instant FROM (
+          SELECT datetime(entered_at) AS instant FROM presence_visits WHERE user_id=:user_id
+          UNION ALL
+          SELECT datetime(p.last_entered_at) AS instant
+          FROM thread_presence p JOIN threads t ON t.id=p.thread_id
+          WHERE t.user_id=:user_id
+        ) WHERE instant IS NOT NULL
+    """, {"user_id": user_id}).fetchone()
+    return row["instant"] if row and row["instant"] else None
+
+
+def first_presence_period(db, user_id: str, grain: Grain) -> str | None:
+    """Return the first local day or week whose presence recording is observable."""
+    instant = first_presence_at(db, user_id)
+    if instant is None:
+        return None
+    local_day = datetime.fromisoformat(instant).replace(tzinfo=timezone.utc).astimezone(ZoneInfo(grain.zone)).date()
+    if grain.kind == "days":
+        return local_day.isoformat()
+    return (local_day - timedelta(days=local_day.weekday())).isoformat()
 
 
 def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:

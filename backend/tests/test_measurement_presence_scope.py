@@ -20,11 +20,12 @@ def _seed_thread(db, thread_id: str, *, project_id: str | None = None,
     )
 
 
-def _seed_visit(db, surface: str, *, thread_id: str | None = None, project_id: str | None = None) -> None:
+def _seed_visit(db, surface: str, *, thread_id: str | None = None, project_id: str | None = None,
+                user_id: str = "steve") -> None:
     db.execute(
         "INSERT INTO presence_visits (user_id,surface,thread_id,project_id,entered_at,exited_at,seconds,sessions,exit_reason) "
-        "VALUES ('steve',?,?,?,'2026-09-21T12:00:00Z','2026-09-21T13:00:00Z',3600,1,'hidden')",
-        (surface, thread_id, project_id),
+        "VALUES (?,?,?,?,'2026-09-21T12:00:00Z','2026-09-21T13:00:00Z',3600,1,'hidden')",
+        (user_id, surface, thread_id, project_id),
     )
 
 
@@ -97,13 +98,31 @@ async def test_project_only_scope_keeps_project_level_presence(isolated_db):
 
 
 @pytest.mark.asyncio
+async def test_shared_project_does_not_include_another_users_project_only_presence(isolated_db):
+    from api.measurement import measurement_series
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('shared','shared','t','t')")
+        _seed_thread(db, "steves-thread", project_id="shared")
+        _seed_visit(db, "other-user-project-level", project_id="shared", user_id="other")
+        db.commit()
+    finally:
+        db.close()
+
+    assert await _hours(measurement_series) == 0
+    assert await _hours(measurement_series, project="shared") == 0
+
+
+@pytest.mark.asyncio
 async def test_agent_scope_counts_only_the_selected_agent_closure(isolated_db):
     """A selected agent never inherits another agent's or unassigned project presence."""
     from api.measurement import measurement_series
 
     _seeded()
-    # The agent and child visits overlap, so their union is one hour.
-    assert await _hours(measurement_series, agent="agent-a") == pytest.approx(1.0)
+    # Each threaded slice is split evenly, so this closure keeps its two allocated shares.
+    assert await _hours(measurement_series, agent="agent-a") == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio
@@ -111,16 +130,15 @@ async def test_project_and_agent_together_keep_the_exact_agent_closure(isolated_
     """Naming an agent's own project must not change that agent's answer.
 
     Pre-fix, the presence predicate took its project alternative for any named
-    project, so this same request returned 3.0h: the agent's own 2.0h closure
-    plus the visit recorded against the project with no thread. The same agent
-    answered two different numbers depending on whether its own project was
-    named, while project-only (4.0h), agent-only (2.0h) and workspace+agent
-    (2.0h) stayed correct, which is why a scope-only test missed it.
+    project, adding the visit recorded against the project with no thread. The
+    same agent then answered different allocated time depending on whether its
+    own project was named, while the agent-only and workspace+agent selections
+    stayed correct, which is why a scope-only test missed it.
     """
     from api.measurement import measurement_series
 
     _seeded()
-    assert await _hours(measurement_series, project="one", agent="agent-a") == pytest.approx(1.0)
+    assert await _hours(measurement_series, project="one", agent="agent-a") == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio
@@ -128,7 +146,7 @@ async def test_workspace_scope_with_an_agent_excludes_project_level_presence(iso
     from api.measurement import measurement_series
 
     _seeded()
-    assert await _hours(measurement_series, project="all", agent="agent-a") == pytest.approx(1.0)
+    assert await _hours(measurement_series, project="all", agent="agent-a") == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio

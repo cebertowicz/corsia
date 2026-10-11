@@ -63,6 +63,38 @@ def test_agent_page_uses_the_same_equal_share_as_its_row(db):
         assert query_family(db, "active", own)[0]["active_hours"] == pytest.approx(hours)
 
 
+def test_agent_time_on_platform_uses_the_same_equal_share_as_attention(db):
+    _visit(db, "root", "2026-09-29T12:00:00Z", "2026-09-29T12:10:00Z")
+    _visit(db, "other", "2026-09-29T12:05:00Z", "2026-09-29T12:15:00Z")
+    own = {**PARAMS, "scope_agent": "root"}
+    prepare_outcome_periods(db, own)
+    assert query_family(db, "presence", own)[0]["value"] == pytest.approx(7.5 / 60)
+    assert query_family(db, "active", own)[0]["active_hours"] == pytest.approx(7.5 / 60)
+
+
+@pytest.mark.parametrize(("zone", "entered_at", "exited_at"), [
+    ("UTC", "2026-09-29T23:30:00Z", "2026-09-30T00:30:00Z"),
+    ("Asia/Kolkata", "2026-09-29T18:00:00Z", "2026-09-29T19:00:00Z"),
+])
+def test_period_boundary_intervals_preserve_and_split_time(db, zone, entered_at, exited_at):
+    grain = resolve_grain("days", zone, now=datetime(2026, 10, 1, 12, tzinfo=timezone.utc))
+    params = {**SCOPE, "grain": grain}
+    _visit(db, "root", entered_at, exited_at)
+    prepare_outcome_periods(db, params)
+    rows = query_family(db, "active", params)
+    assert {row["period"]: row["active_hours"] for row in rows} == {
+        "2026-09-29": pytest.approx(0.5), "2026-09-30": pytest.approx(0.5),
+    }
+
+
+def test_presence_start_uses_one_global_source_for_days_and_weeks(db):
+    from api.measurement_presence import first_presence_period
+
+    _visit(db, "root", "2026-09-21T12:00:00Z", "2026-09-21T12:10:00Z")
+    assert first_presence_period(db, "steve", resolve_grain("days", "UTC", now=datetime(2026, 10, 1, tzinfo=timezone.utc))) == "2026-09-21"
+    assert first_presence_period(db, "steve", resolve_grain("weeks", "UTC", now=datetime(2026, 10, 1, tzinfo=timezone.utc))) == "2026-09-21"
+
+
 def test_idle_exit_stops_accrual_at_the_recorded_exit(db):
     _visit(db, "root", "2026-09-29T12:00:00Z", "2026-09-29T12:10:00Z", reason="idle")
     prepare_outcome_periods(db, PARAMS)

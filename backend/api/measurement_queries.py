@@ -313,14 +313,20 @@ def query_family(db, family: str, params: dict[str, Any], *, grouping: str = "sc
     elif family == "presence":
         predicate = presence_predicate(scope_threads)
         sql = f"""
-          WITH {presence_allocation_cte(bound["grain"])}
+          WITH {presence_allocation_cte(bound["grain"])}, scoped_presence AS (
+            SELECT s.began,s.ended,s.seconds FROM presence_live_segments s
+            WHERE :scope_agent IS NULL AND EXISTS (
+              SELECT 1 FROM presence_intervals v
+              WHERE v.began<=s.began AND v.ended>=s.ended AND {predicate}
+            )
+            UNION ALL
+            SELECT s.began,s.ended,s.seconds FROM presence_thread_slices s
+            WHERE :scope_agent IS NOT NULL AND s.thread_id IN (SELECT id FROM {scope_threads})
+          )
           SELECT {bound["grain"].bucket('s.began')} AS period,
             SUM(s.seconds)/3600.0 AS value,COUNT(*) AS n
-          FROM presence_live_segments s
-          WHERE {bound["grain"].bucket('s.began')} IS NOT NULL AND EXISTS (
-            SELECT 1 FROM presence_intervals v
-            WHERE v.began<=s.began AND v.ended>=s.ended AND {predicate}
-          ) GROUP BY period ORDER BY period
+          FROM scoped_presence s
+          WHERE {bound["grain"].bucket('s.began')} IS NOT NULL GROUP BY period ORDER BY period
         """
     elif family == "active":
         sql = active_family_sql(grain, scope_threads, outcomes)

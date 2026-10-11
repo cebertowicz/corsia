@@ -57,13 +57,14 @@ def instrument_period(start: str, grain: Grain | None = None) -> str:
     return day.isoformat() if grain is not None and grain.kind == "days" else (day - timedelta(days=day.weekday())).isoformat()
 
 
-def period_measured(metric: str, period: str, grain: Grain | None = None) -> bool:
+def period_measured(metric: str, period: str, grain: Grain | None = None,
+                    first_presence_period: str | None = None) -> bool:
     """Say whether one registry id's instrument existed in a period (a week, or a day on Days).
 
-    Presence-backed metrics derive their observed range from retained intervals in the
-    query layer, so a release-date constant cannot hide valid history. Other metrics
-    retain their registry-owned instrument boundary.
+    Presence-backed metrics derive their observed range from the user's first recorded
+    presence, so a request window cannot move the coverage boundary. Other metrics retain
+    their registry-owned instrument boundary.
     """
     if REGISTRY[metric].family in {"active", "presence"}:
-        return True
+        return bool(first_presence_period and period >= first_presence_period)
     return not period or period >= instrument_period(REGISTRY[metric].start, grain)

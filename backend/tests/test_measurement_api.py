@@ -303,10 +303,10 @@ async def test_active_time_uses_the_union_of_presence_intervals(isolated_db):
 def test_outcomes_per_active_hour_is_proxy_and_handles_zero_hours():
     from api.measurement import _row
 
-    row = _row("outcomes_per_active_hour", WEEK, {"outcomes": 40, "active_hours": 8}, False)
+    row = _row("outcomes_per_active_hour", WEEK, {"outcomes": 40, "active_hours": 8}, False, first_presence_period=WEEK)
     assert row["value"] == pytest.approx(5)
     assert row["proxy"] is True
-    assert _row("outcomes_per_active_hour", WEEK, {"outcomes": 40, "active_hours": 0}, False)["value"] is None
+    assert _row("outcomes_per_active_hour", WEEK, {"outcomes": 40, "active_hours": 0}, False, first_presence_period=WEEK)["value"] is None
 
 
 @pytest.mark.asyncio
@@ -1400,6 +1400,33 @@ async def test_no_series_serves_a_period_before_its_instrument_existed(isolated_
     assert answer("active_hours_per_outcome", before)[0] == pytest.approx(1 / 24)
     assert answer("time_on_platform_h", before)[0] == pytest.approx(1.0)
     assert answer("time_on_platform_h", after)[0] == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_presence_coverage_starts_globally_and_keeps_later_empty_periods(isolated_db):
+    from api.measurement import measurement_index, series_payload
+    from core.measurement_scope import resolve_grain
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        db.execute(
+            "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+            "VALUES ('steve','thread','root','2025-08-01T12:00:00Z','2025-08-01T12:01:00Z',60,1,'hidden')"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    grain = resolve_grain("weeks", "UTC", now=datetime(2027, 1, 4, tzinfo=timezone.utc), averaged=True)
+    result = await series_payload(["time_on_platform_h"], "all", "none", grain, USER)
+    rows = [row for row in result["rows"] if row["series"] == "time_on_platform_h"]
+    assert rows and rows[0]["period"] == grain.served[0]
+    assert all(row["value"] == 0 for row in rows), [(row["period"], row["value"]) for row in rows]
+    definitions = {item["id"]: item for item in (await measurement_index(project="all", agent="none", user=USER))["definitions"]}
+    assert definitions["active_hours_per_outcome"]["data_start"] == "2025-08-01"
+    assert definitions["time_on_platform_h"]["data_start"] == "2025-08-01"
 
 
 @pytest.mark.asyncio

@@ -609,6 +609,7 @@ def test_seed_worktree_db_measurement_fixture_reaches_the_attention_estimate(tmp
     """The fixture gives settled weeks recorded presence, so the proxy Attention
     series serves values, and the thin week stays withheld."""
     from api.measurement import _row
+    from api.measurement_presence import first_presence_period
     from api.measurement_queries import prepare_outcome_periods as _prepare_outcome_periods, query_family as _query_family
 
     db_path = _seed_with_measurement_fixture(tmp_path, monkeypatch, enabled=True)
@@ -618,9 +619,11 @@ def test_seed_worktree_db_measurement_fixture_reaches_the_attention_estimate(tmp
               "grain": _seed_grain()}
     _prepare_outcome_periods(conn, params)
     active = {r["period"]: r for r in _query_family(conn, "active", params)}
+    first_presence = first_presence_period(conn, _SEED_OWNER, params["grain"])
     conn.close()
 
-    rows = {period: _row("active_hours_per_outcome", period, active.get(period), False)
+    rows = {period: _row("active_hours_per_outcome", period, active.get(period), False,
+                         grain=params["grain"], first_presence_period=first_presence)
             for period in ("2026-09-07", "2026-09-14", "2026-09-21")}
     assert rows["2026-09-07"]["value"] is None
     # The fixture records 60 and 120 minutes of presence, divided by that week's accepted outcomes.
