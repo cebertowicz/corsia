@@ -205,7 +205,7 @@
 	   with the page gutter instead, by cancelling that inset; row 1 is one button that expands the ask in
 	   place, row 2 holds the actions. */
 	@container doc-canvas (max-width: 600px) {
-		.review-bar { flex-wrap: wrap; padding: 6px 8px; margin-left: calc(var(--doc-rail, 44px) * -1); }
+		.review-bar { flex-wrap: wrap; padding: 6px 8px; margin-left: calc(var(--doc-phone-inset, var(--doc-rail, 44px)) * -1); }
 		.review-bar.receipt, .review-bar.stale { flex-wrap: nowrap; align-items: center; min-height: 44px; }
 		.rb-wide { display: none; }
 		.rb-narrow { position: relative; display: flex; align-items: flex-start; gap: 8px; flex: 1 1 100%; min-width: 0; width: 100%; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }

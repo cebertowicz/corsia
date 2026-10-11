@@ -15,10 +15,12 @@ export const docTheme = EditorView.theme({
 		overflow: 'auto'
 	},
 	'.cm-content': {
-		padding: '4px 0 40vh var(--doc-rail, 44px)',
+		padding: '4px var(--doc-phone-inset, 0px) 40vh var(--doc-phone-inset, var(--doc-rail, 44px))',
 		caretColor: 'var(--accent)',
 		maxWidth: '100%'
 	},
+	// --doc-phone-inset is set once on the canvas (DocViewer.css) for a touch pointer at phone width: the text keeps that
+	// inset on both sides, and the 44px marker hit box reaches into its edge. Unset, the one-sided rail applies.
 	'.cm-line': { padding: '0 2px' },
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },

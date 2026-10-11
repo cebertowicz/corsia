@@ -262,9 +262,13 @@
 	/* Compact fills the canvas, so it owns no divider edge and the tab strip's
 	   role is taken over by the app header. */
 	.leaf.compact { flex: 1; border-left: none; }
+	/* The app header is taller by the top safe area at phone width (see Header.svelte), and sits over the canvas. */
+	@media (max-width: 768px) { .leaf { padding-top: calc(var(--header-height, 56px) + env(safe-area-inset-top, 0px)); } }
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
 	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; }
 	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
+	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
+	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }
 
 	.gone {
 		display: flex; flex-direction: column; align-items: flex-start; gap: 6px;

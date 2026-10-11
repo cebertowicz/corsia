@@ -99,6 +99,24 @@ describe('comment rail', () => {
 		expect(view.dom.style.getPropertyValue('--doc-rail')).toBe('');
 	});
 
+	it('keeps the whole hit box when the text inset is narrower, and centres the glyph in that inset', async () => {
+		const view = mount('alpha');
+		view.contentDOM.style.paddingLeft = '24px';
+		await show(view, [{ from: 0, to: 5, id: 'a' }]);
+		const [{ style }] = buttons(view);
+		expect(railWidth()).toBe(44);
+		expect([style.width, style.height]).toEqual(['44px', '44px']);
+		expect(style.paddingRight).toBe(`${44 - 24}px`);
+	});
+
+	it('leaves no spare padding when the inset is the whole rail', async () => {
+		const view = mount('alpha');
+		view.contentDOM.style.paddingLeft = '44px';
+		await show(view, [{ from: 0, to: 5, id: 'a' }]);
+		const [{ style }] = buttons(view);
+		expect([style.width, style.height, style.paddingRight]).toEqual(['44px', '44px', '0px']);
+	});
+
 	it('drops the marker together with the highlight when an edit collapses its anchor', async () => {
 		const view = mount('alpha\nbeta');
 		await show(view, [{ from: 0, to: 5, id: 'a' }, { from: 6, to: 10, id: 'b' }]);
