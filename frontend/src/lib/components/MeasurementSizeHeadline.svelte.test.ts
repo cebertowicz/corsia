@@ -122,7 +122,7 @@ describe('MeasurementSizeHeadline', () => {
 
 	it('prints no rate and n/a when the served window is under the minimum, with its n', () => {
 		const few = mountRows([at(0, 10, { sized: 5 })], { latest: win(null, 5), previous: win(null, 0) });
-		expect(few.querySelector('.stat')?.textContent).toBe('– h of work per hour you spend, Jul 20 to Aug 16, n 5, n/a');
+		expect(few.querySelector('.stat')?.textContent).toBe('– h of work per hour you spend, Jul 20 to Aug 16, n 5, n/a vs Jun 22 to Jul 19 (n 0)');
 	});
 
 	it('does not chart weeks served before a comparability break', () => {

@@ -59,7 +59,7 @@
 	@container (min-width: 720px) { .kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 	/* From 900px the Tokens tile gets a 270px track, enough for its four parts in one row; below that the five tiles are equal and the parts take two by two. */
 	@container (min-width: 900px) { .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)) 270px; } }
-	.tile { container: kpi-tile / inline-size; display: flex; flex-direction: column; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 12px; min-width: 0; }
+	.tile { container: kpi-tile / inline-size; display: flex; flex-direction: column; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 0; padding: 12px; min-width: 0; }
 	/* One type scale on every tile: label 12px/650, value 28px/750, sub-line 12px/400. */
 	.label { color: var(--text-secondary); font-size: 12px; font-weight: 650; }
 	strong { color: var(--text-primary); font-size: 28px; font-weight: 750; line-height: 1.1; margin: 4px 0 2px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

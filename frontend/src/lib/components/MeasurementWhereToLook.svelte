@@ -67,7 +67,7 @@
 </section>
 
 <style>
-	.card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 16px; min-width: 0; }
+	.card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 0; padding: 16px; min-width: 0; }
 	.sh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 6px; }
 	h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); }
 	.stat { margin: 0 0 12px; color: var(--text-secondary); font-size: var(--text-subhead); }
@@ -103,14 +103,20 @@
 		.tb th { font-size: var(--text-caption); }
 		.act { font-size: 11px; }
 	}
-	/* Phone: the subject and its measure share one cell, the subject above, so neither wraps a word per line. */
+	/* Phone: the subject and its measure share one cell, the subject above, so neither wraps a word per line.
+	   No column keeps a width floor, so the table always fits the card; a subject or header breaks only between
+	   words, except a single unbroken name wider than the card, which may break anywhere rather than push the page. */
 	@media (max-width: 430px) {
+		.tb td:first-child, .tb th:first-child { min-width: 0; }
+		.tb td.subj b { overflow-wrap: anywhere; }
+		.tb th { white-space: normal; word-break: normal; }
 		.tb th.measure, .tb td.measure { display: none; }
 		span.stacked { display: inline; }
 		div.stacked { display: block; margin-top: 4px; }
 	}
 	.agents-slot { margin-top: 20px; min-width: 0; }
 	.empty, .refreshing { margin: 0; color: var(--text-secondary); font-size: var(--text-subhead); }
+	.empty { font-style: italic; }
 	.error { color: var(--red-text); display: flex; align-items: center; gap: 8px; }
 	.error button { border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); background: var(--bg-primary); color: var(--text-primary); padding: 4px 8px; cursor: pointer; }
 	.skeleton { height: 96px; border-radius: var(--radius-xs); background: var(--bg-hover); animation: pulse 1.2s ease-in-out infinite alternate; }

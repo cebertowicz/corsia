@@ -143,7 +143,7 @@ describe('MeasurementKpiRow', () => {
 		flushSync(); await tick();
 		// The tile, the section headline and the served window agree: one figure, never a second pool of the drawn days.
 		expect(tile('work')).toContain('40 h Sep 28 to Oct 4, n 1,349, new');
-		expect(sizeHeadline()).toBe('40 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new');
+		expect(sizeHeadline()).toBe('40 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('cost')).toContain('– Sep 28 to Oct 4, n 12, ');
 	});
 
