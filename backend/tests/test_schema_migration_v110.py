@@ -35,7 +35,7 @@ def test_v109_upgrade_marks_a_legacy_token_plan_endpoint_interactive_only(isolat
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.from_version, result.to_version) == (108, 110)
+    assert (result.from_version, result.to_version) == (108, 111)
     assert endpoint_agent_use("external@legacy/glm-5.3") == "interactive_only"
 
 
@@ -59,8 +59,8 @@ def test_v110_upgrade_restricts_legacy_endpoints_without_overwriting_explicit_al
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert SCHEMA_VERSION == 110
-    assert (result.migrated, result.from_version, result.to_version) == (True, 109, 110)
+    assert SCHEMA_VERSION == 111
+    assert (result.migrated, result.from_version, result.to_version) == (True, 109, 111)
     assert endpoint_agent_use("external@legacy-v109/glm-5.3") == "interactive_only"
     assert endpoint_agent_use("external@allowed-v109/glm-5.3") == "allowed"
     assert not migrate_to_current(db, SCHEMA_VERSION).migrated
@@ -82,7 +82,7 @@ def test_v109_upgrade_skips_metadata_that_is_not_an_object(isolated_db):
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.to_version) == (True, 110)
+    assert (result.migrated, result.to_version) == (True, 111)
     rows = dict(db.execute("SELECT id, metadata_json FROM network_servers").fetchall())
     assert rows == {"null-meta": "null", "list-meta": "[1]", "text-meta": '"x"'}
 
@@ -102,5 +102,26 @@ def test_v109_upgrade_leaves_existing_endpoint_allowed(isolated_db):
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.from_version, result.to_version) == (108, 110)
+    assert (result.from_version, result.to_version) == (108, 111)
     assert endpoint_agent_use("external@existing/model") == "allowed"
+
+
+def test_the_v110_step_reads_the_host_not_the_name(isolated_db):
+    from infra.database import get_db
+
+    db = get_db()
+    for sid, name, base in (
+        ("named-only", "Token Plan (Beijing)", "https://api.example.com/compatible-mode/v1"),
+        ("by-host", "Workspace", "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"),
+    ):
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES (?,'external','external',?,?,443,'online','t','t','t',?)",
+            (sid, sid, name, json.dumps({"base_url": base})),
+        )
+
+    migrate_109_to_110(db)
+
+    rows = {sid: json.loads(raw) for sid, raw in db.execute("SELECT id, metadata_json FROM network_servers")}
+    assert "agent_use_restriction" not in rows["named-only"]
+    assert rows["by-host"]["agent_use_restriction"] == "interactive_only"
