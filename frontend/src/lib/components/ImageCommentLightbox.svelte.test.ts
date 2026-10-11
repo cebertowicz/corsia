@@ -1,5 +1,5 @@
 import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ fetchComments: vi.fn() }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
@@ -264,5 +264,60 @@ describe('ImageCommentLightbox', () => {
 		props.src = `${SRC}&v=2`;
 		await settle();
 		expect(mocks.fetchComments).toHaveBeenCalledTimes(2);
+	});
+
+	describe('an image inside a document', () => {
+		const onImageAt = (id: string, number: number, x: number, from: number) => ({
+			...row(id, number, x), anchor_text: '![Mock](a.png)', from_off: from, to_off: from + 14, image_src: '/ws/a.png',
+		});
+		beforeEach(() => {
+			mocks.fetchComments.mockResolvedValue({
+				comments: [
+					onImageAt('here', 1, 0.1, 10), onImageAt('also-here', 2, 0.6, 10), onImageAt('same-file-later', 1, 0.3, 40),
+					{ id: 'text', author: 'you', author_kind: 'user', body: 'A text comment', created_at: '2026-10-10T00:00:00Z', anchor_text: '![', from_off: 10, to_off: 12 },
+				],
+				feedback: { owner_label: null, undelivered_batches: [] },
+			});
+		});
+		const inDocument = (post = vi.fn(async () => 'new')) => ({ occurrence: { from: 10, to: 24 }, post });
+
+		it('shows only the comments on this image, with the way back to the document', async () => {
+			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(), inDocument: inDocument() });
+			expect(mocks.fetchComments).toHaveBeenCalledWith('art-doc');
+			expect(pill()!.getAttribute('aria-label')).toBe('2 comments');
+			expect(host.querySelectorAll('[data-region-tag]')).toHaveLength(2);
+			expect(host.querySelector('button[aria-label="Back to notes.md"]')).not.toBeNull();
+		});
+
+		it('posts a new comment through the document, anchored on the image', async () => {
+			const post = vi.fn(async () => 'new');
+			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(post) });
+			commentButton()!.click();
+			await settle();
+			host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+			await settle();
+			const textarea = host.querySelector<HTMLTextAreaElement>('textarea')!;
+			textarea.value = 'Too dark';
+			textarea.dispatchEvent(new Event('input', { bubbles: true }));
+			await settle();
+			host.querySelector<HTMLButtonElement>('button.submit')!.click();
+			await settle();
+			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark');
+		});
+
+		it('opens at the comment it was opened on, its card at its tag', async () => {
+			for (const name of ['scrollTo', 'scrollIntoView']) {
+				Object.defineProperty(Element.prototype, name, { configurable: true, value: vi.fn() });
+				onTestFinished(() => { delete (Element.prototype as unknown as Record<string, unknown>)[name]; });
+			}
+			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'also-here' } });
+			expect(host.querySelector('[data-region-tag="2"]')!.getAttribute('aria-pressed')).toBe('true');
+			expect(host.querySelector('[data-popover] [data-comment-id="also-here"], [data-popover] .ct')).not.toBeNull();
+		});
+
+		it('opened to move a stale pin, starts placing it again', async () => {
+			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', inDocument: inDocument(), focus: { id: 'here', move: true } });
+			expect(commentButton()!.getAttribute('aria-pressed')).toBe('true');
+		});
 	});
 });

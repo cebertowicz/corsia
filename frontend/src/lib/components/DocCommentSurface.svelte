@@ -12,6 +12,7 @@
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
+	import { imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
@@ -21,7 +22,12 @@
 	 * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
 	 */
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null }: {
+	/**
+	 * A document's images with comments on parts of them (DCOL-FR13.6): each image's comments sit together in the drawer
+	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
+	 */
+	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -53,7 +59,15 @@
 		load?: CommentLoad;
 		onRetry?: () => void;
 		image?: ImageCommentSurface | null;
+		images?: DocImageComments | null;
 	} = $props();
+	const asDoc = (comment: unknown) => comment as DocComment;
+	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
+	const onItsImage = (comment: DocComment) => !comment.orphaned && comment.from != null;
+	function movePinInDocument(id: string) {
+		const comment = comments.find((item) => item.id === id);
+		if (comment && onItsImage(comment)) images?.onOpen(comment, { id, move: true });
+	}
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let drawer = $state<HTMLElement>();
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
@@ -231,6 +245,12 @@
 	}
 </script>
 
+{#snippet imageHead(row: unknown[])}
+	{@const group = row as DocComment[]}
+	{@const src = images?.srcOf(group[0])}
+	{#if images && src}<ImageRegionThumb {src} comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />{/if}
+{/snippet}
+
 {#snippet content()}
 	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} label={draft.label} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={onCancelDraft ?? onClose} />
 	{:else}
@@ -243,7 +263,7 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf} onMovePin={image?.onMovePin} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 

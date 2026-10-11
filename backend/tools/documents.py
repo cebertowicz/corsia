@@ -83,11 +83,10 @@ _REGION_SCHEMA = {
     "properties": {"x": {"type": "number"}, "y": {"type": "number"},
                    "w": {"type": "number"}, "h": {"type": "number"}},
     "required": ["x", "y"],
-    "description": ("A box {x, y, w, h} (or a point {x, y}) in fractions 0..1 of an image, origin "
-                    "top-left. On an image artifact, pass it instead of quote. On an image inside a "
-                    "document, pass it with quote naming that image: its markdown ![alt](path) or text "
-                    "inside it such as its path (near picks one of repeated images). The result includes "
-                    "the image with your box drawn, so you can check it and move it with doc_comment_update."),
+    "description": ("A box {x, y, w, h} (or a point {x, y}) in fractions 0..1 of an image, origin top-left. Pass "
+                    "it instead of quote on an image artifact; on an image in a document, with quote naming the image "
+                    "(its markdown ![alt](path) or path; near picks among repeats). The result shows your box drawn "
+                    "on the image, to check and move with doc_comment_update."),
 }
 
 
@@ -95,9 +94,8 @@ async def _region_result(
     payload: dict[str, Any], row: dict[str, Any], path: str | None, reader: str,
 ) -> str | MediaToolResult:
     """The JSON result plus the image with this comment's numbered box drawn (DCOL-FR13.7)."""
-    image = Path(str(image_regions.image_of(row, path)))
-
     def _render():
+        image = Path(str(image_regions.image_of(row, path)))
         db = get_db()
         try:
             return image_regions.write_marked_image(

@@ -75,6 +75,8 @@ export interface DocComment {
 	regionNumber?: number | null;
 	/** The image changed after the pin was placed (FR13.9). */
 	regionStale?: boolean;
+	/** For an image inside a document, the workspace file it shows; null on an image artifact. */
+	imageSrc?: string | null;
 }
 
 export const docComments = writable<Record<string, DocComment[]>>({});
@@ -121,12 +123,13 @@ export function fromServer(r: ServerComment): DocComment {
 	};
 }
 
-export function regionFromServer(r: ServerComment): Pick<DocComment, 'region' | 'regionNumber' | 'regionStale'> {
+export function regionFromServer(r: ServerComment): Pick<DocComment, 'region' | 'regionNumber' | 'regionStale' | 'imageSrc'> {
 	if (r.region_number == null || r.region_x == null || r.region_y == null) return {};
 	return {
 		region: { x: r.region_x, y: r.region_y, w: r.region_w ?? 0, h: r.region_h ?? 0 },
 		regionNumber: r.region_number,
-		regionStale: !!r.region_stale
+		regionStale: !!r.region_stale,
+		imageSrc: r.image_src ?? null
 	};
 }
 

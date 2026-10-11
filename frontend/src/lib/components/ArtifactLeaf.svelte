@@ -3,6 +3,7 @@
 	import DocViewer from './DocViewer.svelte';
 	import ImageViewer from './ImageViewer.svelte';
 	import ImageLightbox from './ImageLightbox.svelte';
+	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
@@ -10,8 +11,9 @@
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { pushBackLayer } from '$lib/historyBackLayer';
-	import type { OpenImageRequest } from '$lib/cm/markdown-image';
-	import { closeDocumentImage, documentImageViewers, openDocumentImage } from '$lib/stores/documentImageViewer';
+	import {
+		closeDocumentImage, documentImageViewers, openDocumentImage, type DocumentImageRequest,
+	} from '$lib/stores/documentImageViewer';
 	import { widenForImageViewer } from '$lib/imageViewerPane';
 	import { restoreDocumentPlace } from '$lib/documentImagePlace';
 	import { uiScope } from '$lib/stores/uiScope';
@@ -74,7 +76,7 @@
 	// returns to the same live document; the viewer belongs to the tab it was opened from.
 	const shownImage = $derived(threadId && target ? ($documentImageViewers[threadId] ?? null) : null);
 	const imageOpen = $derived(shownImage !== null && shownImage.instanceId === target?.instanceId);
-	function openImage(request: OpenImageRequest) {
+	function openImage(request: DocumentImageRequest) {
 		if (threadId && target) openDocumentImage(threadId, { ...request, instanceId: target.instanceId });
 	}
 	function closeImage() {
@@ -271,7 +273,29 @@
 				</div>
 				{#if imageOpen && shownImage}
 					<div class="image-overlay">
-						<ImageLightbox src={shownImage.src} alt={shownImage.alt} docName={target.name} onBack={closeImage} />
+						{#if shownImage.comments}
+							{@const comments = shownImage.comments}
+							<!-- Keyed on the image, so opening another one starts its comments afresh. -->
+							{#key `${shownImage.src}\u0000${shownImage.focus?.id ?? ''}`}
+								<ImageCommentLightbox
+									src={shownImage.src}
+									alt={shownImage.alt}
+									artifactId={comments.artifactId}
+									projectId={comments.projectId}
+									readOnly={comments.readOnly}
+									docName={target.name}
+									onBack={closeImage}
+									inDocument={{
+										occurrence: { from: shownImage.from, to: shownImage.to },
+										post: (region, text) => comments.post(shownImage.from, shownImage.to, region, text),
+										failure: comments.failure,
+									}}
+									focus={shownImage.focus ?? null}
+								/>
+							{/key}
+						{:else}
+							<ImageLightbox src={shownImage.src} alt={shownImage.alt} docName={target.name} onBack={closeImage} />
+						{/if}
 					</div>
 				{/if}
 			{/if}

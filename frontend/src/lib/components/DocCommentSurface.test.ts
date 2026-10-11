@@ -392,3 +392,41 @@ describe('DocCommentSurface suggestions', () => {
 		expect(host.textContent).not.toContain('Accept all from agent-1');
 	});
 });
+
+describe('DocCommentSurface comments on images inside a document', () => {
+	const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
+	const text = (id: string, from: number) => ({ id, anchor: id, author: 'you', text: id, at: 'now', resolved: false, replies: [], from, to: from + 2 });
+	const onImage = (id: string, number: number, from: number, extra: Record<string, unknown> = {}) => ({
+		...text(id, from), anchor: '![Mock](a.png)', to: from + 14, region: BOX, regionNumber: number, imageSrc: '/ws/a.png', ...extra,
+	});
+	const comments = [
+		text('before', 0), onImage('b', 2, 10, { regionStale: true }), text('between', 30), onImage('a', 1, 10),
+		onImage('c', 1, 40), onImage('gone', 3, 10, { orphaned: true }),
+	];
+	const images = () => ({ srcOf: vi.fn((comment: { id: string }) => `/img/${comment.id}`), colorOf: vi.fn(() => '#e5484d'), onOpen: vi.fn() });
+
+	it('lists each image\'s comments together under its thumbnail, in number order, at the image\'s place', () => {
+		render({ state: { kind: 'list' }, comments, images: images() });
+		const ids = [...host.querySelectorAll('[data-doc-comments-drawer] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
+		expect(ids).toEqual(['before', 'a', 'b', 'between', 'c', 'gone']);
+		const thumbs = [...host.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
+		expect(thumbs).toHaveLength(3);
+		expect(thumbs[0].nextElementSibling?.getAttribute('data-comment-id')).toBe('a');
+		expect(thumbs[0].querySelector('img')!.getAttribute('src')).toBe('/img/a');
+		expect(host.querySelector('[data-comment-id="a"] .ct-num')!.textContent).toBe('1');
+	});
+
+	it('opens the image from its thumbnail and places a stale pin again there; an image no longer in the text has nowhere to open', () => {
+		const groups = images();
+		const onFocus = vi.fn();
+		render({ state: { kind: 'list' }, comments, images: groups, onFocus });
+		const thumbs = [...host.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
+		thumbs[0].click();
+		expect(groups.onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+		expect(thumbs[2].disabled).toBe(true);
+		host.querySelector<HTMLButtonElement>('[data-comment-id="b"] [data-move-pin]')!.click();
+		expect(groups.onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'b' }), { id: 'b', move: true });
+		host.querySelector<HTMLButtonElement>('[data-comment-id="a"] .ct-num')!.click();
+		expect(onFocus).toHaveBeenCalledWith('a');
+	});
+});
