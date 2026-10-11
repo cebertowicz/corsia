@@ -230,7 +230,7 @@ def build_models(
     for key in tokens:
         # A model seen only in token share still belongs in the table or its floor row.
         tallies.setdefault(key, ModelTally())
-    kept, rest = split_by_spend(tallies)
+    kept, rest = split_by_spend(tallies, used=tokens)
     rows = [_row(key, identities[key].label, tallies[key], key not in offered, sizes[key], first_try) for key in kept]
     if rest:
         rows.append(_other_row(rest, tallies, sizes, first_try))

@@ -17,7 +17,7 @@ models counts once, and its rate divides by those distinct tasks.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from collections.abc import Callable
 from typing import Any
@@ -128,6 +128,7 @@ class ModelTally:
 
 def split_by_spend(
     tallies: Mapping[str, ModelTally], minimum: int = MIN_TASKS, shown: int = MODEL_ROWS,
+    *, used: Collection[str] = (),
 ) -> tuple[list[str], list[str]]:
     """Keys that hold their own table row, and the keys of the models pooled into "Other".
 
@@ -136,7 +137,14 @@ def split_by_spend(
     """
     listed = [key for key, tally in tallies.items() if tally.ledger > 0 or len(tally.latest.tasks) >= minimum]
     listed.sort(key=lambda key: (-tallies[key].ledger, -len(tallies[key].latest.tasks), key))
-    return listed[:shown], listed[shown:]
+    kept = listed[:shown]
+    # Every other model that recorded usage (``used`` names those seen in token share) pools
+    # into Other, so a token-only or low-volume local model never disappears from both. A
+    # selector seen only in turns recorded no usage and stays out, as its failures are disclosed apart.
+    return kept, [
+        key for key, tally in tallies.items()
+        if key not in kept and (key in used or tally.ledger > 0 or tally.latest.tasks or tally.previous.tasks)
+    ]
 
 
 def _split_ranked(rows: list[dict[str, Any]], shown: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

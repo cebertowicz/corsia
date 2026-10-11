@@ -491,9 +491,11 @@ async def test_models_does_not_show_turn_only_raw_selectors(isolated_db, monkeyp
 
     served = await measurement_models(project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     assert _named_rows(served) == []
-    # A model with no spend and under 14 tasks has no row, so turns alone list nothing; the unresolved
-    # alias failures are disclosed, and provider limits are not failures.
-    assert served["rows"] == []
+    # A model with no spend and under 14 tasks has no row of its own. The one that recorded token
+    # usage still pools into Other, so the pie's model is never missing from the table; turns alone
+    # add nothing. The unresolved alias failures are disclosed, and provider limits are not failures.
+    assert [(row["label"], row["tasks"]) for row in served["rows"]] == [("Other (1 more model)", 0)]
+    assert [share["model"] for share in served["token_shares"]] == ["claude-code/opus"]
     assert served["unmatched_failed_turns"] == 51
 
 

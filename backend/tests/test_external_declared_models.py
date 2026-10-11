@@ -218,6 +218,157 @@ def test_edit_refuses_a_value_that_is_not_a_model_id(isolated_db, monkeypatch) -
     assert err.value.status_code == 400
 
 
+def test_agent_use_restriction_round_trips_through_endpoint_metadata(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server, update_external_server
+    from api.network_servers import AddServerBody, UpdateExternalServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Restricted", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"],
+            agent_use_restriction="interactive_only",
+        ),
+    ))["server_id"]
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "interactive_only"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+    asyncio.run(update_external_server(
+        sid, UpdateExternalServerBody(base_url=_BASE, agent_use_restriction="allowed"),
+    ))
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "allowed"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
+
+
+def test_moving_an_endpoint_onto_a_token_plan_host_restricts_it(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server, update_external_server
+    from api.network_servers import AddServerBody, UpdateExternalServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Workspace", base_url="https://api.example.com/compatible-mode/v1",
+            dialect="openai", model_ids=["glm-5.3"],
+        ),
+    ))["server_id"]
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
+
+    asyncio.run(update_external_server(sid, UpdateExternalServerBody(base_url=_BASE)))
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "interactive_only"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+
+def test_an_edit_that_stays_on_its_host_keeps_a_chosen_restriction(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server, update_external_server
+    from api.network_servers import AddServerBody, UpdateExternalServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Workspace", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"],
+            agent_use_restriction="allowed",
+        ),
+    ))["server_id"]
+
+    asyncio.run(update_external_server(sid, UpdateExternalServerBody(base_url=_BASE)))
+
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
+
+
+def test_a_re_add_without_the_field_keeps_the_stored_restriction(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    body = dict(name="Restricted", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"])
+    sid = asyncio.run(add_external_server(
+        AddServerBody(**body, agent_use_restriction="interactive_only"),
+    ))["server_id"]
+
+    again = asyncio.run(add_external_server(AddServerBody(**body)))["server_id"]
+
+    assert again == sid
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+
+def test_a_new_token_plan_endpoint_is_stored_interactive_only(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(name="Workspace", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"]),
+    ))["server_id"]
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "interactive_only"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+
+def test_re_adding_a_token_plan_endpoint_with_unreadable_metadata_restricts_it(
+    isolated_db, monkeypatch,
+) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    body = dict(name="Workspace", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"])
+    sid = asyncio.run(add_external_server(AddServerBody(**body)))["server_id"]
+    with closing(sqlite3.connect(str(isolated_db))) as db:
+        db.execute("UPDATE network_servers SET metadata_json='{broken' WHERE id=?", (sid,))
+        db.commit()
+
+    asyncio.run(add_external_server(AddServerBody(**body)))
+
+    assert _server_meta(isolated_db, sid)["agent_use_restriction"] == "interactive_only"
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+
+def test_a_registration_that_names_a_restriction_keeps_it(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    sid = asyncio.run(add_external_server(
+        AddServerBody(
+            name="Token Plan", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"],
+            agent_use_restriction="allowed",
+        ),
+    ))["server_id"]
+
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
+
+
+@pytest.mark.parametrize(
+    ("name", "base_url", "expected"),
+    [
+        ("Token Plan (Beijing)", "https://api.example.com/v1", "interactive_only"),
+        ("Workspace", "https://token-plan.example.com/v1", "interactive_only"),
+        ("Workspace", "https://api.example.com/v1", "allowed"),
+        (None, "not a url", "allowed"),
+    ],
+)
+def test_registration_default_reads_name_and_host(name, base_url, expected) -> None:
+    from llm.endpoint_policy import registration_default
+
+    assert registration_default(name, base_url) == expected
+
+
 # ── removal stays removed ────────────────────────────────────────────────────
 
 def _seed_removable(path) -> None:

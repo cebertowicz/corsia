@@ -165,6 +165,7 @@ from infra.migration_104_to_105_review_time import migrate_104_to_105
 from infra.migration_105_to_106_plan_aggregates import migrate_105_to_106
 from infra.migration_106_to_107_key_store_credentials import migrate_106_to_107
 from infra.migration_107_to_108_server_keys import migrate_107_to_108
+from infra.migration_109_to_110_agent_use_restriction import migrate_109_to_110
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -749,6 +750,7 @@ MIGRATIONS[105] = migrate_105_to_106
 MIGRATIONS[106] = migrate_106_to_107
 MIGRATIONS[107] = migrate_107_to_108
 MIGRATIONS[MCP_SECRETS_FROM_VERSION] = migrate_mcp_secrets
+MIGRATIONS[109] = migrate_109_to_110
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

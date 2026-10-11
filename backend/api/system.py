@@ -25,7 +25,6 @@ from infra.settings import (
     get_feature_flags,
     get_host_access_auto_approve,
     get_host_access_reviewer_fallback,
-    is_alibaba_token_plan_model,
     save_agent_defaults,
     save_setting_merge,
 )
@@ -184,11 +183,9 @@ def _save_exact_model_defaults(body: dict) -> dict:
                 400,
                 "Corrections checker must be an exact ready public catalog LiteLLM model or null",
             )
-        if checker_model is not None and is_alibaba_token_plan_model(checker_model):
-            raise HTTPException(
-                400,
-                "Corrections checker cannot use an Alibaba Token Plan model",
-            )
+        from llm.endpoint_policy import endpoint_agent_use
+        if checker_model is not None and endpoint_agent_use(checker_model) == "interactive_only":
+            raise HTTPException(400, "Corrections checker cannot use an interactive-only endpoint model")
         save_agent_defaults({"corrections_checker_model": checker_model})
         updated["corrections_checker_model"] = checker_model
     return updated
