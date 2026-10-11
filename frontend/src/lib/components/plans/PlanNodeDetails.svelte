@@ -27,6 +27,13 @@
 	const tone = $derived(node.display.tone_key);
 	const causes = $derived(execution.causes.length > 1 ? execution.causes : []);
 	const showTries = $derived(execution.attempt_count > 0 || node.state === 'failed');
+	// A single recorded item identifies its executor and release without repeating the count.
+	// Keep a count only when it adds information: several tries, omitted history, or a failed task with no recorded try.
+	const showTryCount = $derived(
+		execution.attempt_count >= 2
+			|| execution.attempt_count > execution.attempts.length
+			|| (node.state === 'failed' && execution.attempts.length === 0),
+	);
 	const next = $derived(nextMove(execution.causes));
 	const showEvidence = $derived(isFinished(node) || execution.condition === 'review');
 	const staleEvidence = $derived(
@@ -67,7 +74,7 @@
 	{/if}
 	{#if showTries}
 		<div class="tries">
-			<p><span class="prefix">Tries:</span> {execution.attempt_count}{#if execution.attempt_count > execution.attempts.length}{' '}(latest {execution.attempts.length} shown){/if}</p>
+			{#if showTryCount}<p><span class="prefix">Tries:</span> {execution.attempt_count}{#if execution.attempt_count > execution.attempts.length && execution.attempts.length > 0}{' '}(latest {execution.attempts.length} shown){/if}</p>{/if}
 			<ul>
 				{#each execution.attempts as attempt}
 					<li>Try {attempt.ordinal} · {attempt.executor.label} · {tryEnding(attempt.released_at, attempt.release_reason)}</li>

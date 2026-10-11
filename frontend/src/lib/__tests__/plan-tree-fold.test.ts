@@ -155,6 +155,23 @@ describe('PlanTree — finished work folds at the bottom of each level', () => {
 		expect(rendered()).toEqual(['Open task', '[12 completed]']);
 	});
 
+	it('keeps an expanded fold label whole instead of giving it truncation chrome', async () => {
+		const nodes = [
+			node({ id: 'open', title: 'Open task' }),
+			...Array.from({ length: 19 }, (_, index) => done(`Done ${index}`)),
+			done('Failed', { state: 'failed' }),
+			...Array.from({ length: 5 }, (_, index) => done(`Closed ${index}`, { state: 'closed' })),
+		];
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes }) });
+		await settle();
+		await press('Show 5');
+
+		const label = host.querySelector<HTMLElement>('.fold-row .fold-label');
+		expect(label?.textContent?.trim()).toBe('19 completed, 1 failed, 5 closed');
+		expect(label?.className).not.toMatch(/truncate|ellipsis/);
+		expect(label?.style.textOverflow).toBe('');
+	});
+
 	it('shows no fold row inside a collapsed branch', async () => {
 		const nodes = [
 			node({ id: 'open', title: 'Open task' }),

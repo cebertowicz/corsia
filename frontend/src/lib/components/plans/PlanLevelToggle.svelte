@@ -28,7 +28,7 @@
 	const owned = $derived(expanded ? controls : undefined);
 </script>
 
-<span class="row-actions">
+<span class="row-actions" class:expanded>
 	{#if single}
 		<button
 			class="details-toggle" type="button" aria-expanded={expanded} aria-controls={owned}
@@ -50,6 +50,12 @@
 
 <style>
 	.row-actions { display: inline-flex; flex: none; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: var(--space-2); margin-left: auto; }
+	/* The control line arrives as the fold opens, including when a narrow row moves it below its label. */
+	.row-actions.expanded { animation: fold-actions-in var(--dur-standard) var(--ease-entrance); }
+	@keyframes fold-actions-in {
+		from { opacity: 0; transform: translateY(calc(var(--space-1) * -1)); }
+		to { opacity: 1; transform: translateY(0); }
+	}
 	.details-toggle { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; min-height: 28px; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-tertiary); font: inherit; font-size: var(--text-caption); cursor: pointer; }
 	.details-toggle:disabled { cursor: wait; }
 	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
@@ -58,6 +64,6 @@
 	/* Same geometry and token-driven spin as the shared Button primitive above. */
 	.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: var(--radius-circle); animation: spin var(--dur-hero-plus) linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
-	@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+	@media (prefers-reduced-motion: reduce) { .spinner, .row-actions.expanded { animation: none; } }
 	@media (max-width: 620px) { .details-toggle { min-height: 44px; } }
 </style>

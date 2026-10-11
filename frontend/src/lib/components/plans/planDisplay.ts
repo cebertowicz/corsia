@@ -64,6 +64,14 @@ const NODE_LABELS: Record<OperatorNodeLabelKey, string> = {
 	finished: 'Finished',
 };
 
+/** A settled node's outcome is more useful than the server's generic `finished` key. */
+const FINISHED_NODE_LABELS: Partial<Record<OperatorNode['state'], string>> = {
+	accepted: 'Done',
+	accepted_with_followup: 'Done',
+	closed: 'Won’t do',
+	failed: 'Failed',
+};
+
 const NODE_STATES: Record<OperatorNodeLabelKey, NodeDisplayState> = {
 	working: 'working',
 	needs_you: 'needs-you',
@@ -91,6 +99,7 @@ export function nodeDisplayState(node: OperatorNode): NodeDisplayState {
 /** Translate one server-owned node key to user-facing copy. */
 export function nodeDisplayLabel(node: OperatorNode, _isNext = false): string {
 	const key = node.display.label_key as string;
+	if (key === 'finished') return FINISHED_NODE_LABELS[node.state] ?? NODE_LABELS.finished;
 	return Object.hasOwn(NODE_LABELS, key)
 		? NODE_LABELS[key as OperatorNodeLabelKey]
 		: 'Unavailable';
@@ -131,14 +140,16 @@ function scheduledLine(node: OperatorNode, now: Date, running: boolean, clock = 
 }
 
 function finishedOutcome(node: OperatorNode): string {
+	const label = nodeDisplayLabel(node);
 	switch (node.state) {
-		case 'accepted': return node.status_reason ? `Done · ${node.status_reason}` : 'Done';
+		case 'accepted': return node.status_reason ? `${label} · ${node.status_reason}` : label;
 		case 'accepted_with_followup':
 			return node.status_reason
-				? `Done · follow-up created · ${node.status_reason}`
-				: 'Done · follow-up created';
-		case 'failed': return 'Failed';
-		case 'closed': return node.status_reason ? `Won’t do: ${node.status_reason}` : 'Won’t do';
+				? `${label} · follow-up created · ${node.status_reason}`
+				: `${label} · follow-up created`;
+		case 'failed': return label;
+		case 'closed': return node.status_reason ? `${label}: ${node.status_reason}` : label;
+		// Archived before it settled: the server sends `finished` with an open state.
 		default: return 'Archived';
 	}
 }
