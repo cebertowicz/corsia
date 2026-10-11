@@ -15,7 +15,7 @@ from tests.registry_helpers import make_session
 def freshness_scope(isolated_db, tmp_path, monkeypatch):
     from infra import config
     from infra.database import get_db
-    from registry import service
+    from registry import file_resolution, service
     from tools import sandbox_config
 
     workspace = tmp_path / "workspace"
@@ -34,7 +34,7 @@ def freshness_scope(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [workspace])
     monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RO", [])
     monkeypatch.setattr(
-        service, "get_allowed_dirs_rw", lambda **_kwargs: [workspace.resolve()]
+        file_resolution, "get_allowed_dirs_rw", lambda **_kwargs: [workspace.resolve()]
     )
     db = get_db()
     db.execute(

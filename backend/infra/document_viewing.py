@@ -143,9 +143,8 @@ def _path_for_agent(path: Path, workspace: Path) -> str | None:
     """
     if path.is_relative_to(workspace):
         return str(path.relative_to(workspace))
-    # Imported here: registry.service imports the tools layer.
     from infra.project_repo_policy import RepoPolicyQueryError
-    from registry.service import registrable_zone
+    from registry.file_resolution import registrable_zone
 
     try:
         return str(path) if registrable_zone(path) is not None else None

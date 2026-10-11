@@ -11,7 +11,7 @@ import threading
 import pytest
 
 from doceditor.live_store import LiveStore
-from registry import service
+from registry import file_resolution, service
 from registry.identity_metadata import parse_metadata
 from tests.test_document_live_publisher import setup, owe, events
 from tests.test_shared_document_ownership import ownership_scope as ownership_scope
@@ -150,7 +150,7 @@ def worker(workspace, db_path, store_path):
     config.WORKSPACE = workspace
     config.WORKSPACE_SELECTION = WorkspaceSelection(workspace_id="workspace-stable-id", root=workspace, name="Test")
     config.DB_PATH = database.DB_PATH = db_path
-    service.get_allowed_dirs_rw = lambda **kwargs: [workspace]
+    file_resolution.get_allowed_dirs_rw = lambda **kwargs: [workspace]
     store = LiveStore(store_path)
     publish_one(store, store.next_publication())
     second = store.next_publication()

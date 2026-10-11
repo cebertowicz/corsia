@@ -23,7 +23,7 @@ def file_scope(isolated_db, tmp_path, monkeypatch):
     """Create one governed project and its exact active tool thread."""
     from infra import config
     from infra.database import get_db
-    from registry import service
+    from registry import file_resolution, service
     from tools import filesystem_edit, filesystem_rw, host_access_gate
     from tools.filesystem_gate import AuthorizedPath
 
@@ -49,7 +49,7 @@ def file_scope(isolated_db, tmp_path, monkeypatch):
         WorkspaceSelection("managed-write-tests", workspace.resolve(), "Tests"),
     )
     monkeypatch.setattr(
-        service, "get_allowed_dirs_rw", lambda **_kwargs: [workspace.resolve()]
+        file_resolution, "get_allowed_dirs_rw", lambda **_kwargs: [workspace.resolve()]
     )
     db = get_db()
     db.execute(

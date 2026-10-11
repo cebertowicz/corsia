@@ -73,14 +73,14 @@ async def test_killed_writer_recovers_intent_before_lane(durable_scope, cut, tmp
 async def worker(workspace, db_path, target, state, thread, cut):
     from infra import config, database
     from infra.platform_paths import WorkspaceSelection
-    from registry import service
+    from registry import file_resolution
 
     config.WORKSPACE = workspace
     config.WORKSPACE_SELECTION = WorkspaceSelection(
         workspace_id="workspace-stable-id", root=workspace, name="Test workspace",
     )
     config.DB_PATH = database.DB_PATH = db_path
-    service.get_allowed_dirs_rw = lambda **kwargs: [workspace]
+    file_resolution.get_allowed_dirs_rw = lambda **kwargs: [workspace]
 
     def parked(*args, **kwargs):
         print("CUT", flush=True)

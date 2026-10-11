@@ -232,10 +232,10 @@ def test_settling_a_task_clears_thread_folder_files_and_keeps_shared_documents(d
 
 
 def test_the_predicate_agrees_with_the_shared_roots_definition(db, monkeypatch):
-    from registry import service
+    from registry import file_resolution, service
 
     workspace = config.WORKSPACE
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **_kwargs: [workspace])
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", lambda **_kwargs: [workspace])
     thread_id = make_session(db, prefix="parity")
     relative = [
         "shared/planning/roadmap.md",

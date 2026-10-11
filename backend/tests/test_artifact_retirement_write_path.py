@@ -14,7 +14,7 @@ from infra import config
 from infra.database import get_db
 from infra.workspace_paths import WorkspaceSelection
 from plans import service
-from registry import service as registry_service
+from registry import file_resolution, service as registry_service
 from registry.registration_writer import RegistrationOrigin
 from tests.plan_review_helpers import submit_review_evidence
 from tests.registry_helpers import make_session
@@ -37,7 +37,7 @@ def write_path_scope(isolated_db, tmp_path, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        registry_service,
+        file_resolution,
         "get_allowed_dirs_rw",
         lambda **_kwargs: [workspace.resolve()],
     )

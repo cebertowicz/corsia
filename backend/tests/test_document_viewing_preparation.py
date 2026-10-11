@@ -78,12 +78,12 @@ def test_deep_anchor_parses_only_prefix_including_setext_underline(deleg_db, vie
 def test_registered_repository_document_outside_workspace_is_named_by_its_full_path(
     deleg_db, tmp_path, monkeypatch,
 ):
-    from registry import service
+    from registry import file_resolution, service
 
     path = tmp_path / "repository" / "outside.md"
     path.parent.mkdir()
     path.write_text("# Outside\n")
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **kwargs: [path.parent])
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", lambda **kwargs: [path.parent])
     artifact = service.register_write_strict("sender-self", str(path), db=deleg_db, notify=False)
     _admit(deleg_db, "outside-workspace", {KEY: {
         "artifact_id": artifact["id"], "heading_anchor": 1, "heading_line": "# Outside",
@@ -96,14 +96,14 @@ def test_registered_repository_document_outside_workspace_is_named_by_its_full_p
 def test_a_long_full_path_is_cut_in_the_middle_and_keeps_its_file_name(deleg_db, tmp_path, monkeypatch):
     """A path over the note's cap is marked as cut and keeps its file name; it cannot be opened as written."""
     from core.viewing_context import VIEWING_PATH_CAP
-    from registry import service
+    from registry import file_resolution, service
 
     folder = tmp_path / "repository" / ("deep-" * 24) / ("deep-" * 24 + "folder")
     folder.mkdir(parents=True)
     path = folder / "the-file-name.md"
     path.write_text("# Outside\n")
     assert len(str(path.resolve())) > VIEWING_PATH_CAP
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **kwargs: [tmp_path / "repository"])
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", lambda **kwargs: [tmp_path / "repository"])
     artifact = service.register_write_strict("sender-self", str(path), db=deleg_db, notify=False)
     _admit(deleg_db, "long-path", {KEY: {"artifact_id": artifact["id"]}})
     named = json.loads(_row(deleg_db, "long-path")["metadata"])[KEY]["path"]
@@ -114,18 +114,18 @@ def test_unreadable_registered_roots_omit_the_note_and_admit_the_message(deleg_d
     from infra import input_preparation
     from infra.document_viewing import materialize_viewing_document
     from infra.project_repo_policy import RepoPolicyQueryError
-    from registry import service
+    from registry import file_resolution, service
 
     path = tmp_path / "repository" / "outside.md"
     path.parent.mkdir()
     path.write_text("# Outside\n")
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **kwargs: [path.parent])
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", lambda **kwargs: [path.parent])
     artifact = service.register_write_strict("sender-self", str(path), db=deleg_db, notify=False)
 
     def unreadable(**kwargs):
         raise RepoPolicyQueryError("repository policy query failed: locked")
 
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", unreadable)
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", unreadable)
     request = {KEY: {"artifact_id": artifact["id"]}}
     prepared = materialize_viewing_document(input_preparation.prepare_viewing_document(
         "sender-self", "user", "roots-unreadable-probe", request, deleg_db,
@@ -139,15 +139,15 @@ def test_unreadable_registered_roots_omit_the_note_and_admit_the_message(deleg_d
 def test_document_outside_every_allowed_root_has_no_note(deleg_db, tmp_path, monkeypatch):
     from infra import input_preparation
     from infra.document_viewing import materialize_viewing_document
-    from registry import service
+    from registry import file_resolution, service
 
     path = tmp_path / "repository" / "outside.md"
     path.parent.mkdir()
     path.write_text("# Outside\n")
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **kwargs: [path.parent])
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", lambda **kwargs: [path.parent])
     artifact = service.register_write_strict("sender-self", str(path), db=deleg_db, notify=False)
     # The repository is no longer registered: the file still exists, the grant does not.
-    monkeypatch.setattr(service, "get_allowed_dirs_rw", lambda **kwargs: [])
+    monkeypatch.setattr(file_resolution, "get_allowed_dirs_rw", lambda **kwargs: [])
     request = {KEY: {"artifact_id": artifact["id"], "heading_anchor": 1}}
 
     prepared = materialize_viewing_document(input_preparation.prepare_viewing_document(

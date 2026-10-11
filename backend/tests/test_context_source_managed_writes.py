@@ -23,7 +23,7 @@ def context_scope(isolated_db, tmp_path, monkeypatch):
     """Create a disposable project with one valid governed shared category."""
     from infra import config
     from infra.database import get_db
-    from registry import service
+    from registry import file_resolution, service
 
     workspace = tmp_path / "workspace"
     project_root = workspace / "projects" / "alpha"
@@ -39,7 +39,7 @@ def context_scope(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "WORKSPACE", workspace)
     monkeypatch.setattr(config, "WORKSPACE_SELECTION", selection)
     monkeypatch.setattr(
-        service,
+        file_resolution,
         "get_allowed_dirs_rw",
         lambda **_kwargs: [workspace.resolve()],
     )

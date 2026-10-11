@@ -14,7 +14,7 @@ from tests.registry_helpers import make_session
 def assignment_scope(isolated_db, tmp_path, monkeypatch):
     from infra import config
     from infra.database import get_db
-    from registry import service
+    from registry import file_resolution, service
 
     workspace = tmp_path / "workspace"
     root = workspace / "projects" / "alpha"
@@ -31,7 +31,7 @@ def assignment_scope(isolated_db, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "WORKSPACE", workspace)
     monkeypatch.setattr(config, "WORKSPACE_SELECTION", selection)
     monkeypatch.setattr(
-        service, "get_allowed_dirs_rw", lambda **_kwargs: [workspace.resolve()],
+        file_resolution, "get_allowed_dirs_rw", lambda **_kwargs: [workspace.resolve()],
     )
     db = get_db()
     db.execute(
