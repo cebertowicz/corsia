@@ -30,6 +30,12 @@ DECISION_HOLDS = (
     "this task has an open decision, which already holds it until the user "
     "answers; do not block it as well."
 )
+NOT_ASKABLE = (
+    "ask_artifact_id must name an active registered document or image. For "
+    "a mockup or other visuals, embed the rendered images in a markdown "
+    "document as relative images (![caption](name.assets/screen.png)) and "
+    "ask on that document."
+)
 #: The user outcomes that end an ask, as the agent is told them. Defer keeps
 #: the task held.
 _ENDS_ASK = {
@@ -231,9 +237,7 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
             "a decision is not blocked on; raise it, and it holds its task by itself"
         )
     if identity["type"] not in ASKABLE_TYPES or identity["state"] != "active":
-        raise service.PlanInputError(
-            "ask_artifact_id must name an active registered document or image"
-        )
+        raise service.PlanInputError(NOT_ASKABLE)
     return ask.strip()
 
 

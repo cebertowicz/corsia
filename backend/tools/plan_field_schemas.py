@@ -119,7 +119,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "ask_artifact_id": {
         **TEXT,
-        "description": "Owned registered document to review; never a decision.",
+        "description": "Owned document or image to review, visuals embedded inline; never a decision.",
     },
     "hold_id": {**TEXT, "description": "The exact pause or blocker to clear."},
     "watchdog_budget_seconds": {
