@@ -20,7 +20,7 @@ Before anything runs, write the decision, the change being tested, its baseline,
 | Costly to undo, or it changes what many people or agents do | Consistent effect across a larger varied sample, plus a check of the main quality floor |
 | A published or general claim (superiority, savings, benchmark results) | Controlled comparison per section 4, with uncertainty reported |
 
-Reuse what already exists as the baseline (current outputs, historical labels, prior runs) instead of re-running it.
+Reuse what already exists as the baseline (current outputs, historical labels, prior runs) instead of re-running it, when it was produced under the same conditions as the new arm apart from the change; otherwise re-run it or narrow the claim.
 
 ## 2. Stage it: every stage must earn the next
 
