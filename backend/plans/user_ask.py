@@ -126,7 +126,12 @@ def ask_holds(db, hold_ids) -> dict[str, dict]:
         ids,
     ).fetchall()
     cleared = [r["clearance_event_id"] for r in rows if r["clearance_event_id"]]
-    answers = _event_payloads(db, cleared)
+    # holds.clear_write keeps the release detail under its own ``detail`` key.
+    answers = {
+        event_id: detail
+        for event_id, payload in _event_payloads(db, cleared).items()
+        if isinstance(detail := payload.get("detail"), dict)
+    }
     placed = _placed_raised_in(db, [r["id"] for r in rows], {r["node_id"] for r in rows})
     return {
         r["id"]: {

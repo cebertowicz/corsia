@@ -346,3 +346,23 @@ def test_an_edit_sent_before_the_answer_still_counts_in_the_round(db):
     result = _answer(db, artifact, "approved")
     assert result.review["verdict"] == "approved_with_changes"
     assert result.review["feedback_counts"]["edits"] == 1
+
+
+@pytest.mark.parametrize("verdict,with_comment,note,feedback", [
+    ("approved", False, None, None),
+    ("approved", True, None, {"comments": 1}),
+    ("changes_requested", False, "Cut section 3.", None),
+])
+def test_the_chat_card_reads_the_verdict_the_review_bar_recorded(db, verdict, with_comment, note, feedback):
+    from registry.chat_cards import ask_cards
+
+    artifact = seed_document(db, "owner", name="proposal.md")
+    node = _ask(db, artifact)
+    hold_id = db.execute("SELECT id FROM plan_node_holds WHERE node_id=?", (node,)).fetchone()["id"]
+    if with_comment:
+        _comment(db, artifact)
+
+    recorded = _answer(db, artifact, verdict, note).review["verdict"]
+
+    card = ask_cards(db, {hold_id: artifact})[hold_id]
+    assert (card["state"], card.get("feedback")) == (recorded, feedback)
