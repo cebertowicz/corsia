@@ -81,7 +81,10 @@ def _configure_sandbox(
     workspace: Path,
     policies,
 ) -> None:
-    provider = policies if callable(policies) else lambda: policies
+    provider = (
+        (lambda **_kwargs: policies()) if callable(policies)
+        else (lambda **_kwargs: policies)
+    )
     monkeypatch.setattr(sandbox_config, "WORKSPACE", workspace)
     select_workspace(monkeypatch, workspace)
     monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [workspace])
