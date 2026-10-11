@@ -37,7 +37,7 @@ async function settle() {
 const item = (id: string, over: Partial<FoldedItem> = {}): FoldedItem => ({
 	id, parent_id: null, kind: 'task', title: id, state: 'accepted', folded_at: '2026-09-01T00:00:00Z',
 	fold_bucket: 'done', display: { label_key: 'finished', tone_key: 'complete' },
-	folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false, ...over,
+	status_reason: null, folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false, ...over,
 });
 
 const reply = (status: number, body: unknown) => ({ ok: status === 200, status, json: async () => body, headers: { get: () => null } });
@@ -155,5 +155,16 @@ describe('PlanTree — a level\'s folded history', () => {
 		mountTree(root(1, 1));
 		await press('Show 1');
 		expect(titles()).toContain('Wrote the guide');
+	});
+
+	it('says why a fetched Won’t do row was not done, as an open one does', async () => {
+		const wontDo = item('Old 0', {
+			title: 'Retire the draft', state: 'closed', fold_bucket: 'closed',
+			status_reason: 'No longer needed', display: { label_key: 'finished', tone_key: 'closed' },
+		});
+		vi.stubGlobal('fetch', vi.fn(async () => page([wontDo], null)));
+		mountTree([{ parent_id: null, done: 0, failed: 0, closed: 1, more: 1 }]);
+		await press('Show 1');
+		expect(host.textContent).toContain('Won’t do · No longer needed');
 	});
 });

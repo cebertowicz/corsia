@@ -75,7 +75,7 @@ export function foldedNode(item: FoldedItem, depth: number, parentId: string | n
 			condition: 'terminal', primary_reason: null, causes: [], selection: null, conflict: null,
 			attempt_count: 0, friction_count: 0, attempts: [],
 		},
-		display: item.display, status_reason: null, evidence: null, commitment_cost: null,
+		display: item.display, status_reason: item.status_reason, evidence: null, commitment_cost: null,
 		node_cost: { own: EMPTY_AMOUNT, rolled: EMPTY_AMOUNT }, initiative: null,
 		branch_progress: null, scheduled_until: null, attention_path: [], completion: null,
 		child: null, review: null, user_actions: [], discussion_artifact_id: null, artifacts: [],
