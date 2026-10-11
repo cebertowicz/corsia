@@ -110,6 +110,14 @@ export function regionRect(region: ImageRegion, frame: DOMRect): DOMRect {
 	return new DOMRect(left, top, region.w * frame.width, region.h * frame.height);
 }
 
+/** The middle of a region and its tag together, as a fraction of the image, so a glide to it lands the tag clear of the edge too. */
+export function revealCentre(region: ImageRegion, tag: DOMRect | null, frame: DOMRect): Point {
+	const box = regionRect(region, frame);
+	const left = Math.min(box.left, tag?.left ?? box.left), right = Math.max(box.right, tag?.right ?? box.right);
+	const top = Math.min(box.top, tag?.top ?? box.top), bottom = Math.max(box.bottom, tag?.bottom ?? box.bottom);
+	return { x: ((left + right) / 2 - frame.left) / frame.width, y: ((top + bottom) / 2 - frame.top) / frame.height };
+}
+
 /** The target nearest `at` within the 44 px hit area, so overlapping targets go to the closer centre. */
 export function nearestTarget<T extends Point & { id: string }>(targets: T[], at: Point, reach = HIT_RADIUS): string | null {
 	let best: { id: string; d: number } | null = null;

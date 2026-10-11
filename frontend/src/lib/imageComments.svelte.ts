@@ -22,8 +22,8 @@ export function createImageComments(context: {
 	readOnly: () => boolean;
 	/** Where focus goes when a card closes with nothing else to return to. */
 	restoreFocus: () => void;
-	/** Scroll a region into view at the current zoom. */
-	reveal?: (region: ImageRegion) => void;
+	/** Scroll a comment's region and its tag into view at the current zoom. */
+	reveal?: (id: string, region: ImageRegion) => void;
 	/** A comment or reply was posted, so the review status may change. */
 	onCreated?: () => void;
 }) {
@@ -102,7 +102,7 @@ export function createImageComments(context: {
 	/** A card in the drawer was selected: the drawer stays, the tag is picked and scrolled into view. */
 	function showFromList(id: string, region: ImageRegion | null | undefined) {
 		focusedDocComment.set(id);
-		if (region) context.reveal?.(region);
+		if (region) context.reveal?.(id, region);
 	}
 	/** Move pin: the next box or point drawn becomes the comment's new place. */
 	function movePin(id: string) {

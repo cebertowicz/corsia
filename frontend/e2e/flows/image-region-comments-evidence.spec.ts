@@ -16,13 +16,26 @@ const desktopOnly = (testInfo: TestInfo) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 };
 const layout = (page: Page) => page.locator('.image-comments .layout');
-const box = (page: Page, id: string) => page.locator(`.image-viewer [data-region-box="${id}"]`);
+const box = (page: Page, id: string) => page.locator(`.image-viewer [data-region-box="${id}"]:not([inert])`);
 const opacity = (page: Page, id: string) => () => box(page, id).evaluate((el) => Number(getComputedStyle(el).opacity).toFixed(2));
 /** The image's cell, which gives up the drawer's room below or beside it. */
 const viewerSize = (page: Page) => () => page.locator('.image-comments .viewer-cell').evaluate((el) => {
 	const r = el.getBoundingClientRect();
 	return `${Math.round(r.width)}x${Math.round(r.height)}`;
 });
+/** The image cell's size and how far the drawer's list is scrolled, so opening shows whether the list moves with the drawer. */
+const openingDrawer = (page: Page) => async () => `${await viewerSize(page)()} list ${await page.evaluate(() => document.querySelector('.canvas-comment-drawer .drawer-comments')?.scrollTop ?? '-')}`;
+/**
+ * Every tag and mark of a pin being moved: what it is, where, its opacity, and its dashed layer's opacity
+ * (`old` is the place it is leaving; `inert` ones are fading out). One reading per frame shows the fades.
+ */
+const movingPin = (page: Page) => () => viewer(page).evaluate((root) => [...root.querySelectorAll<HTMLElement>('[data-region-tag], [data-region-box], [data-region-dot], [data-region-from]')]
+	.map((el) => {
+		const kind = el.dataset.regionTag ? 'tag' : el.dataset.regionFrom ? 'old' : el.dataset.regionDot ? 'dot' : 'box';
+		const dashed = el.dataset.regionTag ? getComputedStyle(el.querySelector('.disc')!, '::before').opacity : el.dataset.regionDot || (el.dataset.regionFrom && !el.style.width) ? getComputedStyle(el).outlineColor : getComputedStyle(el, '::before').opacity;
+		const r = el.getBoundingClientRect();
+		return `${kind}${el.inert ? '(inert)' : ''}@${Math.round(r.x)},${Math.round(r.y)} o=${Number(getComputedStyle(el).opacity).toFixed(2)} dashed=${dashed}`;
+	}).join(' | '));
 const background = (el: Element) => getComputedStyle(el).backgroundColor;
 const discPress = (el: Element) => { const disc = getComputedStyle(el.querySelector('.disc')!); return `${disc.scale} ${disc.backgroundColor}`; };
 
@@ -81,15 +94,17 @@ async function failNextPost(page: Page, seeded: Seeded) {
 		? route.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"unavailable"}' }) : route.continue());
 }
 /** Holds the next pin move until released, then fails it with a server error. */
-async function holdThenFailMove(page: Page): Promise<() => void> {
+/** Holds the next pin move until released, then fails it or lets it through. */
+async function holdMove(page: Page, fail = true): Promise<() => Promise<void>> {
 	let release: () => void = () => {};
 	const held = new Promise<void>((resolve) => { release = resolve; });
 	await page.route('**/api/comments/**', async (route) => {
 		if (route.request().method() !== 'PATCH') return route.continue();
 		await held;
+		if (!fail) return route.continue();
 		await route.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"unavailable"}' });
 	});
-	return release;
+	return async () => release();
 }
 
 test.describe('@flow:image-region-comments @surface:documents image comment review evidence', () => {
@@ -173,7 +188,11 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			expectTransition(await record(page, testInfo, '1440-35-drawer-close', layout(page), () => page.keyboard.press('Escape'), viewerSize(page), { frames: 14 }), 'image cell as the drawer closes');
 			await expect(drawer(page)).toHaveCount(0);
 			const opening = await pillCentre();
-			expectTransition(await record(page, testInfo, '1440-34-drawer-open', layout(page), () => page.mouse.click(opening.x, opening.y), viewerSize(page), { frames: 14 }), 'image cell as the drawer opens');
+			// Tag 12 is selected: the drawer slides in already at its card, so the list never scrolls while it opens.
+			const opened = await record(page, testInfo, '1440-34-drawer-open', layout(page), () => page.mouse.click(opening.x, opening.y), openingDrawer(page), { frames: 14 });
+			expectTransition(opened, 'image cell as the drawer opens');
+			const listScroll = new Set(opened.map((value) => String(value).split(' list ')[1]).filter((value) => value !== '-'));
+			expect(listScroll.size, `the list holds still while the drawer opens: ${JSON.stringify(opened)}`).toBe(1);
 			await page.keyboard.press('Escape');
 			await expect(drawer(page)).toHaveCount(0);
 
@@ -239,14 +258,16 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await page.locator('[data-popover]').getByRole('button', { name: 'Move pin' }).click();
 			await expect(commentButton(page)).toContainText('Move pin');
 			await still(page, testInfo, '1440-20b-move-pin-start');
-			const release = await holdThenFailMove(page);
+			const release = await holdMove(page);
 			const target = await at(page, .62, .64);
-			await page.mouse.click(target.x, target.y);
+			// The pin fades in, dashed, at its new place, its old tag fades out, and its old box turns dashed and dims.
+			expectTransition(await record(page, testInfo, '1440-21m-move-start-to-pending', viewer(page), () => page.mouse.click(target.x, target.y), movingPin(page)), 'moved pin going pending');
 			await expect(commentButton(page)).toContainText('Moving pin…');
 			await expect(tag(page, 1)).toHaveClass(/pending/);
 			await expect(page.locator('.image-viewer [data-region-from]')).toHaveCount(1);
 			await shoot(page, testInfo, '1440-21-move-pin-pending', true);
-			release();
+			// Failing: the pending pin fades out and the old one comes back solid, in place.
+			expectTransition(await record(page, testInfo, '1440-21n-pending-to-failed', viewer(page), release, movingPin(page)), 'failed move reverting');
 			await expect(toast(page, "Couldn't move the pin")).toBeVisible();
 			await expect(tag(page, 1)).not.toHaveClass(/pending/);
 			await expect(tag(page, 1)).toHaveClass(/stale/);
@@ -254,10 +275,18 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await shoot(page, testInfo, '1440-21b-move-pin-failed', true);
 			await page.unroute('**/api/comments/**');
 
-			// Trying again lands it.
+			// Trying again lands it: the pending pin settles from dashed to solid where it is, and the old place fades out.
+			const land = await holdMove(page, false);
 			await tag(page, 1).click();
 			await page.locator('[data-popover]').getByRole('button', { name: 'Move pin' }).click();
 			await page.mouse.click(target.x, target.y);
+			await expect(tag(page, 1)).toHaveClass(/pending/);
+			await rest(page);
+			// Filmed from a still pending pin: the fades that started it have finished.
+			await expect(viewer(page).locator('[data-region-tag][inert], [data-region-from][inert]')).toHaveCount(0);
+			await expect.poll(() => tag(page, 1).evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+			expectTransition(await record(page, testInfo, '1440-22m-pending-to-settled', viewer(page), land, movingPin(page)), 'moved pin settling');
+			await page.unroute('**/api/comments/**');
 			await expect(commentButton(page)).not.toContainText('Moving pin…');
 			await expect(tag(page, 1)).not.toHaveClass(/stale/);
 			await shoot(page, testInfo, '1440-22-move-pin-settled', true);
@@ -334,14 +363,14 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await tag(page, 1).tap();
 			await sheet(page).getByRole('button', { name: 'Move pin' }).tap();
 			await expect(sheet(page)).toHaveCount(0);
-			const release = await holdThenFailMove(page);
-			// Clear of every tag, since a tag keeps its own press in box mode.
+			const release = await holdMove(page);
+			// Clear of every tag, since a tag keeps its own press in box mode. A phone frame is slow to take, so its clock runs slower.
 			const spot = await at(page, .35, .85);
-			await touchDrag(page, spot, spot);
+			expectTransition(await record(page, testInfo, '393-10m-move-start-to-pending', viewer(page), () => touchDrag(page, spot, spot), movingPin(page), { rate: 0.03 }), 'moved pin going pending (393)');
 			await expect(commentButton(page)).toContainText('Moving pin…');
 			await expect(tag(page, 1)).toHaveClass(/pending/);
 			await shoot(page, testInfo, '393-10-move-pin-pending', true);
-			release();
+			expectTransition(await record(page, testInfo, '393-11m-pending-to-failed', viewer(page), release, movingPin(page), { rate: 0.03 }), 'failed move reverting (393)');
 			await expect(toast(page, "Couldn't move the pin")).toBeVisible();
 			await expect(tag(page, 1)).not.toHaveClass(/pending/);
 			await shoot(page, testInfo, '393-11-move-pin-failed', true);

@@ -100,8 +100,9 @@ export const at = async (page: Page, fx: number, fy: number) => {
 	const box = await frame(page);
 	return { x: box.x + box.width * fx, y: box.y + box.height * fy };
 };
-export const tag = (page: Page, number: number) => page.locator(`.image-viewer [data-region-tag="${number}"]`);
-export const tagNumbers = (page: Page) => page.locator('.image-viewer [data-region-tag]').evaluateAll((tags) => tags.map((t) => (t as HTMLElement).dataset.regionTag));
+// A tag or mark that is leaving stays in the page, inert, while it fades out; only the live ones are read.
+export const tag = (page: Page, number: number) => page.locator(`.image-viewer [data-region-tag="${number}"]:not([inert])`);
+export const tagNumbers = (page: Page) => page.locator('.image-viewer [data-region-tag]:not([inert])').evaluateAll((tags) => tags.map((t) => (t as HTMLElement).dataset.regionTag));
 export const commentButton = (page: Page) => viewer(page).locator('[data-image-comment]');
 export const pill = (page: Page) => viewer(page).locator('[data-image-comments-pill]');
 export const fitButton = (page: Page) => viewer(page).getByRole('button', { name: 'Fit', exact: true });
@@ -177,6 +178,8 @@ export async function record(page: Page, testInfo: TestInfo, name: string, aroun
 		values.push(await probe());
 		await still(page, testInfo, `${name}-f00`, clip);
 		await trigger();
+		// A trigger that detaches its own CDP session (touchDrag) puts the clock back to 1, so set it again.
+		await cdp.send('Animation.setPlaybackRate', { playbackRate: rate });
 		for (let index = 1; index <= frames; index++) {
 			values.push(await probe());
 			await still(page, testInfo, `${name}-f${String(index).padStart(2, '0')}`, clip);

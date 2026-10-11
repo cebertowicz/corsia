@@ -8,7 +8,7 @@
 	import ImageCommentBar from './ImageCommentBar.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import { createImageComments } from '$lib/imageComments.svelte';
-	import { regionColor } from '$lib/imageRegions';
+	import { regionColor, revealCentre } from '$lib/imageRegions';
 	import { FIT_MARGIN } from '$lib/imageZoom';
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
 	import { commentLoads, docComments, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
@@ -41,7 +41,13 @@
 		artifactId: () => artifactId,
 		readOnly: () => !canComment,
 		restoreFocus: () => root?.querySelector<HTMLElement>('.viewport')?.focus({ preventScroll: true }),
-		reveal: (region) => lightbox?.revealFraction(region.x + region.w / 2, region.y + region.h / 2),
+		reveal: (id, region) => {
+			const frame = root?.querySelector('[data-image-regions]')?.getBoundingClientRect();
+			if (!frame?.width || !frame.height) return;
+			const tag = root?.querySelector(`[data-region-tag][data-comment-id="${id}"]:not([inert])`)?.getBoundingClientRect() ?? null;
+			const centre = revealCentre(region, tag, frame);
+			lightbox?.revealFraction(centre.x, centre.y);
+		},
 	});
 
 	$effect(() => { draftOpen = image.hasDraftText; });

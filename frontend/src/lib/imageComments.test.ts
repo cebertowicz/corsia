@@ -107,7 +107,7 @@ describe('image comments', () => {
 		expect(comments.ui.state).toEqual({ kind: 'list' });
 		expect(get(focusedDocComment)).toBe('c2');
 		expect(comments.selectedId).toBe('c2');
-		expect(reveal).toHaveBeenCalledWith(BOX);
+		expect(reveal).toHaveBeenCalledWith('c2', BOX);
 	});
 
 	it('keeps the drawer open when a tag is picked, and selects that comment there', () => {

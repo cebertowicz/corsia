@@ -96,21 +96,26 @@
 			drawer?.querySelector<HTMLElement>('[data-drawer-filter]')?.focus();
 		});
 	});
-	/** Bring a card into view in the drawer's own list: smooth, or at once with reduced motion. */
-	function scrollToCard(id: string) {
+	/** Bring a card into view in the drawer's own list: smooth, or at once when asked or with reduced motion. */
+	function scrollToCard(id: string, instant: boolean) {
 		const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
 		const card = list?.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
 		if (!list || !card) return;
 		const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - 4;
-		list.scrollTo({ top: Math.max(0, top), behavior: get(prefersReducedMotion) ? 'auto' : 'smooth' });
+		list.scrollTo({ top: Math.max(0, top), behavior: instant || get(prefersReducedMotion) ? 'instant' : 'smooth' });
 	}
 	// An image's selected comment, picked on the image or there when the drawer opens, is scrolled to and marked in it.
+	// The drawer opens already at its card, so only the drawer moves; a pick while it is open glides the list.
+	let listShown = false;
 	$effect(() => {
 		const id = focusedId;
 		// Picking the selected tag again scrolls back to its card.
 		void picks;
-		if (!isImage || surfaceState?.kind !== 'list' || !id) return;
-		void tick().then(() => scrollToCard(id));
+		const shown = isImage && surfaceState?.kind === 'list';
+		const opening = shown && !listShown;
+		listShown = shown;
+		if (!shown || !id) return;
+		void tick().then(() => scrollToCard(id, opening));
 	});
 	/**
 	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with

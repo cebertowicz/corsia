@@ -206,14 +206,15 @@ describe('ImageCommentLightbox', () => {
 			expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }));
 		});
 
-		it('opens the drawer at the selected comment’s card, marked', async () => {
+		it('opens the drawer already at the selected comment’s card, marked, so only the drawer moves', async () => {
 			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 			tag(3).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
 			await settle();
 			scrollTo.mockClear();
 			await openDrawer();
 			expect(card('second').querySelector('.ct')!.classList.contains('focused')).toBe(true);
-			expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }));
+			expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'instant' }));
+			expect(scrollTo).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }));
 		});
 
 		it('lands keyboard focus on the card’s Reply field when a tag is picked', async () => {

@@ -45,7 +45,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			// In a narrow canvas the card falls below, never over the tag or the box it is about.
 			const cardBox = (await card.boundingBox())!;
 			expect(overlap((await tag(page, 1).boundingBox())!, cardBox)).toBe(false);
-			expect(overlap((await page.locator('.image-viewer [data-region-box]').boundingBox())!, cardBox)).toBe(false);
+			expect(overlap((await page.locator('.image-viewer [data-region-box]:not([inert])').boundingBox())!, cardBox)).toBe(false);
 			await expectUnclipped(page, card);
 			await expect(tag(page, 1)).not.toHaveClass(/faint/);
 			await shoot(page, testInfo, '1440-03-card-beside-tag', true);
@@ -68,14 +68,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			const firstCardWithNeighbours = page.locator('.ct').filter({ hasText: 'The header is too tall here' });
 			await expect(firstCardWithNeighbours).toBeVisible();
 			const neighbouringCardBox = (await firstCardWithNeighbours.boundingBox())!;
-			for (const regionTag of await page.locator('.image-viewer [data-region-tag]').all()) {
+			for (const regionTag of await page.locator('.image-viewer [data-region-tag]:not([inert])').all()) {
 				expect(overlap((await regionTag.boundingBox())!, neighbouringCardBox)).toBe(false);
 			}
 			await page.keyboard.press('Escape');
 			await shoot(page, testInfo, '1440-04-tags-faint', true);
 			await tag(page, 1).hover();
 			await expect(tag(page, 1)).not.toHaveClass(/faint/);
-			await expect(page.locator('.image-viewer [data-region-box]')).toHaveCount(1);
+			await expect(page.locator('.image-viewer [data-region-box]:not([inert])')).toHaveCount(1);
 			await shoot(page, testInfo, '1440-05-tag-hover');
 
 			// Reply on the point.
@@ -188,7 +188,11 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(tag(page, 2)).toHaveClass(/stale/);
 			await expect(tag(page, 4)).toHaveClass(/stale/);
 			await expect(tag(page, 2)).toHaveAttribute('aria-label', /image changed since this comment/);
-			await expect(tag(page, 2).locator('.disc')).toHaveCSS('border-style', 'dashed');
+			// The dashed edge is the disc's own layer, shown over a cleared solid border.
+			await expect.poll(() => tag(page, 2).locator('.disc').evaluate((el) => {
+				const edge = getComputedStyle(el, '::before');
+				return `${edge.borderTopStyle} ${edge.opacity} ${getComputedStyle(el).borderTopColor}`;
+			})).toBe('dashed 1 rgba(0, 0, 0, 0)');
 			expect(await tag(page, 2).evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
 			await shoot(page, testInfo, '1440-13-stale-pins', true);
 
@@ -222,7 +226,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			const card = page.locator('.ct').filter({ hasText: 'The header is too tall here' });
 			await expect(card).toBeVisible();
 			const cardBox = (await card.boundingBox())!;
-			const box = (await page.locator('.image-viewer [data-region-box]').boundingBox())!;
+			const box = (await page.locator('.image-viewer [data-region-box]:not([inert])').boundingBox())!;
 			expect(overlap(box, cardBox)).toBe(false);
 			expect(overlap((await tag(page, 1).boundingBox())!, cardBox)).toBe(false);
 			// Beside: the card shares the box's rows instead of dropping below it.

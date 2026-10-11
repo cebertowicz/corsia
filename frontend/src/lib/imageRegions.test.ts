@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_COLORS } from '$lib/docPresence';
-import { describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, TAG_RADIUS } from './imageRegions';
+import { describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, revealCentre, TAG_RADIUS } from './imageRegions';
 
 const FRAME = { width: 800, height: 500 };
 
@@ -100,6 +100,20 @@ describe('nearestTarget', () => {
 		expect(nearestTarget(targets, { x: 108, y: 100 })).toBe('a');
 		expect(nearestTarget(targets, { x: 112, y: 104 })).toBe('b');
 		expect(nearestTarget(targets, { x: 200, y: 200 })).toBeNull();
+	});
+});
+
+describe('revealCentre', () => {
+	const frame = new DOMRect(100, 50, 800, 500);
+	it('centres a box together with its tag, so the tag lands clear of the viewport edge', () => {
+		// On screen the box runs 420 to 580 across and 200 to 300 down; its tag sits left of the top-left corner.
+		const centre = revealCentre({ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, new DOMRect(395, 189, 22, 22), frame);
+		expect(centre.x).toBeCloseTo(((395 + 580) / 2 - 100) / 800);
+		expect(centre.y).toBeCloseTo(((189 + 300) / 2 - 50) / 500);
+	});
+
+	it('centres the box alone when its tag is not on screen', () => {
+		expect(revealCentre({ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, null, frame)).toEqual({ x: 0.5, y: 0.4 });
 	});
 });
 
