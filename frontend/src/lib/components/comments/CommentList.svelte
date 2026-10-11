@@ -58,15 +58,14 @@
 </div>
 
 <style>
-	.comment-jump { display: block; width: 100%; min-height: 24px; text-align: left; border: 0; background: none; color: var(--accent); font: inherit; font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-	@media (pointer: coarse) { .comment-jump { min-height: 44px; } }
+	.comment-jump { display: block; width: 100%; min-height: 44px; text-align: left; border: 0; background: none; color: var(--accent); font: inherit; font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 	.comment-jump:disabled { color: var(--text-tertiary); cursor: default; }
 	.comment-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
 
-	.list { display: flex; flex-direction: column; gap: 4px; }
+	.list { display: flex; flex-direction: column; gap: 8px; }
 	h3, summary { margin: 6px 0 2px; color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); }
 	h3:first-child { margin-top: 0; }
 	.empty { margin: 0; color: var(--text-tertiary); font-size: var(--text-footnote); }
-	details { display: flex; flex-direction: column; gap: 4px; }
+	details { display: flex; flex-direction: column; gap: 8px; }
 	summary { cursor: pointer; }
 </style>

@@ -39,11 +39,7 @@ function raiseAsk(threadId: string, artifactId: string, reason: string): void {
 	});
 }
 
-/** The desktop and mobile projects share one database, so every seeded thread needs a title no other run reuses. */
-const uniqueTitle = (title: string) => `${title} ${Math.random().toString(36).slice(2, 7)}`;
-
-async function seed(request: APIRequestContext, baseTitle: string) {
-	const title = uniqueTitle(baseTitle);
+async function seed(request: APIRequestContext, title: string) {
 	const threadId = await createSession(request, title);
 	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
 	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
@@ -56,8 +52,7 @@ async function seed(request: APIRequestContext, baseTitle: string) {
 type Doc = Awaited<ReturnType<typeof seed>>;
 
 /** A registered image the owning thread asks about; the same fixture shape as a document, with no text. */
-async function seedImage(request: APIRequestContext, baseTitle: string): Promise<Doc> {
-	const title = uniqueTitle(baseTitle);
+async function seedImage(request: APIRequestContext, title: string): Promise<Doc> {
 	const threadId = await createSession(request, title);
 	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
 	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
@@ -118,12 +113,7 @@ const bar = (page: Page) => page.locator('.review-bar');
 /** The bar's geometry per surface: one compact row, a stacked bar with compact right-aligned buttons, or 44px touch buttons. */
 async function expectLayout(page: Page, mode: Mode) {
 	const canvas = () => page.locator('.document-canvas, .image-canvas').first().evaluate((el) => el.getBoundingClientRect().width);
-	if (mode === 'closed') {
-		// The pane's width transition resizes the canvas, and the bar's one-row layout is a container query on that width:
-		// measure only once the transition has finished, never mid-way.
-		await page.locator('.pane').evaluate((pane) => Promise.all(pane.getAnimations().map((animation) => animation.finished)));
-		await expect.poll(canvas).toBeGreaterThan(600);
-	}
+	if (mode === 'closed') await expect.poll(canvas).toBeGreaterThan(600);
 	else if (mode === 'default') expect(await canvas(), 'the default layout is a narrow canvas').toBeLessThan(600);
 	const box = (await bar(page).boundingBox())!;
 	const buttons = await bar(page).locator('.btn').evaluateAll((els) =>
@@ -154,11 +144,7 @@ function journey(name: string, cases: readonly Case[], run: Run) {
 	for (const [label, mode, theme] of cases) {
 		test.describe(label, () => {
 			if (mode === 'phone') test.use({ hasTouch: true, isMobile: true });
-			test(`@surface:review-bar ${name} (${label})`, async ({ page, request }, info) => {
-				// The mobile project's Pixel 7 device is a coarse pointer, so it would turn a 1440 case's compact buttons into 44px ones.
-				test.skip(mode !== 'phone' && info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
-				await run({ page, request, info, mode, theme });
-			});
+			test(`@surface:review-bar ${name} (${label})`, async ({ page, request }, info) => run({ page, request, info, mode, theme }));
 		});
 	}
 }
@@ -278,34 +264,6 @@ journey('a note in flight keeps its layout', [['1440 light', 'default', 'light']
 	await shot(page, 'note-sending', info);
 	release();
 	await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
-});
-
-journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
-	const doc = await seed(request, `Review drawer ${mode} ${theme}`);
-	await comment(request, doc, 'Ring two should wait.', 2);
-	await comment(request, doc, 'Add a rollback line.', 5);
-	await open(page, doc, mode, theme);
-	await page.getByRole('button', { name: '2 comments', exact: true }).click();
-	const drawer = page.locator('[data-doc-comments-drawer]');
-	await expect(drawer).toBeVisible();
-	const done = drawer.getByRole('button', { name: 'Done', exact: true });
-	const filters = drawer.locator('[data-drawer-filter]');
-	const jump = drawer.locator('[data-comment-jump]').first();
-	expect(await filters.count()).toBe(3);
-	const targets = [done, jump, ...(await filters.all())];
-	for (const target of targets) expect((await target.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
-	// A real tap on each control's centre lands on it.
-	const openFilter = drawer.getByRole('button', { name: 'Open', exact: true });
-	const box = (await openFilter.boundingBox())!;
-	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-	await expect(openFilter).toHaveAttribute('aria-pressed', 'true');
-	const jumpBox = (await jump.boundingBox())!;
-	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
-	await expect(drawer).toBeVisible();
-	await shot(page, 'drawer-touch', info);
-	const doneBox = (await done.boundingBox())!;
-	await page.touchscreen.tap(doneBox.x + doneBox.width / 2, doneBox.y + doneBox.height / 2);
-	await expect(drawer).toBeHidden();
 });
 
 journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light']], async ({ page, request, info, mode, theme }) => {

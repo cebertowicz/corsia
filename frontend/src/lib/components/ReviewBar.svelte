@@ -157,7 +157,7 @@
 			{:else}
 				<div class="rb-actions">
 					<Button size="sm" variant="primary" loading={busy} bind:el={approveButton} description={alsoSends} title={alsoSends} onclick={approve}>{bar.approveLabel}</Button>
-					<Button size="sm" variant="ghost" disabled={busy} bind:el={requestButton} onclick={requestChanges}>Request changes</Button>
+					<Button size="sm" variant="secondary" disabled={busy} bind:el={requestButton} onclick={requestChanges}>Request changes</Button>
 				</div>
 			{/if}
 			<span class="sr-only" role="status">{busy ? 'Sending your review' : ''}</span>
@@ -166,7 +166,7 @@
 {/if}
 
 <style>
-	.review-bar { flex: none; display: flex; align-items: center; gap: 6px 12px; min-height: 38px; padding: 4px 6px 4px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--glass-regular-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim), var(--shadow-chip); font-size: var(--text-footnote); color: var(--text-secondary); min-width: 0; }
+	.review-bar { flex: none; display: flex; align-items: center; gap: 6px 12px; min-height: 40px; padding: 6px 8px 6px 12px; border: 1px solid var(--violet-line); border-radius: var(--radius-sm); background: var(--violet-bg); font-size: var(--text-footnote); color: var(--text-secondary); min-width: 0; }
 	.rb-head { display: contents; }
 	.rb-narrow, .rb-others { display: none; }
 	/* The agent name, the boilerplate and the ask are flex items, so the line gives way in order: the boilerplate
@@ -183,19 +183,20 @@
 	.review-bar.noting .rb-line { flex: 0 1 auto; max-width: 46%; }
 	.rb-more { flex: none; white-space: nowrap; color: var(--text-secondary); }
 	.rb-actions { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }
-	.rb-note { flex: 1 1 14rem; min-width: 0; height: 28px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); }
+	.rb-note { flex: 1 1 14rem; min-width: 0; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); }
 	.rb-note::placeholder { color: var(--text-tertiary); }
 	.rb-note:focus { outline: 2px solid var(--accent); outline-offset: -2px; border-color: transparent; }
 	.rb-icon { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
 	.rb-failure { flex: none; color: var(--amber-text); }
 	.rb-failure:empty { display: none; }
+	.review-bar.receipt { background: var(--bg-secondary); border-color: var(--border-subtle); color: var(--text-secondary); }
 	.review-bar.receipt .rb-icon { color: var(--green-text); }
 	.review-bar.receipt.changes .rb-icon { color: var(--amber-text); }
 	.review-bar.receipt .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
 	.rb-receipt { flex: 1 1 0; min-width: 0; outline: none; }
 	.rb-seg { white-space: nowrap; }
-	.review-bar.stale .rb-icon { color: var(--amber-text); }
-	.review-bar.stale .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
+	.review-bar.stale { background: var(--amber-bg); border-color: var(--amber-line); color: var(--amber-text); }
+	.review-bar.stale .rb-text { font-weight: var(--fw-medium); }
 	.review-bar.stale .rb-sub { margin-left: auto; opacity: 0.85; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
