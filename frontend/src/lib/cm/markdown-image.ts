@@ -1,6 +1,6 @@
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
-import { Facet, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
+import { Facet, RangeSet, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { imageContentUrl } from '$lib/artifactImage';
 
@@ -64,17 +64,35 @@ export function renderableImage(state: EditorState, node: SyntaxNode): boolean {
 }
 
 /**
- * The image, drawn below its line. A failed load shows the alt text and why, from the
+ * The image, drawn below its line, or in place of the line when the image is all it holds. It carries the
+ * range of its markdown (`data-from`, `data-to`) so a click can select it whole, and shows when it is selected.
+ * A failed load shows the alt text and why, from the
  * server's answer to the same request: the file is missing (404), refused as outside this
  * scope (400) or not an image (415); any other status, or no answer at all, is a plain
  * failure to load.
  */
 class ImageWidget extends WidgetType {
-	constructor(readonly alt: string, readonly src: string) { super(); }
-	eq(other: ImageWidget) { return other.src === this.src && other.alt === this.alt; }
+	constructor(readonly alt: string, readonly src: string, readonly from: number, readonly to: number, readonly selected: boolean) { super(); }
+	eq(other: ImageWidget) {
+		return other.src === this.src && other.alt === this.alt && other.from === this.from && other.to === this.to && other.selected === this.selected;
+	}
+	/** A moved or newly selected image keeps its element, so it does not reload. */
+	updateDOM(dom: HTMLElement) {
+		if (dom.dataset.src !== this.src || dom.dataset.alt !== this.alt) return false;
+		this.mark(dom);
+		return true;
+	}
+	private mark(wrap: HTMLElement) {
+		wrap.dataset.from = String(this.from);
+		wrap.dataset.to = String(this.to);
+		wrap.classList.toggle('cm-md-image-selected', this.selected);
+	}
 	toDOM() {
 		const wrap = document.createElement('div');
 		wrap.className = 'cm-md-image';
+		wrap.dataset.src = this.src;
+		wrap.dataset.alt = this.alt;
+		this.mark(wrap);
 		const img = document.createElement('img');
 		img.alt = this.alt;
 		img.decoding = 'async';
@@ -100,11 +118,25 @@ class ImageWidget extends WidgetType {
 	ignoreEvent() { return false; }
 }
 
-function buildImageDecorations(state: EditorState): DecorationSet {
+interface Images {
+	decorations: DecorationSet;
+	/** The markdown of each drawn image, which the caret steps over and an edit removes whole. */
+	atomic: DecorationSet;
+}
+
+const NONE: Images = { decorations: Decoration.none, atomic: Decoration.none };
+const UNIT = Decoration.mark({});
+
+/**
+ * An image's markdown never shows. A line holding only the image is replaced by it, so no empty line is left
+ * above; with other text on the line the markdown alone is hidden and the image sits below the line.
+ */
+function buildImages(state: EditorState): Images {
 	const decos: Range<Decoration>[] = [];
+	const atomic: Range<Decoration>[] = [];
 	const { doc, selection } = state;
 	const context = state.facet(imageContext)();
-	if (!context) return Decoration.none;
+	if (!context) return NONE;
 	syntaxTree(state).iterate({
 		enter: (node) => {
 			if (node.name === 'Table' || node.name === 'FencedCode') return false;
@@ -113,22 +145,47 @@ function buildImageDecorations(state: EditorState): DecorationSet {
 			if (path === null) return false;
 			const line = doc.lineAt(node.from);
 			const src = imageContentUrl({ path, projectId: context.projectId, token: context.token });
-			decos.push(Decoration.widget({ widget: new ImageWidget(alt, src), block: true, side: 1 }).range(line.to));
-			// The source shows, still editable, only while the caret is on its line.
-			if (!selection.ranges.some((r) => r.from <= line.to && r.to >= line.from)) decos.push(Decoration.replace({}).range(node.from, node.to));
+			const selected = selection.ranges.some((r) => !r.empty && r.from <= node.from && r.to >= node.to);
+			const widget = new ImageWidget(alt, src, node.from, node.to, selected);
+			if (line.text.trim() === doc.sliceString(node.from, node.to)) {
+				decos.push(Decoration.replace({ widget, block: true }).range(line.from, line.to));
+				// The line break goes with it, so Backspace on the next line removes the image, not the break.
+				atomic.push(UNIT.range(line.from, Math.min(line.to + 1, doc.length)));
+			} else {
+				decos.push(Decoration.widget({ widget, block: true, side: 1 }).range(line.to));
+				decos.push(Decoration.replace({}).range(node.from, node.to));
+				atomic.push(UNIT.range(node.from, node.to));
+			}
 			return false;
 		}
 	});
-	return Decoration.set(decos, true);
+	return { decorations: Decoration.set(decos, true), atomic: RangeSet.of(atomic, true) };
 }
 
-/** Block decorations must come from a state field; this one follows the tree, the document and the caret. */
-export const markdownImages = StateField.define<DecorationSet>({
-	create: buildImageDecorations,
-	update(deco, tr) {
-		const caretMoved = tr.selection !== undefined && deco.size > 0;
-		if (tr.docChanged || caretMoved || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildImageDecorations(tr.state);
-		return deco;
+/** Block decorations must come from a state field; this one follows the tree, the document and the selection (which marks the selected image). */
+export const markdownImages = StateField.define<Images>({
+	create: buildImages,
+	update(images, tr) {
+		const selectionMoved = tr.selection !== undefined && images.atomic.size > 0;
+		if (tr.docChanged || selectionMoved || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildImages(tr.state);
+		return images;
 	},
-	provide: (f) => EditorView.decorations.from(f),
+	provide: (f) => [
+		EditorView.decorations.from(f, (images) => images.decorations),
+		EditorView.atomicRanges.of((view) => view.state.field(f).atomic),
+	],
+});
+
+/** A click on an image selects its markdown whole, which the document's Comment control anchors a comment to. */
+export const selectImageOnClick = EditorView.domEventHandlers({
+	mousedown(event, view) {
+		const wrap = (event.target as Element | null)?.closest?.<HTMLElement>('.cm-md-image');
+		if (!wrap || event.button !== 0) return false;
+		const [from, to] = [Number(wrap.dataset.from), Number(wrap.dataset.to)];
+		if (!(to > from) || to > view.state.doc.length) return false;
+		event.preventDefault();
+		view.dispatch({ selection: { anchor: from, head: to }, userEvent: 'select.image' });
+		view.focus();
+		return true;
+	},
 });
