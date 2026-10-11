@@ -5,6 +5,8 @@ import asyncio
 import httpx
 import pytest
 
+from infra.key_store_servers import remove_server_key, set_server_key
+
 
 def _register(host: str, *, port: int = 5200, key: str | None = None) -> str:
     from llm import network_discovery as nd
@@ -13,7 +15,7 @@ def _register(host: str, *, port: int = 5200, key: str | None = None) -> str:
         "omlx", host, host, host, port, "offline", kind="managed",
     )
     if key is not None:
-        nd.set_server_metadata(server_id, api_key=key)
+        set_server_key(server_id, key)
     return server_id
 
 
@@ -27,11 +29,11 @@ def test_registered_public_headers_read_current_metadata_for_rotation_and_remova
     assert asyncio.run(public_headers({"server_id": server_id}, url=url)) == {
         "Authorization": "Bearer first",
     }
-    nd.set_server_metadata(server_id, api_key="second")
+    set_server_key(server_id, "second")
     assert asyncio.run(public_headers({"server_id": server_id}, url=url)) == {
         "Authorization": "Bearer second",
     }
-    nd.set_server_metadata(server_id, clear=("api_key",))
+    remove_server_key(server_id)
     assert asyncio.run(public_headers({"server_id": server_id}, url=url)) == {}
 
 
@@ -125,7 +127,7 @@ def test_readiness_reloads_registered_key_before_each_probe(isolated_db, monkeyp
     def handler(request: httpx.Request) -> httpx.Response:
         headers.append(request.headers.get("authorization"))
         if len(headers) == 1:
-            nd.set_server_metadata(server_id, api_key="second")
+            set_server_key(server_id, "second")
             return httpx.Response(503, request=request)
         return httpx.Response(200, json={"data": []}, request=request)
 

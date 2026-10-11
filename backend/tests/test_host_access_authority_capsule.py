@@ -51,6 +51,7 @@ def _application_review():
         reason_category="not_applicable",
         reason="The request is bounded.",
         user_attestation="This request matches the stated plan.",
+        reviewer_fallback=False,
         allowed=True,
     )
 

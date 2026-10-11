@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from infra.database import write_transaction
+from infra.key_store_servers import resolve_server
 
 log = logging.getLogger(__name__)
 
@@ -83,14 +84,14 @@ def build_external_params(server_id: str, provider_model_id: str) -> dict:
     a custom ``base_url``; ``openai`` (default) → the litellm OpenAI-compat leg.
     Fails loud when the server row or a reachable endpoint is missing."""
     from llm.reasoning_config import listed_effort_levels
-    from llm.network_discovery import get_server, get_server_metadata
+    from llm.network_discovery import get_server
     from llm.network_endpoints import anthropic_root, build_api_base
 
     server = get_server(server_id)
     if not server:
         raise ValueError(f"External server not found: {server_id}")
     dialect = server.get("dialect") or "openai"
-    api_key = get_server_metadata(server_id).get("api_key")
+    api_key = resolve_server(server_id)
 
     if dialect == "anthropic":
         # The SDK appends /v1/messages itself, so it takes the bare root.
@@ -100,12 +101,10 @@ def build_external_params(server_id: str, provider_model_id: str) -> dict:
             raise ValueError(f"External server has no reachable endpoint: {server_id}")
         return {
             "model": f"anthropic/{provider_model_id}",
-            # A NON-EMPTY key is REQUIRED even for a keyless endpoint: the
-            # AsyncAnthropic SDK falls back to os.environ['ANTHROPIC_API_KEY']
-            # (populated globally from CORSIA's own keys, settings.py) when no
-            # api_key is passed — which would send CORSIA's real cloud Anthropic
-            # credential to this user-supplied endpoint. The sentinel forecloses
-            # that leak (same pattern as the openai leg below / oMLX's "omlx").
+            # A NON-EMPTY key is REQUIRED even for a keyless endpoint: with none, the
+            # SDK falls back to the ANTHROPIC_API_KEY environment variable, which would
+            # send CORSIA's own cloud credential to this user-supplied endpoint. The
+            # sentinel forecloses that (same as the openai leg below and oMLX's "omlx").
             "api_key": api_key or "sk-noauth",
             "api_base": root,
             "uses_streaming": True,
@@ -189,7 +188,7 @@ def _external_discovery_config(
     server_id: str,
 ) -> tuple[dict | None, str | None, str | None, dict | None]:
     """Cloud discovery is its own probe (configured base); others wait for the sweep."""
-    from llm.network_discovery import get_server, get_server_metadata
+    from llm.network_discovery import get_server
     from llm.network_endpoints import build_api_base, configured_api_base, is_cloud_external
 
     server = get_server(server_id)
@@ -199,7 +198,7 @@ def _external_discovery_config(
     return (
         server,
         configured_api_base(server_id) if cloud else build_api_base(server_id),
-        get_server_metadata(server_id).get("api_key"),
+        resolve_server(server_id),
         _capability_overrides(server),
     )
 

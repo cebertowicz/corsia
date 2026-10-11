@@ -40,8 +40,7 @@ def _wire_external_server(monkeypatch, *, dialect: str, api_key):
     server = {"id": "ns-ext", "dialect": dialect, "port": 8080,
               "instance_name": "my-box", "status": "online"}
     monkeypatch.setattr(network_discovery, "get_server", lambda sid: server)
-    monkeypatch.setattr(network_discovery, "get_server_metadata",
-                        lambda sid: {"api_key": api_key})
+    monkeypatch.setattr("llm.external_provider.resolve_server", lambda sid: api_key)
     monkeypatch.setattr(network_endpoints, "get_active_endpoint",
                         lambda sid: {"host": "10.0.0.9"})
     # The one URL owner; both dispatch legs derive their base from it.

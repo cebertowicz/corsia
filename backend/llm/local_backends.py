@@ -81,10 +81,11 @@ class OmlxBackend(LocalModelBackend):
         Returns just ``{"server_id": ...}`` when the row is missing —
         the provider module's own ``host``/``port`` guards take it from there.
 
-        ``api_key`` comes from ``metadata_json`` (set at manual-add time
-        via ``set_server_metadata``) so admin endpoints — model load,
+        ``api_key`` comes from the key store (set at manual-add time via
+        ``set_server_key``) so admin endpoints — model load,
         settings, stats — authenticate without prompting per request."""
-        from llm.network_discovery import get_server, get_server_metadata
+        from infra.key_store_servers import resolve_server
+        from llm.network_discovery import get_server
         from llm.network_endpoints import get_active_endpoint
 
         server = get_server(server_id)
@@ -96,7 +97,7 @@ class OmlxBackend(LocalModelBackend):
             "host": ep["host"] if ep else None,
             "port": int(server["port"]) if server.get("port") else None,
             "instance_name": server.get("instance_name"),
-            "api_key": get_server_metadata(server_id).get("api_key"),
+            "api_key": resolve_server(server_id),
         }
 
     async def check_health(self, litellm_model: str) -> tuple[bool, str]:

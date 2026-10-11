@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Literal, get_args
 
+from host_access.errors import ReviewerUnavailableError
 from llm.isolated_structured import (
     IsolatedStructuredError,
     IsolatedStructuredIdentityError,
@@ -21,6 +22,7 @@ from llm.isolated_structured import (
 REVIEW_FAILURE_STAGE = "application_reviewer_failure"
 ACTIVATION_FAILED_STAGE = "activation_failed"
 BROWSER_ISOLATION_FAILED_STAGE = "browser_isolation_failed"
+REVIEWER_UNAVAILABLE_REASON = "reviewer_unavailable"
 
 ReviewTerminal = Literal[
     "allow", "block", "revoke", "invalid_output", "identity_failure",
@@ -64,6 +66,7 @@ HOLDER_SAFE_REASONS = frozenset(
         ACTIVATION_FAILED_STAGE,
         BROWSER_ISOLATION_FAILED_STAGE,
         REVIEW_FAILURE_STAGE,
+        REVIEWER_UNAVAILABLE_REASON,
     }
 )
 
@@ -153,6 +156,8 @@ def lease_failure_reason(exc: BaseException, *, review_recorded: bool) -> str:
         return BROWSER_ISOLATION_FAILED_STAGE
     if review_recorded:
         return ACTIVATION_FAILED_STAGE
+    if isinstance(exc, ReviewerUnavailableError):
+        return REVIEWER_UNAVAILABLE_REASON
     cause = classify_failure(exc)
     return f"{REVIEW_FAILURE_STAGE}: {cause}" if cause else REVIEW_FAILURE_STAGE
 

@@ -197,6 +197,27 @@ async def test_reviewer_model_save_uses_run_in_db(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reviewer_fallback_save_uses_run_in_db(monkeypatch):
+    import api.system as api_system
+
+    calls = []
+
+    async def fake_run_in_db(function, *args):
+        calls.append((function, args))
+
+    monkeypatch.setattr(api_system, "run_in_db", fake_run_in_db)
+    result = await api_system.update_settings(
+        {"host_access_reviewer_fallback": True},
+        user={"id": "steve", "token_kind": "session"},
+    )
+
+    assert calls == [
+        (api_system.save_agent_defaults, ({"host_access_reviewer_fallback": True},)),
+    ]
+    assert result["host_access_reviewer_fallback"] is True
+
+
+@pytest.mark.asyncio
 async def test_bulletin_tool_and_loop_use_the_db_worker(monkeypatch):
     import infra.bulletin_live as bulletin_live
     import infra.db_async as db_async

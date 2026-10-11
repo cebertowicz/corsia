@@ -19,15 +19,16 @@ def test_omlx_manual_add_probes_health_and_v1_models(monkeypatch):
     _patch_httpx(monkeypatch, router)
 
     upserted: list = []
-    metadata: list = []
+    stored: list = []
+    from api import network_server_helpers
     from llm import network_discovery
     monkeypatch.setattr(
         network_discovery, "upsert_server",
         lambda **kw: (upserted.append(kw), "ns-omlx-1")[1],
     )
     monkeypatch.setattr(
-        network_discovery, "set_server_metadata",
-        lambda sid, *, db, **kw: metadata.append((sid, kw)),
+        network_server_helpers, "set_server_key",
+        lambda sid, key, *, db: stored.append((sid, key)),
     )
 
     body = AddServerBody(
@@ -43,7 +44,7 @@ def test_omlx_manual_add_probes_health_and_v1_models(monkeypatch):
     assert upserted[0]["provider"] == "omlx"
     assert upserted[0]["instance_id"] == "127.0.0.1:8000"
     assert upserted[0]["source"] == "manual"
-    assert metadata == [("ns-omlx-1", {"api_key": "sk-test-key"})]
+    assert stored == [("ns-omlx-1", "sk-test-key")]
 
 
 def test_omlx_manual_add_rejects_when_health_fails(monkeypatch):

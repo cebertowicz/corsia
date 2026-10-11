@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth_fixtures import create_accounts_tables, seed_test_accounts  # noqa: E402
+from infra.key_store_schema import KEY_STORE_SCHEMA_SQL  # noqa: E402
 
 
 def _resp(status: int, body: Any = None) -> httpx.Response:
@@ -177,14 +178,15 @@ def fresh_db(tmp_path, monkeypatch):
         )"""
     )
     # This database is built table by table rather than from the whole schema,
-    # but a route still resolves its caller against the account tables, so they
-    # are not optional here.
+    # but a route still resolves its caller against the account tables, and the
+    # server key through its key store row, so they are not optional here.
     create_accounts_tables(conn)
+    conn.executescript(KEY_STORE_SCHEMA_SQL)
     conn.commit()
     conn.close()
     seed_test_accounts()
     from infra.database import get_db
-    from llm import network_discovery as nd
+    from infra import key_store
     from llm import network_endpoints as ne
 
     db = get_db()
@@ -199,7 +201,7 @@ def fresh_db(tmp_path, monkeypatch):
     )
     db.commit()
     ne.upsert_endpoint("srv-test", "127.0.0.1", ok=True)
-    nd.set_server_metadata("srv-test", api_key="catalog-fixture-key")
+    key_store.set_managed_value("server-srv-test", "catalog-fixture-key")
 
     yield db_file
 

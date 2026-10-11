@@ -105,17 +105,24 @@ class MCPToolWrapper(Tool):
             await asyncio.gather(call, return_exceptions=True)
 
 
-async def _open_session(config: dict, stack: AsyncExitStack):
+async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from mcp import ClientSession, StdioServerParameters
 
+    from tools.mcp_secrets import resolve
+
     auth = None
+    if config.get("secret_headers"):
+        # A legacy credential header stays refused at launch, before any value is read.
+        raise MCPConfigError("literal credential headers are refused; use bearer_file for bearer authentication")
+    secret_env, _ = resolve(name, config)
     if config.get("command"):
         if config.get("bearer_file"):
             raise MCPConfigError("bearer_file is supported only for HTTP MCP servers")
         from mcp.client.stdio import stdio_client
 
+        env = {**(config.get("env") or {}), **secret_env}
         params = StdioServerParameters(command=config["command"],
-                                       args=config.get("args", []), env=config.get("env") or None)
+                                       args=config.get("args", []), env=env or None)
         read, write = await stack.enter_async_context(stdio_client(params))
     elif config.get("url"):
         from mcp.client.streamable_http import streamable_http_client
@@ -136,7 +143,7 @@ async def _open_session(config: dict, stack: AsyncExitStack):
 async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
     allowlist = allowed_names(config)
     tool_timeout = timeout_seconds(config, "tool_timeout", 30)
-    session, auth = await _open_session(config, stack)
+    session, auth = await _open_session(name, config, stack)
     discovered = []
     cursor = None
     while True:

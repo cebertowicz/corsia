@@ -32,8 +32,6 @@ jobs:
       # the HOME-prefix guard (it protects a shared host's live workspace)
       # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
       CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CORSIA_ANALYTICS_DISABLE: '1'
       CORSIA_CONTRACT_SUITE: '1'
       CORSIA_REQUIRE_SAFEHOUSE: '1'

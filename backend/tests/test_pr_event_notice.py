@@ -13,7 +13,7 @@ import pytest
 
 from events.connectors import github_pr_notice as notices
 from events.identity import GITHUB_INTEGRATION, PR_TYPE, pr_external_id
-from infra.settings import get_setting, set_setting
+from infra.settings import get_setting
 from tests.event_routing_helpers import mk_session, register_pr
 
 REPO = "o/r"
@@ -37,7 +37,12 @@ def clock(monkeypatch):
 
 
 def _webhook(on: bool) -> None:
-    set_setting("webhook", {"github_webhook_secret": "configured"} if on else {})
+    from infra import key_store
+
+    if on:
+        key_store.set_value("github-webhook", "hook-value-for-tests")
+    else:
+        key_store.clear_value("github-webhook")
 
 
 def _notice(thread_id: str, tool: str = "bash", arguments: dict | None = None) -> str | None:

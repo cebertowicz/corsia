@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { HostProvider } from '$lib/stores/providersV7';
+	import { ignoredEnvironmentNote } from '$lib/stores/keys';
 
 	let { provider }: { provider: HostProvider } = $props();
 	const hasServer = $derived(!!provider.server);
@@ -11,6 +12,9 @@
 		<div class="row"><span class="l">API key</span><span class="v">{provider.raw.masked_key ?? 'not set'}</span></div>
 		<div class="row"><span class="l">Models</span><span class="v">{provider.raw.models?.length ?? 0}</span></div>
 		<div class="row"><span class="l">Base URL</span><span class="v"><code>{provider.raw.api_base ?? 'default'}</code></span></div>
+		{#if provider.raw.ignored_env_var}
+			<p class="note" data-ignored-env>{ignoredEnvironmentNote(provider.raw.ignored_env_var)}</p>
+		{/if}
 	{:else if hasServer && provider.server}
 		<div class="row"><span class="l">Server</span><span class="v">{provider.server.status}</span></div>
 		<div class="row"><span class="l">Port</span><span class="v">{provider.server.port}</span></div>
@@ -47,6 +51,7 @@
 		text-align: right;
 		display: inline-flex; align-items: center; gap: 8px;
 	}
+	.note { margin: 8px 0 0; font-size: var(--text-footnote); color: var(--text-secondary); }
 	.row code { font-family: 'SF Mono', monospace; font-size: var(--text-footnote); color: var(--text-secondary); }
 
 	@media (max-width: 480px) {

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from infra import settings
+from infra.db_async import run_in_db
+from infra.key_store import resolve_provider
 
 
 async def run_provider_test(name: str, meta: dict) -> dict:
-    cfg_providers = settings.get_providers()
-    api_key = cfg_providers.get(name, {}).get("apiKey", "")
+    api_key = await run_in_db(resolve_provider, name) or ""
     if not api_key:
         return {"ok": False, "error": "No API key configured"}
 
