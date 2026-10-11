@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -118,15 +118,30 @@ def require_image(path: str | None) -> Path:
     return Path(str(path))
 
 
+def readable_image(db, row: Mapping[str, Any], path: str | None, reader_thread_id: str | None) -> tuple[str | None, Path | None]:
+    """The image a region comment is on, as ``reader_thread_id`` may read it now, or why it cannot.
+
+    The one way from a comment row to its image's bytes. The artifact's own file
+    was checked when the artifact was; an image inside a document is named by a
+    stored path, which passes the scope check again on every read (image_scope).
+    """
+    image_path = image_of(row, path)
+    if not image_path:
+        return "the artifact has no image file.", None
+    if not row.get("image_src"):
+        return None, Path(image_path)
+    try:
+        return None, checked_image(db, image_path, reader_thread_id)
+    except CommentActionError as exc:
+        return exc.message, None
+
+
 def current_image(db, row: Mapping[str, Any], path: str | None, owner_thread_id: str | None) -> Path:
-    """The image a region comment is on as it is now; one inside a document passes its scope check again."""
-    if row.get("image_src"):
-        return require_image(str(checked_image(db, str(row["image_src"]), owner_thread_id)))
-    return require_image(path)
-
-
-_REVISIONS: dict[tuple, str] = {}
-_REVISIONS_KEPT = 512
+    """The image a region comment is on as it is now, or the error that it cannot be read."""
+    problem, image = readable_image(db, row, path, owner_thread_id)
+    if image is None and row.get("image_src"):
+        raise CommentActionError("region_target", problem or "the image could not be read.")
+    return require_image(str(image) if image else path)
 
 
 def image_revision(path: Path) -> str:
@@ -137,14 +152,12 @@ def image_revision(path: Path) -> str:
     stat per image per read, not a full read.
     """
     st = path.stat()
-    key = (str(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
-    revision = _REVISIONS.get(key)
-    if revision is None:
-        revision = sha256_file(path)
-        if len(_REVISIONS) >= _REVISIONS_KEPT:
-            _REVISIONS.pop(next(iter(_REVISIONS)))
-        _REVISIONS[key] = revision
-    return revision
+    return _file_sha256(str(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+@lru_cache(maxsize=512)
+def _file_sha256(path: str, *version: int) -> str:
+    return sha256_file(Path(path))
 
 
 def move_fields(comment: Mapping[str, Any], fields: dict[str, Any], image: Path) -> dict[str, Any]:
@@ -165,23 +178,29 @@ def region_of(row: Mapping[str, Any]) -> Region | None:
                   float(row.get("region_w") or 0.0), float(row.get("region_h") or 0.0))
 
 
-def annotate_stale(threads: list[dict], path: str | None) -> None:
-    """Mark each region comment whose image changed since it was placed (FR13.9).
+def _by_image(rows: Iterable[dict], path: str | None) -> dict[str | None, list[dict]]:
+    """The region comments among ``rows``, grouped by the image each is on."""
+    groups: dict[str | None, list[dict]] = {}
+    for row in rows:
+        if row.get("region_number") is not None:
+            groups.setdefault(image_of(row, path), []).append(row)
+    return groups
 
-    One hash per image per call. An image that cannot be read leaves its pins
-    unmarked rather than calling them all stale.
-    """
-    current: dict[str | None, str | None] = {}
-    for comment in threads:
-        if comment.get("region_number") is None:
-            continue
-        image = image_of(comment, path)
-        if image not in current:
-            try:
-                current[image] = image_revision(Path(image)) if image else None
-            except OSError:
-                current[image] = None
-        comment["region_stale"] = current[image] is not None and comment.get("image_rev") != current[image]
+
+def _mark_stale(group: list[dict], image: Path | None) -> None:
+    """An image that cannot be read leaves its pins unmarked rather than calling them all stale."""
+    try:
+        revision = image_revision(image) if image else None
+    except OSError:
+        revision = None
+    for row in group:
+        row["region_stale"] = revision is not None and row.get("image_rev") != revision
+
+
+def annotate_stale(db, threads: list[dict], path: str | None, reader_thread_id: str | None) -> None:
+    """Mark each region comment whose image changed since it was placed (FR13.9), reading each image once."""
+    for group in _by_image(threads, path).values():
+        _mark_stale(group, readable_image(db, group[0], path, reader_thread_id)[1])
 
 
 def agent_color(thread_id: str) -> str:
@@ -287,21 +306,17 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
     once. A copy that cannot be made, or a reader tray that cannot be
     resolved, leaves the reason in its place; the text still goes.
     """
-    regional = [item for item in items if item["kind"] == "comment" and item.get("region_number") is not None]
-    if not regional:
+    by_image = _by_image((item for item in items if item["kind"] == "comment"), path)
+    if not by_image:
         return
-    annotate_stale(regional, path)
-    by_image: dict[str | None, list[dict]] = {}
-    for item in regional:
-        item["region_line"] = describe_region(item)
-        by_image.setdefault(image_of(item, path), []).append(item)
     tray, tray_problem = None, None
     try:
         tray = _working_tray(db, reader_thread_id)
     except (ValueError, OSError) as exc:
         tray_problem = f"the reader's working folder could not be used ({exc})."
     for image_path, group in by_image.items():
-        problem, image = _readable(db, image_path, path, reader_thread_id)
+        problem, image = readable_image(db, group[0], path, reader_thread_id)
+        _mark_stale(group, image)
         if image is not None:
             problem = _unmarkable(str(image))
         problem = problem or tray_problem
@@ -314,6 +329,7 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
             after_commit(db, partial(_draw_copy, image, marks_for(db, group), target, reader_thread_id))
             line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
         for item in group:
+            item["region_line"] = describe_region(item)
             item["marked_image_line"] = line
 
 
@@ -331,18 +347,6 @@ def _draw_copy(image: Path, marks: list[Mark], target: Path, reader_thread_id: s
                          f"drawn ({exc}); the region lines in the task still say where each comment is."),
                 details={"path": str(target)},
             )
-
-
-def _readable(db, image_path: str | None, path: str | None, reader_thread_id: str) -> tuple[str | None, Path | None]:
-    """The image to copy for the reader, or why none: an image inside a document must be in the reader's scope now."""
-    if not image_path:
-        return "the artifact has no image file.", None
-    if image_path == path:
-        return None, Path(image_path)
-    try:
-        return None, checked_image(db, image_path, reader_thread_id)
-    except CommentActionError as exc:
-        return exc.message, None
 
 
 def _unmarkable(path: str | None) -> str | None:

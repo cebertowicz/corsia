@@ -265,6 +265,27 @@ def test_a_doc_pin_does_not_move_onto_an_image_now_outside_the_scope(integration
     assert "outside this document's scope" in r.text
 
 
+def test_listing_comments_never_reads_an_image_now_outside_the_scope(integration_client, doc, tmp_path_factory,
+                                                                      monkeypatch):
+    """Judging a pin stale reads its image, so the list passes the same scope check as every other read."""
+    from doceditor import image_regions
+
+    artifact_id = _register(integration_client, doc)
+    comment = _region_comment(integration_client, artifact_id, doc, CART, {"x": 0.2, "y": 0.2})
+    cart = doc.parent / "img" / "cart.png"
+    outside = _outside_png(tmp_path_factory)
+    cart.unlink()
+    cart.symlink_to(outside)
+    read = []
+    real = image_regions.sha256_file
+    monkeypatch.setattr(image_regions, "sha256_file", lambda path: read.append(Path(path).resolve()) or real(path))
+
+    listed = _threads(integration_client, artifact_id)[comment["id"]]
+
+    assert outside.resolve() not in read
+    assert listed["region_stale"] is False
+
+
 def test_a_region_comment_stays_on_its_image(integration_client, doc):
     """Its box is in that image's coordinates: an anchor that names another image (or none) is refused."""
     artifact_id = _register(integration_client, doc)

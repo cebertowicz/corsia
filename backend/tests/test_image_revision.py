@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 
 from doceditor import image_regions
 
@@ -14,18 +15,27 @@ def test_an_unchanged_image_is_hashed_once_and_a_changed_one_again(tmp_path, mon
     login, cart = tmp_path / "login.png", tmp_path / "cart.png"
     login.write_bytes(b"login v1")
     cart.write_bytes(b"cart v1")
-    rows = [
-        {"region_number": 1, "image_src": str(login), "image_rev": real(login)},
-        {"region_number": 1, "image_src": str(cart), "image_rev": real(cart)},
-    ]
 
     for _ in range(3):
-        image_regions.annotate_stale(rows, None)
+        image_regions.image_revision(login)
+        image_regions.image_revision(cart)
     assert sorted(hashed) == [cart, login]
 
     login.write_bytes(b"login v2, longer")
-    image_regions.annotate_stale(rows, None)
 
-    assert hashed[2:] == [login]
-    assert [row["region_stale"] for row in rows] == [True, False]
     assert image_regions.image_revision(login) == hashlib.sha256(b"login v2, longer").hexdigest()
+    assert hashed[2:] == [login]
+
+
+def test_revisions_read_from_many_threads_past_the_cache_size(tmp_path):
+    """Comment lists and deliveries run on the database pool's threads at once."""
+    images = []
+    for index in range(600):
+        image = tmp_path / f"{index}.png"
+        image.write_bytes(str(index).encode())
+        images.append(image)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        revisions = list(pool.map(image_regions.image_revision, images * 2))
+
+    assert revisions == [hashlib.sha256(str(index).encode()).hexdigest() for index in range(600)] * 2

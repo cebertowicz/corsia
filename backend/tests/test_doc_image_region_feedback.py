@@ -99,8 +99,9 @@ def test_a_doc_batch_carries_one_marked_copy_per_image_and_judges_staleness_per_
     assert description.count("(the image changed after this was placed)") == 1
 
 
-def test_a_doc_batch_draws_no_copy_of_an_image_now_outside_the_readers_scope(isolated_db, tmp_path_factory):
-    """A link retargeted after the comment was placed hands the reader nothing from outside its scope."""
+def test_a_doc_batch_draws_no_copy_of_an_image_now_outside_the_readers_scope(isolated_db, tmp_path_factory, monkeypatch):
+    """A link retargeted after the comment was placed hands the reader nothing from outside its scope, nor reads it."""
+    from doceditor import image_regions
     folder = _in_workspace()
     login = _png(folder / "a" / "shot.png", (800, 500))
     outside = _png(tmp_path_factory.mktemp("outside-scope") / "secret.png", (300, 200))
@@ -112,6 +113,9 @@ def test_a_doc_batch_draws_no_copy_of_an_image_now_outside_the_readers_scope(iso
         _region(db, artifact_id, login, x=0.1, y=0.1, body="Header wraps.")
         login.unlink()
         login.symlink_to(outside)
+        read = []
+        real = image_regions.sha256_file
+        monkeypatch.setattr(image_regions, "sha256_file", lambda path: read.append(Path(path).resolve()) or real(path))
 
         feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
         description = _node_description(db)
@@ -120,3 +124,4 @@ def test_a_doc_batch_draws_no_copy_of_an_image_now_outside_the_readers_scope(iso
 
     assert "Marked-up image (numbered boxes)" not in description, description
     assert "Marked-up image unavailable:" in description and "outside" in description, description
+    assert outside.resolve() not in read
