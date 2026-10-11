@@ -17,6 +17,10 @@ if (typeof Element !== 'undefined' && typeof Element.prototype.animate !== 'func
 		} as unknown as Animation;
 	};
 }
+// An animated keyed each asks a leaving item for its running animations.
+if (typeof Element !== 'undefined' && typeof Element.prototype.getAnimations !== 'function') {
+	Element.prototype.getAnimations = () => [];
+}
 
 if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 	window.matchMedia = ((query: string) => ({

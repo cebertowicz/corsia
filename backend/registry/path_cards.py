@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from registry.chat_cards import reference_card
-from registry.path_access import lookup_file
+from registry.path_access import FileLookup, lookup_file
 
 MAX_CARDS = 8
 MAX_CANDIDATES = 40
@@ -87,6 +87,7 @@ def targets(text: str) -> list[str]:
 
 def reference_cards(
     db, text: str, bases: Sequence[Path], user_id: str, *, covered: Mapping[str, Collection[str]] | None = None,
+    lookup_memo: dict[str, FileLookup] | None = None,
 ) -> tuple[list[dict], int]:
     """Cards for the registered artifacts ``text`` names, and how many more past the cap.
 
@@ -95,13 +96,17 @@ def reference_cards(
     ask cards is on screen. The server never drops the reviewed document.
     """
     roots = [str(base) for base in bases]
+    lookups = lookup_memo if lookup_memo is not None else {}
     cards: list[dict] = []
     seen: set[str] = set()
     for target in targets(text):
         path = workspace_path(target, roots)
         if path is None:
             continue
-        found = lookup_file(path, list(bases), db=db)
+        found = lookups.get(path)
+        if found is None:
+            found = lookup_file(path, list(bases), db=db)
+            lookups[path] = found
         if found.artifact is None or str(found.artifact["id"]) in seen:
             continue
         card = reference_card(db, found.artifact, user_id)

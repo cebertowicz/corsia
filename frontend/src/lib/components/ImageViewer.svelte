@@ -1,10 +1,10 @@
 <script lang="ts">
-	// Renders a workspace image file inside the artifact leaf. Read-only: no
-	// editor, comments or draft. The bytes come from the authenticated file
+	// Renders a workspace image file inside the artifact leaf, with comments on
+	// parts of it and no editor. The bytes come from the authenticated file
 	// route and are only ever shown through <img> (inside the lightbox, which
 	// zooms and pans it), so an SVG can never run script or reach the DOM.
 	import './DocViewer.css';
-	import ImageLightbox from './ImageLightbox.svelte';
+	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { untrack } from 'svelte';
 	import { fetchRevision } from '$lib/api/docs';
@@ -30,6 +30,7 @@
 	let resolvedArtifactId = $state<string | null>(null);
 	let reloadNonce = $state(0);
 	let loadSeq = 0;
+	let draftOpen = $state(false);
 
 	export function reload() {
 		reloadNonce += 1;
@@ -91,7 +92,7 @@
 </script>
 
 <div class="image-viewer">
-	<ReviewBar artifactId={resolvedArtifactId ?? target.artifactId ?? null} />
+	<ReviewBar artifactId={resolvedArtifactId ?? target.artifactId ?? null} {draftOpen} />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
 			<button type="button" class="stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
@@ -106,7 +107,7 @@
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<ImageLightbox {src} alt={target.name} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
+		<ImageCommentLightbox {src} alt={target.name} artifactId={resolvedArtifactId ?? target.artifactId ?? null} projectId={target.projectId ?? null} bind:draftOpen onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 

@@ -31,6 +31,7 @@ from pathlib import Path
 from api.files_roots import scope_bases
 from infra.queries import get_thread_for_user
 from registry.chat_cards import ask_cards
+from registry.path_access import FileLookup
 from registry.path_cards import reference_cards
 
 _ASK_UPDATES_LIMIT = 200
@@ -149,6 +150,7 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
         return
     asks, asked_in_turn = _ask_cards_by_message(db, thread_id, messages)
     bases: list[Path] | None = None
+    lookup_memo: dict[str, FileLookup] = {}
     for row in messages:
         if row.get("role") != "assistant":
             continue
@@ -164,7 +166,7 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
             covered = {artifact: set(holds) for artifact, holds in asked_here.items()}
             for card in cards:
                 covered.setdefault(card["artifact_id"], set()).add(card["hold_id"])
-            refs, more = reference_cards(db, text, bases, user_id, covered=covered)
+            refs, more = reference_cards(db, text, bases, user_id, covered=covered, lookup_memo=lookup_memo)
             cards.extend(refs)
         if cards:
             row["cards"] = cards

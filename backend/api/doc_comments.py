@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from api.doc_comment_models import CommentCreate
 
-from doceditor import comments as store, feedback_batches, feedback_state
+from doceditor import comments as store, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
@@ -72,9 +72,9 @@ async def list_comments(artifact_id: str, token: str):
         try:
             _assert_owns_artifact(artifact_id, user["id"], db)
             artifact = registry_models.get_artifact(artifact_id, db=db)
-            comments, anchors_checked = anchored_threads(
-                artifact_id, artifact["path"] if artifact else None, db,
-            )
+            path = artifact["path"] if artifact else None
+            comments, anchors_checked = anchored_threads(artifact_id, path, db)
+            image_regions.annotate_stale(comments, path)
             feedback_state.annotate_reply_waiting_threads(db, user["id"], artifact_id, comments)
             feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
             return comments, anchors_checked, feedback
@@ -104,6 +104,13 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             )
         except CommentActionError as exc:
             raise HTTPException(400, exc.message) from exc
+    try:
+        region = image_regions.check_region_shape(
+            region=body.region, parent_id=body.parent_id, review=body.review,
+            quote=body.anchor_text, replacement=body.replacement,
+        )
+    except CommentActionError as exc:
+        raise HTTPException(400, exc.message) from exc
 
     def _access():
         db = get_db()
@@ -115,6 +122,8 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             db.close()
 
     path = await run_in_db(_access)
+    if region is not None and not image_regions.is_image_path(path):
+        raise HTTPException(400, "region applies only to an image artifact.")
 
     if body.anchor_text and not body.parent_id and not body.review and (body.from_off is None or body.to_off is None):
         raise HTTPException(400, "Anchored comments require selection offsets")
@@ -122,11 +131,14 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
         artifact_id=artifact_id, path=path, body=text, author=user["name"], author_kind="user", user_id=user["id"],
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
+        region=region,
     )
     try:
         row, _registered, feedback = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
+    except CommentActionError as exc:
+        raise HTTPException(400, exc.message) from exc
     except (CommentSelectionChanged, AppLoopUnavailable) as exc:
         raise HTTPException(409, str(exc)) from exc
     except CrossArtifactIdError as exc:
@@ -322,6 +334,8 @@ class CommentPatch(BaseModel):
     from_off: int | None = None
     to_off: int | None = None
     anchor_text: str | None = None
+    # Moves an image comment's pin; the pin then counts as placed on the current image.
+    region: dict | None = None
 
 
 @router.patch("/comments/{comment_id}")
@@ -343,7 +357,11 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
             comment = store.get_comment(comment_id, db=db)
             try:
                 check_user_text_edit(comment, fields)
-                patch = reopen_fields(comment, fields)
+                moved = fields
+                if "region" in fields:
+                    artifact = registry_models.get_artifact(artifact_id, db=db)
+                    moved = image_regions.move_fields(comment, fields, artifact["path"] if artifact else None)
+                patch = reopen_fields(comment, moved)
             except CommentActionError as exc:
                 raise HTTPException(comment_action_status(exc), exc.message) from exc
             with write_transaction(db, scope="patch_user_comment") as connection:

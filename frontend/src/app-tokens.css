@@ -45,6 +45,10 @@
   --press-scale: 0.96;
   --press-opacity: 0.8;
   --press-bg: var(--bg-active);
+  /* Image-region marks stay legible against either theme and image pixels. */
+  --image-region-ink: #111;
+  --image-region-halo: #fff;
+  --image-region-edge: #000;
 }
 
 @supports (animation-timing-function: linear(0, 0.5 50%, 1)) {

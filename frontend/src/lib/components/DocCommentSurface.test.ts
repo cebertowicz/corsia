@@ -76,6 +76,11 @@ describe('DocCommentSurface suggestions', () => {
 		}
 	});
 
+	it('keeps a document text-comment sheet above the keyboard on narrow screens', () => {
+		render({ narrow: true, state: { kind: 'thread', id: suggestion.id } });
+		expect(document.body.querySelector('.drawer-backdrop')?.classList.contains('follow-keyboard')).toBe(true);
+	});
+
 	describe('a card that follows its text when the comment stops having a place in it', () => {
 		// Where the text is drawn until it is not, then nothing: what the editor reports once the comment is orphaned.
 		let drawn: DOMRect | null;
