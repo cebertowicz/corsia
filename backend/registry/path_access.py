@@ -32,6 +32,31 @@ def path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
     )
 
 
+def lookup_files(raw_paths, bases: list[Path], *, db=None) -> dict[str, FileLookup]:
+    """Resolve several paths and their registered identities in one registry read."""
+    candidates: dict[str, FileLookup] = {}
+    existing: list[str] = []
+    for raw_path in dict.fromkeys(raw_paths):
+        try:
+            candidate = Path(raw_path).expanduser().resolve()
+        except OSError:
+            candidates[raw_path] = FileLookup(None, False, False, None)
+            continue
+        if not path_allowed(candidate, bases, db=db):
+            candidates[raw_path] = FileLookup(candidate, False, False, None)
+            continue
+        if not candidate.is_file():
+            candidates[raw_path] = FileLookup(candidate, True, False, None)
+            continue
+        candidates[raw_path] = FileLookup(candidate, True, True, None)
+        existing.append(str(candidate))
+    identities = registry_service.resolve_file_identities(existing, db=db)
+    return {
+        raw_path: FileLookup(lookup.path, lookup.allowed, lookup.is_file, identities.get(str(lookup.path)))
+        for raw_path, lookup in candidates.items()
+    }
+
+
 def lookup_file(raw_path: str, bases: list[Path], *, db=None) -> FileLookup:
     """Resolve a path to its file and registered identity within the scope."""
     try:

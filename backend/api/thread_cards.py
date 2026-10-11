@@ -26,12 +26,11 @@ so there the reference is unmarked: it shows, and may repeat the earlier ask car
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from api.files_roots import scope_bases
 from infra.queries import get_thread_for_user
 from registry.chat_cards import ask_cards
-from registry.path_cards import reference_cards
+from registry.path_cards import reference_cards_by_message
 
 _ASK_UPDATES_LIMIT = 200
 
@@ -88,15 +87,29 @@ def _page_updates(db, thread_id: str, rows: list[dict]) -> list:
     return db.execute(ask_updates_sql(upper), args).fetchall()
 
 
-def _turn_step(db, thread_id: str, turn_id: str, placed_at: str) -> str | None:
-    """The latest assistant step of a Turn that existed when a hold was placed."""
-    row = db.execute(
-        "SELECT id FROM messages WHERE thread_id=? AND role='assistant'"
-        " AND json_extract(metadata, '$.turn_id')=? AND julianday(created_at)<=julianday(?)"
-        " ORDER BY seq DESC LIMIT 1",
-        (thread_id, turn_id, placed_at),
-    ).fetchone()
-    return row["id"] if row else None
+def _turn_steps(
+    db, thread_id: str, requests: list[tuple[str, str]],
+) -> dict[tuple[str, str], str | None]:
+    """The latest pre-hold assistant step for each requested Turn in one read."""
+    unique = list(dict.fromkeys(requests))
+    if not unique:
+        return {}
+    values = ",".join("(?, ?)" for _ in unique)
+    rows = db.execute(
+        f"""WITH requested(turn_id, placed_at) AS (VALUES {values})
+            SELECT requested.turn_id, requested.placed_at,
+                   (SELECT id FROM messages
+                     WHERE thread_id=? AND role='assistant'
+                       AND json_extract(metadata, '$.turn_id')=requested.turn_id
+                       AND julianday(created_at)<=julianday(requested.placed_at)
+                     ORDER BY seq DESC LIMIT 1) AS message_id
+              FROM requested""",
+        (*[value for request in unique for value in request], thread_id),
+    ).fetchall()
+    return {
+        (row["turn_id"], row["placed_at"]): row["message_id"]
+        for row in rows
+    }
 
 
 def _ask_cards_by_message(
@@ -118,16 +131,25 @@ def _ask_cards_by_message(
     asked: dict[str, dict[str, list[str]]] = {}
     placed: list[tuple[str, str, str]] = []  # (message id, hold id, ask artifact id)
     holds = public.ask_holds(db, [u["hold_id"] for u in updates])
-    for update in updates:
-        hold = holds.get(update["hold_id"])
-        if hold is None:
-            continue
+    ask_updates = [
+        (update, hold)
+        for update in updates
+        if (hold := holds.get(update["hold_id"])) is not None
+    ]
+    fallback_requests = [
+        (hold["raised_in"]["turn_id"], update["created_at"])
+        for update, hold in ask_updates
+        if not any(hold["raised_in"].get(key) for key in ("tool_invocation_id", "provider_call_id"))
+        and hold["raised_in"].get("turn_id")
+    ]
+    fallback_steps = _turn_steps(db, thread_id, fallback_requests)
+    for update, hold in ask_updates:
         raised_in = hold["raised_in"]
-        ids = [raised_in[k] for k in ("tool_invocation_id", "provider_call_id") if raised_in.get(k)]
+        ids = [raised_in[key] for key in ("tool_invocation_id", "provider_call_id") if raised_in.get(key)]
         if ids:
-            message_id = next((by_call[i] for i in ids if i in by_call), None)
+            message_id = next((by_call[call_id] for call_id in ids if call_id in by_call), None)
         elif raised_in.get("turn_id"):
-            message_id = _turn_step(db, thread_id, raised_in["turn_id"], update["created_at"])
+            message_id = fallback_steps[(raised_in["turn_id"], update["created_at"])]
         else:
             message_id = None
         turn = raised_in.get("turn_id") or turn_of.get(message_id)
@@ -148,24 +170,34 @@ def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[di
     if not messages:
         return
     asks, asked_in_turn = _ask_cards_by_message(db, thread_id, messages)
-    bases: list[Path] | None = None
+    text_rows = [
+        row for row in messages
+        if row.get("role") == "assistant" and isinstance(row.get("content"), str) and row["content"]
+    ]
+    covered_by_message: dict[str, dict[str, set[str]]] = {}
+    for row in text_rows:
+        # An artifact asked in a Turn is covered by that ask: the reference is marked, never dropped.
+        turn_id = _loads(row.get("metadata")).get("turn_id")
+        asked_here = asked_in_turn.get(turn_id, {}) if isinstance(turn_id, str) else {}
+        covered = {artifact: set(holds) for artifact, holds in asked_here.items()}
+        for card in asks.get(row["id"], []):
+            covered.setdefault(card["artifact_id"], set()).add(card["hold_id"])
+        covered_by_message[row["id"]] = covered
+    references = (
+        reference_cards_by_message(
+            db,
+            {row["id"]: row["content"] for row in text_rows},
+            scope_bases(thread_row["project_id"], db),
+            user_id,
+            covered=covered_by_message,
+        )
+        if text_rows else {}
+    )
     for row in messages:
         if row.get("role") != "assistant":
             continue
-        cards = list(asks.get(row["id"], []))
-        text = row.get("content")
-        more = 0
-        if isinstance(text, str) and text:
-            if bases is None:
-                bases = scope_bases(thread_row["project_id"], db)
-            # An artifact asked in a Turn is covered by that ask: the reference is marked, never dropped.
-            turn_id = _loads(row.get("metadata")).get("turn_id")
-            asked_here = asked_in_turn.get(turn_id, {}) if isinstance(turn_id, str) else {}
-            covered = {artifact: set(holds) for artifact, holds in asked_here.items()}
-            for card in cards:
-                covered.setdefault(card["artifact_id"], set()).add(card["hold_id"])
-            refs, more = reference_cards(db, text, bases, user_id, covered=covered)
-            cards.extend(refs)
+        cards = [*asks.get(row["id"], []), *references.get(row["id"], ([], 0))[0]]
+        more = references.get(row["id"], ([], 0))[1]
         if cards:
             row["cards"] = cards
             if more:

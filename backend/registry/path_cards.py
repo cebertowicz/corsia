@@ -20,8 +20,8 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import unquote
 
-from registry.chat_cards import reference_card
-from registry.path_access import lookup_file
+from registry.chat_cards import reference_card, reference_cards as live_reference_cards
+from registry.path_access import lookup_file, lookup_files
 
 MAX_CARDS = 8
 MAX_CANDIDATES = 40
@@ -83,6 +83,53 @@ def targets(text: str) -> list[str]:
         if not _SCHEME.match(target) and target not in ordered:
             ordered.append(target)
     return ordered[:MAX_CANDIDATES]
+
+
+def reference_cards_by_message(
+    db,
+    texts: Mapping[str, str],
+    bases: Sequence[Path],
+    user_id: str,
+    *,
+    covered: Mapping[str, Mapping[str, Collection[str]]] | None = None,
+) -> dict[str, tuple[list[dict], int]]:
+    """Reference cards for a page of message text, resolving files and access once."""
+    roots = [str(base) for base in bases]
+    paths_by_message: dict[str, list[str]] = {}
+    for message_id, text in texts.items():
+        paths_by_message[message_id] = [
+            path
+            for target in targets(text)
+            if (path := workspace_path(target, roots)) is not None
+        ]
+    found = lookup_files(
+        [path for paths in paths_by_message.values() for path in paths], list(bases), db=db,
+    )
+    artifacts = {
+        str(lookup.artifact["id"]): lookup.artifact
+        for lookup in found.values()
+        if lookup.artifact is not None
+    }
+    cards_by_artifact = live_reference_cards(db, artifacts, user_id)
+    result: dict[str, tuple[list[dict], int]] = {}
+    for message_id, paths in paths_by_message.items():
+        cards: list[dict] = []
+        seen: set[str] = set()
+        for path in paths:
+            artifact = found[path].artifact
+            if artifact is None:
+                continue
+            artifact_id = str(artifact["id"])
+            if artifact_id in seen or artifact_id not in cards_by_artifact:
+                continue
+            seen.add(artifact_id)
+            card = dict(cards_by_artifact[artifact_id])
+            holds = covered.get(message_id, {}).get(artifact_id) if covered else None
+            if holds:
+                card["covered_by_ask"] = sorted(holds)
+            cards.append(card)
+        result[message_id] = (cards[:MAX_CARDS], max(0, len(cards) - MAX_CARDS))
+    return result
 
 
 def reference_cards(

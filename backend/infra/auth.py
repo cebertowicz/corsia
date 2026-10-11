@@ -125,6 +125,28 @@ def is_owner_sentinel(parent_thread_id: str | None) -> bool:
     return parent_thread_id == "ui" or parent_thread_id.startswith("project:")
 
 
+def may_access_artifacts(parent_thread_ids, user_id: str, db=None) -> dict[str | None, bool]:
+    """Batch the owning-thread access predicate for a page of artifact cards."""
+    from infra.database import get_db
+
+    owners = list(dict.fromkeys(parent_thread_ids))
+    real = [owner for owner in owners if not is_owner_sentinel(owner)]
+    owned: set[str] = set()
+    if real:
+        marks = ",".join("?" for _ in real)
+        owned = {
+            row["id"]
+            for row in (db or get_db()).execute(
+                f"SELECT id FROM threads WHERE user_id=? AND id IN ({marks})",
+                (user_id, *real),
+            ).fetchall()
+        }
+    return {
+        owner: is_owner_sentinel(owner) or owner in owned
+        for owner in owners
+    }
+
+
 def may_access_artifact(parent_thread_id: str | None, user_id: str, db=None) -> bool:
     """Authz predicate for an artifact-backed resource (doc / comment / row).
 

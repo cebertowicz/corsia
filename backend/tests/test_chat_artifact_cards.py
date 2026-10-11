@@ -168,6 +168,38 @@ def test_a_hold_without_call_ids_binds_to_the_latest_step_of_its_turn_at_that_ti
     assert [i for i in ("m1", "m2", "m3", "m4") if page[i].get("cards")] == ["m2"]
 
 
+def test_page_card_queries_are_constant_for_asks_and_references(db, ws, monkeypatch):
+    monkeypatch.setattr("api.thread_cards.scope_bases", lambda *_a, **_k: [ws.resolve()])
+    holds = []
+
+    def add_message(seq: int) -> None:
+        turn = f"turn-{seq}"
+        plan_id, node_id = _node(db)
+        _registered(db, ws, f"reference-{seq}.md")
+        _message(
+            db, seq, turn=turn, at=f"2026-10-01T10:00:0{seq}+00:00",
+            text=f"See [reference](reference-{seq}.md).",
+        )
+        holds.append(_ask(db, plan_id, node_id, document_ask(db, "owner"), turn=turn, calls={}))
+
+    def page_statements() -> tuple[dict[str, dict], list[str]]:
+        seen: list[str] = []
+        db.set_trace_callback(seen.append)
+        page = _page(db)
+        db.set_trace_callback(None)
+        return page, seen
+
+    add_message(1)
+    _one_card_page, baseline = page_statements()
+    add_message(2)
+    add_message(3)
+    page, statements = page_statements()
+
+    assert len(statements) == len(baseline)
+    assert [page[f"m{seq}"]["cards"][0]["hold_id"] for seq in range(1, 4)] == holds
+    assert all(page[f"m{seq}"]["cards"][1]["kind"] == "artifact" for seq in range(1, 4))
+
+
 def test_the_turn_fallback_compares_times_not_their_text_format(db):
     """An update stamped 'YYYY-MM-DD HH:MM:SS' still finds an ISO-stamped earlier step."""
     plan_id, node_id = _node(db)

@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any
 
-from infra.auth import may_access_artifact
+from infra.auth import may_access_artifact, may_access_artifacts
 from registry import models as registry_models
 from registry.presentation import CAPABILITY_LEAF_PACKAGE, resolve_descriptor
 
@@ -126,17 +126,32 @@ def ask_cards(db, asks: Mapping[str, str]) -> dict[str, dict[str, Any]]:
     from plans import public
 
     holds = public.ask_holds(db, asks)
+    artifacts = registry_models.get_artifacts(
+        [artifact_id for hold_id, artifact_id in asks.items() if hold_id in holds], db=db,
+    )
     cards: dict[str, dict[str, Any]] = {}
     for hold_id, artifact_id in asks.items():
         hold = holds.get(hold_id)
         if hold is None:
             continue
-        artifact = registry_models.get_artifact(artifact_id, db=db)
+        artifact = artifacts.get(artifact_id)
         state, feedback = ask_state(hold, artifact)
         cards[hold_id] = card_for(
             artifact, artifact_id, kind="ask", hold_id=hold_id, state=state, feedback=feedback,
         )
     return cards
+
+
+def reference_cards(db, artifacts: Mapping[str, Mapping[str, Any]], user_id: str) -> dict[str, dict[str, Any]]:
+    """Reference cards by artifact id, with owning-thread access checked in one read."""
+    access = may_access_artifacts(
+        [artifact.get("parent_thread_id") for artifact in artifacts.values()], user_id, db=db,
+    )
+    return {
+        artifact_id: card_for(artifact, artifact_id, kind="artifact")
+        for artifact_id, artifact in artifacts.items()
+        if access.get(artifact.get("parent_thread_id"), False)
+    }
 
 
 def reference_card(db, artifact: Mapping[str, Any], user_id: str) -> dict[str, Any] | None:

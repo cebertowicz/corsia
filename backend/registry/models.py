@@ -12,6 +12,7 @@ from registry.identity_bridge import (
     OWNER_REGISTRATION_STATES as _OWNER_REGISTRATION_STATES,
     PANE_REGISTRATION_STATES as _PANE_REGISTRATION_STATES,
     normalized_row_by_id as _normalized_row_by_id,
+    normalized_rows_by_ids as _normalized_rows_by_ids,
 )
 from registry.registration_events import (
     _append_registration_event,  # noqa: F401 — re-exported for callers
@@ -89,6 +90,16 @@ def get_artifact(artifact_id: str, db=None) -> dict | None:
     _db = db or get_db()
     try:
         return _normalized_row_by_id(_db, artifact_id)
+    finally:
+        if not db:
+            _db.close()
+
+
+def get_artifacts(artifact_ids, db=None) -> dict[str, dict]:
+    """Fetch default public projections for many artifact identities at once."""
+    _db = db or get_db()
+    try:
+        return _normalized_rows_by_ids(_db, artifact_ids)
     finally:
         if not db:
             _db.close()

@@ -13,7 +13,11 @@ from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_writer
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type
-from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
+from registry.identity_bridge import (
+    OWNER_REGISTRATION_STATES,
+    PANE_REGISTRATION_STATES,
+    resolve_normalized_owners,
+)
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
@@ -35,7 +39,9 @@ def is_tmp(path: Path) -> bool:
     return "working" in {p.lower() for p in path.parts}
 
 
-def registrable_zone(p: Path, *, db=None) -> str | None:
+def registrable_zone(
+    p: Path, *, db=None, allowed_roots: list[Path] | None = None,
+) -> str | None:
     """Return ``workspace`` or ``repo`` when ``p`` is registrable."""
     from infra import config
 
@@ -45,7 +51,9 @@ def registrable_zone(p: Path, *, db=None) -> str | None:
         (root, "repo")
         for root in {
             allowed.resolve()
-            for allowed in get_allowed_dirs_rw(db=db, containing=p)
+            for allowed in (
+                allowed_roots if allowed_roots is not None else get_allowed_dirs_rw(db=db, containing=p)
+            )
             if allowed.resolve() != workspace
         }
     )
@@ -59,7 +67,9 @@ def registrable_zone(p: Path, *, db=None) -> str | None:
     return max(matches, key=lambda match: len(match[0].parts))[1]
 
 
-def normalize_file_path(raw_path: str, *, db=None) -> tuple[str, str, bool] | None:
+def normalize_file_path(
+    raw_path: str, *, db=None, allowed_roots: list[Path] | None = None,
+) -> tuple[str, str, bool] | None:
     """Resolve a caller-supplied file path for registration."""
     from infra import config
 
@@ -67,7 +77,7 @@ def normalize_file_path(raw_path: str, *, db=None) -> tuple[str, str, bool] | No
     if not p.is_absolute():
         p = config.WORKSPACE / p
     p = p.resolve()
-    zone = registrable_zone(p, db=db)
+    zone = registrable_zone(p, db=db, allowed_roots=allowed_roots)
     if zone is None:
         return None
     return str(p), zone, (is_tmp(p) if zone == "workspace" else False)
@@ -104,11 +114,13 @@ def register_write(
         return None
 
 
-def prepare_file_identity(abs_path: str | FileIdentity, *, db=None) -> FileIdentity | None:
+def prepare_file_identity(
+    abs_path: str | FileIdentity, *, db=None, allowed_roots: list[Path] | None = None,
+) -> FileIdentity | None:
     """Prepare filesystem facts once; database ownership is always read later."""
     if isinstance(abs_path, FileIdentity):
         return abs_path
-    normalized = normalize_file_path(abs_path, db=db)
+    normalized = normalize_file_path(abs_path, db=db, allowed_roots=allowed_roots)
     if normalized is None:
         return None
     canonical, zone, ephemeral = normalized
@@ -132,6 +144,34 @@ def find_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, An
     finally:
         if not db:
             _db.close()
+
+
+def resolve_file_identities(abs_paths, *, db=None) -> dict[str, dict[str, Any]]:
+    """Resolve active file owners for many physical paths in one registry read."""
+    paths = list(dict.fromkeys(abs_paths))
+    if not paths:
+        return {}
+    roots = get_allowed_dirs_rw(db=db)
+    identities = {
+        path: prepare_file_identity(path, db=db, allowed_roots=roots)
+        for path in paths
+    }
+    candidates = [
+        (identity.artifact_type, external_id)
+        for identity in identities.values() if identity is not None
+        for external_id in dict.fromkeys((identity.external_id, identity.canonical))
+    ]
+    owners = resolve_normalized_owners(db, "workspace", candidates)
+    found: dict[str, dict[str, Any]] = {}
+    for path, identity in identities.items():
+        if identity is None:
+            continue
+        for external_id in dict.fromkeys((identity.external_id, identity.canonical)):
+            artifact = owners.get((identity.artifact_type, external_id))
+            if artifact is not None:
+                found[path] = artifact
+                break
+    return found
 
 
 def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
