@@ -256,11 +256,17 @@ def summary(
             "Rerun it once with `gh run rerun <run id> --failed`, or fix what hung and push. "
             "Then end your turn: CORSIA wakes you when the rerun finishes. Do not poll."
         )
+    if reason == REVIEW_MISSING and reviewer_finished(reviewer_state):
+        return (
+            f"{pr}: the reviewer finished head {h7} ({reviewer_state}), but its verdict never "
+            f"reached you. Run {checks} once and act on the {STATUS_CHECK_CONTEXT} result."
+        )
     if reason == REVIEW_MISSING:
         return (
-            f"{pr}: CI passed for head {h7} {minutes} min ago, but the reviewer status is "
-            f"{reviewer_state or 'pending'}. CORSIA has initiated canonical re-evaluation. "
-            f"Wait for its next {STATUS_CHECK_CONTEXT} verdict; do other work; do not poll."
+            f"{pr}: CI passed for head {h7} {minutes} min ago, but the reviewer has not "
+            "finished. CORSIA has reported it. Do other work; do not poll. "
+            "CORSIA also asked the reviewer gate to evaluate this head once more; if it posts a "
+            "verdict, CORSIA wakes you."
         )
     if view.conflicting:
         return (

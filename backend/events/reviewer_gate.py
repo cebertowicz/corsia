@@ -166,7 +166,11 @@ def on_pull_request_ready_for_review(
 
 
 def schedule_overdue_evaluation(repo: str, head_sha: str, pr_number: int, loop: asyncio.AbstractEventLoop) -> None:
-    """Schedule an overdue re-evaluation without blocking its event source."""
+    """Schedule one overdue re-evaluation per PR head without blocking its source."""
+    if not reviewer_gate_state.claim_overdue_evaluation(
+        reviewer_gate_state.pr_key(repo, pr_number), head_sha,
+    ):
+        return
     _dispatch_background_evaluation(repo, head_sha, pr_number, "pr_quiet.events_overdue", loop)
 
 

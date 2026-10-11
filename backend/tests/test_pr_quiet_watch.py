@@ -307,27 +307,34 @@ async def test_a_quiet_wake_refused_after_its_row_committed_is_not_resent(
 
 
 @pytest.mark.asyncio
-async def test_pre_admission_refusal_keeps_marker_and_dispatches_gate_once(
+async def test_pre_admission_refusal_releases_marker_and_dispatches_gate_once(
     gh, parked, monkeypatch,
 ):
+    from events import reviewer_gate
     from infra.send_service import SendRejected
 
     owner, _parent, _sends = _failed_wake_setup(2576, gh, monkeypatch)
+    gh.runs(H, run("success"))
     handoffs: list[tuple[str, str, int]] = []
+    refusals = 0
 
     async def refuse(*_args, **_kwargs):
+        nonlocal refusals
+        refusals += 1
         raise SendRejected(503, "refused before admission")
 
     monkeypatch.setattr(delivery, "send_thread_input", refuse)
     monkeypatch.setattr(
-        "events.reviewer_gate.schedule_overdue_evaluation",
-        lambda repo, head_sha, pr_number, _loop: handoffs.append((repo, head_sha, pr_number)),
+        reviewer_gate, "_dispatch_background_evaluation",
+        lambda repo, head_sha, pr_number, *_args: handoffs.append((repo, head_sha, pr_number)),
     )
     await _sweep(gh, T0 + timedelta(minutes=11), monkeypatch)
+    assert _wake_rows(owner) == [] and get_setting("pr_quiet:o/r#2576")["fired"] == []
+
     await _sweep(gh, T0 + timedelta(minutes=16), monkeypatch)
 
-    assert _wake_rows(owner) == []
-    assert len(get_setting("pr_quiet:o/r#2576")["fired"]) == 1
+    assert refusals == 2, "the next sweep retries the owner wake"
+    assert _wake_rows(owner) == [] and get_setting("pr_quiet:o/r#2576")["fired"] == []
     assert handoffs == [(REPO, H, 2576)]
 
 
@@ -366,18 +373,18 @@ async def test_ci_event_missing_is_silent_when_the_log_holds_the_event(gh, wakes
 
 
 @pytest.mark.asyncio
-async def test_a_failed_wake_keeps_its_claim_for_the_next_sweep(gh, wakes, parked, monkeypatch):
+async def test_a_failed_wake_releases_its_claim_for_the_next_sweep(gh, wakes, parked, monkeypatch):
     _webhook()
     _owner(3)
     gh.pr(3)
     gh.runs(H, run("success"))
     wakes.return_value = False
     await _sweep(gh, T0 + timedelta(minutes=11), monkeypatch)
-    await _sweep(gh, T0 + timedelta(minutes=16), monkeypatch)
+    assert get_setting("pr_quiet:o/r#3")["fired"] == []
 
-    assert _reasons(wakes) == [reasons.CI_EVENT_MISSING]
-    [marker] = get_setting("pr_quiet:o/r#3")["fired"]
-    assert marker.startswith("ci_event_missing@")
+    wakes.return_value = True
+    await _sweep(gh, T0 + timedelta(minutes=16), monkeypatch)
+    assert _reasons(wakes) == [reasons.CI_EVENT_MISSING] * 2
 
 
 # -- Test 6 and the §9 gate: review_missing --
@@ -402,9 +409,9 @@ async def test_review_missing_fires_after_45_minutes(gh, wakes, parked, monkeypa
     assert gh.reads.count(f"repos/o/r/commits/{H}/status") == 1, "a fired reason is not re-read"
     summary = wakes.await_args.args[2]
     assert summary == (
-        f"PR o/r#4: CI passed for head {H[:7]} 46 min ago, but the reviewer status is "
-        "pending. CORSIA has initiated canonical re-evaluation. Wait for its next "
-        "qa/llm-reviewer verdict; do other work; do not poll."
+        f"PR o/r#4: CI passed for head {H[:7]} 46 min ago, but the reviewer has not "
+        "finished. CORSIA has reported it. Do other work; do not poll. CORSIA also asked the "
+        "reviewer gate to evaluate this head once more; if it posts a verdict, CORSIA wakes you."
     )
     assert len(parked) == 1, "the pending-reviewer wording promises a report"
 
@@ -419,12 +426,15 @@ async def test_review_missing_names_a_finished_reviewer_verdict(gh, wakes, parke
     gh.reviewer(H, "failure")
     _received(H)
 
+    unexpected = Mock(side_effect=AssertionError("terminal reviewer state must not invoke reviewer gate"))
+    monkeypatch.setattr("events.reviewer_gate.schedule_overdue_evaluation", unexpected)
+
     await _sweep(gh, T0 + timedelta(minutes=46), monkeypatch)
     assert wakes.await_args.args[2] == (
-        f"PR o/r#5: CI passed for head {H[:7]} 46 min ago, but the reviewer status is "
-        "failure. CORSIA has initiated canonical re-evaluation. Wait for its next "
-        "qa/llm-reviewer verdict; do other work; do not poll."
+        f"PR o/r#5: the reviewer finished head {H[:7]} (failure), but its verdict never "
+        "reached you. Run `gh pr checks 5` once and act on the qa/llm-reviewer result."
     )
+    unexpected.assert_not_called()
     assert parked == []
 
 
@@ -1116,7 +1126,7 @@ async def test_missing_event_dispatches_one_non_blocking_canonical_gate(
     number = 50 if reason == reasons.CI_EVENT_MISSING else 51
     gh.pr(number)
     if reason == reasons.CI_EVENT_MISSING:
-        gh.runs(H, run("failure"))
+        gh.runs(H, run("success"))
         due_at = T0 + timedelta(minutes=11)
     else:
         _reviewer_runs_here()
@@ -1142,10 +1152,44 @@ async def test_missing_event_dispatches_one_non_blocking_canonical_gate(
     assert parked, "the sweep completed its ingress report while the gate was blocked"
 
     await _sweep(gh, due_at + timedelta(minutes=5), monkeypatch)
-    assert calls == [(REPO, H, number)], "the durable fired marker must suppress a second handoff"
+    assert calls == [(REPO, H, number)], "the reviewer gate's process-local claim suppresses a second handoff"
 
     release.set()
     await asyncio.gather(*list(reviewer_gate._PENDING_RETRIES))
+
+
+@pytest.mark.asyncio
+async def test_absent_reviewer_status_dispatches_gate_once_across_owner_wake_retries(
+    gh, parked, monkeypatch,
+):
+    from events import reviewer_gate
+    from infra.send_service import SendRejected
+
+    owner, _parent, _sends = _failed_wake_setup(56, gh, monkeypatch)
+    _reviewer_runs_here()
+    gh.runs(H, run("success"))
+    gh.bodies[f"repos/{REPO}/commits/{H}/status"] = {"statuses": []}
+    _received(H)
+    dispatches: list[tuple[str, str, int]] = []
+    refusals = 0
+
+    async def refuse(*_args, **_kwargs):
+        nonlocal refusals
+        refusals += 1
+        raise SendRejected(503, "refused before admission")
+
+    monkeypatch.setattr(delivery, "send_thread_input", refuse)
+    monkeypatch.setattr(
+        reviewer_gate, "_dispatch_background_evaluation",
+        lambda repo, head_sha, pr_number, *_args: dispatches.append((repo, head_sha, pr_number)),
+    )
+    due_at = T0 + timedelta(minutes=46)
+    await _sweep(gh, due_at, monkeypatch)
+    await _sweep(gh, due_at + timedelta(minutes=5), monkeypatch)
+
+    assert refusals == 2, "each pre-admission refusal releases the owner-wake marker"
+    assert _wake_rows(owner) == [] and get_setting("pr_quiet:o/r#56")["fired"] == []
+    assert dispatches == [(REPO, H, 56)]
 
 
 @pytest.mark.asyncio
@@ -1165,24 +1209,38 @@ async def test_neighbouring_overdue_reason_does_not_dispatch_reviewer_gate(gh, w
 
 
 @pytest.mark.asyncio
-async def test_committed_refused_owner_wake_does_not_prevent_gate_handoff(
+async def test_red_ci_event_missing_wakes_owner_without_dispatching_reviewer_gate(
     gh, wakes, parked, monkeypatch,
 ):
     _webhook()
     _owner(53)
     gh.pr(53)
     gh.runs(H, run("failure"))
-    wakes.return_value = False
-    calls: list[tuple[str, str, int]] = []
-    monkeypatch.setattr(
-        "events.reviewer_gate.schedule_overdue_evaluation",
-        lambda repo, head_sha, pr_number, _loop: calls.append((repo, head_sha, pr_number)),
-    )
+    unexpected = Mock(side_effect=AssertionError("red CI must not invoke reviewer gate"))
+    monkeypatch.setattr("events.reviewer_gate.schedule_overdue_evaluation", unexpected)
 
     await _sweep(gh, T0 + timedelta(minutes=11), monkeypatch)
 
-    assert wakes.await_count == 1
-    assert calls == [(REPO, H, 53)]
+    assert _reasons(wakes) == [reasons.CI_EVENT_MISSING]
+    unexpected.assert_not_called()
+
+
+def test_overdue_gate_dispatches_once_per_process_head(monkeypatch):
+    from events import reviewer_gate
+
+    dispatches: list[tuple[str, str, int]] = []
+    monkeypatch.setattr(
+        reviewer_gate, "_dispatch_background_evaluation",
+        lambda repo, head_sha, pr_number, *_args: dispatches.append((repo, head_sha, pr_number)),
+    )
+    loop = asyncio.new_event_loop()
+    try:
+        reviewer_gate.schedule_overdue_evaluation(REPO, H, 55, loop)
+        reviewer_gate.schedule_overdue_evaluation(REPO, H, 55, loop)
+    finally:
+        loop.close()
+
+    assert dispatches == [(REPO, H, 55)]
 
 
 @pytest.mark.asyncio

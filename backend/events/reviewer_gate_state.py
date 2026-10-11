@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 _IN_FLIGHT: set[tuple[str, str]] = set()
+_OVERDUE_EVALUATIONS: set[tuple[str, str]] = set()
 _IN_FLIGHT_LOCK = threading.Lock()
 
 
@@ -38,6 +39,16 @@ def mark_reviewed(pr_key: str, head_sha: str) -> None:
 def pr_key(repo: str, pr_number: int) -> str:
     """Build the canonical repository and pull-request key for gate state."""
     return f"{repo}#{pr_number}"
+
+
+def claim_overdue_evaluation(pr_key: str, head_sha: str) -> bool:
+    """Claim one quiet-watch re-evaluation for this PR head in this process."""
+    key = (pr_key, head_sha)
+    with _IN_FLIGHT_LOCK:
+        if key in _OVERDUE_EVALUATIONS:
+            return False
+        _OVERDUE_EVALUATIONS.add(key)
+        return True
 
 
 def claim_in_flight(pr_key: str, head_sha: str) -> bool:

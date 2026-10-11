@@ -193,19 +193,22 @@ async def _repo_runs_actions(runner: feed.GhRunner, repo: str) -> bool:
     return isinstance(body, dict) and (body.get("total_count") or 0) > 0
 
 
-
 async def _wake(
     candidate: Candidate, view: reasons.PrView, ci: reasons.CiState, reason: str,
-    now: datetime, reviewer_state: str | None, marker: str,
+    now: datetime, reviewer_state: str | None,
 ) -> bool:
-    """Send an already-claimed wake, retaining only overdue-handoff markers.
+    """Claim the reason durably, then send; a send refused before any row releases the claim.
 
     Claiming first means a retry or restart never wakes twice for one reason:
-    the delivery key hashes the summary, which changes between sweeps. Missed
-    CI/reviewer events retain their marker after pre-admission refusal because
-    the canonical reviewer-gate re-evaluation has already been initiated.
-    Other reasons release an uncommitted claim so their owner wake can retry.
+    the delivery key hashes the summary, which changes between sweeps. Once the
+    owner's FIFO holds the wake, the claim stays for this head even if the wake
+    later fails: that row's settlement reports the failure to the owner chain
+    (``infra.failed_wake_surface``), and it is never sent again (report and
+    expire, as for refused continuation wakes).
     """
+    marker = reasons.fired_marker(reason, ci)
+    if not await run_in_db(rows.update_head_state, candidate.external_id, view.head, fired=marker):
+        return False
     details = {
         "reason": reason, "head_sha": view.head, "conclusion": ci.conclusion or "none",
         "mergeable": view.mergeable, "url": view.url,
@@ -218,12 +221,11 @@ async def _wake(
     accepted = await delivery.deliver_to_thread(
         candidate.thread_id, event, summary, details, delivery_id=delivery_id,
     )
+    message_id = delivery._event_idempotency_key(event, summary, details, delivery_id=delivery_id)
     if accepted:
         _status["fired_count"] += 1
-    elif reason not in (reasons.CI_EVENT_MISSING, reasons.REVIEW_MISSING):
-        message_id = delivery._event_idempotency_key(event, summary, details, delivery_id=delivery_id)
-        if not await run_in_db(rows.wake_committed, message_id):
-            await run_in_db(rows.update_head_state, candidate.external_id, view.head, unfired=marker)
+    elif not await run_in_db(rows.wake_committed, message_id):
+        await run_in_db(rows.update_head_state, candidate.external_id, view.head, unfired=marker)
     return accepted
 
 
@@ -265,18 +267,21 @@ async def sweep_candidate(
         reviewer_state = (
             await _reviewer_state(runner, view) if reason == reasons.REVIEW_MISSING else None
         )
-        marker = reasons.fired_marker(reason, ci)
-        if not await run_in_db(rows.update_head_state, candidate.external_id, view.head, fired=marker):
-            continue
-        if reason in (reasons.CI_EVENT_MISSING, reasons.REVIEW_MISSING):
+        if reason == reasons.CI_EVENT_MISSING and ci.conclusion == "success":
             from events import reviewer_gate
 
             reviewer_gate.schedule_overdue_evaluation(
                 view.repo, view.head, view.number, asyncio.get_running_loop(),
             )
-        if not await _wake(candidate, view, ci, reason, now, reviewer_state, marker):
+        elif reason == reasons.REVIEW_MISSING and not reasons.reviewer_finished(reviewer_state):
+            from events import reviewer_gate
+
+            reviewer_gate.schedule_overdue_evaluation(
+                view.repo, view.head, view.number, asyncio.get_running_loop(),
+            )
+        if not await _wake(candidate, view, ci, reason, now, reviewer_state):
             continue
-        fired.append(marker)
+        fired.append(reasons.fired_marker(reason, ci))
         # The wake tells the owner CORSIA reported these, so the report must happen.
         if reason == reasons.CI_EVENT_MISSING or (
             reason == reasons.REVIEW_MISSING and not reasons.reviewer_finished(reviewer_state)
