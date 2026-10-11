@@ -452,3 +452,10 @@
 	.queued-remove svg { width: 13px; height: 13px; }
 	.queued-remove:active:not(:disabled) { background: none; color: var(--red); }
 }
+
+/* The composer's height follows the text: resizeTextInputToContent sets it, this carries the change. */
+.input-chip .composer { transition: height var(--dur-tight) var(--ease-snap); }
+@media (prefers-reduced-motion: reduce) {
+	/* Nothing slides: the box takes its new height at once. */
+	.input-chip .composer { transition: none; }
+}

@@ -1,0 +1,10 @@
+/* Press feedback for `use:press` controls. The tint is an overlay fading in, never a size change. */
+[data-press] { -webkit-tap-highlight-color: transparent; }
+[data-press]::after {
+	content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+	background: var(--press-bg); opacity: 0;
+	transition: opacity var(--dur-tight) var(--ease-snap);
+}
+[data-press][data-pressing]::after { opacity: 1; }
+/* Replaces the global press scale: these controls tint instead of resizing. */
+button[data-press]:not(:disabled):active { scale: none; }

@@ -68,7 +68,7 @@ describe('WorkBlock structure', () => {
 		expect(toggle().textContent).toContain('Worked');
 	});
 
-	it('opens a body the header controls, and closes it again', () => {
+	it('opens a body the header controls, and closes it again once the exit has played', async () => {
 		render(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]));
 
 		toggle().click();
@@ -80,6 +80,8 @@ describe('WorkBlock structure', () => {
 		expect(toggle().getAttribute('aria-label')).toMatch(/^Collapse /);
 
 		toggle().click();
+		flushSync();
+		await new Promise((resolve) => setTimeout(resolve, 400));
 		flushSync();
 		expect(host.querySelector('.fold-details')).toBeNull();
 	});

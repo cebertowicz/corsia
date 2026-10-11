@@ -8,6 +8,8 @@
 	import { turnStates } from '$lib/ws/turnState';
 	import { parseWsTimestamp } from '$lib/time';
 	import { passiveContextEventLabel } from './messageListModel';
+	import Expand from './ui/Expand.svelte';
+	import { press } from './ui/press';
 	import { needsWakeRetry, wakeRetryControl } from './pendingWakeRetry';
 
 	let { msg, deliveryOnly = false }: { msg: any; deliveryOnly?: boolean } = $props();
@@ -132,6 +134,7 @@
 		<button
 			type="button"
 			class="ev-details-toggle"
+			use:press
 			data-event-disclosure
 			aria-expanded={detailsExpanded}
 			onclick={() => (detailsExpanded = !detailsExpanded)}
@@ -139,7 +142,7 @@
 			<span>{detailsExpanded ? 'Hide details' : 'Show details'}</span>
 			<svg class:expanded={detailsExpanded} viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
 		</button>
-		{#if detailsExpanded}
+		<Expand open={detailsExpanded}>
 			<ul class="ev-details">
 				{#each eventDetails as detail (detail.id)}
 					<li class="ev-detail">
@@ -148,7 +151,7 @@
 					</li>
 				{/each}
 			</ul>
-		{/if}
+		</Expand>
 	{/if}
 	{#if summaryIsLong}
 		<button
@@ -295,9 +298,9 @@
 		stroke-width: 2;
 		stroke-linecap: round;
 		stroke-linejoin: round;
-		transition: transform var(--dur-tight) var(--ease-snap);
+		transition: transform calc(var(--dur-standard) * 0.7) var(--ease-snap);
 	}
-	.ev-details-toggle svg.expanded { transform: rotate(180deg); }
+	.ev-details-toggle svg.expanded { transform: rotate(180deg); transition: transform var(--dur-standard) var(--ease-entrance); }
 	.ev-details {
 		display: grid;
 		gap: var(--space-1);

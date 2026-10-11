@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { tick, type Snippet } from 'svelte';
+	import Expand from './ui/Expand.svelte';
+	import { press } from './ui/press';
 	import VisitDivider from './VisitDivider.svelte';
 	import BlockLine from './BlockLine.svelte';
 	import { createPhraseSwap } from './plans/phraseSwap.svelte';
@@ -52,10 +54,12 @@
 
 	let section: HTMLElement | undefined = $state();
 	let toggleButton: HTMLButtonElement | undefined = $state();
+	// The details stay mounted while they close, so their exit is seen.
+	let detailsPresent = $state(false);
 
 	// A stub-backed block reads newest rows first: its rows only start at its start once the read is whole.
 	const complete = $derived(!entry.stub || (load !== undefined && !load.loading && !load.error && !runHasMore(entry.stub, load)));
-	const entries = $derived(expanded ? blockEntries(entry, { complete }) : []);
+	const entries = $derived(expanded || detailsPresent ? blockEntries(entry, { complete }) : []);
 	const indexById = $derived(new Map(entry.items.map((item, index) => [item.id, index])));
 	const plainLabel = $derived(label.endsWith(NEW_SUFFIX) ? label.slice(0, -NEW_SUFFIX.length) : label);
 	// A new phrase waits out the current one's minimum hold, then crossfades in, as the plan row does.
@@ -86,6 +90,7 @@
 	<button
 		type="button"
 		class="fold-toggle"
+		use:press
 		bind:this={toggleButton}
 		aria-expanded={expanded}
 		aria-controls={expanded ? bodyId : undefined}
@@ -101,7 +106,7 @@
 		{/if}
 		<svg class="fold-chevron" class:expanded width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
 	</button>
-	{#if expanded}
+	<Expand open={expanded} bind:present={detailsPresent}>
 		<div class="fold-details" id={bodyId}>
 			{#if entry.stub}
 				{@const stub = entry.stub}
@@ -131,14 +136,14 @@
 			{/each}
 			{#if entry.live}{@render liveActivity?.()}{/if}
 		</div>
-	{:else}
-		{#if entry.pauses?.length}
-			<div class="fold-history" aria-label="Earlier pauses">
-				{#each entry.pauses as annotation (annotation.pause.stoppedTurnId)}
-					{@render pause(annotation, true)}
-				{/each}
-			</div>
-		{/if}
+	</Expand>
+	<!-- Held back while the details close, so a pause is never on screen twice. -->
+	{#if !expanded && !detailsPresent && entry.pauses?.length}
+		<div class="fold-history" aria-label="Earlier pauses">
+			{#each entry.pauses as annotation (annotation.pause.stoppedTurnId)}
+				{@render pause(annotation, true)}
+			{/each}
+		</div>
 	{/if}
 	{@render notes?.()}
 </section>
@@ -159,8 +164,8 @@
 	.fold-label, .live-step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.fold-new { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; white-space: nowrap; }
 	.fold-new i { width: 6px; height: 6px; border-radius: var(--radius-circle); background: var(--accent); }
-	.fold-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
-	.fold-chevron.expanded { transform: rotate(90deg); }
+	.fold-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform calc(var(--dur-standard) * 0.7) var(--ease-snap); }
+	.fold-chevron.expanded { transform: rotate(90deg); transition: transform var(--dur-standard) var(--ease-entrance); }
 	.live-step { transition: opacity var(--fade-ms, 150ms) ease; }
 	.live-step.dimmed { opacity: 0.7; }
 	.live-step.fading { opacity: 0; }

@@ -2,6 +2,8 @@ export { default as Avatar } from './Avatar.svelte';
 export { default as AvatarStack } from './AvatarStack.svelte';
 export { default as Button } from './Button.svelte';
 export { default as Popover } from './Popover.svelte';
+export { default as Expand } from './Expand.svelte';
+export { press } from './press';
 export { default as Field } from './Field.svelte';
 export { default as IconButton } from './IconButton.svelte';
 export { default as Message } from './Message.svelte';
