@@ -1,9 +1,4 @@
-/**
- * The single client renderer for server-owned display keys.
- *
- * Lifecycle, admission, review ownership, current/next, and plan rollup state
- * are never recomputed here. This module translates contract-v2 keys to copy.
- */
+/** The client renderer for server-owned display keys; it translates contract-v2 keys to copy without recomputing lifecycle, admission, ownership, current/next, or rollup state. */
 import type {
 	OperatorLiveness,
 	OperatorNode,
@@ -24,11 +19,7 @@ const INSTANT = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2
 /** "Waiting until" / "Until" in front of an instant: the row already says it waits, so only the time is left. */
 const UNTIL_INSTANT = /(?:Waiting )?[Uu]ntil (?=\d{4}-\d{2}-\d{2}T)/g;
 
-/**
- * Plan prose with each instant it names said in the viewer's local time, and
- * without the "until" that only restates a wait.
- * Reasons carry exact instants for agents; this is where a person reads them.
- */
+/** Plan prose with its instants localized for the viewer and redundant "until" removed. */
 export function localizeInstants(text: string, now: Date = new Date()): string {
 	return text.replace(UNTIL_INSTANT, '').replace(INSTANT, (instant) => {
 		const ms = parseWsTimestamp(instant);
@@ -115,11 +106,7 @@ export function nodeDisplayLabel(node: OperatorNode, _isNext = false): string {
 		: 'Unavailable';
 }
 
-/**
- * What a row says under its title, or null for a one-line row: the server's
- * specific cause, the try a failure forced (friction only, never an edit's
- * reselection), and a request for the user's input.
- */
+/** A row’s secondary copy: its server cause, failed-work attempt, or requested user input. */
 const SETTLED_TONES: ReadonlySet<StateTone> = new Set(['complete', 'closed', 'failed']);
 
 /** When a settled row settled, in local time; null for open work. */
@@ -184,13 +171,20 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 	return parts.length ? parts.join(' · ') : null;
 }
 
-/**
- * How a row in the Scheduled group says its time: `clock` keeps the clock on a
- * far date, `reason` says only why (its cluster's time line names the moment).
- */
+/** Scheduled-row time: `clock` keeps a far-date clock; `reason` leaves its cluster line to name the moment. */
 export type ScheduledView = 'clock' | 'reason';
 
 export function nodeSubline(node: OperatorNode, now: Date = new Date(), view?: ScheduledView): string | null {
+	const { lead, moment } = nodeSublineParts(node, now, view);
+	return lead && moment ? `${lead} · ${moment}` : lead ?? moment;
+}
+
+/** The narrow-row split: `lead` yields first while a settled `moment` stays whole. */
+export function nodeSublineParts(
+	node: OperatorNode,
+	now: Date = new Date(),
+	view?: ScheduledView,
+): { lead: string | null; moment: string | null } {
 	const parts: string[] = [];
 	if (node.display.label_key === 'finished') {
 		parts.push(finishedOutcome(node));
@@ -205,10 +199,9 @@ export function nodeSubline(node: OperatorNode, now: Date = new Date(), view?: S
 		const reason = openReason(node, now, view);
 		if (reason) parts.push(reason);
 	}
-	const settled = settledMoment(node, now);
-	if (settled) parts.push(settled);
 	// A row is one line: a reason's line breaks (send-back feedback, a pasted list) read as spaces.
-	return parts.length ? parts.join(' · ').replace(/\s+/g, ' ').trim() : null;
+	const lead = parts.join(' · ').replace(/\s+/g, ' ').trim();
+	return { lead: lead || null, moment: settledMoment(node, now) };
 }
 
 export function cardStateLabel(state: PlanCardState): string {

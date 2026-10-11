@@ -166,5 +166,9 @@ describe('PlanTree — a level\'s folded history', () => {
 		mountTree([{ parent_id: null, done: 0, failed: 0, closed: 1, more: 1 }]);
 		await press('Show 1');
 		expect(host.textContent).toContain('Won’t do · No longer needed');
+		// A narrow pane cuts the reason, never when it settled: the moment sits outside the clipped text.
+		const subline = host.querySelector('.tree-row:not(.fold-row) .row-subline');
+		expect(subline?.querySelector('.subline-text')?.textContent).toBe('Won’t do · No longer needed');
+		expect(subline?.querySelector('.subline-moment')?.textContent).toMatch(/^ · \S/);
 	});
 });
