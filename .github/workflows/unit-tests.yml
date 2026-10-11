@@ -3,12 +3,6 @@ name: Unit tests (L1)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'requirements*.txt'
-      - 'frontend/package*.json'
-      - '.github/workflows/unit-tests.yml'
   workflow_dispatch:
 
 concurrency:
@@ -38,13 +32,31 @@ jobs:
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether backend unit tests are relevant
+        id: relevance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # uv's managed CPython bundles the same current SQLite the Mac Python
       # does; setup-python on Ubuntu links the distro's older SQLite, whose
       # parser and query planner differ from what CORSIA runs on.
       - uses: astral-sh/setup-uv@v6
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
 
       - name: Install deps
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           # The search tests assert real ripgrep semantics.
           sudo apt-get update --quiet
@@ -57,6 +69,7 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Use in-memory test root
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         # Each SQLite-backed test builds its schema with ~240 commits, and every
         # commit flushes to disk. Test state needs no durability, so keep it in
         # the runner's tmpfs; fall back to RUNNER_TEMP if /dev/shm is missing.
@@ -72,6 +85,7 @@ jobs:
           echo "Backend test state root: $root"
 
       - name: Run backend tests
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -uo pipefail
 
@@ -143,7 +157,7 @@ jobs:
           exit "$status"
 
       - name: Summarize backend test shards
-        if: always()
+        if: ${{ always() && steps.relevance.outputs.relevant == 'true' }}
         continue-on-error: true
         run: |
           .venv/bin/python - <<'PY'
@@ -242,7 +256,7 @@ jobs:
           PY
 
       - name: Upload backend timing report
-        if: always()
+        if: ${{ always() && steps.relevance.outputs.relevant == 'true' }}
         # Diagnostics only: a failed upload must not turn a passing job red.
         continue-on-error: true
         uses: actions/upload-artifact@v4
@@ -267,16 +281,35 @@ jobs:
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether macOS-only unit tests are relevant
+        id: relevance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@v5
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       # The jailed-export cases require the real Safehouse sandbox.
       - name: Install Safehouse
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: scripts/install-ci-safehouse
 
       - name: Install deps
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
@@ -284,6 +317,7 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Run macOS-only backend tests
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -euo pipefail
           files=()
@@ -309,23 +343,43 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether frontend unit tests are relevant
+        id: relevance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v4
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           # Active LTS; the frontend declares no engines constraint.
           node-version: '24'
 
       - name: Install deps + run tests
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         working-directory: frontend
         run: |
           npm ci
           npm run test
 
       - name: Build
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         working-directory: frontend
         run: npm run build
 
       - name: Type check (svelte-check) — ADVISORY during calibration
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         working-directory: frontend
         continue-on-error: true
         run: npm run check

@@ -35,6 +35,26 @@ LINUX_WORKFLOW_JOBS = {
 MACOS_WORKFLOW_JOBS = {
     "integration.yml": 1,
 }
+BLOCKING_CONTEXTS = {
+    "antipatterns.yml": {"Anti-pattern detector (error-severity, blocking)"},
+    "code-health.yml": {"File size ratchet"},
+    "docs-drift.yml": {"Documentation drift check (citations + private-name scan)"},
+    "integration.yml": {"Integration tests (L3)"},
+    "large-files.yml": {"No file over 500 KB"},
+    "lint.yml": {"mypy (regression gate)"},
+    "unit-tests.yml": {
+        "Backend unit tests",
+        "Backend unit tests (macOS-only files)",
+        "Frontend unit tests",
+    },
+}
+UNCONDITIONAL_CONTEXT_WORKFLOWS = {
+    "antipatterns.yml": 1,
+    "code-health.yml": 1,
+    "integration.yml": 1,
+    "lint.yml": 2,
+    "unit-tests.yml": 3,
+}
 
 def _macos_only_files() -> list[str]:
     return [
@@ -92,7 +112,7 @@ def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     assert "--durations=50 --durations-min=0.25" in workflow
     assert '--junitxml="$RUNNER_TEMP/backend-junit-${shard}.xml"' in workflow
     assert "actions/upload-artifact@v4" in workflow
-    assert "if: always()" in workflow
+    assert "if: ${{ always() && steps.relevance.outputs.relevant == 'true' }}" in workflow
     assert "backend-junit-*.xml" in workflow
     assert "backend-*.log" in workflow
     assert "Summarize backend test shards" in workflow
@@ -123,6 +143,27 @@ def test_l3_enables_contract_suite_for_integration_matrix() -> None:
     assert "CORSIA_CONTRACT_SUITE: '1'" in workflow
     assert '-m "integration"' in workflow
     assert "branches: [main, dev]" in workflow
+
+
+def test_blocking_contexts_are_created_for_every_pull_request() -> None:
+    workflow_root = REPO_ROOT / ".github/workflows"
+
+    for filename, contexts in BLOCKING_CONTEXTS.items():
+        workflow = (workflow_root / filename).read_text()
+        for context in contexts:
+            assert f"name: {context}" in workflow, (filename, context)
+
+    for filename, expected_relevance_steps in UNCONDITIONAL_CONTEXT_WORKFLOWS.items():
+        workflow = (workflow_root / filename).read_text()
+        pull_request = workflow.split("  pull_request:\n", 1)[1].split(
+            "  workflow_dispatch:", 1
+        )[0]
+        assert "branches: [main, dev]" in pull_request, filename
+        assert "paths:" not in pull_request, filename
+        assert "paths-ignore:" not in pull_request, filename
+        assert workflow.count("id: relevance") == expected_relevance_steps, filename
+        assert workflow.count("steps.relevance.outputs.relevant") >= expected_relevance_steps, filename
+        assert "\n    if:" not in workflow, filename
 
 
 def test_every_workflow_uses_its_hosted_runner() -> None:

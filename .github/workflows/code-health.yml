@@ -3,22 +3,6 @@ name: Code health
 on:
   pull_request:
     branches: [main, dev]
-    # Not named/wired as a required check, and deliberately so: this repo is
-    # private without the plan tier that unlocks branch protection (the API
-    # returns 403), so "required" has no GitHub-enforced meaning here anyway
-    # -- the merge gate reads statusCheckRollup instead. If that changes, this
-    # paths filter would need to go first: a PR touching none of these paths
-    # never runs this job, so a required check gated on it would wait forever
-    # on a check that never reports.
-    # '**.py' rather than '**/*.py': in GitHub's filter syntax the '**/'
-    # form requires at least one directory separator, so a file added at the
-    # repository root would not match and the gate would silently skip it.
-    paths:
-      - '**.py'
-      - '**.ts'
-      - '**.svelte'
-      - 'quality/file-size-limits.json'
-      - '.github/workflows/code-health.yml'
   workflow_dispatch:
 
 concurrency:
@@ -35,12 +19,30 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether code health is relevant
+        id: relevance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '(^|/).+\.(py|ts|svelte)$|^quality/file-size-limits\.json$|^\.github/workflows/code-health\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@v5
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       - name: Test the ratchet itself
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         # scripts/tests/ is outside backend/, so the "Unit tests (L1)" job's
         # `cd backend && pytest` (rootdir=backend/pytest.ini) never collects
         # it -- confirmed empirically, not assumed: that exact invocation
@@ -54,6 +56,7 @@ jobs:
           "$RUNNER_TEMP/ratchet-test-venv/bin/python" -m pytest scripts/tests/ -q
 
       - name: No file grows past its recorded size
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         # GitHub's default shell for `run:` is `bash -e {0}` -- errexit ON by
         # default, from the shell invocation itself, not from anything below.
         # `shell: bash {0}` (no `-e`) is what actually lets a failing check

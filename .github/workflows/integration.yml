@@ -3,10 +3,6 @@ name: Integration tests (L3)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'requirements*.txt'
-      - '.github/workflows/integration.yml'
   workflow_dispatch:
     inputs:
       live_reviewer:
@@ -39,6 +35,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether integration is relevant
+        id: relevance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '^backend/|^requirements[^/]*\.txt$|^\.github/workflows/integration\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Prepare isolated workspace
         run: |
@@ -48,19 +60,23 @@ jobs:
           mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
 
       - uses: actions/setup-python@v5
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       - name: Install Safehouse
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: scripts/install-ci-safehouse
 
       # The stock-CLI receipt proofs drive the real Claude and Codex CLIs
       # against loopback peers; pin the versions they are tested with.
       - uses: actions/setup-node@v4
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           node-version: '24'
 
       - name: Install stock agent CLIs
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -e
           npm install --global @anthropic-ai/claude-code@2.1.296 @openai/codex@0.160.0
@@ -68,6 +84,7 @@ jobs:
           codex --version
 
       - name: Install backend deps
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -e
           if [ ! -x .venv/bin/python ]; then
@@ -78,6 +95,7 @@ jobs:
           .venv/bin/pip install -r backend/requirements-test.txt
 
       - name: Check required models loaded
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -e
           cd backend
@@ -98,7 +116,7 @@ jobs:
           "
 
       - name: Run integration tests
-        if: ${{ !inputs.live_reviewer }}
+        if: ${{ steps.relevance.outputs.relevant == 'true' && !inputs.live_reviewer }}
         run: |
           set -e
           cd backend
@@ -108,7 +126,7 @@ jobs:
             -x
 
       - name: Run bounded live Haiku reviewer proof
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_reviewer }}
+        if: ${{ steps.relevance.outputs.relevant == 'true' && github.event_name == 'workflow_dispatch' && inputs.live_reviewer }}
         run: |
           set -e
           CORSIA_WORKSPACE="$(mktemp -d "$RUNNER_TEMP/reviewer-workspace.XXXXXX")"

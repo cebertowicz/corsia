@@ -3,11 +3,6 @@ name: Lint (ruff + mypy)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'tools/**'
-      - 'pyproject.toml'
-      - '.github/workflows/lint.yml'
   workflow_dispatch:
 
 concurrency:
@@ -24,18 +19,37 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether ruff is relevant
+        id: relevance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '^backend/|^tools/|^pyproject\.toml$|^\.github/workflows/lint\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@v5
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       - name: Install ruff
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           if [ ! -x .venv/bin/python ]; then python -m venv .venv; fi
           .venv/bin/pip install --upgrade pip --quiet
           .venv/bin/pip install ruff --quiet
 
       - name: ruff check
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: .venv/bin/ruff check . || true
 
   mypy:
@@ -51,12 +65,30 @@ jobs:
       CORSIA_ANALYTICS_DISABLE: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether mypy is relevant
+        id: relevance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '^backend/|^tools/|^pyproject\.toml$|^\.github/workflows/lint\.yml$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@v5
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       - name: Install deps + mypy
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           if [ ! -x .venv/bin/python ]; then python -m venv .venv; fi
           .venv/bin/pip install --upgrade pip --quiet
@@ -72,12 +104,15 @@ jobs:
           .venv/bin/pip install 'mypy==2.3.0' --quiet
 
       - name: mypy backend
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: .venv/bin/mypy backend/ 2>&1 | tee mypy-backend.txt || true
 
       - name: mypy tools
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: .venv/bin/mypy tools/ 2>&1 | tee mypy-tools.txt || true
 
       - name: Type-error limits
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           .venv/bin/python scripts/mypy_error_limits.py \
             backend=mypy-backend.txt \

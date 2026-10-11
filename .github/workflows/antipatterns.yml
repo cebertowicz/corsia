@@ -3,13 +3,6 @@ name: Anti-patterns (blocking)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'tools/**'
-      - 'scripts/**'
-      - 'infra/**'
-      - '.github/workflows/antipatterns.yml'
   workflow_dispatch:
 
 concurrency:
@@ -35,12 +28,30 @@ jobs:
           mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether the antipattern gate is relevant
+        id: relevance
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE_REF"...HEAD | grep -Eq '^(backend/|frontend/|tools/|scripts/|infra/|\.github/workflows/antipatterns\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@v5
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         with:
           python-version: '3.11'
 
       - name: Run full error-severity antipattern gate (whole repo, blocking)
+        if: ${{ steps.relevance.outputs.relevant == 'true' }}
         run: |
           set -o pipefail
           PYTHONPATH=tools python -m antipatterns \
