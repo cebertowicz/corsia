@@ -358,6 +358,9 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			const from = await region.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
 			await touch('touchStart', [{ x: centre.x + 80, y: centre.y + 80 }]);
 			for (let step = 1; step <= 8; step++) await touch('touchMove', [{ x: centre.x + 80 - step * 12, y: centre.y + 80 - step * 10 }]);
+			// A finger that stops before it lifts. Lifted at the speed of these synthetic moves, Chromium on Linux
+			// starts a fling and drops the next tap's click (it only stops the fling), whatever the page does.
+			await page.waitForTimeout(150);
 			await touch('touchEnd', []);
 			await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBeGreaterThan(from.left + 40);
 			expect(await region.evaluate((el) => el.scrollTop)).toBeGreaterThan(from.top + 30);
