@@ -270,14 +270,15 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
 def _release(
     db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
 ) -> int:
-    from plans import admission, holds, plan_wake
+    from plans import admission_projection, holds, plan_wake
     from plans.plan_events import append_owner_event
     from plans.user_steering import CHANGE_KIND
     from prompts import plan_wakes as wakes
 
     rows = db.execute(
         f"""SELECT h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,
-                  n.revision, p.owner_id,
+                  n.revision, n.executor_thread_id, n.owner_thread_id,
+                  p.owner_kind, p.owner_id,
                   EXISTS (SELECT 1 FROM plan_node_holds other
                           WHERE other.node_id=n.id AND other.id<>h.id
                             AND other.cleared_at IS NULL) AS other_holds,
@@ -292,22 +293,32 @@ def _release(
             ORDER BY h.created_at, h.id""",
         (artifact_id,),
     ).fetchall()
-    for row in rows:
-        cause_id, cause_at = holds.clear_write(
+    causes = [
+        holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",
             actor_id=None, provenance=_PROVENANCE, db=db,
             detail=release.detail if release else None,
         )
+        for row in rows
+    ]
+    executors = {row["hold_id"]: admission_projection.executor_of(row, row) for row in rows}
+    handoffs = _reconcile_for_askers(db, rows, executors)
+    for row, (cause_id, cause_at) in zip(rows, causes):
         summary = _release_summary(row, done, retired=retired, release=release)
-        wake_id = plan_wake.append(
+        executor = executors[row["hold_id"]]
+        wake_id = None if executor is None else plan_wake.append(
             db,
-            recipient=str(row["owner_id"]),
+            recipient=executor,
             kind=plan_wake.ASK_RELEASED,
             subject_id=str(row["node_id"]),
             revision=int(row["revision"]),
             about=str(row["hold_id"]),
             plan_id=str(row["plan_id"]),
-            content=wakes.WAKE_ASK_RELEASED.format(summary=summary),
+            content=plan_wake.with_next(
+                db, str(row["plan_id"]), executor,
+                wakes.WAKE_ASK_RELEASED.format(summary=summary),
+                **handoffs.pop((str(row["plan_id"]), executor), {}),
+            ),
             open_node_id=str(row["node_id"]),
         )
         append_owner_event(
@@ -324,24 +335,41 @@ def _release(
             },
             created_at=cause_at,
         )
-    for plan_id in dict.fromkeys(str(row["plan_id"]) for row in rows):
-        admission.reconcile_plan(plan_id, actor_id=None, provenance=_PROVENANCE, db=db)
     return len(rows)
 
 
+def _reconcile_for_askers(db, rows, executors: dict) -> dict[tuple[str, str], dict]:
+    """Reconcile each plan an answer released, and return the askers' handoff facts.
+
+    The ask wake is the asker's result of this write, so reconcile is told not
+    to wake the asker again (``causing_executor``), and runs before the wake so
+    its next block is the state the asker returns to. Standing in for the
+    work-selected wake, the asker's first wake on each plan also carries what
+    that wake would have: its facts, keyed by plan and asker (``selected_fact``).
+    """
+    from plans import admission, plan_wake
+
+    handoffs: dict[tuple[str, str], dict] = {}
+    for plan_id in dict.fromkeys(str(row["plan_id"]) for row in rows):
+        causing = next(
+            executors[row["hold_id"]] for row in rows if str(row["plan_id"]) == plan_id
+        )
+        reconciled = admission.reconcile_plan(
+            plan_id, actor_id=None, provenance=_PROVENANCE, causing_executor=causing, db=db,
+        )
+        if causing is not None:
+            handoffs[(plan_id, causing)] = plan_wake.selected_fact(db, reconciled, causing)
+    return handoffs
+
+
 def _release_summary(row, done: str, *, retired: bool, release: AskRelease | None) -> str:
-    """Return the complete one-line answer a wake carries without a selection snapshot."""
-    ask = str(row["ask"] or "your ask")
-    verdict = "none"
-    answer = "none"
-    if release is not None:
-        value = release.detail.get("verdict")
-        verdict = str(value).replace("_", " ") if value else verdict
-        value = release.detail.get("note")
-        answer = " ".join(str(value).split()) if value else answer
-    event = f'Your ask "{ask}" became unavailable' if retired else f'The user {done} "{ask}"'
-    return (
-        f'{event} for {row["kind"]} "{row["title"]}" (node {row["node_id"]}). '
-        f'Verdict: {verdict}. User answer: {answer}. '
-        f'Other holds remain: {"yes" if row["other_holds"] else "no"}.'
+    """Return the one-line answer the wake and its receipt carry."""
+    from prompts import plan_wakes as wakes
+
+    detail = release.detail if release is not None else {}
+    return wakes.ask_release_summary(
+        ask=str(row["ask"] or "your ask"), done=done, retired=retired,
+        kind=str(row["kind"]), title=str(row["title"]), node_id=str(row["node_id"]),
+        verdict=detail.get("verdict"), note=detail.get("note"),
+        other_holds=bool(row["other_holds"]),
     )

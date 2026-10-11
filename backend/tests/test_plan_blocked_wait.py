@@ -91,23 +91,42 @@ def _ask_receipts(db) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def _ask_receipt_content(node, *, event: str, verdict: str = "none", answer: str = "none",
-                         other_holds: str = "no") -> str:
+def _plan_wakes_after(db, input_order: int, thread: str = "owner") -> list[sqlite3.Row]:
+    """Return the plan wakes a thread's FIFO took after ``input_order``."""
+    return db.execute(
+        "SELECT id,content FROM messages WHERE thread_id=? AND input_order > ? "
+        "AND id LIKE 'plan-wake:%' ORDER BY input_order",
+        (thread, input_order),
+    ).fetchall()
+
+
+def _last_input_order(db, thread: str = "owner") -> int:
+    return db.execute(
+        "SELECT COALESCE(MAX(input_order), 0) FROM messages WHERE thread_id=?", (thread,),
+    ).fetchone()[0]
+
+
+def _ask_receipt_content(node, *, event: str, verdict: str | None = None,
+                         answer: str | None = None, other_holds: str = "no") -> str:
     return (
-        f'{event} for task "{node.title}" (node {node.id}). '
-        f'Verdict: {verdict}. User answer: {answer}. Other holds remain: {other_holds}.'
+        f'{event} for task "{node.title}" (node {node.id}).'
+        + (f" Verdict: {verdict}." if verdict else "")
+        + (f" User answer: {answer}." if answer else "")
+        + f" Other holds remain: {other_holds}."
     )
 
 
-def _ask_wake_content(node, *, event: str, verdict: str = "none", answer: str = "none",
-                      other_holds: str = "no") -> str:
-    return (
-        "[CORSIA plan] "
-        + _ask_receipt_content(
-            node, event=event, verdict=verdict, answer=answer, other_holds=other_holds,
-        )
-        + '\n{"next": null}'
-    )
+def _ask_wake_next(db, wake, node, *, executor: str = "owner", **receipt) -> dict:
+    """Check an ask wake's line and return its next block, the executor's real current one."""
+    from plans import close_next
+
+    line, block = wake["content"].split("\n", 1)
+    assert line == "[CORSIA plan] " + _ask_receipt_content(node, **receipt)
+    shown = json.loads(block)["next"]
+    plan_id = service._node_row(db, node.id)["plan_id"]
+    assert shown is not None
+    assert shown == close_next.executor_next(db, plan_id, executor)
+    return shown
 
 
 def _document_ask(db, external_id: str) -> str:
@@ -123,11 +142,13 @@ def _document_ask(db, external_id: str) -> str:
     ).fetchone()["id"])
 
 
-def _ask_held_node(db, *, state: str, external_id: str, before_block=None):
+def _ask_held_node(db, *, state: str, external_id: str, before_block=None,
+                   description: str | None = None, author: str | None = None):
     """Create an ask-held task in one state whose release needs an owner wake."""
     plan = service.ensure_plan("thread", "owner", db=db)
     node = service.add_node(
-        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed",
+        description=description, actor_id=author, db=db,
     )
     if state == "active":
         admission.activate(
@@ -343,9 +364,7 @@ def test_answering_a_pending_document_ask_wakes_the_owner_once(db):
 
     [wake] = _ask_release_wakes(db)
     assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
-    assert wake["content"] == _ask_wake_content(
-        node, event='The user acknowledged "Read the proposal"',
-    )
+    _ask_wake_next(db, wake, node, event='The user acknowledged "Read the proposal"')
     [receipt] = _ask_receipts(db)
     assert receipt["content"] == _ask_receipt_content(
         node, event='The user acknowledged "Read the proposal"',
@@ -364,9 +383,7 @@ def test_answering_a_review_requested_document_ask_wakes_the_owner_once(db):
 
     [wake] = _ask_release_wakes(db)
     assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
-    assert wake["content"] == _ask_wake_content(
-        node, event='The user acknowledged "Read the proposal"',
-    )
+    _ask_wake_next(db, wake, node, event='The user acknowledged "Read the proposal"')
 
 
 def test_answering_an_ask_that_still_has_another_hold_reports_that_hold(db):
@@ -384,9 +401,11 @@ def test_answering_an_ask_that_still_has_another_hold_reports_that_hold(db):
     attention.clear_attention(ask, outcome="acknowledge", db=db)
 
     [wake] = _ask_release_wakes(db)
-    assert wake["content"] == _ask_wake_content(
-        node, event='The user acknowledged "Read the proposal"', other_holds="yes",
+    shown = _ask_wake_next(
+        db, wake, node, event='The user acknowledged "Read the proposal"', other_holds="yes",
     )
+    # Still held, so the answer cannot have given the task the slot.
+    assert (shown["selected"] or {}).get("id") != node.id
     assert "pick it up" not in wake["content"]
 
 
@@ -406,28 +425,90 @@ def test_answering_an_ask_for_a_model_less_owner_keeps_only_the_receipt(db):
     assert json.loads(receipt["metadata"])["ask_wake_id"] is None
 
 
-def test_answering_an_active_document_ask_wakes_the_asker_and_selects_work(db):
+def test_answering_an_active_document_ask_is_one_wake_naming_the_selected_task(db):
     from registry import attention
 
     node, ask = _ask_held_node(db, state="active", external_id="active-wake.md")
+    before = _last_input_order(db)
 
     attention.clear_attention(
         ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", db=db,
     )
 
-    [wake] = _ask_release_wakes(db)
-    assert wake["content"] == _ask_wake_content(
-        node,
+    [wake] = _plan_wakes_after(db, before)
+    assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
+    shown = _ask_wake_next(
+        db, wake, node,
         event='The user answered "Read the proposal"',
         verdict="changes requested",
         answer="Cut section 3.",
     )
-    selection = db.execute(
-        "SELECT content FROM messages WHERE thread_id='owner' "
-        "AND id LIKE 'plan-wake:work_selected:%' ORDER BY input_order DESC LIMIT 1",
-    ).fetchone()
-    assert selection is not None
-    assert "Cut section 3." not in selection["content"]
+    assert shown["selected"]["id"] == node.id
+    assert "selected_description" not in json.loads(wake["content"].split("\n", 1)[1])
+
+
+@pytest.mark.parametrize("author, carried", [("conductor", True), ("owner", False)])
+def test_the_ask_wake_carries_the_description_the_work_selected_wake_would(
+    db, author, carried,
+):
+    """Standing in for the work-selected wake, the ask wake hands over the same facts."""
+    from registry import attention
+
+    items = "Comment c-1\nFeedback: Please check this point."
+    node, ask = _ask_held_node(
+        db, state="active", external_id=f"described-{author}.md",
+        description=items, author=author,
+    )
+    before = _last_input_order(db)
+
+    attention.clear_attention(ask, outcome="answer", verdict="approved", db=db)
+
+    [wake] = _plan_wakes_after(db, before)
+    shown = _ask_wake_next(
+        db, wake, node, event='The user answered "Read the proposal"', verdict="approved",
+    )
+    assert shown["selected"]["id"] == node.id
+    facts = json.loads(wake["content"].split("\n", 1)[1])
+    expected = {"node_id": node.id, "text": items, "cut": False}
+    assert facts.get("selected_description") == (expected if carried else None)
+
+
+def test_answering_an_ask_on_a_scope_plan_wakes_the_task_executor(db):
+    from plans import holds, user_ask
+    from registry import attention
+
+    db.execute(
+        """INSERT INTO threads (id,user_id,project_id,model,created_at,updated_at)
+           VALUES ('runner','user','project','test/model','t','t')"""
+    )
+    plan = service.ensure_plan("project_scope", "project", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    db.execute(
+        "UPDATE plan_nodes SET executor_thread_id='runner',owner_thread_id='runner' WHERE id=?",
+        (node.id,),
+    )
+    ask = _document_ask(db, "scope-wake.md")
+    # The public boundary refuses scope-plan writes, so place the ask the way
+    # block_node does underneath it.
+    holds.block_hold(
+        node.id, reason_key="review", reason="Review it", owner_kind="user", owner_id=ask,
+        expected_revision=service._node_row(db, node.id)["revision"],
+        actor_id=None, provenance="test.blocked_wait", db=db,
+    )
+    user_ask.attach(db, node.id, ask, actor_id=None, provenance="test.blocked_wait")
+    db.commit()
+    before = _last_input_order(db, "runner")
+
+    attention.clear_attention(ask, outcome="answer", verdict="approved", db=db)
+
+    [wake] = _plan_wakes_after(db, before, "runner")
+    assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
+    _ask_wake_next(
+        db, wake, node, executor="runner",
+        event='The user answered "Read the proposal"', verdict="approved",
+    )
 
 
 def test_selected_delegated_ask_release_wakes_when_worker_news_is_queued(db):
@@ -461,8 +542,8 @@ def test_selected_delegated_ask_release_wakes_when_worker_news_is_queued(db):
 
     [wake] = _ask_release_wakes(db)
     assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
-    assert wake["content"] == _ask_wake_content(
-        node,
+    _ask_wake_next(
+        db, wake, node,
         event='The user answered "Read the proposal"',
         verdict="changes requested",
         answer="Cut section 3.",
