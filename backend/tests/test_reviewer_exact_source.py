@@ -279,6 +279,13 @@ def _temp_rule() -> str:
     )
 
 
+def _cwd_tracking_file_rule() -> str:
+    from pathlib import Path
+
+    temp_parent = str(Path("/tmp").resolve()).replace(".", "\\.")
+    return f'(allow file-write* (regex #"^{temp_parent}/claude-[^/]{{1,64}}-cwd$"))'
+
+
 def test_write_scope_with_custom_config_root_allows_only_the_run_state_folder():
     from reviewer.reviewer_exact_source import (
         claude_config_state_scope, render_write_profile,
@@ -290,6 +297,7 @@ def test_write_scope_with_custom_config_root_allows_only_the_run_state_folder():
         _BASE_RULES.format(work="/x/work")
         + f'(allow file-write* (regex #"^/x/acct/projects/{_RUN_FOLDER}(/.*)?$"))'
         + _temp_rule()
+        + _cwd_tracking_file_rule()
     )
     assert scope.global_file.as_posix() == "/x/acct/.claude.json"
 
@@ -305,6 +313,7 @@ def test_write_scope_without_config_root_variable_uses_the_default_root():
         _BASE_RULES.format(work="/x/work")
         + f'(allow file-write* (regex #"^/srv/home/\\.claude/projects/{_RUN_FOLDER}(/.*)?$"))'
         + _temp_rule()
+        + _cwd_tracking_file_rule()
     )
     assert scope.global_file.as_posix() == "/srv/home/.claude.json"
 
@@ -411,6 +420,9 @@ def test_write_scope_confines_config_state_to_the_run_folder(tmp_path):
     sibling = config / "projects" / "-tmp-work-corsia-cc-zz-c9999"
     temp_folder = temp_root / "-tmp-work-corsia-cc-ab-c1234"
     temp_sibling = temp_root / "-tmp-work-corsia-cc-zz-c9999"
+    cwd_file = temp_root.parent / "claude-abc123-cwd"
+    cwd_other = temp_root.parent / "claude-abc123-other"
+    other_cwd = temp_root.parent / "other-cwd"
     for folder in (run_dir, run_folder, sibling, config / "hooks", temp_sibling):
         folder.mkdir(parents=True)
     scope = dataclasses.replace(
@@ -419,8 +431,8 @@ def test_write_scope_confines_config_state_to_the_run_folder(tmp_path):
     )
     script = f"mkdir -p {temp_folder} ; " + " ; ".join(
         f"echo x > {target}" for target in (
-            run_folder / "ok", temp_folder / "ok", sibling / "no", temp_sibling / "no",
-            temp_root / "no", config / "hooks" / "no",
+            run_folder / "ok", temp_folder / "ok", cwd_file, sibling / "no", temp_sibling / "no",
+            temp_root / "no", cwd_other, other_cwd, config / "hooks" / "no",
             config / "settings.json", config / ".claude.json",
         )
     )
@@ -429,9 +441,10 @@ def test_write_scope_confines_config_state_to_the_run_folder(tmp_path):
 
     assert (run_folder / "ok").is_file()
     assert (temp_folder / "ok").is_file()
+    assert cwd_file.is_file()
     assert not any(
         path.exists() for path in (
-            sibling / "no", temp_sibling / "no", temp_root / "no",
+            sibling / "no", temp_sibling / "no", temp_root / "no", cwd_other, other_cwd,
             config / "hooks" / "no", config / "settings.json", config / ".claude.json",
         )
     )
