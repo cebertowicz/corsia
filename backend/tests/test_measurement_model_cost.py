@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from api import measurement_model_cost, measurement_models
+from api import measurement_chain_costs, measurement_model_cost, measurement_models
 from api.cost_identity import IdentityResolver, ModelIdentity
 from api.measurement_model_cost import query_model_costs
 from api.measurement_models import build_models, models_payload
@@ -383,8 +383,8 @@ def test_token_share_follows_the_selected_range(db):
 
 def test_tasks_and_prices_read_only_the_two_windows_models_shows(db, monkeypatch):
     seen = []
-    walk = measurement_models.materialize_chain
-    monkeypatch.setattr("api.measurement_models.materialize_chain",
+    walk = measurement_chain_costs.materialize_chain
+    monkeypatch.setattr("api.measurement_chain_costs.materialize_chain",
                         lambda _db, params: seen.append(params["grain"]) or walk(_db, params))
     models_payload(db, SCOPE, GRAIN, [])
     (read,) = seen

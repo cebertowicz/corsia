@@ -31,21 +31,26 @@ from core.measurement_scope import Grain
 DOLLARS_PER_HOUR = "dollars_per_work_hour"
 
 
-def query_task_hour_cost(db, params: dict[str, Any]) -> dict[tuple[str, str], dict[str, float]]:
+def query_task_hour_cost(db, params: dict[str, Any], cost_rows: list[dict[str, Any]] | None = None,
+                         ) -> dict[tuple[str, str], dict[str, float]]:
     """Return ``{(root_id, period): {dollars, hours, n}}`` for the grain's latest and previous windows.
 
-    ``params['grain']`` is the one the page prepared (``prepare_outcome_periods(roots=True)``); only the
-    size-rated tasks' chains are read, so the cost follows how many tasks carry a rating.
+    ``params['grain']`` is the one the page prepared (``prepare_outcome_periods(roots=True)``). Only the
+    size-rated tasks count. ``cost_rows`` are the classified rows of the same two windows' chains, as
+    ``measurement_models.chain_costs`` reads them for every task: a task's rows are the same whichever tasks
+    were walked with it. Without them only the rated tasks' chains are read here, so the cost follows how many
+    tasks carry a rating.
     """
     grain = params["grain"]
     rated = rated_tasks(db, [*grain.previous.periods, *grain.latest.periods])
     if not rated:
         return {}
-    chain = materialize_chain(db, params, rated)
-    try:
-        cost_rows = query_model_costs(db, params, IdentityResolver(db), chain_rows=chain)
-    finally:
-        db.execute(f"DROP TABLE IF EXISTS {chain}")  # the pooled connection outlives the request
+    if cost_rows is None:
+        chain = materialize_chain(db, params, rated)
+        try:
+            cost_rows = query_model_costs(db, params, IdentityResolver(db), chain_rows=chain)
+        finally:
+            db.execute(f"DROP TABLE IF EXISTS {chain}")  # the pooled connection outlives the request
     dollars: dict[str, float] = defaultdict(float)
     for row in cost_rows:
         task_id = str(row["task_id"])

@@ -18,7 +18,7 @@ Two floors are this surface's own, and are named as such:
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import json
 from math import sqrt
 from typing import Any
@@ -352,6 +352,7 @@ def _rank(registry: dict[str, Any], rows: list[dict[str, Any]], metric: str, sor
 def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: str, sort: str,
                  grain: Grain, comparable: Callable[[str, str], bool],
                  measured: Callable[[str, str], bool], with_dollars: bool = True,
+                 task_costs: Mapping[str, Any] | None = None,
                  ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]], int, dict[str, Any]]:
     """Return ranked rows, findings, PL-4 project summaries, the agent population and the scope's pooled cells.
 
@@ -362,7 +363,9 @@ def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: s
     prepared window and the periods these rows answer for, so no period can fall outside
     the data prepared for it. The table pools the grain's latest window and carries the
     previous window beside it; the findings frame is its last nine periods; the project
-    summaries count outcomes in the latest window.
+    summaries count outcomes in the latest window. ``task_costs`` is ``measurement_models.chain_costs`` for the
+    same scope and grain when the caller already holds it; the dollars per hour then read its rows instead of
+    walking the rated tasks' chains again.
     """
     # Invariants, not caller validation: the route answers an unknown metric or sort
     # with a 400 before any of this runs, so reaching here with one is a server fault.
@@ -385,7 +388,8 @@ def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: s
     aggregated = [_aggregate_agent(registry, agent, grain, metric, comparable, measured) for agent in agents.values()]
     # Dollars per hour reads each task's whole chain, so it covers only the two windows the table shows.
     # ``with_dollars=False`` is for a reader of the other columns only (Biggest changes), so it does not pay for it.
-    costs = query_task_hour_cost(db, {**query, "grain": two_windows(grain)}) if with_dollars else None
+    costs = (query_task_hour_cost(db, {**query, "grain": two_windows(grain)}, task_costs["cost_rows"] if task_costs is not None else None)
+             if with_dollars else None)
     for row in aggregated if costs is not None else ():
         row["metrics"][DOLLARS_PER_HOUR] = dollars_metric(costs, row["agent"]["id"], grain, RANKING_MINIMUM_N)
     # What an agent's own cell is read against: every agent's tasks pooled, by the same function.
