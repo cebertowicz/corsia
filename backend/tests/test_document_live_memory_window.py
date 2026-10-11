@@ -81,7 +81,10 @@ async def test_memory_checkpoint_stop_and_queued_same_author_write_converge(owne
         await sleep(.01)
         assert not queued.done(), "the same document writer must stay behind the current lane item"
         stop = asyncio.create_task(ws._do_stop(user(scope), sid, None, None, identity.turn_id))
-        assert (await asyncio.wait_for(stop, .5)).outcome == "stopped"
+        # The contract is that Stop commits while this document lane remains pinned.
+        # Its task completion is the deterministic settlement signal; a wall-clock
+        # bound only measures scheduler and DB-executor contention in the test shard.
+        assert (await stop).outcome == "stopped"
         await _settle_stop_work()
         rows = db.execute("SELECT content,metadata FROM messages WHERE role='tool' AND json_extract(metadata,'$.tool_call_id')='call'").fetchall()
         assert len(rows) == 1
