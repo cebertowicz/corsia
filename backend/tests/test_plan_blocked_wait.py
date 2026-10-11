@@ -96,7 +96,7 @@ def _document_ask(db, external_id: str) -> str:
     ).fetchone()["id"])
 
 
-def _ask_held_node(db, *, state: str, external_id: str):
+def _ask_held_node(db, *, state: str, external_id: str, before_block=None):
     """Create an ask-held task in one state whose release needs an owner wake."""
     plan = service.ensure_plan("thread", "owner", db=db)
     node = service.add_node(
@@ -122,6 +122,8 @@ def _ask_held_node(db, *, state: str, external_id: str):
         assert state == "pending"
     ask = _document_ask(db, external_id)
     db.commit()
+    if before_block is not None:
+        before_block(node, plan)
     mutate(
         plan.id, "block_node", {
             "node_id": node.id, "reason_key": "review", "reason": "Review it",
@@ -349,6 +351,40 @@ def test_answering_an_active_document_ask_only_wakes_the_selected_work_once(db):
     assert wake["id"].startswith(f"plan-wake:work_selected:{node.id}:")
     assert "requested changes" in wake["content"]
     assert "Their note: Cut section 3." in wake["content"]
+
+
+def test_selected_delegated_ask_release_wakes_when_worker_news_is_queued(db):
+    from plans import delegation, plan_wake, wake_currency
+    from registry import attention
+
+    db.execute(
+        """INSERT INTO threads
+           (id,user_id,project_id,spawned_by,model,created_at,updated_at)
+           VALUES ('worker','user','project','owner','test/model','t','t')"""
+    )
+
+    def queue_worker_news(node, plan) -> None:
+        delegation.attach_spawned_thread(node.id, "worker", db=db)
+        assert plan_wake.append(
+            db, recipient="owner", kind=plan_wake.CHILD_RETURNED,
+            subject_id=node.id, revision=int(service._node_row(db, node.id)["revision"]),
+            plan_id=plan.id, content="Worker returned.", delegated_step_id=node.id,
+            delegated_worker="worker",
+        ) is not None
+        assert wake_currency.step_news_queued(db, "owner", node.id)
+
+    node, ask = _ask_held_node(
+        db, state="active", external_id="delegated-selected-wake.md",
+        before_block=queue_worker_news,
+    )
+
+    attention.clear_attention(
+        ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", db=db,
+    )
+
+    [wake] = _ask_release_wakes(db)
+    assert wake["id"].startswith(f"plan-wake:ask_released:{node.id}:")
+    assert wake["content"].count("Their note: Cut section 3.") == 1
 
 
 def test_retiring_a_document_ask_releases_its_hold_through_attention(db):

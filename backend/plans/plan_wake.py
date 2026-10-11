@@ -32,6 +32,8 @@ from typing import Literal
 TASK_CLOSED = "task_closed"
 #: Another actor's write gave this thread's slot to a task.
 WORK_SELECTED = "work_selected"
+#: An artifact ask on a task this thread runs was answered or retired; the task no longer waits.
+ASK_RELEASED = "ask_released"
 #: Work this thread delegated has returned and awaits its verdict.
 CHILD_RETURNED = "child_returned"
 #: A submission this thread made or returned was rejected; it now holds the revision.
@@ -360,7 +362,8 @@ def notify_closed(
     )
 
 
-def _node(db, node_id: str):
+def node(db, node_id: str):
+    """Return the plan-node row needed to compose a wake."""
     from plans import service
 
     return service._node_row(db, node_id)

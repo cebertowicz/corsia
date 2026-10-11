@@ -315,10 +315,10 @@ def _release(
         for node_id, summary in released:
             node = service._node_row(db, node_id)
             executor = admission_projection.executor_of(node, plan)
-            if executor is None or (node_id, executor) in reconciled.selected:
+            if executor is None or node_id in reconciled.selection_woken:
                 continue
             plan_wake.append(
-                db, recipient=executor, kind="ask_released", subject_id=node_id,
+                db, recipient=executor, kind=plan_wake.ASK_RELEASED, subject_id=node_id,
                 revision=int(node["revision"]), plan_id=plan_id,
                 content=plan_wake.with_next(
                     db, plan_id, executor, wakes.WAKE_ASK_RELEASED.format(summary=summary),
