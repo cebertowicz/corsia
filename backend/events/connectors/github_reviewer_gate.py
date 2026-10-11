@@ -60,6 +60,7 @@ def checks_green(repo: str, pr_number: int, head_sha: str) -> bool | None:
             [(check.get("name"), check.get("state")) for check in not_green],
         )
         return False
+
     return True
 
 
