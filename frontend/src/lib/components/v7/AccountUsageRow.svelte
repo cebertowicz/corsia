@@ -112,7 +112,7 @@
 		background: none; border: none; border-radius: var(--radius-xs);
 	}
 	button.account-usage-row.picker { cursor: pointer; }
-	button.account-usage-row.picker:hover:not(:disabled) { background: var(--bg-hover); }
+	button.account-usage-row.picker:hover:not(:disabled):not(.marked) { background: var(--bg-hover); }
 	button.account-usage-row.picker:disabled { cursor: default; }
 	.account-usage-row.picker.blocked { color: var(--text-secondary); }
 	/* The account's selected fill shares the model row's inset; its label remains aligned with the model status dot. */
