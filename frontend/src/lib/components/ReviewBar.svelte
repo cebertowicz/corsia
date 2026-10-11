@@ -205,11 +205,9 @@
 	   with the page gutter instead, by cancelling that inset; row 1 is one button that expands the ask in
 	   place, row 2 holds the actions. */
 	@container doc-canvas (max-width: 600px) {
-		.review-bar { flex-wrap: wrap; padding: 6px 8px; margin-left: calc(var(--doc-rail, 44px) * -1); }
+		.review-bar { flex-wrap: wrap; padding: 6px 8px; margin-left: calc(var(--doc-phone-inset, var(--doc-rail, 44px)) * -1); }
 		.review-bar.receipt, .review-bar.stale { flex-wrap: nowrap; align-items: center; min-height: 44px; }
 		.rb-wide { display: none; }
-		/* The header's text inset is 24px here for a touch pointer (see DocViewerStatus), so the bar cancels that, not the 44px rail. */
-		@media (any-pointer: coarse) { .review-bar { margin-left: -24px; } }
 		.rb-narrow { position: relative; display: flex; align-items: flex-start; gap: 8px; flex: 1 1 100%; min-width: 0; width: 100%; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 		/* The hit area reaches through the bar's padding and the gap above row 2 without changing its height. */
 		.rb-narrow::after { content: ''; position: absolute; inset: -6px 0; }

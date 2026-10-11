@@ -1,7 +1,6 @@
 import { EditorView } from '@codemirror/view';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
-import { FINE_RAIL } from './comment-clusters';
 
 export const docTheme = EditorView.theme({
 	'&': {
@@ -16,14 +15,12 @@ export const docTheme = EditorView.theme({
 		overflow: 'auto'
 	},
 	'.cm-content': {
-		padding: '4px 0 40vh var(--doc-rail, 44px)',
+		padding: '4px var(--doc-phone-inset, 0px) 40vh var(--doc-phone-inset, var(--doc-rail, 44px))',
 		caretColor: 'var(--accent)',
 		maxWidth: '100%'
 	},
-	// A touch pointer at phone width (the 600px canvas threshold the document header and review bar use) keeps the fine
-	// rail's inset on both sides, so the column is centred; its 44px marker hit box then reaches into the text's edge
-	// instead of reserving a wider left inset (see the rail below). A fine pointer keeps the one-sided rail.
-	'@media (any-pointer: coarse)': { '@container doc-canvas (max-width: 600px)': { '.cm-content': { paddingInline: `${FINE_RAIL}px` } } },
+	// --doc-phone-inset is set once on the canvas (DocViewer.css) for a touch pointer at phone width: the text keeps that
+	// inset on both sides, and the 44px marker hit box reaches into its edge. Unset, the one-sided rail applies.
 	'.cm-line': { padding: '0 2px' },
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },

@@ -267,8 +267,8 @@
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
 	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; }
 	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
-	/* The text column's own 24px inset sits inside this, so a phone keeps a 12px page gutter outside it. */
-	@media (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }
+	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
+	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }
 
 	.gone {
 		display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
