@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import pytest
 
 from api.measurement_cost import build_cost
+from api.measurement_prepared import DDL, PREPARED_OUTCOME_NODES
 from core.measurement_scope import resolve_grain
 from llm.api_equivalent import api_equivalent, is_long_context, price_identity
 from llm.list_prices import ALIBABA_BEIJING, ALIBABA_SINGAPORE, LIST_PRICES, listing_for_host
@@ -114,6 +115,7 @@ def _seed(db, rows):
     # The fixture database seeds placeholder accounts with an unreadable created_at; a payer like that
     # now reads as unrecorded, so a test about usage starts with no accounts.
     db.execute("DELETE FROM vendor_accounts")
+    db.execute(DDL[PREPARED_OUTCOME_NODES])  # the settled outcomes: none here, only the periods' counts below
     db.execute("INSERT INTO measurement_scope_threads VALUES ('thread', 'thread')")
     db.execute("INSERT INTO measurement_outcome_periods VALUES ('2026-09-21', 2, 2, 0)")
     for index, row in enumerate(rows):

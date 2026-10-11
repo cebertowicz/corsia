@@ -1,0 +1,81 @@
+name: Determine CI relevance
+description: Decide whether a CI target is relevant to the current event without silently skipping on detection failures.
+inputs:
+  event_name:
+    description: GitHub event name.
+    required: true
+  base_ref:
+    description: Pull request base branch name.
+    required: false
+  patterns:
+    description: Extended regular expression matching paths that require this target.
+    required: true
+outputs:
+  relevant:
+    description: Whether the target must run for this event.
+    value: ${{ steps.detect.outputs.relevant }}
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      env:
+        EVENT_NAME: ${{ inputs.event_name }}
+        BASE_REF: ${{ inputs.base_ref }}
+        PATTERNS: ${{ inputs.patterns }}
+      run: |
+        set -euo pipefail
+
+        # Non-PR events have no base ref and must always run the requested target.
+        if [[ "$EVENT_NAME" != "pull_request" ]]; then
+          echo "relevant=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        [[ -n "$BASE_REF" ]] || {
+          echo "::error::pull_request event has no base ref" >&2
+          exit 1
+        }
+
+        base_revision="refs/remotes/origin/$BASE_REF"
+        if ! git rev-parse --verify --quiet "$base_revision^{commit}" >/dev/null; then
+          # Checkout normally fetches every branch. If this specific base is absent,
+          # fetch it once and verify the exact remote-tracking ref before diffing.
+          if ! git fetch --no-tags origin "refs/heads/$BASE_REF:$base_revision"; then
+            echo "::error::unable to fetch pull_request base ref origin/$BASE_REF" >&2
+            exit 1
+          fi
+          git rev-parse --verify --quiet "$base_revision^{commit}" >/dev/null || {
+            echo "::error::pull_request base ref origin/$BASE_REF is unavailable or invalid" >&2
+            exit 1
+          }
+        fi
+
+        git merge-base "$base_revision" HEAD >/dev/null || {
+          echo "::error::pull_request base ref origin/$BASE_REF has no merge base with HEAD" >&2
+          exit 1
+        }
+
+        changed_paths="$(mktemp)"
+        trap 'rm -f "$changed_paths"' EXIT
+        # Disable rename detection: Git emits a rename as a deletion plus an
+        # addition, so both paths reach the matcher. `-z` keeps each pathname
+        # raw instead of applying core.quotePath's display quoting.
+        if ! git diff --name-only --no-renames -z "$base_revision"...HEAD > "$changed_paths"; then
+          echo "::error::unable to determine changed paths from origin/$BASE_REF to HEAD" >&2
+          exit 1
+        fi
+        while IFS= read -r -d '' path; do
+          if [[ "$path" =~ $PATTERNS ]]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          else
+            match_status=$?
+          fi
+          if [[ "$match_status" -ne 1 ]]; then
+            echo "::error::unable to match changed paths against relevance patterns" >&2
+            exit "$match_status"
+          fi
+        done < "$changed_paths"
+
+        echo "relevant=false" >> "$GITHUB_OUTPUT"

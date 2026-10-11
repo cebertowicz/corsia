@@ -1,4 +1,4 @@
-import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { EditorView, ViewPlugin, type BlockInfo, type ViewUpdate } from '@codemirror/view';
 import { commentRanges, type CommentRange } from './comment-marks';
 import { clusterMarkerLines, railWidth, type MarkerCluster } from './comment-clusters';
 
@@ -89,7 +89,7 @@ class CommentRail {
 		// reserves the same width the viewer's header takes.
 		view.dom.style.setProperty('--doc-rail', `${railWidth()}px`);
 		// A text size or line height change moves lines without a document or viewport change: regroup on any resize of the
-		// text, or of a commented line (the text's own height can be pinned by its minimum height while its lines change).
+		// text, or of a commented line or image (the text's own height can be pinned by its minimum height while its lines change).
 		if (typeof ResizeObserver !== 'undefined') {
 			this.resize = new ResizeObserver(() => this.schedule());
 			this.resize.observe(view.contentDOM);
@@ -129,7 +129,7 @@ class CommentRail {
 		for (const range of state.field(commentRanges)) {
 			const block = view.lineBlockAt(state.doc.lineAt(range.from).from);
 			// A rendered line is measured where it is drawn; the height map stands in for a line the viewport has not drawn.
-			const element = this.drawnLine(view, block.from);
+			const element = this.drawnLine(view, block);
 			const drawn = element?.getBoundingClientRect();
 			if (element) drawnLines.add(element);
 			const line = byLine.get(block.from) ?? {
@@ -140,6 +140,8 @@ class CommentRail {
 			line.replyWaiting ||= !!range.replyWaiting;
 			byLine.set(block.from, line);
 		}
+		// A block widget that resizes (an image that loads) moves every line below it, commented or not.
+		for (const child of contentDOM.children) if (!child.classList.contains('cm-line')) drawnLines.add(child);
 		const lines = [...byLine.entries()].sort(([a], [b]) => a - b).map(([, line]) => line);
 		const placed = clusterMarkerLines(lines, target).map((cluster): Placed => {
 			const first = lines.find((line) => line.ids.includes(cluster.ids[0]))!;
@@ -152,8 +154,11 @@ class CommentRail {
 		return { placed, left: content.left - scroller.left + scrollDOM.scrollLeft, target, inset, drawn: [...drawnLines] };
 	}
 
-	private drawnLine(view: EditorView, from: number): Element | null {
+	private drawnLine(view: EditorView, { from, widget }: BlockInfo): Element | null {
 		if (from < view.viewport.from || from > view.viewport.to) return null;
+		// A line drawn as a block widget (an image alone on its line) is no .cm-line, and its height can change without an
+		// editor update, as when the image loads: it is the text's child that starts at the line.
+		if (widget) return [...view.contentDOM.children].find((child) => !child.classList.contains('cm-line') && view.posAtDOM(child) === from) ?? null;
 		const { node } = view.domAtPos(from);
 		const line = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line');
 		return line && view.contentDOM.contains(line) ? line : null;

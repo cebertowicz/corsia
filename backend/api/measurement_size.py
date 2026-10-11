@@ -15,8 +15,7 @@ from collections import Counter, defaultdict
 from collections.abc import Collection
 from typing import Any
 
-from api.measurement_queries import outcome_ctes, query_family
-from core.measurement_scope import query_params, scope_cte
+from api.measurement_queries import query_family
 from core.size_rating import (
     AUTHOR_DECLARED_PROFILE, BASIS_AUTHOR_DECLARED, CLASS_MIDPOINT_HOURS, LATEST_EVIDENCE_SQL, NO_EVIDENCE,
     PROFILE_KEYS, SERVED_BASES, SIZE_EVENT, SUBJECT_PREFIX, UNKNOWN, UNKNOWN_VERSION,
@@ -49,9 +48,10 @@ def _newest_facts_sql(nodes: str) -> str:
 """
 
 
-_NODES_SQL = _nodes_sql("o.id", "outcome_rows", "o.first_try")
-_FACTS_SQL = ", " + _newest_facts_sql(_NODES_SQL)
-# The nodes ``prepare_outcome_periods(roots=True)`` already materialized, with each one's root.
+# The nodes ``prepare_outcome_periods`` already materialized: every one with its first-try mark, or the
+# requested periods' with their root.
+_PREPARED_ALL_NODES_SQL = _nodes_sql("o.node_id", "measurement_outcome_nodes", "o.first_try")
+_PREPARED_ALL_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_ALL_NODES_SQL)
 _PREPARED_NODES_SQL = (_nodes_sql("o.node_id", "measurement_outcome_nodes", "o.root_id")
                        + " WHERE o.period IN (SELECT value FROM json_each(:periods))")
 _PREPARED_FACTS_SQL = "WITH " + _newest_facts_sql(_PREPARED_NODES_SQL)
@@ -100,10 +100,12 @@ def _classified(nodes: list, fact_rows: list) -> list[tuple[str, str, Any, str, 
 
 
 def _sized_nodes(db, params: dict[str, Any]) -> list[tuple[str, str, int, str, dict | None, str | None]]:
-    """Each accepted outcome in the request: (id, period, first_try, status, attributes, size class)."""
-    bound = query_params(params)
-    prefix = scope_cte() + outcome_ctes(bound["grain"])
-    rows = _classified(db.execute(prefix + _NODES_SQL, bound).fetchall(), db.execute(prefix + _FACTS_SQL, bound).fetchall())
+    """Each accepted outcome in the request: (id, period, first_try, status, attributes, size class).
+
+    Reads the nodes ``prepare_outcome_periods`` settled on this connection for these same ``params``,
+    so the scope is not settled again; call it only after that preparation.
+    """
+    rows = _classified(db.execute(_PREPARED_ALL_NODES_SQL).fetchall(), db.execute(_PREPARED_ALL_FACTS_SQL).fetchall())
     return [(node_id, period, int(first_try), status, attributes, size_class)
             for node_id, period, first_try, status, attributes, size_class in rows]
 

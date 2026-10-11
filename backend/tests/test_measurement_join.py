@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import threading
 
 import pytest
 
@@ -155,6 +156,22 @@ async def test_a_failure_reaches_every_caller_and_is_never_kept():
     assert await join.joined("k", again, reuse_finished=True) == again.result
 
 
+async def test_result_sizing_runs_off_the_event_loop(monkeypatch):
+    loop_thread = threading.get_ident()
+    seen = []
+    size = join._result_size
+
+    def sized(result):
+        seen.append(threading.get_ident())
+        return size(result)
+
+    monkeypatch.setattr(join, "_result_size", sized)
+    read = _Read()
+    read.release.set()
+    assert await join.joined("k", read) == read.result
+    assert seen and seen[0] != loop_thread
+
+
 async def test_a_result_that_cannot_be_sized_still_reaches_every_caller_and_is_never_kept():
     read = _Read(result={(1, 2): "a tuple key json cannot write"})
     callers = [asyncio.ensure_future(join.joined("k", read, reuse_finished=True)) for _ in range(2)]
@@ -246,7 +263,8 @@ async def test_where_to_look_joined_with_the_page_equals_where_to_look_alone(iso
 
     _freeze(monkeypatch, POST_BREAK)
     _seeded(_seed)
-    runs = {"series_payload": 0, "agents_payload": 0, "models_read": 0, "cost_read": 0, "ledger_read": 0}
+    reads = ("series_payload", "agents_payload", "models_read", "cost_read", "ledger_read", "task_chain_costs")
+    runs = dict.fromkeys(reads, 0)
     lead = join._lead
 
     async def counted(flights, key, compute, loop):
@@ -260,11 +278,12 @@ async def test_where_to_look_joined_with_the_page_equals_where_to_look_alone(iso
         alone = await measurement_where_to_look(**scope)
         page_series = await page.measurement_series(ids=PAGE_IDS, **scope)
         join._flights.clear()
-        runs.update(series_payload=0, agents_payload=0, models_read=0, cost_read=0, ledger_read=0)
-        # The page's Cost and Models panels ask for the one ledger together: it is read once, not once each.
+        runs.update(dict.fromkeys(reads, 0))
+        # The page's Cost and Models panels ask for the one ledger together, and its Agents and Models panels for the
+        # one set of task chains' costs: each is read once, not once each.
         cost_grain = page.resolve_grain(grain, "UTC", averaged=True)
         series, _, _, _, joined = await asyncio.gather(
             page.measurement_series(ids=PAGE_IDS, **scope), page.measurement_agents(**scope), page.measurement_models(**scope),
             cost_read(project, agent, cost_grain, USER), measurement_where_to_look(ids=PAGE_IDS, **scope))
         assert joined == alone and series == page_series
-        assert runs == {"series_payload": 1, "agents_payload": 1, "models_read": 1, "cost_read": 1, "ledger_read": 1}, (project, agent)
+        assert runs == dict.fromkeys(reads, 1), (project, agent)

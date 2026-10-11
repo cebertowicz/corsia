@@ -3,10 +3,6 @@ name: Integration tests (L3)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'requirements*.txt'
-      - '.github/workflows/integration.yml'
   workflow_dispatch:
     inputs:
       live_reviewer:
@@ -20,7 +16,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: '^backend/|^requirements[^/]*\.txt$|^\.github/workflows/integration\.yml$|^\.github/actions/relevance/action\.yml$'
+
   integration:
+    needs: relevance
+    if: ${{ needs.relevance.outputs.relevant == 'true' }}
     name: ${{ inputs.live_reviewer && 'Live host reviewer proof (Haiku)' || 'Integration tests (L3)' }}
     # macOS: the L3 contract suite runs agent shells under Seatbelt
     # (sandbox-exec) and requires Safehouse, neither of which exists on Linux.
@@ -39,6 +55,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Prepare isolated workspace
         run: |

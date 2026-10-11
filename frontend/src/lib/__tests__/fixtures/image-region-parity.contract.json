@@ -1,5 +1,5 @@
 {
-	"_comment": "Backend ports of viewer rules (doceditor/image_regions.py agent_color, _project_color; doceditor/image_markup.py place_tag, place_tags) must match the viewer (docPresence.ts agentColor, projectColors.ts projectColor, imageRegions.ts placeTag, placeTags). Both sides test against this file.",
+	"_comment": "Backend ports of viewer rules (doceditor/image_regions.py agent_color, _project_color; doceditor/image_markup.py place_tag, place_tags) must match the viewer (docPresence.ts agentColor, projectColors.ts projectColor, imageRegions.ts placeTag, placeTags). doceditor/doc_images.py resolve_image_path must match markdown-image.ts resolveImagePath. Both sides test against this file.",
 	"agent_colors": [
 		{
 			"thread_id": "author",
@@ -482,6 +482,116 @@
 					"side": "left"
 				}
 			]
+		}
+	],
+	"image_paths": [
+		{
+			"case": "relative",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "shots/a.png",
+			"expected": "/ws/notes/shots/a.png"
+		},
+		{
+			"case": "dot relative",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "./a.png",
+			"expected": "/ws/notes/a.png"
+		},
+		{
+			"case": "parent",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "../shots/a.png",
+			"expected": "/ws/shots/a.png"
+		},
+		{
+			"case": "parent past root",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "../../../../a.png",
+			"expected": "/a.png"
+		},
+		{
+			"case": "absolute",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "/ws/other/b.png",
+			"expected": "/ws/other/b.png"
+		},
+		{
+			"case": "doubled slashes",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "/ws//other/./b.png",
+			"expected": "/ws/other/b.png"
+		},
+		{
+			"case": "percent encoded",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "my%20shots/a.png",
+			"expected": "/ws/notes/my shots/a.png"
+		},
+		{
+			"case": "angle brackets",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "<my shots/a.png>",
+			"expected": "/ws/notes/my shots/a.png"
+		},
+		{
+			"case": "padded",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "  a.png  ",
+			"expected": "/ws/notes/a.png"
+		},
+		{
+			"case": "https",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "https://example.com/a.png",
+			"expected": null
+		},
+		{
+			"case": "data uri",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "data:image/png;base64,AAAA",
+			"expected": null
+		},
+		{
+			"case": "other scheme",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "ftp://h/a.png",
+			"expected": null
+		},
+		{
+			"case": "protocol relative",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "//cdn.example.com/a.png",
+			"expected": null
+		},
+		{
+			"case": "malformed escape",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "a%zz.png",
+			"expected": null
+		},
+		{
+			"case": "invalid utf-8 escape",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "a%C3.png",
+			"expected": null
+		},
+		{
+			"case": "empty",
+			"doc_path": "/ws/notes/doc.md",
+			"url": "",
+			"expected": null
+		},
+		{
+			"case": "no document path, relative",
+			"doc_path": null,
+			"url": "a.png",
+			"expected": null
+		},
+		{
+			"case": "no document path, absolute",
+			"doc_path": null,
+			"url": "/ws/a.png",
+			"expected": "/ws/a.png"
 		}
 	]
 }
