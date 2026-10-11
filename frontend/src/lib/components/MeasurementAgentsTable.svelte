@@ -143,7 +143,7 @@
 							{#if costText === null}<span class="unmeasured">&ndash;</span><span class="sr-only">Unmeasured</span>{:else}{costText}{/if}
 						</td>
 						<td class="n" title={typeof change === 'number' ? formatChange(change) : change}>
-							{#if typeof change === 'number'}{formatChange(change)}<span class="sr-only"> against {previousName ?? 'the previous window'}</span>{:else}<span class="unmeasured">{change}</span>{/if}
+							{#if typeof change === 'number'}{formatChange(change)}<span class="sr-only"> against {previousName ?? 'the previous window'}</span>{:else if change === 'new'}new{:else}<span class="unmeasured">{change}</span>{/if}
 						</td>
 					</tr>
 				{/each}
