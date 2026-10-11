@@ -251,13 +251,18 @@ class ClearBody(BaseModel):
 
 @router.post("/{artifact_id}/clear")
 async def post_clear(artifact_id: str, body: ClearBody):
-    """A user clearing action (S6a). Closing a viewer does NOT hit this."""
+    """A user clearing action (S6a). Closing a viewer does NOT hit this.
+
+    An answered ask wakes its asker inside the write; that thread is driven
+    once the write has committed, so its Turn starts now.
+    """
     user = _require_user(body.token)
     await _authorize(artifact_id, user)
+    woken: list[str] = []
     try:
         result = await run_in_db(lambda: attention.clear_attention(
             artifact_id, outcome=body.outcome, condition=body.condition,
-            reason=body.reason, verdict=body.verdict, note=body.note,
+            reason=body.reason, verdict=body.verdict, note=body.note, drives=woken,
         ))
     except review_bar.AnswerRefused as exc:
         status = 409 if exc.code == "ask_stale" else 422
@@ -266,6 +271,7 @@ async def post_clear(artifact_id: str, body: ClearBody):
         ) from exc
     except attention.AttentionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await public.drive_threads(woken)
     return asdict(result)
 
 

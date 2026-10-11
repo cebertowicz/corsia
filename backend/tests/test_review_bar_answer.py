@@ -68,15 +68,19 @@ def _notices(db) -> list[str]:
 
 
 def _last_ask_wake(db) -> str:
-    return [notice for notice in _notices(db) if notice.startswith("[CORSIA plan] ")][-1]
+    """Return the last ask wake's line; the next block under it is the owner's real one."""
+    wake = [notice for notice in _notices(db) if notice.startswith("[CORSIA plan] ")][-1]
+    line, block = wake.split("\n", 1)
+    assert json.loads(block)["next"]["executor_thread_id"] == "owner"
+    return line
 
 
 def _answer_notice(node_id: str, *, ask: str, title: str, verdict: str,
-                   answer: str = "none") -> str:
+                   answer: str | None = None) -> str:
     return (
         f'[CORSIA plan] The user answered "{ask}" for task "{title}" (node {node_id}). '
-        f'Verdict: {verdict}. User answer: {answer}. Other holds remain: no.\n'
-        '{"next": null}'
+        f'Verdict: {verdict}.' + (f" User answer: {answer}." if answer else "")
+        + " Other holds remain: no."
     )
 
 

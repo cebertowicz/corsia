@@ -117,3 +117,20 @@ def test_a_verdict_on_another_outcome_is_a_400(integration_client):
     response = _clear(integration_client, artifact, outcome="dismiss", verdict="approved")
 
     assert response.status_code == 400
+
+
+def test_an_answer_drives_the_asker_once_its_write_commits(integration_client, monkeypatch):
+    from plans import public
+
+    driven: list[tuple[str, ...]] = []
+
+    async def drive_threads(thread_ids):
+        driven.append(tuple(thread_ids))
+
+    monkeypatch.setattr(public, "drive_threads", drive_threads)
+    thread = f"rb-drive-{uuid.uuid4().hex[:6]}"
+    artifact = _asked_document(thread)
+
+    assert _clear(integration_client, artifact, verdict="approved").status_code == 200
+
+    assert driven == [(thread,)]
