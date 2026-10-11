@@ -315,10 +315,10 @@
       "sha256": "f96a968ba81f38933a4803514a3dc1b0006f617e4e2430b5cc97e506f6710eb5"
     },
     {
-      "bytes": 8471,
+      "bytes": 8475,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "957f67acee97c1e2b52bc5590248d6214f646864b9d068c5cdaf9b6a1b82fd8c"
+      "sha256": "b968f269f267ee018dd51696f778897d4f150c7978fe80643c711211c9c6d4e3"
     }
   ],
   "version": "v1"
