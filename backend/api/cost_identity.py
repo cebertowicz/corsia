@@ -75,9 +75,8 @@ def _current_identity(row: Mapping[str, Any]) -> str | None:
     return base_identity(str(resolved)) if resolved else ""
 
 
-# Person-facing names for models a row names only by its bare id, keyed by that id.
-_DISPLAY_NAMES = {"deepseek-v4.1-flash": "DeepSeek V4.1 Flash", "qwen3.8-flash": "Qwen 3.8 Flash", "glm-5.3": "GLM-5.3"}
-
+# Person-facing names come only from persisted catalog rows. A retired model without
+# one remains its literal selector; this resolver must not guess a display name.
 
 def _model_name(key: str) -> str:
     """``key`` without its harness prefix: a row names the model, never the harness it ran under."""
@@ -85,10 +84,7 @@ def _model_name(key: str) -> str:
     return name if harness in HARNESS_PROVIDERS and name else key
 
 
-def _shown(label: str) -> str:
-    """A label as a person reads it: a bare model id the page has a name for reads as that name."""
-    return _DISPLAY_NAMES.get(label.rsplit("/", 1)[-1].lower(), label)
-
+# Display-name projection is owned by the catalog at the call sites below.
 
 def _is_alias(row: Mapping[str, Any]) -> bool:
     """A harness row whose selector names another model, or names none yet."""
@@ -119,7 +115,7 @@ class IdentityResolver:
         """The catalog's name for ``key``, or its model name when no row names it."""
         row = self._row(key)
         if row is not None and not _is_alias(row):
-            return _shown(projected_display_name(row, _meta(row)))
+            return projected_display_name(row, _meta(row))
         if self._labels is None:
             self._labels = {}
             marks = ",".join("?" * len(HARNESS_PROVIDERS))
@@ -133,7 +129,7 @@ class IdentityResolver:
                         resolved_external_model_id(str(candidate["harness"]), current) or "",
                         projected_display_name(candidate, _meta(candidate)),
                     )
-        return _shown(self._labels.get(key) or _model_name(key))
+        return self._labels.get(key) or _model_name(key)
 
     def _known(self, key: str) -> ModelIdentity:
         return ModelIdentity(key, self._label(key), True)

@@ -136,7 +136,10 @@ def split_by_spend(
     """
     listed = [key for key, tally in tallies.items() if tally.ledger > 0 or len(tally.latest.tasks) >= minimum]
     listed.sort(key=lambda key: (-tallies[key].ledger, -len(tallies[key].latest.tasks), key))
-    return listed[:shown], listed[shown:]
+    kept = listed[:shown]
+    # A token-only or low-volume local model still belongs in the table's
+    # remainder, rather than disappearing from both named rows and Other.
+    return kept, [key for key in tallies if key not in kept]
 
 
 def _split_ranked(rows: list[dict[str, Any]], shown: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

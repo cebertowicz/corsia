@@ -41,10 +41,8 @@ REGISTRY: dict[str, MetricDefinition] = {
 }
 
 
-# The stored UTC instant the token total counts as fully recorded from. A window that begins earlier was only
-# partly recorded, so a change against it reads new, never a percentage over a partial base.
-TOKENS_RECORDED_FROM = "2026-09-07"
-
+# Token completeness is derived from persisted usage by ``measurement_kpi``. It is
+# installation history, not a release-date registry constant.
 
 def instrument_period(start: str, grain: Grain | None = None) -> str:
     """Return the period an instrument started in: its Monday, or its own day on the Days grain.

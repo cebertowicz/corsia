@@ -81,8 +81,8 @@ class _UsageTelemetry:
                 source="corrections_recording",
                 ttft_ms=None,
             )
-        except Exception as exc:
-            logger.warning("corrections recording usage telemetry failed: {}", type(exc).__name__)
+        except Exception:
+            logger.exception("corrections recording usage telemetry failed")
 
 
 def _resolve_target(model_id: str):
@@ -129,18 +129,7 @@ def _pending_candidates(
             FROM messages m
             JOIN scope_threads scoped ON scoped.id=m.thread_id
             JOIN threads t ON t.id=m.thread_id
-            WHERE m.role='user' AND length(trim(m.content))>0
-              AND m.content NOT LIKE '[EVENT:%'
-              AND m.content NOT LIKE '[DELIVERY WARNING%'
-              AND m.content NOT LIKE '[PASSIVE CONTEXT DIGEST]%'
-              AND m.content NOT LIKE '[AGENT-SEND%'
-              AND m.content NOT LIKE '[CORSIA%'
-              AND (m.metadata IS NULL OR NOT json_valid(m.metadata) OR (
-                json_type(m.metadata,'$.sender_kind') IS NULL
-                AND json_type(m.metadata,'$.routed_event') IS NULL
-                AND json_type(m.metadata,'$.send_idempotency_key') IS NULL
-              ))
-              AND NOT EXISTS (
+            WHERE NOT EXISTS (
                 SELECT 1 FROM outcome_events e
                 WHERE e.event_name=:correction_event
                   AND e.subject_key=:message_prefix || m.id AND e.retracted_at IS NULL

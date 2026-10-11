@@ -62,7 +62,7 @@ const weeksScenario: Scenario = {
 	},
 };
 
-const costPeriod = (figure: { value: number | null; n: number }) => ({ period: '2026-09-28', dollars: figure.value === null ? null : figure.value * 1_000, priced_records: 1, api_records: 1, outcomes: figure.n, per_outcome: figure.value === null ? null : 1, sized: figure.n, hours: 1_000, per_hour: figure.value });
+const costPeriod = (figure: { value: number | null; n: number }) => ({ period: '2026-09-28', dollars: figure.value === null ? null : figure.value * 1_000, priced_records: 1, usage_records: 1, outcomes: figure.n, per_outcome: figure.value === null ? null : 1, sized: figure.n, hours: 1_000, per_hour: figure.value });
 /** A pooled comparison window as the Cost payload serves it: named by the days it covers, with no `period` key. */
 const pooled = ({ period: from, ...figures }: ReturnType<typeof costPeriod>) => ({ from, to: from, ...figures });
 
@@ -104,7 +104,7 @@ async function serve(page: Page, project: { id: string; name: string }, agentId:
 		if (url.pathname.endsWith('/models')) return route.fulfill({ json: { rows: [], min_tasks: 14, token_shares: [], unmatched_failed_turns: 0, unresolved_token_share: 0, total_spend_usd: 0 } });
 		if (url.pathname.endsWith('/cost')) {
 			const [latest, previous] = scenario.cost.map(costPeriod);
-			return route.fulfill({ json: { definition_version: 1, period, series: [previous, latest], latest: pooled(latest), previous: pooled(previous), coverage: { priced_records: 3, api_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null } } });
+			return route.fulfill({ json: { definition_version: 1, period, series: [previous, latest], latest: pooled(latest), previous: pooled(previous), coverage: { priced_records: 3, usage_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null } } });
 		}
 		const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
 		const served: Record<string, ReturnType<typeof window>[]> = { estimated_human_hours_per_active_hour: scenario.size, first_try_acceptance: scenario.firstTry, active_hours_per_outcome: scenario.minutes };

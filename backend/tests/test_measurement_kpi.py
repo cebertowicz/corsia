@@ -217,6 +217,41 @@ async def test_kpi_says_whether_a_window_began_after_the_tokens_were_fully_recor
 
 
 @pytest.mark.asyncio
+async def test_kpi_token_completeness_uses_a_fresh_installations_first_recorded_day(isolated_db, monkeypatch):
+    measurement = _pin_now(monkeypatch)
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_scope(db)
+        _usage(db, "first-recorded", "root", "2026-08-01T12:00:00.000000", parts=(1, 1, 1, 1), total=4)
+        db.commit()
+    finally:
+        db.close()
+
+    weeks = (await _response(measurement, "p1", grain="weeks"))["kpi"]
+    assert (weeks["current"]["tokens_recorded"], weeks["previous"]["tokens_recorded"]) == (True, True)
+
+
+@pytest.mark.asyncio
+async def test_kpi_token_completeness_starts_when_an_upgrade_begins_persisting_complete_rows(isolated_db, monkeypatch):
+    measurement = _pin_now(monkeypatch)
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_scope(db)
+        _usage(db, "old-incomplete", "root", "2026-08-01T12:00:00.000000")
+        _usage(db, "first-complete", "root", "2026-09-07T12:00:00.000000", parts=(1, 1, 1, 1), total=4)
+        db.commit()
+    finally:
+        db.close()
+
+    weeks = (await _response(measurement, "p1", grain="weeks"))["kpi"]
+    assert (weeks["current"]["tokens_recorded"], weeks["previous"]["tokens_recorded"]) == (True, False)
+
+
+@pytest.mark.asyncio
 async def test_kpi_on_the_periods_grain_compares_the_last_four_completed_weeks_with_the_four_before(isolated_db, monkeypatch):
     measurement = _pin_now(monkeypatch)
     from infra.database import get_db
