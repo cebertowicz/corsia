@@ -125,6 +125,107 @@ describe('ImageCommentLightbox', () => {
 		expect(props.draftOpen).toBe(false);
 	});
 
+	describe('the drawer and the image, linked', () => {
+		let scrollTo: ReturnType<typeof vi.fn>;
+		let scrollIntoView: ReturnType<typeof vi.fn>;
+		beforeEach(() => {
+			scrollTo = vi.fn();
+			scrollIntoView = vi.fn();
+			Object.defineProperty(Element.prototype, 'scrollTo', { configurable: true, value: scrollTo });
+			Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+		});
+		afterEach(() => {
+			delete (Element.prototype as unknown as Record<string, unknown>).scrollTo;
+			delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+		});
+		const drawer = () => host.querySelector<HTMLElement>('[data-doc-comments-drawer]');
+		const card = (id: string) => drawer()!.querySelector<HTMLElement>(`[data-comment-id="${id}"]`)!;
+		const tag = (n: number) => host.querySelector<HTMLButtonElement>(`[data-region-tag="${n}"]`)!;
+		const box = (id: string) => host.querySelector<HTMLElement>(`[data-region-box="${id}"]`)!;
+		async function openDrawer() { pill()!.click(); await settle(); }
+
+		it('drops Show on image: each card selects its tag itself', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			await openDrawer();
+			expect(drawer()!.textContent).not.toContain('Show on image');
+			card('second').querySelector<HTMLElement>('.ct')!.click();
+			await settle();
+			expect(drawer()).not.toBeNull();
+			expect(tag(3).getAttribute('aria-pressed')).toBe('true');
+			// The card's number is a button too, so the keyboard can select from the drawer.
+			const number = card('first').querySelector<HTMLButtonElement>('button.ct-num')!;
+			expect(number.getAttribute('aria-label')).toBe('Show comment 1 on the image');
+			number.click();
+			await settle();
+			expect(tag(1).getAttribute('aria-pressed')).toBe('true');
+		});
+
+		it('highlights a card’s box and tag on hover or focus, and a tag’s card on hover, without scrolling', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			await openDrawer();
+			scrollTo.mockClear(); scrollIntoView.mockClear();
+			card('second').dispatchEvent(new PointerEvent('pointerenter'));
+			await settle();
+			expect(box('second').classList.contains('shown')).toBe(true);
+			expect(tag(3).classList.contains('faint')).toBe(false);
+			card('second').dispatchEvent(new PointerEvent('pointerleave'));
+			await settle();
+			expect(box('second').classList.contains('shown')).toBe(false);
+			card('first').dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+			await settle();
+			expect(box('first').classList.contains('shown')).toBe(true);
+			tag(3).dispatchEvent(new PointerEvent('pointerenter'));
+			await settle();
+			expect(card('second').querySelector('.ct')!.classList.contains('linked')).toBe(true);
+			expect(scrollTo).not.toHaveBeenCalled();
+			expect(scrollIntoView).not.toHaveBeenCalled();
+		});
+
+		it('keeps the drawer open when a tag is picked, selects it, and scrolls the drawer smoothly to its card', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			await openDrawer();
+			scrollTo.mockClear();
+			tag(3).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+			await settle();
+			expect(drawer()).not.toBeNull();
+			expect(host.querySelector('[data-popover]')).toBeNull();
+			expect(tag(3).getAttribute('aria-pressed')).toBe('true');
+			expect(card('second').querySelector('.ct')!.classList.contains('focused')).toBe(true);
+			expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }));
+			expect(scrollIntoView).not.toHaveBeenCalled();
+		});
+
+		it('opens the drawer at the selected comment’s card, marked', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			tag(3).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+			await settle();
+			scrollTo.mockClear();
+			await openDrawer();
+			expect(card('second').querySelector('.ct')!.classList.contains('focused')).toBe(true);
+			expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }));
+		});
+
+		it('lands keyboard focus on the card’s Reply field when a tag is picked', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			tag(1).focus();
+			tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+			await settle();
+			expect(document.activeElement?.classList.contains('ct-input')).toBe(true);
+		});
+
+		it('opens the drawer by growing its track, sized to leave the image its fitted height', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			const layout = host.querySelector<HTMLElement>('.layout')!;
+			expect(layout.classList.contains('drawer-open')).toBe(false);
+			await openDrawer();
+			expect(layout.classList.contains('drawer-open')).toBe(true);
+			expect(layout.style.getPropertyValue('--drawer-size')).toMatch(/^\d+(\.\d+)?px$/);
+			pill()!.click();
+			await settle();
+			expect(layout.classList.contains('drawer-open')).toBe(false);
+		});
+	});
+
 	it('shows the image alone until its artifact is known', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: null });
 		expect(mocks.fetchComments).not.toHaveBeenCalled();

@@ -87,12 +87,17 @@ export function createImageComments(context: {
 		context.onCreated?.();
 		if (anchor) show(id, anchor);
 	}
-	/** A tag was picked: its card opens beside its box, and closing it returns focus to the tag. */
+	/**
+	 * A tag was picked: its card opens beside its box, and closing it returns
+	 * focus to the tag. With the drawer open, the drawer stays and the tag is
+	 * selected there instead, so the drawer can bring its card into view.
+	 */
 	function pick(id: string, anchor: () => DOMRect | null, opener: HTMLElement) {
 		draftRegion = null;
+		if (ui.state?.kind === 'list') { focusedDocComment.set(id); return; }
 		ui.focusMarker([id], opener, anchor);
 	}
-	/** A card in the drawer asked to be shown on the image: the drawer stays, the tag is picked. */
+	/** A card in the drawer was selected: the drawer stays, the tag is picked and scrolled into view. */
 	function showFromList(id: string, region: ImageRegion | null | undefined) {
 		focusedDocComment.set(id);
 		if (region) context.reveal?.(region);

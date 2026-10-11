@@ -110,6 +110,14 @@ describe('image comments', () => {
 		expect(reveal).toHaveBeenCalledWith(BOX);
 	});
 
+	it('keeps the drawer open when a tag is picked, and selects that comment there', () => {
+		const { comments } = controller();
+		comments.ui.openList(document.createElement('button'));
+		comments.pick('c3', () => null, document.createElement('button'));
+		expect(comments.ui.state).toEqual({ kind: 'list' });
+		expect(comments.selectedId).toBe('c3');
+	});
+
 	it('draws and moves nothing for a reader who may not comment', async () => {
 		const { comments } = controller(true);
 		comments.toggleBoxMode();

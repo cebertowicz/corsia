@@ -2,13 +2,14 @@
 	// The image viewer with comments on parts of the image (DCOL-FR13.3-13.9):
 	// numbered tags over the image, a Comment button and the comments pill in its
 	// bar, and the document's own cards, composer and drawer beside it.
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageRegionLayer from './ImageRegionLayer.svelte';
 	import ImageCommentBar from './ImageCommentBar.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import { createImageComments } from '$lib/imageComments.svelte';
 	import { regionColor } from '$lib/imageRegions';
+	import { FIT_MARGIN } from '$lib/imageZoom';
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
 	import { commentLoads, docComments, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
 	import { isPaneDrawer } from '$lib/stores/paneOpen';
@@ -60,12 +61,37 @@
 	function focusFromCard(id: string) {
 		if (image.ui.state?.kind === 'list') image.showFromList(id, comments.find((comment) => comment.id === id)?.region);
 	}
+
+	// The drawer opens by growing its grid track, so the image above or beside it moves with it rather than jumping.
+	const drawerOpen = $derived(image.ui.state?.kind === 'list');
+	const DRAWER_GAP = 8;
+	let drawerSize = $state(0);
+	/**
+	 * Below the image the drawer takes what the image does not need at Fit, and never less than the usual share, so a
+	 * short screenshot leaves room for several cards (F6); a tall one keeps the usual split and fits smaller.
+	 */
+	function measureDrawer() {
+		if (!root) return;
+		const box = root.getBoundingClientRect();
+		const bar = root.querySelector('.bar')?.getBoundingClientRect().height ?? 0;
+		const usual = Math.min(box.height * 0.36, 260);
+		const natural = lightbox?.naturalSize();
+		if (!natural || !(natural.width > 0)) { drawerSize = Math.round(usual); return; }
+		const fitted = natural.height * Math.min(1, Math.max(0, box.width - 2 * FIT_MARGIN) / natural.width);
+		drawerSize = Math.round(Math.max(usual, box.height - DRAWER_GAP - (bar + fitted + 2 * FIT_MARGIN)));
+	}
+	$effect(() => { if (drawerOpen) measureDrawer(); });
+	onMount(() => {
+		const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (drawerOpen) measureDrawer(); }) : null;
+		if (root) observer?.observe(root);
+		return () => observer?.disconnect();
+	});
 </script>
 
 <svelte:window onkeydowncapture={image.onKeydownCapture} />
 
 <div class="image-comments">
-<div class="layout" bind:this={root}>
+<div class="layout" class:drawer-open={drawerOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
 	<div class="viewer-cell">
 		<ImageLightbox bind:this={lightbox} {src} {alt} {onLoaded} {onFailed} {onRetry}>
 			{#snippet barActions({ loaded })}
@@ -132,19 +158,31 @@
 			target={null}
 			{artifactId}
 			readOnly={!canComment}
-			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null }}
+			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover }}
 		/>
 	{/if}
 </div>
 </div>
 
 <style>
-	/* The comments drawer takes the same place it does beside a document: below the image, or beside it on a wide canvas. */
+	/*
+	 * The comments drawer takes the same place it does beside a document: below the image, or beside it on a wide canvas.
+	 * Its track grows from nothing, and the drawer rides its leading edge, clipped by the layout, so it slides in from the
+	 * bottom (or the right) while the image refits in what is left. Reduced motion skips the slide; the drawer crossfades.
+	 */
 	.image-comments { container: image-comments / inline-size; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-	.layout { flex: 1; min-height: 0; display: grid; gap: 8px; grid-template-areas: 'viewer'; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-	.layout:has(:global(.canvas-comment-drawer)) { grid-template-areas: 'viewer' 'drawer'; grid-template-rows: minmax(0, 1fr) minmax(0, min(36%, 260px)); }
-	@container image-comments (min-width: 900px) {
-		.layout:has(:global(.canvas-comment-drawer)) { grid-template-areas: 'viewer drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: minmax(0, 1fr); }
+	.layout {
+		flex: 1; min-height: 0; display: grid; gap: 0; overflow: clip;
+		grid-template-areas: 'viewer' 'drawer'; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 0px;
+		transition: grid-template-rows calc(var(--dur-drawer) * 0.7) var(--ease-ios-sheet), grid-template-columns calc(var(--dur-drawer) * 0.7) var(--ease-ios-sheet);
 	}
+	.layout.drawer-open { grid-template-rows: minmax(0, 1fr) var(--drawer-size); transition-duration: var(--dur-drawer); }
+	.layout :global(.canvas-comment-drawer) { align-self: start; box-sizing: border-box; height: calc(var(--drawer-size) - 8px); margin-top: 8px; }
+	@container image-comments (min-width: 900px) {
+		.layout { grid-template-areas: 'viewer drawer'; grid-template-columns: minmax(0, 1fr) 0px; grid-template-rows: minmax(0, 1fr); }
+		.layout.drawer-open { grid-template-columns: minmax(0, 1fr) 328px; grid-template-rows: minmax(0, 1fr); }
+		.layout :global(.canvas-comment-drawer) { align-self: stretch; justify-self: start; width: 320px; height: auto; margin: 0 0 0 8px; }
+	}
+	@media (prefers-reduced-motion: reduce) { .layout { transition: none; } }
 	.viewer-cell { grid-area: viewer; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 </style>

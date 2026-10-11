@@ -7,7 +7,7 @@
 
 <script lang="ts">
 	import { tick } from 'svelte';
-	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, bounds = null, avoidRect, children }: {
+	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, bounds = null, avoidRect, initialFocus, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -19,6 +19,8 @@
 		bounds?: HTMLElement | null;
 		/** A live rectangle the card should clear vertically when it cannot fit beside its anchor. */
 		avoidRect?: () => DOMRect | null;
+		/** A selector for what takes focus on open, when present; otherwise the first focusable element does. */
+		initialFocus?: string;
 		children: import('svelte').Snippet;
 	} = $props();
 	let surface = $state<HTMLElement>();
@@ -87,7 +89,11 @@
 		if (!open) return;
 		hidden = false;
 		opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		void tick().then(() => { position(); surface?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]:not([tabindex="-1"])')?.focus(); });
+		void tick().then(() => {
+			position();
+			const preferred = initialFocus ? surface?.querySelector<HTMLElement>(initialFocus) : null;
+			(preferred ?? surface?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]:not([tabindex="-1"])'))?.focus();
+		});
 	});
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.
 	$effect(() => {

@@ -3,10 +3,15 @@
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, documentOrder = false, focusedId = null, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, decisionErrors = {}, readOnly = false, reopenReachesOwner = false }: {
+	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, decisionErrors = {}, readOnly = false, reopenReachesOwner = false }: {
 		comments: Comment[];
 		documentOrder?: boolean;
 		focusedId?: string | null;
+		/** Image comments: the one whose tag is hovered or focused lights its card, and hovering or focusing a card reports it. */
+		hoveredId?: string | null;
+		onHover?: (id: string | null) => void;
+		/** Off where the caller scrolls the list to the focused card itself. */
+		scrollOnFocus?: boolean;
 		onFocus?: (id: string) => void;
 		onReply?: (id: string, text: string) => Promise<void>;
 		onResolve?: (id: string, resolved: boolean) => void;
@@ -35,6 +40,10 @@
 		const card = (event.target as HTMLElement)?.closest('[data-comment-id]');
 		if (!(event.relatedTarget instanceof Node) || !card?.contains(event.relatedTarget)) heldOrder = null;
 	}
+	function leaveCard(event: FocusEvent) {
+		const card = event.currentTarget as HTMLElement;
+		if (!(event.relatedTarget instanceof Node) || !card.contains(event.relatedTarget)) onHover?.(null);
+	}
 	const reviews = $derived(comments.filter((comment) => comment.review && !comment.resolved));
 	const open = $derived(comments.filter((comment) => !comment.review && !comment.resolved && !comment.orphaned));
 	const orphaned = $derived(comments.filter((comment) => !comment.resolved && !!comment.orphaned));
@@ -45,15 +54,22 @@
 <div class="list" role="region" aria-label="Comment threads" onfocusin={holdCardOrder} onfocusout={releaseCardOrder}>
 	{#if documentOrder}
 		{#each ordered as comment (comment.id)}
-			<div data-comment-id={comment.id}>
-				{#if comment.regionNumber != null}
-					<button type="button" class="comment-jump" data-comment-jump onclick={() => onFocus?.(comment.id)} aria-label="Show comment {comment.regionNumber} on the image">Show on image</button>
-				{:else}
+			{@const region = comment.regionNumber != null}
+			<!-- An image comment's card and its mark light up together; the card itself selects its tag, so it needs no link. -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				data-comment-id={comment.id}
+				onpointerenter={region && onHover ? () => onHover(comment.id) : undefined}
+				onpointerleave={region && onHover ? () => onHover(null) : undefined}
+				onfocusin={region && onHover ? () => onHover(comment.id) : undefined}
+				onfocusout={region && onHover ? leaveCard : undefined}
+			>
+				{#if !region}
 					<button type="button" class="comment-jump" data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={() => onFocus?.(comment.id)} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : `Go to text: ${comment.anchor}`}>
 						{comment.review ? 'Review comment' : comment.orphaned ? 'Text changed' : 'Go to text'}{comment.anchor ? `: “${comment.anchor}”` : ''}
 					</button>
 				{/if}
-				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
+				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
 			</div>
 		{/each}
 	{:else}

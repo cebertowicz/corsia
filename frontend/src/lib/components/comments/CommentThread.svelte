@@ -31,9 +31,15 @@
 	import { agentColor } from '$lib/docPresence';
 	import { retryPlacement } from '$lib/stores/docComments';
 
-	let { comment, focused = false, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
+	let { comment, focused = false, linked = false, selectable = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
 		comment: CommentThreadData;
 		focused?: boolean;
+		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
+		linked?: boolean;
+		/** An image comment in the drawer: its number is a button that selects its tag. */
+		selectable?: boolean;
+		/** Off where the caller scrolls its own list to the focused card. */
+		scrollOnFocus?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
 		onReply?: (commentId: string, text: string) => Promise<void>;
@@ -74,7 +80,7 @@
 	let retryOnVisible = false;
 
 	$effect(() => { if (focused) showReplies = true; });
-	$effect(() => { if (focused && el) el.scrollIntoView({ block: 'nearest' }); });
+	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	function stampRenderedReply() {
 		const latest = comment.replies.at(-1)?.id;
 		if (!comment.replyWaiting || !showReplies || !latest || document.visibilityState !== 'visible') return;
@@ -183,9 +189,10 @@
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct" class:focused class:acked={comment.acked} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus}>
+	<div class="ct" class:focused class:linked class:acked={comment.acked} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus}>
 		<div class="ct-head">
-			{#if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
+			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
+			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<span class="ct-author">{author.name}</span>
 			{#if author.kind === 'agent' && agentTag(author)}<span class="ct-tag" title="via {author.provider} · {author.thread}">{agentTag(author)}</span>{/if}
@@ -258,8 +265,10 @@
 	.ct {
 		background: color-mix(in srgb, var(--text-primary) 4%, transparent); border: 1px solid transparent; border-radius: var(--radius-sm);
 		padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
-		transition: border-color var(--dur-tight), box-shadow var(--dur-tight); cursor: pointer;
+		transition: border-color var(--dur-tight), box-shadow var(--dur-tight), background-color var(--dur-tight) var(--ease-snap); cursor: pointer;
 	}
+	/* Lit with its mark on the image while either is hovered or focused; lighter than selected. */
+	.ct.linked:not(.focused) { background: color-mix(in srgb, var(--text-primary) 8%, transparent); border-color: color-mix(in srgb, var(--text-primary) 14%, transparent); }
 	.ct.read-only .ct-act, .ct.read-only .ct-compose, .ct.read-only .ct-res-acts { display: none; }
 	.ct.focused { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glass-rim), 0 0 0 3px var(--accent-subtle); }
 	.ct.acked { border-color: color-mix(in srgb, var(--green) 30%, transparent); }
@@ -287,6 +296,10 @@
 		background: var(--region-color, var(--accent)); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color, var(--accent)) 70%, var(--image-region-edge));
 		font-size: var(--text-caption); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; line-height: 1;
 	}
+	button.ct-num { position: relative; font-family: inherit; cursor: pointer; }
+	button.ct-num:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	/* A 44 px target around the 18 px number on touch. */
+	@media (pointer: coarse) { button.ct-num::before { content: ''; position: absolute; inset: -13px; } }
 	.ct-suggestion-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
 	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: #fff; background: var(--accent); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
 	.ct-suggestion-accept:disabled, .ct-link:disabled { opacity: 0.55; cursor: not-allowed; }

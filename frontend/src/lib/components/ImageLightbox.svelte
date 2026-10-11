@@ -115,6 +115,8 @@
 	}
 	/** The shown image's live bounds, for an anchored card to avoid covering its tags. */
 	export function imageBounds(): DOMRect | null { return imgEl?.isConnected ? imgEl.getBoundingClientRect() : null; }
+	/** The image's own pixel size once it has loaded, for a caller sizing the space around the viewer. */
+	export function naturalSize(): Size | null { return natural; }
 	/** Scrolls so the given fraction of the image (0..1 on each axis) is centred in the viewport, keeping the zoom. */
 	export function revealFraction(x: number, y: number) {
 		const el = viewportEl;

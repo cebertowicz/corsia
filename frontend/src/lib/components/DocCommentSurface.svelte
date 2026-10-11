@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { get } from 'svelte/store';
 	import { Button } from './ui';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import type { CommentLoad } from '$lib/stores/docComments';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
@@ -14,8 +16,11 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
-	/** Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour. */
-	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null };
+	/**
+	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
+	 * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
+	 */
+	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void };
 	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
@@ -51,6 +56,8 @@
 	} = $props();
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let drawer = $state<HTMLElement>();
+	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
+	const isImage = $derived(!!image);
 	let navigationNotice = $state('');
 	const byNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 	const displayed = $derived.by(() => {
@@ -83,10 +90,36 @@
 		filter = 'all'; navigationNotice = '';
 		void tick().then(() => {
 			const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
-			if (list) list.scrollTop = 0;
+			// An image's drawer opens at the selected comment instead (the effect below).
+			if (list && !(isImage && focusedId)) list.scrollTop = 0;
 			drawer?.querySelector<HTMLElement>('[data-drawer-filter]')?.focus();
 		});
 	});
+	/** Bring a card into view in the drawer's own list: smooth, or at once with reduced motion. */
+	function scrollToCard(id: string) {
+		const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
+		const card = list?.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
+		if (!list || !card) return;
+		const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - 4;
+		list.scrollTo({ top: Math.max(0, top), behavior: get(prefersReducedMotion) ? 'auto' : 'smooth' });
+	}
+	// An image's selected comment, picked on the image or there when the drawer opens, is scrolled to and marked in it.
+	$effect(() => {
+		const id = focusedId;
+		if (!isImage || surfaceState?.kind !== 'list' || !id) return;
+		void tick().then(() => scrollToCard(id));
+	});
+	/**
+	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with
+	 * reduced motion it crossfades instead. A document's drawer keeps appearing and leaving at once.
+	 */
+	function drawerMotion(_node: Element, { leaving }: { leaving: boolean }) {
+		if (!isImage) return { duration: 0 };
+		const token = (name: string) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+		const pace = leaving ? 0.7 : 1;
+		if (get(prefersReducedMotion)) return { duration: token('--dur-tight') * pace, css: (t: number) => `opacity: ${t}` };
+		return { duration: leaving ? token('--dur-drawer') * pace : 0 };
+	}
 	function closeDrawer() { onClose(); restoreFocus(); }
 	function navigate(id: string) {
 		const comment = comments.find((item) => item.id === id);
@@ -202,13 +235,13 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf} onMovePin={image?.onMovePin} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf} onMovePin={image?.onMovePin} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 
 {#if surfaceState}
 	{#if surfaceState.kind === 'list'}
-		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>
+		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>
 			<div class="drawer-heading"><h2>Comments <span>{comments.length}</span></h2><Button size="sm" variant="ghost" onclick={closeDrawer}>Done</Button></div>
 			<div class="comment-filters" role="group" aria-label="Filter comments">
 				{#each ['all', 'open', 'resolved'] as choice}
@@ -225,7 +258,7 @@
 			</div>
 		</section>
 	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>
-	{:else}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+	{:else}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>
