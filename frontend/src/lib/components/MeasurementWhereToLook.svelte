@@ -103,8 +103,13 @@
 		.tb th { font-size: var(--text-caption); }
 		.act { font-size: 11px; }
 	}
-	/* Phone: the subject and its measure share one cell, the subject above, so neither wraps a word per line. */
+	/* Phone: the subject and its measure share one cell, the subject above, so neither wraps a word per line.
+	   No column keeps a width floor, so the table always fits the card; a subject or header breaks only between
+	   words, except a single unbroken name wider than the card, which may break anywhere rather than push the page. */
 	@media (max-width: 430px) {
+		.tb td:first-child, .tb th:first-child { min-width: 0; }
+		.tb td.subj b { overflow-wrap: anywhere; }
+		.tb th { white-space: normal; word-break: normal; }
 		.tb th.measure, .tb td.measure { display: none; }
 		span.stacked { display: inline; }
 		div.stacked { display: block; margin-top: 4px; }

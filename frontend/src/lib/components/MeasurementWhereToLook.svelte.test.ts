@@ -116,6 +116,16 @@ describe('MeasurementWhereToLook', () => {
 		expect(phone).toMatch(/div\.stacked \{ display: block;/);
 	});
 
+	it('fits the card at 430px and under: no width floor on the subject column, headers wrap at spaces, the long-name rule is the subject alone', () => {
+		const phone = media('(max-width: 430px)');
+		expect(phone).toContain('.tb td:first-child, .tb th:first-child { min-width: 0; }');
+		expect(phone).toContain('.tb th { white-space: normal; word-break: normal; }');
+		expect(phone).toContain('.tb td.subj b { overflow-wrap: anywhere; }');
+		// Outside the phone block the subject column keeps its 10ch floor.
+		expect(css).toContain('.tb td:first-child, .tb th:first-child { min-width: 10ch; }');
+		expect(phone).not.toContain('table-layout');
+	});
+
 	it('gives the worse and improved tables the same fixed column widths on a wide screen', () => {
 		render(state({ worse: [row()], improved: [row({ subject: { id: 'ag-2', name: 'Docs', kind: 'agent' }, change: 0.4 })] }));
 		const columns = [...host.querySelectorAll('table.tb')].map((table) => [...table.querySelectorAll('colgroup col')].map((col) => [...col.classList].find((name) => name.startsWith('c-'))));

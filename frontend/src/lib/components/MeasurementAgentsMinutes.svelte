@@ -57,6 +57,9 @@
 	/* Headers and agent names wrap between whole words only, as in r2.7: the Agent column is at least as wide as the longest name's longest word. */
 	thead th { font-size: var(--text-footnote); color: var(--text-secondary); font-weight: 600; vertical-align: bottom; }
 	tbody th, tbody td { font-weight: 400; }
+	/* One unbroken name wider than the card (a path or an id) breaks anywhere instead of widening the page. The column keeps room for the longest real agent name,
+	   so a name with spaces or a long word is never broken: a name wraps at its spaces first. */
+	tbody th { overflow-wrap: anywhere; min-width: 15ch; }
 	.n { text-align: right; font-variant-numeric: tabular-nums; }
 	.unmeasured { color: var(--text-secondary); font-style: italic; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
