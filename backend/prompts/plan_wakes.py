@@ -14,7 +14,7 @@ from typing import Literal
 WAKE_TASK_CLOSED = "[CORSIA plan] {title} was closed by another actor."
 WAKE_WORK_SELECTED = "[CORSIA plan] {title} is now your current task."
 #: An ask-release wake carries the same summary formerly used for the passive receipt.
-WAKE_ASK_RELEASED = "{summary}"
+WAKE_ASK_RELEASED = "[CORSIA plan] {summary}"
 WAKE_CHILD_RETURNED = (
     "[CORSIA plan] The work delegated for {title} has returned and awaits your verdict."
 )

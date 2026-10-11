@@ -10,7 +10,7 @@ worker's Turn end (``delegation_turn_end.on_worker_turn_end``).
 
 Taking the slot back is state, not news. What a parent hears about its worker
 is the notification matrix's, written by ``delegation_notice._wake_parent``
-alone (debt ledger 1), so ``plan_wake.notify_selected`` asks ``told_elsewhere``
+alone (debt ledger 1), so ``selection_wake.notify`` asks ``told_elsewhere``
 before telling an executor its slot was filled.
 """
 

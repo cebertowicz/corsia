@@ -308,7 +308,8 @@ def _release(
         )
     for plan_id, released in released_by_plan.items():
         reconciled = admission.reconcile_plan(
-            plan_id, actor_id=None, provenance=_PROVENANCE, db=db,
+            plan_id, actor_id=None, provenance=_PROVENANCE,
+            selection_wake_summaries=dict(released), db=db,
         )
         plan = service._plan_row(db, plan_id)
         for node_id, summary in released:

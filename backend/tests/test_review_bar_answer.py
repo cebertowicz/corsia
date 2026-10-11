@@ -90,7 +90,7 @@ def test_a_plain_approval_reaches_the_agent_with_its_note(db):
     _answer(db, artifact, "approved", "Ship it.")
 
     text = _notices(db)[-1]
-    assert text.split("\n{", 1)[0] == (
+    assert text.removeprefix("[CORSIA plan] ").split("\n{", 1)[0] == (
         'The user approved "proposal.md", so task "Review the proposal" '
         "no longer waits on them: pick it up.\nTheir note: Ship it."
     )
@@ -138,7 +138,7 @@ def test_approve_with_changes_and_the_feedback_task_pointer(db):
     task = db.execute(
         "SELECT title FROM plan_nodes WHERE title LIKE 'Steve left%'",
     ).fetchone()["title"]
-    assert _notices(db)[-1].split("\n{", 1)[0] == (
+    assert _notices(db)[-1].removeprefix("[CORSIA plan] ").split("\n{", 1)[0] == (
         'The user approved with changes "proposal.md" (1 comment, 1 suggestion, '
         f'in task "{task}"), so task "Review the proposal" no longer waits on '
         "them: pick it up.\nTheir note: Mostly fine."
@@ -171,7 +171,7 @@ def test_request_changes_with_no_feedback_needs_a_note(db):
     assert attention.get_attention_state(artifact, db=db) == "raised"
 
     _answer(db, artifact, "changes_requested", "Cut section 3.")
-    summary = _notices(db)[-1].split("\n{", 1)[0]
+    summary = _notices(db)[-1].removeprefix("[CORSIA plan] ").split("\n{", 1)[0]
     assert summary.startswith('The user requested changes on "proposal.md", so')
     assert summary.endswith("\nTheir note: Cut section 3.")
 
@@ -195,7 +195,10 @@ def test_one_answer_releases_every_ask_on_the_artifact(db):
     _answer(db, artifact, "approved")
 
     assert _open_holds(db, first) == 0 and _open_holds(db, second) == 0
-    notices = [text for text in _notices(db) if text.startswith("The user approved")]
+    notices = [
+        text for text in _notices(db)
+        if text.removeprefix("[CORSIA plan] ").startswith("The user approved")
+    ]
     assert len(notices) == 2
     assert any('task "Review the proposal"' in text for text in notices)
     assert any('task "Check the numbers"' in text for text in notices)

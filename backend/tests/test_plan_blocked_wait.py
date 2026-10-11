@@ -336,19 +336,19 @@ def test_answering_an_active_document_ask_only_wakes_the_selected_work_once(db):
 
     node, ask = _ask_held_node(db, state="active", external_id="active-wake.md")
 
-    attention.clear_attention(ask, outcome="acknowledge", db=db)
+    attention.clear_attention(
+        ask, outcome="answer", verdict="changes_requested", note="Cut section 3.", db=db,
+    )
 
     wakes = db.execute(
         "SELECT id,content FROM messages WHERE thread_id='owner' "
         "AND id LIKE 'plan-wake:%' ORDER BY input_order",
     ).fetchall()
-    assert [wake for wake in wakes if wake["id"].startswith("plan-wake:ask_released:")] == []
-    selected = [
-        wake for wake in wakes
-        if wake["id"].startswith(f"plan-wake:work_selected:{node.id}:")
-    ]
-    assert len(selected) == 1
-    assert 'Review is now your current task.' in selected[0]["content"]
+    assert len(wakes) == 1
+    [wake] = wakes
+    assert wake["id"].startswith(f"plan-wake:work_selected:{node.id}:")
+    assert "requested changes" in wake["content"]
+    assert "Their note: Cut section 3." in wake["content"]
 
 
 def test_retiring_a_document_ask_releases_its_hold_through_attention(db):

@@ -325,40 +325,6 @@ def notify_revision(
         )
 
 
-def notify_selected(
-    db, reconciled, *, plan_id: str, causing_executor: str | None,
-    from_worker: bool = False,
-) -> None:
-    """Tell each executor whose slot this write filled that it has current work.
-
-    A delegated step its worker's side hands back is the notification
-    matrix's news (``delegated_selection.told_elsewhere``), not this wake's.
-    A task its executor did not write brings its description, bounded, beside
-    the block (``handoff_brief``).
-    """
-    from plans import delegated_selection, handoff_brief
-    from prompts import plan_wakes as wakes
-
-    for node_id, executor in reconciled.selected:
-        if not executor or executor == causing_executor:
-            continue
-        node = _node(db, node_id)
-        if delegated_selection.told_elsewhere(db, executor, node, from_worker=from_worker):
-            continue
-        append(
-            db,
-            recipient=executor,
-            kind=WORK_SELECTED,
-            subject_id=node_id,
-            revision=int(node["revision"]),
-            plan_id=plan_id,
-            content=with_next(
-                db, plan_id, executor,
-                wakes.WAKE_WORK_SELECTED.format(title=str(node["title"])),
-                **handoff_brief.fact(db, node_id, executor),
-            ),
-        )
-
 
 def notify_closed(
     db, node_id: str, *, plan_id: str, executor: str | None, causing_executor: str | None,
