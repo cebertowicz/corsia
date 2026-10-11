@@ -91,7 +91,8 @@
 						{comments}
 						{colorOf}
 						draftColor={projectAccent(projectId, accent)}
-						draft={image.movingRegion ?? image.draftRegion}
+						draft={image.draftRegion}
+						moving={image.moving ? { id: image.moving, region: image.movingRegion } : null}
 						selectedId={image.selectedId}
 						hoveredId={image.ui.hovered}
 						boxMode={image.boxMode}

@@ -43,9 +43,61 @@ describe('ImageRegionLayer', () => {
 		// Left of the box's top-left corner, matching the server's marked-up copy.
 		expect(tags[1].style.left).toBe('304px');
 		expect(tags[1].style.top).toBe('163px');
-		// Only the picked comment's box is drawn.
-		expect(host.querySelectorAll('[data-region-box]')).toHaveLength(1);
+		// Only the picked comment's box shows.
+		expect(host.querySelectorAll('[data-region-box].shown')).toHaveLength(1);
 		expect(tags[1].getAttribute('aria-label')).toBe('Comment 2 by you, box 20% wide, 20% tall at 40% across, 30% down');
+	});
+
+	it('keeps every box mounted so it fades in and out on hover instead of popping', async () => {
+		render({ comments: [comment('a', 1, { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }), comment('b', 2, { x: 0.5, y: 0.5, w: 0.2, h: 0.2 })] });
+		const boxes = () => [...host.querySelectorAll<HTMLElement>('[data-region-box]')];
+		expect(boxes().map((box) => box.dataset.regionBox)).toEqual(['a', 'b']);
+		expect(boxes().filter((box) => box.classList.contains('shown'))).toHaveLength(0);
+		host.querySelector<HTMLElement>('[data-region-tag="2"]')!.dispatchEvent(new FocusEvent('focus'));
+		flushSync();
+		expect(boxes().filter((box) => box.classList.contains('shown')).map((box) => box.dataset.regionBox)).toEqual(['b']);
+	});
+
+	it('hides an agent name at rest when it covers another comment’s point', () => {
+		vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+			if (this.classList.contains('name')) return new DOMRect(155, 110, 50, 18);
+			if (this.getAttribute('data-region-dot') === 'b') return new DOMRect(180, 113, 14, 14);
+			if (this.getAttribute('data-region-tag') === '1') return new DOMRect(110, 110, 22, 22);
+			if (this.getAttribute('data-region-tag') === '2') return new DOMRect(500, 400, 22, 22);
+			return FRAME;
+		});
+		render({ comments: [
+			comment('a', 1, { x: 0.1, y: 0.1, w: 0.1, h: 0.1 }, { author: 'Reviewer', authorKind: 'agent' }),
+			comment('b', 2, { x: 0.12, y: 0.13, w: 0, h: 0 }),
+		] });
+		flushSync();
+		expect(host.querySelector('[data-region-tag="1"] .name')?.classList.contains('hidden')).toBe(true);
+	});
+
+	it('shows a pin being moved at its new place, pending, and its old place as leaving', () => {
+		render({
+			comments: [comment('a', 1, { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, { regionStale: true })],
+			moving: { id: 'a', region: { x: 0.6, y: 0.5, w: 0.2, h: 0.2 } },
+		});
+		const tag = host.querySelector<HTMLElement>('[data-region-tag="1"]')!;
+		expect(tag.classList.contains('pending')).toBe(true);
+		expect(Number.parseFloat(tag.style.left)).toBeGreaterThan(400);
+		expect(tag.getAttribute('aria-label')).toContain('moving here');
+		const next = host.querySelector<HTMLElement>('[data-region-box="a"]')!;
+		expect([next.style.left, next.classList.contains('pending'), next.classList.contains('shown')]).toEqual(['60%', true, true]);
+		const old = host.querySelector<HTMLElement>('[data-region-from="a"]')!;
+		expect([old.style.left, old.classList.contains('leaving')]).toEqual(['10%', true]);
+	});
+
+	it('shows a moved point pending at its new spot rather than as a bare dot', () => {
+		render({
+			comments: [comment('a', 1, { x: 0.1, y: 0.1, w: 0, h: 0 })],
+			moving: { id: 'a', region: { x: 0.7, y: 0.6, w: 0, h: 0 } },
+		});
+		const next = host.querySelector<HTMLElement>('[data-region-dot="a"]')!;
+		expect([next.style.left, next.classList.contains('pending')]).toEqual(['70%', true]);
+		expect(host.querySelector<HTMLElement>('[data-region-from="a"]')?.style.left).toBe('10%');
+		expect(host.querySelector('.dot.draft')).toBeNull();
 	});
 
 	it("names an agent on its tag and marks a pin on a changed image", () => {
@@ -64,6 +116,9 @@ describe('ImageRegionLayer', () => {
 			}
 			if (this.getAttribute('data-region-tag') === '1') return new DOMRect(110, 110, 22, 22);
 			if (this.getAttribute('data-region-tag') === '2') return new DOMRect(160, 110, 22, 22);
+			// Each point's dot is 14 px at its fraction of the frame, clear of both names.
+			if (this.getAttribute('data-region-dot') === 'a') return new DOMRect(173, 93, 14, 14);
+			if (this.getAttribute('data-region-dot') === 'b') return new DOMRect(253, 93, 14, 14);
 			return FRAME;
 		});
 		render({ comments: [

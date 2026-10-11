@@ -59,7 +59,7 @@
 	.thumb { display: flex; justify-content: flex-start; width: 100%; padding: 2px 0 6px; border: 0; background: none; cursor: pointer; }
 	.thumb:disabled { cursor: default; }
 	.thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
-	.frame { position: relative; display: inline-block; max-width: 100%; line-height: 0; border-radius: 2px; box-shadow: 0 0 0 1px var(--border); }
+	.frame { position: relative; display: inline-block; max-width: 100%; line-height: 0; border-radius: var(--radius-2xs); box-shadow: 0 0 0 1px var(--border); }
 	img { display: block; max-width: 100%; max-height: 72px; width: auto; height: auto; border-radius: inherit; user-select: none; }
 	.box { position: absolute; box-sizing: border-box; border: 1.5px solid var(--region-color); box-shadow: 0 0 0 1px var(--image-region-halo); pointer-events: none; }
 	.box.stale { border-style: dashed; }
