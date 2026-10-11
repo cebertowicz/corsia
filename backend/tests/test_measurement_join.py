@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import threading
 
 import pytest
 
@@ -153,6 +154,22 @@ async def test_a_failure_reaches_every_caller_and_is_never_kept():
     again = _Read()
     again.release.set()
     assert await join.joined("k", again, reuse_finished=True) == again.result
+
+
+async def test_result_sizing_runs_off_the_event_loop(monkeypatch):
+    loop_thread = threading.get_ident()
+    seen = []
+    size = join._result_size
+
+    def sized(result):
+        seen.append(threading.get_ident())
+        return size(result)
+
+    monkeypatch.setattr(join, "_result_size", sized)
+    read = _Read()
+    read.release.set()
+    assert await join.joined("k", read) == read.result
+    assert seen and seen[0] != loop_thread
 
 
 async def test_a_result_that_cannot_be_sized_still_reaches_every_caller_and_is_never_kept():

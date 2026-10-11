@@ -323,7 +323,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
     """The ``/agents`` body for one resolved grain and an already validated metric and sort."""
     # The dollars per hour read the task chains Models reads for the same page load: awaited here, outside the
     # lane, so this read holds no worker while it waits for them.
-    task_costs = await task_chain_costs(project, agent, page_grain, user) if dollars else None
+    cost_rows = (await task_chain_costs(project, agent, page_grain, user))["cost_rows"] if dollars else []
 
     def query() -> dict[str, Any]:
         db = get_db()
@@ -334,7 +334,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             prepare_outcome_periods(db, params, roots=True)
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain, period_comparable,
-                lambda name, period: period_measured(name, period, page_grain), with_dollars=dollars, task_costs=task_costs)
+                lambda name, period: period_measured(name, period, page_grain), cost_rows, with_dollars=dollars)
             return {
                 "definition_version": 1,
                 "scope": selected_scope.response(),

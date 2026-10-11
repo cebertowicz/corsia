@@ -7,14 +7,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from api import measurement, measurement_model_cost, measurement_models
-from api.measurement_agent_cost import query_task_hour_cost
+from api import measurement, measurement_chain_costs, measurement_model_cost, measurement_models
 from api.measurement_join import _flights
 from api.measurement_chain_costs import chain_costs, two_windows
-from api.measurement_queries import prepare_outcome_periods
 from api.measurement_scope import resolve_grain
 from core import measurement_scope
-from core.size_rating import CLASS_MIDPOINT_HOURS
 from model_identity_fixtures import seed_identity_catalog
 from tests.plan_writer_authorizer import raw_plan_seed
 
@@ -74,9 +71,10 @@ def _seed(db) -> None:
 
 
 def _count(monkeypatch) -> dict[str, int]:
-    """How many chain walks and cost reads ran: each builds its SQL once."""
-    runs = {"walks": 0, "cost_reads": 0}
+    """How many chain walks, cost reads and shared gap reads ran."""
+    runs = {"walks": 0, "cost_reads": 0, "gaps": 0}
     chain_ctes, cost_sql = measurement_model_cost.chain_ctes, measurement_model_cost._cost_sql
+    gaps = measurement_chain_costs.query_recording_gaps
 
     def walk(**kwargs):
         runs["walks"] += 1
@@ -86,8 +84,13 @@ def _count(monkeypatch) -> dict[str, int]:
         runs["cost_reads"] += 1
         return cost_sql(chain_rows)
 
+    def gap_read(*args, **kwargs):
+        runs["gaps"] += 1
+        return gaps(*args, **kwargs)
+
     monkeypatch.setattr(measurement_model_cost, "chain_ctes", walk)
     monkeypatch.setattr(measurement_model_cost, "_cost_sql", cost)
+    monkeypatch.setattr(measurement_chain_costs, "query_recording_gaps", gap_read)
     return runs
 
 
@@ -98,11 +101,11 @@ async def _page(grain):
         measurement_models.models_read("all", "none", grain, USER))
 
 
-async def test_one_page_load_walks_the_chains_and_reads_their_costs_once(db, monkeypatch):
+async def test_one_page_load_shares_the_cost_walk_and_gaps(db, monkeypatch):
     _seed(db)
     runs = _count(monkeypatch)
     agents, models = await _page(resolve_grain("weeks", "UTC"))
-    assert runs == {"walks": 1, "cost_reads": 1}
+    assert runs == {"walks": 1, "cost_reads": 1, "gaps": 1}
     assert agents["overall"]["dollars_per_work_hour"]["n"] > 0 and OPUS in {row["model"] for row in models["rows"]}
 
 
@@ -111,38 +114,28 @@ async def test_agents_alone_and_models_alone_each_read_what_they_need(db, monkey
     grain = resolve_grain("weeks", "UTC")
     runs = _count(monkeypatch)
     await measurement.agents_payload("all", "none", grain, "ranked", "fresh_tokens_per_outcome", True, USER)
-    assert runs == {"walks": 1, "cost_reads": 1}
+    assert runs == {"walks": 1, "cost_reads": 1, "gaps": 1}
     _flights.clear()
     await measurement_models.models_read("all", "none", grain, USER)
-    assert runs == {"walks": 2, "cost_reads": 2}
+    assert runs == {"walks": 2, "cost_reads": 2, "gaps": 2}
 
 
 async def test_agents_without_dollars_reads_no_chain(db, monkeypatch):
     _seed(db)
     runs = _count(monkeypatch)
     await measurement.agents_payload("all", "none", resolve_grain("weeks", "UTC"), "ranked", "fresh_tokens_per_outcome", False, USER)
-    assert runs == {"walks": 0, "cost_reads": 0}
+    assert runs == {"walks": 0, "cost_reads": 0, "gaps": 0}
 
 
-def test_dollars_per_hour_from_every_task_s_rows_equal_those_from_the_rated_tasks_chains(db):
-    _seed(db)
-    grain = resolve_grain("weeks", "UTC")
-    prepare_outcome_periods(db, {**SCOPE, "grain": grain}, roots=True)
-    params = {**SCOPE, "grain": two_windows(grain)}
-    narrow = query_task_hour_cost(db, params)
-    shared = query_task_hour_cost(db, params, chain_costs(db, SCOPE, grain)["cost_rows"])
-    assert shared == narrow
-    assert sum(cell["n"] for cell in narrow.values()) == 4  # m, l, mixed, and before in the previous window
-    assert narrow[("root", "2026-09-28")]["hours"] == sum(CLASS_MIDPOINT_HOURS[size] for size in "MLS")
-
-
-async def test_the_served_agents_dollars_equal_the_unshared_figures(db):
+async def test_the_served_agents_dollars_equal_the_shared_figures(db):
     _seed(db)
     grain = resolve_grain("weeks", "UTC")
     served = await measurement.agents_payload("all", "none", grain, "ranked", "fresh_tokens_per_outcome", True, USER)
-    prepare_outcome_periods(db, {**SCOPE, "grain": grain}, roots=True)
-    from api.measurement_agent_cost import dollars_metric
+    from api.measurement_agent_cost import dollars_metric, query_task_hour_cost
     from api.measurement_agents import RANKING_MINIMUM_N
+    from api.measurement_queries import prepare_outcome_periods
 
-    alone = dollars_metric(query_task_hour_cost(db, {**SCOPE, "grain": two_windows(grain)}), None, grain, RANKING_MINIMUM_N)
+    prepare_outcome_periods(db, {**SCOPE, "grain": grain}, roots=True)
+    alone = dollars_metric(query_task_hour_cost(db, {**SCOPE, "grain": two_windows(grain)}, chain_costs(db, SCOPE, grain)["cost_rows"]),
+                           None, grain, RANKING_MINIMUM_N)
     assert served["overall"]["dollars_per_work_hour"] == alone

@@ -265,8 +265,8 @@ def models_inputs_without_costs(
     """Read everything Models builds from except the usage ledger and the task chains' costs, for one validated scope.
 
     The grain's latest window is read for tasks, prices, turns and token share, and the
-    window before it only for the change: one comparison rule, resolved once. ``chain_costs``
-    supplies the prices and the recording gaps.
+    window before it only for the change: one comparison rule, resolved once. Shared
+    ``api.measurement_chain_costs.chain_costs`` supplies prices and recording gaps.
     """
     params = window_params(scope_params, grain)
     prepare_outcome_periods(db, params)
@@ -275,7 +275,8 @@ def models_inputs_without_costs(
         "token_rows": query_family(db, "models", _latest_window_params(params)),
         "turn_rows": turn_rows, "error_rows": error_rows,
         "latest": params["grain"].latest.periods, "previous": params["grain"].previous.periods,
-        "offered": IdentityResolver(db).offered_now(catalog_entries), "outcomes": outcome_sizes(db, params),
+        "offered": IdentityResolver(db).offered_now(catalog_entries),
+        "outcomes": outcome_sizes(db, params),
         "latest_window_params": _latest_window_params(params),
     }
 

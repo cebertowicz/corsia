@@ -1,7 +1,7 @@
-"""The accepted tasks' chains and their classified costs over the grain's two windows, read once per page load.
+"""The accepted tasks' classified cost rows and recording gaps over the grain's two windows, read once per page load.
 
-Models reads every task's rows and the tasks with a recording gap; Agents' dollars per hour read the rated tasks'
-rows of the same result (a task's rows are the same whichever tasks were walked with it).
+Models reads every task's rows and recording gaps; Agents' dollars per hour read the cost rows of that same result.
+A task's rows are the same whichever tasks were walked with it.
 """
 
 from __future__ import annotations
@@ -34,9 +34,10 @@ def window_params(scope_params: dict[str, Any], grain: Grain) -> dict[str, Any]:
 
 
 def chain_costs(db, scope_params: dict[str, Any], grain: Grain) -> dict[str, Any]:
-    """Every accepted task's classified usage per identity over the two windows, and the tasks with a recording gap.
+    """Every accepted task's classified usage and recording gaps over the two windows.
 
-    The chains are walked once, for both their prices and their gaps.
+    The one shared read walks each task's chain once. Agents consumes only ``cost_rows``; Models also consumes
+    ``gaps``.
     """
     params = window_params(scope_params, grain)
     chain = materialize_chain(db, params)

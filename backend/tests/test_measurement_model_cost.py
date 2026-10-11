@@ -341,7 +341,7 @@ def test_a_call_that_failed_to_record_before_acceptance_marks_the_served_rate(db
     assert row["recording_gap"] is True and row["recorded_cost_per_task"] is not None
 
 
-def test_one_models_read_walks_the_chains_once_and_leaves_no_table(db, monkeypatch):
+def test_models_shares_its_gap_walk_and_leaves_no_table(db, monkeypatch):
     walks = []
     ctes = measurement_model_cost.chain_ctes
     monkeypatch.setattr(measurement_model_cost, "chain_ctes", lambda **kwargs: walks.append(kwargs) or ctes(**kwargs))
