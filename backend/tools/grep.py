@@ -4,6 +4,7 @@ import asyncio
 import re
 import subprocess
 from collections.abc import Iterator
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from tools.base import Tool
 from tools.filesystem_effects import bound_path_kind, open_bound_text, walk_bound_files
 from tools.filesystem_gate import _resolve_path, _resolve_path_for_action
 from tools.glob_walk import select_grep_files
+from tools.grep_content import SEPARATOR, GrepLine, SourceLines, context_ranges, render
 from tools.grep_ripgrep import search_ripgrep
 from tools.search_scope import (
     THREADS_NOTICE, SearchScope, included_filter, keep_path, pattern_components,
@@ -35,6 +37,14 @@ _MAX_SEARCH_FILE_BYTES = 10 * 1024 * 1024
 def _grep_scope(search_dir: Path, current_thread_id: str | None, all_threads: bool) -> SearchScope:
     """Grep's scope: the shared rules; a ``.env`` file is read only when named."""
     return SearchScope(current_thread_id, all_threads, root_name=search_dir.name)
+
+
+def _add_right_stripped(
+    results: list[GrepLine], safe: list[str | None], lines: list[GrepLine], faithful: list[str | None],
+) -> None:
+    """Add the fallback search's lines and their faithful text, right-stripped as it prints them."""
+    results.extend(replace(line, text=line.text.rstrip()) for line in lines)
+    safe.extend(None if text is None else text.rstrip() for text in faithful)
 
 
 class GrepTool(Tool):
@@ -243,7 +253,9 @@ class GrepTool(Tool):
         except re.error as exc:
             return f"Error: Invalid regex pattern: {exc}"
 
-        results: list[str] = []
+        results: list[GrepLine] = []
+        safe: list[str | None] = []
+        source = SourceLines()
         counts: dict[str, int] = {}
         content_result_count = 0
 
@@ -262,28 +274,24 @@ class GrepTool(Tool):
             if output_mode != "content":
                 return
 
-            ranges: list[tuple[int, int]] = []
-            for index in matching_indexes:
-                start = max(0, index - context)
-                end = min(len(lines), index + context + 1)
-                if ranges and start <= ranges[-1][1]:
-                    ranges[-1] = (ranges[-1][0], max(ranges[-1][1], end))
-                else:
-                    ranges.append((start, end))
-
-            for start, end in ranges:
+            emitted: list[GrepLine] = []
+            for start, end in context_ranges(matching_indexes, context, len(lines)):
                 if content_result_count >= max_results:
                     break
-                if context and results:
-                    results.append("--")
+                if context and (results or emitted):
+                    emitted.append(SEPARATOR)
                 for index in range(start, end):
                     if content_result_count >= max_results:
                         break
                     separator = ":" if regex.search(lines[index]) else "-"
-                    results.append(
-                        f"{rel}{separator}{index + 1}{separator}{lines[index]}"
-                    )
+                    emitted.append(GrepLine(
+                        f"{rel}{separator}{index + 1}{separator}", lines[index], index + 1,
+                    ))
                     content_result_count += 1
+            results.extend(emitted)
+            safe.extend(source.substitute(
+                relative.suffix, content, emitted, universal=True,
+            ))
 
         scope = _grep_scope(search_path, current_thread_id, all_threads)
         kind = bound_path_kind(search_path)
@@ -330,14 +338,7 @@ class GrepTool(Tool):
             )
         if not results:
             return f"No matches for pattern '{pattern}'"
-        output = "\n".join(results)
-        if len(output) > self.OUTPUT_CHAR_CAP:
-            output = (
-                output[: self.OUTPUT_CHAR_CAP]
-                + f"\n\n... (output truncated at {self.OUTPUT_CHAR_CAP:,} chars. "
-                "Narrow your search with glob filters or use 'files' mode.)"
-            )
-        return output
+        return render(results, safe, self.OUTPUT_CHAR_CAP)
 
     def _search_python(
         self,
@@ -367,7 +368,9 @@ class GrepTool(Tool):
             )
         )
 
-        results = []
+        results: list[GrepLine] = []
+        safe: list[str | None] = []
+        source = SourceLines()
         files_matched = set()
 
         for fpath, resolved_path in sorted(files):
@@ -382,15 +385,18 @@ class GrepTool(Tool):
                 continue
 
             lines = content.split("\n")
+            emitted: list[GrepLine] = []
             for i, line in enumerate(lines, 1):
                 if regex.search(line):
                     rel = str(fpath.relative_to(search_dir))
                     files_matched.add(rel)
 
                     if output_mode == "content":
-                        results.append(f"{rel}:{i}: {line.rstrip()}")
-                        if len(results) >= max_results:
+                        emitted.append(GrepLine(f"{rel}:{i}: ", line, i))
+                        if len(results) + len(emitted) >= max_results:
                             break
+            faithful = source.substitute(resolved_path.suffix, content, emitted)
+            _add_right_stripped(results, safe, emitted, faithful)
 
         if output_mode == "files":
             if not files_matched:
@@ -417,13 +423,7 @@ class GrepTool(Tool):
         else:
             if not results:
                 return f"No matches for pattern '{pattern}'"
-            output = "\n".join(results)
-            if len(output) > self.OUTPUT_CHAR_CAP:
-                output = (
-                    output[: self.OUTPUT_CHAR_CAP]
-                    + f"\n\n... (output truncated at {self.OUTPUT_CHAR_CAP:,} chars. Narrow your search with glob filters or use 'files' mode.)"
-                )
-            return output
+            return render(results, safe, self.OUTPUT_CHAR_CAP)
 
     def _iter_python_files(
         self,
