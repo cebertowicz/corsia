@@ -151,10 +151,7 @@ def on_check_suite_completed(
 
 
 def on_pull_request_ready_for_review(
-    repo: str,
-    head_sha: str,
-    pr_number: int,
-    internal_event: str,
+    repo: str, head_sha: str, pr_number: int, internal_event: str,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> None:
     """Re-evaluate the gate when a draft PR becomes ready for review."""
@@ -165,12 +162,7 @@ def on_pull_request_ready_for_review(
     _evaluate_review_gate(repo, head_sha, pr_number, internal_event, loop)
 
 
-def evaluate_overdue(
-    repo: str,
-    head_sha: str,
-    pr_number: int,
-    loop: asyncio.AbstractEventLoop,
-) -> None:
+def evaluate_overdue(repo: str, head_sha: str, pr_number: int, loop: asyncio.AbstractEventLoop) -> None:
     """Re-enter the normal reviewer gate after quiet-watch detects a missed event."""
     _evaluate_review_gate(repo, head_sha, pr_number, "pr_quiet.events_overdue", loop)
 
