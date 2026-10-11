@@ -155,7 +155,7 @@
 {#if pendingCount > 0}
 	{#if sendingGrace}
 		<span class="sending-now">
-			<span class="sending-grace" role="status" title={graceText}>{graceText}</span>
+			<span class="sending-grace" role="status" title={graceText}>Sending to <span class="grace-owner">{ownerName ?? 'the owner'}</span> in {graceMinutes} min</span>
 			<Button size="sm" onclick={sendCurrentDocument} loading={sending}>Send now</Button>
 		</span>
 	{:else}
@@ -171,13 +171,16 @@
 
 <style>
 	.sending-grace {
+		display: inline-flex;
+		gap: 0.25em;
 		min-width: 0;
 		overflow: hidden;
-		text-overflow: ellipsis;
 		white-space: nowrap;
 		font-size: var(--text-footnote);
 		color: var(--text-secondary);
 	}
+	/* Only the owner name gives way; "Sending to" and the countdown stay whole. */
+	.grace-owner { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 	.undelivered {
 		display: inline-flex;
 		flex-wrap: wrap;
