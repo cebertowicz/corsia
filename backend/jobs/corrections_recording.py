@@ -24,6 +24,7 @@ from core.corrections_recording import (
     dedupe_key,
     fact_attributes,
     is_owner_authored_message,
+    owner_message_sql_predicate,
     refusal_classification,
     subject_key,
     validate_classification,
@@ -123,13 +124,14 @@ def _pending_candidates(
 
     db = get_db()
     try:
+        owner_filter, owner_filter_params = owner_message_sql_predicate()
         rows = db.execute(
-            scope_cte() + """
+            scope_cte() + f"""
             SELECT m.rowid,m.id,m.thread_id,t.project_id,m.role,m.content,m.metadata,m.created_at
             FROM messages m
             JOIN scope_threads scoped ON scoped.id=m.thread_id
             JOIN threads t ON t.id=m.thread_id
-            WHERE NOT EXISTS (
+            WHERE {owner_filter} AND NOT EXISTS (
                 SELECT 1 FROM outcome_events e
                 WHERE e.event_name=:correction_event
                   AND e.subject_key=:message_prefix || m.id AND e.retracted_at IS NULL
@@ -140,6 +142,7 @@ def _pending_candidates(
             ORDER BY m.created_at ASC,m.id ASC LIMIT :scan_limit
             """,
             {
+                **owner_filter_params,
                 "user_id": owner_user_id,
                 "scope_project": "all",
                 "scope_agent": None,

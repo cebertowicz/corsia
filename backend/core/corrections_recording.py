@@ -66,6 +66,7 @@ SYSTEM_WRAPPER_PREFIXES = (
     "[AGENT-SEND",
     "[CORSIA",
 )
+OWNER_MESSAGE_METADATA_KEYS = ("sender_kind", "routed_event", "send_idempotency_key")
 FACT_KEYS = (
     "message_id",
     "thread_id",
@@ -152,9 +153,31 @@ def is_owner_authored_message(
     if role != "user" or not isinstance(content, str) or not content.strip():
         return False
     parsed = _metadata(metadata)
-    if any(key in parsed for key in ("sender_kind", "routed_event", "send_idempotency_key")):
+    if any(key in parsed for key in OWNER_MESSAGE_METADATA_KEYS):
         return False
     return not content.startswith(SYSTEM_WRAPPER_PREFIXES)
+
+
+def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
+    """Build the SQL-safe superset filter for ``is_owner_authored_message``.
+
+    The Python predicate remains authoritative after fetching rows. This filter only
+    projects its canonical role, wrapper, and metadata constants so irrelevant rows
+    cannot starve a bounded pending-candidate scan.
+    """
+    params = {"owner_message_role": "user"}
+    clauses = [f"{alias}.role=:owner_message_role", f"{alias}.content<>''"]
+    for index, prefix in enumerate(SYSTEM_WRAPPER_PREFIXES):
+        key = f"owner_wrapper_prefix_{index}"
+        params[key] = f"{prefix}%"
+        clauses.append(f"{alias}.content NOT LIKE :{key}")
+    for index, metadata_key in enumerate(OWNER_MESSAGE_METADATA_KEYS):
+        key = f"owner_metadata_path_{index}"
+        params[key] = f"$.{metadata_key}"
+        clauses.append(
+            f"json_type(CASE WHEN json_valid({alias}.metadata) THEN {alias}.metadata ELSE '{{}}' END, :{key}) IS NULL"
+        )
+    return " AND ".join(clauses), params
 
 
 def classifier_prompt(preceding_agent: str | None, owner_message: str) -> str:

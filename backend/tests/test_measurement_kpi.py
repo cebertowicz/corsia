@@ -251,6 +251,27 @@ async def test_kpi_token_completeness_starts_when_an_upgrade_begins_persisting_c
     assert (weeks["current"]["tokens_recorded"], weeks["previous"]["tokens_recorded"]) == (True, False)
 
 
+def test_tokens_recorded_from_memoizes_the_first_complete_day_per_database():
+    from api.measurement_kpi import _tokens_recorded_from
+
+    class Db:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self, _query):
+            self.calls += 1
+            return self
+
+        def fetchone(self):
+            return {"day": "2026-09-07"}
+
+    db = Db()
+
+    assert _tokens_recorded_from(db) == "2026-09-07"
+    assert _tokens_recorded_from(db) == "2026-09-07"
+    assert db.calls == 1
+
+
 @pytest.mark.asyncio
 async def test_kpi_on_the_periods_grain_compares_the_last_four_completed_weeks_with_the_four_before(isolated_db, monkeypatch):
     measurement = _pin_now(monkeypatch)

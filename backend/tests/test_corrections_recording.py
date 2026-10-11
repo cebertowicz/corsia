@@ -127,6 +127,35 @@ def test_pending_candidates_exclude_another_users_root_and_subtree(isolated_db):
     ]
 
 
+def test_pending_candidates_scan_past_non_owner_rows(isolated_db):
+    from core.corrections_recording import checker_version
+    from jobs import corrections_recording as job
+
+    db = _db()
+    try:
+        _thread(db)
+        for index in range(job.MAX_PENDING_SCAN_MULTIPLIER + 1):
+            role, content = (
+                ("assistant", "Not a correction candidate.")
+                if index % 2 == 0 else ("user", "[EVENT: wake]")
+            )
+            _message(
+                db, f"non-owner-{index}", role, content,
+                at=f"2026-10-01T00:00:{index:02d}Z",
+            )
+        _message(
+            db, "owner-message", "user", "That result is wrong.",
+            at="2026-10-01T00:01:00Z",
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    candidates = job._pending_candidates(checker_version("model-a"), 1, OWNER)
+
+    assert [candidate.message_id for candidate in candidates] == ["owner-message"]
+
+
 @pytest.mark.asyncio
 async def test_global_batch_selects_oldest_candidates_across_owners(isolated_db, monkeypatch):
     from infra.settings import set_setting
