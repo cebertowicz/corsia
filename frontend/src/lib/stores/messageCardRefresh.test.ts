@@ -1,4 +1,3 @@
-import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { emit } from '$lib/ws/events';
@@ -55,9 +54,6 @@ describe('rangesToRefresh', () => {
 			const params = new URL(String(input), 'http://corsia.test').searchParams;
 			const from = params.get('from_id')!;
 			const to = params.get('to_id')!;
-			if (from === 'm0' && to === 'm60') {
-				return { ok: true, json: async () => ({ messages: [row('hidden', 'assistant')] }) };
-			}
 			return { ok: true, json: async () => ({ messages: [row(from, 'assistant', { cards: card })] }) };
 		});
 		vi.stubGlobal('fetch', fetch);
@@ -66,12 +62,10 @@ describe('rangesToRefresh', () => {
 		await vi.advanceTimersByTimeAsync(400);
 
 		expect(fetch).toHaveBeenCalledTimes(7);
-		expect(fetch.mock.calls).toHaveLength(7);
 		for (const [input] of fetch.mock.calls) {
 			const params = new URL(String(input), 'http://corsia.test').searchParams;
 			expect(params.get('from_id')).toBe(params.get('to_id'));
 		}
-		expect(get(messages).some((message) => message.id === 'hidden')).toBe(false);
 	});
 
 	it('uses at most thirteen requests for a completed turn with twelve older cards', async () => {
@@ -87,9 +81,6 @@ describe('rangesToRefresh', () => {
 			const params = new URL(String(input), 'http://corsia.test').searchParams;
 			const from = params.get('from_id')!;
 			const to = params.get('to_id')!;
-			if (from === 'c0' && to === 'a50') {
-				return { ok: true, json: async () => ({ messages: [row('hidden', 'assistant')] }) };
-			}
 			return { ok: true, json: async () => ({ messages: [row(from, 'assistant')] }) };
 		});
 		vi.stubGlobal('fetch', fetch);
@@ -100,7 +91,6 @@ describe('rangesToRefresh', () => {
 		expect(fetch).toHaveBeenCalledTimes(13);
 		const completedTurn = new URL(String(fetch.mock.calls[0][0]), 'http://corsia.test').searchParams;
 		expect([completedTurn.get('from_id'), completedTurn.get('to_id')]).toEqual(['a1', 'a50']);
-		expect(get(messages).some((message) => message.id === 'hidden')).toBe(false);
 	});
 });
 

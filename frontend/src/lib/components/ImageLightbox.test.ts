@@ -239,6 +239,27 @@ describe('ImageLightbox', () => {
 		expect(host.querySelector<HTMLImageElement>('.pad img')?.getAttribute('src')).toBe('/second.png');
 	});
 
+	it('ignores a delayed failure detail after retrying the same source', async () => {
+		let finish: (value: { status: number; body: null }) => void;
+		vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { finish = resolve; })));
+		const failed = render();
+		failed.dispatchEvent(new Event('error'));
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+		button('Try again').click();
+		await settle();
+
+		const retried = host.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperty(retried, 'naturalWidth', { configurable: true, value: NATURAL.width });
+		Object.defineProperty(retried, 'naturalHeight', { configurable: true, value: NATURAL.height });
+		retried.dispatchEvent(new Event('load'));
+		await settle();
+		finish!({ status: 404, body: null });
+		await settle();
+
+		expect(host.querySelector('.load-error')).toBeNull();
+		expect(host.querySelector<HTMLImageElement>('.pad img')).toBe(retried);
+	});
+
 	it('shows why an image did not load, with a way to try again, and the bar stays', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, body: null })));
 		const failed = vi.fn();

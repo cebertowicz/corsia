@@ -85,10 +85,11 @@
 	}
 	async function onImageError() {
 		const failedSrc = src;
+		const failedAttempt = attempt;
 		onFailed?.();
 		failure = FAILED_IMAGE;
 		const reason = await imageFailureReason(failedSrc);
-		if (src === failedSrc) failure = reason;
+		if (src === failedSrc && attempt === failedAttempt) failure = reason;
 	}
 	function retry() {
 		if (onRetry) onRetry();
