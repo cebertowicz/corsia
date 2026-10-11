@@ -15,7 +15,7 @@
 	import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, markFreshnessVerified, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer } from '$lib/docViewerOperations';
-	import { handleDocumentEscape } from '$lib/docViewerKeyboard';
+	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
 	import { canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentsInDocumentOrder, type CanvasScrollTarget } from '$lib/docCanvasComments';
@@ -25,6 +25,7 @@
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
+	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import {
 		docSaveDrafts, draftKey, effectiveDraftTarget, existingDraft, seedDraft,
 		enrichDraftTarget, setDraftText, flushDraft,
@@ -51,6 +52,8 @@
 		onSignal,
 		stale = false,
 		onReload,
+		onOpenImage,
+		covered = false,
 	}: {
 		target: DocViewerTarget | null;
 		onClose?: () => void;
@@ -60,6 +63,10 @@
 		/** A newer revision exists than the one on screen. */
 		stale?: boolean;
 		onReload?: () => void;
+		/** Opens an image of the document larger in the canvas. */
+		onOpenImage?: (request: OpenImageRequest) => void;
+		/** The canvas shows an image viewer over this document; it keeps its state but answers no keys. */
+		covered?: boolean;
 	} = $props();
 
 	let docState = $state<DocState>('loading');
@@ -280,23 +287,10 @@
 	}
 
 	function onKey(event: KeyboardEvent): void {
-		if (event.defaultPrevented) return;
-		if (event.key === 'Escape' && commentUI.state?.kind === 'list' && event.target === commentUI.anchor) {
-			event.preventDefault();
-			commentUI.close();
-			commentUI.restoreFocus();
-			return;
-		}
-		handleDocumentEscape(event, {
-			hasCommentDraft: draftController.draft !== null,
-			clearCommentDraft: draftController.cancel,
-			paneOpen: $paneOpen,
-			isPaneDrawer: isPaneDrawer(),
-			hasPendingSelection: Boolean(draftController.pending),
-			clearPendingSelection: () => draftController.select(null),
-			escapeCloses,
-			flush: flushNow,
-			close: onClose,
+		handleDocumentKey(event, {
+			covered, commentUI, draftController,
+			paneOpen: $paneOpen, isPaneDrawer: isPaneDrawer(),
+			escapeCloses, flush: flushNow, close: onClose,
 		});
 	}
 </script>
@@ -362,6 +356,7 @@
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
 		readOnly={readonly || suggestionBusyId !== null}
 		imageBase={target}
+		{onOpenImage}
 		{saveError}
 		{saveStatus}
 		pendingSel={draftController.pending}

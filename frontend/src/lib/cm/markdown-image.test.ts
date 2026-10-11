@@ -8,17 +8,23 @@ import { cursorCharLeft, cursorCharRight, deleteCharBackward, deleteCharForward 
 import { commentMarks, setCommentRanges } from './comment-marks';
 import { commentRail } from './comment-rail';
 import { markdownLivePreview } from './markdown-live';
-import { FAILED_IMAGE, imageContext, MISSING_IMAGE, NOT_AN_IMAGE, resolveImagePath, UNAVAILABLE_IMAGE, type ImageContext } from './markdown-image';
+import {
+	FAILED_IMAGE, imageContext, imageOpener, MISSING_IMAGE, NOT_AN_IMAGE, resolveImagePath, UNAVAILABLE_IMAGE,
+	type ImageContext, type OpenImageRequest,
+} from './markdown-image';
 
 const DOC_PATH = '/ws/notes/plan.md';
 const CONTEXT: ImageContext = { docPath: DOC_PATH, projectId: 'p1', token: 'tok' };
 const views: EditorView[] = [];
 
-function mount(doc: string, cursor?: number, context: ImageContext | null = CONTEXT): EditorView {
+function mount(doc: string, cursor?: number, context: ImageContext | null = CONTEXT, opener?: (request: OpenImageRequest) => void): EditorView {
 	const state = EditorState.create({
 		doc,
 		selection: cursor != null ? { anchor: cursor } : undefined,
-		extensions: [markdown({ extensions: GFM }), markdownLivePreview, commentMarks, commentRail, imageContext.of(() => context)],
+		extensions: [
+			markdown({ extensions: GFM }), markdownLivePreview, commentMarks, commentRail, imageContext.of(() => context),
+			...(opener ? [imageOpener.of(opener)] : []),
+		],
 	});
 	const view = new EditorView({ state, parent: document.body });
 	if (!forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
@@ -148,6 +154,80 @@ describe('markdown images in the live preview', () => {
 		expect(view.contentDOM.textContent).not.toContain('![Mock screen]');
 		view.dispatch({ selection: { anchor: 0 } });
 		expect(view.dom.querySelector('.cm-md-image-selected')).toBeNull();
+	});
+
+	describe('opening an image larger', () => {
+		const drawn = (view: EditorView) => {
+			const img = view.dom.querySelector<HTMLImageElement>('.cm-md-image img')!;
+			Object.defineProperty(img, 'complete', { value: true });
+			Object.defineProperty(img, 'naturalWidth', { value: 640 });
+			return img;
+		};
+		const click = (target: Element) => {
+			const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+			target.dispatchEvent(down);
+			target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+			return down;
+		};
+		const enter = (view: EditorView) => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+
+		it('opens a drawn image on a click and leaves the caret and selection where they were', () => {
+			const open = vi.fn();
+			const view = mount(DOC, 0, CONTEXT, open);
+			const at = DOC.indexOf(IMAGE);
+			const down = click(drawn(view));
+			expect(down.defaultPrevented).toBe(true);
+			expect(open).toHaveBeenCalledTimes(1);
+			const request: OpenImageRequest = open.mock.calls[0][0];
+			expect(request).toMatchObject({ alt: 'Mock screen', from: at, to: at + IMAGE.length, scrollTop: 0, top: 0 });
+			expect(imagePath(Object.assign(new Image(), { src: request.src }))).toBe('/ws/notes/shots/a.png');
+			expect(view.state.selection.main.empty).toBe(true);
+			expect(view.dom.querySelector('.cm-md-image-selected')).toBeNull();
+		});
+
+		it('does not open an image that has not drawn, and a click selects it as before', () => {
+			const open = vi.fn();
+			const view = mount(DOC, 0, CONTEXT, open);
+			click(view.dom.querySelector('.cm-md-image img')!);
+			expect(open).not.toHaveBeenCalled();
+			expect(view.dom.querySelector('.cm-md-image-selected img')).not.toBeNull();
+		});
+
+		it('does not open a failed image, which keeps its note and can still be selected', async () => {
+			vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, body: null })));
+			const open = vi.fn();
+			const view = mount(DOC, 0, CONTEXT, open);
+			view.dom.querySelector('.cm-md-image img')!.dispatchEvent(new Event('error'));
+			await vi.waitFor(() => expect(view.dom.querySelector('.cm-md-image-note')).not.toBeNull());
+			click(view.dom.querySelector('.cm-md-image-note')!);
+			expect(open).not.toHaveBeenCalled();
+			expect(view.dom.querySelector('.cm-md-image-selected')).not.toBeNull();
+		});
+
+		it('opens the image that is the whole selection on Enter, and leaves Enter alone otherwise', () => {
+			const open = vi.fn();
+			const view = mount(DOC, 0, CONTEXT, open);
+			const at = DOC.indexOf(IMAGE);
+			drawn(view);
+
+			enter(view);
+			expect(open).not.toHaveBeenCalled();
+
+			view.dispatch({ selection: { anchor: at, head: at + IMAGE.length } });
+			enter(view);
+			expect(open).toHaveBeenCalledTimes(1);
+			expect(open.mock.calls[0][0]).toMatchObject({ from: at, to: at + IMAGE.length });
+			expect(view.state.doc.toString()).toBe(DOC);
+		});
+
+		it('does nothing on Enter for a selected image that has not drawn', () => {
+			const open = vi.fn();
+			const view = mount(DOC, 0, CONTEXT, open);
+			const at = DOC.indexOf(IMAGE);
+			view.dispatch({ selection: { anchor: at, head: at + IMAGE.length } });
+			enter(view);
+			expect(open).not.toHaveBeenCalled();
+		});
 	});
 
 	it('keeps the margin marker of a comment anchored on an image, and the comment still opens from it', async () => {
