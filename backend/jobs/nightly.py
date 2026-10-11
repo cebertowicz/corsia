@@ -228,9 +228,9 @@ def _log_manual_corrections_drain(task: asyncio.Task[None]) -> None:
 async def nightly_job_loop() -> None:
     """Background loop: continuously check nightly, idle, and manual triggers.
 
-    A manual corrections drain may last four hours, so it is tracked separately:
-    maintenance triggers continue to fire, and the 02:00 corrections pass yields
-    to that in-flight drain rather than duplicating provider work.
+    A manual corrections drain may last RUN_TIME_BUDGET_SECONDS, so it is tracked
+    separately: maintenance triggers continue to fire, and the 02:00 corrections
+    pass yields to that in-flight drain rather than duplicating provider work.
     """
     manual_corrections_task: asyncio.Task[None] | None = None
     await asyncio.sleep(STARTUP_DELAY)

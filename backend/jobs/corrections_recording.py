@@ -50,12 +50,6 @@ DEFAULT_BATCH_SIZE = 20
 # Four hours bounds a deliberate drain while the scheduler continues to service
 # maintenance triggers; at the 60-second call timeout it permits at least 240 calls.
 RUN_TIME_BUDGET_SECONDS = 4 * 60 * 60
-# A provider error or timeout may belong to one message (a rejected request) or
-# to the provider (an outage or hang); the exception type cannot tell which.
-# Consecutive failed calls across different messages can: three in a row stop
-# the run, so one poison message never blocks the backlog and an outage costs
-# at most three calls (three minutes at the call timeout).
-PROVIDER_FAILURE_STREAK = 3
 # Fortissimo reasons by default (as in the gated run), so the cap must leave room
 # for thinking plus the verdict; the 60s call timeout bounds it (~80 tok/s).
 CLASSIFIER_MAX_OUTPUT_TOKENS = 4096
@@ -133,7 +127,7 @@ def _owner_user_ids() -> list[str]:
 
 
 def request_manual_corrections_recording() -> None:
-    """Durably ask the existing nightly loop to drain for up to four hours."""
+    """Durably ask the existing nightly loop to drain for RUN_TIME_BUDGET_SECONDS."""
     from infra.settings import set_setting
 
     set_setting(MANUAL_REQUEST_SETTING, {"pending": True})
@@ -212,10 +206,8 @@ async def _classify_and_record(
 ) -> str:
     """Classify one candidate and write its fact.
 
-    Returns "recorded", "refused", "failed" (our write failed),
-    "call_failed" (the checker call failed; the message stays pending),
-    "provider_unavailable", or "duplicate" when the fact already existed and
-    nothing was inserted.
+    Returns "recorded", "refused", "failed", "provider_unavailable", or
+    "duplicate" when the fact already existed and nothing was inserted.
     """
     try:
         classification = await invoke(
@@ -251,15 +243,17 @@ async def _classify_and_record(
         logger.warning("corrections recording provider unavailable {}: {}", candidate.message_id, type(exc).__name__)
         return "provider_unavailable"
     except (IsolatedStructuredProviderError, IsolatedStructuredTimeoutError) as exc:
-        # Ambiguous between this message and the provider: the run's failure
-        # streak decides (PROVIDER_FAILURE_STREAK).
+        # These failures belong to the attempted message: leave it pending,
+        # record the failed mapping, and continue to older candidates.
         logger.warning("corrections recording call failed {}: {}", candidate.message_id, exc)
         await run_in_db(_record_failure)
-        return "call_failed"
+        return "failed"
     except Exception:
+        # An unexpected local error is likewise one message failure, never a
+        # provider outage; preserve it in logs and continue the bounded run.
         logger.exception("corrections recording failed {}", candidate.message_id)
         await run_in_db(_record_failure)
-        return "call_failed"
+        return "failed"
     try:
         inserted = await run_in_db(_record_fact, candidate, classification, version)
     except Exception:
@@ -354,7 +348,6 @@ async def run_corrections_recording(
     counts = {"recorded": 0, "refused": 0, "failed": 0, "duplicate": 0}
     before: tuple[str, str] | None = None
     version, started_at = checker_version(model_id), clock()
-    failure_streak = 0
     try:
         while clock() - started_at < time_budget_seconds:
             batch = await _next_pending_batch(version, batch_size, before)
@@ -369,16 +362,7 @@ async def run_corrections_recording(
                     return await _finish_run(
                         counts, "provider_unavailable", status="provider_unavailable",
                     )
-                if outcome != "call_failed":
-                    failure_streak = 0
-                    counts[outcome] += 1
-                    continue
-                counts["failed"] += 1
-                failure_streak += 1
-                if failure_streak >= PROVIDER_FAILURE_STREAK:
-                    return await _finish_run(
-                        counts, "provider_unavailable", status="provider_unavailable",
-                    )
+                counts[outcome] += 1
     except asyncio.CancelledError:
         await _finish_run(counts, "shutdown", status="cancelled")
         raise

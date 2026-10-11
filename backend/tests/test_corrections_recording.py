@@ -627,24 +627,20 @@ async def test_provider_outage_stops_after_one_call_and_leaves_the_backlog_pendi
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("error_name", ["IsolatedStructuredTimeoutError", "IsolatedStructuredError"])
-async def test_a_per_message_failure_is_counted_and_the_run_continues_to_older(
+@pytest.mark.parametrize("error_name", ["IsolatedStructuredTimeoutError", "IsolatedStructuredProviderError"])
+async def test_three_per_message_call_failures_do_not_starve_older_candidates(
     isolated_db, monkeypatch, error_name,
 ):
-    # A timeout or a failure inside one response (the base error class) belongs
-    # to that message: it must not stop the run as if the provider were down,
-    # and the run must not report a clean drain while it stays pending.
     from infra.settings import get_setting, set_setting
     from jobs import corrections_recording as job
     from llm import isolated_structured
 
     error = getattr(isolated_structured, error_name)
-
     db = _db()
     try:
         _thread(db)
-        _message(db, "older", "user", "older correction", at="2026-10-01T00:00:01Z")
-        _message(db, "newer", "user", "newer correction", at="2026-10-01T00:00:02Z")
+        for index in range(5):
+            _message(db, f"m{index}", "user", f"correction {index}", at=f"2026-10-01T00:00:0{index}Z")
         db.commit()
     finally:
         db.close()
@@ -652,29 +648,26 @@ async def test_a_per_message_failure_is_counted_and_the_run_continues_to_older(
     set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
     calls: list[str] = []
 
-    async def timeout_then_record(*args, **kwargs):
+    async def fail_newest_three(*args, **kwargs):
         prompt = kwargs["user_prompt"]
         calls.append(prompt)
-        if "newer correction" in prompt:
-            raise error("Native isolated inference attempted a tool")
+        if any(f"correction {index}" in prompt for index in (2, 3, 4)):
+            raise error("per-message call failure")
         return kwargs["validator"]({"label": "correction", "reason": "It corrects the delivery."})
 
-    result = await job.run_corrections_recording(batch_size=2, invoke=timeout_then_record)
+    result = await job.run_corrections_recording(batch_size=5, invoke=fail_newest_three)
 
-    assert result == {"status": "partial", "processed": 2, "recorded": 1, "refused": 0, "failed": 1}
+    assert result == {"status": "partial", "processed": 5, "recorded": 2, "refused": 0, "failed": 3}
     assert get_setting("corrections_recording_status")["stop_reason"] == "empty"
-    assert ["newer correction" in prompt for prompt in calls] == [True, False]
+    assert [f"correction {index}" in prompt for index, prompt in zip(range(4, -1, -1), calls)] == [True] * 5
     pending = await job._next_pending_batch(job.checker_version("model-a"), 20, None)
-    assert [candidate.message_id for candidate in pending.candidates] == ["newer"]
+    assert [candidate.message_id for candidate in pending.candidates] == ["m4", "m3", "m2"]
 
 
 @pytest.mark.asyncio
-async def test_a_provider_error_on_one_message_does_not_stop_the_run(isolated_db, monkeypatch):
-    # A request rejected for one message's content comes back as a provider
-    # error; it must not end every run before older messages are reached.
-    from infra.settings import set_setting
+async def test_unexpected_invoke_failure_is_per_message_failed_and_the_run_continues(isolated_db, monkeypatch):
+    from infra.settings import get_setting, set_setting
     from jobs import corrections_recording as job
-    from llm.isolated_structured import IsolatedStructuredProviderError
 
     db = _db()
     try:
@@ -686,55 +679,25 @@ async def test_a_provider_error_on_one_message_does_not_stop_the_run(isolated_db
         db.close()
     monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
     set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
+    outcomes: list[str] = []
+    classify_and_record = job._classify_and_record
 
-    async def reject_newer(*args, **kwargs):
+    async def observe_outcome(*args, **kwargs):
+        outcome = await classify_and_record(*args, **kwargs)
+        outcomes.append(outcome)
+        return outcome
+
+    async def fail_newer(*args, **kwargs):
         if "newer correction" in kwargs["user_prompt"]:
-            raise IsolatedStructuredProviderError("provider_error:http_400:invalid_request")
+            raise RuntimeError("local prompt bug")
         return kwargs["validator"]({"label": "correction", "reason": "It corrects the delivery."})
 
-    result = await job.run_corrections_recording(batch_size=2, invoke=reject_newer)
+    monkeypatch.setattr(job, "_classify_and_record", observe_outcome)
+    result = await job.run_corrections_recording(batch_size=2, invoke=fail_newer)
 
     assert result == {"status": "partial", "processed": 2, "recorded": 1, "refused": 0, "failed": 1}
-    pending = await job._next_pending_batch(job.checker_version("model-a"), 20, None)
-    assert [candidate.message_id for candidate in pending.candidates] == ["newer"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("error_name", ["IsolatedStructuredTimeoutError", "IsolatedStructuredProviderError"])
-async def test_consecutive_failed_calls_stop_the_run_as_provider_unavailable(
-    isolated_db, monkeypatch, error_name,
-):
-    # A hung or failing provider fails every message: the streak stops the run
-    # instead of spending the whole time budget on calls that cannot succeed.
-    from infra.settings import get_setting, set_setting
-    from jobs import corrections_recording as job
-    from llm import isolated_structured
-
-    error = getattr(isolated_structured, error_name)
-    db = _db()
-    try:
-        _thread(db)
-        for index in range(job.PROVIDER_FAILURE_STREAK + 2):
-            _message(db, f"m{index}", "user", f"correction {index}", at=f"2026-10-01T00:00:0{index}Z")
-        db.commit()
-    finally:
-        db.close()
-    monkeypatch.setattr(job, "_resolve_target", lambda model: (SimpleNamespace(available=True), None))
-    set_setting("agents", {"defaults": {"corrections_checker_model": "model-a"}})
-    calls = 0
-
-    async def failing(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        raise error("provider_error:http_503")
-
-    result = await job.run_corrections_recording(batch_size=2, invoke=failing)
-
-    streak = job.PROVIDER_FAILURE_STREAK
-    assert calls == streak
-    assert result == {"status": "provider_unavailable", "processed": streak, "recorded": 0, "refused": 0, "failed": streak}
-    assert get_setting("corrections_recording_status")["stop_reason"] == "provider_unavailable"
-    assert _facts() == []
+    assert outcomes == ["failed", "recorded"]
+    assert get_setting("corrections_recording_status")["stop_reason"] == "empty"
 
 
 @pytest.mark.asyncio
