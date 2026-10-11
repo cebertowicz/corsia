@@ -149,12 +149,5 @@ def may_access_artifacts(parent_thread_ids, user_id: str, db=None) -> dict[str |
 
 
 def may_access_artifact(parent_thread_id: str | None, user_id: str, db=None) -> bool:
-    """Authz predicate for an artifact-backed resource (doc / comment / row).
-
-    Allowed when the caller owns the owning thread, OR the owner is a
-    workspace/project sentinel (shared substrate — see ``is_owner_sentinel``).
-    Denied only for a real OTHER user's thread.
-    """
-    if is_owner_sentinel(parent_thread_id):
-        return True
-    return owns_thread(parent_thread_id, user_id, db=db)
+    """Whether the caller may access one artifact-backed resource."""
+    return may_access_artifacts([parent_thread_id], user_id, db=db)[parent_thread_id]

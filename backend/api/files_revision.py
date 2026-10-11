@@ -20,6 +20,7 @@ from infra.db_async import run_in_db, run_off_db
 from core.workspace_context_sources import is_workspace_context_path
 from registry import models as registry_models
 from registry import service as registry_service
+from registry.file_resolution import resolve_file_identity
 from registry.file_types import image_media_type
 from registry.path_access import path_allowed
 from registry.doc_freshness import artifact_freshness
@@ -130,7 +131,7 @@ def _find_candidate(path: str, artifact_id: str | None, user_id: str, bases: lis
         raise HTTPException(400, "Path is outside this scope's roots")
     if not candidate.is_file():
         return None
-    return candidate, registry_service.resolve_file_identity(str(candidate), db=db)
+    return candidate, resolve_file_identity(str(candidate), db=db)
 
 
 def _text_revision(path: Path) -> str:

@@ -184,13 +184,15 @@ def test_strict_registration_rejects_anonymous_foreign_owner_before_path_work(is
     owner = _seed(db)
     db.execute("UPDATE threads SET title='Pending' WHERE id=?", (owner,))
     visited = []
-    original = service.prepare_file_identity
+    from registry import file_resolution
+
+    original = file_resolution.prepare_file_identity
 
     def prepare(path, *, db=None):
         visited.append(path)
         return original(path, db=db)
 
-    monkeypatch.setattr(service, "prepare_file_identity", prepare)
+    monkeypatch.setattr(file_resolution, "prepare_file_identity", prepare)
     try:
         with pytest.raises(TransactionOwnershipError):
             service.register_write_strict(owner, "note.md")

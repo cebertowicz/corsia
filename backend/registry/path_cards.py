@@ -20,8 +20,8 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from urllib.parse import unquote
 
-from registry.chat_cards import reference_card, reference_cards_by_artifact
-from registry.path_access import lookup_file, lookup_files
+from registry.chat_cards import reference_cards_by_artifact
+from registry.path_access import lookup_files
 
 MAX_CARDS = 8
 MAX_CANDIDATES = 40
@@ -130,31 +130,3 @@ def reference_cards_by_message(
             cards.append(card)
         result[message_id] = (cards[:MAX_CARDS], max(0, len(cards) - MAX_CARDS))
     return result
-
-
-def reference_cards_for_text(
-    db, text: str, bases: Sequence[Path], user_id: str, *, covered: Mapping[str, Collection[str]] | None = None,
-) -> tuple[list[dict], int]:
-    """Cards for the registered artifacts ``text`` names, and how many more past the cap.
-
-    ``covered`` maps an artifact id to the holds whose ask card covers it: the card is
-    kept and marked ``covered_by_ask``, so the client shows it only when none of those
-    ask cards is on screen. The server never drops the reviewed document.
-    """
-    roots = [str(base) for base in bases]
-    cards: list[dict] = []
-    seen: set[str] = set()
-    for target in targets(text):
-        path = workspace_path(target, roots)
-        if path is None:
-            continue
-        found = lookup_file(path, list(bases), db=db)
-        if found.artifact is None or str(found.artifact["id"]) in seen:
-            continue
-        card = reference_card(db, found.artifact, user_id)
-        if card is not None:
-            seen.add(card["artifact_id"])
-            if covered and covered.get(card["artifact_id"]):
-                card["covered_by_ask"] = sorted(covered[card["artifact_id"]])
-            cards.append(card)
-    return cards[:MAX_CARDS], max(0, len(cards) - MAX_CARDS)

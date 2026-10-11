@@ -11,7 +11,7 @@ from registry.identity_bridge import (
     OWNER_REGISTRATION_STATES,
     PARENT_CHAIN_REGISTRATION_STATE,
     ParentChainOwnershipError,
-    _latest_released_owner_thread_id,
+    latest_released_owner_thread_ids,
     _upsert_registration,
 )
 from registry.registration_rebind import settled_row_rebind
@@ -242,7 +242,7 @@ def latest_released_owner_thread_id(artifact_id: str, *, db=None) -> str | None:
     """Return the released owner only when release is the latest disposition."""
     conn = db or get_db()
     try:
-        return _latest_released_owner_thread_id(conn, artifact_id)
+        return latest_released_owner_thread_ids(conn, [artifact_id]).get(artifact_id)
     finally:
         if not db:
             conn.close()

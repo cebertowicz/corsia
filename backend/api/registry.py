@@ -32,6 +32,7 @@ from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 from infra.queries import get_project, get_thread_for_user
 from registry import models, pinning, service
+from registry.file_resolution import normalize_file_path, resolve_file_identity
 from registry.removal_events import (
     broadcast_artifact_removal_event,
     emit_artifact_removal_event,
@@ -156,7 +157,7 @@ async def register_artifact(token: str, body: RegisterBody):
         # A local file path (URLs — PR links, upload refs — pass through
         # untouched): same normalization as the observer path, in run_in_db
         # (resolve + the root policy walk the filesystem).
-        normalized = await run_in_db(lambda: service.normalize_file_path(path))
+        normalized = await run_in_db(lambda: normalize_file_path(path))
         if normalized is None:
             raise HTTPException(
                 400, f"path is outside the registrable roots: {path}")
@@ -218,7 +219,7 @@ async def resolve_artifact(
             raise HTTPException(400, "provide path or an exact identity, not both")
         if not path.strip():
             raise HTTPException(400, "path is required")
-        row = await run_in_db(lambda: service.resolve_file_identity(path))
+        row = await run_in_db(lambda: resolve_file_identity(path))
     else:
         if any(value is None for value in identity_fields):
             raise HTTPException(

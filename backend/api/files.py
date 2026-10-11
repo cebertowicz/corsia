@@ -23,6 +23,7 @@ from infra.auth import authenticate, owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db
 from registry import service as registry_service
+from registry.file_resolution import classify
 from registry.path_access import path_allowed
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -175,7 +176,7 @@ async def register(token: str, body: RegisterBody):
                 "artifact": row,
                 "_notification": row or {
                     "integration": "workspace",
-                    "type": registry_service.classify(p),
+                    "type": classify(p),
                     "external_id": str(p),
                 },
             }

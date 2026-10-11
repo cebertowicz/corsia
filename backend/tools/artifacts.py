@@ -10,6 +10,7 @@ from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from registry import models, service, view
+from registry.file_resolution import resolve_file_identity
 from registry.registration_writer import origin_from_tool_context
 from registry.removal_events import broadcast_artifact_removal_event
 from tools.artifact_register_ops import register_for_tool
@@ -30,7 +31,7 @@ def _resolve_by_args(kwargs: dict[str, Any], workspace: Path, db) -> dict | None
         return models.get_artifact(artifact_id, db=db)
     path = kwargs.get("path")
     if path:
-        return service.resolve_file_identity(tool_path(path, workspace), db=db)
+        return resolve_file_identity(tool_path(path, workspace), db=db)
     integration = kwargs.get("integration")
     type_ = kwargs.get("type")
     external_id = kwargs.get("external_id")

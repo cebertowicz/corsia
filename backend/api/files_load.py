@@ -11,6 +11,7 @@ from infra import config
 from infra.auth import owns_thread
 from infra.database import get_db
 from registry import service as registry_service
+from registry.file_resolution import classify, resolve_file_identity
 from registry.file_types import image_media_type
 from registry.path_access import path_allowed
 from registry.doc_freshness import artifact_freshness
@@ -90,11 +91,11 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     try:
         if live_open:
             _live_open_setup(p, project_id, thread_id, db)
-        artifact_type = registry_service.classify(p)
+        artifact_type = classify(p)
         if thread_id:
             art = registry_service.register_write_strict(thread_id, str(p), db=db)
         else:
-            art = registry_service.resolve_file_identity(str(p), db=db)
+            art = resolve_file_identity(str(p), db=db)
         freshness = artifact_freshness(art, p, db=db)
     finally:
         db.close()

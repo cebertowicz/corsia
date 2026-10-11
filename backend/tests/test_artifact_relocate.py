@@ -561,7 +561,7 @@ def row_external_id(db, artifact_id: str) -> str:
 class TestRelocateOnlyHandlesWorkspaceIdentities:
     """Every step of relocation is workspace-shaped.
 
-    ``service.classify`` only returns workspace document/code/skill and
+    The workspace classifier only returns document/code/skill and
     ``external_identity_for_path`` mints a ``workspace://`` key, so running
     them against another integration silently rewrites a good identity into an
     unregistered ``(integration, type)`` pair the pane can only render as a

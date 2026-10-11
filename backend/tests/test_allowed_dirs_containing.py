@@ -64,7 +64,7 @@ def test_file_batch_resolution_uses_each_path_containing_scope(monkeypatch, tmp_
     ]
     calls: list[Path] = []
 
-    def allowed_dirs(*, db=None, containing=None):
+    def allowed_dirs(*, db=None, containing=None, policies=None):
         calls.append(containing)
         return []
 

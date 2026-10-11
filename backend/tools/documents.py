@@ -26,6 +26,7 @@ from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from registry import models as registry_models
 from registry import service as registry_service
+from registry.file_resolution import normalize_file_path, resolve_file_identity
 from tools.artifact_tool_helpers import default_workspace, tool_path
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
@@ -52,11 +53,11 @@ def _resolve_doc_target(
             raise PermissionError("Artifact not found")
         return art["id"], art["path"], None
 
-    normalized = registry_service.normalize_file_path(doc_path, db=db)
+    normalized = normalize_file_path(doc_path, db=db)
     if normalized is None:
         raise ValueError(f"doc_path is outside the registrable roots: {doc_path}")
     canonical, _zone, _tmp = normalized
-    art = registry_service.resolve_file_identity(canonical, db=db)
+    art = resolve_file_identity(canonical, db=db)
     if art is not None:
         if not may_access_artifact(art["parent_thread_id"], user_id, db=db):
             raise PermissionError("Artifact not found")

@@ -12,23 +12,13 @@ from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_writer
 from registry.file_identity import FileIdentity, PreparedFileWrite
-from registry.file_resolution import (
-    classify,
-    find_file_identity,
-    normalize_file_path,
-    prepare_file_identity,
-    resolve_file_identities,
-    resolve_file_identity,
-)
+from registry.file_resolution import find_file_identity
 from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
 from registry.origin_telemetry import emit_committed_origin
 
-
-
-# File identity preparation is owned by registry.file_resolution.
 
 def register_write(
     thread_id: str | None,
@@ -60,8 +50,6 @@ def register_write(
         logger.warning(f"registry register_write failed for {abs_path}: {e}")
         return None
 
-
-# Canonical file identity utilities are imported from registry.file_resolution.
 
 def retire_missing_temporary_under(
     root: Path,

@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Any
 
-from infra.auth import may_access_artifact, may_access_artifacts
+from infra.auth import may_access_artifacts
 from registry import models as registry_models
 from registry.presentation import CAPABILITY_LEAF_PACKAGE, resolve_descriptor
 
@@ -154,10 +154,3 @@ def reference_cards_by_artifact(
         for artifact_id, artifact in artifacts.items()
         if access.get(artifact.get("parent_thread_id"), False)
     }
-
-
-def reference_card(db, artifact: Mapping[str, Any], user_id: str) -> dict[str, Any] | None:
-    """A card for a registered artifact a message names, only when this user may open it."""
-    if not may_access_artifact(artifact.get("parent_thread_id"), user_id, db=db):
-        return None
-    return card_for(artifact, str(artifact["id"]), kind="artifact")

@@ -14,6 +14,7 @@ from infra.github_pr_identity import (
 )
 from infra.queries import get_thread_for_user
 from registry import models, service
+from registry.file_resolution import classify, normalize_file_path
 from registry.file_identity import external_identity_for_path
 from registry.registration_writer import RegistrationOrigin
 from tools.artifact_tool_helpers import tool_path
@@ -24,13 +25,13 @@ def _identity_from_path(
     *,
     db,
 ) -> tuple[str, str, str, str, bool, dict[str, Any]]:
-    normalized = service.normalize_file_path(path, db=db)
+    normalized = normalize_file_path(path, db=db)
     if normalized is None:
         raise ValueError(f"path is outside the registrable roots: {path}")
     canonical, zone, ephemeral_default = normalized
     return (
         "workspace",
-        service.classify(Path(canonical)),
+        classify(Path(canonical)),
         external_identity_for_path(canonical, zone, db=db),
         canonical,
         ephemeral_default,

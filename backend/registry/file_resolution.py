@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from infra.database import get_db
+from infra.project_repo_policy import RepoPolicyQueryError, list_registered_repo_policies
 from registry import models
 from registry.file_identity import FileIdentity, external_identity_for_path
 from registry.file_types import extension_type
@@ -112,11 +113,18 @@ def resolve_file_identities(abs_paths, *, db=None) -> dict[str, dict[str, Any]]:
     if not paths:
         return {}
     roots_by_directory: dict[Path, list[Path]] = {}
+    try:
+        policies = list_registered_repo_policies(db=db)
+    except RepoPolicyQueryError:
+        policies = None
 
-    def roots_for(path: str) -> list[Path]:
-        directory = Path(path).parent
+    def roots_for(path: str | FileIdentity) -> list[Path]:
+        directory = Path(path.canonical if isinstance(path, FileIdentity) else path).parent
         if directory not in roots_by_directory:
-            roots_by_directory[directory] = get_allowed_dirs_rw(db=db, containing=directory)
+            kwargs = {"db": db, "containing": directory}
+            if policies is not None:
+                kwargs["policies"] = policies
+            roots_by_directory[directory] = get_allowed_dirs_rw(**kwargs)
         return roots_by_directory[directory]
 
     identities = {
@@ -143,19 +151,10 @@ def resolve_file_identities(abs_paths, *, db=None) -> dict[str, dict[str, Any]]:
 
 
 def resolve_file_identity(abs_path: str | FileIdentity, *, db=None) -> dict[str, Any] | None:
-    """Resolve an active file owner from a physical path."""
-    identity = prepare_file_identity(abs_path, db=db)
-    if identity is None:
-        return None
+    """Resolve one active file owner through the canonical batch resolver."""
     connection = db or get_db()
     try:
-        for candidate in dict.fromkeys((identity.external_id, identity.canonical)):
-            artifact = models.resolve(
-                "workspace", identity.artifact_type, candidate, db=connection,
-            )
-            if artifact is not None:
-                return artifact
-        return None
+        return resolve_file_identities([abs_path], db=connection).get(abs_path)
     finally:
         if db is None:
             connection.close()

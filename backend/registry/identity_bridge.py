@@ -50,19 +50,10 @@ def _registration_select() -> str:
 def resolve_normalized_owner(
     db, integration: str, type: str, external_id: str
 ) -> dict | None:
-    placeholders = ",".join("?" for _ in OWNER_REGISTRATION_STATES)
-    row = db.execute(
-        _registration_select()
-        + f""" WHERE i.integration=? AND i.type=? AND i.external_id=?
-                 AND i.state='active'
-                 AND r.relationship_state IN ({placeholders})
-              ORDER BY CASE r.relationship_state
-                       WHEN 'owner-pinned' THEN 0 ELSE 1 END,
-                       r.updated_at DESC, r.id ASC
-              LIMIT 1""",
-        (integration, type, external_id, *OWNER_REGISTRATION_STATES),
-    ).fetchone()
-    return public_row_from_normalized(row) if row else None
+    """Resolve one active owner through the canonical batch query."""
+    return resolve_normalized_owners(db, integration, [(type, external_id)]).get(
+        (type, external_id),
+    )
 
 
 def normalized_row_by_id(
@@ -120,23 +111,7 @@ def normalized_rows_by_ids(db, artifact_ids) -> dict[str, dict]:
     unresolved = [artifact_id for artifact_id in ids if artifact_id not in found]
     if not unresolved:
         return found
-    marks = ",".join("?" for _ in unresolved)
-    latest = db.execute(
-        f"""WITH ranked AS (
-                SELECT artifact_id, event_type, old_owner_thread_id,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY artifact_id ORDER BY created_at DESC, rowid DESC
-                       ) AS position
-                  FROM artifact_registration_events
-                 WHERE artifact_id IN ({marks})
-                   AND event_type IN ('ownership_released', 'ownership_rehomed')
-            )
-            SELECT artifact_id, old_owner_thread_id
-              FROM ranked
-             WHERE position=1 AND event_type='ownership_released'""",
-        unresolved,
-    ).fetchall()
-    released = [(row["artifact_id"], row["old_owner_thread_id"]) for row in latest]
+    released = list(latest_released_owner_thread_ids(db, unresolved).items())
     if not released:
         return found
     values = ",".join("(?, ?)" for _ in released)
@@ -197,18 +172,28 @@ def resolve_normalized_owners(
     return found
 
 
-def _latest_released_owner_thread_id(db, artifact_id: str) -> str | None:
-    latest = db.execute(
-        """SELECT event_type, old_owner_thread_id
-           FROM artifact_registration_events
-           WHERE artifact_id=?
-             AND event_type IN ('ownership_released', 'ownership_rehomed')
-           ORDER BY created_at DESC, rowid DESC LIMIT 1""",
-        (artifact_id,),
-    ).fetchone()
-    if latest is None or latest["event_type"] != "ownership_released":
-        return None
-    return latest["old_owner_thread_id"]
+def latest_released_owner_thread_ids(db, artifact_ids) -> dict[str, str]:
+    """Latest released owners, excluding identities later rehomed."""
+    ids = list(dict.fromkeys(artifact_ids))
+    if not ids:
+        return {}
+    marks = ",".join("?" for _ in ids)
+    rows = db.execute(
+        f"""WITH ranked AS (
+                SELECT artifact_id, event_type, old_owner_thread_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY artifact_id ORDER BY created_at DESC, rowid DESC
+                       ) AS position
+                  FROM artifact_registration_events
+                 WHERE artifact_id IN ({marks})
+                   AND event_type IN ('ownership_released', 'ownership_rehomed')
+            )
+            SELECT artifact_id, old_owner_thread_id
+              FROM ranked
+             WHERE position=1 AND event_type='ownership_released'""",
+        ids,
+    ).fetchall()
+    return {row["artifact_id"]: row["old_owner_thread_id"] for row in rows}
 
 
 def _joined_registration(

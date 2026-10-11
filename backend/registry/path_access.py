@@ -12,7 +12,7 @@ from typing import Any, NamedTuple
 
 from core.workspace_context_sources import is_workspace_context_path
 from infra import config
-from registry.file_resolution import resolve_file_identities, resolve_file_identity
+from registry.file_resolution import resolve_file_identities
 
 
 class FileLookup(NamedTuple):
@@ -58,15 +58,5 @@ def lookup_files(raw_paths, bases: list[Path], *, db=None) -> dict[str, FileLook
 
 
 def lookup_file(raw_path: str, bases: list[Path], *, db=None) -> FileLookup:
-    """Resolve a path to its file and registered identity within the scope."""
-    try:
-        candidate = Path(raw_path).expanduser().resolve()
-    except OSError:
-        return FileLookup(None, False, False, None)
-    if not path_allowed(candidate, bases, db=db):
-        return FileLookup(candidate, False, False, None)
-    if not candidate.is_file():
-        return FileLookup(candidate, True, False, None)
-    return FileLookup(
-        candidate, True, True, resolve_file_identity(str(candidate), db=db),
-    )
+    """Resolve one path through the canonical batch lookup."""
+    return lookup_files([raw_path], bases, db=db)[raw_path]

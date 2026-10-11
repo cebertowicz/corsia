@@ -25,7 +25,7 @@ from plans import service
 from plans.boundary import PlanActor, mutate
 from registry import service as registry_service
 from registry.chat_cards import ask_cards
-from registry.path_cards import MAX_CARDS, reference_cards_for_text, targets, workspace_path
+from registry.path_cards import MAX_CARDS, reference_cards_by_message, targets, workspace_path
 from tests.plan_ask_helpers import document_ask
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -194,10 +194,10 @@ def test_page_card_queries_are_constant_for_asks_and_references(db, ws, monkeypa
     def add_message(seq: int) -> None:
         turn = f"turn-{seq}"
         plan_id, node_id = _node(db)
-        _registered(db, ws, f"reference-{seq}.md")
+        _registered(db, ws, f"references-{seq}/reference-{seq}.md")
         _message(
             db, seq, turn=turn, at=f"2026-10-01T10:00:0{seq}+00:00",
-            text=f"See [reference](reference-{seq}.md).",
+            text=f"See [reference](references-{seq}/reference-{seq}.md).",
         )
         holds.append(_ask(db, plan_id, node_id, document_ask(db, "owner"), turn=turn, calls={}))
 
@@ -489,6 +489,7 @@ def ws() -> Iterator[Path]:
 
 def _registered(db, root: Path, name: str, thread="owner") -> str:
     path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("# doc\n")
     return str(registry_service.register_write_strict(thread, str(path), title=name, db=db)["id"])
 
@@ -514,7 +515,9 @@ def test_a_message_gets_a_card_per_registered_file_it_names_and_none_for_others(
     strangers = _registered(db, ws, "theirs.md", thread="stranger")
     text = f"[plan](plan.md) [no](unregistered.md) [theirs](theirs.md) [gone](missing.md) {ws}/plan.md"
 
-    cards, more = reference_cards_for_text(db, text, [ws.resolve()], "user")
+    cards, more = reference_cards_by_message(
+        db, {"message": text}, [ws.resolve()], "user",
+    )["message"]
 
     assert [(c["kind"], c["artifact_id"], c["title"]) for c in cards] == [("artifact", kept, "plan.md")]
     assert more == 0 and strangers not in {c["artifact_id"] for c in cards}
@@ -525,7 +528,9 @@ def test_a_message_past_the_cap_shows_eight_cards_and_the_count_of_the_rest(db, 
     for name in names:
         _registered(db, ws, name)
 
-    cards, more = reference_cards_for_text(db, " ".join(f"[x]({n})" for n in names), [ws.resolve()], "user")
+    cards, more = reference_cards_by_message(
+        db, {"message": " ".join(f"[x]({n})" for n in names)}, [ws.resolve()], "user",
+    )["message"]
 
     assert (len(cards), more) == (MAX_CARDS, 3)
 
@@ -597,7 +602,9 @@ def test_a_reference_card_carries_the_artifact_type_the_canvas_uses_for_images(d
     png = str(registry_service.register_write_strict("owner", str(ws / "shot.png"), title="Shot", db=db)["id"])
     doc = _registered(db, ws, "plan.md")
 
-    cards, _ = reference_cards_for_text(db, "[a](shot.png) [b](plan.md)", [ws.resolve()], "user")
+    cards, _ = reference_cards_by_message(
+        db, {"message": "[a](shot.png) [b](plan.md)"}, [ws.resolve()], "user",
+    )["message"]
 
     by_id = {c["artifact_id"]: c for c in cards}
     assert (by_id[png]["type"], by_id[png]["icon"], by_id[png]["opens"]) == ("image", "image", True)

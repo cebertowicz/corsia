@@ -27,6 +27,7 @@ from infra.db_async import run_in_db, run_off_db
 from infra.guidance_git import GuidanceTarget, guidance_target, save_guidance
 from infra.guidance_messages import saver_author
 from registry import service as registry_service
+from registry.file_resolution import classify, resolve_file_identity
 from registry.durable_writes import write_text
 from registry.shared_write_errors import DurableWritePolicyError
 from registry.shared_document_events import report_plain_write
@@ -259,7 +260,7 @@ def _write_document(
     new_sha256 = hashlib.sha256(body.text.encode("utf-8")).hexdigest()
     db = get_db()
     try:
-        artifact_type = registry_service.classify(resolved)
+        artifact_type = classify(resolved)
         if body.thread_id:
             # The thread registers the write; the edit is the user's unless an agent made it.
             artifact = registry_service.register_write_strict(
@@ -267,7 +268,7 @@ def _write_document(
                 actor_thread_id=UI_THREAD if direct_user else None, db=db,
             )
         else:
-            artifact = registry_service.resolve_file_identity(str(resolved), db=db)
+            artifact = resolve_file_identity(str(resolved), db=db)
             if artifact is not None:
                 from registry.review_edit_journal import journal_reviewed_edit
 

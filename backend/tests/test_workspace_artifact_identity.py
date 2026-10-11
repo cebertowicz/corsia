@@ -37,7 +37,7 @@ def identity_scope(isolated_db, tmp_path, monkeypatch):
 
 
 def test_workspace_write_uses_logical_identity_and_physical_path(identity_scope):
-    from registry import service
+    from registry import file_resolution, service
 
     workspace, _repository, thread_id, db = identity_scope
     path = workspace / "shared" / "planning" / "roadmap.md"
@@ -53,7 +53,7 @@ def test_workspace_write_uses_logical_identity_and_physical_path(identity_scope)
         "workspace://workspace-stable-id/shared/planning/roadmap.md"
     )
     assert artifact["path"] == str(path.resolve())
-    assert service.resolve_file_identity(str(path), db=db)["id"] == artifact["id"]
+    assert file_resolution.resolve_file_identity(str(path), db=db)["id"] == artifact["id"]
 
 
 def test_repository_write_keeps_absolute_identity(identity_scope):

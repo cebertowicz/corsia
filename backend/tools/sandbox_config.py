@@ -326,18 +326,23 @@ def _allowed_dirs_rw_containing(
     return roots
 
 
-def get_allowed_dirs_rw(*, db=None, containing: Path | None = None) -> list[Path]:
+def get_allowed_dirs_rw(
+    *, db=None, containing: Path | None = None, policies: list[RepoPolicy] | None = None,
+) -> list[Path]:
     """RW dirs at this moment — recomputed each call so new projects pick up.
 
     ``containing`` narrows the answer to the roots holding that path: only its
     own repositories are verified and only its own worktree is checked.
     """
     kwargs = {} if db is None else {"db": db}
+    if policies is None:
+        policies = _list_authoritative_repo_policies(
+            containing=containing.expanduser().resolve(strict=False) if containing else None,
+            **kwargs,
+        )
     if containing is None:
-        return _allowed_dirs_rw(_list_authoritative_repo_policies(**kwargs))
-    target = containing.expanduser().resolve(strict=False)
-    policies = _list_authoritative_repo_policies(containing=target, **kwargs)
-    return _allowed_dirs_rw_containing(policies, target)
+        return _allowed_dirs_rw(policies)
+    return _allowed_dirs_rw_containing(policies, containing.expanduser().resolve(strict=False))
 
 
 def get_allowed_dirs_ro(*, policies: list[RepoPolicy] | None = None) -> list[Path]:

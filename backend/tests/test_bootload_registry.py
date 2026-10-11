@@ -101,9 +101,9 @@ def test_existing_thread_owned_row_keeps_owner(db, tmp_path):
     )
     bootload.sync_bootload_documents("p1", ws, ["PROJECT.md"], db=db)
 
-    from registry import service
+    from registry import file_resolution
 
-    row = service.resolve_file_identity(ext, db=db)
+    row = file_resolution.resolve_file_identity(ext, db=db)
     assert row["id"] == legacy["id"]
     assert row["external_id"].startswith("workspace://bootload-workspace/")
     assert row["parent_thread_id"] == "session-abc", "registration must not re-home"

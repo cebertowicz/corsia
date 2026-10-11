@@ -232,6 +232,7 @@ class ReadFileTool(Tool):
             from infra import config
             from infra.database import get_db
             from registry import service
+            from registry.file_resolution import resolve_file_identity
             from registry.doc_freshness import (
                 artifact_freshness, format_freshness, verification_hint,
             )
@@ -243,7 +244,7 @@ class ReadFileTool(Tool):
                     resolved, workspace=config.WORKSPACE, db=db
                 ):
                     return None
-                artifact = service.resolve_file_identity(str(resolved), db=db)
+                artifact = resolve_file_identity(str(resolved), db=db)
                 projection = artifact_freshness(artifact, resolved, db=db)
                 if projection is None:
                     return None
