@@ -255,10 +255,10 @@
       "sha256": "d78135b596e0c9c59849f67aa4aae3f50dc2836735cc948bb05eed65515758ec"
     },
     {
-      "bytes": 4458,
+      "bytes": 4450,
       "kind": "skill",
       "path": "skills/context-stewardship/SKILL.md",
-      "sha256": "85fd0ae0ac3fcf0913efb3eb794f847ab88a14ada4cabd2bc0b2ebf341e20281"
+      "sha256": "cd4ebb24a0a98445ad5a85de24f9be6413cb1a413cc7663afb5f474820e949bc"
     },
     {
       "bytes": 4113,
@@ -279,10 +279,10 @@
       "sha256": "2909468bcf8b92791a37a5199e3c063f44e95cd03c389a9518c883528798a554"
     },
     {
-      "bytes": 4429,
+      "bytes": 4479,
       "kind": "skill",
       "path": "skills/experiment-design/SKILL.md",
-      "sha256": "f48052740369c4ef67418747357dc84148a0fb801bfdc5d54d14848e1defea22"
+      "sha256": "2255f4f64db1d24e7a343210b2920ebe39124882be6a12a79d177bbea51c12e9"
     },
     {
       "bytes": 3647,
@@ -321,10 +321,10 @@
       "sha256": "f96a968ba81f38933a4803514a3dc1b0006f617e4e2430b5cc97e506f6710eb5"
     },
     {
-      "bytes": 8371,
+      "bytes": 8333,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "34baa8e1e8da1f8076ba955e963212a58d26f10adfc2f43f2d5f16991174224e"
+      "sha256": "ebd2800d29d03a4b7a128627264e808c965168cbc8ebab428c13c5b7d52552f9"
     }
   ],
   "version": "v1"

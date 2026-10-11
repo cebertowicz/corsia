@@ -17,7 +17,7 @@ Before anything runs, write the decision, the change being tested, its baseline,
 | Wrong conclusion would be | Bar |
 |---|---|
 | Cheap to notice and undo (wording, prompt, rubric, config, a reversible default) | Direction check: the change is clearly better on a small sample. No perfect score, no significance test |
-| Costly to undo, or it changes what many people or agents do | Consistent effect across a larger varied sample, plus a check of the main quality floor |
+| Costly to undo, or it changes what many people or agents do | Consistent effect across a larger varied sample, plus a check of the main quality floor; someone other than the author grades the results |
 | A published or general claim (superiority, savings, benchmark results, a persistent owner's readiness) | Controlled comparison per section 4, with uncertainty reported |
 
 Reuse what already exists as the baseline (current outputs, historical labels, prior runs) instead of re-running it, when it was produced under the same conditions as the new arm apart from the change; otherwise re-run it or narrow the claim.

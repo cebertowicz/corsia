@@ -36,7 +36,7 @@ Check the result against the aligned acceptance evidence on the real artifact or
 
 ### Persistent-owner readiness
 
-Before claiming domain expertise is ready, compare representative outcomes with a fresh agent carrying only general System knowledge. Require cheaper, faster and/or better results; include knowledge upkeep/retrieval, planning, execution, review, rework and user attention. Test the savings hypothesis that comprehensive expert plans let weaker workers preserve quality at lower total cost. A readiness claim is a savings claim: run the comparison with skill `experiment-design` under its controls for published or general claims, and count task difficulty among the factors held fixed. Instruction compliance alone proves no outcome benefit. Sample behavior and outcomes first; consider mechanical formats or enforcement only if instructions fail.
+Before claiming domain expertise is ready, compare representative outcomes with a fresh agent carrying only general System knowledge. Require cheaper, faster and/or better results; include knowledge upkeep/retrieval, planning, execution, review, rework and user attention. Test the savings hypothesis that comprehensive expert plans let weaker workers preserve quality at lower total cost. Run the comparison with skill `experiment-design` under its controls for published or general claims, and count task difficulty among the factors held fixed. Instruction compliance alone proves no outcome benefit. Sample behavior and outcomes first; consider mechanical formats or enforcement only if instructions fail.
 
 ## No established workflow
 
