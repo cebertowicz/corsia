@@ -59,6 +59,7 @@
 
 <style>
 	.comment-jump { display: block; width: 100%; min-height: 24px; text-align: left; border: 0; background: none; color: var(--accent); font: inherit; font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+	@media (pointer: coarse) { .comment-jump { min-height: 44px; } }
 	.comment-jump:disabled { color: var(--text-tertiary); cursor: default; }
 	.comment-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
 

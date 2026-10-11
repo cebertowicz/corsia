@@ -224,9 +224,10 @@
 	.comment-filters { display: flex; gap: 2px; flex: none; padding: 2px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
 	.comment-filters button { position: relative; flex: 1; height: 22px; border: 0; border-radius: var(--radius-2xs); color: var(--text-secondary); background: none; font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; transition: background var(--dur-tight), color var(--dur-tight); }
 	.comment-filters button:hover { color: var(--text-primary); }
-	.comment-filters button[aria-pressed="true"] { color: var(--text-primary); background: var(--glass-thick); box-shadow: var(--glass-rim), 0 1px 2px rgba(0, 0, 0, 0.12); }
+	.comment-filters button[aria-pressed="true"] { color: var(--text-primary); font-weight: var(--fw-semibold); background: var(--glass-thick); box-shadow: var(--glass-rim), 0 1px 2px rgba(0, 0, 0, 0.12); }
+	:global([data-theme="dark"]) .comment-filters button[aria-pressed="true"] { background: color-mix(in srgb, var(--text-primary) 16%, transparent); }
 	.comment-filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	@media (pointer: coarse) { .comment-filters button::after { content: ''; position: absolute; inset: -6px 0; } }
+	@media (pointer: coarse) { .drawer-heading :global(button), .comment-filters button { min-height: 44px; } }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
