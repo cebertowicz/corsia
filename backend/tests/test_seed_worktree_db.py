@@ -589,7 +589,7 @@ def test_seed_worktree_db_measurement_fixture_feeds_the_series_queries(tmp_path,
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     params = {"user_id": _SEED_OWNER, "scope_project": "all", "scope_agent": None,
-              "grain": _seed_grain(), "max_active_gap_seconds": 600}
+              "grain": _seed_grain()}
     _prepare_outcome_periods(conn, params)
     outcomes = {r["period"]: r for r in _query_family(conn, "outcomes", params)}
     decisions = {r["period"]: r for r in _query_family(conn, "decisions", params)}
@@ -606,7 +606,7 @@ def test_seed_worktree_db_measurement_fixture_feeds_the_series_queries(tmp_path,
 
 
 def test_seed_worktree_db_measurement_fixture_reaches_the_attention_estimate(tmp_path, monkeypatch):
-    """The fixture gives the settled weeks human activity, so the proxy Attention
+    """The fixture gives settled weeks recorded presence, so the proxy Attention
     series serves values, and the thin week stays withheld."""
     from api.measurement import _row
     from api.measurement_queries import prepare_outcome_periods as _prepare_outcome_periods, query_family as _query_family
@@ -615,7 +615,7 @@ def test_seed_worktree_db_measurement_fixture_reaches_the_attention_estimate(tmp
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     params = {"user_id": _SEED_OWNER, "scope_project": "all", "scope_agent": None,
-              "grain": _seed_grain(), "max_active_gap_seconds": 600}
+              "grain": _seed_grain()}
     _prepare_outcome_periods(conn, params)
     active = {r["period"]: r for r in _query_family(conn, "active", params)}
     conn.close()
@@ -623,8 +623,9 @@ def test_seed_worktree_db_measurement_fixture_reaches_the_attention_estimate(tmp
     rows = {period: _row("active_hours_per_outcome", period, active.get(period), False)
             for period in ("2026-09-07", "2026-09-14", "2026-09-21")}
     assert rows["2026-09-07"]["value"] is None
-    assert rows["2026-09-14"]["value"] == pytest.approx((60 * 60 + 59 * 600) / 3600 / 100)
-    assert rows["2026-09-21"]["value"] == pytest.approx((120 * 60 + 119 * 600) / 3600 / 762)
+    # The fixture records 60 and 120 minutes of presence, divided by that week's accepted outcomes.
+    assert rows["2026-09-14"]["value"] == pytest.approx(60 / 60 / 100)
+    assert rows["2026-09-21"]["value"] == pytest.approx(120 / 60 / 762)
     assert rows["2026-09-21"]["proxy"] is True
 
 

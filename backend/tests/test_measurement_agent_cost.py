@@ -150,7 +150,8 @@ async def test_the_agents_route_serves_dollars_per_hour_and_attention_minutes(is
             node = f"worker-2026-11-02-{index}"
             connection.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,source,created_at,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) VALUES (?, 'worker',?,1000000,0,0,0,1000000,'external_harness:claude-code','2026-11-02T10:00:00Z','plan-worker',?,'attempt',?,'execution')",
                                (f"usage-{node}", OPUS, node, f"commitment-worker-2026-11-02-{index}"))
-        connection.execute("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES ('m1','worker','user','x','{}','2026-11-03T12:00:00Z')")
+        connection.execute("INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+                           "VALUES ('steve','chat','worker','2026-11-03T12:00:00Z','2026-11-03T12:01:00Z',60,1,'hidden')")
 
     _seeded(seed)
     (row,) = (await _read())["rows"]

@@ -38,15 +38,17 @@ def presence_allocation_cte(grain: Grain) -> str:
         SELECT v.thread_id,v.project_id,
           MAX(datetime(v.entered_at),datetime(:from_ts)) AS began,
           MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended
-        FROM presence_visits v LEFT JOIN threads t ON t.id=v.thread_id
-        WHERE v.entered_at<:to_ts AND v.exited_at>:from_ts
-          AND (
-            (v.thread_id IS NOT NULL AND t.user_id=:user_id)
-            OR (v.thread_id IS NULL AND v.project_id IS NOT NULL AND EXISTS (
-              SELECT 1 FROM threads project_thread
-              WHERE project_thread.project_id=v.project_id AND project_thread.user_id=:user_id
-            ))
-          )
+        FROM threads t JOIN presence_visits v ON v.thread_id=t.id
+        WHERE t.user_id=:user_id AND v.entered_at<:to_ts AND v.exited_at>:from_ts
+        UNION ALL
+        SELECT v.thread_id,v.project_id,
+          MAX(datetime(v.entered_at),datetime(:from_ts)) AS began,
+          MIN(datetime(v.exited_at),datetime(:to_ts)) AS ended
+        FROM presence_visits v
+        WHERE v.thread_id IS NULL AND v.project_id IS NOT NULL
+          AND v.entered_at<:to_ts AND v.exited_at>:from_ts
+          AND EXISTS (SELECT 1 FROM threads project_thread
+            WHERE project_thread.project_id=v.project_id AND project_thread.user_id=:user_id)
         UNION ALL
         SELECT p.thread_id,t.project_id,
           MAX(datetime(p.last_entered_at),datetime(:from_ts)) AS began,
