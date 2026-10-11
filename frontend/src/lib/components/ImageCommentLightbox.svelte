@@ -172,6 +172,8 @@
 	 */
 	.image-comments { container: image-comments / inline-size; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 	.layout {
+		/* Measured on open and set inline; nothing until then. */
+		--drawer-size: 0px;
 		flex: 1; min-height: 0; display: grid; gap: 0; overflow: clip;
 		grid-template-areas: 'viewer' 'drawer'; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 0px;
 		transition: grid-template-rows calc(var(--dur-drawer) * 0.7) var(--ease-ios-sheet), grid-template-columns calc(var(--dur-drawer) * 0.7) var(--ease-ios-sheet);
