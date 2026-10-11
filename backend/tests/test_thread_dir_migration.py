@@ -165,7 +165,7 @@ def test_migrate_no_working_dir_is_noop(tmp_path):
 
 def test_new_layout_tmp_classification(tmp_path):
     """.threads/{id}/working is ephemeral; skills/ and context/ are durable."""
-    from registry.service import is_tmp
+    from registry.file_resolution import is_tmp
 
     assert is_tmp(tmp_path / ".threads" / "s" / "working" / "note.md") is True
     assert is_tmp(tmp_path / ".threads" / "s" / "skills" / "x" / "SKILL.md") is False
