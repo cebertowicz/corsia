@@ -278,7 +278,7 @@ async def test_decision_uses_raised_period_for_asks_and_answered_period_for_alig
 
 
 @pytest.mark.asyncio
-async def test_active_time_counts_300_and_600_but_not_601_second_gaps(isolated_db):
+async def test_active_time_uses_the_union_of_presence_intervals(isolated_db):
     from api.measurement import measurement_series
     from infra.database import get_db
 
@@ -287,9 +287,9 @@ async def test_active_time_counts_300_and_600_but_not_601_second_gaps(isolated_d
         _seed_thread(db, "root")
         _seed_outcomes(db, "root")
         db.executemany(
-            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?, 'root', 'user', 'x', '{}', ?)",
-            [("m1", "2026-09-22T10:00:00Z"), ("m2", "2026-09-22T10:05:00Z"),
-             ("m3", "2026-09-22T10:15:00Z"), ("m4", "2026-09-22T10:25:01Z")],
+            "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) VALUES ('steve','chat','root',?,?,0,1,'hidden')",
+            [("2026-09-22T10:00:00Z", "2026-09-22T10:05:00Z"),
+             ("2026-09-22T10:04:00Z", "2026-09-22T10:15:00Z")],
         )
         db.commit()
     finally:
@@ -297,7 +297,7 @@ async def test_active_time_counts_300_and_600_but_not_601_second_gaps(isolated_d
 
     result = await measurement_series("active_hours_per_outcome", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     row = next(row for row in result["rows"] if row["n"] == 762)
-    assert row["value"] == pytest.approx((4 * 60 + 300 + 600) / 3600 / 762)
+    assert row["value"] == pytest.approx(15 / 60 / 762)
 
 
 def test_outcomes_per_active_hour_is_proxy_and_handles_zero_hours():
@@ -310,7 +310,7 @@ def test_outcomes_per_active_hour_is_proxy_and_handles_zero_hours():
 
 
 @pytest.mark.asyncio
-async def test_active_time_uses_the_single_pre_window_predecessor(isolated_db):
+async def test_active_time_does_not_count_messages_without_presence(isolated_db):
     from api.measurement import measurement_series
     from infra.database import get_db
 
@@ -327,7 +327,7 @@ async def test_active_time_uses_the_single_pre_window_predecessor(isolated_db):
         db.close()
 
     result = await measurement_series("active_hours_per_outcome", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
-    assert next(row for row in result["rows"] if row["n"] == 762)["value"] == pytest.approx(360 / 3600 / 762)
+    assert not any(row["n"] == 762 for row in result["rows"])
 
 
 @pytest.mark.asyncio
@@ -626,7 +626,8 @@ def test_prepared_outcomes_and_sargable_ranges_match_legacy_family_values(isolat
         # The oracle is the frozen legacy SQL, and only for the families it was written
         # against; the ``models`` family reads rows the legacy module never covered,
         # so its fixtures live in this file instead.
-        families = _ORACLE_FAMILIES & {definition.family for definition in REGISTRY.values() if definition.available}
+        # Presence-only attention intentionally supersedes the frozen message-gap and visit-sum oracle.
+        families = (_ORACLE_FAMILIES - {"active", "presence"}) & {definition.family for definition in REGISTRY.values() if definition.available}
         legacy = {family: query_legacy_family(db, family, _oracle_params(params)) for family in families}
 
         _prepare_outcome_periods(db, _grained(params))
@@ -642,9 +643,8 @@ def test_prepared_outcomes_and_sargable_ranges_match_legacy_family_values(isolat
         db.close()
 
 
-def test_pre_window_predecessor_across_a_thread_tree_matches_legacy(isolated_db):
-    """The latest human message before the window is picked across every scope
-    thread, grandchildren included, exactly as the prior single sorted query did."""
+def test_messages_without_presence_do_not_create_attention_across_a_thread_tree(isolated_db):
+    """Message history cannot manufacture attention after the presence cutover."""
     from api.measurement_queries import prepare_outcome_periods as _prepare_outcome_periods, query_family as _query_family
     from infra.database import get_db
     from tests.measurement_legacy_queries import query_legacy_family
@@ -676,15 +676,8 @@ def test_pre_window_predecessor_across_a_thread_tree_matches_legacy(isolated_db)
         db.commit()
         params = {"user_id": "steve", "scope_project": "all", "scope_agent": None,
                   "from": "2026-09-14", "to": "2026-09-14", "max_active_gap_seconds": 600}
-        legacy = query_legacy_family(db, "active", _oracle_params(params))
-
         _prepare_outcome_periods(db, _grained(params))
-        optimized = _family_in_range(db, "active", params)
-
-        # 2 human messages in the window, gaps 7 minutes (from the tied 23:58
-        # predecessor) and 4 minutes, both under 600s.
-        assert legacy == [{"period": "2026-09-14", "active_hours": pytest.approx((2 * 60 + 420 + 240) / 3600), "outcomes": 0}]
-        assert optimized == legacy
+        assert _family_in_range(db, "active", params) == []
     finally:
         db.close()
 
@@ -707,7 +700,7 @@ def test_range_bounds_match_legacy_for_space_separated_timestamps(isolated_db):
         db.commit()
         params = {"user_id": "steve", "scope_project": "all", "scope_agent": None,
                   "from": "2026-09-14", "to": "2026-09-28", "max_active_gap_seconds": 600}
-        families = ("active", "presence", "decisions", "tokens")
+        families = ("decisions", "tokens")
         legacy = {family: query_legacy_family(db, family, _oracle_params(params)) for family in families}
 
         _prepare_outcome_periods(db, _grained(params))
@@ -1400,13 +1393,13 @@ async def test_no_series_serves_a_period_before_its_instrument_existed(isolated_
         return (row["value"], row["n"])
 
     assert answer("outcomes", before)[0] == 24, "outcomes ran before 08-31, so its own start still serves it"
-    for metric in ("active_hours_per_outcome", "asks_per_outcome", "first_try_acceptance"):
+    for metric in ("asks_per_outcome", "first_try_acceptance"):
         assert (metric, before) not in served, f"{metric} serves no period before its instrument existed"
         assert answer(metric, after)[0] is not None, metric
-    assert ("time_on_platform_h", before) not in served
-    assert ("time_on_platform_h", after) not in served, (
-        "presence started 2026-09-29: the seeded 09-21 visit predates it, so that period is not served and is never a measured hour"
-    )
+    # Retained presence, not a hard-coded release date, defines the first observable attention period.
+    assert answer("active_hours_per_outcome", before)[0] == pytest.approx(1 / 24)
+    assert answer("time_on_platform_h", before)[0] == pytest.approx(1.0)
+    assert answer("time_on_platform_h", after)[0] == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio

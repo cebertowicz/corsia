@@ -60,11 +60,9 @@ def _composite_surface(measurement_series) -> bool:
 async def _hours(measurement_series, *, project: str = "all", agent: str | None = None) -> float:
     """Total presence hours one composite scope selects, at the family the panel reads.
 
-    Read through the family rather than ``/series`` on purpose: the presence
-    instrument began 2026-09-29, the served spine ends at the last completed period, and
-    a window-level request therefore correctly returns none of these synthetic visits
-    until that period completes. What this file owns is which visits a scope selects --
-    the same predicate the panel reads through -- so the window is named here instead.
+    Read through the family rather than ``/series`` on purpose: this file owns
+    which visits a scope selects -- the same predicate the panel reads through --
+    while the window is named here directly.
     """
     assert _composite_surface(measurement_series), (
         "presence scope is only a testable contract once one request carries project, agent and grain"
@@ -94,7 +92,8 @@ async def test_project_only_scope_keeps_project_level_presence(isolated_db):
     from api.measurement import measurement_series
 
     _seeded()
-    assert await _hours(measurement_series, project="one") == 4.0
+    # Four concurrent visits occupy one hour of the person's time, not four hours.
+    assert await _hours(measurement_series, project="one") == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio
@@ -103,7 +102,8 @@ async def test_agent_scope_counts_only_the_selected_agent_closure(isolated_db):
     from api.measurement import measurement_series
 
     _seeded()
-    assert await _hours(measurement_series, agent="agent-a") == 2.0
+    # The agent and child visits overlap, so their union is one hour.
+    assert await _hours(measurement_series, agent="agent-a") == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio
@@ -120,7 +120,7 @@ async def test_project_and_agent_together_keep_the_exact_agent_closure(isolated_
     from api.measurement import measurement_series
 
     _seeded()
-    assert await _hours(measurement_series, project="one", agent="agent-a") == 2.0
+    assert await _hours(measurement_series, project="one", agent="agent-a") == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio
@@ -128,7 +128,7 @@ async def test_workspace_scope_with_an_agent_excludes_project_level_presence(iso
     from api.measurement import measurement_series
 
     _seeded()
-    assert await _hours(measurement_series, project="all", agent="agent-a") == 2.0
+    assert await _hours(measurement_series, project="all", agent="agent-a") == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio

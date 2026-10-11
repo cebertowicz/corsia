@@ -18,7 +18,6 @@ from api.measurement_limits import first_recorded_period, limits_by_period, rout
 from api.measurement_recent import router as recent_router
 from api.measurement_registry import REGISTRY, instrument_period, period_measured
 from api.measurement_models import models_read
-from api.measurement_agent_attention import MAX_ACTIVE_GAP_SECONDS
 from api.measurement_partial import current_period_outcomes
 from api.measurement_queries import prepare_outcome_periods, query_family
 from api.measurement_size import size_family, size_rows
@@ -175,6 +174,27 @@ def requested_series(ids: str) -> list[str]:
     return requested
 
 
+def _presence_periods(family_rows: dict[str, list[dict[str, Any]]]) -> dict[str, str | None]:
+    """Return each presence-backed family's first retained period."""
+    return {
+        family: min((row["period"] for row in family_rows[family] if row.get("period")), default=None)
+        for family in ("active", "presence")
+        if family in family_rows
+    }
+
+
+def _metric_spine(metric: str, family: str, spine: list[str], first_limit_period: str | None,
+                  first_presence_period: dict[str, str | None], grain: Grain) -> list[str]:
+    """Return only periods the metric can describe for this scope."""
+    if metric == "limit_hits":
+        first = max(first_limit_period, instrument_period(REGISTRY[metric].start, grain)) if first_limit_period else None
+        return [period for period in spine if first and period >= first]
+    if family in first_presence_period:
+        first = first_presence_period[family]
+        return [period for period in spine if first and period >= first]
+    return [period for period in spine if period_measured(metric, period, grain)]
+
+
 @joined_read
 async def series_payload(requested: list[str], project: str, agent: str, page_grain: Grain, user: dict) -> dict[str, Any]:
     """The ``/series`` body for one resolved grain, which must carry the averaging lead-in.
@@ -192,7 +212,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
             scope_params = selected_scope.params(user["id"])
-            params = {**scope_params, "grain": page_grain, "max_active_gap_seconds": MAX_ACTIVE_GAP_SECONDS}
+            params = {**scope_params, "grain": page_grain}
             so_far = current_period_outcomes(db, scope_params, page_grain) if "outcomes" in requested and page_grain.kind == "days" else None
             families = {REGISTRY[metric].family for metric in requested}
             first_limit_period = first_recorded_period(db, params) if "limits" in families else None
@@ -208,6 +228,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     rows: list[dict[str, Any]] = []
     windows: dict[str, dict[str, Any]] = {}
     spine = list(page_grain.periods)
+    first_presence_period = _presence_periods(family_rows)
 
     def measured(metric: str, period: str) -> bool:
         return period_measured(metric, period, page_grain)
@@ -216,15 +237,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         family = REGISTRY[metric].family
         by_period = {row["period"]: row for row in family_rows[family]}
         sources = by_period if family != "tokens" else {}
-        metric_spine = spine
-        if metric == "limit_hits":
-            # A zero is a recorded result only after this scope had a retained turn
-            # and after the metric's instrument existed. Limit errors themselves do
-            # not define when observation began.
-            first_measured_period = max(first_limit_period, instrument_period(REGISTRY[metric].start, page_grain)) if first_limit_period else None
-            metric_spine = [period for period in spine if first_measured_period and period >= first_measured_period]
-        # Every series starts at the period its instrument first observed; no leading row stands for earlier time.
-        metric_spine = [period for period in metric_spine if measured(metric, period)]
+        metric_spine = _metric_spine(metric, family, spine, first_limit_period, first_presence_period, page_grain)
         eligible, first_row = set(metric_spine), len(rows)
         drawn = [period for period in metric_spine if period in page_grain.served]
         if family == "size":

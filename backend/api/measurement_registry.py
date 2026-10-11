@@ -60,8 +60,10 @@ def instrument_period(start: str, grain: Grain | None = None) -> str:
 def period_measured(metric: str, period: str, grain: Grain | None = None) -> bool:
     """Say whether one registry id's instrument existed in a period (a week, or a day on Days).
 
-    A period that predates the instrument is not a period of zeros: nothing observed it.
-    The series and the Agents table answer with this one predicate so the two surfaces
-    cannot disagree about which periods carry a number.
+    Presence-backed metrics derive their observed range from retained intervals in the
+    query layer, so a release-date constant cannot hide valid history. Other metrics
+    retain their registry-owned instrument boundary.
     """
+    if REGISTRY[metric].family in {"active", "presence"}:
+        return True
     return not period or period >= instrument_period(REGISTRY[metric].start, grain)

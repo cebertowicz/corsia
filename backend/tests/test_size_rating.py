@@ -55,9 +55,12 @@ def _nodes(db, owner, count, *, accepted_at=ACCEPTED_AT, evidence=False):
 
 
 def _messages(db, thread_id):
-    # Two human messages ten minutes apart: 60 s + (600 s gap + 60 s) = 0.2 active hours.
-    db.executemany("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?,?,'user','x','{}',?)",
-                   [(f"{thread_id}-m1", thread_id, "2026-09-22T10:00:00Z"), (f"{thread_id}-m2", thread_id, "2026-09-22T10:10:00Z")])
+    # The helper name is retained for its callers; Measurement now reads this 12-minute visit.
+    db.execute(
+        "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+        "VALUES ('steve','chat',?,'2026-09-22T10:00:00Z','2026-09-22T10:12:00Z',720,1,'hidden')",
+        (thread_id,),
+    )
 
 
 def _rows(db, node_ids, size_class="M", **overrides):
@@ -478,8 +481,10 @@ async def test_the_headline_window_pools_every_period_even_when_none_is_comparab
         first = _nodes(db, "root", 20)
         next_week = _nodes(db, "later", 20, accepted_at="2026-09-30T12:00:00Z")
         _messages(db, "root")
-        db.executemany("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?,?,'user','x','{}',?)",
-                       [("later-m1", "later", "2026-09-30T10:00:00Z"), ("later-m2", "later", "2026-09-30T10:10:00Z")])
+        db.execute(
+            "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+            "VALUES ('steve','chat','later','2026-09-30T10:00:00Z','2026-09-30T10:12:00Z',720,1,'hidden')"
+        )
         _import(db, _rows(db, first, "M", rater_version="2026-10-01"))
         _import(db, _rows(db, next_week, "M", rater="other-rater", rater_version="2026-10-01"))
         db.commit()
