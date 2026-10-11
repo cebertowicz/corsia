@@ -56,6 +56,29 @@
 	} = $props();
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let drawer = $state<HTMLElement>();
+	let mobileDrawerOpen = $state(false);
+	let mobileCloseAction = $state<() => void>(() => onClose());
+	$effect(() => {
+		if (surfaceState && narrow) mobileDrawerOpen = true;
+	});
+	function closeMobileDrawer(action: () => void = onClose): void {
+		mobileCloseAction = action;
+		mobileDrawerOpen = false;
+	}
+	function closeMobileSurface(): void {
+		if (narrow) closeMobileDrawer();
+		else onClose();
+	}
+	function cancelMobileDraft(): void {
+		const action = onCancelDraft ?? onClose;
+		if (narrow) closeMobileDrawer(action);
+		else action();
+	}
+	function finishMobileClose(): void {
+		const action = mobileCloseAction;
+		mobileCloseAction = () => onClose();
+		action();
+	}
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const picks = $derived(image?.picks ?? 0);
@@ -232,7 +255,7 @@
 </script>
 
 {#snippet content()}
-	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} label={draft.label} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={onCancelDraft ?? onClose} />
+	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} label={draft.label} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={cancelMobileDraft} />
 	{:else}
 		{#if !readOnly && surfaceState?.kind !== 'thread'}
 			<div class="suggestion-status">
@@ -265,7 +288,7 @@
 				{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
 			</div>
 		</section>
-	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>
+	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}>{@render content()}</AdaptiveDrawer>
 	{:else}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 

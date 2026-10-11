@@ -108,6 +108,22 @@ describe("AdaptiveDrawer", () => {
     }
   });
 
+  it("removes drawer content synchronously when its caller is destroyed", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { callerControlled: true, onClose: vi.fn() },
+    });
+    await settle();
+
+    (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+    await settle();
+    expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(1);
+
+    (host.querySelector("[data-drawer-teardown]") as HTMLButtonElement).click();
+    flushSync();
+    expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(0);
+  });
+
   it("closes from its explicit control and Escape", async () => {
     const close = vi.fn();
     component = mount(AdaptiveDrawerHarness, {

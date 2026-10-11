@@ -3,7 +3,7 @@
 // component that transitions throws instead of rendering.
 if (typeof Element !== 'undefined' && typeof Element.prototype.animate !== 'function') {
 	Element.prototype.animate = function animate() {
-		return {
+		const animation = {
 			cancel() {},
 			finish() {},
 			play() {},
@@ -15,6 +15,12 @@ if (typeof Element !== 'undefined' && typeof Element.prototype.animate !== 'func
 			playState: 'finished',
 			finished: Promise.resolve(),
 		} as unknown as Animation;
+		Object.defineProperty(animation, 'onfinish', {
+			set(callback: ((event: Event) => void) | null) {
+				if (callback) queueMicrotask(() => callback(new Event('finish')));
+			},
+		});
+		return animation;
 	};
 }
 // An animated keyed each asks a leaving item for its running animations.
