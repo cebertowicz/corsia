@@ -39,6 +39,25 @@ def resolve(integration: str, type: str, external_id: str, db=None) -> dict | No
             _db.close()
 
 
+def resolve_upload(external_id: str, db=None) -> dict | None:
+    """Resolve an active upload identity by file id, whether typed upload or image."""
+    _db = db or get_db()
+    try:
+        identity = _db.execute(
+            "SELECT integration, type, state FROM artifact_identities "
+            "WHERE integration='upload' AND type IN ('upload', 'image') AND external_id=?",
+            (external_id,),
+        ).fetchone()
+        if identity is None or identity["state"] != "active":
+            return None
+        return resolve_normalized_owner(
+            _db, identity["integration"], identity["type"], external_id,
+        )
+    finally:
+        if not db:
+            _db.close()
+
+
 def routing_registrations(
     integration: str, type: str, external_id: str, db=None
 ) -> dict[str, Any]:

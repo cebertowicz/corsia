@@ -13,10 +13,6 @@ one here, never by branching pane control flow.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Mapping
-
-from registry.identity_metadata import parse_metadata
 
 CAPABILITY_LEAF_PACKAGE = "leaf-package"
 CAPABILITY_EXTERNAL_LINK = "external-link"
@@ -52,6 +48,9 @@ _DESCRIPTORS: dict[tuple[str, str], PresentationDescriptor] = {
     ("workspace", "skill"): PresentationDescriptor(
         label="Skill", icon="sparkles", capability=CAPABILITY_LEAF_PACKAGE,
     ),
+    ("upload", "image"): PresentationDescriptor(
+        label="Image", icon="image", capability=CAPABILITY_LEAF_PACKAGE,
+    ),
     ("upload", "upload"): PresentationDescriptor(
         label="Upload", icon="paperclip", capability=CAPABILITY_DOWNLOAD,
     ),
@@ -71,58 +70,12 @@ NON_PANE_TYPES: frozenset[tuple[str, str]] = frozenset({
 })
 
 
-_UPLOAD_IMAGE_MIME_TYPES = frozenset({
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-})
-_UPLOAD_IMAGE_SUFFIXES = frozenset({".png", ".jpeg", ".jpg", ".gif", ".webp"})
-
-
-def _is_existing_local_image_upload(
-    path: object, metadata: object, title: object,
-) -> bool:
-    """Whether this upload can use the canvas image leaf safely.
-
-    Existing upload registrations retain ``type=upload``. Their descriptor
-    promotes only the concrete local files the leaf can open, preserving the
-    download behavior for remote, missing, or non-image upload records.
-    """
-    if not isinstance(path, str):
-        return False
-    candidate = Path(path)
-    if not candidate.is_absolute() or not candidate.is_file():
-        return False
-    meta = metadata if isinstance(metadata, Mapping) else parse_metadata(metadata)
-    mime = meta.get("mime")
-    if isinstance(mime, str) and mime.lower() in _UPLOAD_IMAGE_MIME_TYPES:
-        return True
-    if mime:
-        return False
-    filename = title if isinstance(title, str) else candidate.name
-    return Path(filename).suffix.lower() in _UPLOAD_IMAGE_SUFFIXES
-
-
-def resolve_descriptor(
-    integration: str,
-    type_: str,
-    *,
-    path: object = None,
-    metadata: object = None,
-    title: object = None,
-) -> PresentationDescriptor:
-    """Return the trusted descriptor for an artifact's presentation inputs.
+def resolve_descriptor(integration: str, type_: str) -> PresentationDescriptor:
+    """Return the trusted descriptor for an artifact's integration and type.
 
     Never raises: an unregistered type renders as the honest unsupported
     state rather than breaking the pane.
     """
-    if (
-        integration == "upload"
-        and type_ == "upload"
-        and _is_existing_local_image_upload(path, metadata, title)
-    ):
-        return _DESCRIPTORS[("workspace", "image")]
     return _DESCRIPTORS.get((integration, type_), _UNSUPPORTED)
 
 

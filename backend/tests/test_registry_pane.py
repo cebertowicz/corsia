@@ -55,19 +55,16 @@ class TestHierarchicalPaneShape:
         assert pane["needs_attention"] == []
         assert pane["history"] == []
 
-    def test_existing_local_image_upload_opens_as_an_image_in_pane_and_card(self, tmp_path):
+    def test_typed_image_upload_opens_as_an_image_in_pane_and_card(self):
         db = get_db()
         parent = _mk_parent(db)
-        image = tmp_path / "uploaded.png"
-        image.write_bytes(b"png")
         art = models.register_artifact(
             integration="upload",
-            type="upload",
+            type="image",
             external_id=f"upload-{uuid.uuid4().hex[:8]}",
             parent_thread_id=parent,
-            title=image.name,
-            path=str(image),
-            metadata={"mime": "image/png"},
+            title="uploaded.png",
+            path="/workspace/uploaded.png",
             db=db,
         )
 
@@ -79,7 +76,7 @@ class TestHierarchicalPaneShape:
             "label": "Image", "icon": "image", "capability": "leaf-package",
         }
         assert item["action"]["capability"] == "leaf-package"
-        assert (card["icon"], card["opens"]) == ("image", True)
+        assert (card["type"], card["icon"], card["opens"]) == ("image", "image", True)
 
     def test_pane_payload_reports_owner_pin_state(self):
         db = get_db()

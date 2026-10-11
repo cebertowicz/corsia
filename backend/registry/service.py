@@ -12,7 +12,7 @@ from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_writer
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
-from registry.file_types import extension_type
+from registry.file_types import extension_type, image_media_type
 from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
@@ -154,7 +154,13 @@ def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
             )
             if artifact is not None:
                 return artifact
-        return None
+        upload = _db.execute(
+            "SELECT external_id FROM artifact_identities "
+            "WHERE integration='upload' AND type IN ('upload', 'image') "
+            "AND path=? AND state='active'",
+            (identity.canonical,),
+        ).fetchone()
+        return models.resolve_upload(upload["external_id"], db=_db) if upload else None
     finally:
         if not db:
             _db.close()
@@ -429,7 +435,7 @@ def register_upload(
         raise ValueError(f"upload path is not a file: {canonical}")
     row = models.register_artifact(
         integration="upload",
-        type="upload",
+        type="image" if image_media_type(canonical) is not None else "upload",
         external_id=file_id,
         parent_thread_id=thread_id,
         title=filename,
@@ -459,10 +465,10 @@ def register_uploads(
             fid = att.get("file_id") or att.get("url") or att.get("filename")
             if not fid:
                 continue
-            existing = models.resolve("upload", "upload", str(fid))
+            existing = models.resolve_upload(str(fid))
             row = models.register_artifact(
                 integration="upload",
-                type="upload",
+                type=existing["type"] if existing is not None else "upload",
                 external_id=str(fid),
                 parent_thread_id=thread_id,
                 title=att.get("filename", "upload"),
