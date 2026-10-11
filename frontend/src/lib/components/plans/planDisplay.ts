@@ -158,7 +158,7 @@ function finishedOutcome(node: OperatorNode): string {
 				? `${label} · follow-up created · ${node.status_reason}`
 				: `${label} · follow-up created`;
 		case 'failed': return label;
-		case 'closed': return node.status_reason ? `${label}: ${node.status_reason}` : label;
+		case 'closed': return node.status_reason ? `${label} · ${node.status_reason}` : label;
 		// An open container whose work all finished says what its work did; a
 		// leaf archived before it settled is the only other open `finished`.
 		default: return node.branch_progress ? label : 'Archived';
