@@ -16,6 +16,7 @@
 	import { coreSettings } from '$lib/stores/settings';
 	import { mergeTranscriptUpdates } from './transcriptUpdates';
 	import { endVisit, loadUpdateCards, openAtDivider, threadUpdateCards, visitDividers, watchUpdateCardNudges } from '$lib/stores/threadUpdateCards';
+	import { watchMessageCards } from '$lib/stores/messageCardRefresh';
 	import { DividerLandingIntent, RenderedUpdateCards, scheduleDividerLanding } from './messageListUpdateCards';
 	import { countVisibleEntries, visibleEntryContinuation } from './transcriptFocusModel';
 	import { planLimitPauseDescriptors } from './planLimitPause';
@@ -96,6 +97,7 @@
 		const id = renderedThreadId;
 		const fromSeq = cardsFromSeq;
 		watchUpdateCardNudges();
+		watchMessageCards();
 		if (!id) return;
 		const opening = dividerOpenFor !== id;
 		dividerOpenFor = id;

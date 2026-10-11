@@ -342,8 +342,8 @@ def test_verified_worktree_git_effects_are_cwd_independent_and_controls_stay_den
     # The cwd grant must not cover the sibling repo: its write access must
     # come from the verified-worktree profile, not Safehouse --add-dirs.
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_rw", lambda: [outside])
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [outside])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [outside])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
 
     staged = worktree / "staged.txt"
     success = _run_protected_shell(

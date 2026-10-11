@@ -9,14 +9,18 @@
 		loading?: boolean;
 		ariaLabel?: string;
 		title?: string;
+		/** Extra help a screen reader reads after the name (`aria-description`). */
+		description?: string;
+		/** The rendered button, for a caller that moves focus. */
+		el?: HTMLButtonElement;
 		onclick?: (e: MouseEvent) => void;
 		children: Snippet;
 	}
 
-	const {
+	let {
 		variant = 'secondary', size = 'md', type = 'button',
 		disabled = false, loading = false,
-		ariaLabel, title,
+		ariaLabel, title, description, el = $bindable(),
 		onclick, children,
 	}: Props = $props();
 
@@ -29,6 +33,8 @@
 	class:loading
 	disabled={isDisabled}
 	aria-label={ariaLabel}
+	{...(description ? { 'aria-description': description } : {})}
+	bind:this={el}
 	{title}
 	{onclick}
 >

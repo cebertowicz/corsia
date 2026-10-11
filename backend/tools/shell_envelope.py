@@ -95,6 +95,7 @@ def execution_envelope_for_consumed_action(
             "agent_account": agent_account,
             "gws_home": own_gws_home(env),
             "thread_id": thread_id,
+            "policies": policies,
         },
     )
 

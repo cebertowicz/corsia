@@ -181,7 +181,7 @@ def test_no_raw_reason_evidence_or_feedback_is_stored_or_read(db):
     card = thread_updates.read_newest_cards(db, "owner", min_seq=0)[0][0]
     assert set(card) == {
         "id", "thread_id", "kind", "message_id", "node_id", "title", "after_seq", "created_at",
-        "node_exists", "asks_user", "blocked_asks_user",
+        "node_exists", "asks_user", "blocked_asks_user", "ask",
     }
 
 

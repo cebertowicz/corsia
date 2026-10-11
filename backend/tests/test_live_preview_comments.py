@@ -115,6 +115,28 @@ async def test_a_suggestion_typed_after_its_quote_turns_the_highlight_into_a_sug
     assert drawn(doc.live.frames, "call-1") == (["comment", "suggest"], NAPS, "dozes")
 
 
+@pytest.mark.parametrize("args", [
+    {"replacement": "dozes", "quote": "naps", "doc_path": "doc.md"},
+    {"quote": "naps", "replacement": "dozes", "artifact_id": "art-1"},
+    {"replacement": "dozes", "doc_path": "doc.md", "quote": "naps"},
+])
+async def test_a_suggestion_is_drawn_whole_whatever_order_the_keys_arrive_in(doc, args):
+    route = PreviewRoute()
+    await stream(route, doc, "call-1", args)
+    assert drawn(doc.live.frames, "call-1") == (["suggest"], NAPS, "dozes")
+
+
+async def test_a_suggestion_whose_target_arrives_last_is_drawn_whole_and_ends_settled(doc):
+    route = PreviewRoute()
+    route.start("call-1", thread_id="thread-a", turn_id="turn-1", tool=TOOL, workspace=doc.workspace)
+    route.update("call-1", json.dumps({"quote": "naps", "replacement": "dozes off", "doc_path": "doc.md"}))
+    await settle()
+    route.end("call-1", "settled")
+    assert [frame["type"] for frame in doc.live.frames] == ["doc_preview", "doc_preview_end"]
+    assert drawn(doc.live.frames, "call-1") == (["suggest"], NAPS, "dozes off")
+    assert doc.live.frames[-1]["outcome"] == "settled"
+
+
 async def test_a_repeated_quote_waits_for_near_before_anything_is_drawn(doc):
     route = PreviewRoute()
     await stream(route, doc, "call-1", {"doc_path": "doc.md", "quote": "The fox", "near": "naps", "body": "b"})
