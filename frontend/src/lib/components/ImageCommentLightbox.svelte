@@ -73,6 +73,7 @@
 					<ImageCommentBar
 						boxMode={image.boxMode}
 						moving={!!image.moving}
+						savingMove={image.moveSaving}
 						count={comments.length}
 						loading={$commentLoads[artifactId]?.state === 'loading'}
 						listOpen={image.ui.state?.kind === 'list'}
@@ -90,7 +91,7 @@
 						{comments}
 						{colorOf}
 						draftColor={projectAccent(projectId, accent)}
-						draft={image.draftRegion}
+						draft={image.movingRegion ?? image.draftRegion}
 						selectedId={image.selectedId}
 						hoveredId={image.ui.hovered}
 						boxMode={image.boxMode}
@@ -129,7 +130,7 @@
 			target={null}
 			{artifactId}
 			readOnly={!canComment}
-			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close }}
+			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null }}
 		/>
 	{/if}
 </div>

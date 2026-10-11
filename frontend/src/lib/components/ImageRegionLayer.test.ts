@@ -109,12 +109,18 @@ describe('ImageRegionLayer', () => {
 		expect(boxed.onDraw).toHaveBeenCalledOnce();
 	});
 
-	it('pans instead of drawing while Space is held', () => {
+	it('pans instead of drawing while Space is held and exposes the cursor state', () => {
 		const { layer, onDraw } = render();
+		expect(layer.classList.contains('drawing')).toBe(true);
+		expect(layer.classList.contains('space-held')).toBe(false);
 		window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }));
+		flushSync();
+		expect(layer.classList.contains('space-held')).toBe(true);
 		layer.dispatchEvent(pointer('pointerdown', 200, 100));
 		layer.dispatchEvent(pointer('pointerup', 400, 300));
 		window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', key: ' ' }));
+		flushSync();
+		expect(layer.classList.contains('space-held')).toBe(false);
 		expect(onDraw).not.toHaveBeenCalled();
 	});
 

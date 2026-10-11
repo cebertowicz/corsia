@@ -35,7 +35,8 @@ export function createImageComments(context: {
 	let boxMode = $state(false);
 	let draftRegion = $state<ImageRegion | null>(null);
 	let draftBody = $state('');
-	let moving = $state<string | null>(null);
+	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
+	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 
 	function show(id: string, anchor: CommentAnchor) {
 		focusedDocComment.set(id);
@@ -49,24 +50,26 @@ export function createImageComments(context: {
 	}
 	/** The Comment button: box mode on, or off again without placing anything. */
 	function toggleBoxMode() {
-		if (context.readOnly()) return;
+		if (context.readOnly() || moving?.region) return;
 		boxMode = !boxMode;
 		if (!boxMode) moving = null;
 	}
 	/** A box, point or whole-image region was drawn: it opens the composer, or moves the pin being moved. */
 	async function draw(region: ImageRegion, anchor: CommentAnchor) {
 		const artifact = context.artifactId();
-		if (context.readOnly() || !artifact) return;
+		if (context.readOnly() || !artifact || moving?.region) return;
 		// One comment per press of Comment, so the next one-finger pan draws nothing.
 		boxMode = false;
-		const pin = moving;
-		if (pin) {
-			moving = null;
+		const move = moving;
+		if (move) {
+			// Keep the new location visible until the server accepts it or rejects it.
+			moving = { ...move, region };
 			try {
-				await submitDocumentComment(() => moveRegion(artifact, pin, region), retryToast.remember, () => "Couldn't move the pin — try again");
+				await submitDocumentComment(() => moveRegion(artifact, move.id, region), retryToast.remember, () => "Couldn't move the pin — try again");
 				retryToast.dismissAfterSuccess();
-				show(pin, anchor);
-			} catch { /* The toast says why; the pin stays where it was. */ }
+				moving = null;
+				show(move.id, anchor);
+			} catch { moving = null; /* The toast says why; the pin stays where it was. */ }
 			return;
 		}
 		draftRegion = region;
@@ -98,7 +101,7 @@ export function createImageComments(context: {
 	function movePin(id: string) {
 		if (context.readOnly()) return;
 		close();
-		moving = id;
+		moving = { id };
 		boxMode = true;
 	}
 	/**
@@ -112,7 +115,7 @@ export function createImageComments(context: {
 			event.preventDefault();
 			close();
 			ui.restoreFocus();
-		} else if (boxMode || moving) {
+		} else if ((boxMode || moving) && !moving?.region) {
 			event.preventDefault();
 			boxMode = false;
 			moving = null;
@@ -122,7 +125,9 @@ export function createImageComments(context: {
 	return {
 		ui,
 		get boxMode() { return boxMode; },
-		get moving() { return moving; },
+		get moving() { return moving?.id ?? null; },
+		get movingRegion() { return moving?.region ?? null; },
+		get moveSaving() { return !!moving?.region; },
 		get draftRegion() { return draftRegion; },
 		get selectedId() {
 			if (ui.state?.kind === 'thread') return ui.state.id;

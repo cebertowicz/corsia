@@ -62,15 +62,22 @@ describe('image comments', () => {
 		expect(comments.draftRegion).toEqual(BOX);
 	});
 
-	it('moves a pin with the next region drawn, then shows its card', async () => {
-		mocks.moveRegion.mockResolvedValueOnce(undefined);
+	it('keeps the newly drawn pin visible while its move is saving, then shows its card', async () => {
+		let settle: () => void = () => {};
+		mocks.moveRegion.mockImplementationOnce(() => new Promise<void>((resolve) => { settle = resolve; }));
 		const { comments } = controller();
 		comments.movePin('pin');
 		expect(comments.boxMode).toBe(true);
-		await comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
+		const move = comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
 		expect(mocks.moveRegion).toHaveBeenCalledWith('image', 'pin', { x: 0.5, y: 0.5, w: 0, h: 0 });
+		expect(comments.moving).toBe('pin');
+		expect(comments.movingRegion).toEqual({ x: 0.5, y: 0.5, w: 0, h: 0 });
+		expect(comments.moveSaving).toBe(true);
+		settle();
+		await move;
 		expect(mocks.addRegionComment).not.toHaveBeenCalled();
 		expect(comments.moving).toBeNull();
+		expect(comments.movingRegion).toBeNull();
 		expect(comments.selectedId).toBe('pin');
 	});
 

@@ -113,6 +113,8 @@
 		if (!imgEl) return;
 		place(next, fractionOnImage(pivot, imgEl.getBoundingClientRect()), pivot);
 	}
+	/** The shown image's live bounds, for an anchored card to avoid covering its tags. */
+	export function imageBounds(): DOMRect | null { return imgEl?.isConnected ? imgEl.getBoundingClientRect() : null; }
 	/** Scrolls so the given fraction of the image (0..1 on each axis) is centred in the viewport, keeping the zoom. */
 	export function revealFraction(x: number, y: number) {
 		const el = viewportEl;

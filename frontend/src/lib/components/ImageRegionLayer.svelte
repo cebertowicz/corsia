@@ -37,7 +37,7 @@
 	let surface = $state<HTMLElement>();
 	let width = $state(0);
 	let height = $state(0);
-	let spaceHeld = false;
+	let spaceHeld = $state(false);
 	let stroke = $state<{ pointer: number; from: Point; to: Point; closes: boolean } | null>(null);
 	let focusedTag = $state<string | null>(null);
 	// Agent comments that arrive while the viewer is open sweep in; those already there do not.
@@ -151,6 +151,7 @@
 <div
 	class="regions"
 	class:drawing={!readOnly}
+	class:space-held={spaceHeld}
 	class:box-mode={boxMode}
 	data-image-regions
 	bind:this={layer}
@@ -205,22 +206,25 @@
 
 <style>
 	.regions { position: absolute; inset: 0; z-index: 1; }
-	.regions.drawing { cursor: crosshair; }
+	@media (pointer: fine) {
+		.regions.drawing { cursor: crosshair; }
+		.regions.drawing.space-held { cursor: grab; }
+	}
 	.surface { position: absolute; inset: 0; border-radius: inherit; }
 	.surface:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.regions.box-mode { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent); }
 
 	/* A box is the author's colour inside a thin white line, so it reads on light and dark parts of a screenshot. */
-	.box { position: absolute; box-sizing: border-box; border: 2px solid var(--region-color); border-radius: 2px; box-shadow: 0 0 0 1px #fff, inset 0 0 0 1px #fff; pointer-events: none; }
-	.box.stale { border-style: dashed; opacity: 0.55; }
+	.box { position: absolute; box-sizing: border-box; border: 2px solid var(--region-color); border-radius: 2px; box-shadow: 0 0 0 1px var(--image-region-halo), inset 0 0 0 1px var(--image-region-halo); pointer-events: none; }
+	.box.stale { border-style: dashed; }
 	.box.draft { border-style: solid; background: color-mix(in srgb, var(--region-color) 10%, transparent); }
 	.box.sweep { animation: sweep 600ms cubic-bezier(0.22, 1, 0.36, 1); }
 	@keyframes sweep { from { clip-path: inset(0 100% 100% 0); } to { clip-path: inset(0 0 0 0); } }
 
 	/* A point pin is a 14 px dot. */
-	.dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--region-color); box-shadow: 0 0 0 2px #fff; pointer-events: none; }
+	.dot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--region-color); box-shadow: 0 0 0 2px var(--image-region-halo); pointer-events: none; }
 	.dot.faint { background: color-mix(in srgb, var(--region-color) 80%, transparent); }
-	.dot.stale { opacity: 0.55; outline: 1.5px dashed var(--region-color); outline-offset: 3px; }
+	.dot.stale { outline: 1.5px dashed var(--region-color); outline-offset: 3px; }
 
 	/* The 22 px disc sits on the placed centre; an agent's name grows away from the box it points at. */
 	.tag {
@@ -233,20 +237,19 @@
 	.tag.leftward::before { left: auto; right: -11px; }
 	.disc {
 		box-sizing: border-box; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
-		background: var(--region-color); color: #111; border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, #000);
-		box-shadow: 0 0 0 1.5px #fff; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
+		background: var(--region-color); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge));
+		box-shadow: 0 0 0 1.5px var(--image-region-halo); font-size: var(--text-caption); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; line-height: 1;
 		transition: background var(--dur-tight, 120ms);
 	}
 	.name {
 		max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: var(--radius-pill, 999px);
-		background: var(--region-color); color: #111; border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, #000); box-shadow: 0 0 0 1.5px #fff;
-		font-size: 11px; font-weight: 600; line-height: 14px;
+		background: var(--region-color); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); box-shadow: 0 0 0 1.5px var(--image-region-halo);
+		font-size: var(--text-caption); font-weight: var(--fw-semibold); line-height: 14px;
 	}
 	/* Faint until hovered, focused or picked: only the fill fades; the digit, border and white ring stay solid. */
 	.tag.faint .disc, .tag.faint .name { background: color-mix(in srgb, var(--region-color) 80%, transparent); }
-	.tag.selected .disc { box-shadow: 0 0 0 1.5px #fff, 0 0 0 4px var(--region-color); }
-	.tag.stale { opacity: 0.55; }
-	.tag.stale .disc, .tag.stale .name { border-style: dashed; background: color-mix(in srgb, var(--region-color) 70%, transparent); }
+	.tag.selected .disc { box-shadow: 0 0 0 1.5px var(--image-region-halo), 0 0 0 4px var(--region-color); }
+	.tag.stale .disc, .tag.stale .name { border-style: dashed; background: color-mix(in srgb, var(--region-color) 80%, transparent); }
 	.tag:hover .disc, .tag:hover .name { background: var(--region-color); }
 	.tag:focus-visible { outline: none; }
 	.tag:focus-visible .disc { background: var(--region-color); outline: 2px solid var(--accent); outline-offset: 3px; }

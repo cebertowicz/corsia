@@ -123,4 +123,10 @@ describe('design tokens', () => {
 		expect(defined.has('--surface-1')).toBe(false);
 		expect(references.some((reference) => reference.token === '--surface-1')).toBe(false);
 	});
+
+	it('registers the theme-independent image-region contrast tokens', () => {
+		for (const token of ['--image-region-ink', '--image-region-halo', '--image-region-edge']) {
+			expect(defined.has(token), `${token} must be defined`).toBe(true);
+		}
+	});
 });

@@ -153,6 +153,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await page.keyboard.press('Escape');
 			await rest(page);
 			await expect(tag(page, 2)).toHaveClass(/faint/);
+			await tag(page, 1).click();
+			const firstCardWithNeighbours = page.locator('.ct').filter({ hasText: 'The header is too tall here' });
+			await expect(firstCardWithNeighbours).toBeVisible();
+			const neighbouringCardBox = (await firstCardWithNeighbours.boundingBox())!;
+			for (const regionTag of await page.locator('.image-viewer [data-region-tag]').all()) {
+				expect(overlap((await regionTag.boundingBox())!, neighbouringCardBox)).toBe(false);
+			}
+			await page.keyboard.press('Escape');
 			await shoot(page, testInfo, '1440-04-tags-faint', true);
 			await tag(page, 1).hover();
 			await expect(tag(page, 1)).not.toHaveClass(/faint/);
@@ -176,6 +184,11 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(tag(page, 1)).toHaveCount(0);
 			await commentButton(page).click();
 			await expect(commentButton(page)).toHaveAttribute('aria-pressed', 'true');
+			await commentButton(page).hover();
+			const activeCommentColor = await commentButton(page).evaluate((el) => getComputedStyle(el).color);
+			const inactiveZoom = page.locator('.image-viewer:visible .zoom button[aria-pressed="false"]');
+			await inactiveZoom.hover();
+			expect(await inactiveZoom.evaluate((el) => getComputedStyle(el).color)).not.toBe(activeCommentColor);
 			await shoot(page, testInfo, '1440-07-box-mode');
 			const surface = page.locator('.image-viewer [data-image-regions] .surface');
 			await expect(surface).toBeFocused();
@@ -186,24 +199,25 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			expect(await tagNumbers(page)).toEqual(['2', '3']);
 			await shoot(page, testInfo, '1440-08-number-not-reused', true);
 
-			// The pill counts every comment on the image; its drawer shows one thumbnail for the image.
+			// The viewer sits directly above this drawer, so its thumbnail would repeat the image and hide the first card.
 			await expect(pill(page)).toHaveAttribute('aria-label', '3 comments');
 			await pill(page).click();
 			const drawer = page.locator('.canvas-comment-drawer');
 			await expect(drawer).toBeVisible();
-			await expect(drawer.locator('[data-region-thumb]')).toHaveCount(1);
-			// The thumbnail draws the listed comments: the resolved box leaves Open's and appears on Resolved's.
-			const thumbNumbers = () => drawer.locator('[data-thumb-number]').evaluateAll((nums) => nums.map((n) => n.textContent));
-			await expect.poll(thumbNumbers).toEqual(['1', '2', '3']);
-			await drawer.locator('[data-drawer-filter]', { hasText: 'Open' }).click();
-			await expect.poll(thumbNumbers).toEqual(['2', '3']);
-			await expect(drawer.locator('[data-region-thumb]')).toHaveCount(1);
-			// The list keeps the selected card in view; scroll back to the thumbnail for the evidence shot.
-			await drawer.locator('[data-region-thumb]').scrollIntoViewIfNeeded();
+			await pill(page).hover();
+			const activePillColor = await pill(page).evaluate((el) => getComputedStyle(el).color);
+			const inactiveZoomForPill = page.locator('.image-viewer:visible .zoom button[aria-pressed="false"]');
+			await inactiveZoomForPill.hover();
+			expect(await inactiveZoomForPill.evaluate((el) => getComputedStyle(el).color)).not.toBe(activePillColor);
+			await expect(drawer.locator('[data-region-thumb]')).toHaveCount(0);
+			const firstCard = drawer.locator('.ct').first();
+			await expect(firstCard).toBeVisible();
+			const [drawerBox, firstCardBox] = await Promise.all([drawer.boundingBox(), firstCard.boundingBox()]);
+			expect(firstCardBox!.y).toBeGreaterThanOrEqual(drawerBox!.y);
+			expect(firstCardBox!.y + firstCardBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
 			await shoot(page, testInfo, '1440-09-drawer-open', true);
 			await drawer.locator('[data-drawer-filter]', { hasText: 'Resolved' }).click();
-			await expect.poll(thumbNumbers).toEqual(['1']);
-			await drawer.locator('[data-region-thumb]').scrollIntoViewIfNeeded();
+			await expect(drawer.locator('.ct')).toHaveCount(1);
 			await shoot(page, testInfo, '1440-09b-drawer-resolved');
 			await page.keyboard.press('Escape');
 			await expect(drawer).toHaveCount(0);
@@ -263,6 +277,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await expect(tag(page, 2)).toHaveClass(/stale/);
 			await expect(tag(page, 4)).toHaveClass(/stale/);
 			await expect(tag(page, 2)).toHaveAttribute('aria-label', /image changed since this comment/);
+			await expect(tag(page, 2).locator('.disc')).toHaveCSS('border-style', 'dashed');
+			expect(await tag(page, 2).evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
 			await shoot(page, testInfo, '1440-13-stale-pins', true);
 
 			// Reduced motion: the number's emphasis does not animate (the app-wide rule leaves at most 0.01 ms).

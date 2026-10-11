@@ -15,7 +15,7 @@
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
 	/** Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour. */
-	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void };
+	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null };
 	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
@@ -81,7 +81,11 @@
 	$effect(() => {
 		if (surfaceState?.kind !== 'list') return;
 		filter = 'all'; navigationNotice = '';
-		void tick().then(() => drawer?.querySelector<HTMLElement>('[data-drawer-filter]')?.focus());
+		void tick().then(() => {
+			const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
+			if (list) list.scrollTop = 0;
+			drawer?.querySelector<HTMLElement>('[data-drawer-filter]')?.focus();
+		});
 	});
 	function closeDrawer() { onClose(); restoreFocus(); }
 	function navigate(id: string) {
@@ -215,13 +219,13 @@
 			{#if load?.state === 'error'}<div class="drawer-status" role="status">Couldn't load comments. {load.error}<Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 			{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
 			<div class="drawer-comments">
-				{#if image && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
+				{#if image?.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 				{#if displayed.length}{@render content()}
 				{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
 			</div>
 		</section>
-	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard={!!image} {onClose}>{@render content()}</AdaptiveDrawer>
-	{:else}<Popover anchor={cardAnchor} {bounds} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>
+	{:else}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>

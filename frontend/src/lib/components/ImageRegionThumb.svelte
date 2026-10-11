@@ -57,13 +57,13 @@
 	.thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.frame { position: relative; display: inline-block; max-width: 100%; line-height: 0; border-radius: 2px; box-shadow: 0 0 0 1px var(--border); }
 	img { display: block; max-width: 100%; max-height: 72px; width: auto; height: auto; border-radius: inherit; user-select: none; }
-	.box { position: absolute; box-sizing: border-box; border: 1.5px solid var(--region-color); box-shadow: 0 0 0 1px #fff; pointer-events: none; }
-	.box.stale { border-style: dashed; opacity: 0.55; }
-	.dot { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--region-color); box-shadow: 0 0 0 1px #fff; }
+	.box { position: absolute; box-sizing: border-box; border: 1.5px solid var(--region-color); box-shadow: 0 0 0 1px var(--image-region-halo); pointer-events: none; }
+	.box.stale { border-style: dashed; }
+	.dot { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--region-color); box-shadow: 0 0 0 1px var(--image-region-halo); }
 	.num {
 		position: absolute; box-sizing: border-box; display: grid; place-items: center; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
-		background: var(--region-color); color: #111; border: 1px solid color-mix(in srgb, var(--region-color) 70%, #000); box-shadow: 0 0 0 1px #fff;
-		font-size: 8px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+		background: var(--region-color); color: var(--image-region-ink); border: 1px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); box-shadow: 0 0 0 1px var(--image-region-halo);
+		font-size: var(--text-caption); font-weight: var(--fw-bold); line-height: 1; font-variant-numeric: tabular-nums;
 	}
-	.num.stale { opacity: 0.55; border-style: dashed; }
+	.num.stale { border-style: dashed; }
 </style>

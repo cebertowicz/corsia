@@ -283,9 +283,9 @@
 	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
 	/* An image comment's number, in its tag's colour and shape. */
 	.ct-num {
-		box-sizing: border-box; flex-shrink: 0; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
-		background: var(--region-color, var(--accent)); color: #111; border: 1.5px solid color-mix(in srgb, var(--region-color, var(--accent)) 70%, #000);
-		font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
+		box-sizing: border-box; flex-shrink: 0; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-2xs);
+		background: var(--region-color, var(--accent)); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color, var(--accent)) 70%, var(--image-region-edge));
+		font-size: var(--text-caption); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; line-height: 1;
 	}
 	.ct-suggestion-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
 	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: #fff; background: var(--accent); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
