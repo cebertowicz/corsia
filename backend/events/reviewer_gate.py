@@ -151,7 +151,10 @@ def on_check_suite_completed(
 
 
 def on_pull_request_ready_for_review(
-    repo: str, head_sha: str, pr_number: int, internal_event: str,
+    repo: str,
+    head_sha: str,
+    pr_number: int,
+    internal_event: str,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> None:
     """Re-evaluate the gate when a draft PR becomes ready for review."""
@@ -162,9 +165,9 @@ def on_pull_request_ready_for_review(
     _evaluate_review_gate(repo, head_sha, pr_number, internal_event, loop)
 
 
-def evaluate_overdue(repo: str, head_sha: str, pr_number: int, loop: asyncio.AbstractEventLoop) -> None:
-    """Re-enter the normal reviewer gate after quiet-watch detects a missed event."""
-    _evaluate_review_gate(repo, head_sha, pr_number, "pr_quiet.events_overdue", loop)
+def schedule_overdue_evaluation(repo: str, head_sha: str, pr_number: int, loop: asyncio.AbstractEventLoop) -> None:
+    """Schedule an overdue re-evaluation without blocking its event source."""
+    _dispatch_background_evaluation(repo, head_sha, pr_number, "pr_quiet.events_overdue", loop)
 
 
 def _evaluate_review_gate(
@@ -299,7 +302,7 @@ def _schedule_mergeability_retry(
     loop.call_soon_threadsafe(
         loop.call_later,
         delay,
-        _dispatch_mergeability_retry,
+        _dispatch_background_evaluation,
         repo,
         head_sha,
         pr_number,
@@ -314,36 +317,30 @@ def _schedule_mergeability_retry(
     return True
 
 
-def _dispatch_mergeability_retry(
-    repo: str,
-    head_sha: str,
-    pr_number: int,
-    internal_event: str,
-    loop: asyncio.AbstractEventLoop,
-    retry_attempt: int,
+def _dispatch_background_evaluation(
+    repo: str, head_sha: str, pr_number: int, internal_event: str,
+    loop: asyncio.AbstractEventLoop, retry_attempt: int = 0,
 ) -> None:
-    """Return a delayed retry to the normal worker-thread eligibility path."""
+    """Run a re-evaluation independently and retrieve any task failure."""
     task = asyncio.create_task(asyncio.to_thread(
         _evaluate_review_gate,
         repo, head_sha, pr_number, internal_event, loop, retry_attempt,
     ))
     _PENDING_RETRIES.add(task)
     task.add_done_callback(_PENDING_RETRIES.discard)
-    task.add_done_callback(partial(_log_mergeability_retry_failure, pr_number, head_sha))
+    task.add_done_callback(partial(_log_background_evaluation_failure, pr_number, head_sha))
 
 
-def _log_mergeability_retry_failure(
-    pr_number: int,
-    head_sha: str,
-    task: asyncio.Task[None],
+def _log_background_evaluation_failure(
+    pr_number: int, head_sha: str, task: asyncio.Task[None],
 ) -> None:
-    """Retrieve and identify any delayed retry failure after task completion."""
+    """Retrieve and identify any detached evaluation failure."""
     try:
         task.result()
     except asyncio.CancelledError:
-        log.info("reviewer-gate: delayed retry cancelled for PR #{} sha={}", pr_number, head_sha[:8])
+        log.info("reviewer-gate: background evaluation cancelled for PR #{} sha={}", pr_number, head_sha[:8])
     except Exception:
-        log.exception("reviewer-gate: delayed retry raised for PR #{} sha={}", pr_number, head_sha[:8])
+        log.exception("reviewer-gate: background evaluation raised for PR #{} sha={}", pr_number, head_sha[:8])
 
 
 def _report_mergeability_unresolved(repo: str, pr_number: int, head_sha: str) -> None:
