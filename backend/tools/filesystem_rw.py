@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from host_access.credential_sanitizer import CredentialSafeText, sanitize_credential_text
-from host_access.python_source_redaction import sanitize_python_source
+from host_access.source_redaction import sanitize_source
 from infra.constants import READ_FILE_OUTPUT_CHAR_CAP
 from infra.db_async import run_in_db, run_off_db
 from tools.base import Tool
@@ -129,11 +129,7 @@ class ReadFileTool(Tool):
                 return _ReadOutcome(f"Error: File too large ({size_mb:.0f}MB). Max readable size is {self._MAX_READ_BYTES // (1024*1024)}MB. Use offset/limit for partial reads, or a different tool.")
             data = handle.read()
         content = data.decode("utf-8")
-        source_safe = (
-            sanitize_python_source(content)
-            if file_path.suffix.casefold() in {".py", ".pyi"}
-            else None
-        )
+        source_safe = sanitize_source(content, file_path.suffix)
         text, whole = self._render_lines(
             source_safe if source_safe is not None else content, offset, limit,
         )

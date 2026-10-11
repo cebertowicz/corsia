@@ -268,11 +268,11 @@ def test_web_search_works_needs_a_key_and_a_works_outcome(monkeypatch):
         return outcome
 
     monkeypatch.setattr("tools.web_search_outcome.run_search", search)
-    monkeypatch.setattr("infra.key_store.resolve_builtin", lambda builtin, db=None: None)
+    monkeypatch.setattr("infra.key_store.resolve_builtin", lambda builtin: None)
     assert asyncio.run(setup.web_search_works()) is False
     assert not seen
 
-    monkeypatch.setattr("infra.key_store.resolve_builtin", lambda builtin, db=None: ("k", "store"))
+    monkeypatch.setattr("infra.key_store.resolve_builtin", lambda builtin: ("k", "store"))
     for outcome, works in ((SearchOutcome(WORKS), True), (SearchOutcome(KEY_REFUSED), False),
                            (SearchOutcome(FAILED, "network"), False)):
         assert asyncio.run(setup.web_search_works()) is works
@@ -282,7 +282,7 @@ def test_web_search_works_needs_a_key_and_a_works_outcome(monkeypatch):
 
 def test_one_key_resolver_serves_the_probe_and_web_search(isolated_db, tmp_path, monkeypatch):
     import tools.web as web
-    from infra.settings import set_setting
+    from infra import key_store
     from tools.web_search_outcome import WORKS, SearchOutcome
 
     monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
@@ -295,14 +295,14 @@ def test_one_key_resolver_serves_the_probe_and_web_search(isolated_db, tmp_path,
 
     monkeypatch.setattr("tools.web_search_outcome.run_search", search)
     monkeypatch.setattr(web, "run_search", search)
-    set_setting("tools", {"web": {"search": {"apiKey": "from-settings"}}})
+    key_store.set_value("web-search", "from-store")
     assert asyncio.run(setup.web_search_works()) is True
     asyncio.run(web.WebSearchTool().execute("q"))
     monkeypatch.setenv("BRAVE_API_KEY", "from-env")
-    set_setting("tools", {})
-    assert asyncio.run(setup.web_search_works()) is True
+    key_store.clear_value("web-search")
+    assert asyncio.run(setup.web_search_works()) is False
     asyncio.run(web.WebSearchTool().execute("q"))
 
-    assert seen == ["from-settings", "from-settings", "from-env", "from-env"]
+    assert seen == ["from-store", "from-store"]
     assert not hasattr(web, "resolve_search_key")
     assert not hasattr(setup, "_web_search_key")

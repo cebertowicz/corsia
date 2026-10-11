@@ -4,8 +4,8 @@ import { token, user } from '$lib/stores/auth';
 import { connectionError } from '$lib/stores/connection';
 import { disconnect } from '$lib/ws/connection';
 
-/** Where search reads a key from: Settings › Keys, the settings file, or the environment. */
-export type KeySource = 'keys' | 'settings' | 'environment';
+/** Where a key is read from: Settings › Keys. */
+export type KeySource = 'keys';
 
 /** One entry's metadata. The API never returns a value. */
 export interface KeyEntry {
@@ -19,6 +19,36 @@ export interface KeyEntry {
 	source: KeySource | null;
 	set_at: string | null;
 	checkable: boolean;
+	/** An environment variable CORSIA found and ignores for this key. */
+	ignored_env_var: string | null;
+}
+
+/** A provider's key status. The API never returns a value. */
+export interface ProviderKeyRow {
+	/** The key store entry name, e.g. `provider-anthropic`. */
+	name: string;
+	provider: string;
+	label: string;
+	is_set: boolean;
+	/** A provider CORSIA no longer supports: shown only while it still holds a key. */
+	unsupported: boolean;
+	/** An environment variable CORSIA found and ignores for this provider. */
+	ignored_env_var: string | null;
+}
+
+/** A registered server's key status. The API never returns a value. */
+export interface ServerKeyRow {
+	/** The key store entry name, e.g. `server-ns-1234567890`. */
+	name: string;
+	server_id: string;
+	label: string;
+	is_set: boolean;
+}
+
+export interface KeyListing {
+	keys: KeyEntry[];
+	providerKeys: ProviderKeyRow[];
+	serverKeys: ServerKeyRow[];
 }
 
 export type CheckResult = { outcome: 'works' | 'key_refused' | 'failed' | 'not_set'; reason: string | null };
@@ -63,10 +93,25 @@ async function refusal(res: Response): Promise<KeyWriteError> {
 	return new KeyWriteError(code, message);
 }
 
-export async function listKeys(): Promise<KeyEntry[]> {
+export async function listKeys(): Promise<KeyListing> {
 	const res = await fetch('/api/keys', { headers: headers() });
 	if (!res.ok) throw await refusal(res);
-	return (await res.json()).keys as KeyEntry[];
+	const body = await res.json();
+	return {
+		keys: body.keys as KeyEntry[],
+		providerKeys: (body.provider_keys ?? []) as ProviderKeyRow[],
+		serverKeys: (body.server_keys ?? []) as ServerKeyRow[],
+	};
+}
+
+/** The sentence under a key that CORSIA found in the environment and ignores. */
+export function ignoredEnvironmentFact(variable: string): string {
+	return `${variable} in the environment is ignored.`;
+}
+
+/** For the surface where the key is entered, so "here" is true. */
+export function ignoredEnvironmentNote(variable: string): string {
+	return `${ignoredEnvironmentFact(variable)} Change the key here.`;
 }
 
 async function write(path: string, method: 'PUT' | 'POST', body: Record<string, string>): Promise<void> {

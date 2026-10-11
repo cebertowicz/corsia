@@ -8,8 +8,13 @@ from typing import Any
 from host_access.failure_reasons import (
     ACTIVATION_FAILED_STAGE,
     BROWSER_ISOLATION_FAILED_STAGE,
+    REVIEWER_UNAVAILABLE_REASON,
     is_holder_safe,
     safe_rejection,
+)
+from host_access.reviewer_target import REVIEWER_UNAVAILABLE_ERROR_KEY
+from host_access.reviewer_unavailable import (
+    application_guidance,
 )
 from host_access.supervisor import (
     release_requested_lease,
@@ -119,7 +124,8 @@ class RequestHostAccessTool(Tool):
             "lease_state_changed). A rejected application carries a fixed reason "
             "code, safe reason_category, and concrete guidance; its private "
             "reviewer text is withheld. Do not retry an unchanged request. "
-            "A blocked review failure reports its known stage without guessing. "
+            "A blocked review failure reports its known stage without guessing; "
+            "reviewer_unavailable adds guidance on when to retry. "
             "For an external-agent exception, submit only the exact literal "
             "command and canonical existing absolute working_directory; approval "
             "always awaits a human decision. If either changes, release_host_access({}) "
@@ -260,4 +266,8 @@ class RequestHostAccessTool(Tool):
             # Only bounded, trusted producer codes are forwarded. Reviewer
             # free text stays in the durable private record.
             payload["reason"] = terminal_reason
+            if terminal_reason == REVIEWER_UNAVAILABLE_REASON:
+                payload["guidance"] = application_guidance(
+                    lease.get(REVIEWER_UNAVAILABLE_ERROR_KEY)
+                )
         return json.dumps(payload, separators=(",", ":"))

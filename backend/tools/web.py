@@ -49,8 +49,7 @@ def _validate_url(url: str) -> tuple[bool, str]:
 class WebSearchTool(Tool):
     """Search the web using Brave Search API.
 
-    The key is resolved on every call (Settings › Keys, then the settings
-    value, then the environment), so a newly saved key works with no restart.
+    The key is resolved on every call (Settings › Keys only), so a newly saved key works with no restart.
     It goes only into this request's header; no text this tool returns
     carries it or the provider's error text.
     """

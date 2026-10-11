@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import json
 import sys
 from pathlib import Path
@@ -92,28 +91,20 @@ def test_models_text_names_each_model(calls, capsys):
     assert "GLM" in out and "hidden" in out and "claude-code/opus" in out
 
 
-def test_add_reads_the_key_from_a_named_env_var(calls, monkeypatch, capsys):
-    monkeypatch.setenv("PLAN_KEY", _KEY)
+def test_add_sends_no_key(calls, capsys):
     providers_cli.main(["add", "--name", "Plan", "--base-url", "https://plan.example/v1",
-                        "--dialect", "anthropic", "--model", "glm-5.3", "--model", "qwen3.8-flash",
-                        "--key-env", "PLAN_KEY"])
+                        "--dialect", "anthropic", "--model", "glm-5.3", "--model", "qwen3.8-flash"])
     (call,) = _writes(calls)
     assert call["method"] == "POST" and call["path"] == "/api/settings/network-servers"
     assert call["body"] == {"name": "Plan", "base_url": "https://plan.example/v1", "dialect": "anthropic",
-                            "model_ids": ["glm-5.3", "qwen3.8-flash"], "api_key": _KEY}
-    assert _KEY not in capsys.readouterr().out
+                            "model_ids": ["glm-5.3", "qwen3.8-flash"]}
 
 
-def test_add_reads_the_key_from_stdin(calls, monkeypatch):
-    monkeypatch.setattr(sys, "stdin", io.StringIO(_KEY + "\n"))
-    providers_cli.main(["add", "--name", "P", "--base-url", "https://p.example/v1", "--key-stdin"])
-    assert _writes(calls)[0]["body"]["api_key"] == _KEY
-
-
-def test_add_refuses_an_empty_key_source(calls, monkeypatch):
-    monkeypatch.delenv("EMPTY_KEY", raising=False)
+@pytest.mark.parametrize("flag", ["--key-stdin", "--key-env"])
+def test_add_has_no_key_flags(calls, flag):
+    argv = ["add", "--name", "P", "--base-url", "https://p.example/v1", flag]
     with pytest.raises(SystemExit) as exc:
-        providers_cli.main(["add", "--name", "P", "--base-url", "https://p.example/v1", "--key-env", "EMPTY_KEY"])
+        providers_cli.main(argv + (["X"] if flag == "--key-env" else []))
     assert exc.value.code == 2 and not _writes(calls)
 
 

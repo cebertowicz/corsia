@@ -6,7 +6,8 @@ or exports the database can carry one.
 
 ``key_store_entries`` holds what the Settings › Keys row shows: an added
 entry's name, label, description and who added it, and, for every entry, when
-its value was last set there. A built-in entry (web search) gets a row only to
+its value was last set there. ``value_ref`` names the entry's live value in the
+values file; NULL means none is set. A built-in entry (web search) gets a row only to
 carry that date; its label and use are fixed in code.
 
 ``key_write_attempts`` counts wrong passwords on key writes per session, keyed
@@ -25,7 +26,8 @@ KEY_STORE_SCHEMA_SQL = """
         added_by_thread_id TEXT,
         added_by_name TEXT,
         created_at TEXT NOT NULL,
-        set_at TEXT
+        set_at TEXT,
+        value_ref TEXT
     );
 
     CREATE TABLE IF NOT EXISTS key_write_attempts (

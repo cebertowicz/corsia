@@ -376,7 +376,7 @@ async def _run_lifespan_recovery(monkeypatch) -> None:
 
     monkeypatch.setattr(app_lifecycle, "init_db", lambda: None)
     monkeypatch.setattr(durable_writes, "recover_write_intents", lambda **kw: None)
-    monkeypatch.setattr("infra.settings.bootstrap_env", _stop)
+    monkeypatch.setattr("app_startup_workspace.initialize_workspace", _stop)
     try:
         async with app_lifecycle.lifespan(None):
             pass

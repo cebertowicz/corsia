@@ -98,7 +98,7 @@ def _objects(db, table: str) -> dict[str, str]:
 
 
 def test_the_step_is_registered_and_106_is_current() -> None:
-    assert SCHEMA_VERSION == 106
+    assert SCHEMA_VERSION == 109
     assert MIGRATIONS[105] is step.migrate_105_to_106
 
 
@@ -109,7 +109,7 @@ def test_a_migrated_database_has_the_shape_of_a_fresh_one() -> None:
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 105, 106)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 105, SCHEMA_VERSION)
     for table in ("plan_nodes", "plans"):
         assert _columns(db, table) == _columns(fresh, table), table
         assert _objects(db, table) == _objects(fresh, table), table

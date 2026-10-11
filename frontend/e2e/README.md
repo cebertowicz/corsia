@@ -160,10 +160,14 @@ respond in <5s on a cold boot.
 
 ### 6. Real LLM provider keys in CI.
 
-Flows 1 and 3 require a real LLM round-trip. CI must inject
-`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (or both) as repo secrets;
-without them the providers won't resolve and the spec hangs until the
-60s ceiling. The workflow at `.github/workflows/e2e.yml` plumbs both.
+Flows 1 and 3 require a real LLM round-trip. a real-model run
+needs the provider key in the key store of the run's state root, not in the
+process environment. `scripts/e2e-local` seeds it through
+`scripts/seed-worktree-db` from `CORSIA_SEED_PROVIDER_API_KEY`, or else the
+provider's own `<PROVIDER>_API_KEY` variable in the seeding shell. Without a
+key the providers won't resolve and the spec hangs until the 60s ceiling.
+The CI workflow `.github/workflows/e2e.yml` runs the mock model and injects
+no key.
 
 ---
 

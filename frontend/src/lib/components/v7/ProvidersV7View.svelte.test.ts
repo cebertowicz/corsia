@@ -58,6 +58,30 @@ describe('ProvidersV7View card request', () => {
 		expect(methods.every((init) => (init?.method ?? 'GET') === 'GET')).toBe(true);
 	});
 
+	it('opens the requested server card when the request names a server id', async () => {
+		vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})));
+		const scrolled = vi.fn();
+		Element.prototype.scrollIntoView = scrolled;
+		const onServer = (id: string): HostProvider => ({
+			name: 'omlx', label: 'oMLX', type: 'network', statusDot: 'online', subline: id,
+			raw: { name: 'omlx', label: 'oMLX' } as HostProvider['raw'],
+			server: { id, provider: 'omlx', kind: 'managed', instance_name: id, endpoints: [] } as unknown as HostProvider['server'],
+		});
+		hostGroupSnapshot.set([{
+			key: 'lan', name: 'LAN', subname: '', netKind: 'lan',
+			providers: [onServer('ns-1'), onServer('ns-2')],
+		} as HostGroup]);
+		providerCardRequest.set('ns-2');
+
+		component = mount(ProvidersV7View, { target: document.body });
+		flushSync();
+		await tick();
+
+		expect(document.querySelector('[data-server-card="ns-2"]')?.classList.contains('expanded')).toBe(true);
+		expect(document.querySelector('[data-server-card="ns-1"]')?.classList.contains('expanded')).toBe(false);
+		expect(scrolled).toHaveBeenCalledOnce();
+	});
+
 	it('renders a keyed cloud provider that is switched off with the off dot, off subline and off switch', async () => {
 		vi.stubGlobal('fetch', vi.fn(() => new Promise<never>(() => {})));
 		const cloud = (name: string, label: string, enabled: boolean) => ({
