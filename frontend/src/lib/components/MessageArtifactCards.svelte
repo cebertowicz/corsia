@@ -45,7 +45,10 @@
 	const accessibleName = (card: MessageCard): string =>
 		[card.title, typeWord(card), stateLabel(card)].filter(Boolean).join(', ');
 
-	function open(card: MessageCard): void {
+	function open(card: MessageCard, event: MouseEvent): void {
+		// The chat column marks chat the active surface on any click inside it; bubbling there would
+		// flip the artifact just opened back to chat, which on a narrow canvas hides it.
+		event.stopPropagation();
 		if (!threadId || !card.path) return;
 		openArtifactTab(threadId, { artifactId: card.artifact_id, path: card.path, title: card.name ?? card.title });
 		// The pane is a drawer on narrow canvases; leaving it open would cover the document.
@@ -87,7 +90,7 @@
 						data-card-state={card.state ?? ''}
 						title={card.title}
 						aria-label={accessibleName(card)}
-						onclick={() => open(card)}
+						onclick={(event) => open(card, event)}
 					>{@render face(card)}</button>
 				{:else}
 					<div
