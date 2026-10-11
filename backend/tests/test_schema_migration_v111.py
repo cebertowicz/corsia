@@ -1,11 +1,10 @@
-"""Schema v111 clears an agent-use restriction that only an endpoint's name put there.
+"""Schema v111 clears an agent-use restriction from endpoints off a Token Plan host.
 
-The claims: an endpoint named "Token Plan" on an ordinary host, marked
-``interactive_only`` by the earlier name-or-host rule, reads ``allowed`` again;
-an endpoint on a Token Plan host keeps its restriction; an endpoint whose name
-does not say "Token Plan" keeps whatever it stores; non-object metadata is left
-alone; and the upgraded store matches what a fresh registration stores. Every
-value here is synthetic.
+The claims: an endpoint on an ordinary host marked ``interactive_only`` by the
+earlier name-or-host rule reads ``allowed`` again, including one renamed since it
+was marked; an endpoint on a Token Plan host keeps its restriction; an explicit
+``allowed`` stays; non-object metadata is left alone; and the upgraded store
+matches what a fresh registration stores. Every value here is synthetic.
 """
 
 from __future__ import annotations
@@ -33,14 +32,15 @@ def test_the_step_is_registered_and_current():
     assert MIGRATIONS[110] is migrate_110_to_111
 
 
-def test_v110_upgrade_unmarks_a_token_plan_name_on_an_ordinary_host(isolated_db):
+def test_v110_upgrade_unmarks_every_ordinary_host(isolated_db):
     from infra.database import get_db
     from llm.endpoint_policy import endpoint_agent_use
 
     db = get_db()
     _insert(db, "named-only", "Token Plan (Beijing)", {"base_url": _ORDINARY, "agent_use_restriction": "interactive_only"})
     _insert(db, "by-host", "Alibaba Token Plan", {"base_url": _TOKEN_PLAN, "agent_use_restriction": "interactive_only"})
-    _insert(db, "other-name", "Workspace", {"base_url": _ORDINARY, "agent_use_restriction": "interactive_only"})
+    # Marked while named "Token Plan", then re-added under a new name: the mark survives the rename.
+    _insert(db, "renamed", "Workspace", {"base_url": _ORDINARY, "agent_use_restriction": "interactive_only"})
     _insert(db, "named-allowed", "Token Plan", {"base_url": _ORDINARY, "agent_use_restriction": "allowed"})
     db.execute("PRAGMA user_version=110")
     db.commit()
@@ -49,10 +49,10 @@ def test_v110_upgrade_unmarks_a_token_plan_name_on_an_ordinary_host(isolated_db)
 
     assert (result.migrated, result.from_version, result.to_version) == (True, 110, 111)
     rows = {sid: json.loads(raw) for sid, raw in db.execute("SELECT id, metadata_json FROM network_servers")}
-    assert rows["named-only"] == {"base_url": _ORDINARY}
+    assert rows["named-only"] == rows["renamed"] == {"base_url": _ORDINARY}
     assert endpoint_agent_use("external@named-only/glm-5.3") == "allowed"
+    assert endpoint_agent_use("external@renamed/glm-5.3") == "allowed"
     assert endpoint_agent_use("external@by-host/glm-5.3") == "interactive_only"
-    assert endpoint_agent_use("external@other-name/glm-5.3") == "interactive_only"
     assert endpoint_agent_use("external@named-allowed/glm-5.3") == "allowed"
     assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 

@@ -1,4 +1,4 @@
-"""Clear the agent-use restriction that an endpoint's name alone put there."""
+"""Clear the agent-use restriction from endpoints that are not on a Token Plan host."""
 
 from __future__ import annotations
 
@@ -8,15 +8,17 @@ from llm.endpoint_policy import registration_default
 
 
 def migrate_110_to_111(conn) -> None:
-    """Unmark endpoints restricted only because their name said "Token Plan".
+    """Unmark external endpoints whose host is not a Token Plan host.
 
     Migration 109→110 and registration first recognised a Token Plan endpoint by its
     name or its host; they now read the host only. An install that ran the earlier
     rule can hold ``interactive_only`` on an endpoint whose host is not a Token Plan
-    host, purely because of its free-text name. This removes that value, so the
-    endpoint reads as one that declared nothing, the state a fresh install stores
-    for it. Endpoints on a Token Plan host, and names without "Token Plan", are
-    left alone.
+    host, because of the name it had when it was marked. That name may since have
+    changed, since re-adding the same base URL overwrites it while the stored
+    restriction survives, so the current name cannot tell which marks the name rule
+    made. This removes ``interactive_only`` from every external endpoint off a Token
+    Plan host, so it reads as one that declared nothing, the state a fresh install
+    stores for it. Endpoints on a Token Plan host are left alone.
     """
     table = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='network_servers'"
@@ -24,11 +26,9 @@ def migrate_110_to_111(conn) -> None:
     if table is None:
         return
     rows = conn.execute(
-        "SELECT id,instance_name,metadata_json FROM network_servers WHERE provider='external'"
+        "SELECT id,metadata_json FROM network_servers WHERE provider='external'"
     ).fetchall()
-    for server_id, name, raw in rows:
-        if "token plan" not in (name or "").casefold():
-            continue
+    for server_id, raw in rows:
         try:
             metadata = json.loads(raw or "{}")
         except (TypeError, ValueError):
