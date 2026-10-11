@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
 import { agentsBody, createAgent, createProject } from '../support/measurement-fixture';
+import { waitForMainSlideToSettle } from '../support/sidebar';
 
 /**
  * The Models section at phone width.
@@ -111,11 +112,18 @@ function serveModels(mode: ModelsOutcome) {
 async function openMeasurement(page: import('@playwright/test').Page) {
 	// At phone width the rail is collapsed, so Measurement lives behind the sidebar
 	// toggle; on a wide viewport it is already on screen.
-	if ((page.viewportSize()?.width ?? 0) <= 768) {
+	const phone = (page.viewportSize()?.width ?? 0) <= 768;
+	if (phone) {
 		await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
 	}
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 	await expect(page.locator('.shell-header .h-title')).toHaveText('All work', { timeout: 20_000 });
+	if (phone) {
+		// Following the link closes the rail and slides the main surface back; a box read
+		// mid-slide sits up to the rail's width to the right, so measure only once it has landed.
+		await expect(page.locator('aside.sidebar'), 'the phone rail closed after navigation').not.toHaveClass(/\bopen\b/);
+		await waitForMainSlideToSettle(page);
+	}
 	// The page opens on All work, which shows every chart, Models inside the Cost card.
 	const section = page.locator('section.models');
 	await expect(section).toBeVisible({ timeout: 20_000 });
