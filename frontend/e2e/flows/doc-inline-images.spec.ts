@@ -23,6 +23,7 @@ const DOC = [
 ].join('\n');
 
 test.describe('@flow:doc-inline-images @surface:documents markdown images render inside a document', () => {
+	test.use({ hasTouch: true });
 	for (const width of WIDTHS) {
 		test(`draws relative images in the document canvas at ${width}px without contacting a web server`, async ({ page, request }, testInfo) => {
 			test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
@@ -116,7 +117,9 @@ test.describe('@flow:doc-inline-images @surface:documents markdown images render
 				}
 
 				// A click selects the image whole, with a selected state, and its markdown never shows.
-				await images.first().click();
+				// On the phone width the image is tapped, so the touch path is proven, not only a mouse click.
+				if (width <= 768) await images.first().tap();
+				else await images.first().click();
 				await saveEvidenceScreenshot(page, testInfo, `doc-inline-images-${width}-selected`, { fullPage: false });
 				await expect(page.locator('.cm-md-image-selected img')).toHaveCount(1);
 				await expect(page.getByRole('button', { name: 'Comment', exact: true }).last()).toBeVisible();

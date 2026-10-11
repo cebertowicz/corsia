@@ -76,7 +76,7 @@ export const docTheme = EditorView.theme({
 	// An image sits at its own size, scaled down to the column and never up; padding, not margin, as above.
 	'.cm-md-image': { padding: '0.4em 0' },
 	'.cm-md-image img': { display: 'block', maxWidth: '100%', height: 'auto' },
-	'.cm-md-image-selected img, .cm-md-image-selected .cm-md-image-note': { outline: '2px solid var(--accent)', outlineOffset: '2px' },
+	'.cm-md-image-selected img, .cm-md-image-selected .cm-md-image-note': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	'.cm-md-image-note': { color: 'var(--text-tertiary)' },
 
 	'.cm-comment-anchor': {
