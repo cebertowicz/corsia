@@ -190,6 +190,10 @@
 		.filter { white-space: normal; overflow-wrap: normal; word-break: normal; }
 		thead th { white-space: normal; overflow-wrap: normal; word-break: normal; font-size: var(--text-caption); }
 		.sort { white-space: normal; }
+		/* Fixed table layout otherwise divides the unconstrained first three columns
+		   evenly, leaving too little room for an unbroken agent-name word. */
+		thead th:first-child { width: 28%; }
+		thead th:nth-child(2), thead th:nth-child(3) { width: 10%; }
 		thead th.cost { width: 17%; }
 		thead th.change { width: 35%; }
 	}
