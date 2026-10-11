@@ -279,7 +279,7 @@ describe('MeasurementAgentsTable', () => {
 		expect(wrap?.getAttribute('aria-label')).toContain('Agents table');
 	});
 
-	it('gives the two long headers room for two or three lines at 430px and under, without changing their text', () => {
+	it('keeps every column in view at 430px and under: names and headers wrap between words, the long headers get narrow columns', () => {
 		render(state([agentRow()]));
 		const headers = [...host.querySelectorAll('thead th')];
 		expect(headers[3].classList.contains('cost') && headers[3].textContent).toBe('$ per hour of work');
@@ -288,7 +288,14 @@ describe('MeasurementAgentsTable', () => {
 		const at = css.indexOf('@media (max-width: 430px)');
 		expect(at, 'a phone block exists').toBeGreaterThan(-1);
 		const phone = css.slice(at, css.indexOf('\n\t}', at));
-		expect(phone).toContain('thead th.cost { min-width: 11ch; }');
-		expect(phone).toContain('thead th.change { min-width: 20ch; }');
+		// No floor on the table or the headers, so the columns share the width instead of scrolling past the edge.
+		expect(phone).toContain('table { min-width: 0; }');
+		expect(phone).not.toContain('min-width: 11ch');
+		expect(phone).not.toContain('min-width: 20ch');
+		// A name wraps between its words and a header wraps too; neither may break inside a word.
+		expect(phone).toContain('tbody th { white-space: normal; }');
+		expect(phone).toMatch(/\.filter \{[^}]*white-space: normal;[^}]*word-break: normal;/);
+		expect(phone).toMatch(/thead th \{[^}]*white-space: normal;[^}]*word-break: normal;/);
+		expect(phone).toContain('thead th.change { width: 25%; }');
 	});
 });

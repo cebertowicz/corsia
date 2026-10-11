@@ -182,10 +182,21 @@
 	.skeleton { height: 120px; border-radius: var(--radius-xs); background: var(--bg-hover); animation: pulse 1.2s ease-in-out infinite alternate; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	/* Phone: the two long headers keep room for two or three lines instead of one word per line; the box scrolls sideways for the rest. */
+	/* Phone: every column stays in view. Names and headers wrap between words (never inside one), the figures stay on one line, and the long change header gets a narrow column of its own. */
 	@media (max-width: 430px) {
-		thead th.cost { min-width: 11ch; }
-		thead th.change { min-width: 20ch; }
+		table { min-width: 0; }
+		th, td { padding: 6px 3px; }
+		tbody th { white-space: normal; }
+		.filter { white-space: normal; overflow-wrap: normal; word-break: normal; }
+		thead th { white-space: normal; overflow-wrap: normal; word-break: normal; }
+		.sort { white-space: normal; }
+		thead th.cost { width: 17%; }
+		thead th.change { width: 25%; }
+	}
+	/* The narrowest phones: a smaller body size keeps the longest name ("Infrastructure") from pushing the last column out. */
+	@media (max-width: 380px) {
+		table { font-size: var(--text-footnote); }
+		th, td { padding: 6px 2px; }
 	}
 	@keyframes pulse { to { opacity: .55; } }
 </style>
