@@ -624,10 +624,18 @@ async def test_provider_outage_stops_after_one_call_and_leaves_the_backlog_pendi
 
 
 @pytest.mark.asyncio
-async def test_timeout_skips_one_pending_message_and_continues_to_the_next(isolated_db, monkeypatch):
-    from infra.settings import set_setting
+@pytest.mark.parametrize("error_name", ["IsolatedStructuredTimeoutError", "IsolatedStructuredError"])
+async def test_a_per_message_failure_is_counted_and_the_run_continues_to_older(
+    isolated_db, monkeypatch, error_name,
+):
+    # A timeout or a failure inside one response (the base error class) belongs
+    # to that message: it must not stop the run as if the provider were down,
+    # and the run must not report a clean drain while it stays pending.
+    from infra.settings import get_setting, set_setting
     from jobs import corrections_recording as job
-    from llm.isolated_structured import IsolatedStructuredTimeoutError
+    from llm import isolated_structured
+
+    error = getattr(isolated_structured, error_name)
 
     db = _db()
     try:
@@ -645,12 +653,13 @@ async def test_timeout_skips_one_pending_message_and_continues_to_the_next(isola
         prompt = kwargs["user_prompt"]
         calls.append(prompt)
         if "newer correction" in prompt:
-            raise IsolatedStructuredTimeoutError("slow")
+            raise error("Native isolated inference attempted a tool")
         return kwargs["validator"]({"label": "correction", "reason": "It corrects the delivery."})
 
     result = await job.run_corrections_recording(batch_size=2, invoke=timeout_then_record)
 
-    assert result == {"status": "ok", "processed": 1, "recorded": 1, "refused": 0, "failed": 0}
+    assert result == {"status": "partial", "processed": 2, "recorded": 1, "refused": 0, "failed": 1}
+    assert get_setting("corrections_recording_status")["stop_reason"] == "empty"
     assert ["newer correction" in prompt for prompt in calls] == [True, False]
     pending = await job._next_pending_batch(job.checker_version("model-a"), 20, None)
     assert [candidate.message_id for candidate in pending.candidates] == ["newer"]

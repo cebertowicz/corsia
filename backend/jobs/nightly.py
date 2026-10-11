@@ -218,13 +218,11 @@ async def _reap_worktrees_safely() -> None:
 
 
 def _log_manual_corrections_drain(task: asyncio.Task[None]) -> None:
-    """Observe a detached manual drain so its failure cannot be lost."""
+    """Observe a detached manual drain; the drain logs its own failures."""
     try:
         task.result()
     except asyncio.CancelledError:
         logger.info("nightly_job: manual corrections recording cancelled")
-    except Exception as exc:
-        logger.opt(exception=exc).error("nightly_job: manual corrections recording task failed")
 
 
 async def nightly_job_loop() -> None:

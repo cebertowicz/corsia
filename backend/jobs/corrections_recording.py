@@ -37,9 +37,11 @@ from jobs.corrections_scanning import (
 from llm.isolated_contract import IsolatedStructuredTelemetry
 from llm.isolated_structured import (
     IsolatedStructuredContextOverflowError,
-    IsolatedStructuredError,
+    IsolatedStructuredIdentityError,
     IsolatedStructuredOutputTruncatedError,
-    IsolatedStructuredTimeoutError,
+    IsolatedStructuredProviderError,
+    IsolatedStructuredRateLimitError,
+    IsolatedStructuredUnavailableError,
     invoke_isolated_structured,
 )
 
@@ -203,8 +205,8 @@ async def _classify_and_record(
 ) -> str:
     """Classify one candidate and write its fact.
 
-    Returns "recorded", "refused", "failed", "skipped", "provider_unavailable",
-    or "duplicate" when the fact already existed and nothing was inserted.
+    Returns "recorded", "refused", "failed", "provider_unavailable", or
+    "duplicate" when the fact already existed and nothing was inserted.
     """
     try:
         classification = await invoke(
@@ -230,14 +232,16 @@ async def _classify_and_record(
         logger.warning(
             "corrections recording refused {}: {}", candidate.message_id, classification["reason"],
         )
-    except IsolatedStructuredTimeoutError as exc:
-        # One slow request is retryable per-message; keep it pending while this
-        # bounded run continues so newer-first selection cannot starve the backlog.
-        logger.warning("corrections recording skipped {}: {}", candidate.message_id, type(exc).__name__)
-        return "skipped"
-    except IsolatedStructuredError as exc:
-        # Provider failures affect the whole backlog: leave this message pending
-        # and stop the run so a temporary outage cannot consume its time budget.
+    except (
+        IsolatedStructuredRateLimitError,
+        IsolatedStructuredProviderError,
+        IsolatedStructuredUnavailableError,
+        IsolatedStructuredIdentityError,
+    ) as exc:
+        # Only these say the provider itself cannot serve: leave this message
+        # pending and stop the run so an outage cannot consume its time budget.
+        # Every other failure (a timeout included) belongs to this one message:
+        # it counts as failed, stays pending, and the run moves on to older ones.
         logger.warning("corrections recording provider unavailable {}: {}", candidate.message_id, type(exc).__name__)
         return "provider_unavailable"
     except Exception:
@@ -350,8 +354,7 @@ async def run_corrections_recording(
                     return await _finish_run(
                         counts, "provider_unavailable", status="provider_unavailable",
                     )
-                if outcome != "skipped":
-                    counts[outcome] += 1
+                counts[outcome] += 1
     except asyncio.CancelledError:
         await _finish_run(counts, "shutdown", status="cancelled")
         raise
