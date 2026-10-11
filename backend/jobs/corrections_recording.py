@@ -41,6 +41,7 @@ from llm.isolated_structured import (
     IsolatedStructuredOutputTruncatedError,
     IsolatedStructuredProviderError,
     IsolatedStructuredRateLimitError,
+    IsolatedStructuredTimeoutError,
     IsolatedStructuredUnavailableError,
     invoke_isolated_structured,
 )
@@ -49,6 +50,12 @@ DEFAULT_BATCH_SIZE = 20
 # Four hours bounds a deliberate drain while the scheduler continues to service
 # maintenance triggers; at the 60-second call timeout it permits at least 240 calls.
 RUN_TIME_BUDGET_SECONDS = 4 * 60 * 60
+# A provider error or timeout may belong to one message (a rejected request) or
+# to the provider (an outage or hang); the exception type cannot tell which.
+# Consecutive failed calls across different messages can: three in a row stop
+# the run, so one poison message never blocks the backlog and an outage costs
+# at most three calls (three minutes at the call timeout).
+PROVIDER_FAILURE_STREAK = 3
 # Fortissimo reasons by default (as in the gated run), so the cap must leave room
 # for thinking plus the verdict; the 60s call timeout bounds it (~80 tok/s).
 CLASSIFIER_MAX_OUTPUT_TOKENS = 4096
@@ -205,8 +212,10 @@ async def _classify_and_record(
 ) -> str:
     """Classify one candidate and write its fact.
 
-    Returns "recorded", "refused", "failed", "provider_unavailable", or
-    "duplicate" when the fact already existed and nothing was inserted.
+    Returns "recorded", "refused", "failed" (our write failed),
+    "call_failed" (the checker call failed; the message stays pending),
+    "provider_unavailable", or "duplicate" when the fact already existed and
+    nothing was inserted.
     """
     try:
         classification = await invoke(
@@ -234,20 +243,23 @@ async def _classify_and_record(
         )
     except (
         IsolatedStructuredRateLimitError,
-        IsolatedStructuredProviderError,
         IsolatedStructuredUnavailableError,
         IsolatedStructuredIdentityError,
     ) as exc:
-        # Only these say the provider itself cannot serve: leave this message
-        # pending and stop the run so an outage cannot consume its time budget.
-        # Every other failure (a timeout included) belongs to this one message:
-        # it counts as failed, stays pending, and the run moves on to older ones.
+        # Only these say the provider itself cannot serve whatever is asked:
+        # leave this message pending and stop the run.
         logger.warning("corrections recording provider unavailable {}: {}", candidate.message_id, type(exc).__name__)
         return "provider_unavailable"
+    except (IsolatedStructuredProviderError, IsolatedStructuredTimeoutError) as exc:
+        # Ambiguous between this message and the provider: the run's failure
+        # streak decides (PROVIDER_FAILURE_STREAK).
+        logger.warning("corrections recording call failed {}: {}", candidate.message_id, exc)
+        await run_in_db(_record_failure)
+        return "call_failed"
     except Exception:
         logger.exception("corrections recording failed {}", candidate.message_id)
         await run_in_db(_record_failure)
-        return "failed"
+        return "call_failed"
     try:
         inserted = await run_in_db(_record_fact, candidate, classification, version)
     except Exception:
@@ -342,6 +354,7 @@ async def run_corrections_recording(
     counts = {"recorded": 0, "refused": 0, "failed": 0, "duplicate": 0}
     before: tuple[str, str] | None = None
     version, started_at = checker_version(model_id), clock()
+    failure_streak = 0
     try:
         while clock() - started_at < time_budget_seconds:
             batch = await _next_pending_batch(version, batch_size, before)
@@ -349,12 +362,23 @@ async def run_corrections_recording(
                 return await _finish_run(counts, "empty")
             before = batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id
             for candidate in batch.candidates:
+                if clock() - started_at >= time_budget_seconds:
+                    return await _finish_run(counts, "budget")
                 outcome = await _classify_and_record(candidate, target, binary, version, invoke)
                 if outcome == "provider_unavailable":
                     return await _finish_run(
                         counts, "provider_unavailable", status="provider_unavailable",
                     )
-                counts[outcome] += 1
+                if outcome != "call_failed":
+                    failure_streak = 0
+                    counts[outcome] += 1
+                    continue
+                counts["failed"] += 1
+                failure_streak += 1
+                if failure_streak >= PROVIDER_FAILURE_STREAK:
+                    return await _finish_run(
+                        counts, "provider_unavailable", status="provider_unavailable",
+                    )
     except asyncio.CancelledError:
         await _finish_run(counts, "shutdown", status="cancelled")
         raise
