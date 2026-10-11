@@ -36,6 +36,7 @@ A reversible change usually ends at the first or second stage: at most 20 sample
 
 ## 3. Keep the stages honest
 
+- Before reading any stage, confirm the change actually reached the actor in each arm (its delivered context or input), not just the brief.
 - Inputs match what the real actor sees at that moment. Keep answers, labels and later information out of what is being tested.
 - Change one thing between arms. If several things change together, claim only the combined change.
 - Count every cost: setup, failures, retries, helpers and evaluation. Unknown cost is not zero. Set a spend ceiling for the whole experiment before stage one.
