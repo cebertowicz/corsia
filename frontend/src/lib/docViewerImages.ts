@@ -26,6 +26,8 @@ interface DocViewerImagesOptions {
 	session: () => LiveDocumentSession | undefined;
 	accent: () => string | null;
 	feedback: () => DocFeedback | undefined;
+	/** Shows a comment at its place in the document, for a drawer group whose image does not open. */
+	showInText: (id: string) => void;
 }
 
 /**
@@ -69,7 +71,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	const groups = {
 		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '' }) : null),
 		colorOf: (comment: DocComment) => regionColor(comment, projectId(), options.accent()),
-		onOpen: (comment: DocComment, focus?: Focus) => openOr([comment.id], focus, () => {}),
+		onOpen: (comment: DocComment, focus?: Focus) => openOr([comment.id], focus, () => options.showInText(comment.id)),
 	};
 	return { open, openOr, remap, groups };
 }

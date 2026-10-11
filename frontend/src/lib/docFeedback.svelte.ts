@@ -1,3 +1,4 @@
+import { onDestroy, untrack } from 'svelte';
 import {
 	leaveDocFeedback,
 	retryDocFeedback,
@@ -19,8 +20,8 @@ const DELIVERY_REASONS: Record<string, string> = {
 
 /**
  * One open document's feedback batch as the user sees it: the comments waiting to go to its owner, the Send that
- * closes the batch, and what could not be delivered. The document's status row owns it (and its leaving); an image
- * viewer over the document shows and sends the same batch (DCOL-FR13.12).
+ * closes the batch, and what could not be delivered. The open tab holds it (`holdDocFeedback`); an image viewer over
+ * a document shows and sends the document's batch (DCOL-FR13.12).
  */
 export class DocFeedback {
 	artifactId = $state<string | null>(null);
@@ -125,4 +126,39 @@ export class DocFeedback {
 			console.error('feedback leave failed', error);
 		});
 	};
+}
+
+/**
+ * The batch for the target `of()` names, held for as long as the calling component (the open tab) is mounted, so
+ * reloading what the tab shows is not leaving it. Leaving is another target, a hidden browser tab, closing the page,
+ * or the component going. `onReturn` runs when the browser tab shows again. Call while the component initialises.
+ */
+export function holdDocFeedback(
+	of: () => { artifactId: string | null; targetInstanceId: string | null },
+	onReturn?: () => void,
+): DocFeedback {
+	const feedback = new DocFeedback();
+	$effect(() => {
+		const { artifactId, targetInstanceId } = of();
+		untrack(() => feedback.show(artifactId, targetInstanceId));
+	});
+	$effect(() => {
+		if (!feedback.graceDeadline) return;
+		const timer = setInterval(() => { feedback.countdownNow = Date.now(); }, 30_000);
+		return () => clearInterval(timer);
+	});
+	$effect(() => {
+		const visibility = () => {
+			if (document.visibilityState === 'hidden') feedback.leave();
+			if (document.visibilityState === 'visible') onReturn?.();
+		};
+		window.addEventListener('visibilitychange', visibility);
+		window.addEventListener('beforeunload', feedback.leave);
+		return () => {
+			window.removeEventListener('visibilitychange', visibility);
+			window.removeEventListener('beforeunload', feedback.leave);
+		};
+	});
+	onDestroy(feedback.leave);
+	return feedback;
 }

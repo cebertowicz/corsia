@@ -4,6 +4,7 @@ import type { Writable } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({
 	fetchComments: vi.fn(),
+	fetchRevision: vi.fn(),
 	send: vi.fn(),
 	leave: vi.fn(),
 	ret: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
 vi.mock('$lib/api/docs', () => ({
 	fetchComments: mocks.fetchComments,
+	fetchRevision: mocks.fetchRevision,
 	postComment: vi.fn(),
 	patchComment: vi.fn(),
 	persistPositions: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock('$lib/stores/viewport', async () => {
 
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import DocFeedbackStatus from './DocFeedbackStatus.svelte';
+import ImageViewer from './ImageViewer.svelte';
 import { docComments } from '$lib/stores/docComments';
 import { isMobile } from '$lib/stores/viewport';
 
@@ -51,16 +54,30 @@ function host() {
 	hosts.push(element);
 	return element;
 }
-async function viewer(props: ComponentProps<typeof ImageCommentLightbox>) {
-	const target = host();
-	const component = mount(ImageCommentLightbox, { target, props });
-	mounted.push(component);
+async function drawn(target: HTMLElement) {
 	await settle();
 	const img = target.querySelector<HTMLImageElement>('.pad img')!;
 	Object.defineProperty(img, 'naturalWidth', { configurable: true, value: 1000 });
 	Object.defineProperty(img, 'naturalHeight', { configurable: true, value: 500 });
 	img.dispatchEvent(new Event('load'));
 	await settle();
+}
+async function viewer(props: ComponentProps<typeof ImageCommentLightbox>) {
+	const target = host();
+	const component = mount(ImageCommentLightbox, { target, props });
+	mounted.push(component);
+	await drawn(target);
+	return { target, component };
+}
+/** An image artifact in its own tab, which holds the image's batch for as long as the tab is open. */
+async function imageTab() {
+	const target = host();
+	const component = mount(ImageViewer, {
+		target,
+		props: { target: { instanceId: 'tab-img', path: '/ws/shot.png', name: 'shot.png', projectId: null, threadId: null, artifactId: 'art-img' } },
+	}) as unknown as { reload: () => void };
+	mounted.push(component as unknown as Record<string, unknown>);
+	await drawn(target);
 	return { target, component };
 }
 /** The document's own status row, which owns its batch while the viewer is over it. */
@@ -92,6 +109,7 @@ beforeEach(() => {
 	docComments.set({});
 	for (const mock of [mocks.send, mocks.leave, mocks.ret, mocks.retry]) mock.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.fetchComments.mockReset().mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(0) });
+	mocks.fetchRevision.mockReset().mockResolvedValue({ exists: true, path: '/ws/shot.png', revision: 'r-1', media_type: 'image/png', artifact_id: 'art-img' });
 });
 afterEach(() => {
 	for (const component of mounted.reverse()) unmount(component);
@@ -119,7 +137,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const send = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(send.textContent!.trim()).toBe('Send 2 comments to Design');
+		expect(send.getAttribute('aria-label')).toBe('Send 2 comments to Design');
 		send.click();
 		await settle();
 
@@ -154,15 +172,19 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		await settle();
 		shown.target.querySelector<HTMLButtonElement>('button.submit')!.click();
 		await settle();
-		expect(sendIn(shown.target.querySelector('.bar')!)!.textContent!.trim()).toBe('Send 1 comment to Design');
+		// The bar is narrow at any window size: Send is short there and read out in full; the document row spells it out.
+		const inBar = sendIn(shown.target.querySelector('.bar')!)!;
+		expect(inBar.textContent!.trim()).toBe('Send 1');
+		expect(inBar.getAttribute('aria-label')).toBe('Send 1 comment to Design');
 		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment to Design');
 	});
 
 	it('keeps an image artifact’s own batch, sent to its owner from the bar', async () => {
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1) });
-		const shown = await viewer({ src: SRC, alt: 'Mock', artifactId: 'art-img' });
+		const shown = await imageTab();
 		const send = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(send.textContent!.trim()).toBe('Send 1 comment to Design');
+		expect(send.textContent!.trim()).toBe('Send 1');
+		expect(send.getAttribute('aria-label')).toBe('Send 1 comment to Design');
 		send.click();
 		await settle();
 		expect(mocks.send).toHaveBeenCalledWith('art-img');
@@ -170,14 +192,37 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 	});
 
 	it('shows nothing to send until comments are pending', async () => {
-		const shown = await viewer({ src: SRC, alt: 'Mock', artifactId: 'art-img' });
+		const shown = await imageTab();
 		expect(sendIn(shown.target)).toBeNull();
+	});
+
+	it('reloading an image artifact is not leaving it: its batch stays pending', async () => {
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1) });
+		const shown = await imageTab();
+		expect(sendIn(shown.target.querySelector('.bar')!)!.textContent!.trim()).toBe('Send 1');
+
+		mocks.fetchRevision.mockResolvedValue({ exists: true, path: '/ws/shot.png', revision: 'r-2', media_type: 'image/png', artifact_id: 'art-img' });
+		shown.component.reload();
+		await drawn(shown.target);
+
+		expect(mocks.leave).not.toHaveBeenCalled();
+		expect(sendIn(shown.target.querySelector('.bar')!)!.textContent!.trim()).toBe('Send 1');
+		// Closing the tab is leaving it.
+		unmount(shown.component as unknown as Record<string, unknown>);
+		mounted = mounted.filter((component) => component !== (shown.component as unknown));
+		await settle();
+		expect(mocks.leave).toHaveBeenCalledWith('art-img');
 	});
 
 	it('on a phone, a short Send that reads out in full beside Back, Fit, Comment and the count', async () => {
 		(isMobile as Writable<boolean>).set(true);
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(2) });
-		const shown = await viewer({ src: SRC, alt: 'Mock', artifactId: 'art-img', onBack: vi.fn() });
+		const doc = documentStatus();
+		doc.component.sync('art-doc', pending(2));
+		const shown = await viewer({
+			src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(),
+			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
+		});
 		const bar = shown.target.querySelector('.bar')!;
 		const send = sendIn(bar)!;
 		expect(send.textContent!.trim()).toBe('Send 2');

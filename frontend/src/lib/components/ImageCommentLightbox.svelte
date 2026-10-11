@@ -9,9 +9,7 @@
 	import ImageCommentBar from './ImageCommentBar.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
-	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
-	import { isMobile } from '$lib/stores/viewport';
 	import { createImageComments } from '$lib/imageComments.svelte';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
 	import type { ImageRegion } from '$lib/imageRegions';
@@ -42,8 +40,8 @@
 		/** Opened on this comment: its card shows at its tag, or with `move` its pin is placed again. */
 		focus?: { id: string; move?: boolean } | null;
 		/**
-		 * The document's feedback batch, for an image inside one: the bar shows its pending-send status and Send, and
-		 * going Back is not leaving it (DCOL-FR13.12). Without it an image artifact's own batch is kept here.
+		 * The batch the bar shows pending-send status and Send for (DCOL-FR13.12): the document's, for an image inside
+		 * one (so going Back is not leaving it), or an image artifact's own, held by its tab (so a reload is not either).
 		 */
 		feedback?: DocFeedback | null;
 		/** A new comment has text, so the review bar must not answer over it. */
@@ -61,10 +59,12 @@
 	const accent = $derived($projects.find((project) => project.id === projectId)?.accent_color ?? null);
 	const colorOf = (comment: DocComment) => regionColor(comment, projectId, accent);
 	const canComment = $derived(!readOnly && !!artifactId);
-	let ownFeedback = $state<ReturnType<typeof DocFeedbackStatus>>();
-	const batch = () => feedback ?? ownFeedback?.controller();
 	function reload(id: string) {
-		void loadComments(id).then((current) => batch()?.sync(id, current)).catch(() => undefined);
+		void loadComments(id).then((current) => feedback?.sync(id, current)).catch(() => undefined);
+	}
+	/** Reads the comments (and their batch) again: the user came back to the browser tab. */
+	export function refresh() {
+		if (artifactId) reload(artifactId);
 	}
 	const image = createImageComments({
 		artifactId: () => artifactId,
@@ -78,7 +78,7 @@
 			lightbox?.revealFraction(centre.x, centre.y);
 		},
 		post: () => (inDocument ? { create: inDocument.post, failure: inDocument.failure } : null),
-		onCreated: () => batch()?.commentCreated(),
+		onCreated: () => feedback?.commentCreated(),
 	});
 
 	// Opened from a comment in the document: once the image has drawn, its card shows at its tag, once.
@@ -109,8 +109,7 @@
 		if (artifactId) reload(artifactId);
 	});
 	// An agent's comment arrives while the image is open: its pin appears, sweeping in.
-	// An image artifact's own feedback status listens for these itself.
-	$effect(() => subscribeToDocumentCommentChanges(() => artifactId, (id) => { if (!ownFeedback) reload(id); }));
+	$effect(() => subscribeToDocumentCommentChanges(() => artifactId, reload));
 
 	function toggleBoxMode() {
 		image.toggleBoxMode();
@@ -167,10 +166,9 @@
 						onToggle={toggleBoxMode}
 						onOpenList={image.ui.openList}
 					/>
+					<!-- The bar is narrow at any window size (a canvas panel beside the chat): Send is short here, read out in full. -->
 					{#if feedback}
-						<DocFeedbackControls {feedback} compact={$isMobile} />
-					{:else if !inDocument}
-						<DocFeedbackStatus bind:this={ownFeedback} {artifactId} targetInstanceId={artifactId} compact={$isMobile} onFeedbackChanged={() => reload(artifactId)} />
+						<DocFeedbackControls {feedback} compact />
 					{/if}
 				{/if}
 			{/snippet}

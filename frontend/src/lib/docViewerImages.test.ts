@@ -21,13 +21,14 @@ const DRAWN = { src: '/ws/a.png', alt: 'Mock', from: 10, to: 24, scrollTop: 0, t
 
 function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null } = {}) {
 	const onOpenImage = overrides.onOpenImage === undefined ? vi.fn() : overrides.onOpenImage;
+	const showInText = vi.fn();
 	const comments = [onImage('one'), onImage('two'), onImage('later', 40, 54), comment('text', { from: 10, to: 24 })];
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage ?? undefined, root: () => document.createElement('div'), comments: () => comments,
 		artifactId: () => 'a1', target: () => (overrides.target === undefined ? TARGET : overrides.target), readOnly: () => false,
-		text: () => '', session: () => undefined, accent: () => null, feedback: () => batch,
+		text: () => '', session: () => undefined, accent: () => null, feedback: () => batch, showInText,
 	});
-	return { images, onOpenImage };
+	return { images, onOpenImage, showInText };
 }
 
 describe('opening a document image from its comments', () => {
@@ -70,6 +71,16 @@ describe('opening a document image from its comments', () => {
 		images.openOr(['one'], { id: 'one' }, otherwise);
 		expect(otherwise).toHaveBeenCalledOnce();
 		expect(imageRequestAt).not.toHaveBeenCalled();
+	});
+
+	it('shows a drawer group’s comment in the document when its image does not draw, for the thumbnail and Move pin', async () => {
+		imageRequestAt.mockResolvedValue(null);
+		const { images, onOpenImage, showInText } = viewer();
+		images.groups.onOpen(onImage('one'));
+		await vi.waitFor(() => expect(showInText).toHaveBeenCalledWith('one'));
+		images.groups.onOpen(onImage('two'), { id: 'two', move: true });
+		await vi.waitFor(() => expect(showInText).toHaveBeenCalledWith('two'));
+		expect(onOpenImage).not.toHaveBeenCalled();
 	});
 
 	it('keeps an open image on its markdown when the document changes, only for a document in a thread', () => {
