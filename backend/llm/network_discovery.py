@@ -127,8 +127,6 @@ def read_server_metadata(server_id: str) -> dict | None:
     ).fetchone()
     return parse_server_metadata(server_id, row["metadata_json"] if row else None)
 
-
-
 def parse_server_metadata(server_id: str, raw: str | None) -> dict | None:
     """The one parse of a ``metadata_json`` blob, for callers holding the raw column.
 
