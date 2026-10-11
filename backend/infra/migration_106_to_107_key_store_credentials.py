@@ -35,7 +35,8 @@ from infra.time import utc_now_iso
 log = logging.getLogger(__name__)
 
 # Copied, not imported, so this step keeps producing the shape it was written for.
-_PROVIDER_NAMES = frozenset({"anthropic", "openai", "openrouter", "deepseek", "gemini", "groq", "omlx"})
+_PROVIDER_NAMES = frozenset({"anthropic", "openai", "openrouter", "deepseek", "gemini", "groq"})
+_NETWORK_PLACEHOLDER_PROVIDER = "omlx"
 _VALUE_PATTERN = re.compile(r"^[\x21-\x7e]{1,4096}$")
 _ENV_VARS = {
     "provider-anthropic": "ANTHROPIC_API_KEY",
@@ -83,7 +84,13 @@ def _collect(conn: sqlite3.Connection) -> tuple[dict[str, str], dict[str, str], 
     if providers is not None:
         changed = False
         for name, cfg in providers.items():
-            if name not in _PROVIDER_NAMES or not isinstance(cfg, dict) or "apiKey" not in cfg:
+            if not isinstance(cfg, dict) or "apiKey" not in cfg:
+                continue
+            if name == _NETWORK_PLACEHOLDER_PROVIDER:
+                del cfg["apiKey"]
+                changed = True
+                continue
+            if name not in _PROVIDER_NAMES:
                 continue
             raw = cfg["apiKey"]
             value = _clean(raw)

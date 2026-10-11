@@ -29,11 +29,11 @@ const windowsBody = (extra: Record<string, unknown> = {}) => ({
 		...extra,
 	},
 });
-const costPeriod = (per_hour: number | null, sized: number) => ({ from: '2026-09-28', to: '2026-10-04', dollars: per_hour === null ? null : per_hour * 1_000, priced_records: 1, api_records: 1, outcomes: sized, per_outcome: 1, sized, hours: 1_000, per_hour });
+const costPeriod = (per_hour: number | null, sized: number) => ({ from: '2026-09-28', to: '2026-10-04', dollars: per_hour === null ? null : per_hour * 1_000, priced_records: 1, usage_records: 1, outcomes: sized, per_outcome: 1, sized, hours: 1_000, per_hour });
 const costData = (previous: ReturnType<typeof costPeriod> | null) => ({
 	definition_version: 1 as const, period: { grain: 'days' as const, timezone: 'x', current: '2026-10-04', range: span.latest, ...span },
 	// One served day per day of both windows: a previous window the series covers in full is compared, not read as new.
-	series: Array.from({ length: 14 }, (_, i) => ({ ...costPeriod(1.49, 1187), period: new Date(Date.parse('2026-09-21T00:00:00Z') + i * 86_400_000).toISOString().slice(0, 10), average: null })), latest: costPeriod(1.49, 1187), previous, coverage: { priced_records: 1, api_records: 1 }, not_api_priced_records: 0, excluded: [],
+	series: Array.from({ length: 14 }, (_, i) => ({ ...costPeriod(1.49, 1187), period: new Date(Date.parse('2026-09-21T00:00:00Z') + i * 86_400_000).toISOString().slice(0, 10), average: null })), latest: costPeriod(1.49, 1187), previous, coverage: { priced_records: 1, usage_records: 1 }, not_api_priced_records: 0, excluded: [],
 	actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null },
 });
 

@@ -17,7 +17,7 @@ from llm.isolated_structured import IsolatedStructuredTelemetry
 ReviewKind = Literal["application", "action"]
 
 
-def _usage_thread_id(
+def usage_thread_id(
     application_payload: Mapping[str, Any],
     supplied: str | None,
 ) -> str | None:
@@ -33,7 +33,7 @@ _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "cache_creation_tokens",
 
 
 @dataclass(slots=True)
-class _ReviewTelemetry:
+class ReviewTelemetry:
     review_kind: ReviewKind
     thread_id: str | None
     #: The requester's own model reviewed because the chosen reviewer could not run.
@@ -91,7 +91,7 @@ class _ReviewTelemetry:
             )
 
 
-def _failure_terminal(exc: BaseException) -> ReviewTerminal:
+def failure_terminal(exc: BaseException) -> ReviewTerminal:
     # Telemetry keeps its original closed vocabulary: an unrecognised failure
     # is reported as transport loss here, while the durable holder-visible
     # reason withholds the cause instead of guessing.

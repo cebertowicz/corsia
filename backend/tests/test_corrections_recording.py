@@ -127,6 +127,53 @@ def test_pending_candidates_exclude_another_users_root_and_subtree(isolated_db):
     ]
 
 
+def test_pending_candidates_scan_past_non_owner_rows(isolated_db):
+    from core.corrections_recording import checker_version
+    from jobs import corrections_recording as job
+
+    db = _db()
+    try:
+        _thread(db)
+        for index in range(job.MAX_PENDING_SCAN_MULTIPLIER + 1):
+            role, content = (
+                ("assistant", "Not a correction candidate.")
+                if index % 2 == 0 else ("user", "[EVENT: wake]")
+            )
+            _message(
+                db, f"non-owner-{index}", role, content,
+                at=f"2026-10-01T00:00:{index:02d}Z",
+            )
+        _message(
+            db, "owner-message", "user", "That result is wrong.",
+            at="2026-10-01T00:01:00Z",
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    candidates = job._pending_candidates(checker_version("model-a"), 1, OWNER)
+
+    assert [candidate.message_id for candidate in candidates] == ["owner-message"]
+
+
+def test_pending_candidate_prefilter_matches_wrapper_prefixes_case_sensitively(isolated_db):
+    from core.corrections_recording import checker_version
+    from jobs import corrections_recording as job
+
+    db = _db()
+    try:
+        _thread(db)
+        _message(db, "wrapper", "user", "[CORSIA plan] notice", at="2026-10-01T00:00:00Z")
+        _message(db, "lowercase-owner", "user", "[corsia is wrong here]", at="2026-10-01T00:01:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    candidates = job._pending_candidates(checker_version("model-a"), 20, OWNER)
+
+    assert [candidate.message_id for candidate in candidates] == ["lowercase-owner"]
+
+
 @pytest.mark.asyncio
 async def test_global_batch_selects_oldest_candidates_across_owners(isolated_db, monkeypatch):
     from infra.settings import set_setting
@@ -162,33 +209,98 @@ async def test_global_batch_selects_oldest_candidates_across_owners(isolated_db,
     assert ["owner earliest" in prompt for prompt in seen] == [False, True]
 
 
-def test_token_plan_checker_setting_is_refused(monkeypatch):
+def test_interactive_only_checker_setting_is_refused(isolated_db, monkeypatch):
     from api import system
-
-    monkeypatch.setattr(system, "_ready_public_litellm_models", lambda: {"token-plan-model"})
-    monkeypatch.setattr(system, "is_alibaba_token_plan_model", lambda model: model == "token-plan-model")
-    with pytest.raises(HTTPException, match="Alibaba Token Plan"):
-        system._save_exact_model_defaults({"corrections_checker_model": "token-plan-model"})
-
-
-def test_token_plan_detection_uses_the_external_connection(isolated_db):
-    from infra.settings import is_alibaba_token_plan_model
 
     db = _db()
     try:
         db.execute(
             "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
-            "VALUES ('token-plan','external','external','token-plan','Alibaba Token Plan',443,'online','t','t','t',?)",
-            (json.dumps({"base_url": "https://token-plan.example.com/compatible-mode/v1"}),),
-        )
-        db.execute(
-            "INSERT INTO models (id,harness,provider,provider_model_id,litellm_model,display_name,created_at,updated_at) "
-            "VALUES ('token-model','native','external','glm','external@token-plan/glm','Token model','t','t')"
+            "VALUES ('restricted','external','external','restricted','Restricted',443,'online','t','t','t',?)",
+            (json.dumps({"agent_use_restriction": "interactive_only"}),),
         )
         db.commit()
-        assert is_alibaba_token_plan_model("external@token-plan/glm", db=db)
     finally:
         db.close()
+    monkeypatch.setattr(system, "_ready_public_litellm_models", lambda: {"external@restricted/glm"})
+
+    with pytest.raises(HTTPException, match="interactive-only endpoint"):
+        system._save_exact_model_defaults({"corrections_checker_model": "external@restricted/glm"})
+
+
+def test_endpoint_agent_use_defaults_allowed_for_existing_endpoint(isolated_db):
+    from llm.endpoint_policy import endpoint_agent_use
+
+    db = _db()
+    try:
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES ('existing','external','external','existing','Existing',443,'online','t','t','t',?)",
+            (json.dumps({"base_url": "https://existing.example/v1"}),),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert endpoint_agent_use("external@existing/model") == "allowed"
+
+
+@pytest.mark.parametrize("raw", ["{not json", json.dumps({"agent_use_restriction": "batch_ok"})])
+def test_endpoint_agent_use_refuses_unattended_use_when_the_terms_cannot_be_read(isolated_db, raw):
+    from llm.endpoint_policy import endpoint_agent_use
+
+    db = _db()
+    try:
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES ('unreadable','external','external','unreadable','Unreadable',443,'online','t','t','t',?)",
+            (raw,),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert endpoint_agent_use("external@unreadable/model") == "interactive_only"
+
+
+def test_owner_message_filter_drops_whitespace_only_messages_in_sql():
+    import sqlite3
+
+    from core.corrections_recording import owner_message_sql_predicate
+
+    where, params = owner_message_sql_predicate()
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE messages (id TEXT, role TEXT, content TEXT, metadata TEXT)")
+    db.executemany(
+        "INSERT INTO messages VALUES (?, 'user', ?, '{}')",
+        [("blank", " \t\r\n "), ("spoken", "  fix the header  ")],
+    )
+    kept = [row[0] for row in db.execute(f"SELECT id FROM messages m WHERE {where} ORDER BY id", params)]
+
+    assert kept == ["spoken"]
+
+
+@pytest.mark.asyncio
+async def test_interactive_only_checker_is_skipped_at_runtime(isolated_db, monkeypatch):
+    from infra.settings import set_setting
+    from jobs import corrections_recording as job
+
+    db = _db()
+    try:
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES ('restricted','external','external','restricted','Restricted',443,'online','t','t','t',?)",
+            (json.dumps({"agent_use_restriction": "interactive_only"}),),
+        )
+        db.commit()
+    finally:
+        db.close()
+    set_setting("agents", {"defaults": {"corrections_checker_model": "external@restricted/glm"}})
+    monkeypatch.setattr(job, "_resolve_target", lambda _: pytest.fail("restricted model was resolved"))
+
+    assert await job.run_corrections_recording() == {
+        "status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0,
+    }
 
 
 @pytest.mark.asyncio

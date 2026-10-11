@@ -62,7 +62,7 @@ const weeksScenario: Scenario = {
 	},
 };
 
-const costPeriod = (figure: { value: number | null; n: number }, period: string, n = figure.n) => ({ period, dollars: figure.value === null ? null : figure.value * 1_000, priced_records: 1, api_records: 1, outcomes: n, per_outcome: figure.value === null ? null : 1, sized: n, hours: 1_000, per_hour: figure.value });
+const costPeriod = (figure: { value: number | null; n: number }, period: string, n = figure.n) => ({ period, dollars: figure.value === null ? null : figure.value * 1_000, priced_records: 1, usage_records: 1, outcomes: n, per_outcome: figure.value === null ? null : 1, sized: n, hours: 1_000, per_hour: figure.value });
 /** A pooled comparison window as the Cost payload serves it: named by the days it covers, with no `period` key. */
 const pooled = ({ period: _period, ...figures }: ReturnType<typeof costPeriod>, bounds: { from: string; to: string }) => ({ from: bounds.from, to: bounds.to, ...figures });
 
@@ -120,7 +120,7 @@ async function serve(page: Page, project: { id: string; name: string }, agentId:
 			const [latestFigure, previousFigure] = scenario.cost;
 			const latest = costPeriod(latestFigure, scenario.period.latest.from);
 			const previous = costPeriod(previousFigure, scenario.period.previous.from);
-			return route.fulfill({ json: { definition_version: 1, period, series: costRows(scenario.period, grain, scenario.cost), latest: pooled(latest, scenario.period.latest), previous: pooled(previous, scenario.period.previous), coverage: { priced_records: 3, api_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null } } });
+			return route.fulfill({ json: { definition_version: 1, period, series: costRows(scenario.period, grain, scenario.cost), latest: pooled(latest, scenario.period.latest), previous: pooled(previous, scenario.period.previous), coverage: { priced_records: 3, usage_records: 3 }, not_api_priced_records: 0, excluded: [], actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null } } });
 		}
 		const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
 		const served: Record<string, ReturnType<typeof window>[]> = { estimated_human_hours_per_active_hour: scenario.size, first_try_acceptance: scenario.firstTry, active_hours_per_outcome: scenario.minutes };

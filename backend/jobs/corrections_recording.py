@@ -24,6 +24,7 @@ from core.corrections_recording import (
     dedupe_key,
     fact_attributes,
     is_owner_authored_message,
+    owner_message_sql_predicate,
     refusal_classification,
     subject_key,
     validate_classification,
@@ -81,8 +82,8 @@ class _UsageTelemetry:
                 source="corrections_recording",
                 ttft_ms=None,
             )
-        except Exception as exc:
-            logger.warning("corrections recording usage telemetry failed: {}", type(exc).__name__)
+        except Exception:
+            logger.exception("corrections recording usage telemetry failed")
 
 
 def _resolve_target(model_id: str):
@@ -123,24 +124,14 @@ def _pending_candidates(
 
     db = get_db()
     try:
+        owner_filter, owner_filter_params = owner_message_sql_predicate()
         rows = db.execute(
-            scope_cte() + """
+            scope_cte() + f"""
             SELECT m.rowid,m.id,m.thread_id,t.project_id,m.role,m.content,m.metadata,m.created_at
             FROM messages m
             JOIN scope_threads scoped ON scoped.id=m.thread_id
             JOIN threads t ON t.id=m.thread_id
-            WHERE m.role='user' AND length(trim(m.content))>0
-              AND m.content NOT LIKE '[EVENT:%'
-              AND m.content NOT LIKE '[DELIVERY WARNING%'
-              AND m.content NOT LIKE '[PASSIVE CONTEXT DIGEST]%'
-              AND m.content NOT LIKE '[AGENT-SEND%'
-              AND m.content NOT LIKE '[CORSIA%'
-              AND (m.metadata IS NULL OR NOT json_valid(m.metadata) OR (
-                json_type(m.metadata,'$.sender_kind') IS NULL
-                AND json_type(m.metadata,'$.routed_event') IS NULL
-                AND json_type(m.metadata,'$.send_idempotency_key') IS NULL
-              ))
-              AND NOT EXISTS (
+            WHERE {owner_filter} AND NOT EXISTS (
                 SELECT 1 FROM outcome_events e
                 WHERE e.event_name=:correction_event
                   AND e.subject_key=:message_prefix || m.id AND e.retracted_at IS NULL
@@ -151,6 +142,7 @@ def _pending_candidates(
             ORDER BY m.created_at ASC,m.id ASC LIMIT :scan_limit
             """,
             {
+                **owner_filter_params,
                 "user_id": owner_user_id,
                 "scope_project": "all",
                 "scope_agent": None,
@@ -334,6 +326,12 @@ async def run_corrections_recording(
     if model_id is None:
         await run_in_db(_write_status, "unconfigured", "No checker model configured")
         return {"status": "unconfigured", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
+    from llm.endpoint_policy import endpoint_agent_use
+    if await run_in_db(endpoint_agent_use, model_id) == "interactive_only":
+        reason = "Configured checker model is restricted to interactive use"
+        logger.warning(reason)
+        await run_in_db(_write_status, "unavailable", reason)
+        return {"status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
     try:
         target, binary = await run_in_db(_resolve_target, model_id)
     except (ModelUnavailableError, ValueError) as exc:

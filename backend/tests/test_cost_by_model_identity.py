@@ -99,13 +99,17 @@ async def test_spend_groups_past_seven_with_the_models_cost_class(monkeypatch, b
         identity = ModelIdentity(key, key, True)
         return {"period": "2026-09-28", "task_id": key, "identity": identity, "outcome": outcome, "dollars": dollars}
 
+    # Six costlier models hold the named rows, so model-7 and the local model share the floor row.
+    priced = [(f"vendor/model-{index}", 10.0 - index) for index in range(6)] + [("vendor/model-7", 3.0)]
     built = build_models(
-        [], [], [], [cost("vendor/model-7", "priced", 3.0), cost(LOCAL_MODEL, "not_api_priced", None)],
+        [], [], [], [cost(key, "priced", dollars) for key, dollars in priced] + [cost(LOCAL_MODEL, "not_api_priced", None)],
         resolve=lambda row: ModelIdentity(row["model"], row["model"], True),
         latest=("2026-09-28",), previous=("2026-09-21",), offered=set(),
-        ledger_rows=[{"period": "2026-09-28", "model": "vendor/model-7", "outcome": "priced", "dollars": 3.0}],
+        ledger_rows=[{"period": "2026-09-28", "model": key, "outcome": "priced", "dollars": dollars} for key, dollars in priced],
     )
-    assert built["rows"][-1]["cost_class"] == rest["cost_class"]
+    other = built["rows"][-1]
+    assert (other["label"], other["includes_local"]) == ("Other (2 more models)", True)
+    assert other["cost_class"] == rest["cost_class"]
 
 
 @pytest.mark.asyncio

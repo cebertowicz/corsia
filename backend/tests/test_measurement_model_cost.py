@@ -64,13 +64,13 @@ def test_models_past_the_sixth_by_spend_pool_into_one_counted_other_row():
     built = _build(turns=[{"model": "small-a", "turns": 60}, {"model": "small-b", "turns": 60}],
                    errors=[{"model": "small-a", "error": "socket closed"}], costs=costs, offered={"big"})
     labels = [row["label"] for row in built["rows"]]
-    # Six named rows by priced spend, then big (14 tasks, $14) and small-a ($1) pool; small-b spent nothing and is unlisted.
-    assert labels == [f"top{model}" for model in range(6)] + ["Other (2 more models)"]
+    # Six named rows by priced spend, then big (14 tasks, $14), small-a ($1) and small-b (an unpriced task) pool.
+    assert labels == [f"top{model}" for model in range(6)] + ["Other (3 more models)"]
     other = built["rows"][-1]
     assert other["other"] is True and other["model"] == ""
-    assert (other["tasks"], other["failed_turns_per_100"]) == (15, pytest.approx(100 / 60))
-    # Other keeps its members' priced dollars over their tasks: $14 and $1 over 15 distinct tasks.
-    assert (other["recorded_cost_per_task"], other["cost_class"]) == (pytest.approx(1.0), "priced")
+    assert (other["tasks"], other["failed_turns_per_100"]) == (16, pytest.approx(100 / 120))
+    # Other keeps its members' priced dollars over their tasks, $15 over 16, and marks the unpriced one partial.
+    assert (other["recorded_cost_per_task"], other["cost_class"]) == (pytest.approx(15 / 16), "no_pricing")
 
 
 def test_a_listed_model_has_spend_or_the_task_floor_and_ranks_by_spend_then_tasks():
@@ -79,8 +79,8 @@ def test_a_listed_model_has_spend_or_the_task_floor_and_ranks_by_spend_then_task
     costs += [_cost("cheap", f"c{index}", dollars=1.0) for index in range(3)]
     costs += [_cost("local-small", "l1", outcome="not_api_priced", dollars=None)]
     built = _build(tokens=[{"model": "token-only", "tokens": 10}], costs=costs)
-    # token-only and local-small neither spent nor reached 14 tasks, so only their token share names them.
-    assert [row["model"] for row in built["rows"]] == ["pricey", "cheap", "free-big"]
+    # token-only and local-small neither spent nor reached 14 tasks, so they pool into Other rather than vanish.
+    assert [row["label"] for row in built["rows"]] == ["pricey", "cheap", "free-big", "Other (2 more models)"]
     assert [row["label"] for row in built["token_shares"]] == ["token-only"]
 
 
@@ -142,7 +142,8 @@ def test_a_local_model_has_no_list_price_in_both_cells():
 
 def test_a_row_with_no_tasks_this_period_names_no_cause():
     costs = [_cost("spent-before", "s0", dollars=5.0, period=PREVIOUS)]
-    assert _build(tokens=[{"model": "token-only", "tokens": 10}], costs=costs)["rows"] == []
+    (other,) = _build(tokens=[{"model": "token-only", "tokens": 10}], costs=costs)["rows"]
+    assert (other["tasks"], other["rate_reason"], other["change_reason"], other["cost_change"]) == (0, "no_tasks", "none", None)
 
 
 def test_a_task_using_two_pooled_models_counts_once_in_the_other_row():

@@ -16,6 +16,7 @@ from infra.key_store_servers import (
 from infra.state.ws import notify_models_changed
 from llm import network_discovery as nd
 from llm import network_endpoints as ne
+from llm.endpoint_policy import registration_restriction, relocation_restriction
 from llm.external_declared_models import (
     LIST_UNSUPPORTED, META_KEY, clean_model_ids, declared_model_ids, declared_model_refusal,
 )
@@ -243,6 +244,8 @@ async def update_external_server(server_id: str, body) -> dict:
                 set_server_key(server_id, supplied_key, db=db)
             if body.cache_warm_seconds is not None:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
+            if limit := body.agent_use_restriction or (moved and relocation_restriction(server["instance_name"], base)):
+                fields["agent_use_restriction"] = limit
             if declared:
                 fields[META_KEY] = declared
             cleared = (META_KEY,) if declared == [] else ()
@@ -290,11 +293,13 @@ async def add_external_server(body) -> dict:
                 source="manual",
                 db=db,
             )
-            # A registration is the user's whole statement for this endpoint: a
-            # window or key left empty on a re-add is cleared, not kept from before.
+            # A registration is the user's whole statement: an empty window or key on a
+            # re-add is cleared. An omitted agent-use restriction keeps a stored one.
             fields: dict = {"base_url": base}
             if body.cache_warm_seconds:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
+            if restriction := body.agent_use_restriction or registration_restriction(db, sid, body.name, base):
+                fields["agent_use_restriction"] = restriction
             if key:
                 set_server_key(sid, key, db=db)
             else:
