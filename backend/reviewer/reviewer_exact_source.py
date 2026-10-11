@@ -153,6 +153,13 @@ def render_write_profile(
             f"(allow file-write* (literal {_sb_string(temp_root)})"
             f' (regex #"^{_sb_regex_path(temp_root)}/{folder}(/.*)?$"))'
         )
+        temp_parent = _sb_regex_path(str(config_state.temp_root.parent))
+        # Seatbelt treats counted intervals in regex predicates as never matching.
+        # The CLI writes per-command claude-...-cwd files directly in the system
+        # temp directory; [^/]* cannot cross a separator. Evidence: job 114450929931.
+        rules.append(
+            f'(allow file-write* (regex #"^{temp_parent}/claude-[^/]*-cwd$"))'
+        )
         if config_state.allow_global_file:
             global_file = _sb_regex_path(str(config_state.global_file))
             rules.append(f'(allow file-write* (regex #"^{global_file}(\\.[^/]*)?$"))')
