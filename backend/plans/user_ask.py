@@ -270,7 +270,7 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
 def _release(
     db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
 ) -> int:
-    from plans import admission, admission_projection, holds, plan_wake
+    from plans import admission_projection, holds, plan_wake
     from plans.plan_events import append_owner_event
     from plans.user_steering import CHANGE_KIND
     from prompts import plan_wakes as wakes
@@ -301,17 +301,8 @@ def _release(
         )
         for row in rows
     ]
-    # The ask wake is the asker's result of this write, so reconcile is told
-    # not to wake the asker again (causing_executor), and runs first so the
-    # wake's next block is the state the asker returns to.
     executors = {row["hold_id"]: admission_projection.executor_of(row, row) for row in rows}
-    for plan_id in dict.fromkeys(str(row["plan_id"]) for row in rows):
-        causing = next(
-            executors[row["hold_id"]] for row in rows if str(row["plan_id"]) == plan_id
-        )
-        admission.reconcile_plan(
-            plan_id, actor_id=None, provenance=_PROVENANCE, causing_executor=causing, db=db,
-        )
+    handoffs = _reconcile_for_askers(db, rows, executors)
     for row, (cause_id, cause_at) in zip(rows, causes):
         summary = _release_summary(row, done, retired=retired, release=release)
         executor = executors[row["hold_id"]]
@@ -326,6 +317,7 @@ def _release(
             content=plan_wake.with_next(
                 db, str(row["plan_id"]), executor,
                 wakes.WAKE_ASK_RELEASED.format(summary=summary),
+                **handoffs.pop((str(row["plan_id"]), executor), {}),
             ),
             open_node_id=str(row["node_id"]),
         )
@@ -344,6 +336,30 @@ def _release(
             created_at=cause_at,
         )
     return len(rows)
+
+
+def _reconcile_for_askers(db, rows, executors: dict) -> dict[tuple[str, str], dict]:
+    """Reconcile each plan an answer released, and return the askers' handoff facts.
+
+    The ask wake is the asker's result of this write, so reconcile is told not
+    to wake the asker again (``causing_executor``), and runs before the wake so
+    its next block is the state the asker returns to. Standing in for the
+    work-selected wake, the asker's first wake on each plan also carries what
+    that wake would have: its facts, keyed by plan and asker (``selected_fact``).
+    """
+    from plans import admission, plan_wake
+
+    handoffs: dict[tuple[str, str], dict] = {}
+    for plan_id in dict.fromkeys(str(row["plan_id"]) for row in rows):
+        causing = next(
+            executors[row["hold_id"]] for row in rows if str(row["plan_id"]) == plan_id
+        )
+        reconciled = admission.reconcile_plan(
+            plan_id, actor_id=None, provenance=_PROVENANCE, causing_executor=causing, db=db,
+        )
+        if causing is not None:
+            handoffs[(plan_id, causing)] = plan_wake.selected_fact(db, reconciled, causing)
+    return handoffs
 
 
 def _release_summary(row, done: str, *, retired: bool, release: AskRelease | None) -> str:

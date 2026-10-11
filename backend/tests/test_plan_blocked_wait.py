@@ -142,11 +142,13 @@ def _document_ask(db, external_id: str) -> str:
     ).fetchone()["id"])
 
 
-def _ask_held_node(db, *, state: str, external_id: str, before_block=None):
+def _ask_held_node(db, *, state: str, external_id: str, before_block=None,
+                   description: str | None = None, author: str | None = None):
     """Create an ask-held task in one state whose release needs an owner wake."""
     plan = service.ensure_plan("thread", "owner", db=db)
     node = service.add_node(
-        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed",
+        description=description, actor_id=author, db=db,
     )
     if state == "active":
         admission.activate(
@@ -442,6 +444,33 @@ def test_answering_an_active_document_ask_is_one_wake_naming_the_selected_task(d
         answer="Cut section 3.",
     )
     assert shown["selected"]["id"] == node.id
+    assert "selected_description" not in json.loads(wake["content"].split("\n", 1)[1])
+
+
+@pytest.mark.parametrize("author, carried", [("conductor", True), ("owner", False)])
+def test_the_ask_wake_carries_the_description_the_work_selected_wake_would(
+    db, author, carried,
+):
+    """Standing in for the work-selected wake, the ask wake hands over the same facts."""
+    from registry import attention
+
+    items = "Comment c-1\nFeedback: Please check this point."
+    node, ask = _ask_held_node(
+        db, state="active", external_id=f"described-{author}.md",
+        description=items, author=author,
+    )
+    before = _last_input_order(db)
+
+    attention.clear_attention(ask, outcome="answer", verdict="approved", db=db)
+
+    [wake] = _plan_wakes_after(db, before)
+    shown = _ask_wake_next(
+        db, wake, node, event='The user answered "Read the proposal"', verdict="approved",
+    )
+    assert shown["selected"]["id"] == node.id
+    facts = json.loads(wake["content"].split("\n", 1)[1])
+    expected = {"node_id": node.id, "text": items, "cut": False}
+    assert facts.get("selected_description") == (expected if carried else None)
 
 
 def test_answering_an_ask_on_a_scope_plan_wakes_the_task_executor(db):
