@@ -68,10 +68,10 @@ LINUX_WORKFLOW_JOBS = {
     "close-on-dev-merge.yml": 1,
     "e2e.yml": 2,
     "evals.yml": 1,
-    "integration.yml": 1,
 }
-MACOS_WORKFLOW_JOBS = {
-    "integration.yml": 1,
+MACOS_WORKFLOW_JOBS = {}
+MIXED_RUNNER_WORKFLOW_JOBS = {
+    "integration.yml": (1, 1),
 }
 BLOCKING_CONTEXTS = {
     "antipatterns.yml": {"Anti-pattern detector (error-severity, blocking)"},
@@ -86,7 +86,7 @@ BLOCKING_CONTEXTS = {
         "Frontend unit tests",
     },
 }
-UNCONDITIONAL_CONTEXT_WORKFLOWS = {
+RELEVANCE_CONSUMER_JOB_COUNTS = {
     "antipatterns.yml": 1,
     "code-health.yml": 1,
     "integration.yml": 1,
@@ -104,13 +104,16 @@ def _macos_only_files() -> list[str]:
 
 def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     workflow = WORKFLOW.read_text()
-    backend_job = workflow.split("  backend-macos:", 1)[0]
-    macos_job = workflow.split("  backend-macos:", 1)[1].split("  frontend:", 1)[0]
-    frontend_job = workflow.split("  frontend:", 1)[1]
+    relevance_job = _workflow_job(workflow, "relevance")
+    backend_job = _workflow_job(workflow, "backend")
+    macos_job = _workflow_job(workflow, "backend-macos")
+    frontend_job = _workflow_job(workflow, "frontend")
 
-    assert LINUX_RUNNER in backend_job
+    for job in (relevance_job, backend_job, frontend_job):
+        assert LINUX_RUNNER in job
+        assert MACOS_RUNNER not in job
     assert MACOS_RUNNER in macos_job
-    assert LINUX_RUNNER in frontend_job
+    assert LINUX_RUNNER not in macos_job
     assert "self-hosted" not in workflow
     assert "hdiutil" not in workflow
     # Linux uses uv's managed CPython so its SQLite matches the Mac's, not the distro's.
@@ -191,7 +194,7 @@ def test_blocking_contexts_are_created_for_every_pull_request() -> None:
         for context in contexts:
             assert f"name: {context}" in workflow, (filename, context)
 
-    for filename, expected_relevance_steps in UNCONDITIONAL_CONTEXT_WORKFLOWS.items():
+    for filename, expected_consumer_jobs in RELEVANCE_CONSUMER_JOB_COUNTS.items():
         workflow = (workflow_root / filename).read_text()
         pull_request = workflow.split("  pull_request:\n", 1)[1].split(
             "  workflow_dispatch:", 1
@@ -200,7 +203,7 @@ def test_blocking_contexts_are_created_for_every_pull_request() -> None:
         assert "paths:" not in pull_request, filename
         assert "paths-ignore:" not in pull_request, filename
         assert workflow.count("uses: ./.github/actions/relevance") == 1, filename
-        assert workflow.count("\n    if: ${{ needs.relevance.outputs.relevant == 'true' }}") == expected_relevance_steps, filename
+        assert workflow.count("\n    if: ${{ needs.relevance.outputs.relevant == 'true' }}") == expected_consumer_jobs, filename
 
 
 def _workflow_job(workflow: str, job_name: str) -> str:
@@ -239,6 +242,7 @@ def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job
     assert "value: ${{ steps.detect.outputs.relevant }}" in action
     assert "git fetch --no-tags origin" in action
     assert "git merge-base" in action
+    assert "git diff --name-only --no-renames -z" in action
     assert 'echo "relevant=false"' in action
 
     workflow_root = REPO_ROOT / ".github/workflows"
@@ -260,12 +264,14 @@ def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job
             job = _workflow_job(workflow, job_name)
             assert "needs: relevance" in job, (filename, job_name)
             assert "if: ${{ needs.relevance.outputs.relevant == 'true' }}" in job, (filename, job_name)
+            assert "fetch-depth: 1" in job, (filename, job_name)
+            assert "fetch-depth: 0" not in job, (filename, job_name)
             assert "uses: ./.github/actions/relevance" not in job, (filename, job_name)
             assert "steps.relevance.outputs.relevant" not in job, (filename, job_name)
             assert "id: relevance" not in job, (filename, job_name)
 
 
-def test_relevance_patterns_are_shared_only_within_identical_workflows() -> None:
+def test_relevance_patterns_have_one_workflow_local_source() -> None:
     workflow_root = REPO_ROOT / ".github/workflows"
     for filename, env_name in RELEVANCE_PATTERN_ENV.items():
         workflow = (workflow_root / filename).read_text()
@@ -398,6 +404,40 @@ def test_relevance_action_fails_closed_and_emits_only_successful_results(tmp_pat
     assert action_change.returncode == 0, action_change.stderr
     assert action_change_output.read_text() == "relevant=true\n"
 
+    renamed_repo = _scratch_relevance_repo(tmp_path / "renamed", "backend/example.py")
+    _run_git(renamed_repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (renamed_repo / "docs").mkdir()
+    _run_git(renamed_repo, "mv", "backend/example.py", "docs/example.py")
+    _run_git(renamed_repo, "commit", "-m", "rename backend example")
+    renamed, renamed_output = _run_relevance_action(
+        renamed_repo, tmp_path / "renamed", base_ref="main", patterns="^backend/"
+    )
+    assert renamed.returncode == 0, renamed.stderr
+    assert renamed_output.read_text() == "relevant=true\n"
+
+    renamed_to_backend_repo = _scratch_relevance_repo(tmp_path / "renamed-to-backend", "docs/example.py")
+    _run_git(renamed_to_backend_repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (renamed_to_backend_repo / "backend").mkdir()
+    _run_git(renamed_to_backend_repo, "mv", "docs/example.py", "backend/example.py")
+    _run_git(renamed_to_backend_repo, "commit", "-m", "rename docs example")
+    renamed_to_backend, renamed_to_backend_output = _run_relevance_action(
+        renamed_to_backend_repo, tmp_path / "renamed-to-backend", base_ref="main", patterns="^backend/"
+    )
+    assert renamed_to_backend.returncode == 0, renamed_to_backend.stderr
+    assert renamed_to_backend_output.read_text() == "relevant=true\n"
+
+    unicode_path = "backend/résumé notes.py"
+    unicode_repo = _scratch_relevance_repo(tmp_path / "unicode", unicode_path)
+    _run_git(unicode_repo, "config", "core.quotePath", "true")
+    unicode_change, unicode_output = _run_relevance_action(
+        unicode_repo,
+        tmp_path / "unicode",
+        base_ref="main",
+        patterns=r"^backend/résumé notes\.py$",
+    )
+    assert unicode_change.returncode == 0, unicode_change.stderr
+    assert unicode_output.read_text() == "relevant=true\n"
+
     dispatched, dispatched_output = _run_relevance_action(
         matching_repo,
         tmp_path / "dispatched",
@@ -457,10 +497,17 @@ def test_every_workflow_uses_its_hosted_runner() -> None:
     for filename, expected_jobs in LINUX_WORKFLOW_JOBS.items():
         workflow = (workflow_root / filename).read_text()
         assert workflow.count(LINUX_RUNNER) == expected_jobs, filename
+        assert MACOS_RUNNER not in workflow, filename
 
     for filename, expected_jobs in MACOS_WORKFLOW_JOBS.items():
         workflow = (workflow_root / filename).read_text()
         assert workflow.count(MACOS_RUNNER) == expected_jobs, filename
+        assert LINUX_RUNNER not in workflow, filename
+
+    for filename, (linux_jobs, macos_jobs) in MIXED_RUNNER_WORKFLOW_JOBS.items():
+        workflow = (workflow_root / filename).read_text()
+        assert workflow.count(LINUX_RUNNER) == linux_jobs, filename
+        assert workflow.count(MACOS_RUNNER) == macos_jobs, filename
 
     integration = (workflow_root / "integration.yml").read_text()
     assert "scripts/install-ci-safehouse" in integration
