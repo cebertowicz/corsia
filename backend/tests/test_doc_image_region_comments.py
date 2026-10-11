@@ -242,3 +242,62 @@ async def test_agent_moves_its_doc_image_box_and_gets_that_image_again(integrati
     with Image.open(media.path) as img:
         assert img.size == (320, 200)
     assert json.loads(str(moved).split("\n", 1)[0])["comment"]["region_x"] == 0.5
+
+
+def _outside_png(tmp_path_factory) -> Path:
+    """An image outside every root the document's owner may read."""
+    target = tmp_path_factory.mktemp("outside-scope") / "secret.png"
+    target.write_bytes(_png_bytes(color=(200, 0, 0), size=(320, 200)))
+    return target
+
+
+def test_a_doc_pin_does_not_move_onto_an_image_now_outside_the_scope(integration_client, doc, tmp_path_factory):
+    """The stored image path is a name, not a grant: it passes the scope check again on every read."""
+    artifact_id = _register(integration_client, doc)
+    comment = _region_comment(integration_client, artifact_id, doc, CART, {"x": 0.2, "y": 0.2})
+    cart = doc.parent / "img" / "cart.png"
+    cart.unlink()
+    cart.symlink_to(_outside_png(tmp_path_factory))
+
+    r = integration_client.patch(_url(f"/api/comments/{comment['id']}"), json={"region": {"x": 0.5, "y": 0.5}})
+
+    assert r.status_code == 400, r.text
+    assert "outside this document's scope" in r.text
+
+
+def test_a_region_comment_stays_on_its_image(integration_client, doc):
+    """Its box is in that image's coordinates: an anchor that names another image (or none) is refused."""
+    artifact_id = _register(integration_client, doc)
+    comment = _region_comment(integration_client, artifact_id, doc, CART, {"x": 0.2, "y": 0.2})
+    text = doc.read_text()
+
+    def reanchor(markdown: str, start: int):
+        return integration_client.patch(_url(f"/api/comments/{comment['id']}"), json={
+            "anchor_text": markdown, "from_off": start, "to_off": start + len(markdown)})
+
+    other = reanchor(LOGIN, text.index(LOGIN))
+    assert other.status_code == 400, other.text
+    assert "stays on its image" in other.text
+    words = reanchor("The cart:", text.index("The cart:"))
+    assert words.status_code == 400, words.text
+    same = reanchor(CART, text.index(CART))
+    assert same.status_code == 200, same.text
+    assert _threads(integration_client, artifact_id)[comment["id"]]["image_src"] == str(doc.parent / "img" / "cart.png")
+
+
+@pytest.mark.asyncio
+async def test_agent_region_comment_stays_on_its_image(integration_client, doc):
+    from tools.documents import DocCommentCreateTool, DocCommentUpdateTool
+
+    sid = _mk_thread(integration_client, _OWNER, title="Design Reviewer")
+    created = await DocCommentCreateTool().execute(
+        doc_path=str(doc), quote=CART, region={"x": 0.1, "y": 0.1}, body="Here.", _thread_id=sid,
+    )
+    comment_id = json.loads(str(created).split("\n", 1)[0])["comment"]["id"]
+    start = doc.read_text().index(LOGIN)
+
+    moved = await DocCommentUpdateTool().execute(
+        comment_id=comment_id, anchor_text=LOGIN, from_off=start, to_off=start + len(LOGIN), _thread_id=sid,
+    )
+
+    assert str(moved).startswith("Error:") and "stays on its image" in str(moved), moved

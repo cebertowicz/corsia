@@ -24,6 +24,13 @@ def _png(path: Path, size: tuple[int, int]) -> Path:
     return path
 
 
+def _in_workspace() -> Path:
+    """A fresh folder inside the workspace, where a document's images must be for anyone to read them."""
+    from infra import config
+
+    return Path(config.WORKSPACE) / f"review-{uuid.uuid4().hex[:8]}"
+
+
 def _doc_artifact(db, owner: str, directory: Path) -> str:
     path = directory / "notes.md"
     path.write_text("# Notes\n\n![Login](a/shot.png)\n\n![Cart](b/shot.png)\n")
@@ -62,14 +69,15 @@ def _node_description(db) -> str:
     return str(row["description"])
 
 
-def test_a_doc_batch_carries_one_marked_copy_per_image_and_judges_staleness_per_image(isolated_db, tmp_path):
-    login = _png(tmp_path / "a" / "shot.png", (800, 500))
-    cart = _png(tmp_path / "b" / "shot.png", (300, 200))
+def test_a_doc_batch_carries_one_marked_copy_per_image_and_judges_staleness_per_image(isolated_db):
+    folder = _in_workspace()
+    login = _png(folder / "a" / "shot.png", (800, 500))
+    cart = _png(folder / "b" / "shot.png", (300, 200))
     db = get_db()
     try:
         seed_thread(db, "owner")
         seed_thread(db, "author", title="Reviewer")
-        artifact_id = _doc_artifact(db, "owner", tmp_path)
+        artifact_id = _doc_artifact(db, "owner", folder)
         _region(db, artifact_id, login, x=0.1, y=0.1, body="Header wraps.")
         _region(db, artifact_id, cart, x=0.5, y=0.5, body="Total cut off.", stale=True)
         _region(db, artifact_id, login, x=0.6, y=0.6, body="Wrong icon.")
@@ -89,3 +97,26 @@ def test_a_doc_batch_carries_one_marked_copy_per_image_and_judges_staleness_per_
     assert sizes == {(800, 500), (300, 200)}
     assert description.count("Region 1:") == 2 and "Region 2:" in description
     assert description.count("(the image changed after this was placed)") == 1
+
+
+def test_a_doc_batch_draws_no_copy_of_an_image_now_outside_the_readers_scope(isolated_db, tmp_path_factory):
+    """A link retargeted after the comment was placed hands the reader nothing from outside its scope."""
+    folder = _in_workspace()
+    login = _png(folder / "a" / "shot.png", (800, 500))
+    outside = _png(tmp_path_factory.mktemp("outside-scope") / "secret.png", (300, 200))
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author", title="Reviewer")
+        artifact_id = _doc_artifact(db, "owner", folder)
+        _region(db, artifact_id, login, x=0.1, y=0.1, body="Header wraps.")
+        login.unlink()
+        login.symlink_to(outside)
+
+        feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
+        description = _node_description(db)
+    finally:
+        db.close()
+
+    assert "Marked-up image (numbered boxes)" not in description, description
+    assert "Marked-up image unavailable:" in description and "outside" in description, description

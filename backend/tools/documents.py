@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.media_reads import IMAGE_KIND, MediaReadReference, MediaToolResult
-from doceditor import comments as store, image_regions
+from doceditor import comments as store, doc_images, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentInput
@@ -83,10 +83,9 @@ _REGION_SCHEMA = {
     "properties": {"x": {"type": "number"}, "y": {"type": "number"},
                    "w": {"type": "number"}, "h": {"type": "number"}},
     "required": ["x", "y"],
-    "description": ("A box {x, y, w, h} (or a point {x, y}) in fractions 0..1 of an image, origin top-left. Pass "
-                    "it instead of quote on an image artifact; on an image in a document, with quote naming the image "
-                    "(its markdown ![alt](path) or path; near picks among repeats). The result shows your box drawn "
-                    "on the image, to check and move with doc_comment_update."),
+    "description": ("A box {x, y, w, h} (or point {x, y}) in fractions 0..1 of an image, origin top-left: instead of "
+                    "quote on an image artifact; with quote naming the image (its ![alt](path) or path; near picks "
+                    "among repeats) in a document. The result shows your box drawn, to move with doc_comment_update."),
 }
 
 
@@ -95,19 +94,19 @@ async def _region_result(
 ) -> str | MediaToolResult:
     """The JSON result plus the image with this comment's numbered box drawn (DCOL-FR13.7)."""
     def _render():
-        image = Path(str(image_regions.image_of(row, path)))
+        name = Path(str(image_regions.image_of(row, path))).stem
         db = get_db()
         try:
             return image_regions.write_marked_image(
-                db, image=image, rows=[row], reader_thread_id=reader,
-                label=f"{image.stem}-region-{row['region_number']}",
+                db, image=image_regions.current_image(db, row, path, reader), rows=[row], reader_thread_id=reader,
+                label=f"{name}-region-{row['region_number']}",
             )
         finally:
             db.close()
 
     try:
         marked = await run_in_db(_render)
-    except image_regions.RENDER_ERRORS as exc:
+    except image_regions.RENDER_ERRORS as exc:  # a scope refusal (CommentActionError) is a ValueError too
         return _json({**payload, "marked_image_error": str(exc)})
     reference = MediaReadReference(
         path=str(marked.path), mime_type="image/png", kind=IMAGE_KIND,
@@ -381,7 +380,8 @@ class DocCommentUpdateTool(Tool):
                 check_agent_update(
                     comment, fields, actor_thread_id=actor_thread_id,
                     owner_thread_id=art["parent_thread_id"], db=db)
-                moved = image_regions.move_fields(comment, fields, art["path"]) if "region" in fields else fields
+                moved = doc_images.region_patch(
+                    db, comment, fields, doc_path=art["path"], owner_thread_id=art["parent_thread_id"])
                 patch = reopen_fields(comment, moved)
                 with write_transaction(db, scope="patch_agent_comment") as connection:
                     return update_comment(connection, comment_id, patch, actor_thread_id=actor_thread_id), art["path"]

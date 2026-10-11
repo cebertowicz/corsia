@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from api.doc_comment_models import CommentCreate
 
-from doceditor import comments as store, feedback_batches, feedback_state, image_regions
+from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
@@ -354,10 +354,9 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
             comment = store.get_comment(comment_id, db=db)
             try:
                 check_user_text_edit(comment, fields)
-                moved = fields
-                if "region" in fields:
-                    artifact = registry_models.get_artifact(artifact_id, db=db)
-                    moved = image_regions.move_fields(comment, fields, artifact["path"] if artifact else None)
+                artifact = registry_models.get_artifact(artifact_id, db=db) or {}
+                moved = doc_images.region_patch(
+                    db, comment, fields, doc_path=artifact.get("path"), owner_thread_id=artifact.get("parent_thread_id"))
                 patch = reopen_fields(comment, moved)
             except CommentActionError as exc:
                 raise HTTPException(comment_action_status(exc), exc.message) from exc

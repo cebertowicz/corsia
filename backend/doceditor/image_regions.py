@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -21,6 +22,7 @@ from PIL import Image
 from doceditor import live_events
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
+from doceditor.image_scope import checked_image
 from infra.database import write_transaction
 from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
@@ -116,19 +118,43 @@ def require_image(path: str | None) -> Path:
     return Path(str(path))
 
 
+def current_image(db, row: Mapping[str, Any], path: str | None, owner_thread_id: str | None) -> Path:
+    """The image a region comment is on as it is now; one inside a document passes its scope check again."""
+    if row.get("image_src"):
+        return require_image(str(checked_image(db, str(row["image_src"]), owner_thread_id)))
+    return require_image(path)
+
+
+_REVISIONS: dict[tuple, str] = {}
+_REVISIONS_KEPT = 512
+
+
 def image_revision(path: Path) -> str:
-    """The revision a pin is placed on: the image file's SHA-256."""
-    return sha256_file(path)
+    """The revision a pin is placed on: the image file's SHA-256, hashed once per version of the file.
+
+    Every comment read judges each commented image's staleness (FR13.9), so a
+    file whose identity, size and times are unchanged keeps its last hash: a
+    stat per image per read, not a full read.
+    """
+    st = path.stat()
+    key = (str(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+    revision = _REVISIONS.get(key)
+    if revision is None:
+        revision = sha256_file(path)
+        if len(_REVISIONS) >= _REVISIONS_KEPT:
+            _REVISIONS.pop(next(iter(_REVISIONS)))
+        _REVISIONS[key] = revision
+    return revision
 
 
-def move_fields(comment: Mapping[str, Any], fields: dict[str, Any], path: str | None) -> dict[str, Any]:
-    """Turn a patch's ``region`` into column updates; a moved pin is placed on the current image."""
+def move_fields(comment: Mapping[str, Any], fields: dict[str, Any], image: Path) -> dict[str, Any]:
+    """Turn a patch's ``region`` into column updates; a moved pin is placed on ``image`` as it is now."""
     if comment.get("region_number") is None:
         raise CommentActionError("region_target", "only a comment placed on an image region can be moved.")
     x, y, w, h = parse_region(fields["region"])
     rest = {key: value for key, value in fields.items() if key != "region"}
     return {**rest, "region_x": x, "region_y": y, "region_w": w, "region_h": h,
-            "image_rev": image_revision(require_image(image_of(comment, path)))}
+            "image_rev": image_revision(image)}
 
 
 def region_of(row: Mapping[str, Any]) -> Region | None:
@@ -275,17 +301,17 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
     except (ValueError, OSError) as exc:
         tray_problem = f"the reader's working folder could not be used ({exc})."
     for image_path, group in by_image.items():
-        problem = _unmarkable(image_path) or tray_problem
-        if problem is not None or tray is None:
+        problem, image = _readable(db, image_path, path, reader_thread_id)
+        if image is not None:
+            problem = _unmarkable(str(image))
+        problem = problem or tray_problem
+        if problem is not None or tray is None or image is None:
             line = f"Marked-up image unavailable: {problem}"
         else:
-            image = Path(str(image_path))
             # Images in one document can share a file name, so each one's copy also carries its path's hash.
             tag = "" if image_path == path else f"-{hashlib.sha256(str(image_path).encode()).hexdigest()[:8]}"
-            target = tray / f"{image.stem}-feedback-{batch_id}{tag}.png"
-            marks = marks_for(db, group)
-            after_commit(db, lambda image=image, marks=marks, target=target: _draw_copy(
-                image, marks, target, reader_thread_id))
+            target = tray / f"{Path(str(image_path)).stem}-feedback-{batch_id}{tag}.png"
+            after_commit(db, partial(_draw_copy, image, marks_for(db, group), target, reader_thread_id))
             line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
         for item in group:
             item["marked_image_line"] = line
@@ -305,6 +331,18 @@ def _draw_copy(image: Path, marks: list[Mark], target: Path, reader_thread_id: s
                          f"drawn ({exc}); the region lines in the task still say where each comment is."),
                 details={"path": str(target)},
             )
+
+
+def _readable(db, image_path: str | None, path: str | None, reader_thread_id: str) -> tuple[str | None, Path | None]:
+    """The image to copy for the reader, or why none: an image inside a document must be in the reader's scope now."""
+    if not image_path:
+        return "the artifact has no image file.", None
+    if image_path == path:
+        return None, Path(image_path)
+    try:
+        return None, checked_image(db, image_path, reader_thread_id)
+    except CommentActionError as exc:
+        return exc.message, None
 
 
 def _unmarkable(path: str | None) -> str | None:
