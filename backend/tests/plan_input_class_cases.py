@@ -519,10 +519,7 @@ _CASES = {
         "user_ask.py",
         '"a decision is not blocked on; raise it, and it holds its task by itself"',
     ): _user_block_on_decision_artifact,
-    (
-        "user_ask.py",
-        '"ask_artifact_id must name an active registered document or image"',
-    ): _user_block_on_non_document,
+    ("user_ask.py", "NOT_ASKABLE"): _user_block_on_non_document,
     # --- plans/node_creation.py ---
     ("node_creation.py", 'f"invalid plan node kind: {kind}"'): _operation(
         "add", {"kind": "epic", "title": "T", "acceptance_criteria": "DOD"},
