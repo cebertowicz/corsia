@@ -212,21 +212,6 @@ def pooled_size_window(pooled: dict[str, Any], measured: bool, minimum_n: int) -
                      "estimated_hours": pooled.get("estimated_hours") or 0.0, "active_hours": active_hours}}
 
 
-def size_window_periods(rows: list[dict[str, Any]]) -> set[str]:
-    """The served periods a size comparison window may pool: the run the chart draws.
-
-    Periods before a comparability break are counted differently, so the run starts after the
-    last period that is not comparable; a latest period that is itself not comparable stands
-    alone. The run then starts at its first period with a figure (a withheld low-n rate counts).
-    """
-    ordered = sorted(rows, key=lambda row: row["period"])
-    after_break = max((index + 1 for index, row in enumerate(ordered) if not row["comparable"]), default=0)
-    run = ordered[min(after_break, len(ordered) - 1):] if ordered else []
-    first = next((index for index, row in enumerate(run)
-                  if row["value"] is not None or (row["n"] > 0 and row["raw_value"] is not None)), None)
-    return set() if first is None else {row["period"] for row in run[first:]}
-
-
 def size_rows(metric: str, minimum_n: int, spine: list[str], sources: list[dict[str, Any]],
               comparable: Any, measured: Any, *, dates: dict[str, str]) -> list[dict[str, Any]]:
     """Serve one row per completed period, including periods with no outcomes or time.
