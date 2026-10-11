@@ -228,7 +228,9 @@ def apply(connection: sqlite3.Connection, node_id: str, *, at: str) -> None:
     head = chain[0]
     d_open, d_work, d_folded, child_delta = refresh(head, at)
     listed = int(head["archived_at"] is None)
-    roots = listed - head["listed"] if len(chain) == 1 else 0  # no live parent: a root
+    # ``top_roots`` counts rows with no parent at all (rebuild, recount); a row stranded
+    # under an archived parent is a root for the figures but never for this count.
+    roots = listed - head["listed"] if head["parent_id"] is None else 0
     head["listed"] = listed
     if head["own_last_changed"] is None:
         head["own_last_changed"] = head["updated_at"]

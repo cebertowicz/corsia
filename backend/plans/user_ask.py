@@ -63,7 +63,7 @@ class AskRelease:
 def raised_asks(db, artifact_id: str) -> list:
     """The user holds that wait on this artifact, newest first, with their asking agent."""
     return db.execute(
-        """SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
+        f"""SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
                   n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name
              FROM plan_node_artifact_links l
              JOIN plan_nodes n ON n.id = l.node_id
@@ -71,8 +71,7 @@ def raised_asks(db, artifact_id: str) -> list:
              JOIN plan_node_holds h ON h.node_id = n.id
              LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'
             WHERE l.artifact_id=? AND l.role='attention'
-              AND h.kind='blocked' AND h.owner_kind='user'
-              AND h.owner_id=l.artifact_id AND h.cleared_at IS NULL
+              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
             ORDER BY h.created_at DESC, h.id DESC""",
         (artifact_id,),
     ).fetchall()

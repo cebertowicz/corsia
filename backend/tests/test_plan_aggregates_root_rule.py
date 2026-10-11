@@ -50,3 +50,21 @@ def test_a_change_under_an_archived_parent_reads_as_rebuild_and_the_recount_read
 
     aggregates_rebuild.rebuild(world.db, world.plan.id)
     assert _stored(world) == after_apply
+
+
+def test_archiving_a_row_under_an_archived_parent_leaves_the_root_count() -> None:
+    """``top_roots`` counts rows with no parent at all, as rebuild and the recount do."""
+    world = World()
+    parent = world.add(None, "phase")
+    assert parent
+    child = world.add(parent)
+    assert child
+    service.touch_node(world.db, parent, at=service._now(), archived_at=service._now())
+    aggregates_rebuild.rebuild(world.db, world.plan.id)
+    world.db.commit()
+    before = _stored(world)[1]
+
+    service.touch_node(world.db, child, at=service._now(), archived_at=service._now())
+
+    assert _stored(world)[1][_PLAN.index("top_roots")] == before[_PLAN.index("top_roots")]
+    assert not stored_mismatches(world.db, world.plan.id)

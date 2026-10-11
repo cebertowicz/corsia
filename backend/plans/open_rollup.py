@@ -13,7 +13,6 @@ two equal (``tests/test_plan_open_tree_equivalence.py``).
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from dataclasses import asdict
 
@@ -53,18 +52,11 @@ def sent_back_feedback(connection, node_ids: Iterable[str]) -> dict[str, str]:
         connection,
         f"""SELECT e.node_id,e.created_at,e.payload_json FROM plan_node_events e
             JOIN plan_nodes n ON n.id=e.node_id
-            WHERE e.node_id IN ({{marks}}) AND ({rollup.rejected_round_sql('n', 'e')})
+            WHERE e.node_id IN ({{marks}}) AND {rollup.round_feedback_sql('n', 'e')}
             ORDER BY e.created_at,e.rowid""",
         node_ids,
     )
-    feedback: dict[str, str] = {}
-    for row in sorted(rows, key=lambda row: row["created_at"]):
-        try:
-            text = json.loads(row["payload_json"] or "{}").get("feedback")
-        except (TypeError, json.JSONDecodeError):
-            text = None
-        feedback[str(row["node_id"])] = str(text or "")
-    return feedback
+    return rollup.round_feedback(sorted(rows, key=lambda row: row["created_at"]))
 
 
 def links(connection, node_ids: Iterable[str]) -> dict:
