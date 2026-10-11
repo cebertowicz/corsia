@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from api.doc_comment_models import CommentCreate
 
-from doceditor import comments as store, feedback_batches, feedback_state, image_regions
+from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
@@ -74,7 +74,7 @@ async def list_comments(artifact_id: str, token: str):
             artifact = registry_models.get_artifact(artifact_id, db=db)
             path = artifact["path"] if artifact else None
             comments, anchors_checked = anchored_threads(artifact_id, path, db)
-            image_regions.annotate_stale(comments, path)
+            image_regions.annotate_stale(db, comments, path, artifact["parent_thread_id"] if artifact else None)
             feedback_state.annotate_reply_waiting_threads(db, user["id"], artifact_id, comments)
             feedback = feedback_batches.user_feedback_for_document(db, artifact_id)
             return comments, anchors_checked, feedback
@@ -106,8 +106,7 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             raise HTTPException(400, exc.message) from exc
     try:
         region = image_regions.check_region_shape(
-            region=body.region, parent_id=body.parent_id, review=body.review,
-            quote=body.anchor_text, replacement=body.replacement,
+            region=body.region, parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         )
     except CommentActionError as exc:
         raise HTTPException(400, exc.message) from exc
@@ -122,8 +121,6 @@ async def create_comment(artifact_id: str, token: str, body: CommentCreate):
             db.close()
 
     path = await run_in_db(_access)
-    if region is not None and not image_regions.is_image_path(path):
-        raise HTTPException(400, "region applies only to an image artifact.")
 
     if body.anchor_text and not body.parent_id and not body.review and (body.from_off is None or body.to_off is None):
         raise HTTPException(400, "Anchored comments require selection offsets")
@@ -357,10 +354,9 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
             comment = store.get_comment(comment_id, db=db)
             try:
                 check_user_text_edit(comment, fields)
-                moved = fields
-                if "region" in fields:
-                    artifact = registry_models.get_artifact(artifact_id, db=db)
-                    moved = image_regions.move_fields(comment, fields, artifact["path"] if artifact else None)
+                artifact = registry_models.get_artifact(artifact_id, db=db) or {}
+                moved = doc_images.region_patch(
+                    db, comment, fields, doc_path=artifact.get("path"), owner_thread_id=artifact.get("parent_thread_id"))
                 patch = reopen_fields(comment, moved)
             except CommentActionError as exc:
                 raise HTTPException(comment_action_status(exc), exc.message) from exc

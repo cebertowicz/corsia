@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -20,6 +21,7 @@ from PIL import Image
 
 from doceditor import live_events
 from doceditor.comment_action_errors import CommentActionError
+from doceditor.document_scope import ProjectNotFound, scope_bases
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
 from infra.database import write_transaction
 from infra.passive_changes import append_thread_context_note
@@ -27,6 +29,7 @@ from infra.write_effects import after_commit
 from registry import models as registry_models
 from registry.file_types import image_media_type
 from registry.identity_metadata import sha256_file
+from registry.path_access import ReadRefused, checked_read
 
 # Mirrors the viewer's AGENT_COLORS and agentColor() (frontend/src/lib/docPresence.ts),
 # so a tag is the same colour in the picture an agent reads and on screen.
@@ -40,6 +43,7 @@ _EPSILON = 1e-6
 # What a marked-up copy can fail with: a missing or unreadable file, a format
 # Pillow cannot decode, or an image past the decode budget.
 RENDER_ERRORS = (OSError, ValueError, Image.DecompressionBombError)
+_REFUSED = {"missing": "could not be found", "outside": "is outside this document's scope", "not_file": "is not a file"}
 
 
 def parse_region(value: Any) -> tuple[float, float, float, float]:
@@ -64,18 +68,37 @@ def parse_region(value: Any) -> tuple[float, float, float, float]:
     return x, y, min(w, 1 - x), min(h, 1 - y)
 
 
-def check_region_shape(*, region: Any, parent_id: str | None, review: bool, quote: str | None,
+def check_region_shape(*, region: Any, parent_id: str | None, review: bool,
                        replacement: str | None) -> tuple[float, float, float, float] | None:
-    """A region anchors only a new top-level comment, never a reply, review, quote or suggestion."""
+    """A region anchors only a new top-level comment, never a reply, review or suggestion.
+
+    Whether it also takes a quote depends on the target (``check_region_target``).
+    """
     if region is None:
         return None
-    if parent_id or review or (quote or "").strip() or replacement is not None:
+    if parent_id or review or replacement is not None:
         raise CommentActionError(
             "region_shape",
-            "region anchors a new top-level comment on an image; do not combine it with parent_id, review, "
-            "quote or replacement.",
+            "region anchors a new top-level comment on an image; do not combine it with parent_id, review "
+            "or replacement.",
         )
     return parse_region(region)
+
+
+def check_region_target(path: str | None, quote: str | None) -> None:
+    """An image artifact takes a region alone; a document takes it with a quote naming one of its images."""
+    quoted = bool((quote or "").strip())
+    if is_image_path(path):
+        if quoted:
+            raise CommentActionError(
+                "region_shape", "on an image artifact, region places the comment by itself; do not pass quote.",
+            )
+    elif not quoted:
+        raise CommentActionError(
+            "region_target",
+            "on a document, region needs the image it is on: pass quote with that image's markdown "
+            "![alt](path), or text inside it such as its path.",
+        )
 
 
 def is_image_path(path: str | Path | None) -> bool:
@@ -83,28 +106,76 @@ def is_image_path(path: str | Path | None) -> bool:
     return bool(path) and image_media_type(Path(str(path))) is not None
 
 
+def image_of(row: Mapping[str, Any], path: str | None) -> str | None:
+    """The image a region comment is on: the one in its document it names, else its artifact's file."""
+    return row.get("image_src") or path
+
+
 def require_image(path: str | None) -> Path:
-    """The artifact's image file, or the error that a region needs one."""
+    """The image file, or the error that a region needs one."""
     if not is_image_path(path):
-        raise CommentActionError("region_target", "region applies only to an image artifact.")
+        raise CommentActionError("region_target", "region applies only to an image.")
     if not Path(str(path)).is_file():
         raise CommentActionError("region_target", "the image file is missing, so a region cannot be placed on it.")
     return Path(str(path))
 
 
+def reader_bases(db, thread_id: str | None) -> list[Path]:
+    """The roots ``thread_id`` reads files from, scoped as the file route scopes them; resolved once per request.
+
+    A thread in a project reads that project's roots; a thread outside any project, the workspace's.
+    """
+    row = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone() if thread_id else None
+    try:
+        return scope_bases(row["project_id"] if row else None, db)
+    except ProjectNotFound:
+        return []
+
+
+def checked_image(db, path: str, bases: list[Path]) -> Path:
+    """The file at ``path`` as the read-scope gate passes it for ``bases``, or the region error."""
+    try:
+        return checked_read(path, bases, db=db)
+    except ReadRefused as exc:
+        raise CommentActionError("region_target", f"the image {path} {_REFUSED[exc.reason]}.") from exc
+
+
+def comment_image(db, row: Mapping[str, Any], path: str | None, bases: list[Path]) -> Path | None:
+    """The image a region comment is on, or ``None`` when its artifact has none. An artifact is its own
+    file; a document's image is a stored path, not a grant, so each read takes it through the gate again."""
+    if row.get("image_src"):
+        return checked_image(db, row["image_src"], bases)
+    return Path(path) if path else None
+
+
+def _bases_for(db, groups: Iterable[list[dict]], thread_id: str | None) -> list[Path]:
+    """The reader's roots, resolved only when some image in ``groups`` sits inside a document."""
+    return reader_bases(db, thread_id) if any(group[0].get("image_src") for group in groups) else []
+
+
 def image_revision(path: Path) -> str:
-    """The revision a pin is placed on: the image file's SHA-256."""
-    return sha256_file(path)
+    """The revision a pin is placed on: the image file's SHA-256, hashed once per version of the file.
+
+    Every comment read judges each commented image's staleness (FR13.9), so a
+    file whose identity, size and times are unchanged keeps its last hash: a
+    stat per image per read, not a full read.
+    """
+    st = path.stat()
+    return _file_sha256(str(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
 
 
-def move_fields(comment: Mapping[str, Any], fields: dict[str, Any], path: str | None) -> dict[str, Any]:
-    """Turn a patch's ``region`` into column updates; a moved pin is placed on the current image."""
+@lru_cache(maxsize=512)
+def _file_sha256(path: str, *version: int) -> str:
+    return sha256_file(Path(path))
+
+
+def move_fields(comment: Mapping[str, Any], fields: dict[str, Any], image: Path) -> dict[str, Any]:
+    """Turn a patch's ``region`` into column updates; a moved pin is placed on ``image`` as it is now."""
     if comment.get("region_number") is None:
         raise CommentActionError("region_target", "only a comment placed on an image region can be moved.")
     x, y, w, h = parse_region(fields["region"])
     rest = {key: value for key, value in fields.items() if key != "region"}
-    return {**rest, "region_x": x, "region_y": y, "region_w": w, "region_h": h,
-            "image_rev": image_revision(require_image(path))}
+    return {**rest, "region_x": x, "region_y": y, "region_w": w, "region_h": h, "image_rev": image_revision(image)}
 
 
 def region_of(row: Mapping[str, Any]) -> Region | None:
@@ -115,21 +186,35 @@ def region_of(row: Mapping[str, Any]) -> Region | None:
                   float(row.get("region_w") or 0.0), float(row.get("region_h") or 0.0))
 
 
-def annotate_stale(threads: list[dict], path: str | None) -> None:
-    """Mark each region comment whose image changed since it was placed (FR13.9).
+def _by_image(rows: Iterable[dict], path: str | None) -> dict[str | None, list[dict]]:
+    """The region comments among ``rows``, grouped by the image each is on."""
+    groups: dict[str | None, list[dict]] = {}
+    for row in rows:
+        if row.get("region_number") is not None:
+            groups.setdefault(image_of(row, path), []).append(row)
+    return groups
 
-    One hash per call. An image that cannot be read leaves every pin unmarked
-    rather than calling them all stale.
-    """
-    regional = [c for c in threads if c.get("region_number") is not None]
-    if not regional:
-        return
+
+def _mark_stale(group: list[dict], image: Path | None) -> None:
+    """An image that cannot be read leaves its pins unmarked rather than calling them all stale."""
     try:
-        current = image_revision(Path(str(path))) if path else None
+        revision = image_revision(image) if image else None
     except OSError:
-        current = None
-    for comment in regional:
-        comment["region_stale"] = current is not None and comment.get("image_rev") != current
+        revision = None
+    for row in group:
+        row["region_stale"] = revision is not None and row.get("image_rev") != revision
+
+
+def annotate_stale(db, threads: list[dict], path: str | None, reader_thread_id: str | None) -> None:
+    """Mark each region comment whose image changed since it was placed (FR13.9), reading each image once."""
+    groups = list(_by_image(threads, path).values())
+    bases = _bases_for(db, groups, reader_thread_id)
+    for group in groups:
+        try:
+            image = comment_image(db, group[0], path, bases)
+        except CommentActionError:
+            image = None
+        _mark_stale(group, image)
 
 
 def agent_color(thread_id: str) -> str:
@@ -226,38 +311,43 @@ def _save(png: bytes, target: Path) -> None:
 
 
 def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_id: str, batch_id: str) -> None:
-    """Give a batch's region comments their wake lines and one marked-up copy (FR13.8).
+    """Give a batch's region comments their wake lines and one marked-up copy per image (FR13.8).
 
-    The copy shows only this batch's boxes, so its numbers match the lines.
-    Delivery holds the SQLite writer, so here only the marks and the image's
-    header are read; the copy is drawn once the delivery commits, and a
+    A copy shows only this batch's boxes on its image, so its numbers match the
+    lines. Delivery holds the SQLite writer, so here only the marks and the
+    image's header are read; the copy is drawn once the delivery commits, and a
     rolled-back delivery draws none. It is named for the batch, which delivers
     once. A copy that cannot be made, or a reader tray that cannot be
     resolved, leaves the reason in its place; the text still goes.
     """
-    regional = [item for item in items if item["kind"] == "comment" and item.get("region_number") is not None]
-    if not regional:
+    by_image = _by_image((item for item in items if item["kind"] == "comment"), path)
+    if not by_image:
         return
-    annotate_stale(regional, path)
-    for item in regional:
-        item["region_line"] = describe_region(item)
-    problem = _unmarkable(path)
-    tray = None
-    if problem is None:
+    tray, tray_problem = None, None
+    try:
+        tray = _working_tray(db, reader_thread_id)
+    except (ValueError, OSError) as exc:
+        tray_problem = f"the reader's working folder could not be used ({exc})."
+    bases = _bases_for(db, by_image.values(), reader_thread_id)
+    for image_path, group in by_image.items():
         try:
-            tray = _working_tray(db, reader_thread_id)
-        except (ValueError, OSError) as exc:
-            problem = f"the reader's working folder could not be used ({exc})."
-    if tray is None:
-        line = f"Marked-up image unavailable: {problem}"
-    else:
-        image = Path(str(path))
-        target = tray / f"{image.stem}-feedback-{batch_id}.png"
-        marks = marks_for(db, regional)
-        after_commit(db, lambda: _draw_copy(image, marks, target, reader_thread_id))
-        line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
-    for item in regional:
-        item["marked_image_line"] = line
+            image = comment_image(db, group[0], path, bases)
+            problem = _unmarkable(str(image) if image else None)
+        except CommentActionError as exc:
+            image, problem = None, exc.message
+        _mark_stale(group, image)
+        problem = problem or tray_problem
+        if problem is not None or tray is None or image is None:
+            line = f"Marked-up image unavailable: {problem}"
+        else:
+            # Images in one document can share a file name, so each one's copy also carries its path's hash.
+            tag = "" if image_path == path else f"-{hashlib.sha256(str(image_path).encode()).hexdigest()[:8]}"
+            target = tray / f"{Path(str(image_path)).stem}-feedback-{batch_id}{tag}.png"
+            after_commit(db, partial(_draw_copy, image, marks_for(db, group), target, reader_thread_id))
+            line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
+        for item in group:
+            item["region_line"] = describe_region(item)
+            item["marked_image_line"] = line
 
 
 def _draw_copy(image: Path, marks: list[Mark], target: Path, reader_thread_id: str) -> None:

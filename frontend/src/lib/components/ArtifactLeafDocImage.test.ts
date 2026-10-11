@@ -28,7 +28,7 @@ vi.mock('$lib/api/reviewBar', async (importOriginal) => ({
 import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { backLayerDepth, resetBackLayers } from '$lib/historyBackLayer';
 import { threadWorkspaces, openArtifactTab } from '$lib/stores/artifactWorkspace';
-import { closeDocumentImage, documentImageViewers, openDocumentImage } from '$lib/stores/documentImageViewer';
+import { closeDocumentImage, documentImageViewers, openDocumentImage, remapDocumentImage } from '$lib/stores/documentImageViewer';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 import { paneOpen } from '$lib/stores/paneOpen';
 import { token } from '$lib/stores/auth';
@@ -254,6 +254,36 @@ describe('an image of a document opened in the canvas', () => {
 		host.querySelector<HTMLButtonElement>('.image-overlay button.back')!.click();
 		await settle();
 		expect(get(paneCollapsed)).toBe(true);
+	});
+
+	it('offers comments on the image when the document has them, posting where its markdown is now', async () => {
+		await mountLeaf();
+		const post = vi.fn(async () => 'new');
+		openDocumentImage(THREAD, { ...image(activeInstance()), comments: { artifactId: 'art-doc', projectId: null, readOnly: false, post } });
+		await settle();
+		const overlay = host.querySelector('.image-overlay')!;
+		expect(overlay.querySelector('[data-image-comment]')).not.toBeNull();
+		expect(overlay.querySelector('[data-image-comments-pill]')).not.toBeNull();
+		expect(overlay.querySelector('button[aria-label="Back to notes.md"]')).not.toBeNull();
+
+		remapDocumentImage(THREAD, activeInstance(), (pos) => pos + 3);
+		await settle();
+		const img = overlay.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: 1000 });
+		Object.defineProperty(img, 'naturalHeight', { configurable: true, value: 500 });
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		overlay.querySelector<HTMLButtonElement>('[data-image-comment]')!.click();
+		await settle();
+		overlay.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+		await settle();
+		const textarea = host.querySelector<HTMLTextAreaElement>('.image-overlay textarea')!;
+		textarea.value = 'Too dark';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		host.querySelector<HTMLButtonElement>('.image-overlay button.submit')!.click();
+		await settle();
+		expect(post).toHaveBeenCalledWith(12, 39, { x: 0, y: 0, w: 1, h: 1 }, 'Too dark');
 	});
 
 	it('keeps the pane as the user left it when they toggle it while the viewer is open', async () => {

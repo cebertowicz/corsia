@@ -191,13 +191,54 @@ function loadedImageWidget(target: EventTarget | null): HTMLElement | null {
 	return wrap && img && img.complete && img.naturalWidth > 0 ? wrap : null;
 }
 
+function requestFromWidget(view: EditorView, wrap: HTMLElement): OpenImageRequest | null {
+	const [from, to] = [Number(wrap.dataset.from), Number(wrap.dataset.to)];
+	if (!(to > from) || to > view.state.doc.length) return null;
+	const top = wrap.getBoundingClientRect().top - view.scrollDOM.getBoundingClientRect().top;
+	return { src: wrap.dataset.src ?? '', alt: wrap.dataset.alt ?? '', from, to, scrollTop: view.scrollDOM.scrollTop, top };
+}
+
 function openFromWidget(view: EditorView, wrap: HTMLElement): boolean {
 	const open = view.state.facet(imageOpener);
-	const [from, to] = [Number(wrap.dataset.from), Number(wrap.dataset.to)];
-	if (!open || !(to > from) || to > view.state.doc.length) return false;
-	const top = wrap.getBoundingClientRect().top - view.scrollDOM.getBoundingClientRect().top;
-	open({ src: wrap.dataset.src ?? '', alt: wrap.dataset.alt ?? '', from, to, scrollTop: view.scrollDOM.scrollTop, top });
+	const request = open ? requestFromWidget(view, wrap) : null;
+	if (!open || !request) return false;
+	open(request);
 	return true;
+}
+
+/** How long an image scrolled into view may take to draw before opening it is given up. */
+const DRAW_WAIT_MS = 4000;
+
+/**
+ * What opening the image whose markdown is at `from`..`to` needs, as a click on it would give: for a comment on it,
+ * opened from the margin or the comments drawer. An image off screen is scrolled to first and waited for; one that
+ * does not draw gives null, and the caller keeps its comments in their cards.
+ */
+export async function imageRequestAt(root: HTMLElement, { from, to }: { from: number; to: number }): Promise<OpenImageRequest | null> {
+	const editor = root.querySelector<HTMLElement>('.cm-editor');
+	const view = editor ? EditorView.findFromDOM(editor) : null;
+	if (!view || from > view.state.doc.length) return null;
+	const widget = () => [...view.contentDOM.querySelectorAll<HTMLElement>('.cm-md-image')]
+		.find((wrap) => Number(wrap.dataset.from) < to && Number(wrap.dataset.to) > from) ?? null;
+	// Outside the rendered part of the document the image has no widget yet.
+	if (from < view.viewport.from || from > view.viewport.to) {
+		view.dispatch({ effects: EditorView.scrollIntoView(from, { y: 'center' }) });
+		await new Promise<void>((resolve) => {
+			const timer = setTimeout(resolve, 500);
+			view.requestMeasure({ read: () => undefined, write: () => { clearTimeout(timer); resolve(); } });
+		});
+	}
+	const img = widget()?.querySelector('img');
+	if (img && !img.complete) {
+		await new Promise<void>((resolve) => {
+			const done = () => { clearTimeout(timer); resolve(); };
+			const timer = setTimeout(done, DRAW_WAIT_MS);
+			img.addEventListener('load', done, { once: true });
+			img.addEventListener('error', done, { once: true });
+		});
+	}
+	const wrap = loadedImageWidget(widget());
+	return wrap ? requestFromWidget(view, wrap) : null;
 }
 
 /**
