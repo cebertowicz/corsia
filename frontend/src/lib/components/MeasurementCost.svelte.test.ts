@@ -38,7 +38,7 @@ describe('MeasurementCost', () => {
 		expect(text(host!.querySelector('.spendcard') as HTMLElement)).toBe('Total spend, Sep 28 to Oct 4$10,600API-equivalent, every priced call in the windowHours of work delivered2,120');
 		expect(content).not.toContain('per accepted outcome');
 		expect(content).not.toContain('not in this rate');
-		expect(content).toContain('160 of 200 usage records priced in this range.');
+		expect(content).toContain('160 of 200 usage records priced in Sep 28 to Oct 4.');
 		expect(content).not.toContain('Not priced:');
 		expect(content).not.toContain('Not API-priced:');
 	});
@@ -363,7 +363,7 @@ describe('MeasurementCost', () => {
 		const card = markup.querySelector('section.card.cost') as HTMLElement;
 		expect(card.querySelector('h3')?.textContent).toBe('Cost per hour of delivered work');
 		expect(card.querySelector('.spendcard')).not.toBeNull();
-		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records priced in this range.');
+		expect(text(card.querySelector('.caption') as HTMLElement)).toBe('160 of 200 usage records priced in Sep 28 to Oct 4.');
 		expect(markup.querySelector('.missing')).toBeNull();
 	});
 });

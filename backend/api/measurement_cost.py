@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import Depends, Query
 
+from api.cost_identity import IDENTITY_GROUP, IdentityResolver, identity_columns, identity_join
 from api.measurement_actual import build_actual
 from api.measurement_average import cost_average
 from api.measurement_queries import PREPARED_OUTCOMES, PREPARED_SCOPE
@@ -130,25 +131,33 @@ def register_cost_route(
 
 
 def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
-    """One grouped ledger read. Counts are retained usage records; token sums include only admitted rows."""
+    """One grouped ledger read. Counts are retained usage records; token sums include only admitted rows.
+
+    Each shape carries the manifest identity its turn ran under, so ``model`` is the resolved identity
+    (the key Models and Spend price by), never the raw selector an alias row records.
+    """
     bounded = usage_params(db, params)
     rows = db.execute(
         f"""
-        SELECT {bounded['grain'].bucket('u.hour')} AS period, u.model AS model,
+        SELECT {bounded['grain'].bucket('u.hour')} AS period, {identity_columns('u')},
           u.admission AS admission, u.input_tier AS input_tier, u.idle_hours AS idle_hours,
           SUM(u.records) AS records,
           SUM(CASE WHEN u.admission='ok' THEN u.prompt_tokens ELSE 0 END) AS prompt_tokens,
           SUM(CASE WHEN u.admission='ok' THEN u.completion_tokens ELSE 0 END) AS completion_tokens,
           SUM(CASE WHEN u.admission='ok' THEN u.cache_creation_tokens ELSE 0 END) AS cache_creation_tokens,
           SUM(CASE WHEN u.admission='ok' THEN u.cache_read_tokens ELSE 0 END) AS cache_read_tokens
-        FROM {usage_source(PREPARED_SCOPE, bounded['grain'])} u
+        FROM {usage_source(PREPARED_SCOPE, bounded['grain'])} u {identity_join('u')}
         WHERE {bounded['grain'].bucket('u.hour')} IS NOT NULL
-        GROUP BY period, u.model, u.admission, u.input_tier, u.idle_hours
-        ORDER BY period, u.model, u.input_tier, u.idle_hours
+        GROUP BY period, {IDENTITY_GROUP}, u.admission, u.input_tier, u.idle_hours
+        ORDER BY period, model, u.input_tier, u.idle_hours
         """,
         bounded,
     ).fetchall()
-    return [dict(row) for row in rows]
+    resolve = IdentityResolver(db)
+    shapes = [dict(row) for row in rows]
+    for shape in shapes:
+        shape["model"] = resolve(shape).key
+    return shapes
 
 
 def endpoint_listings(db) -> dict[str, str]:
@@ -236,7 +245,7 @@ def _series(db, classified: list[dict[str, Any]], sized: Mapping[str, Mapping[st
             "period": period,
             "dollars": round(dollars, 10) if dollars is not None else None,
             "priced_records": sum(int(row["records"]) for row in priced),
-            "api_records": sum(int(row["records"]) for row in rows if row["outcome"] != "not_api_priced"),
+            "api_records": sum(int(row["records"]) for row in rows),
             "outcomes": outcomes_count,
             "per_outcome": round(dollars / outcomes_count, 10) if dollars is not None and outcomes_count else None,
             "sized": period_sized,
@@ -280,17 +289,18 @@ def build_cost(db, params: dict[str, Any]) -> dict[str, Any]:
     every = _series(db, classified, size_period_totals(db, params), grain)
     # The lead-in periods are read only so each drawn period has a full span for its average.
     series = [{**row, "average": cost_average(every, grain, row["period"], MINIMUM_SIZED)} for row in every if row["period"] in grain.served]
-    # Coverage names the range the page draws, so the averaging lead-in's records are not counted.
+    # Coverage names the headline window, the one the card's figures and caption name, so neither the
+    # drawn range's earlier periods nor the averaging lead-in's records are counted.
     records: dict[str, int] = defaultdict(int)
     for row in classified:
-        if str(row["period"]) in grain.served:
+        if str(row["period"]) in grain.latest.periods:
             records[row["outcome"]] += int(row["records"])
     return {
         "definition_version": 1,
         "series": series,
         "latest": _pooled(every, grain.latest, grain) if every else None,
         "previous": _pooled(every, grain.previous, grain) if every else None,
-        "coverage": {"priced_records": records["priced"], "api_records": sum(records.values()) - records["not_api_priced"]},
+        "coverage": {"priced_records": records["priced"], "api_records": sum(records.values())},
         "not_api_priced_records": records["not_api_priced"],
         "excluded": [{"kind": kind, "text": text, "records": records[kind]} for kind, text in _EXCLUDED_TEXT.items() if records[kind]],
         "actual": build_actual(db, params),
