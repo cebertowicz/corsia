@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import shlex
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -411,7 +414,10 @@ def test_discard_config_state_removes_only_this_runs_folder(tmp_path):
 def test_write_scope_confines_config_state_to_the_run_folder(tmp_path):
     import dataclasses
 
-    from reviewer.reviewer_exact_source import claude_config_state_scope, write_confined
+    from reviewer.reviewer_exact_source import (
+        _sb_regex_path, _sb_string, claude_config_state_scope, render_write_profile,
+        write_confined,
+    )
 
     config, work = tmp_path / "acct", tmp_path / "work"
     temp_root = (tmp_path / "cli-tmp").resolve()
@@ -420,7 +426,6 @@ def test_write_scope_confines_config_state_to_the_run_folder(tmp_path):
     sibling = config / "projects" / "-tmp-work-corsia-cc-zz-c9999"
     temp_folder = temp_root / "-tmp-work-corsia-cc-ab-c1234"
     temp_sibling = temp_root / "-tmp-work-corsia-cc-zz-c9999"
-    cwd_file = temp_root.parent / "claude-abc123-cwd"
     cwd_other = temp_root.parent / "claude-abc123-other"
     other_cwd = temp_root.parent / "other-cwd"
     for folder in (run_dir, run_folder, sibling, config / "hooks", temp_sibling):
@@ -429,22 +434,105 @@ def test_write_scope_confines_config_state_to_the_run_folder(tmp_path):
         claude_config_state_scope({"CLAUDE_CONFIG_DIR": str(config)}, str(run_dir)),
         temp_root=temp_root,
     )
+    profile = render_write_profile([str(work)], scope)
+    parent = str(temp_root.parent)
+    parent_regex = _sb_regex_path(parent)
+    parent_literal = _sb_string(parent)
+    counted_rule = (
+        f'(allow file-write* (regex #"^{parent_regex}/claude-[^/]{{1,64}}-cwd$"))'
+    )
+    assert counted_rule in profile
+    base_profile = profile.replace(counted_rule, "")
+    candidates = {
+        "A-file-regex": profile,
+        "B-parent-literal": base_profile + (
+            f'(allow file-write* (literal {parent_literal})'
+            f' (regex #"^{parent_regex}/claude-[^/]{{1,64}}-cwd$"))'
+        ),
+        "C-uncounted-regex": base_profile + (
+            f'(allow file-write* (regex #"^{parent_regex}/claude-[^/]*-cwd$"))'
+        ),
+        "D-create-parent": base_profile + (
+            f'(allow file-write-create (regex #"^{parent_regex}$"))' + counted_rule
+        ),
+    }
+    outcomes = {}
+    for name, candidate_profile in candidates.items():
+        candidate_file = temp_root.parent / f"claude-{name}-cwd"
+        plain_file = temp_root.parent / f"qg-plain-file-{name}"
+        command = (
+            f"printf x > {shlex.quote(str(candidate_file))}; "
+            f"printf x > {shlex.quote(str(plain_file))}"
+        )
+        result = subprocess.run(
+            ["/usr/bin/sandbox-exec", "-p", candidate_profile, "/bin/sh", "-c", command],
+            capture_output=True, text=True,
+        )
+        content = candidate_file.read_text() if candidate_file.exists() else ""
+        plain_content = plain_file.read_text() if plain_file.exists() else ""
+        outcome = "written" if content == "x" else "empty" if candidate_file.exists() else "denied"
+        plain_outcome = (
+            "written" if plain_content == "x" else "empty" if plain_file.exists() else "denied"
+        )
+        outcomes[name] = outcome
+        summary = (
+            f"cwd write candidate {name}: {outcome}; ordinary file: {plain_outcome} "
+            f"(exit {result.returncode})"
+        )
+        print(summary)
+        warnings.warn(summary, stacklevel=1)
+
+    assert outcomes["B-parent-literal"] != outcomes["C-uncounted-regex"], outcomes
+
     script = f"mkdir -p {temp_folder} ; " + " ; ".join(
         f"echo x > {target}" for target in (
-            run_folder / "ok", temp_folder / "ok", cwd_file, sibling / "no", temp_sibling / "no",
-            temp_root / "no", cwd_other, other_cwd, config / "hooks" / "no",
-            config / "settings.json", config / ".claude.json",
+            run_folder / "ok", temp_folder / "ok", sibling / "no", temp_sibling / "no",
+            temp_root / "no", cwd_other, other_cwd, temp_root.parent / "qg-plain-file",
+            config / "hooks" / "no", config / "settings.json", config / ".claude.json",
         )
     )
-
     subprocess.run(write_confined(["/bin/sh", "-c", script], [str(work)], scope))
 
     assert (run_folder / "ok").is_file()
     assert (temp_folder / "ok").is_file()
-    assert cwd_file.is_file()
     assert not any(
         path.exists() for path in (
             sibling / "no", temp_sibling / "no", temp_root / "no", cwd_other, other_cwd,
-            config / "hooks" / "no", config / "settings.json", config / ".claude.json",
+            temp_root.parent / "qg-plain-file", config / "hooks" / "no",
+            config / "settings.json", config / ".claude.json",
         )
     )
+
+
+@pytest.mark.skipif(
+    not _can_apply_sandbox(),
+    reason="needs macOS sandbox-exec outside another sandbox (the backend and CI runners are not sandboxed)",
+)
+def test_write_scope_allows_a_child_tmpdir_cwd_file_inside_its_scratch(tmp_path):
+    import dataclasses
+
+    from reviewer.reviewer_exact_source import claude_config_state_scope, write_confined
+
+    config, work = tmp_path / "acct", tmp_path / "work"
+    scratch = work / "tmp"
+    run_dir = work / "corsia-cc-ab_c1234"
+    scratch.mkdir(parents=True)
+    run_dir.mkdir()
+    scope = dataclasses.replace(
+        claude_config_state_scope({"CLAUDE_CONFIG_DIR": str(config)}, str(run_dir)),
+        temp_root=tmp_path / "cli-tmp",
+    )
+    cwd_file = scratch / "claude-abc123-cwd"
+    result = subprocess.run(
+        write_confined(
+            ["/bin/sh", "-c", 'printf x > "$TMPDIR/claude-abc123-cwd"'],
+            [str(work)], scope,
+        ),
+        capture_output=True, text=True, env={**os.environ, "TMPDIR": str(scratch)},
+    )
+
+    summary = f"TMPDIR cwd-file observation: {'written' if cwd_file.read_text() == 'x' else 'not-written'}"
+    print(summary)
+    warnings.warn(summary, stacklevel=1)
+    assert result.returncode == 0, result.stderr
+    assert cwd_file.read_text() == "x"
