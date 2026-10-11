@@ -168,9 +168,10 @@ def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
     params = {"owner_message_role": "user"}
     clauses = [f"{alias}.role=:owner_message_role", f"{alias}.content<>''"]
     for index, prefix in enumerate(SYSTEM_WRAPPER_PREFIXES):
+        # Exact, case-sensitive prefix test like str.startswith; LIKE folds ASCII case.
         key = f"owner_wrapper_prefix_{index}"
-        params[key] = f"{prefix}%"
-        clauses.append(f"{alias}.content NOT LIKE :{key}")
+        params[key] = prefix
+        clauses.append(f"substr({alias}.content, 1, {len(prefix)}) <> :{key}")
     for index, metadata_key in enumerate(OWNER_MESSAGE_METADATA_KEYS):
         key = f"owner_metadata_path_{index}"
         params[key] = f"$.{metadata_key}"

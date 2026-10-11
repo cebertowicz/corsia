@@ -251,25 +251,28 @@ async def test_kpi_token_completeness_starts_when_an_upgrade_begins_persisting_c
     assert (weeks["current"]["tokens_recorded"], weeks["previous"]["tokens_recorded"]) == (True, False)
 
 
-def test_tokens_recorded_from_memoizes_the_first_complete_day_per_database():
+def test_tokens_recorded_from_walks_the_created_at_index_instead_of_scanning_the_ledger(isolated_db):
     from api.measurement_kpi import _tokens_recorded_from
+    from infra.database import get_db
 
-    class Db:
-        def __init__(self):
-            self.calls = 0
+    db = get_db()
+    try:
+        _seed_scope(db)
+        _usage(db, "incomplete", "root", "2026-09-01T12:00:00.000000")
+        _usage(db, "complete", "root", "2026-09-07T12:00:00.000000", total=10)
+        _usage(db, "later", "root", "2026-09-08T12:00:00.000000", total=20)
+        db.commit()
+        queries: list[str] = []
+        db.set_trace_callback(queries.append)
+        try:
+            assert _tokens_recorded_from(db) == "2026-09-07"
+        finally:
+            db.set_trace_callback(None)
+        plan = " ".join(str(tuple(row)) for row in db.execute("EXPLAIN QUERY PLAN " + queries[-1]))
+    finally:
+        db.close()
 
-        def execute(self, _query):
-            self.calls += 1
-            return self
-
-        def fetchone(self):
-            return {"day": "2026-09-07"}
-
-    db = Db()
-
-    assert _tokens_recorded_from(db) == "2026-09-07"
-    assert _tokens_recorded_from(db) == "2026-09-07"
-    assert db.calls == 1
+    assert "USING INDEX idx_llm_usage_created_at" in plan, plan
 
 
 @pytest.mark.asyncio

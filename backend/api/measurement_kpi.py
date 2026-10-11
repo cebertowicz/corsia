@@ -20,7 +20,6 @@ _TOKEN_COMPLETE = """
       AND u.cache_creation_tokens IS NOT NULL AND u.cache_read_tokens IS NOT NULL
     )
 """
-_TOKEN_RECORDED_FROM: dict[Any, str] = {}
 
 
 def _tokens_recorded_from(db) -> str | None:
@@ -28,19 +27,15 @@ def _tokens_recorded_from(db) -> str | None:
 
     Token-recording completeness is installation history, not a release date:
     an upgraded installation may begin later, while a fresh one may begin earlier.
+    Walking ``idx_llm_usage_created_at`` from the oldest row stops at the first
+    complete one, so the read stays bounded without scanning the whole ledger.
     """
-    cached = _TOKEN_RECORDED_FROM.get(db)
-    if cached is not None:
-        return cached
     row = db.execute(
         f"""SELECT substr(u.created_at, 1, 10) AS day FROM llm_usage u
             WHERE {_TOKEN_COMPLETE}
             ORDER BY u.created_at ASC LIMIT 1"""
     ).fetchone()
-    recorded_from = str(row["day"]) if row and row["day"] is not None else None
-    if recorded_from is not None:
-        _TOKEN_RECORDED_FROM[db] = recorded_from
-    return recorded_from
+    return str(row["day"]) if row and row["day"] is not None else None
 
 
 class Period(NamedTuple):

@@ -156,6 +156,24 @@ def test_pending_candidates_scan_past_non_owner_rows(isolated_db):
     assert [candidate.message_id for candidate in candidates] == ["owner-message"]
 
 
+def test_pending_candidate_prefilter_matches_wrapper_prefixes_case_sensitively(isolated_db):
+    from core.corrections_recording import checker_version
+    from jobs import corrections_recording as job
+
+    db = _db()
+    try:
+        _thread(db)
+        _message(db, "wrapper", "user", "[CORSIA plan] notice", at="2026-10-01T00:00:00Z")
+        _message(db, "lowercase-owner", "user", "[corsia is wrong here]", at="2026-10-01T00:01:00Z")
+        db.commit()
+    finally:
+        db.close()
+
+    candidates = job._pending_candidates(checker_version("model-a"), 20, OWNER)
+
+    assert [candidate.message_id for candidate in candidates] == ["lowercase-owner"]
+
+
 @pytest.mark.asyncio
 async def test_global_batch_selects_oldest_candidates_across_owners(isolated_db, monkeypatch):
     from infra.settings import set_setting
