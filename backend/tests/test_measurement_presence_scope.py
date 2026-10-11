@@ -169,3 +169,35 @@ async def test_exclusive_scope_surface_answered_only_the_agent(isolated_db):
     )
     hours = sum(row["value"] or 0 for row in response["rows"] if row["series"] == "time_on_platform_h")
     assert hours == 2.0
+
+
+@pytest.mark.asyncio
+async def test_presence_n_counts_the_scope_visits_not_timeline_slices(isolated_db):
+    """``n`` behind time on platform is the visits observed, however they overlap."""
+    from api.measurement_queries import prepare_outcome_periods
+    from infra.database import get_db
+    from tests.test_measurement_api import _family_in_range, _grained
+
+    _seeded()
+    params = {"user_id": USER["id"], "scope_project": "one", "scope_agent": None,
+              "from": LEGACY_WEEK_FROM, "to": LEGACY_WEEK_TO}
+    db = get_db()
+    try:
+        prepare_outcome_periods(db, _grained(params))
+        rows = _family_in_range(db, "presence", params)
+    finally:
+        db.close()
+    assert [(row["value"], row["n"]) for row in rows] == [(pytest.approx(1.0), 4)]
+
+
+def test_presence_coverage_is_one_registry_attribute():
+    """Every series whose only instrument is presence starts at the first recorded presence."""
+    from api.measurement_registry import REGISTRY, period_measured
+
+    presence_only = {name for name, item in REGISTRY.items() if item.family in {"active", "presence"}}
+    assert presence_only == {name for name, item in REGISTRY.items() if item.presence_backed}
+    for name in presence_only:
+        assert not period_measured(name, "2026-09-07", first_presence_period="2026-09-14")
+        assert period_measured(name, "2026-09-14", first_presence_period="2026-09-14")
+    # A total withholds nothing in a measured period: no presence there is a true zero.
+    assert REGISTRY["time_on_platform_h"].minimum_n == 0

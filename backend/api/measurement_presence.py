@@ -116,11 +116,15 @@ def first_presence_period(db, user_id: str, grain: Grain) -> str | None:
     return (local_day - timedelta(days=local_day.weekday())).isoformat()
 
 
-def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
-    """Return each scope's union-presence time and outcome count by period."""
+def scoped_presence_cte(grain: Grain, scope_threads: str) -> str:
+    """Return the one scoped presence time every presence-backed series reads.
+
+    ``scoped_attention`` is the scope's union time: a composite scope counts each slice
+    once, an agent its evenly split thread slices. ``scoped_visits`` are the scope's
+    clipped visits, the observations behind that time.
+    """
     predicate = presence_predicate(scope_threads)
-    return f"""
-      WITH {presence_allocation_cte(grain)}, scoped_attention AS (
+    return f"""{presence_allocation_cte(grain)}, scoped_attention AS (
         SELECT s.began,s.ended,s.seconds FROM presence_live_segments s
         WHERE :scope_agent IS NULL AND EXISTS (
           SELECT 1 FROM presence_intervals v WHERE v.began<=s.began AND v.ended>=s.ended AND {predicate}
@@ -128,7 +132,28 @@ def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
         UNION ALL
         SELECT s.began,s.ended,s.seconds FROM presence_thread_slices s
         WHERE :scope_agent IS NOT NULL AND s.thread_id IN (SELECT id FROM {scope_threads})
-      ), active_periods AS (
+      ), scoped_visits AS (
+        SELECT v.began FROM presence_intervals v WHERE v.began<v.ended AND {predicate}
+      )"""
+
+
+def presence_family_sql(grain: Grain, scope_threads: str) -> str:
+    """Return each scope's presence hours by period, with n the visits that began in it."""
+    return f"""
+      WITH {scoped_presence_cte(grain, scope_threads)}, hours AS (
+        SELECT {grain.bucket('began')} AS period,SUM(seconds)/3600.0 AS value
+        FROM scoped_attention WHERE {grain.bucket('began')} IS NOT NULL GROUP BY period
+      ), visits AS (
+        SELECT {grain.bucket('began')} AS period,COUNT(*) AS n
+        FROM scoped_visits WHERE {grain.bucket('began')} IS NOT NULL GROUP BY period
+      ) SELECT h.period,h.value,COALESCE(c.n,0) AS n FROM hours h LEFT JOIN visits c USING(period) ORDER BY h.period
+    """
+
+
+def active_family_sql(grain: Grain, scope_threads: str, outcomes: str) -> str:
+    """Return each scope's union-presence time and outcome count by period."""
+    return f"""
+      WITH {scoped_presence_cte(grain, scope_threads)}, active_periods AS (
         SELECT {grain.bucket('began')} AS period,SUM(seconds)/3600.0 AS active_hours
         FROM scoped_attention WHERE {grain.bucket('began')} IS NOT NULL GROUP BY period
       ) SELECT a.period,a.active_hours,COALESCE(o.outcomes,0) AS outcomes FROM active_periods a

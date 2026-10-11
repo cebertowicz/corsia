@@ -141,7 +141,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
         # measured -- never as a zero the chart could draw a baseline through.
         value, n = None, 0
     raw_value = value
-    if (n < definition.minimum_n and metric != "time_on_platform_h") or thin: value = None
+    if n < definition.minimum_n or thin: value = None
     comparable = period_comparable(metric, period)
     result = {"period": period, "series": metric, "value": value, "raw_value": raw_value, "n": n, "proxy": definition.proxy,
               "partial": partial, "comparable": comparable, "break": None,
@@ -175,14 +175,12 @@ def requested_series(ids: str) -> list[str]:
     return requested
 
 
-def _metric_spine(metric: str, family: str, spine: list[str], first_limit_period: str | None,
+def _metric_spine(metric: str, spine: list[str], first_limit_period: str | None,
                   first_presence_period: str | None, grain: Grain) -> list[str]:
     """Return only periods the metric can describe for this scope."""
     if metric == "limit_hits":
         first = max(first_limit_period, instrument_period(REGISTRY[metric].start, grain)) if first_limit_period else None
         return [period for period in spine if first and period >= first]
-    if family in {"active", "presence"} and first_presence_period is None:
-        return []
     return [period for period in spine if period_measured(metric, period, grain, first_presence_period)]
 
 
@@ -227,7 +225,7 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
         family = REGISTRY[metric].family
         by_period = {row["period"]: row for row in family_rows[family]}
         sources = by_period if family != "tokens" else {}
-        metric_spine = _metric_spine(metric, family, spine, first_limit_period, first_presence, page_grain)
+        metric_spine = _metric_spine(metric, spine, first_limit_period, first_presence, page_grain)
         eligible, first_row = set(metric_spine), len(rows)
         drawn = [period for period in metric_spine if period in page_grain.served]
         if family == "size":
@@ -280,7 +278,7 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...), 
     definitions = [{"id": name, "display_name": name.replace("_", " ").title(),
                     "definition": f"Weekly aggregate for {name.replace('_', ' ')}.", "unit": item.unit,
                     "minimum_n": item.minimum_n, "owner": "Self-Improvement Infrastructure",
-                    "data_start": first_presence[:10] if item.family in {"active", "presence"} and first_presence else item.start, "proxy": item.proxy,
+                    "data_start": first_presence[:10] if item.presence_backed and first_presence else item.start, "proxy": item.proxy,
                     "proxy_explanation": "Proxy measurement" if item.proxy else None,
                     "comparability": {"before": _COMPARABILITY_BREAK, "restricted": name != "outcomes"},
                     "breaks": [{"period": _ASKS_BREAK, "kind": "definition"}] if name == "asks_per_outcome" else [],

@@ -19,16 +19,22 @@ class MetricDefinition:
     proxy: bool = False
     companion: str | None = None
     available: bool = True
+    # Measured from the user's first recorded presence, not ``start``: presence is the only
+    # instrument behind the series' coverage.
+    presence_backed: bool = False
 
 
 REGISTRY: dict[str, MetricDefinition] = {
     "outcomes": MetricDefinition("outcomes", "count", 0, "2026-08-10"),
     "first_try_acceptance": MetricDefinition("outcomes", "ratio", 20, "2026-09-14"),
     "rejections_per_outcome": MetricDefinition("outcomes", "ratio", 20, "2026-08-16"),
-    "active_hours_per_outcome": MetricDefinition("active", "hours_per_outcome", 20, "2026-08-31", True),
-    "outcomes_per_active_hour": MetricDefinition("active", "outcomes_per_hour", 20, "2026-08-31", True),
+    "active_hours_per_outcome": MetricDefinition("active", "hours_per_outcome", 20, "2026-08-31", True, presence_backed=True),
+    "outcomes_per_active_hour": MetricDefinition("active", "outcomes_per_hour", 20, "2026-08-31", True, presence_backed=True),
+    # Sized work is its own instrument: its rows and subtotals run from its start, and the rate is withheld
+    # as no_active_time in any period without presence time.
     "estimated_human_hours_per_active_hour": MetricDefinition("size", "estimated_human_hours_per_active_hour", 20, "2026-08-31", True),
-    "time_on_platform_h": MetricDefinition("presence", "hours", 1, "2026-09-29"),
+    # A plain total: a measured period with no presence is a true zero, so nothing is withheld.
+    "time_on_platform_h": MetricDefinition("presence", "hours", 0, "2026-09-29", presence_backed=True),
     "asks_per_outcome": MetricDefinition("decisions", "ratio", 20, "2026-09-07", True),
     "took_recommendation_pct": MetricDefinition("decisions", "ratio", 10, "2026-08-10", companion="answered_other_pct"),
     "answered_other_pct": MetricDefinition("decisions", "ratio", 10, "2026-08-10", companion="took_recommendation_pct"),
@@ -65,6 +71,6 @@ def period_measured(metric: str, period: str, grain: Grain | None = None,
     presence, so a request window cannot move the coverage boundary. Other metrics retain
     their registry-owned instrument boundary.
     """
-    if REGISTRY[metric].family in {"active", "presence"}:
+    if REGISTRY[metric].presence_backed:
         return bool(first_presence_period and period >= first_presence_period)
     return not period or period >= instrument_period(REGISTRY[metric].start, grain)
