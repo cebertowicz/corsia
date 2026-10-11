@@ -116,6 +116,10 @@
 	.agents-slot { margin-top: 20px; min-width: 0; }
 	.empty, .refreshing { margin: 0; color: var(--text-secondary); font-size: var(--text-subhead); }
 	.empty { font-style: italic; }
+	/* Phone: the period line and the empty line keep r2.7's 13px, like the table, against the larger phone type scale. */
+	@media (max-width: 480px) {
+		.stat, .empty { font-size: var(--text-footnote); }
+	}
 	.error { color: var(--red-text); display: flex; align-items: center; gap: 8px; }
 	.error button { border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); background: var(--bg-primary); color: var(--text-primary); padding: 4px 8px; cursor: pointer; }
 	.skeleton { height: 96px; border-radius: var(--radius-xs); background: var(--bg-hover); animation: pulse 1.2s ease-in-out infinite alternate; }
