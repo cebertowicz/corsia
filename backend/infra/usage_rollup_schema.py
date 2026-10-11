@@ -72,6 +72,21 @@ def grace_limit(now: datetime | None = None) -> str:
     return hour_key(((now or utc_now()) - GRACE).isoformat())
 
 
+def invalidate_rollup(db: Any) -> None:
+    """Make Measurement read raw until the normal refresh has rebuilt the cache.
+
+    Migrations call this in their existing transaction immediately after changing
+    ``llm_usage``. The state table did not exist before schema 100, so historical
+    migrations safely no-op while later ones clear coverage without rebuilding or
+    aggregating inside the migration transaction.
+    """
+    state_table = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='llm_usage_hourly_state'"
+    ).fetchone()
+    if state_table is not None:
+        db.execute("UPDATE llm_usage_hourly_state SET built_through='' WHERE id=1")
+
+
 def mark_late_insert(db: Any, created_at: str, now: datetime | None = None) -> None:
     """Mark ``created_at``'s hour dirty when the rollup may already cover it.
 

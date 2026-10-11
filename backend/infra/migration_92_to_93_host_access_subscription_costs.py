@@ -1,6 +1,8 @@
 """Clear list-price estimates from historical canonical subscription rows."""
 from __future__ import annotations
 
+from infra.usage_rollup_schema import invalidate_rollup
+
 
 def migrate_92_to_93(conn) -> None:
     """Keep tokens while clearing non-charge dollars from subscription harness rows."""
@@ -13,3 +15,4 @@ def migrate_92_to_93(conn) -> None:
            WHERE cost_usd IS NOT NULL
              AND (model GLOB 'claude-code/*' OR model GLOB 'codex/*')"""
     )
+    invalidate_rollup(conn)
