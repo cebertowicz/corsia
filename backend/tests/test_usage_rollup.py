@@ -398,17 +398,28 @@ def test_every_ledger_mutation_is_known_to_the_rollup():
 
 
 def test_migrations_touching_usage_have_a_reviewed_rollup_disposition():
-    """Every historical ledger change says whether it affects the hourly grain."""
+    """Every migration that names the ledger says whether it affects the hourly grain.
+
+    Any mention counts, not just UPDATE/DELETE text: rebuilds and column helpers
+    pass ``"llm_usage"`` as a string, and a backfill INSERT changes old hours too.
+    """
     backend = Path(__file__).resolve().parents[1]
     dispositions = {
+        # Before schema 100 the rollup did not exist; invalidate_rollup would no-op.
+        "migration_7_to_8_plans.py": False,
+        "migration_30_to_31_plan_node_cost_indexes.py": False,
+        "migration_46_to_47_guidance_manifests.py": False,
+        "migration_80_to_81_vendor_accounts.py": False,
         # cost_usd is one of api.usage_rollup.COLUMNS, so the cache becomes stale.
         "migration_92_to_93_host_access_subscription_costs.py": True,
         # plan fields are deliberately absent from the rollup grain.
         "migration_93_to_94_turn_usage_binding_backfill.py": False,
         # reasoning_effort is not an hourly aggregate dimension or value.
         "migration_97_to_98_effort_and_limit_history.py": False,
+        # creates the rollup itself; it starts empty and builds from scratch.
+        "migration_99_to_100_usage_rollup.py": False,
     }
-    pattern = re.compile(r"\b(?:ALTER\s+TABLE|UPDATE|DELETE\s+FROM)\s+llm_usage\b", re.I)
+    pattern = re.compile(r"\bllm_usage\b")
     found = set()
     for path in (backend / "infra").glob("migration_*.py"):
         source = path.read_text()
