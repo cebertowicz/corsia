@@ -60,6 +60,7 @@
 		return Math.max(0, Math.ceil((Date.parse(graceDeadline) - countdownNow) / 60_000));
 	});
 	const sendingGrace = $derived(pendingCount > 0 && graceMinutes !== null);
+	const graceText = $derived(`Sending to ${ownerName ?? 'the owner'} in ${graceMinutes} min`);
 
 	$effect(() => {
 		if (activeArtifactId === artifactId && activeTargetInstanceId === targetInstanceId) return;
@@ -153,8 +154,10 @@
 
 {#if pendingCount > 0}
 	{#if sendingGrace}
-		<span class="sending-grace" role="status">Sending to {ownerName ?? 'the owner'} in {graceMinutes} min</span>
-		<Button size="sm" onclick={sendCurrentDocument} loading={sending}>Send now</Button>
+		<span class="sending-now">
+			<span class="sending-grace" role="status" title={graceText}>{graceText}</span>
+			<Button size="sm" onclick={sendCurrentDocument} loading={sending}>Send now</Button>
+		</span>
 	{:else}
 		<Button size="sm" onclick={sendCurrentDocument} loading={sending}>{sendLabel}</Button>
 	{/if}
@@ -169,7 +172,9 @@
 <style>
 	.sending-grace {
 		min-width: 0;
-		overflow-wrap: anywhere;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		font-size: var(--text-footnote);
 		color: var(--text-secondary);
 	}
