@@ -3,6 +3,7 @@
 	import { accountSegments, accountSpendingSegment, accountWindowSegment } from '$lib/stores/modelGroups';
 	import { formatUsageLimit } from '$lib/stores/overageSetting';
 	import type { VendorAccount } from '$lib/stores/vendorAccounts';
+	import CurrentCheck from '../CurrentCheck.svelte';
 
 	/**
 	 * The one account row. Settings renders it in full (`settings`, or `compact` in a policy list);
@@ -55,6 +56,7 @@
 			{/each}
 		</span>
 	</span>
+	{#if marked}<CurrentCheck />{/if}
 {/snippet}
 
 {#if variant === 'picker'}
