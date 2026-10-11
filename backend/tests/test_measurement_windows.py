@@ -125,31 +125,13 @@ async def test_every_available_series_serves_both_windows_on_both_grains(isolate
         assert all(set(side) - {"from", "to"} == keys for side in figures.values())
 
 
-def _size_row(period: str, value: float | None, *, n: int = 30, raw: float | None = None, comparable: bool = True) -> dict:
-    return {"period": period, "value": value, "n": n, "raw_value": raw, "comparable": comparable}
-
-
-def test_a_size_window_pools_only_the_run_the_chart_draws():
-    from api.measurement_size import size_window_periods
-
-    # The run starts after the last period that is not comparable, then at its first period with a figure.
-    rows = [_size_row("2026-09-07", 40), _size_row("2026-09-14", 41, comparable=False), _size_row("2026-09-21", None, n=0),
-            _size_row("2026-09-28", None, n=5, raw=90), _size_row("2026-10-05", 44)]
-    assert size_window_periods(rows) == {"2026-09-28", "2026-10-05"}
-    # A latest period that is itself not comparable stands alone.
-    assert size_window_periods([_size_row("2026-09-28", 40), _size_row("2026-10-05", 44, comparable=False)]) == {"2026-10-05"}
-    # A run with no figure at all pools nothing.
-    assert size_window_periods([_size_row("2026-09-28", None, n=0), _size_row("2026-10-05", None, n=0)]) == set()
-    assert size_window_periods([]) == set()
-
-
 def test_a_window_names_only_the_periods_it_pooled(monkeypatch):
     from api.measurement_windows import series_windows
     from core.measurement_scope import resolve_grain
 
     monkeypatch.setattr("core.measurement_scope._now", lambda: NOW)
     grain = resolve_grain("days", "UTC")
-    # A comparability break leaves the size run one day long: the 7-day window pools 10-08 alone and says so.
+    # A window names only the periods it was handed: here 10-08 alone.
     sources = {"2026-10-07": {"outcomes": 50, "usable": 50, "estimated_hours": 90.0, "active_hours": 3.0},
                "2026-10-08": {"outcomes": 181, "usable": 181, "estimated_hours": 400.0, "active_hours": 2.0}}
     windows = series_windows("estimated_human_hours_per_active_hour", grain, sources, row=lambda *_: {},

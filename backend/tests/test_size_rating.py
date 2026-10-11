@@ -463,6 +463,38 @@ async def test_comparability_across_weeks_follows_the_rating_method_not_the_reco
 
 
 @pytest.mark.asyncio
+async def test_the_headline_window_pools_every_period_even_when_none_is_comparable(isolated_db, monkeypatch):
+    """Mixed rating methods mark each week not comparable; the window the card names is still pooled whole."""
+    from datetime import datetime, timezone
+
+    from api.measurement import measurement_series
+
+    monkeypatch.setattr("core.measurement_scope._now", lambda: datetime(2026, 10, 9, 12, tzinfo=timezone.utc))
+    second = "2026-09-28"
+    db = _db()
+    try:
+        _thread(db, "root")
+        _thread(db, "later")
+        first = _nodes(db, "root", 20)
+        next_week = _nodes(db, "later", 20, accepted_at="2026-09-30T12:00:00Z")
+        _messages(db, "root")
+        db.executemany("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?,?,'user','x','{}',?)",
+                       [("later-m1", "later", "2026-09-30T10:00:00Z"), ("later-m2", "later", "2026-09-30T10:10:00Z")])
+        _import(db, _rows(db, first, "M", rater_version="2026-10-01"))
+        _import(db, _rows(db, next_week, "M", rater="other-rater", rater_version="2026-10-01"))
+        db.commit()
+    finally:
+        db.close()
+    served = await measurement_series("estimated_human_hours_per_active_hour", project="all", agent="none", grain="weeks",
+                                      timezone_name="UTC", user=USER)
+    assert [row["comparable"] for row in served["rows"] if row["period"] in (WEEK, second)] == [False, False]
+    latest = served["windows"]["estimated_human_hours_per_active_hour"]["latest"]
+    assert (latest["n"], latest["from"], latest["to"]) == (40, "2026-09-07", "2026-10-04")
+    assert latest["size"]["estimated_hours"] == pytest.approx(80.0)
+    assert latest["size"]["active_hours"] == pytest.approx(0.4)
+
+
+@pytest.mark.asyncio
 async def test_only_a_real_change_in_rating_method_is_not_comparable(isolated_db):
     db = _db()
     try:

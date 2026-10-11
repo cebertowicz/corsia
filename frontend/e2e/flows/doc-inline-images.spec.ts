@@ -116,10 +116,18 @@ test.describe('@flow:doc-inline-images @surface:documents markdown images render
 					await saveEvidenceScreenshot(page, testInfo, `doc-inline-images-${width}-${scheme}`, { fullPage: false });
 				}
 
-				// A click selects the image whole, with a selected state, and its markdown never shows.
+				// A click opens the image larger in the canvas and Back returns to the document; the image stays
+				// selectable whole from the keyboard, with its markdown never showing.
 				// On the phone width the image is tapped, so the touch path is proven, not only a mouse click.
 				if (width <= 768) await images.first().tap();
 				else await images.first().click();
+				await expect(page.locator('.image-overlay img')).toBeVisible();
+				await page.locator('.image-overlay button.back').click();
+				await expect(page.locator('.image-overlay')).toHaveCount(0);
+				await page.getByText('Text between the images').click({ position: { x: 2, y: 2 } });
+				await page.keyboard.press('Home');
+				await page.keyboard.press('Shift+ArrowUp');
+				await page.keyboard.press('Shift+ArrowUp');
 				await saveEvidenceScreenshot(page, testInfo, `doc-inline-images-${width}-selected`, { fullPage: false });
 				await expect(page.locator('.cm-md-image-selected img')).toHaveCount(1);
 				await expect(page.getByRole('button', { name: 'Comment', exact: true }).last()).toBeVisible();

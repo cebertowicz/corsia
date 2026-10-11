@@ -64,7 +64,7 @@ export interface PeriodSize { period: string; value: number | null; size: SizeCo
 
 /**
  * Weeks from the first recorded week on. A week before it is not drawn; an unknown week after it stays unknown. The chart draws
- * these; the server pools its size windows over the same run (`size_window_periods`), so the headline never pools them again.
+ * these; the headline window is pooled by the server over the whole window the card names, comparable or not.
  */
 export function sizePeriods(rows: MeasurementRow[]): PeriodSize[] {
 	const all = rows.filter((row) => row.series === SIZE_SERIES && row.size)

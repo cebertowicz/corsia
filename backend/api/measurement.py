@@ -21,7 +21,7 @@ from api.measurement_models import models_read
 from api.measurement_agent_attention import MAX_ACTIVE_GAP_SECONDS
 from api.measurement_partial import current_period_outcomes
 from api.measurement_queries import prepare_outcome_periods, query_family
-from api.measurement_size import size_family, size_rows, size_window_periods
+from api.measurement_size import size_family, size_rows
 from api.measurement_windows import series_windows
 from api.measurement_scope import resolve_grain, scope_cte, validate_scope
 from infra.auth import require_user
@@ -246,9 +246,8 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
                 rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain))
         pooling = {"measured": measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,
                    "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain)}
-        # A size window pools the run its chart draws: nothing before a comparability break.
-        pooled = size_window_periods(rows[first_row:]) if family == "size" else set(metric_spine)
-        windows[metric] = series_windows(metric, page_grain, by_period, periods=pooled, **pooling)
+        # Every series pools the window its card names; a size series' comparability marks its rows, never its window.
+        windows[metric] = series_windows(metric, page_grain, by_period, periods=set(metric_spine), **pooling)
         add_averages(rows[first_row:], metric, page_grain, eligible, by_period, **pooling)
     # The page reads each series' minimum n and the moving average's length from here, never from a copy of its own.
     return {"definition_version": 1, "scope": selected_scope, "period": page_grain.describe(), "average_periods": page_grain.average_periods,

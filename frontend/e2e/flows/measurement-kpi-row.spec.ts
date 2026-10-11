@@ -210,6 +210,43 @@ async function capture(page: Page, row: Locator, testInfo: TestInfo, width: numb
 	await row.screenshot({ path: shot(testInfo, name) });
 }
 
+/** Scroll the Measurement page through its whole height at phone width and check no section title ever draws on the app header's title. */
+async function expectNoTitleUnderHeader(page: Page) {
+	await page.setViewportSize({ width: 393, height: 852 });
+	const scroller = page.locator('.measurement-scroller');
+	await expect(scroller).toBeVisible();
+	const { height, client } = await scroller.evaluate((el) => ({ height: el.scrollHeight, client: el.clientHeight }));
+	expect(height, 'the page is taller than the phone screen, so it scrolls').toBeGreaterThan(client);
+	// One synchronous sweep, 8px at a time, so no title is stepped over. A title is drawn only where the scroller shows it, so its box is clipped to the scroller's.
+	const overlaps = await scroller.evaluate((el) => {
+		const header = document.querySelector('.shell-header .h-title')!.getBoundingClientRect();
+		const view = el.getBoundingClientRect();
+		const titles = [...document.querySelectorAll('.measurement-page h2, .measurement-page h3, .measurement-page h4')];
+		const found: string[] = [];
+		for (let top = 0; top <= el.scrollHeight; top += 8) {
+			el.scrollTop = top;
+			for (const node of titles) {
+				const box = node.getBoundingClientRect();
+				const shown = { top: Math.max(box.top, view.top), bottom: Math.min(box.bottom, view.bottom), left: Math.max(box.left, view.left), right: Math.min(box.right, view.right) };
+				if (shown.bottom > shown.top && shown.right > shown.left && shown.bottom > header.top && shown.top < header.bottom && shown.right > header.left && shown.left < header.right) {
+					found.push(`at scroll ${top} "${node.textContent?.trim()}" (${Math.round(shown.top)} to ${Math.round(shown.bottom)}) is drawn on the header title (${Math.round(header.top)} to ${Math.round(header.bottom)})`);
+				}
+			}
+		}
+		return found;
+	});
+	expect(overlaps.slice(0, 3), 'no section title is drawn on the header title at any scroll position').toEqual([]);
+}
+
+/** Scroll so the Cost section title sits at the top edge, where the app header is drawn. */
+async function scrollTitleToHeader(page: Page) {
+	await page.locator('#cost-title').evaluate((el) => {
+		const scroller = el.closest('.measurement-scroller')!;
+		scroller.scrollTop += el.getBoundingClientRect().top - 30;
+	});
+	await page.waitForTimeout(100);
+}
+
 test.describe('@flow:measurement-kpi-row @surface:measurement the key-figures row', () => {
 	for (const scheme of ['light', 'dark'] as const) for (const scope of ['all', 'project'] as const) {
 		test(`shows five tiles for both grains at phone and desktop width (${scheme}, ${scope})`, async ({ page, request }, testInfo) => {
@@ -225,6 +262,19 @@ test.describe('@flow:measurement-kpi-row @surface:measurement the key-figures ro
 			await expectTiles(row, weeksScenario);
 			await capture(page, row, testInfo, 393, `kpi-row-${scope}-${scheme}-weeks-393.png`);
 			await capture(page, row, testInfo, 1280, `kpi-row-${scope}-${scheme}-weeks-1280.png`);
+		});
+	}
+	for (const scheme of ['light', 'dark'] as const) {
+		test(`no section title scrolls under the header title at phone width (${scheme}, project)`, async ({ page, request }, testInfo) => {
+			await page.emulateMedia({ colorScheme: scheme });
+			await enter(page, request, testInfo, scheme, 'project');
+			await page.setViewportSize({ width: 393, height: 852 });
+			await scrollTitleToHeader(page);
+			await page.screenshot({ path: shot(testInfo, `scrolled-${scheme}-393.png`) });
+			await page.setViewportSize({ width: 1280, height: 800 });
+			await scrollTitleToHeader(page);
+			await page.screenshot({ path: shot(testInfo, `scrolled-${scheme}-1280.png`) });
+			await expectNoTitleUnderHeader(page);
 		});
 	}
 });
