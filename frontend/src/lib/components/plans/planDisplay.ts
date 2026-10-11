@@ -185,7 +185,8 @@ export function nodeSubline(node: OperatorNode, now: Date = new Date(), view?: S
 	}
 	const settled = settledMoment(node, now);
 	if (settled) parts.push(settled);
-	return parts.length ? parts.join(' · ') : null;
+	// A row is one line: a reason's line breaks (send-back feedback, a pasted list) read as spaces.
+	return parts.length ? parts.join(' · ').replace(/\s+/g, ' ').trim() : null;
 }
 
 export function cardStateLabel(state: PlanCardState): string {
