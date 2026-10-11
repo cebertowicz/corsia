@@ -18,6 +18,8 @@ def migrate_109_to_110(conn) -> None:
             metadata = json.loads(row[2] or "{}")
         except (TypeError, ValueError):
             continue
+        if not isinstance(metadata, dict):
+            continue
         host = urlsplit(str(metadata.get("base_url") or "")).hostname or ""
         matches_legacy_endpoint = (
             "token plan" in str(row[1] or "").casefold() or "token-plan" in host.casefold()

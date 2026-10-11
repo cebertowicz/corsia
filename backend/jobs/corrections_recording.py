@@ -327,7 +327,7 @@ async def run_corrections_recording(
         await run_in_db(_write_status, "unconfigured", "No checker model configured")
         return {"status": "unconfigured", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
     from llm.endpoint_policy import endpoint_agent_use
-    if endpoint_agent_use(model_id) == "interactive_only":
+    if await run_in_db(endpoint_agent_use, model_id) == "interactive_only":
         reason = "Configured checker model is restricted to interactive use"
         logger.warning(reason)
         await run_in_db(_write_status, "unavailable", reason)

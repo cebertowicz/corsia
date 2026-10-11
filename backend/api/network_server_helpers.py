@@ -292,8 +292,8 @@ async def add_external_server(body) -> dict:
                 source="manual",
                 db=db,
             )
-            # A registration is the user's whole statement for this endpoint: a
-            # window or key left empty on a re-add is cleared, not kept from before.
+            # A registration is the user's whole statement: an empty window or key on a
+            # re-add is cleared. An omitted agent-use restriction is kept (no form sends it).
             fields: dict = {"base_url": base}
             if body.cache_warm_seconds:
                 fields["cache_warm_seconds"] = int(body.cache_warm_seconds)
@@ -305,7 +305,7 @@ async def add_external_server(body) -> dict:
                 remove_server_key(sid, db=db)
             if declared:
                 fields[META_KEY] = declared
-            owned = ("cache_warm_seconds", "agent_use_restriction", META_KEY)
+            owned = ("cache_warm_seconds", META_KEY)
             nd.set_server_metadata(
                 sid, db=db, clear=tuple(k for k in owned if k not in fields), **fields,
             )

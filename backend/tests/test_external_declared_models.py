@@ -243,6 +243,24 @@ def test_agent_use_restriction_round_trips_through_endpoint_metadata(isolated_db
     assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "allowed"
 
 
+def test_a_re_add_without_the_field_keeps_the_stored_restriction(isolated_db, monkeypatch) -> None:
+    from api.network_server_helpers import add_external_server
+    from api.network_servers import AddServerBody
+    from llm.endpoint_policy import endpoint_agent_use
+
+    _quiet(monkeypatch)
+    _patch_httpx(monkeypatch, _Router({_CHAT: _resp(200)}))
+    body = dict(name="Restricted", base_url=_BASE, dialect="openai", model_ids=["glm-5.3"])
+    sid = asyncio.run(add_external_server(
+        AddServerBody(**body, agent_use_restriction="interactive_only"),
+    ))["server_id"]
+
+    again = asyncio.run(add_external_server(AddServerBody(**body)))["server_id"]
+
+    assert again == sid
+    assert endpoint_agent_use(f"external@{sid}/glm-5.3") == "interactive_only"
+
+
 # ── removal stays removed ────────────────────────────────────────────────────
 
 def _seed_removable(path) -> None:

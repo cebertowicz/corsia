@@ -129,6 +129,26 @@ def test_v110_upgrade_restricts_legacy_endpoints_without_overwriting_explicit_al
 
 
 
+def test_v109_upgrade_skips_metadata_that_is_not_an_object(isolated_db):
+    from infra.database import get_db
+
+    db = get_db()
+    for sid, raw in (("null-meta", "null"), ("list-meta", "[1]"), ("text-meta", '"x"')):
+        db.execute(
+            "INSERT INTO network_servers (id,provider,kind,instance_id,instance_name,port,status,last_seen_at,created_at,updated_at,metadata_json) "
+            "VALUES (?,'external','external',?,'Alibaba Token Plan',443,'online','t','t','t',?)",
+            (sid, sid, raw),
+        )
+    db.execute("PRAGMA user_version=109")
+    db.commit()
+
+    result = migrate_to_current(db, SCHEMA_VERSION)
+
+    assert (result.migrated, result.to_version) == (True, 110)
+    rows = dict(db.execute("SELECT id, metadata_json FROM network_servers").fetchall())
+    assert rows == {"null-meta": "null", "list-meta": "[1]", "text-meta": '"x"'}
+
+
 def test_v109_upgrade_leaves_existing_endpoint_allowed(isolated_db):
     from infra.database import get_db
     from llm.endpoint_policy import endpoint_agent_use
