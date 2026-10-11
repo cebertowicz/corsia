@@ -1,3 +1,4 @@
+import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { emit } from '$lib/ws/events';
@@ -41,12 +42,65 @@ describe('rangesToRefresh', () => {
 		messages.set(Array.from({ length: 50 }, (_, index) => row(`m${index}`, 'assistant', {
 			cards: index < 48 && index % 4 === 0 ? card : undefined,
 		})));
-		const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ messages: [] }) }));
+		const fetch = vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ messages: Array.from({ length: 12 }, (_, index) => row(`m${index * 4}`, 'assistant', { cards: card })) }),
+		}));
 		vi.stubGlobal('fetch', fetch);
 		watchMessageCards();
 		emit('plans_changed', {});
 		await vi.advanceTimersByTimeAsync(400);
 		expect(fetch).toHaveBeenCalledTimes(1);
+	});
+
+	it('falls back only for sparse selected rows and never merges collapsed rows', async () => {
+		vi.useFakeTimers();
+		activeThreadId.set('t1');
+		token.set('test-token');
+		messages.set(Array.from({ length: 70 }, (_, index) => row(`m${index}`, 'assistant', {
+			cards: index % 10 === 0 ? card : undefined,
+		})));
+		const fetch = vi.fn(async (input: RequestInfo | URL) => {
+			const params = new URL(String(input), 'http://corsia.test').searchParams;
+			const from = params.get('from_id')!;
+			const to = params.get('to_id')!;
+			if (from === 'm0' && to === 'm60') {
+				return { ok: true, json: async () => ({
+					messages: [row('m60', 'assistant', { cards: card }), row('hidden', 'assistant')], has_more: true,
+				}) };
+			}
+			return { ok: true, json: async () => ({ messages: [row(from, 'assistant', { cards: card })], has_more: false }) };
+		});
+		vi.stubGlobal('fetch', fetch);
+		watchMessageCards();
+		emit('plans_changed', {});
+		await vi.advanceTimersByTimeAsync(400);
+
+		expect(fetch).toHaveBeenCalledTimes(7);
+		const fallbacks = fetch.mock.calls.slice(1).map(([input]) => {
+			const params = new URL(String(input), 'http://corsia.test').searchParams;
+			return [params.get('from_id'), params.get('to_id')];
+		});
+		expect(fallbacks).toEqual([['m0', 'm0'], ['m10', 'm10'], ['m20', 'm20'], ['m30', 'm30'], ['m40', 'm40'], ['m50', 'm50']]);
+		expect(get(messages).some((message) => message.id === 'hidden')).toBe(false);
+	});
+
+	it('refreshes a carded row older than the latest fifty loaded rows', async () => {
+		vi.useFakeTimers();
+		activeThreadId.set('t1');
+		token.set('test-token');
+		messages.set(Array.from({ length: 70 }, (_, index) => row(`m${index}`, 'assistant', {
+			cards: index === 0 ? card : undefined,
+		})));
+		const fetch = vi.fn(async () => ({ ok: true, json: async () => ({ messages: [row('m0', 'assistant', { cards: card })] }) }));
+		vi.stubGlobal('fetch', fetch);
+		watchMessageCards();
+		emit('plans_changed', {});
+		await vi.advanceTimersByTimeAsync(400);
+
+		expect(fetch).toHaveBeenCalledTimes(1);
+		const params = new URL(String(fetch.mock.calls[0][0]), 'http://corsia.test').searchParams;
+		expect([params.get('from_id'), params.get('to_id')]).toEqual(['m0', 'm0']);
 	});
 });
 
