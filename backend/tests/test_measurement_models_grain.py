@@ -99,3 +99,22 @@ async def test_the_last_second_before_local_midnight_belongs_to_the_previous_win
     _seed_tasks([latest_noon] * 14 + [before_utc])
     served = await _row("days", zone)
     assert (served["row"]["tasks"], served["row"]["previous_tasks"]) == (14, 1)
+
+
+@pytest.mark.asyncio
+async def test_token_shares_count_cache_re_reads_like_the_tokens_figure(isolated_db, monkeypatch):
+    """The pie's numerator is fresh tokens plus cache re-reads, the same total the Tokens tile sums."""
+    from api.measurement import measurement_models
+    from infra.database import get_db
+
+    _freeze_clock(monkeypatch, datetime(2026, 10, 7, 12, tzinfo=timezone.utc))
+    _seed_tasks(["2026-10-02T12:00:00Z"])
+    db = get_db()
+    try:
+        db.execute("UPDATE llm_usage SET cache_read_tokens=4000000, total_tokens=5000000 WHERE id='usage-task-0'")
+        db.commit()
+    finally:
+        db.close()
+    served = await measurement_models(project="all", agent="none", grain="days", timezone_name="UTC", user=USER)
+    (share,) = served["token_shares"]
+    assert (share["model"], share["tokens"], share["share_of_tokens"]) == (MODEL, 5_000_000, 1.0)

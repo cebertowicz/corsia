@@ -6,13 +6,9 @@ from ``measurement_model_cost.query_model_costs`` (the chain in ``measurement_ch
 Cost's admission and classification), and its hours from the size rating in
 ``measurement_size`` (class midpoints).
 
-A task counts only when both halves are known, so a missing half is never read as
-zero and the numerator and denominator cover the same tasks:
-
-* it has a usable size rating;
-* at least one of its calls is priced, and none is an API-priceable call with no
-  price (local calls have no list price by design and add no dollars);
-* no call of its chain failed to reach the ledger.
+A task counts when it has a usable size rating and priced API-equivalent dollars
+above zero in its chain; its other calls (local, unpriceable, or missing from the
+ledger) are not in the figure, so the dollars are what could be priced.
 
 The read covers the grain's latest and previous windows only. Each (agent, period)
 serves ``dollars``, ``hours`` and ``n``, the tasks counted; dividing and withholding a
@@ -25,9 +21,8 @@ from collections import defaultdict
 from typing import Any
 
 from api.cost_identity import IdentityResolver
-from api.measurement_model_cost import materialize_chain, query_model_costs, query_recording_gaps
+from api.measurement_model_cost import materialize_chain, query_model_costs
 from api.measurement_size import rated_tasks
-from api.model_groups import cost_class
 from core.measurement_scope import Grain
 
 # The one id the Agents table serves that is not a registry series: the agent's whole-chain
@@ -48,22 +43,19 @@ def query_task_hour_cost(db, params: dict[str, Any]) -> dict[tuple[str, str], di
         return {}
     chain = materialize_chain(db, params, rated)
     try:
-        gaps = query_recording_gaps(db, params, chain_rows=chain)
         cost_rows = query_model_costs(db, params, IdentityResolver(db), chain_rows=chain)
     finally:
         db.execute(f"DROP TABLE IF EXISTS {chain}")  # the pooled connection outlives the request
     dollars: dict[str, float] = defaultdict(float)
-    outcomes: dict[str, set[str]] = defaultdict(set)
     for row in cost_rows:
         task_id = str(row["task_id"])
         if task_id not in rated:
             continue
-        outcomes[task_id].add(str(row["outcome"]))
         if row["outcome"] == "priced" and row["dollars"] is not None:
             dollars[task_id] += float(row["dollars"])
     by_root: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: {"dollars": 0.0, "hours": 0.0, "n": 0})
     for task_id, (root_id, period, hours) in rated.items():
-        if task_id in gaps or cost_class(outcomes.get(task_id, ())) != "priced":
+        if dollars[task_id] <= 0:
             continue
         figures = by_root[(root_id, period)]
         figures["dollars"] += dollars[task_id]

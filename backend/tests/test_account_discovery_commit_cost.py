@@ -163,5 +163,76 @@ def test_a_commit_that_lacks_the_threads_model_keeps_the_hold_and_writes_the_sam
 
     assert (result.status, result.model_count) == ("ready", 1)
     assert _state(db, second) == (
-        [("destination", "codex", second["id"], "account_model_not_discovered", FROZEN_NOW)],
+        [("destination", "codex", second["id"], "account_model_not_discovered", "before")],
         "ready", ["codex/other"], "1")
+
+
+def _thread(db, thread_id, account_id, *, model="codex/test", hold=None, queued=False):
+    db.execute("INSERT INTO threads(id,user_id,model,project_id,created_at,updated_at) "
+               "VALUES (?,'user',?,'destination-project','t','t')", (thread_id, model))
+    db.execute("INSERT INTO thread_vendor_accounts(thread_id,provider,account_id) VALUES (?,'codex',?)",
+               (thread_id, account_id))
+    if hold:
+        db.execute("INSERT INTO thread_vendor_account_holds(thread_id,provider,account_id,reason,updated_at) "
+                   "VALUES (?,'codex',?,?,'before')", (thread_id, account_id, hold))
+    if queued:
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq,delivery_state,input_order,"
+                   "target_model,delivery_error,write_outcome) VALUES (?,?,'user','x','t',1,'queued',1,?,?,?)",
+                   (f"{thread_id}-input", thread_id, model, hold, "proved_no_write" if hold else None))
+
+
+def _hold_rows(db):
+    return [tuple(row) for row in db.execute(
+        "SELECT thread_id,account_id,reason,updated_at FROM thread_vendor_account_holds ORDER BY thread_id")]
+
+
+def test_a_multi_account_commit_writes_only_the_holds_that_change(accounts, monkeypatch):
+    """Some threads change, most do not, one has a queued input, one is on another account."""
+    db, _default, second, third = accounts
+    monkeypatch.setattr("connections.account_holds.utc_now_iso", lambda: FROZEN_NOW)
+    db.execute("INSERT INTO models(id,display_name,litellm_model,provider,provider_model_id,harness,created_at,updated_at) "
+               "VALUES ('codex/other','Other','codex/other','codex','other','codex','t','t')")
+    missing = "account_model_not_discovered"
+    _thread(db, "a-clear", second["id"])
+    _thread(db, "b-released", second["id"], hold=missing)
+    _thread(db, "c-kept", second["id"], model="codex/other", hold=missing)
+    _thread(db, "d-new", second["id"], model="codex/other")
+    _thread(db, "e-queued-released", second["id"], hold=missing, queued=True)
+    _thread(db, "f-queued-kept", second["id"], model="codex/other", hold=missing, queued=True)
+    _thread(db, "g-elsewhere", third["id"], model="codex/other", hold=missing)
+    db.commit()
+
+    result = _commit(db, second, ["codex/test"])
+
+    assert (result.status, result.model_count) == ("ready", 1)
+    assert _hold_rows(db) == [
+        ("c-kept", second["id"], missing, "before"),
+        ("d-new", second["id"], missing, FROZEN_NOW),
+        ("f-queued-kept", second["id"], missing, FROZEN_NOW),
+        ("g-elsewhere", third["id"], missing, "before"),
+    ]
+    assert [tuple(row) for row in db.execute(
+        "SELECT id,delivery_error,write_outcome FROM messages ORDER BY id")] == [
+        ("e-queued-released-input", missing, "proved_no_write"),
+        ("f-queued-kept-input", missing, "proved_no_write"),
+    ]
+
+
+def test_the_statements_of_a_commit_do_not_grow_with_the_threads_it_leaves_unchanged(accounts, monkeypatch):
+    """The cost of a discovery that changes nothing is flat in the bound threads."""
+    db, _default, second, _third = accounts
+    monkeypatch.setattr("connections.account_holds.utc_now_iso", lambda: FROZEN_NOW)
+    seen = []
+    for count, first in ((10, 0), (60, 10)):
+        for index in range(first, count):
+            _thread(db, f"bulk-{index}", second["id"])
+        db.commit()
+        statements = []
+        db.set_trace_callback(statements.append)
+        try:
+            _commit(db, second, ["codex/test"])
+        finally:
+            db.set_trace_callback(None)
+        seen.append(len(statements))
+    assert _hold_rows(db) == []
+    assert seen[1] - seen[0] <= 3
