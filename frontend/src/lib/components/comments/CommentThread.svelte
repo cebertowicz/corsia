@@ -300,6 +300,8 @@
 	.ct.flat {
 		background: none; border: 0; border-radius: 0;
 		padding: 0; gap: var(--space-1);
+		/* Keep a row fully revealable at either edge of the drawer's own scroller. */
+		scroll-margin-block: var(--space-1);
 	}
 	/* Lit with its mark on the image while either is hovered or focused; lighter than selected. */
 	.ct.linked:not(.focused) { background: color-mix(in srgb, var(--text-primary) 8%, transparent); border-color: color-mix(in srgb, var(--text-primary) 14%, transparent); }

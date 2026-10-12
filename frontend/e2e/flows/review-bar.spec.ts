@@ -390,6 +390,11 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
 	await expect(drawer).toBeVisible();
+	// A quote jump moves the phone sheet to its half detent. Wait for that finite
+	// transition before calculating a touch coordinate, rather than tapping where
+	// the filter was while the sheet was still moving.
+	await settled(page);
+	await expect(hitAtCentre(filters)).resolves.toBe(true);
 	const reopenedBox = (await filters.boundingBox())!;
 	await page.touchscreen.tap(reopenedBox.x + reopenedBox.width / 2, reopenedBox.y + reopenedBox.height / 2);
 	const menu = drawer.getByRole('menu', { name: 'Filter comments', exact: true });

@@ -127,7 +127,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			expect(firstCardBox!.y).toBeGreaterThanOrEqual(drawerBox!.y);
 			expect(firstCardBox!.y + firstCardBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
 			await shoot(page, testInfo, '1440-09-drawer-open', true);
-			await drawer.locator('[data-drawer-filter]', { hasText: 'Resolved' }).click();
+			const filter = drawer.getByRole('button', { name: 'Filter comments: All', exact: true });
+			await filter.click();
+			await drawer.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
 			await expect(drawer.locator('.ct')).toHaveCount(1);
 			await shoot(page, testInfo, '1440-09b-drawer-resolved');
 			await page.keyboard.press('Escape');
