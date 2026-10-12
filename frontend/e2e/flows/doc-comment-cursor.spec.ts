@@ -324,8 +324,18 @@ for (const motion of MOTIONS) {
 		await page.getByRole('button', { name: commentsButton(comments.length) }).click();
 		const list = page.getByRole('region', { name: 'Document comments', exact: true });
 		await expect(list).toBeVisible();
-		await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });
-		for (const marker of ['qx-a-code', 'qx-a-own', 'qx-a-cmt']) await clickLine(page, viewport, { marker, note: 'comments list open' });
+		// A canvas too narrow for a side column opens the list as a sheet over the document, which the editor does not resize for: the
+		// document is then under the sheet and cannot be clicked, so only a side column has clicks to land.
+		if (await list.evaluate((el) => el.classList.contains('sheet'))) {
+			const under = await page.evaluate(() => {
+				const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
+				return document.elementFromPoint(scroller.left + scroller.width / 2, scroller.top + scroller.height / 2)?.closest('[data-doc-comments-drawer]') !== null;
+			});
+			expect(under, 'the sheet covers the middle of the canvas').toBe(true);
+		} else {
+			await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });
+			for (const marker of ['qx-a-code', 'qx-a-own', 'qx-a-cmt']) await clickLine(page, viewport, { marker, note: 'comments list open' });
+		}
 		await list.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(list).toHaveCount(0);
 
