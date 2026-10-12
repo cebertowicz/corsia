@@ -116,6 +116,70 @@ def test_a_migration_that_breaks_referential_integrity_is_rolled_back(tmp_path, 
     assert _digest(path) == before
 
 
+def test_a_migration_with_a_mismatched_rebuilt_table_index_is_rolled_back(
+    tmp_path, ladder
+):
+    """A rebuilt table's indexes receive its table-scoped integrity check."""
+    def rebuilds_child_with_mismatched_index(conn: sqlite3.Connection) -> None:
+        conn.execute("ALTER TABLE child RENAME TO old_child")
+        conn.execute(
+            "CREATE TABLE child ("
+            "id INTEGER PRIMARY KEY, "
+            "parent_id INTEGER NOT NULL REFERENCES parent(id)"
+            ")"
+        )
+        conn.execute("INSERT INTO child SELECT * FROM old_child")
+        conn.execute("DROP TABLE old_child")
+        conn.execute("CREATE INDEX child_parent_idx ON child(parent_id)")
+        # Simulate an index definition that no longer matches its b-tree. This
+        # is the corruption table-scoped integrity_check must catch; quick_check
+        # deliberately does not compare table rows to index entries.
+        conn.execute("PRAGMA writable_schema=ON")
+        conn.execute(
+            "UPDATE sqlite_schema SET sql=? WHERE name='child_parent_idx'",
+            ("CREATE INDEX child_parent_idx ON child(id)",),
+        )
+        conn.execute("PRAGMA writable_schema=RESET")
+
+    ladder[1] = rebuilds_child_with_mismatched_index
+    path = _database(tmp_path, 1)
+    before = _digest(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        with pytest.raises(MigrationError) as raised:
+            migrate_to_current(conn, 2)
+        assert str(raised.value.__cause__) == (
+            "integrity_check(child) failed after migration: "
+            "row 1 missing from index child_parent_idx"
+        )
+    finally:
+        conn.close()
+
+    assert _digest(path) == before
+
+
+def test_a_passing_migration_checks_only_changed_tables(tmp_path, ladder):
+    """Unchanged tables do not pay a table-scoped integrity check."""
+    ladder[1] = lambda conn: conn.execute("CREATE TABLE added (id INTEGER PRIMARY KEY)")
+    path = _database(tmp_path, 1)
+    statements: list[str] = []
+
+    conn = sqlite3.connect(path)
+    conn.set_trace_callback(statements.append)
+    try:
+        assert migrate_to_current(conn, 2).migrated
+    finally:
+        conn.close()
+
+    integrity_checks = [
+        statement
+        for statement in statements
+        if statement.startswith("PRAGMA integrity_check(")
+    ]
+    assert integrity_checks == ['PRAGMA integrity_check("added")']
+
+
 def test_a_successful_migration_applies_every_step_in_order(tmp_path, ladder):
     """Multi-step ladders run in sequence and land on the target version."""
     applied: list[int] = []
