@@ -385,6 +385,8 @@ async def test_a_failed_wake_releases_its_claim_for_the_next_sweep(gh, wakes, pa
     wakes.return_value = True
     await _sweep(gh, T0 + timedelta(minutes=16), monkeypatch)
     assert _reasons(wakes) == [reasons.CI_EVENT_MISSING] * 2
+    [marker] = get_setting("pr_quiet:o/r#3")["fired"]
+    assert marker.startswith("ci_event_missing@")
 
 
 # -- Test 6 and the §9 gate: review_missing --
