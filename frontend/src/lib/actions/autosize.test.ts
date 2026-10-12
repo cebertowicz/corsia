@@ -25,6 +25,17 @@ describe('autosize', () => {
 		expect(node.style.overflowY).toBe('auto');
 	});
 
+	it('treats a field holding exactly its cap of text as fitting, though the cap is fractional', () => {
+		// Five lines read scrollHeight 126 against a computed cap of 125.953px: a subpixel over must not make it scrollable.
+		const node = field(() => 126, '125.953px');
+		autosize(node, 'five lines');
+		expect(node.style.overflowY).toBe('hidden');
+		expect(node.style.height).toBe('125.953px');
+		const sixth = field(() => 148, '125.953px');
+		autosize(sixth, 'six lines');
+		expect(sixth.style.overflowY).toBe('auto');
+	});
+
 	it('keeps the text at the top while the height eases below the cap, and scrolls freely past it', () => {
 		const small = field(() => 54);
 		const action = autosize(small, 'a line');

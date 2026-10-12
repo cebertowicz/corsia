@@ -18,7 +18,10 @@ export function autosize(node: HTMLTextAreaElement, _value?: string) {
 		void node.offsetHeight;
 		node.style.transition = '';
 		const cap = Number.parseFloat(style.maxHeight);
-		node.style.overflowY = Number.isFinite(cap) && wanted > cap ? 'auto' : 'hidden';
+		// scrollHeight is a rounded integer and a cap of five `lh` is fractional (125.953px for a 126px five-line field), so a field
+		// holding exactly its cap's worth of text reads a subpixel over it. A pixel of tolerance keeps that field "fitting", so it
+		// stays hidden and held instead of turning scrollable for one frame.
+		node.style.overflowY = Number.isFinite(cap) && wanted > cap + 1 ? 'auto' : 'hidden';
 		current = Number.isFinite(cap) ? Math.min(wanted, cap) : wanted;
 		node.style.height = `${current}px`;
 		hold();

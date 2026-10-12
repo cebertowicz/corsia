@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
-	import { slide } from 'svelte/transition';
+	import { fade, slide } from 'svelte/transition';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
 	export type CommentThreadData = {
@@ -34,8 +34,9 @@
 	import { retryPlacement } from '$lib/stores/docComments';
 	import CommentMeta from './CommentMeta.svelte';
 	import ReplyField from './ReplyField.svelte';
+	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 
-	let { comment, focused = false, activeId = null, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
+	let { comment, focused = false, activeId = null, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
 		comment: CommentThreadData;
 		focused?: boolean;
 		/** The thread the list has focused now. When it moves to another thread, an empty reply field here closes. */
@@ -52,6 +53,8 @@
 		keepReplyVisible?: boolean;
 		/** Drawer rows are flat; other consumers retain the established card treatment. */
 		flat?: boolean;
+		/** Easing out of the list: a resolved card keeps its card form until it is gone, instead of switching to the resolved row first. */
+		leaving?: boolean;
 		/** Off where the caller scrolls its own list to the focused card. */
 		scrollOnFocus?: boolean;
 		onFocus?: () => void;
@@ -196,8 +199,8 @@
 			</div>
 		{/if}
 	</div>
-{:else if comment.resolved && !replyText.trim()}
-	<div class="ct resolved" class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}">
+{:else if comment.resolved && !replyText.trim() && !leaving}
+	<div class="ct resolved" class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }}>
 		<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 			<svg class="ct-check" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 			{#if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
@@ -217,19 +220,19 @@
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus}>
+	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus}>
 		<div class="ct-head">
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
-			{#if !isSuggestion}
+			{#if !isSuggestion && !comment.resolved}
 				<button class="ct-act ack" class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree — end the exchange" title="Agree — ends the back-and-forth">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
 				</button>
 			{/if}
 			<button class="ct-act reply" disabled={readOnly} onclick={(e) => { e.stopPropagation(); void openReply(); }} aria-label="Reply" title="Reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z" /></svg></button>
-			{#if !isSuggestion}
+			{#if !isSuggestion && !comment.resolved}
 				<button class="ct-act resolve" disabled={readOnly} onclick={(e) => { e.stopPropagation(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 				</button>
@@ -259,7 +262,7 @@
 			{/if}
 			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else}
-			{#if comment.resolved}<div class="ct-orphan">Resolved while you were replying</div>{/if}
+			{#if comment.resolved}<ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} />{/if}
 			{#if comment.orphaned && !flat}<div class="ct-orphan">The text this comment was on has changed</div>{/if}
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
@@ -278,13 +281,13 @@
 				{/if}
 			</div>
 		{/if}
-		{#if showReplies && comment.replies.length}
+		{#if showReplies && comment.replies.length && !leaving}
 			<div class="ct-replies" transition:slide={{ duration: 160 }}>
 				{@render replyMessages()}
 			</div>
 		{/if}
 
-		{#if !isSuggestion && comment.acked}
+		{#if !isSuggestion && comment.acked && !comment.resolved}
 			<div class="ct-agreed"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
 		{:else if !readOnly}
 			{#if replyOpen}

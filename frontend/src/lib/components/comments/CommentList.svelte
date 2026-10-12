@@ -2,10 +2,11 @@
 	import type { Snippet } from 'svelte';
 	import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
 	import { groupRows } from '$lib/docImageComments';
+	import { leaveRow } from '$lib/actions/leaveRow';
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}) }: {
+	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}), leavingIds = new Set<string>(), reduced = false }: {
 		comments: Comment[];
 		documentOrder?: boolean;
 		focusedId?: string | null;
@@ -37,6 +38,10 @@
 		keepReplyVisible?: boolean;
 		/** Replies being typed, by comment id; the caller owns them so they outlive this list (a filter switch rebuilds it). */
 		replyDrafts?: Record<string, string>;
+		/** Threads easing out of the list before the caller removes them (a resolved card whose reply was sent or cleared). */
+		leavingIds?: ReadonlySet<string>;
+		/** Reduced motion: a leaving row fades and nothing slides. */
+		reduced?: boolean;
 	} = $props();
 	let heldOrder = $state<string[] | null>(null);
 	const ordered = $derived(heldOrder ? [...comments].sort((a, b) => {
@@ -74,6 +79,7 @@
 			<div
 				data-comment-id={comment.id}
 				class:focused={focusedId === comment.id}
+				use:leaveRow={{ leaving: leavingIds.has(comment.id), reduced }}
 				onpointerenter={region && onHover ? () => onHover(comment.id) : undefined}
 				onpointerleave={region && onHover ? () => onHover(null) : undefined}
 				onfocusin={region && onHover ? () => onHover(comment.id) : undefined}
@@ -84,7 +90,7 @@
 						{#if comment.review || comment.orphaned}{comment.review ? 'Review comment' : 'Text changed'}{comment.anchor ? `: “${comment.anchor}”` : ''}{:else}{comment.anchor ? `“${comment.anchor}”` : 'Go to text'}{/if}
 					</button>
 				{/if}
-				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} activeId={focusedId} linked={region && hoveredId === comment.id} selectable={region} flat={documentOrder} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
+				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} activeId={focusedId} linked={region && hoveredId === comment.id} selectable={region} flat={documentOrder} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
 			</div>
 			{/each}
 		{/each}

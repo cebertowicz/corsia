@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { get } from 'svelte/store';
 	import { Button, IconButton } from './ui';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
@@ -89,18 +89,13 @@
 	const sheetDrawer = $derived(narrow || (!image && canvasWidth < 900));
 	let detent = $state<'full' | 'half'>('full');
 	let replyDrafts = $state<Record<string, string>>({});
-	// Threads that were open when a reply to them was started; once resolved they stay in the Open list while it is non-empty.
-	const draftThreads = new SvelteSet<string>();
-	$effect(() => {
-		for (const comment of comments) {
-			const typing = !!replyDrafts[comment.id]?.trim();
-			if (!typing) { if (draftThreads.has(comment.id)) draftThreads.delete(comment.id); }
-			else if (!comment.resolved && !draftThreads.has(comment.id)) draftThreads.add(comment.id);
-		}
-	});
+	// A thread someone else resolves while a reply to it is being typed stays in the Open list, as a resolved card, until that reply is sent or cleared.
+	const held = keptThreads({ comments: () => comments, drafts: () => replyDrafts, leavesOnRelease: () => filter === 'open', reduced: () => get(prefersReducedMotion) });
 	const column = $derived(bounds?.closest<HTMLElement>('.leaf-body') ?? bounds);
 	const openCount = $derived(comments.filter((comment) => !comment.resolved).length);
-	const headerCount = $derived(filter === 'open' ? `${openCount} open` : filter === 'resolved' ? `${comments.length - openCount} resolved` : `${comments.length} ${comments.length === 1 ? 'thread' : 'threads'}`);
+	// The Open count is the Open list's, the resolved card kept for an unsent reply included, so the header and the list agree.
+	const listedOpen = $derived(comments.filter((comment) => !comment.resolved || held.kept(comment) || held.leaving.has(comment.id)).length);
+	const headerCount = $derived(filter === 'open' ? `${listedOpen} open` : filter === 'resolved' ? `${comments.length - openCount} resolved` : `${comments.length} ${comments.length === 1 ? 'thread' : 'threads'}`);
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
@@ -109,8 +104,7 @@
 	const byNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 	const displayed = $derived.by(() => {
 		if (surfaceState?.kind === 'thread') return comments.filter((comment) => comment.id === surfaceState.id);
-		// A thread resolved by someone else while a reply to it is being typed stays in Open until that reply is sent or cleared.
-		const shown = comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved || draftThreads.has(comment.id)));
+		const shown = comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved || held.kept(comment) || held.leaving.has(comment.id)));
 		// An image's comments read in number order, like its tags.
 		return image ? [...shown].sort(byNumber) : shown;
 	});
@@ -320,7 +314,7 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList bind:replyDrafts comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && surfaceState?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && surfaceState?.kind === 'list'} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList bind:replyDrafts leavingIds={held.leaving} reduced={$prefersReducedMotion} comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && surfaceState?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && surfaceState?.kind === 'list'} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 

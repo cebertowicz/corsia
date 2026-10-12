@@ -521,7 +521,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 	});
 
 	it('keeps a thread being replied to in the Open list when someone else resolves it, until the reply is cleared', async () => {
-		const plain = { ...suggestion, replacement: undefined };
+		const plain = { ...suggestion, replacement: undefined, acked: false };
 		const comments = writable([plain, { ...plain, id: 'comment-2', anchor: 'other text' }]);
 		const state = fromStore(comments);
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
@@ -530,12 +530,43 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
 		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-		comments.set([{ ...plain, resolved: true }, { ...plain, id: 'comment-2', anchor: 'other text' }]); flushSync();
-		expect(host.querySelector('[data-comment-id="comment-1"]')).not.toBeNull();
-		expect(host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!.value).toBe('half a reply');
-		const cleared = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+		expect(host.querySelector('.drawer-heading')?.textContent).toContain('2 open');
+		// A resolved thread also reads as agreed; the kept card must still show the reply being typed, not "Agreed".
+		comments.set([{ ...plain, resolved: true, acked: true }, { ...plain, id: 'comment-2', anchor: 'other text' }]); flushSync();
+		const card = host.querySelector<HTMLElement>('[data-comment-id="comment-1"]')!;
+		expect(card).not.toBeNull();
+		expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('half a reply');
+		// The header counts what the Open list shows, the kept card included.
+		expect(host.querySelector('.drawer-heading')?.textContent).toContain('2 open');
+		// It no longer offers what a resolved thread cannot do, says what Send does, and offers Re-open.
+		expect(card.querySelector('[aria-label="Resolve"]')).toBeNull();
+		expect(card.querySelector('.ct-act.ack')).toBeNull();
+		expect(card.querySelector('.ct-agreed')).toBeNull();
+		expect(card.querySelector('[data-resolved-note]')?.textContent).toContain('Send adds your reply; the thread stays resolved.');
+		expect(card.querySelector('[data-resolved-note] .reopen')?.textContent).toBe('Re-open');
+		const cleared = card.querySelector<HTMLTextAreaElement>('textarea')!;
 		cleared.value = ''; cleared.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
-		expect(host.querySelector('[data-comment-id="comment-1"]')).toBeNull();
+		// It eases out (still mounted, as the card, while it does) and is removed once the ease is done.
+		expect(host.querySelector('[data-comment-id="comment-1"]')).not.toBeNull();
+		expect(host.querySelector('[data-comment-id="comment-1"] [data-resolved-note]')).not.toBeNull();
+		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"]')).toBeNull());
 		expect(host.querySelector('[data-comment-id="comment-2"]')).not.toBeNull();
+		expect(host.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+	});
+
+	it('Re-open on the kept card reopens the thread and keeps the reply', async () => {
+		const plain = { ...suggestion, replacement: undefined };
+		const comments = writable([plain]);
+		const state = fromStore(comments);
+		const onResolve = vi.fn();
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		render({ state: { kind: 'list' }, get comments() { return state.current; }, onResolve });
+		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.reply')!.click();
+		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
+		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+		comments.set([{ ...plain, resolved: true }]); flushSync();
+		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] [data-resolved-note] .reopen')!.click();
+		expect(onResolve).toHaveBeenCalledWith('comment-1', false);
 	});
 });
