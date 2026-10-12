@@ -163,6 +163,15 @@ describe('PlanTree row details disclosure', () => {
 		expect(host.textContent).not.toContain('Research agent');
 	});
 
+	it('names who marked a finished step done beside its status', async () => {
+		await open(node({
+			id: 'marked', state: 'accepted', status_reason: 'Marked by Infrastructure',
+			evidence: { evidence: 'You said the key is set', artifact_ids: [], requirements_revision: 1 },
+		}));
+		expect(line('status')).toBe('Status: Finished · Marked by Infrastructure');
+		expect(line('evidence')).toBe('Evidence: You said the key is set');
+	});
+
 	it('keeps evidence static when there are no hidden notes', async () => {
 		await open(node({
 			id: 'plain-evidence', state: 'accepted',
