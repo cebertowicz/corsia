@@ -62,7 +62,7 @@ class TestMergeabilityRetry:
         schedule.assert_called_once()
         assert fired == [True]
 
-    def test_persistent_unknown_stops_after_bound_and_emits_event(self, _reload_gate):
+    def test_persistent_unknown_reports_error_and_allows_current_head_refire(self, _reload_gate):
         gate_mod = _reload_gate
         unknown = {**_DEFAULT_PR_INFO, "mergeable": "UNKNOWN"}
         emitted = []
@@ -70,17 +70,34 @@ class TestMergeabilityRetry:
         with patch.object(
             gate_mod.github_reviewer_gate,
             "fetch_pr_info_awaiting_mergeability",
-            return_value=unknown,
+            side_effect=[unknown, _DEFAULT_PR_INFO],
         ), patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), patch.object(
-            gate_mod, "emit_product_event", side_effect=lambda scope, event, **_kw: emitted.append((scope, event)),
-        ), patch.object(gate_mod, "_run_reviewer") as run_reviewer:
+            gate_mod.github_reviewer_notifications,
+            "emit_product_event",
+            side_effect=lambda scope, event, **_kw: emitted.append((scope, event)),
+        ), patch.object(
+            gate_mod.github_reviewer_notifications, "notify_reviewer_terminal_error",
+        ) as notify_error, patch(
+            "reviewer.reviewer_status.set_error",
+        ) as set_error, patch.object(gate_mod, "_run_reviewer") as run_reviewer:
             gate_mod._evaluate_review_gate(
                 "owner/repo", "abc123def", 42, "webhook.github.check_suite_completed", None,
                 mergeability_retry_attempt=len(gate_mod.MERGEABILITY_RETRY_DELAYS_S),
             )
+            gate_mod._evaluate_review_gate(
+                "owner/repo", "abc123def", 42, "webhook.github.check_suite_completed", None,
+            )
 
-        run_reviewer.assert_not_called()
+        set_error.assert_called_once_with(
+            "owner/repo",
+            "abc123def",
+            "qa/llm-reviewer: mergeability remained unresolved after retries; retry required",
+        )
+        notify_error.assert_called_once_with(
+            "owner/repo", 42, "abc123def", "mergeability remained unresolved after retries", None,
+        )
         assert ("reviewer_gate", "mergeability_unresolved") in emitted
+        run_reviewer.assert_called_once()
 
     def test_conflicting_holds_without_scheduling_retry(self, _reload_gate):
         gate_mod = _reload_gate

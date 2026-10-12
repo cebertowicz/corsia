@@ -831,6 +831,35 @@ class TestChecksUnreadableGate:
         assert "retry the existing CI run for this head" in summary
         assert "do not push code or an empty/no-op commit to retrigger" in summary
 
+    def test_terminal_error_notification_gives_current_head_refire_instructions(
+        self, _reload_gate
+    ):
+        """The owner receives the reason, SHA guard, and no-push recovery path."""
+        from unittest.mock import AsyncMock
+
+        delivered = AsyncMock(return_value=True)
+
+        with patch("events.delivery.owning_thread_for_identity", return_value="owner-thread"), \
+             patch("events.delivery.deliver_to_thread", delivered):
+            _call_on_backend_loop(
+                github_reviewer_notifications.notify_reviewer_terminal_error,
+                "owner/repo", 42, "abc123def", "mergeability remained unresolved after retries",
+            )
+
+        delivered.assert_awaited_once()
+        args, _ = delivered.call_args
+        assert args[0] == "owner-thread"
+        assert args[1] == "reviewer.terminal_error"
+        summary = args[2]
+        assert "mergeability remained unresolved after retries" in summary
+        assert "abc123de" in summary
+        assert "only if that is still the current head" in summary
+        assert "gh run rerun <run-id>" in summary
+        assert "gh pr ready 42 --undo" in summary
+        assert "gh pr ready 42" in summary
+        assert "do not push, add a no-op commit, or add an empty commit" in summary.lower()
+        assert "reviewer verdict publishes on that exact head" in summary
+
     def test_gate_does_not_write_reviewed_sha_when_checks_unreadable(
         self, _reload_gate
     ):

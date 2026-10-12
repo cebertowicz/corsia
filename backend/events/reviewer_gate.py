@@ -72,9 +72,9 @@ def _settle_reviewer_verdict(
             "sha={} — skip-guard NOT written; gate remains retryable",
             pr_number, head_sha[:8],
         )
-        emit_product_event(
-            "reviewer_gate", "reviewer_no_terminal_result",
-            properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]},
+        reason = "reviewer returned no terminal verdict"
+        github_reviewer_notifications.report_reviewer_terminal_error(
+            repo, pr_number, head_sha, reason, "reviewer_no_terminal_result", None, loop,
         )
         return
 
@@ -94,14 +94,10 @@ def _settle_reviewer_verdict(
             "sha={} — skip-guard NOT written; gate remains retryable",
             verdict, pr_number, head_sha[:8],
         )
-        emit_product_event(
-            "reviewer_gate", "reviewer_unexpected_result",
-            properties={
-                "repo": repo,
-                "pr_number": pr_number,
-                "head_sha": head_sha[:8],
-                "result_type": type(verdict).__name__,
-            },
+        reason = f"reviewer returned invalid terminal verdict ({type(verdict).__name__})"
+        github_reviewer_notifications.report_reviewer_terminal_error(
+            repo, pr_number, head_sha, reason, "reviewer_unexpected_result",
+            {"result_type": type(verdict).__name__}, loop,
         )
         return
 
@@ -246,7 +242,7 @@ def _evaluate_ready_pr(
             mergeability_retry_attempt,
         ):
             return
-        _report_mergeability_unresolved(repo, pr_number, head_sha)
+        _report_mergeability_unresolved(repo, pr_number, head_sha, loop)
         return
     if github_reviewer_gate.hold_pr_until_reviewable(repo, pr_number, head_sha, pr_info):
         return
@@ -344,17 +340,22 @@ def _log_mergeability_retry_failure(
         log.exception("reviewer-gate: delayed retry raised for PR #{} sha={}", pr_number, head_sha[:8])
 
 
-def _report_mergeability_unresolved(repo: str, pr_number: int, head_sha: str) -> None:
-    """Make exhausted process-local mergeability retries visible to operators."""
+def _report_mergeability_unresolved(
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    loop: asyncio.AbstractEventLoop | None,
+) -> None:
+    """Report exhausted mergeability retries as a retryable terminal gate error."""
+    reason = "mergeability remained unresolved after retries"
     log.warning(
-        "reviewer-gate: PR #{} sha={} — mergeability remained UNKNOWN after retries",
+        "reviewer-gate: PR #{} sha={} — {}",
         pr_number,
         head_sha[:8],
+        reason,
     )
-    emit_product_event(
-        "reviewer_gate",
-        "mergeability_unresolved",
-        properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]},
+    github_reviewer_notifications.report_reviewer_terminal_error(
+        repo, pr_number, head_sha, reason, "mergeability_unresolved", None, loop,
     )
 
 

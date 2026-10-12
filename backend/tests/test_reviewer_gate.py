@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from unittest.mock import DEFAULT, MagicMock, patch
+from unittest.mock import ANY, DEFAULT, MagicMock, patch
 
 import pytest
 from reviewer.gh_helpers import STATUS_WRITE_STAMP
@@ -784,43 +784,55 @@ class TestSkipGuardWrite:
         )
         assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") == "abc123def"
 
-    def test_gate_does_not_mark_reviewed_when_reviewer_has_no_terminal_result(
-        self, _reload_gate
+    @pytest.mark.parametrize(
+        ("invalid_verdict", "reason", "status_text"),
+        [
+            (
+                None,
+                "reviewer returned no terminal verdict",
+                "qa/llm-reviewer: reviewer returned no terminal verdict; retry required",
+            ),
+            (
+                "bad-result",
+                "reviewer returned invalid terminal verdict (str)",
+                "qa/llm-reviewer: reviewer returned invalid terminal verdict (str); retry required",
+            ),
+        ],
+    )
+    def test_invalid_verdict_reports_error_and_allows_current_head_refire(
+        self, _reload_gate, invalid_verdict, reason, status_text,
     ):
-        """None from the reviewer means no terminal verdict and stays retryable."""
+        """Invalid reviewer output is loud, retryable, and does not set the skip guard."""
+        from events.connectors import github_reviewer_notifications
+
         gate_mod = _reload_gate
+        clean_verdict = {"verdict": "clean"}
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
-             patch.object(gate_mod, "emit_product_event"), \
+             patch.object(github_reviewer_notifications, "emit_product_event") as emit_event, \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch("reviewer.on_pr_review.on_pr_review", return_value=None):
+             patch("reviewer.on_pr_review.on_pr_review", side_effect=[invalid_verdict, clean_verdict]), \
+             patch.object(github_reviewer_notifications, "notify_reviewer_terminal_error") as notify_error, \
+             patch.object(github_reviewer_notifications, "notify_reviewer_verdict", return_value="no_owner"), \
+             patch("reviewer.reviewer_status.set_error") as set_error:
+            _call_gate(gate_mod)
+            assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") is None
             _call_gate(gate_mod)
 
-        assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") is None
-
-    def test_gate_does_not_mark_reviewed_when_reviewer_returns_non_dict(
-        self, _reload_gate
-    ):
-        """Unexpected reviewer result shape stays retryable and emits telemetry."""
-        gate_mod = _reload_gate
-
-        with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
-             patch.object(gate_mod, "emit_product_event") as emit_event, \
-             patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch("reviewer.on_pr_review.on_pr_review", return_value="bad-result"):
-            _call_gate(gate_mod)
-
-        assert any(
-            call.args[:2] == ("reviewer_gate", "reviewer_unexpected_result")
-            and call.kwargs["properties"] == {
-                "repo": "owner/repo",
-                "pr_number": 42,
-                "head_sha": "abc123de",
-                "result_type": "str",
-            }
-            for call in emit_event.call_args_list
-        )
-        assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") is None
+        set_error.assert_called_once_with("owner/repo", "abc123def", status_text)
+        notify_error.assert_called_once_with("owner/repo", 42, "abc123def", reason, ANY)
+        if invalid_verdict is not None:
+            assert any(
+                call.args[:2] == ("reviewer_gate", "reviewer_unexpected_result")
+                and call.kwargs["properties"] == {
+                    "repo": "owner/repo",
+                    "pr_number": 42,
+                    "head_sha": "abc123de",
+                    "result_type": "str",
+                }
+                for call in emit_event.call_args_list
+            )
+        assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") == "abc123def"
 
     def test_gate_sets_error_status_when_verdict_wake_fails(
         self, _reload_gate
