@@ -9,6 +9,8 @@ import type { MessageCard } from '$lib/api/messageCards';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { token } from '$lib/stores/auth';
 import { paneOpen } from '$lib/stores/paneOpen';
+import { answerSubmissionFailed, answerSubmitted, submittedAnswers } from '$lib/stores/cardAnswers';
+import { focusPlanNode } from '$lib/planNodeFocus';
 import UpdateCard from './UpdateCard.svelte';
 import type { UpdateCard as Card } from '$lib/api/threadUpdates';
 
@@ -32,6 +34,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	paneOpen.set(false);
 	threadWorkspaces.set({});
+	submittedAnswers.set({});
 });
 
 afterEach(() => {
@@ -46,6 +49,7 @@ describe('MessageArtifactCards', () => {
 
 		const [tile] = tiles();
 		expect(tile.tagName).toBe('BUTTON');
+		expect(tile.classList.contains('press-tint')).toBe(true);
 		expect(tile.getAttribute('aria-label')).toBe('Launch plan, document, Needs your review');
 		expect(tile.querySelector('.title')?.textContent).toBe('Launch plan');
 		expect(tile.querySelector('.state')?.textContent).toBe('Needs your review');
@@ -90,6 +94,7 @@ describe('MessageArtifactCards', () => {
 		expect(tile.tagName).toBe('DIV');
 		expect(tile.classList.contains('gone')).toBe(true);
 		expect(tile.querySelector('.title')?.textContent).toBe('Launch plan');
+		expect(tile.querySelector('.ctx')?.textContent).toContain('No longer available');
 		expect(tile.querySelector('.state')?.textContent).toBe('No longer available');
 		tile.click();
 		expect(get(threadWorkspaces).t1?.tabs ?? []).toEqual([]);
@@ -165,6 +170,52 @@ describe('MessageArtifactCards', () => {
 		expect(tiles()[0].getAttribute('aria-selected')).toBeNull();
 		expect(tiles()[0].getAttribute('aria-current')).toBeNull();
 	});
+	it('flips an open ask to the verdict when the answer is sent, and back when the send fails', () => {
+		render({ cards: [ask()] });
+		const state = () => host.querySelector('.state')?.textContent;
+		expect(state()).toBe('Needs your review');
+
+		answerSubmitted(['h1'], { state: 'approved_with_changes', feedback: { comments: 2 } });
+		flushSync();
+		expect(state()).toBe('Approved with changes');
+		expect(host.querySelector('.name')?.textContent).toBe('2 comments');
+		expect(tiles()[0].getAttribute('aria-label')).toBe('Launch plan, document, Approved with changes, 2 comments');
+
+		answerSubmissionFailed(['h1']);
+		flushSync();
+		expect(state()).toBe('Needs your review');
+	});
+
+	it('ignores a sent answer once the server state has moved on', () => {
+		render({ cards: [ask({ state: 'changes_requested', feedback: { comments: 1 } })] });
+
+		answerSubmitted(['h1'], { state: 'approved' });
+		flushSync();
+		expect(host.querySelector('.state')?.textContent).toBe('Changes requested');
+	});
+
+	it('does not apply an answered round to a later open ask for the same artifact', () => {
+		render({ cards: [ask({ state: 'approved', hold_id: 'h1' }), ask({ hold_id: 'h2' })] });
+
+		answerSubmitted(['h1'], { state: 'approved' });
+		flushSync();
+		expect(tiles()[1].querySelector('.state')?.textContent).toBe('Needs your review');
+	});
+
+	it('marks the chip strip as scrolled once it leaves its start, so the leading edge fades too', () => {
+		render({ cards: [1, 2, 3].map((n) => ask({ artifact_id: `f${n}`, hold_id: undefined, kind: 'artifact', state: undefined, title: `File ${n}` })) });
+		const strip = host.querySelector<HTMLElement>('ul.chips')!;
+		expect(strip.hasAttribute('data-before')).toBe(false);
+
+		strip.scrollLeft = 40;
+		strip.dispatchEvent(new Event('scroll'));
+		expect(strip.hasAttribute('data-before')).toBe(true);
+
+		strip.scrollLeft = 0;
+		strip.dispatchEvent(new Event('scroll'));
+		expect(strip.hasAttribute('data-before')).toBe(false);
+	});
+
 });
 
 describe('UpdateCard ask row', () => {
@@ -172,24 +223,53 @@ describe('UpdateCard ask row', () => {
 		id: 7, thread_id: 't1', kind: 'blocked', node_id: 'n1', title: 'Ship the export', after_seq: 3,
 		created_at: '2026-09-29T10:00:00.000000', node_exists: true, asks_user: true, blocked_asks_user: true, ask: ask(),
 	};
-	const mountCard = (card: Card): void => {
-		component = mount(UpdateCard, { target: host, props: { card } });
+	const mountCard = (card: Card, earlier = 0): void => {
+		component = mount(UpdateCard, { target: host, props: { card, earlier } });
 		flushSync();
 	};
 
-	it('puts the ask directly under its blocked row while the block asks for the user', () => {
+	it('merges the ask into its blocked row: one row, named by the artifact, with the task in its context line', () => {
 		mountCard(blocked);
 
 		const row = host.querySelector('.update-card')!;
-		expect(row.nextElementSibling?.classList.contains('update-ask')).toBe(true);
-		expect(host.querySelector('.update-ask .tile')?.getAttribute('aria-label')).toContain('Needs your review');
+		expect(row.classList.contains('merged')).toBe(true);
+		expect(row.nextElementSibling).toBeNull();
+		expect(host.querySelectorAll('.tile')).toHaveLength(1);
+		expect(row.querySelector('.tile')?.getAttribute('aria-label')).toContain('Needs your review');
+		expect(row.querySelector('.tile .title')?.textContent).toBe('Launch plan');
+		expect(row.querySelector('.name')?.textContent).toBe('Ship the export');
+		expect(row.querySelector('time')).not.toBeNull();
 	});
 
-	it('keeps the ask under its row once answered, with its new round state', () => {
+	it('keeps a merged ask to one artifact row without duplicated update metadata', () => {
+		mountCard(blocked, 2);
+
+		expect(host.querySelector('.update-meta')).toBeNull();
+		expect(host.querySelector('.earlier')).toBeNull();
+		expect(host.querySelectorAll('.update-card.merged .tile')).toHaveLength(1);
+		expect(focusPlanNode).not.toHaveBeenCalled();
+	});
+
+	it('puts the time on the title line and the feedback counts in the task\'s place, in the accessible name too', () => {
+		mountCard({ ...blocked, blocked_asks_user: false, ask: ask({ state: 'approved_with_changes', feedback: { comments: 2, suggestions: 1 } }) });
+
+		const tile = host.querySelector('.update-card.merged .tile')!;
+		expect(tile.querySelector('.head time')).not.toBeNull();
+		expect(tile.querySelector('.ctx time')).toBeNull();
+		expect(tile.querySelector('.name')?.textContent).toBe('2 comments, 1 suggestion');
+		expect(tile.getAttribute('aria-label')).toBe('Launch plan, document, Approved with changes, 2 comments, 1 suggestion');
+	});
+
+	it('keeps the task for a verdict that carries no feedback counts', () => {
+		mountCard({ ...blocked, blocked_asks_user: false, ask: ask({ state: 'approved', feedback: { comments: 2 } }) });
+
+		expect(host.querySelector('.update-card.merged .name')?.textContent).toBe('Ship the export');
+	});
+
+	it('keeps the merged row once answered, with its new round state', () => {
 		mountCard({ ...blocked, blocked_asks_user: false, ask: ask({ state: 'answered' }) });
 
-		expect(host.querySelector('.update-card')!.nextElementSibling?.classList.contains('update-ask')).toBe(true);
-		expect(host.querySelector('.update-ask .tile')?.getAttribute('aria-label')).toContain('Answered');
+		expect(host.querySelector('.update-card.merged .tile')?.getAttribute('aria-label')).toContain('Answered');
 	});
 
 	it('shows no ask on a row that recorded none', () => {

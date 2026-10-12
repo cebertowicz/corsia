@@ -1,14 +1,10 @@
 <script lang="ts">
-	// The artifacts a message or a blocked update row carries, as a row of tiles.
-	// A tile opens its artifact in the canvas; it has no answer buttons, because the
-	// review bar in the opened document is the one place to answer an ask.
-	import { CARD_STATE_LABELS, feedbackLine, visibleCards, type MessageCard } from '$lib/api/messageCards';
-	import { imageContentUrl } from '$lib/artifactImage';
-	import { token } from '$lib/stores/auth';
-	import { openArtifactTab } from '$lib/stores/artifactWorkspace';
-	import { uiScope } from '$lib/stores/uiScope';
-	import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
-	import ArtifactGlyph from './ArtifactGlyph.svelte';
+	// The artifacts a message carries. An ask is a flat row under the message; a file the message names is a
+	// chip in a wrapping strip (a scrolling one on a phone). Both open the artifact in the canvas; neither has
+	// answer buttons, because the review bar in the opened document is the one place to answer an ask.
+	import { visibleCards, type MessageCard } from '$lib/api/messageCards';
+	import { paneOpen } from '$lib/stores/paneOpen';
+	import AttachmentRow from './AttachmentRow.svelte';
 
 	let {
 		cards,
@@ -18,7 +14,7 @@
 		renderedAsks,
 	}: {
 		cards: MessageCard[];
-		/** Cards past the cap; the last tile opens the artifact pane. */
+		/** Cards past the cap; the last chip opens the artifact pane. */
 		more?: number;
 		threadId: string | null | undefined;
 		/** Holds whose card renders on their blocked update row instead. */
@@ -28,139 +24,125 @@
 	} = $props();
 
 	const shown = $derived(visibleCards(cards, hiddenHolds, renderedAsks));
+	const asks = $derived(shown.filter((card) => card.kind === 'ask'));
+	const files = $derived(shown.filter((card) => card.kind !== 'ask'));
 
-	const stateLabel = (card: MessageCard): string | null =>
-		card.state ? CARD_STATE_LABELS[card.state] : card.available ? null : CARD_STATE_LABELS.unavailable;
-	// The file name repeats the title for a file titled by its name: omit it, comparing the full strings.
-	const secondary = (card: MessageCard): string | null =>
-		feedbackLine(card.feedback) ?? (card.name && card.name !== card.title ? card.name : null);
-	// Whether a file is an image is the backend's answer alone: its artifact type, as the canvas reads it.
-	// A thumbnail that fails to load falls back to the glyph.
-	let brokenThumbs = $state<ReadonlySet<string>>(new Set());
-	const thumbSrc = (card: MessageCard): string | null =>
-		card.type === 'image' && card.available && card.path && !brokenThumbs.has(card.artifact_id)
-			? imageContentUrl({ path: card.path, projectId: $uiScope?.id ?? null, token: $token ?? '' })
-			: null;
-	const typeWord = (card: MessageCard): string => (card.type ?? 'file').replace(/-/g, ' ');
-	const accessibleName = (card: MessageCard): string =>
-		[card.title, typeWord(card), stateLabel(card)].filter(Boolean).join(', ');
-
-	function open(card: MessageCard, event: MouseEvent): void {
-		// The chat column marks chat the active surface on any click inside it; bubbling there would
-		// flip the artifact just opened back to chat, which on a narrow canvas hides it.
-		event.stopPropagation();
-		if (!threadId || !card.path) return;
-		openArtifactTab(threadId, { artifactId: card.artifact_id, path: card.path, title: card.name ?? card.title });
-		// The pane is a drawer on narrow canvases; leaving it open would cover the document.
-		if (isPaneDrawer()) paneOpen.set(false);
+	/** The least of the next chip that must show past the last whole chip for the scroll cue to read. */
+	const PEEK = 12;
+	/** A chip shows a name this long (in characters) in full; only a longer name truncates, and only down to this. */
+	const NAME_CHARS = 20;
+	/**
+	 * On a phone the strip scrolls. Mark it while more lies past the right edge, and make sure the cue shows: the next
+	 * chip starts at least PEEK px inside the edge. If it would not, chips with names over NAME_CHARS give up width
+	 * first; if that is not enough, the strip's right edge moves in so the last whole chip is cut by the fade, which
+	 * reads as more to scroll just as well.
+	 */
+	function peek(node: HTMLElement, _count: number) {
+		const items = () => Array.from(node.children) as HTMLElement[];
+		const mark = () => {
+			node.toggleAttribute('data-more', node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
+			node.toggleAttribute('data-before', node.scrollLeft > 1);
+		};
+		const fit = () => {
+			node.style.maxWidth = '';
+			for (const item of items()) item.style.maxWidth = '';
+			if (getComputedStyle(node).flexWrap === 'nowrap' && node.scrollWidth > node.clientWidth + 1) {
+				const list = items();
+				const next = list.findIndex((item) => item.offsetLeft + item.offsetWidth > node.clientWidth);
+				if (next > 0) {
+					let need = PEEK - (node.clientWidth - list[next].offsetLeft);
+					for (let i = next - 1; i >= 0 && need > 0; i--) {
+						const title = list[i].querySelector<HTMLElement>('.title');
+						if (!title) continue;
+						const probe = document.createElement('span');
+						probe.style.cssText = `position:absolute;visibility:hidden;width:${NAME_CHARS}ch`;
+						title.appendChild(probe);
+						const floor = Math.min(title.scrollWidth, probe.getBoundingClientRect().width);
+						probe.remove();
+						const take = Math.min(title.clientWidth - floor, need);
+						if (take > 0) {
+							list[i].style.maxWidth = `${list[i].offsetWidth - take}px`;
+							need -= take;
+						}
+					}
+					if (node.clientWidth - list[next].offsetLeft < PEEK) {
+						const last = list[next - 1];
+						node.style.maxWidth = `${last.offsetLeft + last.offsetWidth - PEEK}px`;
+					}
+				}
+			}
+			mark();
+		};
+		// Watch the container: the strip's own width is set above, and watching it would loop.
+		const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null;
+		if (node.parentElement) observer?.observe(node.parentElement);
+		node.addEventListener('scroll', mark, { passive: true });
+		fit();
+		return {
+			update: fit,
+			destroy() { observer?.disconnect(); node.removeEventListener('scroll', mark); },
+		};
 	}
 </script>
 
-{#snippet face(card: MessageCard)}
-	{#if thumbSrc(card)}
-		<img
-			class="thumb"
-			src={thumbSrc(card)}
-			alt=""
-			loading="lazy"
-			onerror={() => (brokenThumbs = new Set(brokenThumbs).add(card.artifact_id))}
-		/>
-	{:else}
-		<ArtifactGlyph icon={card.icon} />
-	{/if}
-	<span class="text">
-		<span class="title">{card.title}</span>
-		{#if stateLabel(card)}
-			<span class="state" class:needs={card.state === 'needs_review'}>{stateLabel(card)}</span>
-		{/if}
-		{#if secondary(card)}<span class="name">{secondary(card)}</span>{/if}
-	</span>
-{/snippet}
-
 {#if shown.length > 0 || more > 0}
-	<ul class="cards" aria-label="Artifacts">
-		{#each shown as card (card.hold_id ?? card.artifact_id)}
-			<li class="slot">
-				{#if card.opens && card.available && threadId && card.path}
-					<button
-						type="button"
-						class="tile"
-						data-artifact-id={card.artifact_id}
-						data-card-kind={card.kind}
-						data-card-state={card.state ?? ''}
-						title={card.title}
-						aria-label={accessibleName(card)}
-						onclick={(event) => open(card, event)}
-					>{@render face(card)}</button>
-				{:else}
-					<div
-						class="tile static"
-						class:gone={!card.available}
-						data-artifact-id={card.artifact_id}
-						data-card-kind={card.kind}
-						data-card-state={card.state ?? ''}
-						title={card.title}
-						role="group"
-						aria-label={accessibleName(card)}
-					>{@render face(card)}</div>
-				{/if}
-			</li>
-		{/each}
-		{#if more > 0}
-			<li class="slot">
-				<button type="button" class="tile more" onclick={() => paneOpen.set(true)}>+{more} more</button>
-			</li>
+	<div class="cards">
+		{#if asks.length > 0}
+			<ul class="asks" aria-label="Artifacts">
+				{#each asks as card (card.hold_id ?? card.artifact_id)}
+					<li><AttachmentRow {card} {threadId} /></li>
+				{/each}
+			</ul>
 		{/if}
-	</ul>
+		{#if files.length > 0 || more > 0}
+			<ul class="chips" aria-label={asks.length > 0 ? 'Files' : 'Artifacts'} use:peek={files.length + more}>
+				{#each files as card (card.hold_id ?? card.artifact_id)}
+					<li><AttachmentRow {card} {threadId} variant="chip" /></li>
+				{/each}
+				{#if more > 0}
+					<li><button type="button" class="tile more press-tint" onclick={() => paneOpen.set(true)}>+{more} more</button></li>
+				{/if}
+			</ul>
+		{/if}
+	</div>
 {/if}
 
 <style>
-	.cards {
-		display: flex;
-		align-items: stretch;
-		gap: 8px;
-		margin: 8px 0 0;
-		padding: 0 0 4px;
-		list-style: none;
-		overflow-x: auto;
-		scroll-snap-type: x proximity;
-	}
-	.slot { display: flex; flex: 0 0 auto; scroll-snap-align: start; }
-	.tile {
-		display: flex;
+	.cards { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
+	ul { list-style: none; }
+	.chips { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+	li { display: flex; min-width: 0; }
+	.asks { max-width: 480px; }
+	.asks li { display: block; }
+	.more {
+		display: inline-flex;
 		align-items: center;
-		gap: 10px;
-		width: 232px;
-		min-width: 200px;
-		padding: 8px 10px;
-		border: 1px solid var(--border-subtle);
-		border-radius: var(--radius-sm);
-		background: var(--bg-secondary);
-		color: var(--text-primary);
+		min-height: 32px;
+		padding: 0 var(--space-3);
+		border: 0;
+		border-radius: var(--radius-pill);
+		background: transparent;
+		color: var(--text-secondary);
 		font: inherit;
-		text-align: left;
+		font-size: var(--text-subhead);
+		cursor: pointer;
 	}
-	button.tile { cursor: pointer; }
-	button.tile:hover { background: var(--bg-hover); }
-	button.tile:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
-	.tile.gone { border-style: dashed; color: var(--text-tertiary); }
-	.tile.more { width: auto; min-width: 0; align-self: center; font-size: var(--text-footnote); color: var(--text-secondary); }
-	.thumb {
-		flex: 0 0 auto;
-		width: 36px;
-		height: 36px;
-		border-radius: var(--radius-sm);
-		object-fit: cover;
-		background: var(--bg-tertiary);
+	.more:focus-visible { outline: 2px solid var(--violet); outline-offset: -2px; }
+	@media (pointer: coarse) { .more { min-height: 36px; } }
+	/* A phone scrolls the strip instead of wrapping it; while more lies to the right, the next chip peeks under the
+	   edge fade as the cue, and once scrolled the leading edge fades the same way. A chip's focus ring is inset, so the scroller has nothing to clip. */
+	@media (max-width: 480px) {
+		.chips {
+			flex-wrap: nowrap;
+			overflow-x: auto;
+			scroll-snap-type: x proximity;
+			scrollbar-width: none;
+		}
+		/* The action sets the attribute, which the compiler cannot see on the element. */
+		.chips:global([data-more]) { mask-image: linear-gradient(to right, var(--bg-primary) calc(100% - var(--space-6)), transparent); }
+		/* Once scrolled, the chip cut by the leading edge fades too, so neither edge ends in a hard cut. */
+		.chips:global([data-before]) { mask-image: linear-gradient(to right, transparent, var(--bg-primary) var(--space-6)); }
+		.chips:global([data-before][data-more]) { mask-image: linear-gradient(to right, transparent, var(--bg-primary) var(--space-6), var(--bg-primary) calc(100% - var(--space-6)), transparent); }
+		.chips li { flex: 0 0 auto; scroll-snap-align: start; }
 	}
-	.text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-	.title, .name, .state {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.title { font-size: var(--text-footnote); }
-	.name, .state { font-size: var(--text-caption); color: var(--text-tertiary); }
-	.state { color: var(--text-secondary); }
-	.state.needs { color: var(--amber); }
 </style>
