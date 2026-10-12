@@ -180,6 +180,31 @@ def test_a_passing_migration_checks_only_changed_tables(tmp_path, ladder):
     assert integrity_checks == ['PRAGMA integrity_check("added")']
 
 
+def test_a_rebuild_with_identical_ddl_still_checks_the_table(tmp_path, ladder):
+    """A table rebuilt from the same definition text is still validated."""
+    def rebuilds_child_identically(conn: sqlite3.Connection) -> None:
+        ddl = conn.execute(
+            "SELECT sql FROM sqlite_schema WHERE name='child'"
+        ).fetchone()[0]
+        conn.execute("ALTER TABLE child RENAME TO child_old")
+        conn.execute(ddl)
+        conn.execute("INSERT INTO child SELECT * FROM child_old")
+        conn.execute("DROP TABLE child_old")
+
+    ladder[1] = rebuilds_child_identically
+    path = _database(tmp_path, 1)
+    statements: list[str] = []
+
+    conn = sqlite3.connect(path)
+    conn.set_trace_callback(statements.append)
+    try:
+        assert migrate_to_current(conn, 2).migrated
+    finally:
+        conn.close()
+
+    assert 'PRAGMA integrity_check("child")' in statements
+
+
 def test_a_successful_migration_applies_every_step_in_order(tmp_path, ladder):
     """Multi-step ladders run in sequence and land on the target version."""
     applied: list[int] = []

@@ -956,20 +956,27 @@ def _plan(from_version: int, to_version: int) -> list[int]:
     return steps
 
 
-def _schema_snapshot(conn: sqlite3.Connection) -> set[tuple[str, str, str, str | None]]:
-    """Return the schema entries whose changes require table validation."""
+def _schema_snapshot(
+    conn: sqlite3.Connection,
+) -> set[tuple[str, str, str, str | None, int]]:
+    """Return the schema entries whose changes require table validation.
+
+    ``rootpage`` is part of the entry so a table or index rebuilt with
+    byte-identical DDL still counts as changed: its b-tree is new even when
+    its definition text is not.
+    """
     return {
         tuple(row)
         for row in conn.execute(
-            "SELECT type, name, tbl_name, sql FROM sqlite_schema "
+            "SELECT type, name, tbl_name, sql, rootpage FROM sqlite_schema "
             "WHERE type IN ('table', 'index')"
         )
     }
 
 
 def _changed_tables(
-    before: set[tuple[str, str, str, str | None]],
-    after: set[tuple[str, str, str, str | None]],
+    before: set[tuple[str, str, str, str | None, int]],
+    after: set[tuple[str, str, str, str | None, int]],
 ) -> list[str]:
     """Find tables created or changed by migration schema entries.
 
@@ -980,14 +987,19 @@ def _changed_tables(
     return sorted(
         {
             tbl_name
-            for _entry_type, _name, tbl_name, _sql in after - before
+            for _entry_type, _name, tbl_name, _sql, _rootpage in after - before
             if tbl_name
         }
     )
 
 
 def _validate(conn: sqlite3.Connection, changed_tables: list[str]) -> None:
-    """Prove the migrated database is sound, still inside the transaction."""
+    """Check the migrated database inside the transaction, before commit.
+
+    Foreign keys and page structure are checked across the whole database;
+    row-to-index agreement only for tables the migration created or rebuilt.
+    Data-only steps rely on SQLite maintaining their indexes.
+    """
     broken = conn.execute("PRAGMA foreign_key_check").fetchall()
     if broken:
         raise MigrationError(f"foreign_key_check failed after migration: {broken[:5]}")
