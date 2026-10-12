@@ -22,7 +22,7 @@ A dependent in the prerequisite's *own* plan hears only a failure or a close,
 and only when someone other than that plan's owner caused it: the owner that
 failed or closed its own task already has the result and its next block. A
 done prerequisite needs no wake there, because the reconcile in the same write
-selects the dependent and ``plan_wake.notify_selected`` says so.
+selects the dependent and ``selection_wake.notify`` says so.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ def conductor_task_settled(connection, node_id: str, *, outcome: str) -> None:
     if connection.execute("SELECT 1 FROM threads WHERE id=?", (recipient,)).fetchone() is None:
         return
     recipient_plan = service.ensure_plan("thread", recipient, db=connection)
-    reason = closure.close_reasons(connection, [node]).get(str(node_id))
+    reason = closure.settled_reasons(connection, [node]).get(str(node_id))
     evidence = review_evidence.latest(
         node_id, requirements_revision=int(node["requirements_revision"]), db=connection,
     )
@@ -154,10 +154,14 @@ def _dependents(
     connection, prerequisite, *, own_plan: bool = False, not_owner: str | None = None,
 ) -> list:
     """Open thread-owned dependents in other plans, or with ``own_plan`` in the
-    prerequisite's own plan when that plan's owner is not ``not_owner``."""
+    prerequisite's own plan when that plan's owner is not ``not_owner``.
+
+    CROSS JOIN pins the join order to the prerequisite's dependency edges: with
+    ``own_plan`` the planner otherwise drives from every node in the plan,
+    settled history included."""
     return connection.execute(
         f"""SELECT n.id,n.title,n.plan_id,pl.owner_id FROM plan_node_dependencies d
-            JOIN plan_nodes n ON n.id=d.node_id JOIN plans pl ON pl.id=n.plan_id
+            CROSS JOIN plan_nodes n ON n.id=d.node_id CROSS JOIN plans pl ON pl.id=n.plan_id
             WHERE d.depends_on_node_id=? AND n.plan_id{'=' if own_plan else '<>'}?
               AND {in_work_sql('n')} AND pl.owner_kind='thread'
               AND (? OR pl.owner_id IS NOT ?)
@@ -206,7 +210,7 @@ def _tell_own_plan(connection, prerequisite, dependents) -> None:
     from prompts import plan_wakes as text
 
     outcome = "closed" if prerequisite["state"] == CLOSED else "failed"
-    reason = closure.close_reasons(connection, [prerequisite]).get(str(prerequisite["id"]))
+    reason = closure.settled_reasons(connection, [prerequisite]).get(str(prerequisite["id"]))
     for dependent in dependents:
         plan_id, recipient = str(dependent["plan_id"]), str(dependent["owner_id"])
         line = text.PREREQUISITE_OWN_PLAN_LINES[outcome].format(

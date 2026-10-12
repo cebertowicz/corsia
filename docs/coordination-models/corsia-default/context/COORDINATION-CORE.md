@@ -66,15 +66,18 @@ the requesting owner keeps semantic correctness and verifies the outcome.
 For every product-affecting change, the responsible domain owner completes all
 three stages before code:
 
-1. **Product:** current approved user outcome and behavior delta;
+1. **Product:** the job to be done, the 3–5 main journeys it touches, then
+   requirements and behavior delta, done before design and reported to
+   the owner, not sent for review;
 2. **UX/IA:** the composed existing surface, information hierarchy,
    design-system reuse, states, and user-facing acceptance evidence. A
-   user-facing design (placement, controls, save behavior, copy) is walked
-   through the 3–5 main user journeys it touches as rendered mockups and
-   approved by the lane that owns the composed experience (the owner if
-   none); the build task depends on that accepted review. The conductor
-   names another lane to review that lane's own designs. The owner approves
-   behavior on the rendered design and settles any disagreement;
+   user-facing design (placement, controls, look, save behavior, copy) is
+   walked through those journeys as rendered mockups, reviewed by the lane
+   owning the composed experience, if any (or one the conductor names for
+   that lane's own designs), then approved by the owner. That review never
+   substitutes for the owner's approval; the build task depends on both,
+   restyles and look-changing fixes included. The owner settles
+   disagreements, and shipped functionality is never reverted over its look;
 3. **Engineering:** technical design, implementation, tests, review, and
    real-surface verification.
 
@@ -97,9 +100,12 @@ product behavior starts implementation without the owner's approval.
 
 ## Asks
 
-- Anything an agent needs from the owner is raised as a **plan decision**, not asked in chat. A
-  chat-only ask leaves no state and is not delivered. Draft → parent review → raise, then block the
-  node on it.
+- When the owner must review or approve something you produced (a draft message or email, a
+  document, plan, proposal, design or image), it goes as an **artifact ask**: everything to judge
+  sits in one artifact and the node blocks on the owner with it as the ask. Related items share
+  one artifact and one ask, in review order, with open points (a pick between variants included)
+  written in it. A **plan decision** is only for a real tradeoff with nothing to review (draft →
+  parent review → raise, then block on it). A step only the owner can take is asked in chat.
 
 ## Context and memory layers
 

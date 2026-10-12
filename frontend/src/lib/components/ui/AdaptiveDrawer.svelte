@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { cubicOut } from 'svelte/easing';
-	import { onMount, tick } from 'svelte';
+	import { tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import { portal } from '$lib/actions/portal';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
+	import { toastClearance } from '$lib/stores/toastClearance';
 
 	let {
 		ariaLabel,
@@ -18,6 +19,9 @@
 		children,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
+		followKeyboard = false,
+		open = true,
+		onClosed = () => {},
 	}: {
 		ariaLabel: string;
 		/**
@@ -36,6 +40,16 @@
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
+		/**
+		 * Sit on the visible part of the screen, above an on-screen keyboard, for a
+		 * drawer whose text field must stay in view while typing. It reads the
+		 * visual viewport the app already publishes as CSS variables.
+		 */
+		followKeyboard?: boolean;
+		/** Whether the caller keeps the drawer mounted for its local close transition. */
+		open?: boolean;
+		/** Runs after the drawer's 260ms local outro completes. */
+		onClosed?: () => void;
 	} = $props();
 
 	let panel = $state<HTMLElement | null>(null);
@@ -44,6 +58,7 @@
 	let dragPointer: number | null = null;
 	let dragStartY = 0;
 	let dragStartedAt = 0;
+	let stopToastClearance: (() => void) | undefined;
 
 	const flyParams = $derived(
 		$prefersReducedMotion
@@ -86,7 +101,21 @@
 		dragY = 0;
 	}
 
-	onMount(() => {
+	function restingViewportBottomOccupancy(node: HTMLElement): number {
+		const bottomMargin = Number.parseFloat(getComputedStyle(node).marginBottom) || 0;
+		return node.offsetHeight + bottomMargin;
+	}
+
+	function releaseToastClearance(): void {
+		stopToastClearance?.();
+		stopToastClearance = undefined;
+	}
+
+	$effect(() => {
+		if (!open || !panel) return;
+		stopToastClearance = toastClearance.register(panel, {
+			measure: () => restingViewportBottomOccupancy(panel!),
+		});
 		const removeBackLayer = pushBackLayer(() => {
 			onClose();
 			return true;
@@ -98,6 +127,7 @@
 		});
 		return () => {
 			mounted = false;
+			releaseToastClearance();
 			removeBackLayer();
 		};
 	});
@@ -109,16 +139,20 @@
 	band it was painted only over the chat column in a WebKit webview, leaving the
 	rail, the open document and the right pane uncovered.
 -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
+{#if open}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
 	class="drawer-backdrop"
+	class:follow-keyboard={followKeyboard}
 	data-adaptive-drawer
 	onclick={onBackdrop}
-	transition:fade={fadeParams}
-	use:portal
->
-	<div class="drawer-motion" transition:fly={flyParams}>
+		onoutrostart={releaseToastClearance}
+		in:fade|global={fadeParams}
+		out:fade={fadeParams}
+		use:portal
+	>
+		<div class="drawer-motion" in:fly|global={flyParams} out:fly={flyParams} onoutroend={onClosed}>
 		<div
 			bind:this={panel}
 			class="drawer-panel"
@@ -152,7 +186,8 @@
 			</div>
 		</div>
 	</div>
-</div>
+	</div>
+{/if}
 
 <style>
 	.drawer-backdrop {
@@ -168,6 +203,14 @@
 		background: color-mix(in srgb, var(--glass-scrim) 88%, transparent);
 		overscroll-behavior: contain;
 		pointer-events: auto;
+	}
+	.drawer-backdrop.follow-keyboard {
+		bottom: auto;
+		top: var(--doc-visual-viewport-offset, 0px);
+		height: var(--doc-visual-viewport-height, 100dvh);
+	}
+	.follow-keyboard .drawer-panel {
+		max-height: min(82dvh, calc(var(--doc-visual-viewport-height, 100dvh) - max(16px, env(safe-area-inset-top, 0px))));
 	}
 	.drawer-motion {
 		width: 100%;

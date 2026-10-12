@@ -169,6 +169,20 @@ def test_the_rollup_never_covers_an_hour_inside_the_grace_window(isolated_db):
     assert rollup_through(db) == hour_key((NOW - GRACE).isoformat())
 
 
+def test_refresh_clears_stale_rollup_rows_in_bounded_transactions(isolated_db, monkeypatch):
+    from api import usage_rollup
+    from infra.database import get_db
+
+    db = get_db()
+    _seed(db, random.Random(5))
+    _build(db)
+    monkeypatch.setattr(usage_rollup, "definition", lambda: "changed")
+    assert usage_rollup.refresh_step(db, NOW)  # reset leaves old rows for bounded clearing
+    (clear,), more = usage_rollup.plan_step(db, NOW)
+    assert more
+    assert len(clear.keywords["stale"]) <= usage_rollup.CLEAR_CHUNK_ROWS
+
+
 def test_refresh_writes_in_chunks_that_each_move_built_through(isolated_db, monkeypatch):
     from api import usage_rollup
     from infra.database import get_db
@@ -188,6 +202,55 @@ def test_refresh_writes_in_chunks_that_each_move_built_through(isolated_db, monk
     assert sum(1 for rows in written if rows) > 10
     # At most CHUNK_ROWS per transaction, except one hour that alone has more: an hour is never split.
     assert all(len(rows) <= 3 or len({row[0] for row in rows}) == 1 for rows in written)
+    assert _served(db) == _raw(db)
+
+
+def test_a_migration_that_changes_usage_reads_raw_until_it_is_rebuilt(isolated_db):
+    from api.usage_rollup import rollup_through
+    from infra.database import get_db
+    from infra.migration_92_to_93_host_access_subscription_costs import migrate_92_to_93
+
+    db = get_db()
+    _seed(db, random.Random(9))
+    row_id = db.execute("SELECT id FROM llm_usage LIMIT 1").fetchone()[0]
+    db.execute("UPDATE llm_usage SET model='claude-code/claude-sonnet-5-5', cost_usd=1 WHERE id=?", (row_id,))
+    _build(db)
+    before = rollup_through(db)
+    assert before
+    migrate_92_to_93(db)
+    expected = _raw(db)
+    assert rollup_through(db) == ""
+    assert _served(db) == expected
+    _build(db)
+    assert rollup_through(db) == before
+    assert _served(db) == expected
+
+
+def test_a_plan_only_migration_keeps_the_rollup_covered(isolated_db):
+    from api.usage_rollup import rollup_through
+    from infra.database import get_db
+    from infra.migration_93_to_94_turn_usage_binding_backfill import migrate_93_to_94
+
+    db = get_db()
+    _seed(db, random.Random(9))
+    bound, unbound = [row[0] for row in db.execute("SELECT id FROM llm_usage LIMIT 2")]
+    db.execute(
+        """UPDATE llm_usage
+           SET thread_id='migration-thread', turn_id='migration-turn',
+               plan_id='plan', plan_node_id='node', plan_attempt_id='attempt',
+               plan_commitment_id='commitment', plan_usage_role='execution'
+           WHERE id=?""",
+        (bound,),
+    )
+    db.execute(
+        "UPDATE llm_usage SET thread_id='migration-thread', turn_id='migration-turn' WHERE id=?",
+        (unbound,),
+    )
+    _build(db)
+    before = rollup_through(db)
+    migrate_93_to_94(db)
+    assert db.execute("SELECT plan_id FROM llm_usage WHERE id=?", (unbound,)).fetchone()[0] == "plan"
+    assert rollup_through(db) == before
     assert _served(db) == _raw(db)
 
 
@@ -332,6 +395,38 @@ def test_every_ledger_mutation_is_known_to_the_rollup():
         for match in pattern.finditer(path.read_text(errors="ignore")):
             found.add((relative, match.group(1).split()[0].upper()))
     assert found <= allowed, f"teach api.usage_rollup about {sorted(found - allowed)}"
+
+
+def test_migrations_touching_usage_have_a_reviewed_rollup_disposition():
+    """Every migration that names the ledger says whether it affects the hourly grain.
+
+    Any mention counts, not just UPDATE/DELETE text: rebuilds and column helpers
+    pass ``"llm_usage"`` as a string, and a backfill INSERT changes old hours too.
+    """
+    backend = Path(__file__).resolve().parents[1]
+    dispositions = {
+        # Before schema 100 the rollup did not exist; invalidate_rollup would no-op.
+        "migration_7_to_8_plans.py": False,
+        "migration_30_to_31_plan_node_cost_indexes.py": False,
+        "migration_46_to_47_guidance_manifests.py": False,
+        "migration_80_to_81_vendor_accounts.py": False,
+        # cost_usd is one of api.usage_rollup.COLUMNS, so the cache becomes stale.
+        "migration_92_to_93_host_access_subscription_costs.py": True,
+        # plan fields are deliberately absent from the rollup grain.
+        "migration_93_to_94_turn_usage_binding_backfill.py": False,
+        # reasoning_effort is not an hourly aggregate dimension or value.
+        "migration_97_to_98_effort_and_limit_history.py": False,
+        # creates the rollup itself; it starts empty and builds from scratch.
+        "migration_99_to_100_usage_rollup.py": False,
+    }
+    pattern = re.compile(r"\bllm_usage\b")
+    found = set()
+    for path in (backend / "infra").glob("migration_*.py"):
+        source = path.read_text()
+        if pattern.search(source):
+            found.add(path.name)
+            assert ("invalidate_rollup(conn)" in source) is dispositions[path.name]
+    assert found == set(dispositions), f"review rollup impact for migrations: {sorted(found ^ set(dispositions))}"
 
 
 def test_the_rollup_grain_holds_no_plan_column():

@@ -469,6 +469,23 @@ def test_a_write_that_leaves_the_projection_unchanged_appends_nothing(owner, sce
     assert _markers(owner) == []
 
 
+def test_the_drain_reads_no_cost(owner, scene, monkeypatch):
+    """The thin status shows no cost, so a write's drain never reads the usage ledger (#2489)."""
+    from plans import operator_node_facts, service
+
+    real = operator_node_facts.project_costs
+    wanted: list[bool] = []
+
+    def recording(node_plans, **kwargs):
+        wanted.append(kwargs.get("wanted", True))
+        return real(node_plans, **kwargs)
+
+    monkeypatch.setattr(operator_node_facts, "project_costs", recording)
+    service.add_node(scene.plan, kind="task", title="Third", acceptance_criteria="Three", db=owner)
+
+    assert wanted and not any(wanted)
+
+
 def test_the_migration_adds_the_marker_table_to_an_existing_database():
     from contextlib import closing
 

@@ -130,6 +130,17 @@ def open_sql(alias: str) -> str:
     return f"{unarchived_sql(alias)} AND {alias}.state NOT IN ({settled})"
 
 
+def listed_open_sql(alias: str) -> str:
+    """The ``plan_nodes`` row ``alias`` is a row of the plan's open work, as SQL (``idx_plan_nodes_open``).
+
+    The one meaning of "open" for every read of the open work: the pane lists exactly
+    these rows, and the chat list asks whether the plan has any. It is the stored fold
+    answer, so a pending container whose children have all settled is not open, and a
+    settled row with open work beneath it is.
+    """
+    return f"{unarchived_sql(alias)} AND {alias}.folded = 0"
+
+
 def outside_retired_branch_sql(alias: str) -> str:
     """No ancestor of the ``plan_nodes`` row ``alias`` is retired, as SQL.
 
@@ -187,10 +198,36 @@ def parent_ids(rows: Iterable[Mapping | sqlite3.Row]) -> set[str]:
     """
     rows = list(rows)
     work = work_ids(rows)
-    return {
+    listed = {
         str(row["parent_id"]) for row in rows
         if row["parent_id"] is not None and str(row["id"]) in work
     }
+    # A row of ``plans.open_rollup`` says so itself when its children are not among ``rows``.
+    return listed | {
+        str(row["id"]) for row in rows
+        if str(row["id"]) in work and "has_child_in_work" in row.keys() and row["has_child_in_work"]
+    }
+
+
+def has_live_parent(node: Mapping | sqlite3.Row, live_ids: Iterable[str] | Mapping) -> bool:
+    """Whether the node hangs from a live parent; a row under an archived or absent one is a root.
+
+    The one root rule: the incremental aggregate write, the rebuild and the recount all ask it.
+    ``live_ids`` holds the ids of the plan's unarchived rows.
+    """
+    parent = node["parent_id"]
+    return parent is not None and str(parent) in live_ids
+
+
+def live_chain(chain: list[Mapping]) -> list[Mapping]:
+    """A node and its ancestors (nearest first), cut where the next ancestor is archived."""
+    live = {str(row["id"]) for row in chain if row["archived_at"] is None}
+    kept = chain[:1]
+    for child, parent in zip(chain, chain[1:]):
+        if not has_live_parent(child, live):
+            break
+        kept.append(parent)
+    return kept
 
 
 def has_child_in_work_sql(alias: str) -> str:

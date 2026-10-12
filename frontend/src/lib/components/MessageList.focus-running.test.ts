@@ -208,13 +208,18 @@ describe('Focus mode while a Turn is running', () => {
 		applyLifecycle(THREAD_ID, { turnId: 'turn-live', turnOrder: 1 });
 		renderList();
 
+		expect(host.querySelector('.pending-input-region')).toBeNull();
+		expect(host.querySelector('[data-message-id="pending-work"]')).toBeNull();
+		expect(host.querySelector('[data-message-id="pending-update"]')).toBeNull();
+
+		coreSettings.set({ features: { focus_mode: false } } as any);
+		flushSync();
+
 		const pending = host.querySelector('.pending-input-region');
+		expect(pending?.textContent).toContain('Pending ordinary output');
 		expect(pending?.textContent).toContain('Pending user-facing answer');
-		expect(pending?.textContent).not.toContain('Pending ordinary output');
-		expect(pending?.textContent).not.toContain('Pending reasoning');
+		expect(pending?.querySelectorAll('[data-message-id="pending-work"]')).toHaveLength(1);
 		expect(pending?.querySelectorAll('[data-message-id="pending-update"]')).toHaveLength(1);
-		expect(pending?.querySelector('[data-message-id="pending-work"]')).toBeNull();
-		expect(pending?.querySelector('.transcript-fold')).not.toBeNull();
 	});
 
 	it('folds a finished ordinary assistant step', () => {

@@ -1,7 +1,7 @@
 /** Shared authenticated, conditional read boundary for both plan representations. */
 import type { OperatorReadOutcome } from './plansTypes';
 
-type ReadOutcome<T> =
+export type ReadOutcome<T> =
 	| { status: 'fresh'; payload: T; etag: string }
 	| Exclude<OperatorReadOutcome, { status: 'fresh' }>;
 

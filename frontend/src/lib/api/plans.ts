@@ -13,6 +13,7 @@ import { decodeOperatorEnvelope } from './plansDecode';
 export * from './activityIndexTypes';
 export * from './plansCostTypes';
 export * from './plansTypes';
+export type { OperatorFoldLevel } from './plansFolded';
 
 
 import { authHeaders, readPlan, safeErrorMessage } from './planRead';

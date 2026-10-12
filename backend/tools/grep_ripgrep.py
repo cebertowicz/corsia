@@ -16,10 +16,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from functools import partial
+import itertools
 from pathlib import Path
+import re
 
 from core.workspace_layout import THREADS_DIR, thread_tray_owners
 from tools.filesystem_effects import expanded_globs
+from tools.grep_content import SEPARATOR, GrepLine, SourceLines, read_source, render
 from tools.search_scope import (
     SKIPPED_NAMES, SearchScope, included_filter, keep_path, path_components,
 )
@@ -29,6 +33,9 @@ _ERROR_CHARS = 1_000
 _RIPGREP = ("rg", "--no-config", "--no-follow", "--hidden")
 _SKIP_GLOBS = ("!.*", *(f"!{name}" for name in sorted(SKIPPED_NAMES)))
 _GLOB_ESCAPE = str.maketrans({char: f"\\{char}" for char in "\\*?[]{}!"})
+# After the NUL that ends the path: the line number, then ':' for a match or
+# '-' for a context line.
+_CONTENT_RE = re.compile(r"(?P<number>[0-9]+)(?P<separator>[:-])")
 
 
 @dataclass(frozen=True)
@@ -73,34 +80,35 @@ async def search_ripgrep(
 
     if search.error and not search.output.strip():
         return f"Error: ripgrep failed:\n{search.error[:_ERROR_CHARS]}"
-    rendered = _render(pattern, search_dir, search.output, output_mode, max_results, scope, output_cap)
     errors = [run.error for run in (listing, search) if run.error]
-    if not errors:
-        return rendered
-    first = errors[0].splitlines()[0][:_ERROR_CHARS]
-    return (
-        f"INCOMPLETE: ripgrep could not search every path ({first}); "
-        f"results may be partial\n\n{rendered}"
-    )
+    header = (
+        f"INCOMPLETE: ripgrep could not search every path "
+        f"({errors[0].splitlines()[0][:_ERROR_CHARS]}); results may be partial\n\n"
+    ) if errors else ""
+    if output_mode == "content":
+        # Reads matched files for the source path, so it runs off the event loop.
+        return await asyncio.to_thread(
+            _render_content, pattern, search_dir, search.output, max_results, scope,
+            output_cap, header,
+        )
+    rendered = _render(pattern, search_dir, search.output, max_results, scope, output_cap)
+    return f"{header}{rendered}"
 
 
 def _render(
     pattern: str,
     search_dir: Path,
     output: str,
-    output_mode: str,
     max_results: int,
     scope: SearchScope,
     output_cap: int,
 ) -> str:
-    """Grep's text for ripgrep output: kept lines, limited, root-relative and capped."""
+    """Grep's text for ripgrep's files or count output: kept lines, limited,
+    root-relative and capped."""
     lines = _kept_lines(output.strip(), scope)
     if not lines:
         return f"No matches for pattern '{pattern}'"
-    if output_mode in ("files", "count"):
-        lines = lines[:max_results]
-    else:
-        lines = _first_matches(lines, max_results)
+    lines = lines[:max_results]
     prefix = f"{search_dir}/"
     rendered = "\n".join(line.replace(prefix, "") for line in lines)
     if len(rendered) > output_cap:
@@ -180,7 +188,7 @@ def _mode_arguments(output_mode: str, case_insensitive: bool, context: int) -> l
     elif output_mode == "count":
         arguments = ["--count"]
     else:
-        arguments = ["--line-number", *(["-C", str(context)] if context > 0 else [])]
+        arguments = ["--null", "--line-number", *(["-C", str(context)] if context > 0 else [])]
     return [*arguments, *(["-i"] if case_insensitive else [])]
 
 
@@ -226,13 +234,72 @@ def _is_skipped_name(component: str) -> bool:
     return component != "**" and (component.startswith(".") or component in SKIPPED_NAMES)
 
 
-def _first_matches(lines: list[str], max_results: int) -> list[str]:
-    """Content lines through the ``max_results``-th match, with their separators."""
-    kept: list[str] = []
+def _render_content(
+    pattern: str,
+    search_dir: Path,
+    output: str,
+    max_results: int,
+    scope: SearchScope,
+    output_cap: int,
+    header: str,
+) -> str:
+    """Grep's text for ripgrep's ``--null`` content output, each line as ``read_file``
+    would show it where the file has a source path."""
+    parsed = _first_matches(_content_lines(output, search_dir, scope), max_results)
+    if not parsed:
+        return f"{header}No matches for pattern '{pattern}'"
+    source = SourceLines()
+    safe: list[str | None] = []
+    for path, group in itertools.groupby(parsed, key=lambda item: item[0]):
+        lines = [line for _path, line in group]
+        if path is None:
+            safe.extend(None for _line in lines)
+        else:
+            safe.extend(source.substitute(Path(path).suffix, partial(read_source, Path(path)), lines))
+    return render([line for _path, line in parsed], safe, output_cap, header)
+
+
+def _content_lines(
+    output: str, search_dir: Path, scope: SearchScope,
+) -> list[tuple[str | None, GrepLine]]:
+    """Each content line's file and rendering, outside other threads' folders;
+    empty when no match line remains.
+
+    ``--null`` ends each path with a NUL, so a path holding ':' or '-' parses
+    exactly; rendering restores grep's separators. ``--`` separates context
+    groups and carries no path.
+    """
+    prefix = f"{search_dir}/"
+    parsed: list[tuple[str | None, GrepLine]] = []
+    for line in output.split("\n"):
+        path, nul, rest = line.partition("\0")
+        match = _CONTENT_RE.match(rest)
+        if line == "--":
+            parsed.append((None, SEPARATOR))
+        elif nul and match is not None:
+            if not keep_path(Path(path), scope.current_thread_id, scope.all_threads):
+                continue
+            display = path.removeprefix(prefix)
+            separator = match.group("separator")
+            parsed.append((path, GrepLine(
+                f"{display}{separator}{match.group('number')}{separator}",
+                rest[match.end():],
+                int(match.group("number")),
+            )))
+        elif line:
+            parsed.append((None, GrepLine("", line)))
+    return parsed if any(line is not SEPARATOR for _path, line in parsed) else []
+
+
+def _first_matches(
+    lines: list[tuple[str | None, GrepLine]], max_results: int,
+) -> list[tuple[str | None, GrepLine]]:
+    """Content lines through the ``max_results``-th line, with their separators."""
+    kept: list[tuple[str | None, GrepLine]] = []
     count = 0
-    for line in lines:
-        kept.append(line)
-        if not line.startswith("--"):
+    for item in lines:
+        kept.append(item)
+        if item[1] is not SEPARATOR:
             count += 1
         if count >= max_results:
             break

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -13,14 +14,25 @@ from loguru import logger
 
 from infra.db_connection import mark_thread_lane
 
-_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="db")
+def _lane_workers(default: int) -> int:
+    """Worker threads for one lane: ``default``, or the measurement override when it is set.
+
+    ``CORSIA_DB_POOL_WORKERS`` exists only so the read-cost speed gate (``scripts/speed_gate``) can serve a
+    request from the same pooled connection on every run; it is not an operator tuning knob and nothing
+    else reads it. Unset or empty, every lane keeps its own default. This is the only place it is read.
+    """
+    override = os.environ.get("CORSIA_DB_POOL_WORKERS", "").strip()
+    return int(override) if override else default
+
+
+_pool = ThreadPoolExecutor(max_workers=_lane_workers(8), thread_name_prefix="db")
 # Read-only lanes, so a page read never queues behind writes or report scans on
 # the default pool, and a report scan holds at most its own lane's threads.
 _read_pool = ThreadPoolExecutor(
-    max_workers=6, thread_name_prefix="db-read", initializer=mark_thread_lane, initargs=("read",),
+    max_workers=_lane_workers(6), thread_name_prefix="db-read", initializer=mark_thread_lane, initargs=("read",),
 )
 _bulk_pool = ThreadPoolExecutor(
-    max_workers=2, thread_name_prefix="db-bulk", initializer=mark_thread_lane, initargs=("bulk",),
+    max_workers=_lane_workers(2), thread_name_prefix="db-bulk", initializer=mark_thread_lane, initargs=("bulk",),
 )
 _admission = threading.Condition()
 _active_jobs = 0

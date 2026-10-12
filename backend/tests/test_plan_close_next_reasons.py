@@ -32,6 +32,7 @@ from tests.plan_close_next_helpers import (
     task,
 )
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
+from tests.plan_writer_authorizer import raw_plan_seed
 
 #: A holder title at the authoring maximum of 60 characters.
 LONG_TITLE = "Running work with a sixty character title that fills the cap"
@@ -89,7 +90,8 @@ def test_a_legacy_task_with_child_nodes_is_reported_not_ready_as_activate_leaves
     parent = task(db, plan.id, "Legacy parent task")
     child = task(db, plan.id, "Legacy child task")
     # Tasks are leaves today; a legacy row can still sit under one.
-    db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent.id, child.id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent.id, child.id))
     db.commit()
     select(db, plan.id, task_a.id)
 

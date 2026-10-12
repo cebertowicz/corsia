@@ -28,3 +28,16 @@ def lane_outcome(lane, operation, outcome: str, *, detached: bool = False,
     if server_saved is not None:
         properties["server_saved"] = server_saved
     emit("lane_outcome", **properties)
+
+
+def region_after_commit(connection, outcome: str, artifact_id: str, w: float, h: float, **properties) -> None:
+    """Report a placed or moved image region once its write commits: identity and shape only."""
+    from infra.write_effects import after_commit
+    shape = "point" if w <= 0 and h <= 0 else "box"
+    after_commit(connection, lambda: emit("image_region_comment", artifact_id=artifact_id, outcome=outcome,
+                                          shape=shape, **properties))
+
+
+def marked_copy_failed(stage: str, error: BaseException) -> None:
+    """A marked-up image could not be drawn; the error's type stands in for its text, which names paths."""
+    emit("image_region_marked_copy", outcome="failed", stage=stage, error=type(error).__name__)

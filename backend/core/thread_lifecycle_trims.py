@@ -19,6 +19,7 @@ from core.thread_lifecycle import (
     TOOL_TRIM_MARKER,
     LifecycleConfig,
     RetentionReport,
+    SETTLED_WORKER_REASON,
     _iso,
     _row_get,
     _thread_dir,
@@ -35,6 +36,11 @@ TOOL_TRIM_BATCH_SIZE = 100
 TOOL_TRIM_BATCH_CHARS = 16 * 1024 * 1024
 TOOL_TRIM_BATCH_SECONDS = 0.25
 _clock = time.monotonic
+_SETTLED_WORKER = (
+    "COALESCE(lifecycle_state, 'active') = 'archived' "
+    "AND archived_reason = ? AND spawned_by IS NOT NULL "
+    "AND COALESCE(agent_enabled, 0) = 0"
+)
 
 # Kept as one predicate so the unlocked candidate read and each writer-side
 # recheck cannot drift on which payloads retention may replace.
@@ -232,35 +238,45 @@ def _remove_empty_dir(path: Path) -> bool:
     return True
 
 
+def _active_identity_dirs(db) -> set[Path]:
+    """Each active identity path with its ancestors, so a unit check is one lookup."""
+    rows = db.execute(
+        "SELECT path FROM artifact_identities "
+        "WHERE state='active' AND path IS NOT NULL AND path != ''"
+    ).fetchall()
+    protected: set[Path] = set()
+    for row in rows:
+        if "://" in row["path"]:
+            continue
+        path = Path(row["path"]).expanduser().resolve(strict=False)
+        protected.add(path)
+        protected.update(path.parents)
+    return protected
+
+
 def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
                       report: RetentionReport) -> None:
-    """Delete stale top-level entries under live threads' ``working/``.
+    """Trim stale top-level ``working/`` units for eligible threads.
 
-    Each direct child of ``working/`` is one unit, removed whole, and only when
-    nothing in it was added or changed within the TTL (see
-    ``_unit_is_stale``); a ``.corsia-keep`` file anywhere in a unit, or at the
-    top of ``working/``, keeps it. A thread with a running Turn is skipped: its
-    Turns, and the processes they start, are the writers of its ``working/``.
-    Nothing outside ``working/`` is touched, so any other folder under
-    ``.threads/<id>/`` is durable. Global — includes agent/roster threads;
-    archived threads retain their files until purge.
-
-    Not a lock, but removal re-judges every entry just before unlinking it
-    (``_remove_unit``), so a write that lands mid-sweep keeps that entry and
-    its directories. Every filesystem error, including a failed existence or
-    type check, keeps the entry, is logged, and is counted in
-    ``report.working_trim_errors``; ``report.working_files_trimmed`` counts
-    units removed whole.
+    Active, dormant, and settled temporary workers use the normal TTL. Other
+    archived threads, ``scratch``, and other thread folders remain durable.
+    Keep markers, active turns, and active identities in settled-worker units
+    preserve units. Removal re-judges entries before unlinking; filesystem
+    errors keep and log the unit, while ``working_files_trimmed`` counts whole removals.
     """
     from core.turn_core import active_turn_thread_ids
     from registry import service as registry_service
 
-    cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()
     busy = active_turn_thread_ids(db=db)
     rows = db.execute(
-        "SELECT id, project_id FROM threads "
-        "WHERE COALESCE(lifecycle_state, 'active') IN ('active', 'dormant')"
+        "SELECT id, project_id, "
+        f"CASE WHEN {_SETTLED_WORKER} THEN 1 ELSE 0 END AS settled_worker "
+        "FROM threads WHERE COALESCE(lifecycle_state, 'active') IN ('active', 'dormant') "
+        f"OR ({_SETTLED_WORKER})",
+        (SETTLED_WORKER_REASON, SETTLED_WORKER_REASON),
     ).fetchall()
+    active_identity_dirs = _active_identity_dirs(db)
+    cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()
     working_roots: dict[str, Path] = {}
     for r in rows:
         sid = _row_get(r, "id")
@@ -288,6 +304,9 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
             continue
         for unit in units:
             try:
+                if (_row_get(r, "settled_worker")
+                        and unit.resolve(strict=False) in active_identity_dirs):
+                    continue
                 if not _unit_is_stale(unit, cutoff):
                     continue
                 if not _remove_unit(unit, cutoff):

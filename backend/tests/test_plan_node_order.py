@@ -19,6 +19,7 @@ import pytest
 from infra.schema import SCHEMA_SQL
 from plans import admission, current, node_order, rollup, service
 from plans.boundary import PlanActor
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 
@@ -50,7 +51,8 @@ def test_depth_first_places_rows_unreachable_from_a_root_after_the_tree(db, shap
     stranded = []
     for node_id, parent_id, order_key in _UNREACHABLE[shape]:
         node = _node(db, plan.id, "task", node_id, order_key)
-        db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent_id, node.id))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent_id, node.id))
         stranded.append((node, order_key))
     db.commit()
     db.execute("PRAGMA foreign_keys=ON")
@@ -74,9 +76,9 @@ def test_depth_first_of_no_rows_is_empty(db):
     assert node_order.ordered_nodes_with_paths(db, plan.id) == []
 
 
-def test_order_cursor_never_projects_node_bodies():
+def test_order_cursor_never_projects_node_bodies(db):
     """The hot ordered projection excludes prose even after recursion completes."""
-    sql = node_order._ORDERED_CURSOR_SQL
+    sql = node_order._open_cte(db) + node_order._ORDERED_CURSOR_TAIL_SQL
 
     assert "SELECT * FROM plan_nodes" not in sql
     assert "node.*" not in sql
@@ -186,7 +188,8 @@ def test_eligibility_warns_before_selecting_a_stranded_task(db, caplog):
     phase = _node(db, plan.id, "phase", "Retired phase", 0)
     stranded = _node(db, plan.id, "task", "Stranded task", 0, phase.id)
     service.transition_node(stranded.id, "active", db=db)
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (phase.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (phase.id,))
     db.commit()
     caplog.set_level(logging.WARNING, logger="plans.node_order")
     caplog.clear()
@@ -211,7 +214,8 @@ def test_every_reader_of_plan_order_keeps_a_task_under_an_archived_phase(db, cap
     phase = _node(db, plan.id, "phase", "Retired phase", 0)
     stranded = _node(db, plan.id, "task", "Stranded task", 0, phase.id)
     service.transition_node(stranded.id, "active", db=db)
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (phase.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (phase.id,))
     db.commit()
     caplog.set_level(logging.WARNING, logger="plans.node_order")
 

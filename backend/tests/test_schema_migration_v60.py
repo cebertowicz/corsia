@@ -15,6 +15,7 @@ from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
 from plans import mutations, service
 from tests.plan_scene import _artifact
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _ARCHIVED = "2026-09-20T10:00:00.000000+00:00"
 _CHECKS = "github.check_suite.completed"
@@ -63,7 +64,8 @@ def _legacy_db(path):
             "older": _event_wait(db, owner.id, ids["older"], "owner", "o/r#1", "2026-09-20T01:00:00+00:00"),
             "settled": _event_wait(db, owner.id, ids["settled"], "owner", "o/r#3", "2026-09-20T03:00:00+00:00"),
         }
-        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (ids["settled"],))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (ids["settled"],))
         watched["dated"] = watches.arm_watch(
             ids["dated"], {"type": "deadline", "value": "2026-10-10T00:00:00+00:00"},
             owner_thread="owner", plan_id=owner.id, plan_node_id=ids["dated"], db=db,
@@ -128,7 +130,7 @@ def _parent_heard(db) -> tuple[int, int]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 105
+    assert SCHEMA_VERSION == 113
 
 
 def test_open_event_waits_get_a_deadline_and_keep_their_event(tmp_path):

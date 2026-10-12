@@ -1,19 +1,33 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { get } from 'svelte/store';
 	import { Button } from './ui';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import type { CommentLoad } from '$lib/stores/docComments';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import CommentList from './comments/CommentList.svelte';
+	import ImageRegionThumb from './ImageRegionThumb.svelte';
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
+	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry }: {
+	/**
+	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
+	 * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
+	 */
+	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
+	/**
+	 * A document's images with comments on parts of them (DCOL-FR13.6): each image's comments sit together in the drawer
+	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
+	 */
+	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -21,7 +35,8 @@
 		narrow: boolean;
 		comments: DocComment[];
 		focusedId: string | null;
-		draft: { text: string; body?: string } | null;
+		/** `label` names what a non-text comment is on, in place of the quote. */
+		draft: { text: string; body?: string; label?: string } | null;
 		draftReason?: string;
 		onDraftBody?: (text: string) => void;
 		onCancelDraft?: () => void;
@@ -43,12 +58,67 @@
 		onDocumentChanged?: () => void;
 		load?: CommentLoad;
 		onRetry?: () => void;
+		image?: ImageCommentSurface | null;
+		images?: DocImageComments | null;
 	} = $props();
+	const asDoc = (comment: unknown) => comment as DocComment;
+	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
+	const onItsImage = (comment: DocComment) => !comment.orphaned && comment.from != null;
+	function movePinInDocument(id: string) {
+		const comment = comments.find((item) => item.id === id);
+		if (comment && onItsImage(comment)) images?.onOpen(comment, { id, move: true });
+	}
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let drawer = $state<HTMLElement>();
+	let mobileDrawerOpen = $state(false);
+	let mobileCloseAction = $state<(() => void) | null>(null);
+	let closingMobileState = $state<SurfaceState>(null);
+	let closingMobileDraft = $state<{ text: string; body?: string; label?: string } | null>(null);
+	const renderedMobileState = $derived(closingMobileState ?? surfaceState);
+	const renderedMobileDraft = $derived(closingMobileDraft ?? draft);
+	$effect(() => {
+		if (surfaceState && narrow) {
+			closingMobileState = null;
+			closingMobileDraft = null;
+			mobileDrawerOpen = true;
+		}
+	});
+	function closeMobileDrawer(action: () => void = onClose): void {
+		mobileCloseAction = action;
+		mobileDrawerOpen = false;
+	}
+	function closeMobileSurface(): void {
+		if (narrow) closeMobileDrawer();
+		else onClose();
+	}
+	function cancelMobileDraft(): void {
+		const action = onCancelDraft ?? onClose;
+		if (!narrow) { action(); return; }
+		// Cancel commits state immediately, but the captured content owns the local outro.
+		closingMobileState = surfaceState;
+		closingMobileDraft = draft;
+		mobileCloseAction = null;
+		mobileDrawerOpen = false;
+		action();
+	}
+	function finishMobileClose(): void {
+		const action = mobileCloseAction;
+		mobileCloseAction = null;
+		closingMobileState = null;
+		closingMobileDraft = null;
+		action?.();
+	}
+	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
+	const isImage = $derived(!!image);
+	const picks = $derived(image?.picks ?? 0);
 	let navigationNotice = $state('');
-	const displayed = $derived.by(() => surfaceState?.kind === 'thread' ? comments.filter((comment) => comment.id === surfaceState.id)
-		: comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved)));
+	const byNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
+	const displayed = $derived.by(() => {
+		if (surfaceState?.kind === 'thread') return comments.filter((comment) => comment.id === surfaceState.id);
+		const shown = comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved));
+		// An image's comments read in number order, like its tags.
+		return image ? [...shown].sort(byNumber) : shown;
+	});
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
@@ -71,8 +141,45 @@
 	$effect(() => {
 		if (surfaceState?.kind !== 'list') return;
 		filter = 'all'; navigationNotice = '';
-		void tick().then(() => drawer?.querySelector<HTMLElement>('[data-drawer-filter]')?.focus());
+		void tick().then(() => {
+			const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
+			// An image's drawer opens at the selected comment instead (the effect below).
+			if (list && !(isImage && focusedId)) list.scrollTop = 0;
+			drawer?.querySelector<HTMLElement>('[data-drawer-filter]')?.focus();
+		});
 	});
+	/** Bring a card into view in the drawer's own list: smooth, or at once when asked or with reduced motion. */
+	function scrollToCard(id: string, instant: boolean) {
+		const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
+		const card = list?.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
+		if (!list || !card) return;
+		const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - 4;
+		list.scrollTo({ top: Math.max(0, top), behavior: instant || get(prefersReducedMotion) ? 'instant' : 'smooth' });
+	}
+	// An image's selected comment, picked on the image or there when the drawer opens, is scrolled to and marked in it.
+	// The drawer opens already at its card, so only the drawer moves; a pick while it is open glides the list.
+	let listShown = false;
+	$effect(() => {
+		const id = focusedId;
+		// Picking the selected tag again scrolls back to its card.
+		void picks;
+		const shown = isImage && surfaceState?.kind === 'list';
+		const opening = shown && !listShown;
+		listShown = shown;
+		if (!shown || !id) return;
+		void tick().then(() => scrollToCard(id, opening));
+	});
+	/**
+	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with
+	 * reduced motion it crossfades instead. A document's drawer keeps appearing and leaving at once.
+	 */
+	function drawerMotion(_node: Element, { leaving }: { leaving: boolean }) {
+		if (!isImage) return { duration: 0 };
+		const token = (name: string) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+		const pace = leaving ? 0.7 : 1;
+		if (get(prefersReducedMotion)) return { duration: token('--dur-tight') * pace, css: (t: number) => `opacity: ${t}` };
+		return { duration: leaving ? token('--dur-drawer') * pace : 0 };
+	}
 	function closeDrawer() { onClose(); restoreFocus(); }
 	function navigate(id: string) {
 		const comment = comments.find((item) => item.id === id);
@@ -176,8 +283,14 @@
 	}
 </script>
 
+{#snippet imageHead(row: unknown[])}
+	{@const group = row as DocComment[]}
+	{@const src = images?.srcOf(group[0])}
+	{#if images && src}<ImageRegionThumb {src} alt={imageAlt(group[0])} caption comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />{/if}
+{/snippet}
+
 {#snippet content()}
-	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={onCancelDraft ?? onClose} />
+	{#if renderedMobileState?.kind === 'draft' && renderedMobileDraft}<CommentComposer quote={renderedMobileDraft.text} label={renderedMobileDraft.label} body={renderedMobileDraft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={cancelMobileDraft} />
 	{:else}
 		{#if !readOnly && surfaceState?.kind !== 'thread'}
 			<div class="suggestion-status">
@@ -188,13 +301,13 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 
-{#if surfaceState}
-	{#if surfaceState.kind === 'list'}
-		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>
+{#if surfaceState || closingMobileState}
+	{#if surfaceState?.kind === 'list'}
+		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>
 			<div class="drawer-heading"><h2>Comments <span>{comments.length}</span></h2><Button size="sm" variant="ghost" onclick={closeDrawer}>Done</Button></div>
 			<div class="comment-filters" role="group" aria-label="Filter comments">
 				{#each ['all', 'open', 'resolved'] as choice}
@@ -205,24 +318,30 @@
 			{#if load?.state === 'error'}<div class="drawer-status" role="status">Couldn't load comments. {load.error}<Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 			{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
 			<div class="drawer-comments">
+				{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 				{#if displayed.length}{@render content()}
 				{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
 			</div>
 		</section>
-	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} {onClose}>{@render content()}</AdaptiveDrawer>
-	{:else}<Popover anchor={cardAnchor} {bounds} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+	{:else if narrow && renderedMobileState}<AdaptiveDrawer ariaLabel="Document comments" heading={renderedMobileState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}>{@render content()}</AdaptiveDrawer>
+	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>
-	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-secondary); }
-	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); }
-	.drawer-heading h2 span { color: var(--text-secondary); font-weight: var(--fw-medium); }
-	.drawer-heading :global(button), .comment-filters button { min-height: 44px; }
-	.comment-filters { display: flex; gap: 4px; flex: none; }
-	.comment-filters button { flex: 1; border: 0; border-radius: var(--radius-sm); color: var(--text-secondary); background: none; font: inherit; font-size: var(--text-footnote); cursor: pointer; }
-	.comment-filters button[aria-pressed="true"] { color: var(--accent); background: var(--accent-bg); }
+	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: 4px; min-height: 0; min-width: 0; position: relative; isolation: isolate; padding: 6px 8px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); }
+	/* The glass material is its own layer under the content, so the drawer's own box stays plain for the contrast probe, which cannot composite a backdrop filter. */
+	.canvas-comment-drawer::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--glass-regular-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: var(--glass-rim), var(--shadow-chip); pointer-events: none; }
+	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 4px; }
+	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-secondary); }
+	.drawer-heading h2 span { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; margin-left: 2px; }
+	/* A segmented control: one track, the chosen segment raised on it. */
+	.comment-filters { display: flex; gap: 2px; flex: none; padding: 2px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+	.comment-filters button { position: relative; flex: 1; height: 22px; border: 0; border-radius: var(--radius-2xs); color: var(--text-secondary); background: none; font: inherit; font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer; transition: background var(--dur-tight), color var(--dur-tight); }
+	.comment-filters button:hover { color: var(--text-primary); }
+	.comment-filters button[aria-pressed="true"] { color: var(--text-primary); font-weight: var(--fw-semibold); background: var(--glass-thick); box-shadow: var(--glass-rim), 0 1px 2px rgba(0, 0, 0, 0.12); }
+	:global([data-theme="dark"]) .comment-filters button[aria-pressed="true"] { background: color-mix(in srgb, var(--text-primary) 16%, transparent); }
 	.comment-filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+	@media (pointer: coarse) { .drawer-heading :global(button), .comment-filters button { min-height: 44px; } }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

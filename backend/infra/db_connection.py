@@ -143,7 +143,11 @@ class PooledConnection(sqlite3.Connection):
 
 
 def _producer(frame) -> tuple:
-    while frame is not None and frame.f_code.co_filename == __file__:
+    # A module that only forwards connection calls (a test wrapper) sets this flag so the
+    # cursor is attributed to its caller, not to the forwarder.
+    while frame is not None and (
+        frame.f_code.co_filename == __file__ or frame.f_globals.get("__producer_transparent__")
+    ):
         frame = frame.f_back
     return (frame.f_code, frame.f_lineno) if frame is not None else (None, 0)
 

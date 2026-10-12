@@ -45,13 +45,13 @@
 </script>
 
 <section class="card cost" aria-labelledby="cost-title">
-	<div class="heading"><h3 id="cost-title">Cost per hour of delivered work</h3>
+	<div class="heading"><h3 id="cost-title">Cost per person-hour of work delivered</h3>
 		<div class="toggle" aria-label="Cost view"><button class:active={view === 'equivalent'} aria-pressed={view === 'equivalent'} onclick={() => view = 'equivalent'}>API-equivalent</button><button class:active={view === 'actual'} aria-pressed={view === 'actual'} onclick={() => view = 'actual'}>Actual</button></div>
 	</div>
 	{#if costState.loading && !costState.data}<div class="skeleton" aria-label="Loading Cost"></div>
 	{:else if costState.error && !costState.data}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>
 	{:else if costState.data}
-		{#if headline}<p class="stat"><b>{rate === null ? '–' : money(rate)}</b> per hour of delivered work, {headline.nowText}, n {group(headline.current.sized)}, {headline.change}</p>{/if}
+		{#if headline}<p class="stat"><b>{rate === null ? '–' : money(rate)}</b> per person-hour of work delivered, {headline.nowText}, n {group(headline.current.sized)}, {headline.change}</p>{/if}
 		{#if view === 'actual' && (scoped || !costState.data.actual.workspace_subscription)}
 			<div class="actual"><h4>{actualTitle}</h4><p>Actual is recorded for the whole workspace, not this view.</p><p><button type="button" class="billing-link" onclick={onOpenAllWork}>Open All work</button></p><p class="note">The API-equivalent figures stay on the other view.</p></div>
 		{:else if view === 'actual'}
@@ -67,17 +67,17 @@
 				{#if workspaceSubscription.subscription_coverage === 'absent' || workspaceSubscription.subscription_coverage === 'partial'}<p>Subscription prices don't cover {periodText}. <button class="billing-link" onclick={() => openPrices((workspaceSubscription.subscription_unrecorded_accounts ?? 1) > 0)}>Set them in each provider's settings.</button></p>{:else if workspaceSubscription.subscription_coverage === 'complete'}{#if overageNotRecorded}{#if !overageReadsNone}<p>Overage is recorded for only part of this period.</p>{/if}{:else if actualComplete}<p>Subscriptions, overage and direct charges complete</p>{/if}{/if}<p class="note">The API-equivalent figures stay on the other view.</p></div>
 		{:else}
 			{#if headline}
-				<h4>API-equivalent $ per hour of delivered work, {chart.rangeText}, by {unit}</h4>
+				<h4>API-equivalent $ per person-hour of work delivered, {chart.rangeText}, by {unit}</h4>
 				<div class="chartrow"><div class="chartcol">
 				<MeasurementBarChart
 					points={chart.points}
-					axisTitle="API-equivalent $ per hour of delivered work"
+					axisTitle="API-equivalent $ per person-hour of work delivered"
 					{unit}
 					averageName={chart.averageName}
-					caption={`API-equivalent dollars of every priced call divided by the estimated hours of size-rated accepted work; lower is better. n is size-rated accepted outcomes per ${unit}. ${chart.note}${startsAt ? ` The series starts at ${startsAt}, the first ${unit} with size-rated accepted work.` : ''}`}
+					caption={`API-equivalent dollars of every priced call divided by the person-hours the accepted work would take a capable person by hand; lower is better. n is size-rated accepted outcomes per ${unit}.${startsAt ? ` The series starts at ${startsAt}, the first ${unit} with size-rated accepted work.` : ''}`}
 					minN={20}
 					minNText="fewer than 20 outcomes"
-					ariaLabel={`API-equivalent dollars per hour of delivered work, ${chart.rangeText}`}
+					ariaLabel={`API-equivalent dollars per person-hour of work delivered, ${chart.rangeText}`}
 					tickFormat={(value, decimals) => `$${value.toFixed(decimals)}`}
 					valueFormat={(value) => value.toFixed(2)}
 				/></div>
@@ -85,7 +85,7 @@
 			{:else}
 				<p class="sentence">No usage records could be priced in this range.</p>
 			{/if}
-			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.api_records)} in this range.</p>
+			<p class="caption">{coverageText(costState.data.coverage.priced_records, costState.data.coverage.usage_records)} in {periodText} are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.</p>
 		{/if}
 		{#if costState.error}<p class="error" role="alert">{costState.error}<button onclick={onRetry}>Retry</button></p>{/if}
 	{/if}
@@ -94,6 +94,6 @@
 
 <style>
 	/* The Work per hour card's surface: Cost, its spend, Models and the pie sit in one card. */
-	.card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; min-width: 0; }
-	.cost { display:grid; gap:12px; } .heading { display:flex; align-items:center; gap:12px; flex-wrap:wrap; } h3,p { margin:0; } h3 { color:var(--text-primary); font-size:18px; font-weight:600; overflow-wrap:anywhere; } .caption { font-size:12px; font-style:italic; overflow-wrap:anywhere; } p,small { color:var(--text-secondary); font-size:var(--text-footnote); } .toggle { display:flex; border:1px solid var(--border-subtle); border-radius:var(--radius-xs); overflow:hidden; } button { font:inherit; color:var(--text-primary); background:var(--bg-primary); border:0; padding:5px 9px; cursor:pointer; } button.active { background:var(--text-primary); color:var(--bg-primary); font-weight:600; } .skeleton { height:160px; background:var(--bg-hover); border-radius:var(--radius-xs); } .error { color:var(--red-text); } .error button { border:1px solid var(--border-subtle); margin-left:8px; } .actual { display:grid; gap:8px; } .actual-values { display:grid; gap:4px; } .actual-values div { display:flex; align-items:baseline; justify-content:space-between; gap:12px; color:var(--text-secondary); font-size:var(--text-footnote); } .actual-values strong { color:var(--text-primary); font-weight:500; text-align:right; } .actual-values .bill { display:block; } .actual-values .keep { white-space:nowrap; } @media (max-width:480px) { .actual-values div { flex-direction:column; align-items:flex-start; gap:2px; } .actual-values strong { text-align:left; } } .billing-link { padding:0; color:var(--blue); background:transparent; text-decoration:underline; } .spendcard { background:var(--bg-secondary); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:12px; display:grid; gap:8px; min-width:0; } .stat { color:var(--text-secondary); font-size:var(--text-footnote); } .stat b { color:var(--text-primary); font-size:20px; margin-right:4px; } h4 { margin:0; color:var(--text-secondary); font-size:var(--text-footnote); font-weight:600; letter-spacing:.04em; text-transform:uppercase; } .spendcard span { color:var(--text-secondary); font-size:var(--text-footnote); } .spendcard strong { color:var(--text-primary); font-size:var(--text-title2); overflow-wrap:anywhere; } .hrs { display:flex; justify-content:space-between; gap:12px; color:var(--text-secondary); font-size:var(--text-footnote); } .hrs b { color:var(--text-primary); font-weight:600; } .chartrow { display:grid; gap:12px; grid-template-columns:minmax(0,1fr); } .chartcol { min-width:0; } @media(min-width:1100px) { .chartrow { grid-template-columns:minmax(0,1fr) 280px; align-items:start; } } @media(max-width:393px) { .heading { align-items:stretch; } .toggle { width:100%; } .toggle button { flex:1; } }
+	.card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 0; padding: 14px; min-width: 0; }
+	.cost { display:grid; gap:12px; } .heading { display:flex; align-items:center; gap:12px; flex-wrap:wrap; } h3,p { margin:0; } h3 { color:var(--text-primary); font-size:18px; font-weight:600; overflow-wrap:anywhere; } .caption { font-size:12px; font-style:italic; overflow-wrap:anywhere; } p,small { color:var(--text-secondary); font-size:var(--text-footnote); } .toggle { display:flex; border:1px solid var(--border-subtle); border-radius:var(--radius-xs); overflow:hidden; } button { font:inherit; color:var(--text-primary); background:var(--bg-primary); border:0; padding:5px 9px; cursor:pointer; } button.active { background:var(--text-primary); color:var(--bg-primary); font-weight:600; } .skeleton { height:160px; background:var(--bg-hover); border-radius:var(--radius-xs); } .error { color:var(--red-text); } .error button { border:1px solid var(--border-subtle); margin-left:8px; } .actual { display:grid; gap:8px; } .actual-values { display:grid; gap:4px; } .actual-values div { display:flex; align-items:baseline; justify-content:space-between; gap:12px; color:var(--text-secondary); font-size:var(--text-footnote); } .actual-values strong { color:var(--text-primary); font-weight:500; text-align:right; } .actual-values .bill { display:block; } .actual-values .keep { white-space:nowrap; } @media (max-width:480px) { .actual-values div { flex-direction:column; align-items:flex-start; gap:2px; } .actual-values strong { text-align:left; } } .billing-link { padding:0; color:var(--blue); background:transparent; text-decoration:underline; } .spendcard { background:var(--bg-secondary); border:1px solid var(--border-subtle); border-radius: 0; padding:12px; display:grid; gap:8px; min-width:0; } .stat { color:var(--text-secondary); font-size:var(--text-footnote); } .stat b { color:var(--text-primary); font-size:20px; margin-right:4px; } h4 { margin:0; color:var(--text-secondary); font-size:var(--text-footnote); font-weight:600; letter-spacing:.04em; text-transform:uppercase; } .spendcard span { color:var(--text-secondary); font-size:var(--text-footnote); } .spendcard strong { color:var(--text-primary); font-size:var(--text-title2); overflow-wrap:anywhere; } .hrs { display:flex; justify-content:space-between; gap:12px; color:var(--text-secondary); font-size:var(--text-footnote); } .hrs b { color:var(--text-primary); font-weight:600; } .chartrow { display:grid; gap:12px; grid-template-columns:minmax(0,1fr); } .chartcol { min-width:0; } @media(min-width:1100px) { .chartrow { grid-template-columns:minmax(0,1fr) 280px; align-items:start; } } @media(max-width:393px) { .heading { align-items:stretch; } .toggle { width:100%; } .toggle button { flex:1; } }
 </style>

@@ -12,6 +12,7 @@ from pathlib import Path
 import tomllib
 from typing import Any
 
+from tools import mcp_secrets
 from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
 
 _SOURCE_LABELS = {
@@ -135,7 +136,9 @@ def _copyable_config(source: str, config: dict[str, Any]) -> dict[str, Any]:
     return copied
 
 
-def _validate(config: dict[str, Any]) -> None:
+def _validate(server: str, config: dict[str, Any]) -> None:
+    """Validate the config as it will be saved: credential values become key store references."""
+    config, _ = mcp_secrets.split_secrets(server, config)
     allowed_names(config)
     timeout_seconds(config, "connect_timeout", 10)
     timeout_seconds(config, "tool_timeout", 30)
@@ -171,7 +174,7 @@ def prepare_import(selected: list[dict[str, str]], home: Path | None = None) -> 
         kind = _kind(source, config)
         try:
             copied = _copyable_config(source, config)
-            _validate(copied)
+            _validate(name, copied)
         except MCPConfigError as error:
             statuses.append({"name": name, "kind": kind or "unknown", "status": f"failed: {error}"})
             continue
@@ -181,7 +184,12 @@ def prepare_import(selected: list[dict[str, str]], home: Path | None = None) -> 
 
 
 def save_import(additions: dict[str, dict[str, Any]]) -> dict[str, str]:
-    """Merge selected configs and classify existing names in one transaction."""
+    """Merge selected configs and classify existing names in one transaction.
+
+    A new server's credential values go to the key store and its config keeps
+    references. A name already set up is never overwritten, and its stored
+    credentials are left as they are.
+    """
     from infra.database import write_transaction
     from infra.settings import get_setting, set_setting
 
@@ -191,10 +199,12 @@ def save_import(additions: dict[str, dict[str, Any]]) -> dict[str, str]:
         servers = tools.get("mcpServers", {})
         servers = dict(servers) if isinstance(servers, dict) else {}
         for name, config in additions.items():
+            clean, lifted = mcp_secrets.split_secrets(name, config)
             if name not in servers:
-                servers[name] = config
+                mcp_secrets.store_secrets(lifted, db=db)
+                servers[name] = clean
                 outcomes[name] = "saved"
-            elif servers[name] == config:
+            elif servers[name] == clean and mcp_secrets.stored_matches(lifted, db=db):
                 outcomes[name] = "existing_equal"
             else:
                 outcomes[name] = "conflict"

@@ -113,6 +113,11 @@ def _is_credential_key(name: object) -> bool:
     return isinstance(name, str) and bool(_SENSITIVE_KEY_RE.fullmatch(name.strip()))
 
 
+def is_credential_name(name: object) -> bool:
+    """Whether a variable or header name is credential-keyed, by the rule data sanitizing applies."""
+    return isinstance(name, str) and _is_credential_key(name.strip().strip("\"'").casefold())
+
+
 def _redact_assignment(match: re.Match[str]) -> str:
     value = match.group("quoted")
     if value is None:
@@ -193,6 +198,11 @@ _RULES: tuple[tuple[re.Pattern[str], Callable[[re.Match[str]], str]], ...] = (
 # Rules that recognize a credential by its own text, not by a key or header
 # around it. Their matches stay secret whatever the text parses as.
 _SHAPE_PATTERNS = frozenset({_PEM_PRIVATE_KEY_RE, _TOKEN_PREFIX_RE})
+# Rules whose matches are never code or prose, whatever the text lexes as: a
+# credential's own shape, URL userinfo, and cookie values.
+_NEVER_CODE_PATTERNS = _SHAPE_PATTERNS | {
+    _URL_USERINFO_RE, _COOKIE_HEADER_RE, _COOKIE_ASSIGNMENT_RE,
+}
 
 
 def sanitize_credential_text(value: str) -> str:
@@ -204,16 +214,20 @@ def sanitize_credential_text(value: str) -> str:
     return value
 
 
-def credential_spans(value: str, *, shape_only: bool = False) -> list[tuple[int, int]]:
+def credential_spans(
+    value: str, *, shape_only: bool = False, never_code: bool = False,
+) -> list[tuple[int, int]]:
     """Merged regions of ``value`` that the rules would change.
 
     Each rule runs on the original text, so a region is reported even when an
     earlier rule would already have rewritten it. ``shape_only`` limits the
-    regions to rules that recognize a credential by its own text.
+    regions to rules that recognize a credential by its own text;
+    ``never_code`` adds URL userinfo and cookie values to those.
     """
+    selected = _SHAPE_PATTERNS if shape_only else _NEVER_CODE_PATTERNS if never_code else None
     spans: list[tuple[int, int]] = []
     for pattern, callback in _RULES:
-        if shape_only and pattern not in _SHAPE_PATTERNS:
+        if selected is not None and pattern not in selected:
             continue
         for match in pattern.finditer(value):
             old, new = match.group(0), callback(match)

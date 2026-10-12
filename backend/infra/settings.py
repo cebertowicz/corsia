@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 from datetime import datetime, timezone
 
@@ -52,17 +51,6 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def get_api_keys() -> dict[str, str]:
-    """Extract API keys from providers config."""
-    providers = get_setting("providers") or {}
-    keys = {}
-    for name, prov in providers.items():
-        if isinstance(prov, dict):
-            if api_key := prov.get("apiKey"):
-                keys[name] = api_key
-    return keys
-
-
 def get_agent_defaults() -> dict:
     """Get agent default settings."""
     agents = get_setting("agents") or {}
@@ -74,9 +62,22 @@ def get_host_access_auto_approve() -> bool:
     return get_agent_defaults().get("host_access_auto_approve") is True
 
 
+def get_host_access_reviewer_fallback(*, db=None) -> bool:
+    """Return whether the requester's model reviews when the chosen reviewer cannot run."""
+    agents = get_setting("agents", db=db) or {}
+    defaults = agents.get("defaults")
+    return isinstance(defaults, dict) and defaults.get("host_access_reviewer_fallback") is True
+
+
 def get_host_access_reviewer_model(*, db=None) -> str | None:
     """Return the exact configured catalog ID for host-access review."""
     return _exact_agent_default("host_access_reviewer_model", db=db)
+
+
+def get_corrections_checker_model(*, db=None) -> str | None:
+    """Return the exact configured catalog ID for correction recording."""
+    return _exact_agent_default("corrections_checker_model", db=db)
+
 
 
 def _exact_agent_default(key: str, *, db=None) -> str | None:
@@ -125,11 +126,11 @@ def get_feature_flags() -> dict:
     return get_setting("features") or {}
 
 
-def save_setting_merge(key: str, updates: dict) -> None:
+def save_setting_merge(key: str, updates: dict, *, db: sqlite3.Connection | None = None) -> None:
     """Deep-merge updates into an existing setting."""
-    with write_transaction(None, scope="save_setting_merge") as db:
-        current = get_setting(key, db=db) or {}
-        set_setting(key, _deep_merge(current, updates), db=db)
+    with write_transaction(db, scope="save_setting_merge") as conn:
+        current = get_setting(key, db=conn) or {}
+        set_setting(key, _deep_merge(current, updates), db=conn)
 
 
 def save_agent_defaults(updates: dict) -> None:
@@ -149,15 +150,3 @@ def delete_agent_default(key: str) -> None:
         updated = dict(agents)
         updated["defaults"] = defaults
         set_setting("agents", updated, db=db)
-
-
-def bootstrap_env() -> None:
-    """Set environment variables from DB settings (API keys, etc.)."""
-    keys = get_api_keys()
-    env_map = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openai": "OPENAI_API_KEY",
-    }
-    for provider_name, env_var in env_map.items():
-        if provider_name in keys and env_var not in os.environ:
-            os.environ[env_var] = keys[provider_name]

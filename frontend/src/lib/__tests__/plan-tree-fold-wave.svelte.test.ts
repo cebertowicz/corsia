@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
 import * as foldWave from '$lib/components/plans/foldWave';
-import { NEW_ROW_CAP, STAGGER_MS, heldRows, newlyMatching } from '$lib/components/plans/foldWave';
-import type { PaneView } from '$lib/components/plans/foldMotion.svelte';
+import { STAGGER_MS, newlyMatching } from '$lib/components/plans/foldWave';
+import { heldIds, type PaneView } from '$lib/components/plans/foldMotion.svelte';
+import type { FoldedWork } from '$lib/components/plans/planFoldLevels';
 import { node } from './fixtures/planTreeNode';
+import { withFolds, withLiveFolds } from './fixtures/planFolds';
 
 /**
  * When rows fold, every one of them animates -- a check beat, a slide to its
@@ -63,7 +65,7 @@ function ghostDelays(): number[] {
 
 async function foldAll(count: number) {
 	const props = $state({ nodes: finished(count, false) });
-	component = mount(PlanTree, { target: host, props });
+	component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
 	await tick();
 	flushSync();
 	props.nodes = finished(count, true);
@@ -87,7 +89,7 @@ describe('PlanTree — the fold wave', () => {
 			node({ id: 'open', title: 'Open task' }),
 		];
 		const props = $state({ nodes: rows(false) });
-		component = mount(PlanTree, { target: host, props });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
 		await tick();
 		flushSync();
 		props.nodes = rows(true);
@@ -103,7 +105,7 @@ describe('PlanTree — the fold wave', () => {
 
 	it('keeps playing when a refresh lands mid-wave (found on the live pane)', async () => {
 		const props = $state({ nodes: finished(3, false) });
-		component = mount(PlanTree, { target: host, props });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
 		await tick();
 		flushSync();
 		props.nodes = finished(3, true);
@@ -147,7 +149,7 @@ describe('PlanTree — the fold wave', () => {
 	});
 
 	it('does not replay old history on the first render', async () => {
-		component = mount(PlanTree, { target: host, props: { nodes: finished(8, true) } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: finished(8, true) }) });
 		await tick();
 		flushSync();
 		expect(ghostDelays()).toHaveLength(0);
@@ -170,7 +172,7 @@ describe('PlanTree — the fold wave', () => {
 				node({ id: 'b', title: 'Task B', state: 'active' }),
 			],
 		});
-		component = mount(PlanTree, { target: host, props });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
 		await tick();
 		flushSync();
 		// 'b' becomes terminal -- it sinks to the bottom of its level as its own
@@ -200,10 +202,11 @@ describe('newlyMatching', () => {
 	});
 });
 
+
 /**
- * The pane shows only finished work new since the user last looked at it
- * (`seenThrough`), at most `NEW_ROW_CAP` rows, and folds them when the pane
- * advances the mark. Everything older is already inside its level's count.
+ * The pane holds open every folded row its read lists that it has not yet shown
+ * fold, and folds them when the pane releases them (`PaneView.released`). A
+ * level's fold row counts what the server counted, less the rows held open.
  * Without a pane view (an Activity card, a drill-down) the tree shows the
  * server's folds.
  */
@@ -214,50 +217,51 @@ describe('PlanTree — only what is new since the last look', () => {
 	const rowIds = () => [...host.querySelectorAll<HTMLElement>('.tree-row[data-flip-key]:not(.fold-row)')]
 		.map((row) => row.dataset.flipKey);
 	const foldText = () => host.querySelector('.fold-row')?.textContent ?? '';
+	const seen = (...ids: string[]): PaneView => ({ released: new Set(ids) });
 
-	async function open(nodes: OperatorNode[], paneView: PaneView | null) {
-		const props = $state({ nodes, paneView });
-		component = mount(PlanTree, { target: host, props });
+	async function open(nodes: OperatorNode[], paneView: PaneView | null, folded?: FoldedWork) {
+		const props = $state({ nodes, paneView, folded });
+		component = mount(PlanTree, { target: host, props: withLiveFolds(props) });
 		await tick();
 		flushSync();
 		return props;
 	}
 
-	async function advance(props: { paneView: PaneView | null }, seenThrough: string) {
-		props.paneView = { seenThrough };
+	async function release(props: { paneView: PaneView | null }, ...ids: string[]) {
+		props.paneView = seen(...ids);
 		await tick();
 		flushSync();
 	}
 
-	it('holds open only the ten most recently settled of twelve new rows', async () => {
-		await open(finished(12, true), { seenThrough: null });
-		expect(rowIds()).toEqual(['open', ...Array.from({ length: NEW_ROW_CAP }, (_, i) => `done-${i}`)]);
-		expect(foldText()).toContain('2 completed');
+	it('holds every listed folded row open, and counts only what the server has beyond them', async () => {
+		const server = { planId: 'plan-1', levels: [{ parent_id: null, done: 15, failed: 0, closed: 0, more: 3 }] };
+		await open(finished(12, true), seen(), server);
+		expect(rowIds()).toEqual(['open', ...Array.from({ length: 12 }, (_, i) => `done-${i}`)]);
+		expect(foldText()).toContain('3 completed');
 		expect(ghostDelays()).toHaveLength(0);
 	});
 
-	it('holds only rows settled after the mark, and folds them in one wave when it advances', async () => {
-		// done-0 and done-1 settled after the mark; done-2 and done-3 before it.
-		const props = await open(finished(4, true), { seenThrough: iso(T0 - 90_000) });
+	it('holds only rows not yet released, and folds them in one wave when the pane releases them', async () => {
+		const props = await open(finished(4, true), seen('done-2', 'done-3'));
 		expect(rowIds()).toEqual(['open', 'done-0', 'done-1']);
 		expect(foldText()).toContain('2 completed');
-		await advance(props, iso(T0));
+		await release(props, 'done-0', 'done-1', 'done-2', 'done-3');
 		expect(ghostDelays()).toEqual([0, STAGGER_MS]);
 		expect(rowIds()).toEqual(['open']);
 		expect(foldText()).toContain('4 completed');
 	});
 
-	it('replays nothing when the mark covers every finished row', async () => {
-		await open(finished(4, true), { seenThrough: iso(T0) });
+	it('replays nothing when the view has shown every folded row', async () => {
+		await open(finished(4, true), seen('done-0', 'done-1', 'done-2', 'done-3'));
 		expect(rowIds()).toEqual(['open']);
 		expect(foldText()).toContain('4 completed');
 		expect(ghostDelays()).toHaveLength(0);
 	});
 
-	it('holds a row that finishes while the pane is open until the mark passes it', async () => {
+	it('holds a row that finishes while the pane is open until the view releases it', async () => {
 		const props = await open(
 			[node({ id: 'open', title: 'Open task' }), node({ id: 'late', title: 'Late' })],
-			{ seenThrough: iso(T0) },
+			seen(),
 		);
 		props.nodes = [
 			node({ id: 'open', title: 'Open task' }),
@@ -267,7 +271,7 @@ describe('PlanTree — only what is new since the last look', () => {
 		flushSync();
 		expect(rowIds()).toEqual(['open', 'late']);
 		expect(ghostDelays()).toHaveLength(0);
-		await advance(props, iso(T0 + 120_000));
+		await release(props, 'late');
 		expect(ghostDelays()).toEqual([0]);
 		expect(rowIds()).toEqual(['open']);
 	});
@@ -280,31 +284,22 @@ describe('PlanTree — only what is new since the last look', () => {
 
 	it('honours reduced motion: the same rows fold, with no animation', async () => {
 		reducedMotion = true;
-		const props = await open(finished(4, true), { seenThrough: null });
-		await advance(props, iso(T0));
+		const props = await open(finished(4, true), seen());
+		await release(props, 'done-0', 'done-1', 'done-2', 'done-3');
 		expect(animate).not.toHaveBeenCalled();
 		expect(rowIds()).toEqual(['open']);
 	});
 });
 
-describe('heldRows', () => {
-	const at = (minutes: number) => new Date(Date.UTC(2026, 8, 17, 12, minutes)).toISOString();
-
-	it('holds folded rows settled after the mark, with the folded parents they render under', () => {
+describe('heldIds', () => {
+	it('holds the listed folded rows a view has not shown, and nothing without a view', () => {
 		const nodes = [
-			node({ id: 'phase', state: 'pending', folded: true, last_transition_at: at(0) }),
-			node({ id: 'new', parent_id: 'phase', depth: 1, state: 'accepted', folded: true, last_transition_at: at(40) }),
-			node({ id: 'old', state: 'accepted', folded: true, last_transition_at: at(10) }),
-			node({ id: 'open', state: 'active', last_transition_at: at(50) }),
+			node({ id: 'phase', state: 'pending', folded: true }),
+			node({ id: 'new', parent_id: 'phase', depth: 1, state: 'accepted', folded: true }),
+			node({ id: 'old', state: 'accepted', folded: true }),
+			node({ id: 'open', state: 'active' }),
 		];
-		expect([...heldRows(nodes, at(30))].sort()).toEqual(['new', 'phase']);
-	});
-
-	it('treats a plan never viewed as all new, capped to the newest, and an unreadable mark as holding nothing', () => {
-		const nodes = Array.from({ length: 12 }, (_, i) => node({
-			id: `d${i}`, state: 'accepted', folded: true, last_transition_at: at(i),
-		}));
-		expect([...heldRows(nodes, null)].sort()).toEqual(['d10', 'd11', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9']);
-		expect(heldRows(nodes, 'not a time').size).toBe(0);
+		expect([...heldIds(nodes, { released: new Set(['old']) })].sort()).toEqual(['new', 'phase']);
+		expect(heldIds(nodes, null).size).toBe(0);
 	});
 });

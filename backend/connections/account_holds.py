@@ -1,6 +1,8 @@
 """Project account ineligibility into durable holds without moving bindings."""
 from __future__ import annotations
 
+import json
+
 from connections.account_policy import (
     PROJECT_POLICY_MISSING, AccountAdmissionError, account_reason, missing_project_reason, thread_scope,
 )
@@ -15,6 +17,14 @@ ACCOUNT_HOLD_REASONS = (
 
 
 
+def _binding_hold(binding, *, missing: str | None, project: str | None, model: str, provider: str | None, db):
+    """The one evaluator of a bound account's hold reason for a thread, or None when it may run."""
+    account = get_account(str(binding["account_id"]), db=db)
+    return missing or account_reason(
+        account, provider=binding["provider"], project_ids=[project], execution=True,
+        model=model if binding["provider"] == provider else None, db=db)
+
+
 def refresh_thread_holds(thread_id: str, *, wake: bool = True, db) -> None:
     """Update per-vendor holds in the lifecycle/policy/rehome writer transaction."""
     scope = thread_scope(thread_id, db=db)
@@ -26,10 +36,8 @@ def refresh_thread_holds(thread_id: str, *, wake: bool = True, db) -> None:
     provider = model_vendor(model, db=db)
     rows = db.execute("SELECT provider,account_id FROM thread_vendor_accounts WHERE thread_id=?", (thread_id,)).fetchall()
     for binding in rows:
-        account = get_account(str(binding["account_id"]), db=db)
-        reason = missing or account_reason(
-            account, provider=binding["provider"], project_ids=[scope["project_id"]], execution=True,
-            model=model if binding['provider'] == provider else None, db=db)
+        reason = _binding_hold(binding, missing=missing, project=scope["project_id"], model=model,
+                               provider=provider, db=db)
         if reason:
             db.execute("""INSERT INTO thread_vendor_account_holds(thread_id,provider,account_id,reason,updated_at)
                 VALUES (?,?,?,?,?) ON CONFLICT(thread_id,provider) DO UPDATE SET
@@ -52,23 +60,29 @@ def refresh_thread_holds(thread_id: str, *, wake: bool = True, db) -> None:
 
 
 def affected_thread_ids(account_id: str, *, db) -> list[str]:
-    """Current subjects resolved through the one account-selection owner."""
-    from connections.account_policy import turn_account
+    """Current subjects resolved through the one account-selection owner.
+
+    One read names every candidate with its project and its binding row; the owner
+    then answers from those facts, so the walk reads nothing per thread.
+    """
+    from connections.account_policy import _scoped_turn_account
 
     account = get_account(account_id, db=db)
     provider = account['provider']
-    rows = db.execute("""SELECT t.id,t.model FROM threads t
+    rows = db.execute("""SELECT t.id,t.model,t.project_id,b.account_id AS bound,b.pending_account_id AS pending
+        FROM threads t LEFT JOIN thread_vendor_accounts b ON b.thread_id=t.id AND b.provider=?
         WHERE t.model IS NOT NULL AND trim(t.model)<>''
           AND EXISTS (SELECT 1 FROM models m WHERE m.harness=?
                       AND (m.id=trim(t.model) OR m.litellm_model=trim(t.model)))
-          AND (EXISTS (SELECT 1 FROM thread_vendor_accounts b
-                      WHERE b.thread_id=t.id AND b.provider=?)
+          AND (b.thread_id IS NOT NULL
                OR EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=t.id
                           AND m.input_order IS NOT NULL AND m.delivery_state='queued'
                           AND m.active_turn_id IS NULL))""", (provider, provider)).fetchall()
     affected = []
     for row in rows:
-        selected, _ = turn_account(provider, thread_id=str(row['id']), model=str(row['model']), db=db)
+        binding = None if row['bound'] is None else {'account_id': row['bound'], 'pending_account_id': row['pending']}
+        selected, _ = _scoped_turn_account(provider, thread_id=str(row['id']), project=row['project_id'],
+                                           account_id=None, model=str(row['model']), db=db, binding=binding)
         if selected == account_id:
             affected.append(str(row['id']))
     return affected
@@ -100,21 +114,82 @@ def policy_thread_ids(project_id: str, provider: str, *, db) -> list[str]:
         """, {"project": project_id, "provider": provider}).fetchall()]
 
 
+def _hold_facts(thread_ids: list[str], *, db) -> tuple[dict, dict, dict]:
+    """Every fact an unqueued thread's holds depend on, read in three statements per chunk.
+
+    Returns each thread's row with whether it has an unclaimed queued input, its
+    bindings, and its stored holds.
+    """
+    threads: dict[str, dict] = {}
+    bindings: dict[str, list] = {}
+    holds: dict[tuple[str, str], tuple[str, str]] = {}
+    for start in range(0, len(thread_ids), 1000):
+        marks = json.dumps(thread_ids[start:start + 1000])
+        for row in db.execute("""SELECT t.id,t.project_id,t.model,
+              EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=t.id AND m.input_order IS NOT NULL
+                      AND m.delivery_state='queued' AND m.active_turn_id IS NULL) AS queued
+            FROM threads t WHERE t.id IN (SELECT value FROM json_each(?))""", (marks,)):
+            threads[str(row['id'])] = dict(row)
+        for row in db.execute("""SELECT thread_id,provider,account_id FROM thread_vendor_accounts
+            WHERE thread_id IN (SELECT value FROM json_each(?))""", (marks,)):
+            bindings.setdefault(str(row['thread_id']), []).append(row)
+        for row in db.execute("""SELECT thread_id,provider,account_id,reason FROM thread_vendor_account_holds
+            WHERE thread_id IN (SELECT value FROM json_each(?))""", (marks,)):
+            holds[(str(row['thread_id']), str(row['provider']))] = (str(row['account_id']), str(row['reason']))
+    return threads, bindings, holds
+
+
+def _refresh_unqueued_holds(thread_id: str, facts: tuple[dict, dict, dict], *, db) -> None:
+    """``refresh_thread_holds`` for a thread with no unclaimed queued input, from facts already read.
+
+    With nothing queued the input-hold marking, head notice and wake of the single-thread
+    owner have nothing to act on, so only the per-vendor hold rows remain. Each is judged by
+    the same evaluator and written only when it differs from the stored row, so a discovery
+    that changes few holds writes few rows and an unchanged hold keeps its ``updated_at``.
+    """
+    from infra.vendor_turn_binding import model_vendor
+
+    threads, bindings, holds = facts
+    thread = threads[thread_id]
+    missing = missing_project_reason({"project_id": thread["project_id"]}, db=db)
+    model = str(thread["model"] or "")
+    provider = model_vendor(model, db=db)
+    for binding in bindings.get(thread_id, ()):
+        reason = _binding_hold(binding, missing=missing, project=thread["project_id"], model=model,
+                               provider=provider, db=db)
+        stored = holds.get((thread_id, binding["provider"]))
+        if reason:
+            if stored != (str(binding["account_id"]), reason):
+                db.execute("""INSERT INTO thread_vendor_account_holds(thread_id,provider,account_id,reason,updated_at)
+                    VALUES (?,?,?,?,?) ON CONFLICT(thread_id,provider) DO UPDATE SET
+                    account_id=excluded.account_id,reason=excluded.reason,updated_at=excluded.updated_at""",
+                    (thread_id, binding["provider"], binding["account_id"], reason, utc_now_iso()))
+        elif stored is not None:
+            db.execute("DELETE FROM thread_vendor_account_holds WHERE thread_id=? AND provider=?",
+                       (thread_id, binding["provider"]))
+
+
 def refresh_account_holds(account_id: str, *, wake: bool = True, db) -> None:
     """Project every affected thread's holds, reading each global fact once.
 
     Discovery changes many threads' holds at once and every thread re-reads the same
     project policy, account and model facts through the canonical readers. One scoped
     read memo (``connections.fact_memo``) spans the affected-set walk and the fan-out,
-    so those readers answer from their first read; each thread's own scope, binding,
-    pending account and queued head are still read per thread, and every evaluator
-    stays the one this module already used.
+    so those readers answer from their first read. The thread facts are read for the whole
+    set in a few statements: a thread with an unclaimed queued input still goes through
+    the single-thread owner, and any other thread has only its hold rows to judge, which
+    are written only where they differ. Every evaluator stays the one this module already used.
     """
     from connections import fact_memo
 
     with fact_memo.fact_reads():
-        for thread_id in affected_thread_ids(account_id, db=db):
-            refresh_thread_holds(thread_id, wake=wake, db=db)
+        thread_ids = affected_thread_ids(account_id, db=db)
+        facts = _hold_facts(thread_ids, db=db)
+        for thread_id in thread_ids:
+            if facts[0][thread_id]["queued"]:
+                refresh_thread_holds(thread_id, wake=wake, db=db)
+            else:
+                _refresh_unqueued_holds(thread_id, facts, db=db)
 
 
 def refresh_model_hold(thread_id: str, model: str, *, wake: bool = True, db) -> str | None:

@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.plan_writer_authorizer import raw_plan_seed
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -41,21 +42,24 @@ def _nodes(db, owner, count, *, accepted_at=ACCEPTED_AT, evidence=False):
     ids = []
     for number in range(count):
         node_id = f"{owner}-node-{number}"
-        db.execute(
-            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,"
-            "requirements_revision,revision,created_at,updated_at) VALUES (?,?,NULL,?,'task','Synthetic task','done',"
-            "'accepted',?,1,1,'t','t')", (node_id, plan_id, number, node_id))
-        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,payload_json,created_at) "
-                   "VALUES (?,?,'test','accepted','active','accepted',?,?)",
-                   (f"{node_id}-accepted", node_id, json.dumps({"evidence": "synthetic proof"}) if evidence else None, accepted_at))
+        with raw_plan_seed(db):
+            db.execute(
+                "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,"
+                "requirements_revision,revision,created_at,updated_at) VALUES (?,?,NULL,?,'task','Synthetic task','done',"
+                "'accepted',?,1,1,'t','t')", (node_id, plan_id, number, node_id))
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,payload_json,created_at) "
+                       "VALUES (?,?,'test','accepted','active','accepted',?,?)",
+                       (f"{node_id}-accepted", node_id, json.dumps({"evidence": "synthetic proof"}) if evidence else None, accepted_at))
         ids.append(node_id)
     return ids
 
 
-def _messages(db, thread_id):
-    # Two human messages ten minutes apart: 60 s + (600 s gap + 60 s) = 0.2 active hours.
-    db.executemany("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?,?,'user','x','{}',?)",
-                   [(f"{thread_id}-m1", thread_id, "2026-09-22T10:00:00Z"), (f"{thread_id}-m2", thread_id, "2026-09-22T10:10:00Z")])
+def _presence_visit(db, thread_id):
+    db.execute(
+        "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+        "VALUES ('steve','chat',?,'2026-09-22T10:00:00Z','2026-09-22T10:12:00Z',720,1,'hidden')",
+        (thread_id,),
+    )
 
 
 def _rows(db, node_ids, size_class="M", **overrides):
@@ -119,7 +123,7 @@ async def test_midpoints_coverage_and_identical_retry(isolated_db):
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 24)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         rows = _rows(db, nodes[:20], "M") + _rows(db, nodes[20:22], "unknown")
         report = _import(db, rows)
         db.commit()
@@ -141,11 +145,11 @@ async def test_midpoints_coverage_and_identical_retry(isolated_db):
     assert row["value"] == pytest.approx(200.0)
     assert row["n"] == 20 and row["proxy"] is True
     assert size["basis"] == {"delivered_evidence_proxy": 0, "accepted_scope_proxy": 20, "author_declared": 0}
-    # The registry's dates are served with the row, so the headline never restates them.
-    from api.measurement import _COMPARABILITY_BREAK, REGISTRY
+    # The dates are served with the row, so the headline never restates them. The rate starts
+    # at the later of the instrument's start and the first presence period.
+    from api.measurement import _COMPARABILITY_BREAK
 
-    assert (size["data_start"], size["comparability_before"]) == (
-        REGISTRY["estimated_human_hours_per_active_hour"].start, _COMPARABILITY_BREAK)
+    assert (size["data_start"], size["comparability_before"]) == (WEEK, _COMPARABILITY_BREAK)
 
 
 @pytest.mark.asyncio
@@ -164,7 +168,7 @@ async def test_reimporting_an_earlier_or_retracted_rating_serves_it_again(isolat
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 20)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         rating_a, rating_b = _rows(db, nodes, "M"), _rows(db, nodes, "L")
         assert apply(rating_a)["written"] == 20
         assert apply(rating_b)["written"] == 20
@@ -302,7 +306,7 @@ async def test_reimport_resolves_a_newest_tie_the_series_calls_a_conflict(isolat
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 20)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         rows = _rows(db, nodes, "M")
         # Two live facts tied at the newest time with equal values in a different key
         # order: the served series compares raw text, so this is a conflict.
@@ -336,7 +340,7 @@ async def test_newest_bad_fact_never_exposes_an_older_favorable_rating(isolated_
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 25)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         old = "2026-10-01T00:00:00+00:00"
         new = "2026-10-02T00:00:00+00:00"
         rows = {row["node_id"]: row for row in _rows(db, nodes, "XXL")}
@@ -367,8 +371,8 @@ async def test_scopes_do_not_leak_and_import_time_does_not_move_history(isolated
         _thread(db, "b-root", "b")
         a_nodes = _nodes(db, "a-root", 20)
         b_nodes = _nodes(db, "b-root", 20)
-        _messages(db, "a-root")
-        _messages(db, "b-root")
+        _presence_visit(db, "a-root")
+        _presence_visit(db, "b-root")
         _import(db, _rows(db, a_nodes, "L"), project="a")
         _import(db, _rows(db, b_nodes, "XS"), project="b")
         db.commit()
@@ -394,7 +398,7 @@ async def test_count_series_and_thresholds_are_unchanged_by_ratings(isolated_db)
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 30)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         db.commit()
         before = await measurement_series("outcomes,outcomes_per_active_hour", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
         _import(db, _rows(db, nodes[:10], "M"))
@@ -418,7 +422,7 @@ async def test_an_unrecorded_rater_version_does_not_break_comparability(isolated
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 40)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         _import(db, _rows(db, nodes[:20], "M", rater_version="unknown"))
         _import(db, _rows(db, nodes[20:], "M"))  # the same method with a recorded version
         db.commit()
@@ -440,7 +444,7 @@ async def test_comparability_across_weeks_follows_the_rating_method_not_the_reco
         _thread(db, "later")
         first = _nodes(db, "root", 20)
         next_week = _nodes(db, "later", 20, accepted_at="2026-09-30T12:00:00Z")
-        _messages(db, "root")
+        _presence_visit(db, "root")
         _import(db, _rows(db, first, "M", rater_version="unknown"))
         _import(db, _rows(db, next_week, "M", rater_version="2026-10-01"))
         db.commit()
@@ -461,12 +465,79 @@ async def test_comparability_across_weeks_follows_the_rating_method_not_the_reco
 
 
 @pytest.mark.asyncio
+async def test_the_headline_window_pools_every_period_even_when_none_is_comparable(isolated_db, monkeypatch):
+    """Mixed rating methods mark each week not comparable; the window the card names is still pooled whole."""
+    from datetime import datetime, timezone
+
+    from api.measurement import measurement_series
+
+    monkeypatch.setattr("core.measurement_scope._now", lambda: datetime(2026, 10, 9, 12, tzinfo=timezone.utc))
+    second = "2026-09-28"
+    db = _db()
+    try:
+        _thread(db, "root")
+        _thread(db, "later")
+        first = _nodes(db, "root", 20)
+        next_week = _nodes(db, "later", 20, accepted_at="2026-09-30T12:00:00Z")
+        _presence_visit(db, "root")
+        db.execute(
+            "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+            "VALUES ('steve','chat','later','2026-09-30T10:00:00Z','2026-09-30T10:12:00Z',720,1,'hidden')"
+        )
+        _import(db, _rows(db, first, "M", rater_version="2026-10-01"))
+        _import(db, _rows(db, next_week, "M", rater="other-rater", rater_version="2026-10-01"))
+        db.commit()
+    finally:
+        db.close()
+    served = await measurement_series("estimated_human_hours_per_active_hour", project="all", agent="none", grain="weeks",
+                                      timezone_name="UTC", user=USER)
+    assert [row["comparable"] for row in served["rows"] if row["period"] in (WEEK, second)] == [False, False]
+    latest = served["windows"]["estimated_human_hours_per_active_hour"]["latest"]
+    # The rate divides by presence time, so the window starts at the first presence week.
+    assert (latest["n"], latest["from"], latest["to"]) == (40, WEEK, "2026-10-04")
+    assert latest["size"]["estimated_hours"] == pytest.approx(80.0)
+    assert latest["size"]["active_hours"] == pytest.approx(0.4)
+
+
+@pytest.mark.asyncio
+async def test_the_rate_never_divides_work_from_before_presence_by_later_time(isolated_db, monkeypatch):
+    """Sized hours from before the first presence keep their subtotal, but no row or window
+    divides them by presence time recorded later."""
+    from datetime import datetime, timezone
+
+    from api.measurement import measurement_series
+
+    monkeypatch.setattr("core.measurement_scope._now", lambda: datetime(2026, 10, 9, 12, tzinfo=timezone.utc))
+    before = "2026-09-14"
+    db = _db()
+    try:
+        _thread(db, "root")
+        _thread(db, "earlier")
+        _import(db, _rows(db, _nodes(db, "earlier", 20, accepted_at="2026-09-16T12:00:00Z"), "M"))
+        _import(db, _rows(db, _nodes(db, "root", 20), "M"))
+        _presence_visit(db, "root")
+        db.commit()
+    finally:
+        db.close()
+    served = await measurement_series("estimated_human_hours_per_active_hour", project="all", agent="none", grain="weeks",
+                                      timezone_name="UTC", user=USER)
+    early = next(row for row in served["rows"] if row["period"] == before)
+    assert (early["value"], early["n"], early["size"]["rate_reason"]) == (None, 0, "before_data_start")
+    assert early["size"]["estimated_hours"] == pytest.approx(40.0), "the subtotal is still served"
+    assert early["size"]["data_start"] == WEEK
+    latest = served["windows"]["estimated_human_hours_per_active_hour"]["latest"]
+    assert (latest["n"], latest["from"]) == (20, WEEK)
+    assert latest["size"]["estimated_hours"] == pytest.approx(40.0)
+    assert latest["value"] == pytest.approx(40.0 / 0.2)
+
+
+@pytest.mark.asyncio
 async def test_only_a_real_change_in_rating_method_is_not_comparable(isolated_db):
     db = _db()
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 40)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         _import(db, _rows(db, nodes[:20], "M", rater_version="unknown"))
         _import(db, _rows(db, nodes[20:], "M", rater="other-rater"))
         db.commit()
@@ -484,7 +555,7 @@ async def test_two_recorded_rater_versions_in_one_week_are_not_comparable(isolat
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 40)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         _import(db, _rows(db, nodes[:20], "M", rater_version="2026-10-01"))
         _import(db, _rows(db, nodes[20:], "M", rater_version="2026-10-05"))
         db.commit()
@@ -557,7 +628,7 @@ async def test_author_declared_size_counts_without_a_fact_and_never_replaces_one
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 24)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         db.executemany(
             "UPDATE plan_nodes SET size=? WHERE id=?",
             [("M", node_id) for node_id in nodes[:21]] + [("unknown", nodes[22])],
@@ -583,7 +654,7 @@ async def test_a_week_sized_only_by_declarations_names_its_method_and_stays_comp
     try:
         _thread(db, "root")
         nodes = _nodes(db, "root", 20)
-        _messages(db, "root")
+        _presence_visit(db, "root")
         db.executemany("UPDATE plan_nodes SET size='M' WHERE id=?", [(node_id,) for node_id in nodes])
         db.commit()
     finally:

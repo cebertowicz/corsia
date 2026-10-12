@@ -1,5 +1,7 @@
+import { get } from "svelte/store";
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toastClearance } from "$lib/stores/toastClearance";
 import AdaptiveDrawerHarness from "./fixtures/AdaptiveDrawerHarness.svelte";
 
 let host: HTMLElement;
@@ -47,6 +49,16 @@ describe("AdaptiveDrawer", () => {
     expect(host.querySelector(".drawer-body")?.classList.contains("fill")).toBe(true);
   });
 
+  it("sits on the visible part of the screen only when asked to follow the keyboard", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
+    await settle();
+    expect(host.querySelector(".drawer-backdrop")?.classList.contains("follow-keyboard")).toBe(false);
+    unmount(component);
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn(), followKeyboard: true } });
+    await settle();
+    expect(host.querySelector(".drawer-backdrop")?.classList.contains("follow-keyboard")).toBe(true);
+  });
+
   it("owns one modal dialog and moves focus to the consumer target", async () => {
     component = mount(AdaptiveDrawerHarness, {
       target: host,
@@ -59,6 +71,57 @@ describe("AdaptiveDrawer", () => {
     expect(dialog?.getAttribute("aria-label")).toBe("Focused action");
     expect(document.activeElement?.textContent).toBe("Primary action");
     expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(1);
+  });
+
+  it("runs drawer transitions when a caller conditionally mounts it", async () => {
+    const originalAnimate = Element.prototype.animate;
+    const dispatchEvent = vi.spyOn(Element.prototype, "dispatchEvent");
+    Element.prototype.animate = vi.fn(() => {
+      const animation = {
+        cancel: vi.fn(),
+        finished: Promise.resolve(),
+      } as unknown as Animation;
+      Object.defineProperty(animation, "onfinish", {
+        set(callback: (event: Event) => void) {
+          queueMicrotask(() => callback(new Event("finish")));
+        },
+      });
+      return animation;
+    }) as unknown as typeof Element.prototype.animate;
+
+    try {
+      component = mount(AdaptiveDrawerHarness, {
+        target: host,
+        props: { callerControlled: true, onClose: vi.fn() },
+      });
+      await settle();
+
+      (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+      await settle();
+      expect(dispatchEvent.mock.calls.map(([event]) => event.type)).toContain("introstart");
+
+      (host.querySelector(".drawer-done") as HTMLButtonElement).click();
+      await settle();
+      expect(dispatchEvent.mock.calls.map(([event]) => event.type)).toContain("outrostart");
+    } finally {
+      Element.prototype.animate = originalAnimate;
+    }
+  });
+
+  it("removes drawer content synchronously when its caller is destroyed", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { callerControlled: true, onClose: vi.fn() },
+    });
+    await settle();
+
+    (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+    await settle();
+    expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(1);
+
+    (host.querySelector("[data-drawer-teardown]") as HTMLButtonElement).click();
+    flushSync();
+    expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(0);
   });
 
   it("closes from its explicit control and Escape", async () => {
@@ -122,6 +185,21 @@ describe("AdaptiveDrawer", () => {
     handle.dispatchEvent(pointer("pointermove", 280, 8));
     handle.dispatchEvent(pointer("pointerup", 280, 8));
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers desktop resting occupancy including its bottom margin and releases it at close start", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
+    await settle();
+
+    const panel = host.querySelector(".drawer-panel") as HTMLElement;
+    panel.style.marginBottom = "16px";
+    Object.defineProperty(panel, "offsetHeight", { configurable: true, value: 440 });
+    window.dispatchEvent(new Event("resize"));
+
+    expect(get(toastClearance)).toBe(456);
+
+    (host.querySelector("[data-adaptive-drawer]") as HTMLElement).dispatchEvent(new Event("outrostart"));
+    expect(get(toastClearance)).toBe(0);
   });
 
   it("keeps a dedicated independently scrollable body for long content", async () => {

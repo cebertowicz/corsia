@@ -87,6 +87,7 @@
 				span: agent.lastSpan!,
 				highlightSpan: agent.highlightSpan,
 				highlightKind: agent.highlightKind,
+				lastAtMs: agent.lastAtMs,
 				revealPending: artifactId ? () => revealPendingArrival(artifactId, agent.id) : undefined,
 			}));
 	});

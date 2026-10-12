@@ -7,7 +7,7 @@ import type { OperatorNode } from '$lib/api/plans';
  * folds gets the same small ceremony -- a check beat, a slide to its level's
  * fold row, a fold into that level's count. Rows leave one at a time in
  * on-screen order, each `STAGGER_MS` after the last, slowly enough to read;
- * the pane's row cap (`NEW_ROW_CAP`) bounds the wave, not a time cap. Reduced
+ * the window of folded rows the server lists bounds the wave, not a time cap. Reduced
  * motion skips the wave: the settled state is already rendered.
  *
  * The DOM holds the settled state from the first frame. Each folding row is a
@@ -43,41 +43,6 @@ export function newlyMatching(
 
 /** How long new finished rows sit on screen, in a visible page, before they fold. */
 export const PAUSE_MS = 1500;
-/** The most new finished rows a view holds open; older new ones are already folded. */
-export const NEW_ROW_CAP = 10;
-
-/** A mark the user has never set lies before everything: nothing is behind it. */
-function instant(value: string | null): number {
-	return value === null ? -Infinity : Date.parse(value);
-}
-
-/** A held folded row renders under its folded ancestors, so they unfold with it. */
-function withFoldedAncestors(ids: Iterable<string>, byId: Map<string, OperatorNode>): Set<string> {
-	const held = new Set<string>();
-	for (const id of ids) {
-		let current = byId.get(id);
-		while (current?.folded && !held.has(current.id)) {
-			held.add(current.id);
-			current = current.parent_id ? byId.get(current.parent_id) : undefined;
-		}
-	}
-	return held;
-}
-
-/**
- * The folded rows the pane holds open: those that settled after
- * `seenThrough` (all of them in a plan never viewed), at most the
- * `NEW_ROW_CAP` most recently settled, with the folded ancestors they render
- * under. Every other folded row stays folded and never moves.
- */
-export function heldRows(nodes: OperatorNode[], seenThrough: string | null): Set<string> {
-	const seen = instant(seenThrough);
-	const fresh = nodes
-		.filter((node) => node.folded && Date.parse(node.last_transition_at) > seen)
-		.sort((a, b) => Date.parse(b.last_transition_at) - Date.parse(a.last_transition_at))
-		.slice(0, NEW_ROW_CAP);
-	return withFoldedAncestors(fresh.map((node) => node.id), new Map(nodes.map((node) => [node.id, node])));
-}
 
 /** Rows that folded since the last render the user saw. */
 export function newlyFolded(previous: Map<string, boolean> | null, nodes: OperatorNode[]): OperatorNode[] {

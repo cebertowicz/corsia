@@ -13,6 +13,7 @@ import pytest
 
 from plans import lesson_reviews
 from tests.test_lesson_review_history import review
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 @pytest.fixture
@@ -72,7 +73,8 @@ async def test_tool_and_http_share_scoped_result_without_writes(report_target):
     assert foreign is not None
     assert foreign["owner_id"] == "foreign" and foreign["user_id"] == "other-user"
     assert foreign["source_event_id"] == lesson_reviews.lesson_key("foreign", "a" * 64)
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (foreign["id"],))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (foreign["id"],))
     db.commit()
     foreign_changed = json.loads(await tool.execute(
         _thread_id="owner", scope="project", project="project", cursor=tool_result["next_cursor"],
@@ -94,7 +96,8 @@ async def test_tool_and_http_share_scoped_result_without_writes(report_target):
     assert selected is not None
     assert selected["owner_id"] == "owner" and selected["user_id"] == "user"
     assert selected["source_event_id"] == lesson_reviews.lesson_key(visible["id"], visible["version"])
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (selected["id"],))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (selected["id"],))
     db.commit()
     changed = json.loads(await tool.execute(_thread_id="owner", scope="project", project="project",
                                            cursor=tool_result["next_cursor"]))

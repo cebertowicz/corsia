@@ -107,7 +107,8 @@ def test_workspace_limited_but_projects_ready_saves_and_names_the_workspace(acco
     assert status["host_access_reviewer_status"] == "ready"
     assert status["host_access_reviewer_message"] == (
         f"{_name()} can't review requests from {WORKSPACE} right now "
-        f"(usage limit until {_until()}). Those requests fail until then."
+        f"(usage limit until {_until()}). Those requests fail until then. "
+        "Choose another model or turn on fallback."
     )
 
 
@@ -153,7 +154,8 @@ def test_unarchived_project_in_any_stage_is_a_scope(accounts, stage):
     assert status["host_access_reviewer_status"] == "ready"
     assert status["host_access_reviewer_message"] == (
         f"{_name()} can't review requests from {', '.join(PROJECTS)} right now "
-        f"(usage limit until {_until()}). Those requests fail until then."
+        f"(usage limit until {_until()}). Those requests fail until then. "
+        "Choose another model or turn on fallback."
     )
 
 
@@ -208,15 +210,76 @@ def test_every_scope_limited_rejects_with_the_reset(accounts):
         unsaved = "host_access_reviewer_model" not in get_agent_defaults()
         status = _status_after_selecting(client)
 
-    expected = (
-        f"{_name()} can't review requests right now (usage limit until {_until()}). "
-        "Choose another model."
-    )
+    lead = f"{_name()} can't review requests right now (usage limit until {_until()})."
     assert rejected.status_code == 400
-    assert rejected.json()["detail"] == expected
+    assert rejected.json()["detail"] == f"{lead} Choose another model."
     assert unsaved
     assert status["host_access_reviewer_status"] == "unavailable"
-    assert status["host_access_reviewer_message"] == expected
+    assert status["host_access_reviewer_message"] == (
+        f"{lead} Host-access requests will fail until then. "
+        "Choose another model or turn on fallback."
+    )
+
+
+def test_every_scope_limited_with_fallback_on_says_the_requesters_model_reviews(accounts):
+    from infra.settings import save_agent_defaults
+
+    db, legacy, second, third = accounts
+    for account in (legacy, second, third):
+        _discover(db, account)
+    _projects_use(db, second)
+    _limit(db, legacy)
+    _limit(db, second)
+    save_agent_defaults({"host_access_reviewer_fallback": True})
+
+    with _client() as client:
+        status = _status_after_selecting(client)
+
+    assert status["host_access_reviewer_status"] == "unavailable"
+    assert status["host_access_reviewer_message"] == (
+        f"{_name()} can't review requests right now (usage limit until {_until()}). "
+        "Each requesting agent's own model is reviewing instead."
+    )
+
+
+def test_one_limited_scope_with_fallback_on_says_those_requests_use_the_requesters_model(accounts):
+    from infra.settings import save_agent_defaults
+
+    db, legacy, second, third = accounts
+    _discover(db, legacy)
+    _discover(db, second)
+    _projects_use(db, second)
+    _limit(db, legacy)
+    save_agent_defaults({"host_access_reviewer_fallback": True})
+
+    with _client() as client:
+        status = _status_after_selecting(client)
+
+    assert status["host_access_reviewer_status"] == "ready"
+    assert status["host_access_reviewer_message"] == (
+        f"{_name()} can't review requests from {WORKSPACE} right now "
+        f"(usage limit until {_until()}). "
+        "Those requests use the requesting agent's own model until then."
+    )
+
+
+def test_a_limited_scope_without_a_reset_time_does_not_say_until_then(accounts):
+    db, legacy, second, third = accounts
+    _discover(db, legacy)
+    _discover(db, second, models=("codex/other",))
+    _projects_use(db, second)
+
+    with _client() as client:
+        saved = _save(client)
+        status = _status(client)
+
+    assert saved.status_code == 200
+    assert status["host_access_reviewer_status"] == "ready"
+    assert status["host_access_reviewer_message"] == (
+        f"{_name()} can't review requests from {', '.join(PROJECTS)} right now "
+        "(the account doesn't offer this model). Those requests fail. "
+        "Choose another model or turn on fallback."
+    )
 
 
 def _status_after_selecting(client: TestClient) -> dict:

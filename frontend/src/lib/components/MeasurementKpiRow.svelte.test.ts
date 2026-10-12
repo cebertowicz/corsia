@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { tick } from 'svelte';
 import MeasurementKpiRow from './MeasurementKpiRow.svelte';
+import kpiRowSource from './MeasurementKpiRow.svelte?raw';
 import MeasurementSizeHeadline from './MeasurementSizeHeadline.svelte';
 import type { Kpi, KpiPeriod, KeyFiguresState } from '$lib/stores/keyFigures';
 import { measurementCost } from '$lib/stores/measurementCost';
@@ -28,11 +29,11 @@ const windowsBody = (extra: Record<string, unknown> = {}) => ({
 		...extra,
 	},
 });
-const costPeriod = (per_hour: number | null, sized: number) => ({ from: '2026-09-28', to: '2026-10-04', dollars: per_hour === null ? null : per_hour * 1_000, priced_records: 1, api_records: 1, outcomes: sized, per_outcome: 1, sized, hours: 1_000, per_hour });
+const costPeriod = (per_hour: number | null, sized: number) => ({ from: '2026-09-28', to: '2026-10-04', dollars: per_hour === null ? null : per_hour * 1_000, priced_records: 1, usage_records: 1, outcomes: sized, per_outcome: 1, sized, hours: 1_000, per_hour });
 const costData = (previous: ReturnType<typeof costPeriod> | null) => ({
 	definition_version: 1 as const, period: { grain: 'days' as const, timezone: 'x', current: '2026-10-04', range: span.latest, ...span },
 	// One served day per day of both windows: a previous window the series covers in full is compared, not read as new.
-	series: Array.from({ length: 14 }, (_, i) => ({ ...costPeriod(1.49, 1187), period: new Date(Date.parse('2026-09-21T00:00:00Z') + i * 86_400_000).toISOString().slice(0, 10), average: null })), latest: costPeriod(1.49, 1187), previous, coverage: { priced_records: 1, api_records: 1 }, not_api_priced_records: 0, excluded: [],
+	series: Array.from({ length: 14 }, (_, i) => ({ ...costPeriod(1.49, 1187), period: new Date(Date.parse('2026-09-21T00:00:00Z') + i * 86_400_000).toISOString().slice(0, 10), average: null })), latest: costPeriod(1.49, 1187), previous, coverage: { priced_records: 1, usage_records: 1 }, not_api_priced_records: 0, excluded: [],
 	actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: null },
 });
 
@@ -88,9 +89,9 @@ describe('MeasurementKpiRow', () => {
 	it('shows the five tiles in order, each a number and unit with its window, n and change', async () => {
 		await render(state({ current: period(), previous: before }));
 		expect([...host.querySelectorAll('[data-kpi]')].map((node) => (node as HTMLElement).dataset.kpi)).toEqual(['work', 'first-try', 'cost', 'minutes', 'tokens']);
-		expect(tile('work')).toBe('Hours of work per hour of your attention 92 h Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)');
+		expect(tile('work')).toBe('Work per hour of your attention 92 h Sep 28 to Oct 4, n 1,349, +206% vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('first-try')).toBe('First-try rate (agent-graded) 89% Sep 28 to Oct 4, n 1,377, +5% vs Sep 21 to Sep 27 (n 451)');
-		expect(tile('cost')).toBe('Cost per hour of delivered work $1.49 Sep 28 to Oct 4, n 1,187, -4% vs Sep 21 to Sep 27 (n 399)');
+		expect(tile('cost')).toBe('Cost per person-hour of work delivered $1.49 Sep 28 to Oct 4, n 1,187, -4% vs Sep 21 to Sep 27 (n 399)');
 		expect(tile('minutes')).toBe('Your minutes per outcome 1.8 min Sep 28 to Oct 4, n 1,377, -69% vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('tokens')).toBe('Tokens 34.6B Sep 28 to Oct 4, +126% vs Sep 21 to Sep 27 Uncached input526MCache write278MCache read33.7BOutput119M');
 		expect(host.querySelector('h2')).toBeNull();
@@ -109,6 +110,12 @@ describe('MeasurementKpiRow', () => {
 		expect(tile('tokens')).toContain('Sep 28 to Oct 4, new');
 	});
 
+	it('reads new on the tokens tile when the previous window began before tokens were fully recorded, never a percentage over a partial base', async () => {
+		await render(state({ current: period(), previous: { ...before, tokens_recorded: false } }));
+		expect(tile('tokens')).toContain('Sep 28 to Oct 4, new vs Sep 21 to Sep 27');
+		expect(tile('tokens')).not.toContain('%');
+	});
+
 	it('reads new on the size tile when the instrument began inside the previous window, as its section headline does', async () => {
 		const size = 'estimated_human_hours_per_active_hour';
 		const windows = (body.windows as Record<string, SeriesWindows>)[size];
@@ -119,8 +126,8 @@ describe('MeasurementKpiRow', () => {
 		seedPanels(body, { size: panel });
 		component = mount(MeasurementKpiRow, { target: host, props: { state: state({ current: period(), previous: before }), onRetry: vi.fn() } });
 		flushSync(); await tick();
-		expect(tile('work')).toContain('92 h Sep 28 to Oct 4, n 1,349, new');
-		expect(sizeHeadline()).toBe('92 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new');
+		expect(tile('work')).toContain('92 h Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
+		expect(sizeHeadline()).toBe('92 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('first-try')).toContain('+5% vs Sep 21 to Sep 27 (n 451)');
 	});
 
@@ -136,7 +143,7 @@ describe('MeasurementKpiRow', () => {
 		flushSync(); await tick();
 		// The tile, the section headline and the served window agree: one figure, never a second pool of the drawn days.
 		expect(tile('work')).toContain('40 h Sep 28 to Oct 4, n 1,349, new');
-		expect(sizeHeadline()).toBe('40 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new');
+		expect(sizeHeadline()).toBe('40 h of work per hour you spend, Sep 28 to Oct 4, n 1,349, new vs Sep 21 to Sep 27 (n 451)');
 		expect(tile('cost')).toContain('– Sep 28 to Oct 4, n 12, ');
 	});
 
@@ -175,5 +182,18 @@ describe('MeasurementKpiRow', () => {
 		host.querySelector<HTMLButtonElement>('[data-kpi="first-try"] .error button')!.click();
 		expect(String(fetched.mock.calls[0][0])).toContain('ids=first_try_acceptance');
 		vi.unstubAllGlobals();
+	});
+});
+
+describe('MeasurementKpiRow layout rules', () => {
+	const css = kpiRowSource.slice(kpiRowSource.indexOf('<style>')).replace(/\/\*[\s\S]*?\*\//g, '');
+
+	it('stretches the tiles of a row to one height and never breaks a Tokens label mid-word', () => {
+		expect(css).not.toMatch(/align-items:\s*start/);
+		expect(css).not.toMatch(/dt\s*\{[^}]*overflow-wrap/);
+	});
+
+	it('gives the Tokens tile its own track when the frame is wide, for one row of four parts', () => {
+		expect(css).toMatch(/@container \(min-width: 900px\) \{ \.kpis \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\) 270px; \} \}/);
 	});
 });

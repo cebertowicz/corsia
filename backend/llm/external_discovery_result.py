@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 from infra.database import write_transaction
+from infra.key_store_servers import resolve_server
 from llm.network_discovery import parse_server_metadata, set_server_metadata
 
 log = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ def superseded_by_edit(db, server_id: str, target: tuple | None, result: dict) -
     # base is lan_base(host, port); a stored base_url ignores it.
     host = urlsplit(api_base).hostname or ""
     current = endpoint_base(meta, host=host, port=row["port"], external=True)
-    if ((row["dialect"] or "openai") == dialect and (meta or {}).get("api_key") == key
+    if ((row["dialect"] or "openai") == dialect and resolve_server(server_id) == key
             and current == api_base):
         return False
     result["error"] = "Superseded by an endpoint edit"

@@ -9,6 +9,7 @@ export interface CoreSettings {
 	host_access_reviewer_status?: 'ready' | 'requester_model' | 'unavailable';
 	host_access_reviewer_message?: string | null;
 	host_access_auto_approve?: boolean;
+	host_access_reviewer_fallback?: boolean;
 	live_bulletins?: { enabled: boolean; base_url?: string };
 	workspace_context_files?: WorkspaceContextFile[];
 	features?: FeatureSettings;

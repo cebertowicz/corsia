@@ -16,17 +16,17 @@ from app_startup_runtime import (
 )
 from app_shutdown_native import remaining_native_owners, shutdown_native_turns
 import infra.app_loop as app_loop
-from infra import state
+from infra import key_store_values, state
 from infra.db_async import run_in_db
 from infra.database import init_db, shutdown_pool
 
 
 async def _startup_cloud_discovery() -> None:
-    from infra.settings import get_api_keys
+    from infra.key_store_providers import provider_keys
     from llm.catalog import discover_cloud_models
     from loguru import logger
 
-    keys = get_api_keys()
+    keys = await run_in_db(provider_keys)
     for provider, key in (
         ("openai", keys.get("openai")),
         ("anthropic", keys.get("anthropic")),
@@ -104,25 +104,27 @@ def _initialize_startup(logger) -> None:
     from app_startup_workspace import initialize_workspace
     from core.project_path_conversion import convert_legacy_project_paths
     from infra.config import LOGS_DIR, RUNTIME_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
-    from infra.settings import bootstrap_env
+    from infra.ignored_environment import drop_ignored_environment, note_ignored_environment
     from infra.startup_prerequisites import prepare_startup_prerequisites
     from plans.public import sweep_owed_status
     from registry.durable_writes import recover_write_intents
     from registry.relocate import recover_interrupted_relocations
 
+    note_ignored_environment()
     prepare_startup_prerequisites()
     for directory in (UPLOADS_DIR, LOGS_DIR, RUNTIME_DIR):
         directory.mkdir(parents=True, exist_ok=True)
     phase_started = time.monotonic()
     logger.info("startup phase: database initialization started")
     init_db()
+    drop_ignored_environment()
+    key_store_values.sweep_at_startup()
     convert_legacy_project_paths(WORKSPACE_SELECTION)
     elapsed = time.monotonic() - phase_started
     logger.info("startup phase: database initialization complete in {:.1f}s", elapsed)
     recover_write_intents()
     recover_interrupted_relocations()
     sweep_owed_status()
-    bootstrap_env()
     initialize_workspace(WORKSPACE, logger)
 
 

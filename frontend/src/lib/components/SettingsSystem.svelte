@@ -1,18 +1,17 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import {
-		coreSettings,
 		loadSettings,
 		updateSettings,
 		updateStatus,
 		loadUpdateStatus,
 	} from '$lib/stores/settings';
 	import { readSystemVersion, restartSystem, waitForSystemRestart } from '$lib/stores/settingsSystemRestart';
-	import { pickerModels, workspaceModels } from '$lib/stores/models';
 	import { logout, token as authToken } from '$lib/stores/auth';
 	import { themeSetting, type ThemeSetting } from '$lib/stores/theme';
-	import { Button, StatePill, Toggle } from '$lib/components/ui';
+	import { Button } from '$lib/components/ui';
 	import FocusModeSetting from './FocusModeSetting.svelte';
+	import HostAccessReviewSetting from './HostAccessReviewSetting.svelte';
 	import { plainResponseError } from '$lib/plainError';
 	import { reloadWithCacheBust } from '$lib/version';
 
@@ -28,7 +27,6 @@
 	} = $props();
 
 	let settingsError = $state('');
-	let hostAccessAutoApprovalSaving = $state(false);
 	let restartMode = $state<'restart' | null>(null);
 	let restartInProgress = $state(false);
 	let updateConfirm = $state(false);
@@ -150,24 +148,6 @@
 		return 'var(--green)';
 	}
 
-	const readyModels = $derived($workspaceModels.filter(m => m.status === 'ready'));
-
-	const hostAccessReviewerPhantom = $derived.by(() => {
-		const id = $coreSettings?.host_access_reviewer_model ?? '';
-		if (!id || readyModels.some(m => m.id === id)) return null;
-		return { id, name: $coreSettings?.host_access_reviewer_model_name || id };
-	});
-
-	const hostAccessReviewerPill = $derived.by(() => {
-		if ($coreSettings?.host_access_reviewer_status === 'ready') {
-			return { state: 'success' as const, label: 'Ready' };
-		}
-		if ($coreSettings?.host_access_reviewer_status === 'unavailable') {
-			return { state: 'error' as const, label: 'Unavailable' };
-		}
-		return { state: 'success' as const, label: "Requesting agent's model" };
-	});
-
 </script>
 
 <div class="section-header">
@@ -190,65 +170,7 @@
 
 <FocusModeSetting onError={(message) => settingsError = message} />
 
-<div class="settings-card" data-settings-anchor="host-access-review">
-	<div class="card-title-row">
-		<div>
-			<h3>Host Access Review</h3>
-			<p class="card-desc">Independently reviews temporary access requests and each elevated action.</p>
-		</div>
-		<StatePill state={hostAccessReviewerPill.state} label={hostAccessReviewerPill.label} size="sm" />
-	</div>
-
-	<div class="field-row">
-		<label for="host-access-reviewer-model">Reviewer model</label>
-		<select
-			id="host-access-reviewer-model"
-			value={$coreSettings?.host_access_reviewer_model ?? ''}
-			onchange={async (e: Event) => {
-				settingsError = '';
-				const target = e.target as HTMLSelectElement;
-				const result = await updateSettings({
-					host_access_reviewer_model: target.value || null,
-				});
-				if (!result.ok) {
-					target.value = $coreSettings?.host_access_reviewer_model ?? '';
-					settingsError = result.error ?? 'Failed to update';
-				}
-			}}
-		>
-			<option value="">Same model as the requesting agent</option>
-			{#if hostAccessReviewerPhantom}
-				<option value={hostAccessReviewerPhantom.id}>{hostAccessReviewerPhantom.name} (unavailable)</option>
-			{/if}
-			{#each pickerModels($workspaceModels, $coreSettings?.host_access_reviewer_model) as model (model.id)}
-				<option value={model.id}>{model.name}{model.desc ? ` (${model.desc})` : ''}</option>
-			{/each}
-		</select>
-	</div>
-	<div class="feature-row">
-		<div class="feature-info">
-			<span class="feature-name">Auto-approve leases</span>
-			<span class="feature-desc">When the reviewer allows an application, activate it immediately without asking you. Per-action review and hard safety limits still apply. Repository-policy exceptions still require your approval.</span>
-		</div>
-		<Toggle
-			checked={$coreSettings?.host_access_auto_approve ?? false}
-			onchange={async (next) => {
-				settingsError = '';
-				hostAccessAutoApprovalSaving = true;
-				const result = await updateSettings({ host_access_auto_approve: next });
-				hostAccessAutoApprovalSaving = false;
-				if (!result.ok) settingsError = result.error ?? 'Failed to update';
-			}}
-			ariaLabel="Automatically approve reviewed host-access leases"
-			disabled={hostAccessAutoApprovalSaving}
-		/>
-	</div>
-	{#if $coreSettings?.host_access_reviewer_message}
-		<p class="settings-status" class:error={$coreSettings.host_access_reviewer_status === 'unavailable'}>
-			{$coreSettings.host_access_reviewer_message}
-		</p>
-	{/if}
-</div>
+<HostAccessReviewSetting onError={(message) => settingsError = message} />
 
 <div class="settings-card" data-settings-anchor="restart">
 	<h3>Services</h3>
@@ -376,11 +298,7 @@
 	.theme-opt:hover { color: var(--text-primary); }
 	.theme-opt.active { background: var(--accent); color: #fff; }
 	.settings-card h3 { font-size: var(--text-callout); font-weight: 600; color: var(--text-primary); margin: 0 0 4px; }
-	.card-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-	.card-title-row > div { min-width: 0; }
 	.card-desc { font-size: var(--text-subhead); color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
-	.settings-status { margin: -2px 0 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: 1.45; }
-	.settings-status.error { color: var(--red); }
 	.settings-error { background: color-mix(in srgb, var(--red) 10%, transparent); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); color: var(--red); border-radius: var(--radius-xs); padding: 10px 14px; font-size: var(--text-subhead); margin-bottom: 16px; }
 	.service-grid { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 	.service-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--bg-tertiary); border-radius: var(--radius-sm); }
@@ -391,27 +309,16 @@
 	.card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 	.confirm-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 	.confirm-text { font-size: var(--text-subhead); color: var(--text-secondary); }
-	.field-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
-	.field-row label { font-size: var(--text-footnote); font-weight: 500; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
-	.field-row select { background: var(--bg-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); color: var(--text-primary); font-size: var(--text-subhead); font-family: inherit; padding: 8px 12px; cursor: pointer; max-width: 100%; }
-	.field-row select:focus { outline: none; border-color: var(--accent); }
 	.status-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 12px; background: var(--bg-primary); border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); }
 	.status-row { display: flex; align-items: center; gap: 12px; font-size: var(--text-subhead); }
 	.status-label { color: var(--text-muted); width: 120px; flex-shrink: 0; }
 	.status-value { color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
 	.dot { width: 7px; height: 7px; border-radius: var(--radius-circle); flex-shrink: 0; }
 
-	.feature-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
-	.feature-row:last-child { border-bottom: none; }
-	.feature-info { display: flex; flex-direction: column; gap: 3px; flex: 1; }
-	.feature-name { font-size: var(--text-subhead); font-weight: 500; color: var(--text-primary); }
-	.feature-desc { font-size: var(--text-footnote); color: var(--text-muted); line-height: 1.5; }
-
 	@media (max-width: 768px) {
 		.status-label { width: auto; min-width: 80px; }
 		.service-row { flex-wrap: wrap; gap: 6px; }
 		.service-actions { width: 100%; margin-left: 0; }
 
-		.feature-row { flex-direction: column; gap: 10px; }
-	}
+		}
 </style>

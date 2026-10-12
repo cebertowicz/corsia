@@ -7,7 +7,7 @@
 
 <script lang="ts">
 	import { tick } from 'svelte';
-	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, bounds = null, children }: {
+	let { anchor, open, onClose, restoreFocus, placement = 'right', fill = false, bounds = null, avoidRect, initialFocus, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -17,6 +17,10 @@
 		fill?: boolean;
 		/** Keep the surface inside this element (the canvas it belongs to) instead of anywhere in the window. */
 		bounds?: HTMLElement | null;
+		/** A live rectangle the card should clear vertically when it cannot fit beside its anchor. */
+		avoidRect?: () => DOMRect | null;
+		/** A selector for what takes focus on open, when present; otherwise the first focusable element does. */
+		initialFocus?: string;
 		children: import('svelte').Snippet;
 	} = $props();
 	let surface = $state<HTMLElement>();
@@ -52,6 +56,7 @@
 		const gap = 8;
 		const width = Math.min(box.width, area.right - area.left - 2 * gap);
 		const height = Math.min(box.height, area.bottom - area.top - 2 * gap);
+		const avoided = avoidRect?.();
 		let left = rect.left;
 		let top = rect.bottom + gap;
 		if (placement === 'bottom') {
@@ -61,8 +66,14 @@
 			left = rect.right + gap; top = rect.top;
 		} else if (rect.left - gap - width >= area.left + gap) {
 			left = rect.left - width - gap; top = rect.top;
+		} else if (avoided && avoided.bottom + gap + height <= area.bottom - gap) {
+			// For an image region, use empty canvas below the image before covering another tag.
+			top = avoided.bottom + gap;
+		} else if (avoided && avoided.top - gap - height >= area.top + gap) {
+			// When the lower canvas is full, use the empty canvas above the image instead.
+			top = avoided.top - height - gap;
 		} else if (top + height > area.bottom - gap && rect.top - gap - height >= area.top + gap) {
-			// No room beside or below: above it. Otherwise it stays directly below, clamped into the canvas.
+			// No room beside or outside the avoided rectangle: above the anchor. Otherwise it stays below it, clamped into the canvas.
 			top = rect.top - height - gap;
 		}
 		top = Math.max(area.top + gap, Math.min(top, area.bottom - height - gap));
@@ -78,7 +89,11 @@
 		if (!open) return;
 		hidden = false;
 		opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		void tick().then(() => { position(); surface?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]:not([tabindex="-1"])')?.focus(); });
+		void tick().then(() => {
+			position();
+			const preferred = initialFocus ? surface?.querySelector<HTMLElement>(initialFocus) : null;
+			(preferred ?? surface?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]:not([tabindex="-1"])'))?.focus();
+		});
 	});
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.
 	$effect(() => {

@@ -99,7 +99,7 @@ def _build_existing_v77_database(path) -> None:
 
 
 def test_the_step_is_registered_at_77_and_81_is_current() -> None:
-    assert SCHEMA_VERSION == 105
+    assert SCHEMA_VERSION == 113
     assert MIGRATIONS[77] is migrate_77_to_78
 
 
@@ -111,28 +111,21 @@ def _plan(db: sqlite3.Connection, sql: str, params: dict) -> list[str]:
     return [str(row[3]) for row in db.execute("EXPLAIN QUERY PLAN " + sql, params)]
 
 
-def _plan_children(db: sqlite3.Connection, sql: str, params: dict, parent_detail: str) -> list[str]:
-    """The plan steps directly under the first step whose detail starts with parent_detail."""
-    rows = db.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
-    parent = next(row[0] for row in rows if str(row[3]).startswith(parent_detail))
-    return [str(row[3]) for row in rows if row[1] == parent]
 
-
-def test_scope_walk_and_pre_window_lookup_search_their_indexes_without_planner_stats() -> None:
+def test_scope_walk_and_presence_query_search_their_indexes_without_planner_stats() -> None:
     """Production databases never run ANALYZE, so the plans must hold with no stats.
 
-    Without the child index every recursive step of the scope walk scans all
-    threads; without per-thread (created_at, id) order the latest pre-window
-    message is found by sorting every earlier message.
+    The scope walk needs its child index; the presence query must seek both the
+    owner's threads and their visits, rather than scan either base event table.
     """
-    from api.measurement_queries import (
-        PREPARED_OUTCOMES, PREPARED_SCOPE, active_family_sql as _active_family_sql)
+    from api.measurement_presence import active_family_sql as _active_family_sql
+    from api.measurement_queries import PREPARED_OUTCOMES, PREPARED_SCOPE
     from api.measurement_scope import query_params as _query_params, resolve_grain as _resolve_grain, scope_cte as _scope_cte
 
     # The active-hours SQL buckets by the page grain, so its binds come from one.
     grain = _resolve_grain("weeks", "UTC", now=datetime(2026, 9, 28, 12, tzinfo=timezone.utc))
     params = _query_params({"user_id": "u", "scope_project": "all", "scope_agent": None, "grain": grain,
-                            "from": "2026-09-07", "to": "2026-09-21", "max_active_gap_seconds": 600})
+                            "from": "2026-09-07", "to": "2026-09-21"})
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
         assert db.execute(
@@ -145,14 +138,13 @@ def test_scope_walk_and_pre_window_lookup_search_their_indexes_without_planner_s
         recursive = scope[scope.index("RECURSIVE STEP") + 1:]
         assert any("SEARCH child USING INDEX idx_measurement_thread_children" in step for step in recursive), scope
 
-        # The per-thread seek is already in (created_at, id) order: no sort of
-        # earlier messages. Only the outer pick sorts, over one row per thread.
-        seek = _plan_children(db, _active_family_sql(grain, PREPARED_SCOPE, PREPARED_OUTCOMES), params, "CORRELATED SCALAR SUBQUERY")
-        assert seek == [
-            "SEARCH prior USING INDEX idx_measurement_human_messages_time (thread_id=? AND created_at<?)"
-        ], seek
-        lookup = _plan_children(db, _active_family_sql(grain, PREPARED_SCOPE, PREPARED_OUTCOMES), params, "CO-ROUTINE pre_window_message")
-        assert lookup[0] == "SCAN s", lookup
+        presence = _plan(db, _active_family_sql(grain, PREPARED_SCOPE, PREPARED_OUTCOMES), params)
+        # Thread-owned visits start from the viewer's indexed threads, then seek
+        # each thread's visits. Project-only visits use the same index's NULL key.
+        assert any("SEARCH t USING INDEX idx_threads_user (user_id=?)" in step for step in presence), presence
+        assert any("SEARCH v USING INDEX idx_presence_visits_thread (thread_id=? AND entered_at<?)" in step
+                   for step in presence), presence
+        assert not any("SCAN presence_visits" in step or "SCAN messages" in step for step in presence), presence
 
 
 def test_scope_walk_keeps_its_child_search_when_analyzed_with_only_root_threads() -> None:

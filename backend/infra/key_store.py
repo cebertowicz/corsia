@@ -1,35 +1,35 @@
 """The key store: keys agents use but can never read.
 
 Values live in one file in CORSIA's private state, a folder no agent route can
-open, in the protected shell or under reviewed host access. The folder is 0700
-and the file 0600, and every write goes to a temporary file created 0600 in
-the same call that opens it, flushed to disk, then renamed into place, so the
-default umask never leaves a readable window. Labels and dates live in the
-database (``infra.key_store_schema``); values never do, and never go into the
-settings table either, so no database read, backup or settings route can
-carry one.
+open, in the protected shell or under reviewed host access; only
+``infra.key_store_values`` reads or writes it. Labels, dates and the reference
+to each entry's live value live in the database (``infra.key_store_schema``);
+values never do, and never go into the settings table either, so no database
+read, backup or settings route can carry one. A value is written under a fresh
+reference inside the caller's transaction, so the database commit is the only
+commit point: a rolled-back write leaves the entry on its old value.
 
 Nothing here turns an entry's name into its value for a caller. What uses a
-key is fixed in code: :func:`resolve_builtin` is the only reader, and only a
-built-in entry has one. An entry an agent adds does nothing until code that
-uses it ships.
+key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider` and
+``infra.key_store_servers.resolve_server`` are the only readers, and only a
+built-in, a cloud-provider or a server entry has one. An entry an agent adds does nothing until code
+that uses it ships, and cannot claim a name code owns (``RESERVED_PREFIXES``).
 
 Errors raised here carry fixed text and never a value.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import re
-import secrets
 import sqlite3
-import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
 
+from infra import key_store_values
 from infra.database import get_db, write_transaction
-from infra.fs_durability import fsync_directory
+from infra.key_store_mcp import PREFIX as MCP_PREFIX, is_mcp_entry_name
+# VALUES_FILE and keys_dir are re-exported: callers find the values file through this module.
+from infra.key_store_values import VALUES_FILE as VALUES_FILE, KeyStoreError, keys_dir as keys_dir
 from infra.time import utc_now_iso
 
 #: Lowercase letters, digits and hyphens, up to 40 characters.
@@ -42,96 +42,60 @@ VALUE_MAX = 4096
 #: header, and an HTTP client refusing it could echo it in its error text.
 _VALUE_PATTERN = re.compile(r"^[\x21-\x7e]+$")
 
-VALUES_FILE = "values.json"
-
-#: Where a resolved key came from, in the order search reads them.
+#: Where a resolved key comes from: the key store.
 SOURCE_STORE = "keys"
-SOURCE_SETTINGS = "settings"
-SOURCE_ENVIRONMENT = "environment"
 
-
-class KeyStoreError(ValueError):
-    """A key store request was refused. The text is safe to show; it never holds a value."""
+#: Entry-name prefixes code owns for the kinds that resolve from the store.
+#: ``POST /api/keys`` cannot claim a name under any of them.
+PROVIDER_PREFIX = "provider-"
+SERVER_PREFIX = "server-"
+RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX)
+#: A network server's id: lowercase letters, digits and hyphens, short enough for the entry name.
+SERVER_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,32}$")
+#: Providers that can hold a key, entered in add-provider. The hidden legacy
+#: names stay so a saved key survives the move and can still be removed.
+PROVIDER_NAMES = frozenset(
+    {"anthropic", "openai", "openrouter", "deepseek", "gemini", "groq", "omlx"}
+)
 
 
 @dataclass(frozen=True)
 class BuiltinKey:
-    """An entry whose use ships in code, with today's other places for its key."""
+    """An entry whose use ships in code."""
 
     name: str
     label: str
     used_by: str
-    #: The settings table path of the key's older home, read after the store.
-    settings_path: tuple[str, ...]
-    #: The environment variable read last.
-    env_var: str
+    #: Whether Settings › Keys can run a live check of it.
+    checkable: bool = False
 
 
 WEB_SEARCH = BuiltinKey(
     name="web-search",
     label="Web search",
     used_by="web search",
-    settings_path=("tools", "web", "search", "apiKey"),
-    env_var="BRAVE_API_KEY",
+    checkable=True,
 )
-BUILTINS: dict[str, BuiltinKey] = {WEB_SEARCH.name: WEB_SEARCH}
-
-_values_lock = threading.Lock()
-
-
-def keys_dir() -> Path:
-    """The private folder holding the values file, resolved at call time."""
-    from infra import config
-
-    return Path(config.STATE_ROOT) / "keys"
-
-
-def _values_path() -> Path:
-    return keys_dir() / VALUES_FILE
-
-
-def _ensure_dir() -> Path:
-    folder = keys_dir()
-    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(folder, 0o700)
-    return folder
-
-
-def _read_values() -> dict[str, str]:
-    path = _values_path()
-    try:
-        raw = path.read_bytes()
-    except FileNotFoundError:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except ValueError:
-        # The file is CORSIA's own; an unreadable one is refused, never echoed.
-        raise KeyStoreError("The key store file could not be read.") from None
-    if not isinstance(parsed, dict):
-        raise KeyStoreError("The key store file could not be read.")
-    return {str(k): v for k, v in parsed.items() if isinstance(v, str)}
-
-
-def _write_values(values: dict[str, str]) -> None:
-    folder = _ensure_dir()
-    temporary = folder / f".{VALUES_FILE}.{secrets.token_hex(8)}.tmp"
-    # Created 0600 by the call that opens it; O_EXCL refuses a planted file.
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(values, handle, sort_keys=True)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, folder / VALUES_FILE)
-        fsync_directory(folder)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+GITHUB_WEBHOOK = BuiltinKey(
+    name="github-webhook",
+    label="GitHub webhook secret",
+    used_by="GitHub webhook signature checks",
+)
+BUILTINS: dict[str, BuiltinKey] = {WEB_SEARCH.name: WEB_SEARCH, GITHUB_WEBHOOK.name: GITHUB_WEBHOOK}
 
 
 def _db(db: sqlite3.Connection | None) -> sqlite3.Connection:
     return db if db is not None else get_db()
+
+
+def is_managed_name(name: str) -> bool:
+    """Whether code, not a person, owns this entry: a built-in, or a provider's, server's or MCP server's key."""
+    return (
+        name in BUILTINS
+        or (name.startswith(PROVIDER_PREFIX) and name[len(PROVIDER_PREFIX):] in PROVIDER_NAMES)
+        or (name.startswith(SERVER_PREFIX) and bool(SERVER_ID_PATTERN.match(name[len(SERVER_PREFIX):])))
+        or is_mcp_entry_name(name)
+    )
 
 
 def _row(name: str, db: sqlite3.Connection) -> sqlite3.Row | None:
@@ -150,7 +114,8 @@ def _require_entry(name: str, db: sqlite3.Connection) -> None:
         raise KeyStoreError("No key has that name.")
 
 
-def _validated_value(value: object) -> str:
+def validated_value(value: object) -> str:
+    """The value as it would be stored, or :class:`KeyStoreError` for one the store refuses."""
     if not isinstance(value, str):
         raise KeyStoreError("Couldn't save that. Nothing was changed.")
     cleaned = value.strip()
@@ -165,6 +130,8 @@ def validate_new_entry(name: object, label: object, description: object) -> tupl
     """Check an entry an agent adds; return its normalized fields."""
     if not isinstance(name, str) or not NAME_PATTERN.match(name):
         raise KeyStoreError("A key name is 1-40 lowercase letters, digits or hyphens.")
+    if name.startswith(RESERVED_PREFIXES):
+        raise KeyStoreError("A key with that name already exists.")
     if not isinstance(label, str) or not label.strip() or len(label.strip()) > LABEL_MAX:
         raise KeyStoreError(f"A label is plain text, 1-{LABEL_MAX} characters.")
     if description is None:
@@ -198,111 +165,93 @@ def add_entry(
     return entry_metadata(name, db=db)
 
 
-def _drop_settings_copy(builtin: BuiltinKey, conn: sqlite3.Connection) -> None:
-    """Delete a built-in's older settings copy, if any; the store now holds its key."""
-    from infra.settings import get_setting, set_setting
-
-    top = get_setting(builtin.settings_path[0], db=conn)
-    node: object = top
-    for part in builtin.settings_path[1:-1]:
-        node = node.get(part) if isinstance(node, dict) else None
-    if isinstance(node, dict) and builtin.settings_path[-1] in node:
-        del node[builtin.settings_path[-1]]
-        set_setting(builtin.settings_path[0], top, db=conn)
-
-
 def set_value(name: str, value: object, *, db: sqlite3.Connection | None = None) -> None:
     """Store ``value`` for an existing entry, replacing any earlier one.
 
-    Setting a built-in also deletes its older settings copy, so the key lives
-    only in the store.
+    The settings table is never read or written.
     """
     _require_entry(name, _db(db))
-    cleaned = _validated_value(value)
-    with _values_lock:
-        values = _read_values()
-        values[name] = cleaned
-        _write_values(values)
+    _store(name, validated_value(value), db)
+
+
+def set_managed_value(name: str, value: object, *, db: sqlite3.Connection | None = None) -> None:
+    """Store a value for an entry code owns. Server code only: no route calls it."""
+    if not is_managed_name(name):
+        raise KeyStoreError("No key has that name.")
+    _store(name, validated_value(value), db)
+
+
+def _store(name: str, cleaned: str, db: sqlite3.Connection | None) -> None:
     now = utc_now_iso()
     with write_transaction(db, scope="key_store_set") as conn:
+        ref = key_store_values.put(conn, name, cleaned)
         conn.execute(
-            "INSERT INTO key_store_entries (name, created_at, set_at) VALUES (?, ?, ?)"
-            " ON CONFLICT(name) DO UPDATE SET set_at = excluded.set_at",
-            (name, now, now),
+            "INSERT INTO key_store_entries (name, created_at, set_at, value_ref) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(name) DO UPDATE SET set_at = excluded.set_at, value_ref = excluded.value_ref",
+            (name, now, now, ref),
         )
-        if name in BUILTINS:
-            _drop_settings_copy(BUILTINS[name], conn)
+
+
+def _delete_row(name: str, db: sqlite3.Connection | None, scope: str) -> None:
+    """Delete an entry's row; its value goes in the sweep after the commit."""
+    with write_transaction(db, scope=scope) as conn:
+        conn.execute("DELETE FROM key_store_entries WHERE name = ?", (name,))
+        key_store_values.sweep_after_commit(conn)
+
+
+def drop_managed_entry(name: str, *, db: sqlite3.Connection | None = None) -> None:
+    """Remove an entry code owns, value and row. Server code only: no route calls it."""
+    if not is_managed_name(name) or name in BUILTINS:
+        raise KeyStoreError("No key has that name.")
+    _delete_row(name, db, "key_store_drop")
 
 
 def clear_value(name: str, *, db: sqlite3.Connection | None = None) -> None:
     """Remove an entry's stored value, keeping the entry."""
     _require_entry(name, _db(db))
-    with _values_lock:
-        values = _read_values()
-        if values.pop(name, None) is not None:
-            _write_values(values)
     with write_transaction(db, scope="key_store_clear") as conn:
-        conn.execute("UPDATE key_store_entries SET set_at = NULL WHERE name = ?", (name,))
+        conn.execute("UPDATE key_store_entries SET set_at = NULL, value_ref = NULL WHERE name = ?", (name,))
+        key_store_values.sweep_after_commit(conn)
 
 
 def remove_entry(name: str, *, db: sqlite3.Connection | None = None) -> None:
     """Remove an added entry and its value. A built-in entry cannot be removed."""
     if name in BUILTINS:
         raise KeyStoreError("A built-in key can be cleared but not removed.")
+    if is_managed_name(name):
+        drop_managed_entry(name, db=db)
+        return
     _require_entry(name, _db(db))
-    with _values_lock:
-        values = _read_values()
-        if values.pop(name, None) is not None:
-            _write_values(values)
-    with write_transaction(db, scope="key_store_remove") as conn:
-        conn.execute("DELETE FROM key_store_entries WHERE name = ?", (name,))
+    _delete_row(name, db, "key_store_remove")
 
 
-def _settings_value(builtin: BuiltinKey, db: sqlite3.Connection) -> str:
-    from infra.settings import get_setting
-
-    node: object = get_setting(builtin.settings_path[0], db=db) or {}
-    for part in builtin.settings_path[1:]:
-        node = node.get(part) if isinstance(node, dict) else None
-    return node.strip() if isinstance(node, str) else ""
-
-
-def resolve_builtin(
-    builtin: BuiltinKey, *, db: sqlite3.Connection | None = None,
-) -> tuple[str, str] | None:
+def resolve_builtin(builtin: BuiltinKey, *, db: sqlite3.Connection | None = None) -> tuple[str, str] | None:
     """Return ``(value, source)`` for a built-in's key, or None when none is set.
 
-    Read on every call, in order: the store, the settings value, the
-    environment. A key saved in Settings › Keys always wins. The value is for
-    the one request that uses it and is never written to the environment.
+    Read from the store on every call; the environment is not consulted. The
+    value is for the one request that uses it and is never written to the
+    environment.
     """
-    with _values_lock:
-        stored = _read_values().get(builtin.name)
-    if stored:
-        return stored, SOURCE_STORE
-    from_settings = _settings_value(builtin, _db(db))
-    if from_settings:
-        return from_settings, SOURCE_SETTINGS
-    from_env = os.environ.get(builtin.env_var, "").strip()
-    if from_env:
-        return from_env, SOURCE_ENVIRONMENT
-    return None
+    stored = resolve_names([builtin.name], db=db).get(builtin.name)
+    return (stored, SOURCE_STORE) if stored else None
 
 
-def _source(name: str, stored_names: set[str], db: sqlite3.Connection) -> str | None:
-    if name in stored_names:
-        return SOURCE_STORE
-    builtin = BUILTINS.get(name)
-    if builtin is None:
+def resolve_provider(name: str, *, db: sqlite3.Connection | None = None) -> str | None:
+    """The stored key for a cloud provider, or None when none is set."""
+    if name not in PROVIDER_NAMES:
         return None
-    if _settings_value(builtin, db):
-        return SOURCE_SETTINGS
-    if os.environ.get(builtin.env_var, "").strip():
-        return SOURCE_ENVIRONMENT
-    return None
+    return resolve_names([f"{PROVIDER_PREFIX}{name}"], db=db).get(f"{PROVIDER_PREFIX}{name}")
 
 
-def _metadata(name: str, row: sqlite3.Row | None, source: str | None) -> dict:
+def resolve_names(names: Iterable[str], *, db: sqlite3.Connection | None = None) -> dict[str, str]:
+    """The value each named entry's committed row references, for those that have one. Server code only.
+
+    Inside a transaction on ``db`` it reads that transaction's own rows.
+    """
+    return key_store_values.resolve(_db(db), names)
+
+
+def _metadata(name: str, row: sqlite3.Row | None, is_set: bool) -> dict:
     builtin = BUILTINS.get(name)
     if builtin is not None:
         label, description = builtin.label, ""
@@ -318,30 +267,28 @@ def _metadata(name: str, row: sqlite3.Row | None, source: str | None) -> dict:
         "used_by": builtin.used_by if builtin else None,
         "added_by": None if builtin or row is None else row["added_by_name"],
         "added_by_thread_id": None if builtin or row is None else row["added_by_thread_id"],
-        "is_set": source is not None,
-        "source": source,
-        "set_at": row["set_at"] if row is not None and source == SOURCE_STORE else None,
-        "checkable": builtin is not None,
+        "is_set": is_set,
+        "set_at": row["set_at"] if row is not None and is_set else None,
+        "checkable": builtin is not None and builtin.checkable,
     }
 
 
 def list_entries(db: sqlite3.Connection | None = None) -> list[dict]:
     """Every entry's metadata, built-ins first. Never a value."""
     conn = _db(db)
-    with _values_lock:
-        stored_names = set(_read_values())
     rows = {
         row["name"]: row for row in conn.execute(
             "SELECT name, label, description, added_by_thread_id, added_by_name,"
             " created_at, set_at FROM key_store_entries ORDER BY created_at, name"
         ).fetchall()
     }
+    stored_names = set(key_store_values.resolve(conn, [*BUILTINS, *rows]))
     entries = [
-        _metadata(name, rows.get(name), _source(name, stored_names, conn))
+        _metadata(name, rows.get(name), name in stored_names)
         for name in BUILTINS
     ]
     entries.extend(
-        _metadata(name, row, _source(name, stored_names, conn))
+        _metadata(name, row, name in stored_names)
         for name, row in rows.items()
         if name not in BUILTINS and row["label"] is not None
     )

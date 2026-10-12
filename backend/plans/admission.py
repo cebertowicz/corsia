@@ -149,9 +149,10 @@ def reconcile_plan(
 
     Telling the newly selected executors happens here, with the selection, so
     every writer that changes eligibility delivers the same news. The one fact
-    a caller knows and this does not is ``causing_executor``: the thread whose
-    own write this is, which is never told, because its own result already
-    carries these facts.
+    a caller knows and this does not is ``causing_executor``, never told twice:
+    the thread whose own write this is, whose result carries these facts, or a
+    thread the caller wakes itself, whose wake must then carry them, the
+    handoff description included (``plan_wake.selected_fact``).
 
     A worker plan's reconciliation then reconciles its delegator's plan
     (``delegated_selection``). ``from_worker`` marks that one: it goes no

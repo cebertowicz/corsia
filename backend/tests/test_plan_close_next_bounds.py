@@ -46,6 +46,7 @@ from tests.plan_close_next_helpers import (
     task,
 )
 from tests.test_plan_reconcile_release import db  # noqa: F401 - fixture
+from tests.plan_writer_authorizer import raw_plan_seed
 
 EMOJI = "\U0001F600"
 QUOTE_RUN = '"\\' * 20
@@ -76,8 +77,9 @@ def _uuid_executor(db) -> PlanActor:
 
 def _legacy(db, node_id: str, **columns) -> None:
     """Write legacy values the authoring boundary would refuse today."""
-    for column, value in columns.items():
-        db.execute(f"UPDATE plan_nodes SET {column}=? WHERE id=?", (value, node_id))
+    with raw_plan_seed(db):
+        for column, value in columns.items():
+            db.execute(f"UPDATE plan_nodes SET {column}=? WHERE id=?", (value, node_id))
     db.commit()
 
 
@@ -95,6 +97,10 @@ def _worst_case_scene(db, monkeypatch):
     for node in others[:3]:
         queue_active(db, node.id)
         pause(db, plan.id, node.id, reason=reason, actor=actor)
+    # Ready work leads the listing, so the rest wait too and the long rows stay listed.
+    for node in others[3:]:
+        queue_active(db, node.id)
+        pause(db, plan.id, node.id, reason="later", actor=actor)
     titles = {
         others[0].id: EMOJI * 60 + QUOTE_RUN,
         others[1].id: QUOTE_RUN + EMOJI * 60,

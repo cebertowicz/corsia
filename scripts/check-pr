@@ -91,7 +91,7 @@ if [ -z "$OWNER_IDENTITY_FILE" ] && [ -f "$RETIRED_TOKEN_FILE" ]; then
   yellow "Note: ${RETIRED_TOKEN_FILE} is no longer read automatically. To keep using it: CORSIA_OWNER_IDENTITY_FILE=${RETIRED_TOKEN_FILE} bash scripts/check-pr"
 fi
 
-header "0/6 actionlint (GHA workflow validation)"
+header "0/7 actionlint (GHA workflow validation)"
 if command -v actionlint >/dev/null 2>&1; then
   if ls .github/workflows/*.yml >/dev/null 2>&1; then
     actionlint .github/workflows/*.yml || fail "actionlint reported workflow issues — see output above"
@@ -103,17 +103,17 @@ else
   yellow "actionlint not installed; skipping workflow validation. Install: brew install actionlint"
 fi
 
-header "1/6 file-size ratchet"
+header "1/7 file-size ratchet"
 "$VENV_PY" scripts/file_size_limits.py || fail "file-size ratchet failed — see output above"
 green "file-size ratchet: recorded limits satisfied"
 
-header "2/6 antipatterns (severity=error, whole repo)"
+header "2/7 antipatterns (severity=error, whole repo)"
 PYTHONPATH=tools "$VENV_PY" -m antipatterns \
   --all --severity error --repo-root . \
   || fail "antipatterns errors present in repository — see output above"
 green "antipatterns: no errors in repository"
 
-header "3/6 mypy (regression gate)"
+header "3/7 mypy (regression gate)"
 MYPY_VENV="$REPO_ROOT/.check-pr-mypy-venv"
 MYPY_PY="$MYPY_VENV/bin/python"
 if [ ! -x "$MYPY_PY" ]; then
@@ -163,10 +163,10 @@ esac
   || fail "mypy error limits exceeded — see output above"
 green "mypy: error counts within recorded limits"
 
-header "4/6 tools pytest"
+header "4/7 tools pytest"
 "$VENV_PY" -m pytest tools/ --tb=line -q || fail "tools tests failed"
 
-header "5/6 docs drift"
+header "5/7 docs drift"
 # CI's checkout has no git identity, so blank the repo-local one too: a
 # commit identity such as a bot or the product's own name is not the owner's.
 # The owner comes from the explicit identity file or workspace profile only.
@@ -242,14 +242,96 @@ report_owner_identity_scan() {
   fi
 }
 
+header "6/7 read cost (head vs the committed baseline)"
+# Builds the synthetic production-shaped database, measures SQLite VM steps, statements and response bytes
+# per read route on this tree, and compares them with quality/speed-gate-baseline.json using the same
+# `compare` as the speed-gate CI job. Counts only, on one pinned SQLite build, so the numbers here match
+# CI's. It enforces: a route that rises past the rule, or falls enough that the baseline should drop, fails
+# with the routes and one rebaseline command. A harness that could not run, or a pin that does not match,
+# also fails: a gate that did not run is never a pass.
+# SPEED_GATE_SKIP=1 skips it.
+if [ "${SPEED_GATE_SKIP:-0}" = "1" ]; then
+  yellow "read cost: skipped (SPEED_GATE_SKIP=1)"
+else
+  SG_BASE_REF=""
+  for candidate in "${SPEED_GATE_BASE:-}" origin/dev dev; do
+    [ -n "$candidate" ] && git rev-parse --verify --quiet "$candidate" >/dev/null && { SG_BASE_REF="$candidate"; break; }
+  done
+  [ -n "$SG_BASE_REF" ] || fail "read cost: no base ref to scope the change against (set SPEED_GATE_BASE to the branch this PR targets)"
+  if ! "$VENV_PY" -c 'import fastapi, litellm, aiohttp' >/dev/null 2>&1; then
+    fail "read cost: NOT MEASURED. $VENV_PY lacks the backend dependencies. Set CHECK_PR_PYTHON to the backend venv (backend/requirements.txt) to run it, or SPEED_GATE_SKIP=1 to skip knowingly."
+  fi
+  SG_BASE="$(git merge-base "$SG_BASE_REF" HEAD)"
+  # The same paths as the CI job's scope step: a PR that touches none of them cannot change a read cost.
+  if git diff --quiet "$SG_BASE" -- backend scripts/speed_gate quality/speed-gate-baseline.json .github/workflows/speed-gate.yml; then
+    green "read cost: nothing under backend/ or the gate changed since the merge-base ($SG_BASE_REF); not measured"
+  else
+    SG_START="$(date +%s)"
+    SG_DIR="$REPO_ROOT/.check-pr-speed-gate"
+    mkdir -p "$SG_DIR"
+    # The gate measures on one pinned SQLite (sqlean.py, exact version and hashes in requirements.txt). It is
+    # provisioned here, next to the pinned mypy environment, and never installed into the source venv. The
+    # directory is keyed on the requirements file plus the interpreter that imports it, so a changed pin or a
+    # different Python reprovisions instead of reusing a wheel built for another one.
+    SG_KEY="$("$VENV_PY" -I -c 'import hashlib, platform, sys
+digest = hashlib.sha256(open(sys.argv[1], "rb").read())
+digest.update(f"{sys.implementation.name} {platform.python_version()} {sys.platform} {platform.machine()}".encode())
+print(digest.hexdigest()[:16])' scripts/speed_gate/requirements.txt)" || fail "read cost: could not key the pinned SQLite on $VENV_PY"
+    SG_SITE="$SG_DIR/site-$SG_KEY"
+    if [ -d "$SG_SITE/sqlean" ]; then
+      green "read cost: pinned SQLite already provisioned for this requirements file and interpreter ($SG_KEY)"
+    else
+      yellow "read cost: provisioning the pinned SQLite for key $SG_KEY ($("$VENV_PY" -c 'import sys; print(sys.version.split()[0])'))"
+      SG_STAGE="$(mktemp -d "$SG_DIR/site.staging.XXXXXX")" || fail "read cost: could not create a staging directory in $SG_DIR"
+      # Installed with the mypy environment's pip but for the importing interpreter's version and ABI.
+      SG_PYVER="$("$VENV_PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+      "$MYPY_PY" -m pip install --quiet --require-hashes --only-binary :all: --target "$SG_STAGE" \
+        --implementation cp --python-version "$SG_PYVER" --abi "cp${SG_PYVER/./}" \
+        -r scripts/speed_gate/requirements.txt \
+        || { rm -rf "$SG_STAGE"; fail "read cost: could not install the pinned SQLite (scripts/speed_gate/requirements.txt) for Python $SG_PYVER"; }
+      # Proof the wheel loads under the interpreter that will import it.
+      SG_LOADED="$("$VENV_PY" -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from sqlean import dbapi2; print(dbapi2.sqlite_version)' "$SG_STAGE")" \
+        || { rm -rf "$SG_STAGE"; fail "read cost: the pinned SQLite does not load under $VENV_PY"; }
+      yellow "read cost: pinned SQLite $SG_LOADED loads under $VENV_PY"
+      if [ ! -e "$SG_SITE" ]; then mv "$SG_STAGE" "$SG_SITE" || fail "read cost: could not publish $SG_SITE"; else rm -rf "$SG_STAGE"; fi
+      # Directories for any other key are stale.
+      for stale in "$SG_DIR"/site-*; do [ "$stale" = "$SG_SITE" ] || rm -rf "$stale"; done
+    fi
+    SG_LOG="$SG_DIR/last-run.log"
+    set +e
+    { SPEED_GATE_SQLEAN_PATH="$SG_SITE" PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli measure \
+        --backend backend --out "$SG_DIR/measurement.json" --repeats 2 --enforce
+      SG_RC=$?
+      if [ "$SG_RC" = "0" ]; then
+        SPEED_GATE_SQLEAN_PATH="$SG_SITE" PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli compare \
+          --current "$SG_DIR/measurement.json" --baseline quality/speed-gate-baseline.json --enforce
+        SG_RC=$?
+      fi
+      exit "$SG_RC"
+    } 2>&1 | tee "$SG_LOG"
+    SG_RC="${PIPESTATUS[0]}"
+    set -e
+    SG_SECONDS=$(( $(date +%s) - SG_START ))
+    if [ "$SG_RC" != "0" ]; then
+      case "$SG_RC" in
+        1) fail "read cost: enforcement failed; fix the read or use the exact rebaseline command in the report above (measurement kept at $SG_DIR/measurement.json)" ;;
+        2) fail "read cost: SQLite version mismatch; regenerate the baseline with the exact rebaseline command in the report above" ;;
+        3) fail "read cost: repeated runs disagreed; fix the measurement instability before relying on this gate" ;;
+        *) fail "read cost: the fixture build or a harness run could not run, or a measurement guard or the SQLite pin stopped it (exit $SG_RC); there is no verdict" ;;
+      esac
+    fi
+    green "read cost: measured in ${SG_SECONDS}s and matches the committed baseline"
+  fi
+fi
+
 if [ "$FULL_BACKEND" != "1" ]; then
-  yellow "6/6 backend pytest — CI-OWNED"
+  yellow "7/7 backend pytest — CI-OWNED"
   report_owner_identity_scan
   green "Run targeted tests from the actual change blast radius before push."
   exit 0
 fi
 
-header "6/6 backend pytest"
+header "7/7 backend pytest"
 (
   cd backend
   "$VENV_PY" -m pytest tests/ --tb=line -q

@@ -6,6 +6,7 @@ import { endPreview, previewSlot, type PreviewMode } from './typed-reveal-previe
 import { startArrivalSelect, type ArrivalSelect, type SelectOutcome } from './typed-reveal-arrival';
 import { commentMarks, setCommentRanges } from './comment-marks';
 import { suggestionMarks } from './suggestion-marks';
+import { CLAIM_GRACE_MS } from '$lib/stores/livePreviewFeed';
 
 const { make, cleanup } = trackRigs();
 beforeEach(() => { vi.useFakeTimers(); });
@@ -164,15 +165,69 @@ describe('a streamed suggestion types its insert inline', () => {
 		expect(lane(r, A.threadId)?.select ?? null).toBeNull();
 	});
 
-	it('a committed suggestion that differs drops the preview and arrives like any other', () => {
-		const r = make(DOC);
+	it('a committed suggestion that differs drops the stale preview and types the committed insert instead', () => {
+		const r = make(DOC, [commentMarks, suggestionMarks(pointer)]);
 		stream(r, 'suggest', 'there');
 		vi.advanceTimersByTime(8_000);
 		const { promise } = arrive(r, { insert: 'goodbye' });
 		expect(promise).not.toBeNull();
+		expect(r.lanes().flatMap((l) => l.previews)).toMatchObject([{ mode: 'suggest', text: 'goodbye', typed: 0 }]);
+		committed(r, 'goodbye');
+		expect(inserts(r)).not.toContain('goodbye');
+		vi.advanceTimersByTime(8_000);
+		expect(inserts(r)).toEqual(['goodbye']);
+	});
+});
+
+describe('a suggestion that streamed nothing still types its insert', () => {
+	const shownLengths = (r: Rig, until: number) => {
+		const lengths = new Set<number>();
+		for (let t = 0; t < until; t += 50) {
+			vi.advanceTimersByTime(50);
+			lengths.add((inserts(r)[0] ?? '').length);
+		}
+		return lengths;
+	};
+
+	it('types a committed suggestion that arrives with no preview, and the call id is not needed', async () => {
+		const r = make(DOC, [commentMarks, suggestionMarks(pointer)]);
+		const { outcomes } = arrive(r, { insert: 'there, friend', callId: null });
+		await settle();
+		committed(r, 'there, friend');
+		expect(outcomes).toEqual(['ended']);
+		expect(inserts(r)).not.toContain('there, friend');
+		const lengths = shownLengths(r, 12_000);
+		expect([...lengths].some((n) => n > 0 && n < 'there, friend'.length)).toBe(true);
+		expect(inserts(r)).toEqual(['there, friend']);
 		expect(r.lanes().flatMap((l) => l.previews)).toHaveLength(0);
-		expect(lane(r, A.threadId)?.select?.key).toBe('comment-1');
+	});
+
+	it('drops the typing when no suggestion ever commits, so nothing is left half drawn', async () => {
+		const r = make(DOC, [commentMarks, suggestionMarks(pointer)]);
+		arrive(r, { insert: 'there, friend' });
+		await settle();
+		vi.advanceTimersByTime(CLAIM_GRACE_MS);
+		expect(r.lanes().flatMap((l) => l.previews)).toHaveLength(0);
 		expect(inserts(r)).toEqual([]);
+	});
+
+	it('shows the whole insert at once when typing is not allowed', async () => {
+		const r = make(DOC, [commentMarks, suggestionMarks(pointer)]);
+		r.options.canType = false;
+		const { promise } = arrive(r, { insert: 'there, friend' });
+		expect(promise).toBeNull();
+		committed(r, 'there, friend');
+		expect(inserts(r)).toEqual(['there, friend']);
+	});
+
+	it('a user click on the struck quote ends the typing and shows the whole insert', async () => {
+		const r = make(DOC, [commentMarks, suggestionMarks(pointer)]);
+		arrive(r, { insert: 'there, friend' });
+		await settle();
+		committed(r, 'there, friend');
+		vi.advanceTimersByTime(2_000);
+		r.view.dispatch({ selection: EditorSelection.cursor(8), userEvent: 'select' });
+		expect(inserts(r)).toEqual(['there, friend']);
 	});
 });
 

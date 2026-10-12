@@ -36,6 +36,7 @@ from infra.schema import SCHEMA_SQL
 from plans import admission, admission_attempts, lesson_reviews, scheduled_wait, selection_validity, service
 from plans.projections import liveness_signal
 from plans.boundary import PlanActor, mutate
+from tests.plan_writer_authorizer import raw_plan_seed
 
 LESSON = "0f3a6f0e-7f0e-5a55-9d40-6f1f0e6f7a11"
 SHA = "a" * 64
@@ -114,9 +115,9 @@ def _armed(db, node_id: str) -> list[sqlite3.Row]:
 
 
 def _close_reason(db, node_id: str) -> str:
-    from plans.closure import close_reasons
+    from plans.closure import settled_reasons
 
-    return close_reasons(db, [_node(db, node_id)])[node_id]
+    return settled_reasons(db, [_node(db, node_id)])[node_id]
 
 
 def _review_nodes(db) -> list[str]:
@@ -674,7 +675,8 @@ def test_a_version_placed_again_after_its_review_was_settled_gets_a_new_review(d
 
 def test_an_archived_review_is_not_found_again(db):
     first, _ = _lesson(db)
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (first,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (first,))
     db.commit()
 
     second, created = _lesson(db)
@@ -845,7 +847,9 @@ def test_the_owners_own_wake_for_the_new_date_is_kept_and_the_stale_one_resolved
         mutation_id="extend", db=db,
     )
     db.commit()
-    assert len(_armed(db, node_id)) == 2
+    # A task has one schedule (#903): the owner's wait replaces the review's own wake.
+    [owners] = _armed(db, node_id)
+    assert _instant(owners["condition_value"]) == _instant(other)
 
     again, created = _lesson(db, due=other)
 
@@ -935,7 +939,8 @@ def test_an_open_attempt_alone_keeps_the_waits_when_the_date_moves(db):
     """The guard does not rest on the node's state: an open attempt is enough."""
     node_id, _ = _lesson(db, due=_due(days=14))
     _owner_starts(db, node_id)
-    db.execute("UPDATE plan_nodes SET state='pending' WHERE id=?", (node_id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='pending' WHERE id=?", (node_id,))
     db.commit()
     before = _untouched(db, node_id)
     assert before[0] == "pending" and admission_attempts.open_attempt(db, node_id) is not None

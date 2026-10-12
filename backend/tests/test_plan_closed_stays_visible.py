@@ -135,15 +135,15 @@ def test_a_parent_cannot_close_over_an_open_child(db):
     assert service._node_row(db, phase.id)["state"] == "pending"
 
 
-def test_close_reasons_names_only_closed_nodes(db):
+def test_settled_reasons_names_only_closed_nodes(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     kept = _task(db, plan.id, "Kept")
     dropped = _task(db, plan.id, "Dropped")
     _close(db, dropped.id)
 
     rows = [service._node_row(db, kept.id), service._node_row(db, dropped.id)]
-    assert closure.close_reasons(db, rows) == {dropped.id: REASON}
-    assert closure.close_reasons(db, rows[:1]) == {}
+    assert closure.settled_reasons(db, rows) == {dropped.id: REASON}
+    assert closure.settled_reasons(db, rows[:1]) == {}
 
 
 def _phase(db, plan_id: str):
@@ -391,7 +391,8 @@ def test_a_close_names_open_work_anywhere_beneath_it(db):
         parent_id=top.id, db=db,
     )
     deep = _task(db, plan.id, "Deep step", parent_id=middle.id)
-    _settle(db, middle.id, "failed")
+    # The middle used to be failed over its open step; failing over open work is
+    # refused now (#731), so the middle stays a container and the open step sits two levels down.
 
     with pytest.raises(service.PlanError, match=deep.id):
         _close(db, top.id)

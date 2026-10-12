@@ -332,7 +332,7 @@ def test_an_unreachable_endpoint_is_refused_with_the_url_and_reason(monkeypatch)
 def test_a_re_registration_is_the_whole_statement_for_the_endpoint(monkeypatch) -> None:
     """A window or key left empty on re-add is cleared, not kept from last time."""
     _out, _router, _upserted, stored = _register(monkeypatch, _OPENAI_BASE, warm=None)
-    assert stored[0][2] == ("cache_warm_seconds", "api_key", "declared_models")
+    assert stored[0][2] == ("cache_warm_seconds", "declared_models")
 
     _out, _router, _upserted, stored = _register(
         monkeypatch, _OPENAI_BASE, warm=600, api_key="sk-new")

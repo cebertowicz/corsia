@@ -41,6 +41,15 @@ logger = logging.getLogger(__name__)
 # never take a slot. Callers must run off the event loop: acquiring blocks.
 _NORMALIZATION_SLOTS = threading.Semaphore(MAX_CONCURRENT_IMAGE_NORMALIZATIONS)
 
+
+def decode_slot() -> threading.Semaphore:
+    """The slots every full-frame decode on this host shares, here or elsewhere.
+
+    The decode budget (``image_decode_pixel_budget``) is a per-slot share of
+    this machine's memory, so a decode sized by it holds one of these slots.
+    """
+    return _NORMALIZATION_SLOTS
+
 # EXIF tag 274. Values 2-8 ask for a flip or a rotation; 1, a missing tag, and
 # anything out of range all mean the stored pixels are already upright.
 _ORIENTATION_TAG = 0x0112

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import pytest
 
 from api.measurement_cost import build_cost
+from api.measurement_prepared import DDL, PREPARED_OUTCOME_NODES
 from core.measurement_scope import resolve_grain
 from llm.api_equivalent import api_equivalent, is_long_context, price_identity
 from llm.list_prices import ALIBABA_BEIJING, ALIBABA_SINGAPORE, LIST_PRICES, listing_for_host
@@ -114,6 +115,7 @@ def _seed(db, rows):
     # The fixture database seeds placeholder accounts with an unreadable created_at; a payer like that
     # now reads as unrecorded, so a test about usage starts with no accounts.
     db.execute("DELETE FROM vendor_accounts")
+    db.execute(DDL[PREPARED_OUTCOME_NODES])  # the settled outcomes: none here, only the periods' counts below
     db.execute("INSERT INTO measurement_scope_threads VALUES ('thread', 'thread')")
     db.execute("INSERT INTO measurement_outcome_periods VALUES ('2026-09-21', 2, 2, 0)")
     for index, row in enumerate(rows):
@@ -176,8 +178,8 @@ def test_api_equivalent_prices_only_the_proven_short_context_bound_before_weekly
     period = result["latest"]
     assert result["definition_version"] == 1
     assert period["dollars"] == pytest.approx(10.544 + 0.8)
-    assert (period["priced_records"], period["api_records"]) == (3, 5)
-    assert result["coverage"] == {"priced_records": 3, "api_records": 5}
+    assert (period["priced_records"], period["usage_records"]) == (3, 5)
+    assert result["coverage"] == {"priced_records": 3, "usage_records": 5}
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "context_tier_unproven": 1, "cache_rate_unpublished": 1}
 
@@ -206,8 +208,8 @@ def test_admission_prices_only_rows_with_proven_buckets_and_contract(isolated_db
         db.close()
     period = result["latest"]
     assert period["dollars"] == pytest.approx(SONNET.input_per_million * 3 + SONNET.cache_read_per_million)
-    assert (period["priced_records"], period["api_records"]) == (3, 9)
-    assert result["coverage"] == {"priced_records": 3, "api_records": 9}
+    assert (period["priced_records"], period["usage_records"]) == (3, 11)
+    assert result["coverage"] == {"priced_records": 3, "usage_records": 11}
     assert result["not_api_priced_records"] == 2
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "contract_unproven": 3, "tokens_unreported": 1, "tokens_inconsistent": 1, "no_list_price": 1}
@@ -273,9 +275,66 @@ def test_alibaba_usage_prices_by_hour_and_names_unpublished_cache_rates(isolated
     period = result["latest"]
     assert period["dollars"] == pytest.approx(0.3 + 0.03 + 0.15 + 0.15)
     assert (result["coverage"], result["not_api_priced_records"]) == (
-        {"priced_records": 3, "api_records": 4}, 4)
+        {"priced_records": 3, "usage_records": 8}, 4)
     assert {item["kind"]: item["records"] for item in result["excluded"]} == {
         "cache_rate_unpublished": 1}
+
+
+def test_coverage_counts_the_headline_window_not_the_drawn_range(isolated_db):
+    from infra.database import get_db
+
+    sonnet = "claude-code/claude-sonnet-5-5"
+    db = get_db()
+    try:
+        _seed(db, [(sonnet, CC, 1_000, 0, 0, 0, 1_000, None)])
+        # Weeks before the headline window: drawn on the chart, not part of the window's figures.
+        for index, day in enumerate(("2026-08-11T12:00:00Z", "2026-08-12T12:00:00Z")):
+            db.execute(
+                "INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
+                "cache_read_tokens,total_tokens,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (f"early{index}", "thread", sonnet, 1_000, 0, 0, 0, 1_000, CC, day))
+        db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,source,created_at) VALUES "
+                   "('early-local','thread','omlx@local/qwen',5,'conversation','2026-08-11T12:00:00Z')")
+        result = build_cost(db, {**PARAMS, "from_ts": "2026-08-01"})
+    finally:
+        db.close()
+    assert GRAIN.latest.first == "2026-08-31" and "2026-08-10" in GRAIN.served
+    assert result["coverage"] == {"priced_records": 1, "usage_records": 1}
+    assert result["not_api_priced_records"] == 0
+    assert result["excluded"] == []
+
+
+def test_a_local_record_stays_in_the_denominator_and_is_named_not_api_priced(isolated_db):
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed(db, [("claude-code/claude-sonnet-5-5", CC, 1_000, 0, 0, 0, 1_000, None),
+                   ("omlx@local/qwen", "conversation", 10, 0, 0, 0, 10, 0.0)])
+        result = build_cost(db, PARAMS)
+    finally:
+        db.close()
+    assert result["coverage"] == {"priced_records": 1, "usage_records": 2}
+    assert result["latest"]["usage_records"] == 2
+    assert result["not_api_priced_records"] == 1
+
+
+def test_a_record_is_classified_by_its_resolved_model_identity_not_its_raw_selector(isolated_db):
+    from infra.database import get_db
+    from model_identity_fixtures import seed_manifest
+
+    db = get_db()
+    try:
+        _seed(db, [("claude-code/opus", CC, 1_000_000, 0, 0, 0, 1_000_000, None, "alias-row")])
+        seed_manifest(db, "m1", "claude-code", "claude-sonnet-5-5", "catalog")
+        db.execute("UPDATE llm_usage SET context_manifest_id='m1' WHERE id='alias-row'")
+        result = build_cost(db, PARAMS)
+    finally:
+        db.close()
+    # The alias selector alone has no list price; the identity its turn resolved to does.
+    assert result["coverage"] == {"priced_records": 1, "usage_records": 1}
+    assert result["latest"]["dollars"] == pytest.approx(SONNET.input_per_million)
+    assert result["excluded"] == []
 
 
 RECEIPT_ID = "0123456789abcdef01234567"  # the 24-hex shape of turn-usage and checkpoint receipts

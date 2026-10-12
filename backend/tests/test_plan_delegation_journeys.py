@@ -153,9 +153,55 @@ def test_journey1_structured_childs_explicit_completion_is_refused(
     )
 
     assert "already delivers your result to the parent" in result
-    assert "review evidence" in result
     assert len(wakes(deleg_db, thread_id="parent-1")) == before_wakes
     assert tool_service.get_node(node.id, db=deleg_db).state == "active"
+    # #282: no step to hold evidence; the Turn's last message is the return.
+    assert "last message this turn is the return" in result
+    assert "write nothing after it" in result
+
+
+def test_journey1_refusal_for_a_worker_with_steps_names_step_evidence(
+    deleg_db, monkeypatch
+):
+    """#282: only a planless worker is told to return by its final reply."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    import plans.mutations as tool_mutations
+    import plans.service as tool_service
+    import tools.delegation as delegation_tools
+    from tools.delegation import _send_explicit_completion
+
+    monkeypatch.setattr(
+        delegation_tools, "run_in_db",
+        AsyncMock(side_effect=lambda fn, *a, **k: fn(*a, **k)),
+    )
+    monkeypatch.setattr("tools.delegation.send_thread_input", AsyncMock())
+    deleg_db.execute(
+        "INSERT INTO threads (id,user_id,model,title,created_at,updated_at) "
+        "VALUES ('parent-1','u-test','claude-code/opus','Parent','t','t')"
+    )
+    deleg_db.execute("UPDATE threads SET spawned_by='parent-1' WHERE id='sender-self'")
+    deleg_db.commit()
+    parent_plan = tool_service.ensure_plan("thread", "parent-1", db=deleg_db)
+    node = tool_service.add_node(
+        parent_plan.id, kind="task", title="Delegate",
+        acceptance_criteria="Delegate DOD", spawn_kind="claude-code", db=deleg_db,
+    )
+    tool_service.transition_node(node.id, "active", db=deleg_db)
+    own = tool_service.ensure_plan("thread", "sender-self", db=deleg_db)
+    tool_service.add_node(
+        own.id, kind="task", title="Own step", acceptance_criteria="Done", db=deleg_db,
+    )
+    tool_mutations.attach_spawned_thread(node.id, "sender-self", db=deleg_db)
+    deleg_db.commit()
+
+    result = asyncio.run(
+        _send_explicit_completion("sender-self", "parent-1", "child-turn-1", "finished")
+    )
+
+    assert "Put the result in your step's review evidence" in result
+    assert "final reply" not in result
 
 
 # === Journey 2: waits ========================================================

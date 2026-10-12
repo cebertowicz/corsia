@@ -134,6 +134,47 @@ def notify_pr_info_unreadable(
     )
 
 
+def notify_reviewer_terminal_error(
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    reason: str,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> None:
+    """Wake the PR owner with a retry-safe recovery path for a terminal gate error."""
+    short_sha = head_sha[:8]
+    if reason == "reviewer returned no terminal verdict":
+        summary = (
+            f"PR #{pr_number} reviewer ended without verdict on {short_sha}. The "
+            "qa/llm-reviewer status on that SHA names the cause. Re-fire only after "
+            "the cause clears and only if it remains the current head; do not push, "
+            "add a no-op commit, or add an empty commit."
+        )
+    else:
+        summary = (
+            f"PR #{pr_number} reviewer gate terminal error on {short_sha}: {reason}. "
+            "Re-fire only if that is still the current head. If a current-head CI run "
+            "exists, run `gh run rerun <run-id>`; otherwise run "
+            f"`gh pr ready {pr_number} --undo` then `gh pr ready {pr_number}`. "
+            "Do not push, add a no-op commit, or add an empty commit. Done means a "
+            "reviewer verdict publishes on that exact head."
+        )
+    deliver_owner_event(
+        repo,
+        pr_number,
+        "reviewer.terminal_error",
+        summary,
+        {
+            "repo": repo,
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "reason": reason,
+        },
+        loop,
+        chip=f"PR #{pr_number}: reviewer gate error on {short_sha}",
+    )
+
+
 def notify_reviewer_verdict(
     repo: str,
     pr_number: int,

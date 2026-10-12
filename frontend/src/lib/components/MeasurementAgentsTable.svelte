@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { agentLabel } from '$lib/stores/measurementAgentLabel';
 	import {
 		loadMeasurementAgents,
 		type AgentsMetric,
@@ -12,19 +13,19 @@
 
 	type Row = AgentsState['rows'][number];
 
-	/** The most rows the table shows: the server's top ten. */
+	/** The most rows the table shows: the ten agents with the most outcomes in the latest window. */
 	const LIMIT = 10;
 
 	/** The windows the heading and the change column name; without an echoed period the table names none. */
 	const latestName = $derived(agents.period ? periodName(agents.period.latest) : null);
 	const previousName = $derived(agents.period ? periodName(agents.period.previous) : null);
 
-	/** The column the reader sorted by. The table opens in the order the server ranked it. */
+	/** The column the reader sorted by. The table opens with the most outcomes first. */
 	type SortKey = 'agent' | 'outcomes' | AgentsMetric;
 	let sortKey = $state<SortKey | null>(null);
 	let descending = $state(true);
 
-	/** Click cycles ascending, descending, then back to the served order. */
+	/** Click cycles ascending, descending, then back to the opening order. */
 	function sortBy(key: SortKey): void {
 		if (sortKey !== key) { sortKey = key; descending = false; return; }
 		if (!descending) { descending = true; return; }
@@ -54,9 +55,16 @@
 		return row.metrics[key]?.value ?? null;
 	}
 
-	/** The server's top ten, in the reader's order; a row with no value for the column goes last in either direction. */
+	/**
+	 * The ten agents with the most outcomes in the latest window, in the reader's order. The server ranks by
+	 * a quality metric, so the row set and the opening order are decided here; a row with no value for the
+	 * column goes last in either direction.
+	 */
 	const shown = $derived.by(() => {
-		const top = agents.rows.slice(0, LIMIT);
+		const top = agents.rows
+			.filter((row) => row.n > 0)
+			.sort((a, b) => b.n - a.n || a.agent.name.localeCompare(b.agent.name))
+			.slice(0, LIMIT);
 		const key = sortKey;
 		if (key === null) return top;
 		const direction = descending ? -1 : 1;
@@ -100,7 +108,7 @@
 		<div class="table-wrap" role="region" aria-label="Agents table, scrolls sideways when it is wider than the screen" tabindex="0">
 		<table>
 			<caption class="sr-only">
-				Agents in the latest window, in the order the server ranked them until a column header is chosen. A value is
+				The ten agents with the most outcomes in the latest window, most first until a column header is chosen. A value is
 				hidden until the agent has enough outcomes for it, and an unmeasured figure is never shown as zero.
 			</caption>
 			<thead>
@@ -108,7 +116,7 @@
 					<th scope="col" aria-sort={ariaSort('agent')}><button class="sort" onclick={() => sortBy('agent')}>Agent</button></th>
 					<th scope="col" class="n" aria-sort={ariaSort('outcomes')}><button class="sort" onclick={() => sortBy('outcomes')}>Outcomes</button></th>
 					<th scope="col" class="n" aria-sort={ariaSort('first_try_acceptance')}><button class="sort" onclick={() => sortBy('first_try_acceptance')}>First try</button></th>
-					<th scope="col" class="n cost" aria-sort={ariaSort('dollars_per_work_hour')}><button class="sort" onclick={() => sortBy('dollars_per_work_hour')}>$ per hour of work</button></th>
+					<th scope="col" class="n cost" aria-sort={ariaSort('dollars_per_work_hour')}><button class="sort" aria-label="$ per person-hour of work delivered" onclick={() => sortBy('dollars_per_work_hour')}>$ per person-hour{' '}<span class="long">of work delivered</span></button></th>
 					<th scope="col" class="n change" aria-sort={ariaSort('active_hours_per_outcome')}><button class="sort" onclick={() => sortBy('active_hours_per_outcome')}>Change in minutes per outcome, vs {previousName ?? 'the previous window'}</button></th>
 				</tr>
 			</thead>
@@ -124,7 +132,7 @@
 					<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 					<tr class:thin onclick={() => filterMeasurementAgent(row.agent.id, row.agent.project.id)}>
 						<th scope="row">
-							<button class="filter name" aria-label={`Filter to this agent: ${row.agent.name}`}>{row.agent.name}</button>
+							<button class="filter name" aria-label={`Filter to this agent: ${agentLabel(row.agent.name)}`}>{agentLabel(row.agent.name)}</button>
 							{#if thin}<span class="sr-only">Too few outcomes to rank</span>{/if}
 						</th>
 						<td class="n">{formatMeasurementValue(row.n, 'count')}</td>
@@ -135,7 +143,7 @@
 							{#if costText === null}<span class="unmeasured">&ndash;</span><span class="sr-only">Unmeasured</span>{:else}{costText}{/if}
 						</td>
 						<td class="n" title={typeof change === 'number' ? formatChange(change) : change}>
-							{#if typeof change === 'number'}{formatChange(change)}<span class="sr-only"> against {previousName ?? 'the previous window'}</span>{:else}<span class="unmeasured">{change}</span>{/if}
+							{#if typeof change === 'number'}{formatChange(change)}<span class="sr-only"> against {previousName ?? 'the previous window'}</span>{:else if change === 'new'}new{:else}<span class="unmeasured">{change}</span>{/if}
 						</td>
 					</tr>
 				{/each}
@@ -148,7 +156,7 @@
 </section>
 
 <style>
-	.agents { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 16px; display: grid; gap: 6px; }
+	.agents { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 0; padding: 16px; display: grid; gap: 6px; }
 	h3, p { margin: 0; }
 	h3 { margin-top: 20px; color: var(--text-secondary); font-size: var(--text-footnote); letter-spacing: 0.05em; text-transform: uppercase; }
 	p { color: var(--text-secondary); font-size: var(--text-subhead); }
@@ -174,10 +182,26 @@
 	.skeleton { height: 120px; border-radius: var(--radius-xs); background: var(--bg-hover); animation: pulse 1.2s ease-in-out infinite alternate; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	.table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	/* Phone: the two long headers keep room for two or three lines instead of one word per line; the box scrolls sideways for the rest. */
+	/* Phone: every column stays in view. Names and headers wrap between words (never inside one), the figures stay on one line, and the long change header gets a narrow column of its own. */
 	@media (max-width: 430px) {
-		thead th.cost { min-width: 11ch; }
-		thead th.change { min-width: 20ch; }
+		table { width: 100%; min-width: 0; table-layout: fixed; font-size: var(--text-footnote); }
+		th, td { padding: 6px 3px; }
+		tbody th { white-space: normal; }
+		.filter { white-space: normal; overflow-wrap: normal; word-break: normal; }
+		thead th { white-space: normal; overflow-wrap: normal; word-break: normal; font-size: var(--text-caption); }
+		.sort { white-space: normal; }
+		/* Fixed table layout otherwise divides the unconstrained first three columns
+		   evenly, leaving too little room for an unbroken agent-name word. */
+		thead th:first-child { width: 28%; }
+		thead th:nth-child(2), thead th:nth-child(3) { width: 10%; }
+		thead th.cost { width: 17%; }
+		thead th.change { width: 35%; }
+		/* The full cost name runs past three lines in its column; the phone header keeps its first words. */
+		.long { display: none; }
+	}
+	/* The narrowest phones: tighter padding keeps the longest name ("Infrastructure") from pushing the last column out. */
+	@media (max-width: 380px) {
+		th, td { padding: 6px 2px; }
 	}
 	@keyframes pulse { to { opacity: .55; } }
 </style>

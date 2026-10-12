@@ -25,6 +25,7 @@ import plans.operator_projection as operator_projection
 import plans.service as service
 from plans.boundary import PlanActor
 from tests.test_attention_queue import _mid, _seed, raise_decision  # noqa: F401
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 @pytest.fixture
@@ -54,9 +55,10 @@ def _attach_child(db, parent_thread: str, child_thread: str) -> None:
     service.transition_node(
         node.id, "active", actor_id=parent_thread, provenance="p", db=db,
     )
-    db.execute(
-        "UPDATE plan_nodes SET spawned_thread_id=? WHERE id=?", (child_thread, node.id),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET spawned_thread_id=? WHERE id=?", (child_thread, node.id),
+        )
     child = service.ensure_plan("thread", child_thread, db=db)
     db.execute(
         "UPDATE plans SET parent_plan_id=? WHERE id=?", (parent.id, child.id),

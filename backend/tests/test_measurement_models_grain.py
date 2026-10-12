@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from tests.test_measurement_api import USER, _freeze_clock, _seed_thread
+from tests.plan_writer_authorizer import raw_plan_seed
 
 MODEL = "claude-code/claude-opus-5-5"
 
@@ -21,8 +22,9 @@ def _seed_tasks(instants: list[str]) -> None:
         db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) VALUES ('plan','thread','root','active',1,'t','t')")
         for index, accepted_at in enumerate(instants):
             node = f"task-{index}"
-            db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,'t','t')", (node, node))
-            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accepted-{node}", node, accepted_at))
+            with raw_plan_seed(db):
+                db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,'t','t')", (node, node))
+                db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accepted-{node}", node, accepted_at))
             db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,source,created_at,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) VALUES (?, 'root',?,1000000,0,0,0,1000000,'external_harness:claude-code',?,'plan',?,'attempt',?,'execution')", (f"usage-{node}", MODEL, accepted_at, node, node))
         db.commit()
     finally:
@@ -97,3 +99,22 @@ async def test_the_last_second_before_local_midnight_belongs_to_the_previous_win
     _seed_tasks([latest_noon] * 14 + [before_utc])
     served = await _row("days", zone)
     assert (served["row"]["tasks"], served["row"]["previous_tasks"]) == (14, 1)
+
+
+@pytest.mark.asyncio
+async def test_token_shares_count_cache_re_reads_like_the_tokens_figure(isolated_db, monkeypatch):
+    """The pie's numerator is fresh tokens plus cache re-reads, the same total the Tokens tile sums."""
+    from api.measurement import measurement_models
+    from infra.database import get_db
+
+    _freeze_clock(monkeypatch, datetime(2026, 10, 7, 12, tzinfo=timezone.utc))
+    _seed_tasks(["2026-10-02T12:00:00Z"])
+    db = get_db()
+    try:
+        db.execute("UPDATE llm_usage SET cache_read_tokens=4000000, total_tokens=5000000 WHERE id='usage-task-0'")
+        db.commit()
+    finally:
+        db.close()
+    served = await measurement_models(project="all", agent="none", grain="days", timezone_name="UTC", user=USER)
+    (share,) = served["token_shares"]
+    assert (share["model"], share["tokens"], share["share_of_tokens"]) == (MODEL, 5_000_000, 1.0)

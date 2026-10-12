@@ -59,9 +59,20 @@ def decode(value: str | None, *, plan_id: str, section: str | None) -> dict | No
     if (
         not isinstance(payload, dict) or payload.get("v") != 1
         or payload.get("p") != plan_id or payload.get("s") != section
-        or not isinstance(payload.get("o"), int) or payload["o"] < 0
         or (section != FULL and not isinstance(payload.get("a"), str))
-        or not isinstance(payload.get("t"), str)
+        or not (_offset_form(payload) or (section == FULL and _keyset_form(payload)))
     ):
         raise PlanError(stale)
     return payload
+
+
+def _offset_form(payload: dict) -> bool:
+    return isinstance(payload.get("o"), int) and payload["o"] >= 0 and isinstance(payload.get("t"), str)
+
+
+def _keyset_form(payload: dict) -> bool:
+    """A cursor naming the sort key of the last row served: no position, no revision."""
+    key = payload.get("k")
+    return isinstance(key, list) and bool(key) and key[0] in (0, 1) and all(
+        isinstance(part, list) and len(part) == 2 and isinstance(part[1], str) for part in key[1:]
+    )

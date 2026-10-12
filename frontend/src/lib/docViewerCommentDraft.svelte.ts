@@ -21,7 +21,8 @@ type Context = {
 	onClose: () => void;
 };
 const aborted = () => new DOMException('Comment draft closed', 'AbortError');
-function liveFailureMessage(error: unknown): string {
+/** What a failed post of a comment anchored in a live document says; an image's region comment there says the same. */
+export function liveFailureMessage(error: unknown): string {
 	if (!(error instanceof Error)) return 'Could not post the comment; your draft is kept.';
 	if (error.message === SELECTION_LOST) return 'The selected text changed or was removed. Your comment draft is kept.';
 	if (error.message.startsWith('409 ')) return 'The document changed before your comment could be attached. Your draft is kept. Try again.';

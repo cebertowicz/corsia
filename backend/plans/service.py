@@ -7,12 +7,12 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Iterator
+from typing import Any, Iterator
 
 from infra.database import get_db
 import plans.errors as errors
 import plans.node_waits as node_waits
-from plans import plan_write, tree_rows
+from plans import aggregates, plan_write, tree_rows, writer_context
 from plans.models import Plan, PlanNode
 # Re-exported: the lifecycle table lives in `plans.node_states`.
 from plans.node_states import (  # noqa: F401
@@ -50,7 +50,7 @@ def _now() -> str:
 _TOUCH_COLUMNS = frozenset({
     "state", "order_key", "title", "description", "acceptance_criteria",
     "watchdog_budget_seconds", "requirements_revision", "archived_at", "size",
-    "commitment_id", "spawned_thread_id", "spawn_kind",
+    "commitment_id", "spawned_thread_id", "spawn_kind", "sent_back",
 })
 
 def touch_node(connection: sqlite3.Connection, node_id: str, *, at: str | None = None,
@@ -64,10 +64,14 @@ def touch_node(connection: sqlite3.Connection, node_id: str, *, at: str | None =
     if unknown:
         raise ValueError(f"touch_node cannot set {sorted(unknown)}")
     assignments = "".join(f"{name}=?, " for name in columns)
-    return connection.execute(
-        f"UPDATE plan_nodes SET {assignments}revision=revision+1, updated_at=? WHERE id=?",
-        (*columns.values(), at or _now(), node_id),
+    stamp = at or _now()
+    written = writer_context.execute(
+        connection, f"UPDATE plan_nodes SET {assignments}revision=revision+1, updated_at=? WHERE id=?",
+        (*columns.values(), stamp, node_id),
     ).rowcount
+    if written and aggregates.INPUT_COLUMNS & columns.keys():
+        aggregates.apply(connection, node_id, at=stamp)
+    return written
 
 def _id() -> str:
     """Create a collision-resistant plan record identity."""
@@ -213,6 +217,7 @@ def _event(connection: sqlite3.Connection, node_id: str, event: str, *, actor_id
          prior_state, new_state, verification_result, causal_event_id,
          json.dumps(payload, sort_keys=True) if payload else None, created_at),
     )
+    aggregates.note_event(connection, node_id, new_state)
     from plans.plan_events import project_node_event
 
     project_node_event(
@@ -301,7 +306,8 @@ def transition_node(node_id: str, new_state: str, *, actor_id: str | None = None
 
 def _transition(connection: sqlite3.Connection, node_id: str, new_state: str, *, actor_id: str | None,
                 provenance: str, verification_result: str | None, verified_by: str | None,
-                settles_worker: bool = True, payload: dict | None = None) -> PlanNode:
+                settles_worker: bool = True, payload: dict | None = None,
+                sent_back: bool = False) -> PlanNode:
     """Apply a validated transition; ``settles_worker=False`` keeps a rejected step's worker.
 
     ``settles_worker=False`` is also the one sign that the work continues on a
@@ -311,6 +317,9 @@ def _transition(connection: sqlite3.Connection, node_id: str, new_state: str, *,
     ``payload`` carries the outcome's own durable fact on the transition event
     -- a close's reason -- so the record of why is the same row as the record
     of what, and no consumer has to join two events to read one outcome.
+
+    ``sent_back`` marks the close as a rejection's round, in the same write as
+    the state (the row fact the plan aggregates read).
     """
     from plans import material_events
 
@@ -329,7 +338,10 @@ def _transition(connection: sqlite3.Connection, node_id: str, new_state: str, *,
             connection, node, verification_result=verification_result,
             verified_by=verified_by, actor_id=actor_id, provenance=provenance,
         )
-    touch_node(connection, node_id, state=new_state)
+    if new_state == "failed" and "sub_open" in node.keys() and node["sub_open"]:
+        raise errors.open_descendants(node["sub_open"])
+    marks: dict[str, Any] = {"sent_back": 1} if sent_back else {}
+    touch_node(connection, node_id, state=new_state, **marks)
     recorded = {**(payload or {}), **({"verified_by": verified_by} if verified_by else {})}
     event_id = _event(
         connection, node_id, "state_transition", actor_id=actor_id,

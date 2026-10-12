@@ -11,6 +11,7 @@ from infra.database import initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
 from plans import mutations, service, worker_retirement
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _PROVENANCE = "migration.60_to_61"
 
@@ -90,7 +91,8 @@ def _legacy_db(path):
             service.ensure_plan("thread", "w-failed", db=db).id, kind="task",
             title="branch step", acceptance_criteria="x", parent_id=ids["branch"], db=db,
         ).id
-        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (branch_step,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (branch_step,))
         # A reused worker still working for another open step is left alone.
         ids["reused_done"] = _delegate(db, parent.id, "w-reused", "Reused done")
         ids["reused_leaf"] = _leaf(db, "w-reused", "reused leaf", "active")
@@ -98,10 +100,11 @@ def _legacy_db(path):
             parent.id, kind="task", title="Reused open", acceptance_criteria="x",
             spawn_kind="claude-code", db=db,
         ).id
-        db.execute(
-            "UPDATE plan_nodes SET spawned_thread_id='w-reused' WHERE id=?",
-            (ids["reused_open"],),
-        )
+        with raw_plan_seed(db):
+            db.execute(
+                "UPDATE plan_nodes SET spawned_thread_id='w-reused' WHERE id=?",
+                (ids["reused_open"],),
+            )
         worker_plan = service.ensure_plan("thread", "w-failed", db=db)
         db.execute(
             """INSERT INTO plan_node_attempts (id,plan_id,node_id,executor_thread_id,
@@ -109,11 +112,12 @@ def _legacy_db(path):
                VALUES ('held',?,?,'w-failed',1,1,'test','2026-09-20T00:00:00+00:00')""",
             (worker_plan.id, ids["failed_leaf"]),
         )
-        for key, state in (
-            ("accepted", "accepted"), ("failed", "failed"),
-            ("closed", "closed"), ("reused_done", "accepted"),
-        ):
-            db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, ids[key]))
+        with raw_plan_seed(db):
+            for key, state in (
+                ("accepted", "accepted"), ("failed", "failed"),
+                ("closed", "closed"), ("reused_done", "accepted"),
+            ):
+                db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, ids[key]))
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
@@ -147,7 +151,7 @@ def _heard(db) -> tuple[int, int]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 105
+    assert SCHEMA_VERSION == 113
 
 
 def test_accepted_parent_accepts_what_returned_and_stands_down_the_rest(tmp_path):

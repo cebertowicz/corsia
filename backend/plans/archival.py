@@ -47,6 +47,7 @@ from __future__ import annotations
 import plans.dependencies as dependencies
 import plans.errors as errors
 import plans.node_states as node_states
+import plans.open_descendants as open_descendants
 import plans.service as service
 
 #: How many blocking ids a refusal lists before it stops. Enough to act on,
@@ -222,15 +223,31 @@ def _require_no_children(connection, node_id: str) -> None:
         raise service.PlanError(_naming(_CHILDREN_REFUSED, children))
 
 
-def _require_no_open_children(connection, node_id: str) -> None:
+def _require_no_open_children(
+    connection, node_id: str, refusal: str = _OPEN_CHILDREN_REFUSED,
+) -> None:
     """Refuse to close a node over a descendant that is still open work.
 
-    The walk descends only through nodes in the work: beneath a retired one
-    nothing is open, which is the invariant this guard and
-    ``service.require_live_node`` together keep.
+    The count stored on the node says whether anything beneath it is open, so a
+    close over settled history reads one row. The walk descends only through
+    nodes in the work: beneath a retired one nothing is open, which is the
+    invariant this guard and ``service.require_live_node`` together keep.
     """
+    counts = open_descendants.counted(connection, node_id)
+    if counts is not None:
+        children = open_descendants.named(
+            connection, node_id, _NAMED_BLOCKERS + 1, open_below=bool(counts[0]),
+        )
+    else:
+        children = _walk_open_children(connection, node_id)
+    if children:
+        raise service.PlanError(_naming(refusal, children))
+
+
+def _walk_open_children(connection, node_id: str) -> list[str]:
+    """The open descendants, by walking the subtree; for a database without stored counts."""
     terminal = tuple(sorted(service._TERMINAL_STATES))
-    children = [
+    return [
         str(row["id"])
         for row in connection.execute(
             "WITH RECURSIVE below(id,state,order_key,created_at) AS ("
@@ -244,8 +261,6 @@ def _require_no_open_children(connection, node_id: str) -> None:
             (node_id, *terminal, _NAMED_BLOCKERS + 1),
         )
     ]
-    if children:
-        raise service.PlanError(_naming(_OPEN_CHILDREN_REFUSED, children))
 
 
 def _require_settled_spawned_work(connection, node) -> None:

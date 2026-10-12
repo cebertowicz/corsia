@@ -127,6 +127,11 @@ single-user machine running one model; lower it if you share the box.
 `{"host_access_auto_approve": true|false}`: `false` sends each approved lease
 to you for a decision (`backend/api/system.py`). Pick a model you will
 **not** use for ordinary delegation, so its quota stays available.
+Add `{"host_access_reviewer_fallback": true}` (default `false`) to let the
+requesting agent's own model review when that reviewer cannot run, for
+example under a usage limit; with it off, host-access requests fail with the
+cause until the reviewer is back. Like the other two, it needs a signed-in
+person's session.
 
 ## 2. Create the project, and the contributor agent — run it
 
@@ -353,8 +358,8 @@ design — the same reason the human, not you, types their own sign-in
 password in §4A.
 
 The reviewer runs from a GitHub webhook (`POST /webhooks/github`), which
-rejects deliveries until the settings row `webhook` has a
-`github_webhook_secret` (`backend/api/webhooks.py`). §7 sets up that
+rejects deliveries until the `github-webhook` key has a value, which the
+person enters in Settings › Keys (`backend/api/webhooks.py`). §7 sets up that
 delivery path.
 
 **The upstream repository's `qa/llm-reviewer` status belongs to the
@@ -461,35 +466,13 @@ through unsigned, but only while no secret is configured yet
 
 ### Give CORSIA the same secret
 
-**Run it.** CORSIA reads it from the settings row `webhook`, field
-`github_webhook_secret` (`backend/api/webhooks.py` `_get_webhook_secret`).
-Every other delivery is rejected until it matches what GitHub signs with.
-
-**There is no supported interface that writes this value** — no API route, no
-CLI command, no settings screen. Until one exists, call the backend's own
-settings helper. Do not edit the database file by hand.
-
-The one real hazard is writing to the *wrong* database: `default_state_root`
-picks a platform default unless `CORSIA_STATE_DIR` is set
-(`backend/infra/platform_paths.py`), so a shell that does not load your `.env`
-can silently create a second, unused database. Load the same env the server
-loads, and print the resolved path before trusting the write:
-
-```bash
-cd ~/.corsia/backend
-set -a; . ~/.corsia/.env 2>/dev/null; set +a
-~/.corsia/.venv/bin/python -c "
-from infra import config
-print('writing to:', config.DB_PATH)
-from infra.settings import save_setting_merge, get_setting
-save_setting_merge('webhook', {'github_webhook_secret': 'PASTE_THE_SAME_SECRET'})
-print('stored:', bool(get_setting('webhook').get('github_webhook_secret')))
-"
-```
-
-Confirm the printed path is the database your running instance uses.
-`get_setting` reads the row on each request with no caching, so the change
-takes effect on the next delivery — no restart needed.
+**Walk it, set the secret.** CORSIA reads the secret from the `github-webhook`
+key (`backend/api/webhooks.py` `_get_webhook_secret`). Every other delivery is
+rejected until it matches what GitHub signs with. Only the person sets it: tell
+them to open **Settings > Keys**, choose **GitHub webhook secret**, paste the
+same secret they gave GitHub, and enter their CORSIA password. Never ask for the
+secret or the password in chat, and never write it with a script or the
+database. A saved key takes effect on the next delivery, with no restart.
 
 **Walk it.** Verify end to end: in GitHub's webhook page, open **Recent
 Deliveries**, redeliver the `ping`, and confirm a `200` whose body contains

@@ -339,7 +339,7 @@ print(api_models[0]['litellm_model'] if api_models else '')
     if [ -z "$PICKED_MODEL" ]; then
       red "FATAL: no cloud model in catalog after seed. Check that CORSIA_E2E_MODEL is"
       red "an anthropic/openai model, and (for a non-anthropic provider) that"
-      red "CORSIA_SEED_PROVIDER_API_KEY is set to a valid key."
+      red "CORSIA_SEED_PROVIDER_API_KEY (or the provider's <PROVIDER>_API_KEY) is set to a valid key."
       exit 1
     fi
     green "picked test model: $PICKED_MODEL (used explicitly for created test threads)"

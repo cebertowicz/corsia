@@ -37,7 +37,7 @@ def _set_pinned_repo(monkeypatch, tmp_path):
         lambda: [RepoPolicy("p1", "app", repo.resolve(), "main", True)],
     )
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_rw", lambda: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path])
     return repo, worktree
 
 

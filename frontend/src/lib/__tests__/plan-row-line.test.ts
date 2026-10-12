@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
 import { node } from './fixtures/planTreeNode';
+import { withFolds } from './fixtures/planFolds';
 
 /**
  * Owner decision, 2026-09-16: a plan row is one line. The icon carries status and the
@@ -27,7 +28,7 @@ afterEach(() => {
 });
 
 function render(nodes: OperatorNode[], nextNodeIds: string[] = []): void {
-	component = mount(PlanTree, { target: host, props: { nodes, nextNodeIds } });
+	component = mount(PlanTree, { target: host, props: withFolds({ nodes, nextNodeIds }) });
 	flushSync();
 }
 

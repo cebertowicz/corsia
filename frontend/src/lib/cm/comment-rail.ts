@@ -1,4 +1,4 @@
-import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
+import { EditorView, ViewPlugin, type BlockInfo, type ViewUpdate } from '@codemirror/view';
 import { commentRanges, type CommentRange } from './comment-marks';
 import { clusterMarkerLines, railWidth, type MarkerCluster } from './comment-clusters';
 
@@ -89,7 +89,7 @@ class CommentRail {
 		// reserves the same width the viewer's header takes.
 		view.dom.style.setProperty('--doc-rail', `${railWidth()}px`);
 		// A text size or line height change moves lines without a document or viewport change: regroup on any resize of the
-		// text, or of a commented line (the text's own height can be pinned by its minimum height while its lines change).
+		// text, or of a commented line or image (the text's own height can be pinned by its minimum height while its lines change).
 		if (typeof ResizeObserver !== 'undefined') {
 			this.resize = new ResizeObserver(() => this.schedule());
 			this.resize.observe(view.contentDOM);
@@ -110,16 +110,18 @@ class CommentRail {
 	}
 
 	private schedule() {
-		this.view.requestMeasure<{ placed: Placed[]; left: number; target: number; drawn: Element[] }>({
+		this.view.requestMeasure<{ placed: Placed[]; left: number; target: number; inset: number; drawn: Element[] }>({
 			key: this,
 			read: (view) => this.read(view),
-			write: (measured) => this.write(measured.placed, measured.left, measured.target, measured.drawn),
+			write: (measured) => this.write(measured.placed, measured.left, measured.target, measured.inset, measured.drawn),
 		});
 	}
 
 	private read(view: EditorView) {
 		const { state, scrollDOM, contentDOM } = view;
-		const target = Number.parseFloat(getComputedStyle(contentDOM).paddingLeft) || railWidth();
+		// The inset is the text's left padding; a coarse pointer's hit box (railWidth) may be wider than it, reaching into the text's edge.
+		const inset = Number.parseFloat(getComputedStyle(contentDOM).paddingLeft) || railWidth();
+		const target = Math.max(inset, railWidth());
 		const scroller = scrollDOM.getBoundingClientRect();
 		const origin = view.documentTop - scroller.top + scrollDOM.scrollTop;
 		const drawnLines = new Set<Element>();
@@ -127,7 +129,7 @@ class CommentRail {
 		for (const range of state.field(commentRanges)) {
 			const block = view.lineBlockAt(state.doc.lineAt(range.from).from);
 			// A rendered line is measured where it is drawn; the height map stands in for a line the viewport has not drawn.
-			const element = this.drawnLine(view, block.from);
+			const element = this.drawnLine(view, block);
 			const drawn = element?.getBoundingClientRect();
 			if (element) drawnLines.add(element);
 			const line = byLine.get(block.from) ?? {
@@ -138,6 +140,8 @@ class CommentRail {
 			line.replyWaiting ||= !!range.replyWaiting;
 			byLine.set(block.from, line);
 		}
+		// A block widget that resizes (an image that loads) moves every line below it, commented or not.
+		for (const child of contentDOM.children) if (!child.classList.contains('cm-line')) drawnLines.add(child);
 		const lines = [...byLine.entries()].sort(([a], [b]) => a - b).map(([, line]) => line);
 		const placed = clusterMarkerLines(lines, target).map((cluster): Placed => {
 			const first = lines.find((line) => line.ids.includes(cluster.ids[0]))!;
@@ -147,17 +151,20 @@ class CommentRail {
 			};
 		});
 		const content = contentDOM.getBoundingClientRect();
-		return { placed, left: content.left - scroller.left + scrollDOM.scrollLeft, target, drawn: [...drawnLines] };
+		return { placed, left: content.left - scroller.left + scrollDOM.scrollLeft, target, inset, drawn: [...drawnLines] };
 	}
 
-	private drawnLine(view: EditorView, from: number): Element | null {
+	private drawnLine(view: EditorView, { from, widget }: BlockInfo): Element | null {
 		if (from < view.viewport.from || from > view.viewport.to) return null;
+		// A line drawn as a block widget (an image alone on its line) is no .cm-line, and its height can change without an
+		// editor update, as when the image loads: it is the text's child that starts at the line.
+		if (widget) return [...view.contentDOM.children].find((child) => !child.classList.contains('cm-line') && view.posAtDOM(child) === from) ?? null;
 		const { node } = view.domAtPos(from);
 		const line = (node instanceof Element ? node : node.parentElement)?.closest('.cm-line');
 		return line && view.contentDOM.contains(line) ? line : null;
 	}
 
-	private write(placed: Placed[], left: number, target: number, drawn: Element[]) {
+	private write(placed: Placed[], left: number, target: number, inset: number, drawn: Element[]) {
 		this.watch(drawn);
 		const active = this.dom.ownerDocument.activeElement;
 		const held = this.markers.find((marker) => marker.button === active);
@@ -196,6 +203,8 @@ class CommentRail {
 			style.height = `${target}px`;
 			style.top = `${cluster.top}px`;
 			style.paddingTop = `${Math.max(0, (cluster.row - GLYPH) / 2)}px`;
+			// The glyph is centred in the inset beside the text, not in a hit box that reaches over the text.
+			style.paddingRight = `${target - inset}px`;
 			const sibling: ChildNode | null = after ? after.nextSibling : this.dom.firstChild;
 			if (sibling !== marker.button) this.dom.insertBefore(marker.button, sibling);
 			after = marker.button;

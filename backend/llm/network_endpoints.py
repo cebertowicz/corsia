@@ -348,16 +348,16 @@ async def freshness_guard(server_id: str, *, budget_s: float = 1.0) -> bool:
     server = await run_in_db(get_server, server_id) or {}
     is_external = server.get("kind") == "external"
     if is_external:
+        from infra.key_store_servers import resolve_server
         from llm.external_provider import auth_headers
         stored = await run_in_db(read_server_metadata, server_id)
-        meta = stored or {}
         dialect = server.get("dialect") or "openai"
         targets = [
             (ep["host"], external_probe_url(stored, dialect=dialect, host=ep["host"], port=port))
             for ep in endpoints
         ]
         probe_headers = auth_headers(
-            server.get("dialect") or "openai", meta.get("api_key"),
+            server.get("dialect") or "openai", await run_in_db(resolve_server, server_id),
         )
     timeout = httpx.Timeout(connect=0.5, read=budget_s, write=budget_s, pool=budget_s)
 

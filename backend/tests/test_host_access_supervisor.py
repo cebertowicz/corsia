@@ -34,6 +34,7 @@ def _application_review(verdict: str = "allow"):
         reason_category="not_applicable" if verdict == "allow" else "unclear_actions",
         reason="The request is bounded.",
         user_attestation="This request matches the stated plan.",
+        reviewer_fallback=False,
         allowed=verdict == "allow",
     )
 

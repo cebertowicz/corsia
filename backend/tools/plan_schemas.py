@@ -199,7 +199,7 @@ READ_PARAMS = {
     "cursor": {
         "type": "string",
         "description": (
-            "From continue_read; refused once the plan changes."
+            "From continue_read."
         ),
     },
     "known_revision": {

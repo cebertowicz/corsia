@@ -30,6 +30,7 @@ from plans.boundary import PlanActor, mutate
 from tests.test_attention_queue import _mid, _seed
 from tests.test_attention_queue_api import _DbProxy, _immediate
 from tests.plan_review_helpers import submit_review_evidence
+from tests.plan_writer_authorizer import raw_plan_seed
 
 OWNER = PlanActor("root", "user-1", "project-1")
 HUMAN = PlanActor(None, "user-1", None, kind="user")
@@ -377,9 +378,10 @@ def test_an_unknown_prerequisite_is_refused_without_disclosure(db, operation):
 @pytest.mark.parametrize("operation", ["add_dependency", "remove_dependency"])
 def test_an_archived_node_is_refused(db, operation):
     plan, node, prerequisite = _pair(db)
-    db.execute(
-        "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (prerequisite.id,),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at='t' WHERE id=?", (prerequisite.id,),
+        )
     db.commit()
     before = _counts(db)
 

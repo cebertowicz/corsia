@@ -1,13 +1,12 @@
 <!-- The face of a level's fold row: the level's quiet summary, the done mark outlined. -->
 <script lang="ts">
-	import type { OperatorNode } from '$lib/api/plans';
-	import { foldAllCompleted, foldLabel } from './planTreeFold';
+	import { foldAllCompleted, foldLabel, type FoldCounts } from './planFoldLevels';
 
-	let { folded }: { folded: OperatorNode[] } = $props();
+	let { counts }: { counts: FoldCounts } = $props();
 </script>
 
-<span class="fold-mark" class:mixed={!foldAllCompleted(folded)} aria-hidden="true">✓</span>
-<span class="fold-label">{foldLabel(folded)}</span>
+<span class="fold-mark" class:mixed={!foldAllCompleted(counts)} aria-hidden="true">✓</span>
+<span class="fold-label">{foldLabel(counts)}</span>
 
 <style>
 	.fold-mark {

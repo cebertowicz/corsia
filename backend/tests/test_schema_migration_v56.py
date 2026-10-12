@@ -8,6 +8,7 @@ import sqlite3
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
 from infra.schema import SCHEMA_VERSION
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _columns(db) -> set[str]:
@@ -19,7 +20,7 @@ def test_fresh_schema_names_the_workflow_version_column():
         initialize_schema(db)
         columns = _columns(db)
 
-    assert SCHEMA_VERSION == 105
+    assert SCHEMA_VERSION == 113
     assert "workflow_version" in columns and "workflow_commit" not in columns
 
 
@@ -42,7 +43,8 @@ def test_startup_renames_v55_workflow_commit(tmp_path):
 def test_rename_keeps_stored_versions_and_is_idempotent():
     with closing(sqlite3.connect(":memory:")) as db:
         db.execute("CREATE TABLE plan_nodes (id TEXT PRIMARY KEY, workflow_commit TEXT)")
-        db.execute("INSERT INTO plan_nodes VALUES ('n1', 'abc123-dirty')")
+        with raw_plan_seed(db):
+            db.execute("INSERT INTO plan_nodes VALUES ('n1', 'abc123-dirty')")
 
         MIGRATIONS[55](db)
         MIGRATIONS[55](db)

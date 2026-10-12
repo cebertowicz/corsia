@@ -336,7 +336,7 @@
 <style>
 	.app { position: fixed; inset: 0; display: flex; overflow: hidden; background: transparent; }
 	@media (max-width: 1024px) {
-		.main { transition: transform var(--dur-spring) var(--ease-spring); }
+		.main { transition: transform var(--dur-spring) var(--ease-entrance); }
 		.main.pane-open { transform: translateX(calc(-1 * min(420px, 92vw))); }
 		.main-close-tap.open { display: block; pointer-events: auto; }
 	}
@@ -362,7 +362,8 @@
 		padding: calc(var(--header-height) + 20px) 20px 32px;
 	}
 	@media (max-width: 768px) {
-		.measurement-scroller { padding: calc(var(--header-height) + 14px) 14px 24px; }
+		/* The phone header is a translucent overlay, so a scroller that starts under it shows section titles through it. Start the scroller below the header instead. */
+		.measurement-scroller { margin-top: calc(var(--header-height) + env(safe-area-inset-top, 0px)); padding: 14px 14px 24px; }
 	}
 	:global(.spin) { animation: spin 1s linear infinite; }
 	@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -370,7 +371,7 @@
 		.app { bottom: auto; height: 100vh; }
 		.main {
 			transform: translateX(0);
-			transition: transform var(--dur-spring) var(--ease-spring);
+			transition: transform var(--dur-spring) var(--ease-entrance);
 			will-change: transform;
 			border-top-left-radius: 32px;
 			border-bottom-left-radius: 32px;

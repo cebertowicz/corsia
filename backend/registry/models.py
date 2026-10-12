@@ -17,6 +17,7 @@ from registry.registration_events import (
     _append_registration_event,  # noqa: F401 — re-exported for callers
     _now,
     resolve,  # noqa: F401 — re-exported for callers
+    resolve_upload,  # noqa: F401 — re-exported for callers
     routing_registrations,
 )
 from registry.listing import (

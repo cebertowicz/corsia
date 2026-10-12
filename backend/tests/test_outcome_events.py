@@ -296,6 +296,7 @@ def test_only_registered_events_are_the_test_seed_and_the_github_intake():
         "github.check_suite.completed", "github.workflow_run.completed",
         "github.issue.opened", "github.issue.closed",
         "measurement.size_rating",
+        "measurement.correction",
     }
 
 

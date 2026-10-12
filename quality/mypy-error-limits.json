@@ -73,6 +73,6 @@
     "imported LLMResponse and ToolCallRequest for type checking; the pinned",
     "local mypy 2.3.0 gate reports 217."
   ],
-  "backend": 217,
+  "backend": 216,
   "tools": 4
 }
