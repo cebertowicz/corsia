@@ -5,9 +5,9 @@ import { leaveDuration } from '$lib/actions/leaveRow';
 /**
  * A reply being typed protects a thread another person resolves. While the text is non-empty the thread stays in the
  * drawer's Open list as a resolved card (its reply field intact); when the reply is sent or cleared it leaves, easing
- * out (`leaving`) instead of vanishing in a frame. With reduced motion there is no leaving window: the card is removed at once and
- * the sheet's own crossfade (settleHeight) carries the change, so the list does not dim twice. Call during component initialisation:
- * it registers a pre-render effect.
+ * out (`leaving`) instead of vanishing in a frame (a fade under reduced motion). Where a sheet settles its own height and reduced
+ * motion is on (`crossfaded`), there is no leaving window: the card is removed at once and the sheet's crossfade carries the change,
+ * so the list does not dim twice. Call during component initialisation: it registers a pre-render effect.
  */
 export function keptThreads(source: {
 	comments: () => Array<{ id: string; resolved: boolean }>;
@@ -15,6 +15,8 @@ export function keptThreads(source: {
 	/** Only the Open list drops a kept thread; the other filters list it either way. */
 	leavesOnRelease: () => boolean;
 	reduced: () => boolean;
+	/** Reduced motion inside a panel whose own crossfade (settleHeight) already carries a height change. */
+	crossfaded: () => boolean;
 }) {
 	/** Threads that were open when a reply to them was started. */
 	const started = new SvelteSet<string>();
@@ -35,11 +37,12 @@ export function keptThreads(source: {
 		}
 		const releases = source.leavesOnRelease();
 		const reduced = source.reduced();
+		const crossfaded = source.crossfaded();
 		untrack(() => {
 			for (const id of held) {
-				if (now.has(id) || !releases || reduced || !comments.some((comment) => comment.id === id && comment.resolved)) continue;
+				if (now.has(id) || !releases || crossfaded || !comments.some((comment) => comment.id === id && comment.resolved)) continue;
 				leaving.add(id);
-				timers.add(setTimeout(() => leaving.delete(id), leaveDuration()));
+				timers.add(setTimeout(() => leaving.delete(id), leaveDuration(reduced)));
 			}
 			held = now;
 		});
