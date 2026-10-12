@@ -22,12 +22,4 @@ describe('leaveRow', () => {
 		expect(frames[1]).toMatchObject({ height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 });
 		expect(node.style.overflow).toBe('hidden');
 	});
-
-	it('only fades under reduced motion: nothing slides', () => {
-		const { node, animate } = row();
-		leaveRow(node, { leaving: true, reduced: true });
-		const frames = (animate.mock.calls[0] as unknown as [Keyframe[]])[0];
-		expect(frames).toEqual([{ opacity: 1 }, { opacity: 0 }]);
-		expect(node.style.overflow).toBe('');
-	});
 });

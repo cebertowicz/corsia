@@ -532,15 +532,24 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		expect(host.querySelector('.drawer-heading')?.textContent).toContain('2 open');
 		// A resolved thread also reads as agreed; the kept card must still show the reply being typed, not "Agreed".
+		const eased: Array<[Element, number]> = [];
+		const animate = vi.spyOn(Element.prototype, 'animate').mockImplementation(function (this: Element, keyframes: Keyframe[] | PropertyIndexedKeyframes | null) {
+			eased.push([this, Array.isArray(keyframes) ? keyframes.length : 0]);
+			return { cancel() {}, finish() {}, addEventListener() {}, removeEventListener() {}, currentTime: 0, playState: 'finished', finished: Promise.resolve() } as unknown as Animation;
+		});
 		comments.set([{ ...plain, resolved: true, acked: true }, { ...plain, id: 'comment-2', anchor: 'other text' }]); flushSync();
 		const card = host.querySelector<HTMLElement>('[data-comment-id="comment-1"]')!;
 		expect(card).not.toBeNull();
 		expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('half a reply');
-		// The header counts what the Open list shows, the kept card included.
-		expect(host.querySelector('.drawer-heading')?.textContent).toContain('2 open');
+		// The header counts threads that are open, as the document's chip does: the kept card says it is resolved and is not counted.
+		expect(host.querySelector('.drawer-heading')?.textContent).toContain('1 open');
 		// It no longer offers what a resolved thread cannot do, says what Send does, and offers Re-open.
-		expect(card.querySelector('[aria-label="Resolve"]')).toBeNull();
-		expect(card.querySelector('.ct-act.ack')).toBeNull();
+		// The note enters, and Agree and Resolve leave, by easing (clip and fade) rather than in one frame.
+		const easedNodes = eased.map(([node]) => node);
+		expect(easedNodes).toContain(card.querySelector('[data-resolved-note]')!.parentElement);
+		expect(easedNodes).toContain(card.querySelector('[aria-label="Resolve"]'));
+		expect(easedNodes).toContain(card.querySelector('.ct-act.ack'));
+		animate.mockRestore();
 		expect(card.querySelector('.ct-agreed')).toBeNull();
 		expect(card.querySelector('[data-resolved-note]')?.textContent).toContain('Send adds your reply; the thread stays resolved.');
 		expect(card.querySelector('[data-resolved-note] .reopen')?.textContent).toBe('Re-open');

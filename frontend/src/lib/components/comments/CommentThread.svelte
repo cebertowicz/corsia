@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import { fade, slide } from 'svelte/transition';
+	import { clipFade } from '$lib/actions/clipFade';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
 	export type CommentThreadData = {
@@ -227,13 +228,13 @@
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
 			{#if !isSuggestion && !comment.resolved}
-				<button class="ct-act ack" class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree — end the exchange" title="Agree — ends the back-and-forth">
+				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree — end the exchange" title="Agree — ends the back-and-forth">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
 				</button>
 			{/if}
 			<button class="ct-act reply" disabled={readOnly} onclick={(e) => { e.stopPropagation(); void openReply(); }} aria-label="Reply" title="Reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z" /></svg></button>
 			{#if !isSuggestion && !comment.resolved}
-				<button class="ct-act resolve" disabled={readOnly} onclick={(e) => { e.stopPropagation(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
+				<button class="ct-act resolve" transition:clipFade={{ axis: 'x' }} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 				</button>
 			{/if}
@@ -262,7 +263,7 @@
 			{/if}
 			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else}
-			{#if comment.resolved}<ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} />{/if}
+			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
 			{#if comment.orphaned && !flat}<div class="ct-orphan">The text this comment was on has changed</div>{/if}
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
@@ -271,7 +272,7 @@
 		{/if}
 		{#if isLong(comment.text)}<button class="ct-more" onclick={(e) => { e.stopPropagation(); headOpen = !headOpen; }}>{headOpen ? 'Show less' : 'Show more'}</button>{/if}
 
-		{#if comment.replies.length}
+		{#if comment.replies.length && !leaving}
 			<div class="ct-thread-tools">
 				<button class="ct-replies-toggle" onclick={(e) => { e.stopPropagation(); showReplies = !showReplies; }}>
 					{showReplies ? '⊖ Hide' : `⊕ ${comment.replies.length}`} {comment.replies.length === 1 ? 'reply' : 'replies'}

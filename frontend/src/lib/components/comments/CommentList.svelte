@@ -6,7 +6,7 @@
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}), leavingIds = new Set<string>(), reduced = false }: {
+	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}), leavingIds = new Set<string>() }: {
 		comments: Comment[];
 		documentOrder?: boolean;
 		focusedId?: string | null;
@@ -40,8 +40,6 @@
 		replyDrafts?: Record<string, string>;
 		/** Threads easing out of the list before the caller removes them (a resolved card whose reply was sent or cleared). */
 		leavingIds?: ReadonlySet<string>;
-		/** Reduced motion: a leaving row fades and nothing slides. */
-		reduced?: boolean;
 	} = $props();
 	let heldOrder = $state<string[] | null>(null);
 	const ordered = $derived(heldOrder ? [...comments].sort((a, b) => {
@@ -79,7 +77,7 @@
 			<div
 				data-comment-id={comment.id}
 				class:focused={focusedId === comment.id}
-				use:leaveRow={{ leaving: leavingIds.has(comment.id), reduced }}
+				use:leaveRow={{ leaving: leavingIds.has(comment.id) }}
 				onpointerenter={region && onHover ? () => onHover(comment.id) : undefined}
 				onpointerleave={region && onHover ? () => onHover(null) : undefined}
 				onfocusin={region && onHover ? () => onHover(comment.id) : undefined}
