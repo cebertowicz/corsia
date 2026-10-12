@@ -73,8 +73,8 @@
 				onfocusout={region && onHover ? leaveCard : undefined}
 			>
 				{#if !region}
-					<button type="button" class="comment-jump" data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={() => onFocus?.(comment.id)} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : `Go to text: ${comment.anchor}`}>
-						{comment.review ? 'Review comment' : comment.orphaned ? 'Text changed' : 'Go to text'}{comment.anchor ? `: “${comment.anchor}”` : ''}
+					<button type="button" class="comment-jump" data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={() => onFocus?.(comment.id)} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : 'Go to quoted text'}>
+						{#if comment.review || comment.orphaned}{comment.review ? 'Review comment' : 'Text changed'}{comment.anchor ? `: “${comment.anchor}”` : ''}{:else}{comment.anchor ? `“${comment.anchor}”` : 'Go to text'}{/if}
 					</button>
 				{/if}
 				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
@@ -90,12 +90,14 @@
 </div>
 
 <style>
-	.comment-jump { display: block; width: 100%; min-height: 24px; text-align: left; border: 0; background: none; color: var(--accent); font: inherit; font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-	@media (pointer: coarse) { .comment-jump { min-height: 44px; } }
+	.comment-jump { display: block; width: 100%; min-height: var(--space-6); padding: 0 0 0 var(--space-2); text-align: left; border: 0; border-left: 2px solid var(--border); background: none; color: var(--text-tertiary); font: inherit; font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+	@media (pointer: coarse) { .comment-jump { min-height: calc(var(--space-8) - var(--space-1)); } :global(.focused) .comment-jump:not(:disabled) { border-left-color: var(--accent); } }
 	.comment-jump:disabled { color: var(--text-tertiary); cursor: default; }
 	.comment-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
 
-	.list { display: flex; flex-direction: column; gap: 4px; }
+	.list { display: flex; flex-direction: column; }
+	.list > :global([data-comment-id]) { padding: var(--space-2) 0; border-bottom: 1px solid var(--border-subtle); }
+	.list > :global([data-comment-id]:last-child) { border-bottom: 0; }
 	h3, summary { margin: 6px 0 2px; color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); }
 	h3:first-child { margin-top: 0; }
 	.empty { margin: 0; color: var(--text-tertiary); font-size: var(--text-footnote); }

@@ -26,6 +26,7 @@ afterEach(() => { if (component) unmount(component); component = null; host?.rem
 describe('CommentThread', () => {
 	it('posts a reply and clears the input', async () => {
 		const { onReply } = render(thread());
+		button('.ct-reply-open').click(); flushSync();
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, '  looks right  ');
 		button('.ct-send').click();
@@ -33,8 +34,16 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right');
 	});
 
+	it('reveals the reply field only after Reply is pressed', () => {
+		render(thread());
+		expect(host.querySelector('.ct-input')).toBeNull();
+		button('.ct-reply-open').click(); flushSync();
+		expect(host.querySelector('.ct-compose.open .ct-input')).not.toBeNull();
+	});
+
 	it('posts a reply on Cmd+Enter', () => {
 		const { onReply } = render(thread());
+		button('.ct-reply-open').click(); flushSync();
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, 'ship it');
 		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
@@ -150,6 +159,7 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-replies')).toBeNull();
 		button('.ct-replies-toggle').click(); flushSync();
 		expect(host.querySelector('.ct-replies')?.textContent).toContain('Could we keep the old wording?');
+		button('.ct-reply-open').click(); flushSync();
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, ' fine by me ');
 		button('.ct-send').click();

@@ -69,6 +69,7 @@
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
 	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
+	let replyOpen = $state(false);
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	let showReplies = $state(false);
 	let resolvedOpen = $state(false);
@@ -80,6 +81,7 @@
 	let retryOnVisible = false;
 
 	$effect(() => { if (focused) showReplies = true; });
+	$effect(() => { if (replyText) replyOpen = true; });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	function stampRenderedReply() {
 		const latest = comment.replies.at(-1)?.id;
@@ -201,7 +203,8 @@
 				<button class="ct-act ack" class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree — end the exchange" title="Agree — ends the back-and-forth">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
 				</button>
-				<button class="ct-act resolve" disabled={readOnly} onclick={(e) => { e.stopPropagation(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
+				<button class="ct-act reply" disabled={readOnly} onclick={(e) => { e.stopPropagation(); replyOpen = true; }} aria-label="Reply" title="Reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z" /></svg></button>
+					<button class="ct-act resolve" disabled={readOnly} onclick={(e) => { e.stopPropagation(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 				</button>
 			{/if}
@@ -249,22 +252,23 @@
 		{#if !isSuggestion && comment.acked}
 			<div class="ct-agreed"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
 		{:else if !readOnly}
-			<div class="ct-compose">
+				{#if !replyOpen}<button class="ct-reply-open" onclick={(e) => { e.stopPropagation(); replyOpen = true; }}>Reply</button>{/if}
+			{#if replyOpen}<div class="ct-compose" class:open={replyOpen}>
 				<input class="ct-input" placeholder="Reply…" bind:value={replyText} onkeydown={onKey} onclick={(e) => e.stopPropagation()} />
 				{#if replyText.trim()}
 					<button class="ct-send" onclick={(e) => { e.stopPropagation(); postReply(); }} aria-label="Send reply" title="Reply">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
 					</button>
 				{/if}
-			</div>
+			</div>{/if}
 		{/if}
 	</div>
 {/if}
 
 <style>
 	.ct {
-		background: color-mix(in srgb, var(--text-primary) 4%, transparent); border: 1px solid transparent; border-radius: var(--radius-sm);
-		padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
+		background: none; border: 0; border-radius: 0;
+		padding: 0; display: flex; flex-direction: column; gap: var(--space-1);
 		transition: border-color var(--dur-tight), box-shadow var(--dur-tight), background-color var(--dur-tight) var(--ease-snap); cursor: pointer;
 	}
 	/* Lit with its mark on the image while either is hovered or focused; lighter than selected. */
@@ -308,10 +312,10 @@
 	.ct-link:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-bg); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
 	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
 	.ct-body { font-size: var(--text-subhead); line-height: var(--lh-normal); color: var(--text-primary); margin: 0; }
-	.ct-more { align-self: flex-start; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; }
+	.ct-more { align-self: flex-start; min-height: var(--space-6); font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--text-secondary); background: none; border: none; padding: 0; cursor: pointer; }
 	.ct-more:hover { text-decoration: underline; }
 
-	.ct-replies-toggle { align-self: flex-start; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--accent); background: none; border: none; padding: 0; cursor: pointer; }
+	.ct-replies-toggle { align-self: flex-start; min-height: var(--space-6); font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--text-secondary); background: none; border: none; padding: 0; cursor: pointer; }
 	.ct-replies-toggle:hover { text-decoration: underline; }
 	.ct-replies { display: flex; flex-direction: column; gap: 10px; margin-top: 2px; }
 	.ct-msg { display: flex; flex-direction: column; gap: 3px; }
@@ -322,7 +326,11 @@
 
 	.ct-agreed { display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--green); margin-top: 2px; }
 
-	.ct-compose { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+	.ct-compose { display: flex; max-height: 0; overflow: hidden; align-items: center; gap: 6px; margin-top: 0; transition: max-height var(--dur-standard) var(--ease-entrance), margin var(--dur-standard) var(--ease-entrance); }
+	.ct-compose.open { max-height: var(--space-10); margin-top: var(--space-1); }
+	.ct-reply-open { align-self: flex-start; min-height: var(--space-6); padding: 0; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; }
+	.ct-act.reply { display: none; }
+	@media (pointer: coarse) { .ct-act { min-width: calc(var(--space-8) - var(--space-1)); min-height: calc(var(--space-8) - var(--space-1)); align-items: center; justify-content: center; } .ct-act.reply { display: flex; } .ct-reply-open { display: none; } }
 	.ct-input {
 		flex: 1; min-width: 0; font: inherit; font-size: var(--text-footnote);
 		padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);

@@ -19,6 +19,11 @@
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
 		followKeyboard = false,
+		headless = false,
+		opaque = false,
+		within = null,
+		detent = 'full',
+		onDetent,
 	}: {
 		ariaLabel: string;
 		/**
@@ -43,14 +48,29 @@
 		 * visual viewport the app already publishes as CSS variables.
 		 */
 		followKeyboard?: boolean;
+		/** Content may own the header, leaving the chrome with its grabber only. */
+		headless?: boolean;
+		opaque?: boolean;
+		/** Constrain this sheet and its scrim to a document column rather than the viewport. */
+		within?: HTMLElement | null;
+		detent?: 'full' | 'half';
+		onDetent?: (detent: 'full' | 'half') => void;
 	} = $props();
 
+	let box = $state<{ top: number; right: number; bottom: number; left: number; height: number } | null>(null);
+	$effect(() => {
+		if (!within) { box = null; return; }
+		const read = () => { const rect = within.getBoundingClientRect(); box = { top: rect.top, right: innerWidth - rect.right, bottom: innerHeight - rect.bottom, left: rect.left, height: rect.height }; };
+		read(); const observer = new ResizeObserver(read); observer.observe(within); addEventListener('resize', read);
+		return () => { observer.disconnect(); removeEventListener('resize', read); };
+	});
 	let panel = $state<HTMLElement | null>(null);
 	let dragY = $state(0);
 	let dragging = $state(false);
 	let dragPointer: number | null = null;
 	let dragStartY = 0;
 	let dragStartedAt = 0;
+	let dragRaw = 0;
 
 	const flyParams = $derived(
 		$prefersReducedMotion
@@ -70,13 +90,15 @@
 		dragStartY = event.clientY;
 		dragStartedAt = performance.now();
 		dragY = 0;
+		dragRaw = 0;
 		dragging = true;
 		handle.setPointerCapture?.(event.pointerId);
 	}
 
 	function moveDrag(event: PointerEvent): void {
 		if (!dragging || dragPointer !== event.pointerId) return;
-		dragY = Math.max(0, event.clientY - dragStartY);
+		dragRaw = event.clientY - dragStartY;
+		dragY = Math.max(0, dragRaw);
 	}
 
 	function finishDrag(event: PointerEvent): void {
@@ -86,6 +108,7 @@
 		const threshold = Math.min(180, Math.max(96, (panel?.clientHeight ?? 480) * 0.24));
 		dragging = false;
 		dragPointer = null;
+		if (detent === 'half' && event.type === 'pointerup' && (dragRaw <= -40 || (Math.abs(dragRaw) < 6 && elapsed < 350))) { onDetent?.('full'); return; }
 		if (dragY >= threshold || (dragY >= 64 && velocity > 0.75)) {
 			onClose();
 			return;
@@ -121,6 +144,13 @@
 <div
 	class="drawer-backdrop"
 	class:follow-keyboard={followKeyboard}
+	class:within={!!box}
+	class:half={detent === 'half'}
+	style:--drawer-top="{box?.top ?? 0}px"
+	style:--drawer-right="{box?.right ?? 0}px"
+	style:--drawer-bottom="{box?.bottom ?? 0}px"
+	style:--drawer-left="{box?.left ?? 0}px"
+	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
 	onclick={onBackdrop}
 	transition:fade={fadeParams}
@@ -131,6 +161,8 @@
 			bind:this={panel}
 			class="drawer-panel"
 			class:dragging
+			class:opaque
+			class:half={detent === 'half'}
 			style:--drawer-drag-y="{dragY}px"
 			role="dialog"
 			aria-modal="true"
@@ -149,11 +181,11 @@
 				>
 					<span class="drawer-grabber"></span>
 				</div>
-				<div class="drawer-head" class:centered={!!leading}>
+				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}
 					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else}<span class="drawer-head-spacer"></span>{/if}
 					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
-				</div>
+				</div>{/if}
 			</div>
 			<div class="drawer-body" class:fill>
 				{@render children()}
@@ -176,7 +208,12 @@
 		background: color-mix(in srgb, var(--glass-scrim) 88%, transparent);
 		overscroll-behavior: contain;
 		pointer-events: auto;
+		transition: background-color var(--dur-standard) var(--ease-entrance);
 	}
+	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: none; backdrop-filter: brightness(0.78); -webkit-backdrop-filter: brightness(0.78); }
+	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+	.within .drawer-motion { max-width: none; padding: 0; }
+	.within .drawer-panel { max-height: calc(var(--drawer-h) * 0.82); }
 	.drawer-backdrop.follow-keyboard {
 		bottom: auto;
 		top: var(--doc-visual-viewport-offset, 0px);
@@ -199,7 +236,7 @@
 		flex-direction: column;
 		overflow: hidden;
 		transform: translateY(var(--drawer-drag-y));
-		transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+		transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), max-height var(--dur-standard) var(--ease-entrance);
 		border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 		border-bottom: 0;
 		border-radius: 28px 28px 0 0;
@@ -211,9 +248,10 @@
 		-webkit-backdrop-filter: var(--glass-blur);
 		box-shadow: 0 -18px 64px rgba(0, 0, 0, 0.32), var(--glass-rim);
 	}
-	.drawer-panel.dragging {
-		transition: none;
-	}
+	.drawer-panel.dragging { transition: none; }
+	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
+	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, env(safe-area-inset-top, 0px)))); }
+	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
 	.drawer-panel:focus {
 		outline: none;
 	}
@@ -237,9 +275,8 @@
 		cursor: grab;
 		touch-action: none;
 	}
-	.drawer-drag-region:active {
-		cursor: grabbing;
-	}
+	.drawer-panel.half .drawer-drag-region { padding-bottom: var(--space-3); }
+	.drawer-drag-region:active { cursor: grabbing; }
 	.drawer-grabber {
 		width: 36px;
 		height: 4px;

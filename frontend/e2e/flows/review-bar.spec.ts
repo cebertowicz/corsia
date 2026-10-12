@@ -373,23 +373,30 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await page.getByRole('button', { name: /^2 open threads\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
-	const done = drawer.getByRole('button', { name: 'Done', exact: true });
+	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
 	const filters = drawer.locator('[data-drawer-filter]');
 	const jump = drawer.locator('[data-comment-jump]').first();
-	expect(await filters.count()).toBe(3);
-	const targets = [done, jump, ...(await filters.all())];
+	expect(await filters.count()).toBe(1);
+	const targets = [close, jump, ...(await filters.all())];
 	for (const target of targets) expect((await target.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
-	// A real tap on each control's centre lands on it.
-	const openFilter = drawer.getByRole('button', { name: 'Open', exact: true });
+	// A real tap opens the menu, selects a filter, and leaves every drawer control reachable.
+	const openFilter = drawer.getByRole('button', { name: 'Filter comments: Open', exact: true });
 	const box = (await openFilter.boundingBox())!;
 	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-	await expect(openFilter).toHaveAttribute('aria-pressed', 'true');
+	await expect(openFilter).toHaveAttribute('aria-expanded', 'true');
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
 	await expect(drawer).toBeVisible();
+	const reopenedBox = (await filters.boundingBox())!;
+	await page.touchscreen.tap(reopenedBox.x + reopenedBox.width / 2, reopenedBox.y + reopenedBox.height / 2);
+	const menu = drawer.getByRole('menu', { name: 'Filter comments', exact: true });
+	await expect(menu.getByRole('menuitemradio')).toHaveCount(3);
+	await menu.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
+	await expect(filters).toHaveText('Resolved');
+	await expect(filters).toHaveAttribute('aria-expanded', 'false');
 	await shot(page, 'drawer-touch', info);
-	const doneBox = (await done.boundingBox())!;
-	await page.touchscreen.tap(doneBox.x + doneBox.width / 2, doneBox.y + doneBox.height / 2);
+	const closeBox = (await close.boundingBox())!;
+	await page.touchscreen.tap(closeBox.x + closeBox.width / 2, closeBox.y + closeBox.height / 2);
 	await expect(drawer).toBeHidden();
 });
 
@@ -432,8 +439,8 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 			lastCardBottom: Math.min(cards.at(-1)!.getBoundingClientRect().bottom, list.getBoundingClientRect().bottom), footerTop: box.top,
 			background: getComputedStyle(element).backgroundColor, token,
 			drawerHeight: drawer.height, listHeight: list.getBoundingClientRect().height, footerHeight: box.height,
-			docContentHeight: (() => { const doc = frame.closest<HTMLElement>('.doc')!, style = getComputedStyle(doc); return doc.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom); })(),
-			measuredFooter: frame.closest<HTMLElement>('.doc')!.style.getPropertyValue('--doc-drawer-footer-height'),
+			docContentHeight: (() => { const doc = frame.closest<HTMLElement>('.doc'); if (!doc) return null; const style = getComputedStyle(doc); return doc.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom); })(),
+			measuredFooter: frame.closest<HTMLElement>('.doc')?.style.getPropertyValue('--doc-drawer-footer-height') ?? '',
 		};
 	});
 	expect(fit.bottomGap, 'the footer sits on the drawer\'s bottom border').toBeLessThanOrEqual(1.5);
@@ -442,14 +449,16 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	expect(fit.listBottom, 'the list ends where the footer starts').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.lastCardBottom, 'scrolled to the end, the last card is above the footer').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.background, 'the footer is opaque --bg-secondary').toBe(fit.token);
-	// The existing cap owns the list; the measured pinned footer extends the drawer below it. Six cards make a lost list row visible.
-	const drawerCap = fit.docContentHeight * 0.36;
-	const preFooterDrawer = Math.min(drawerCap, 260);
-	const expectedDrawer = preFooterDrawer + fit.footerHeight;
-	const drawerChrome = fit.drawerHeight - fit.listHeight - fit.footerHeight;
-	expect(Number.parseFloat(fit.measuredFooter), 'the grid receives the measured footer height').toBeCloseTo(fit.footerHeight, 0);
-	expect(fit.drawerHeight, 'the drawer adds the footer beneath its existing cap').toBeCloseTo(expectedDrawer, 0);
-	expect(fit.listHeight, 'six-thread list keeps its pre-footer height').toBeGreaterThanOrEqual(preFooterDrawer - drawerChrome - 1);
+	// The inline drawer extends its grid cap by the measured footer. The phone sheet is portaled outside that grid.
+	if (fit.docContentHeight !== null) {
+		const drawerCap = fit.docContentHeight * 0.36;
+		const preFooterDrawer = Math.min(drawerCap, 260);
+		const expectedDrawer = preFooterDrawer + fit.footerHeight;
+		const drawerChrome = fit.drawerHeight - fit.listHeight - fit.footerHeight;
+		expect(Number.parseFloat(fit.measuredFooter), 'the grid receives the measured footer height').toBeCloseTo(fit.footerHeight, 0);
+		expect(fit.drawerHeight, 'the drawer adds the footer beneath its existing cap').toBeCloseTo(expectedDrawer, 0);
+		expect(fit.listHeight, 'six-thread list keeps its pre-footer height').toBeGreaterThanOrEqual(preFooterDrawer - drawerChrome - 1);
+	}
 	expect(await hitAtCentre(send), 'Send now is hit-testable').toBe(true);
 	if (mode === 'phone') expect((await send.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
 	await shot(page, 'unsent-footer', info);

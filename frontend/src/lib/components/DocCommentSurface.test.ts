@@ -57,10 +57,23 @@ describe('DocCommentSurface suggestions', () => {
 		const quote = drawer!.querySelector<HTMLButtonElement>('[data-comment-jump]');
 		quote!.click();
 		expect(onFocus).toHaveBeenCalledWith(suggestion.id);
+		drawer!.querySelector<HTMLButtonElement>('[data-drawer-filter]')!.click(); flushSync();
 		const resolved = [...drawer!.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Resolved');
 		resolved!.click(); flushSync();
 		expect(drawer!.querySelectorAll('[data-comment-id]')).toHaveLength(1);
 		expect(drawer!.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
+	});
+
+	it('opens on Open and switches filters from the named menu', () => {
+		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] });
+		const drawer = host.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
+		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+		const menu = drawer.querySelector<HTMLButtonElement>('[data-drawer-filter]')!;
+		expect(menu.textContent).toBe('Open'); menu.click(); flushSync();
+		const resolved = [...drawer.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((button) => button.textContent === 'Resolved')!;
+		resolved.click(); flushSync();
+		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 resolved');
+		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
 	});
 
 	it('ends the drawer in a Send now footer only while messages are not sent', () => {
@@ -153,6 +166,7 @@ describe('DocCommentSurface suggestions', () => {
 			const { set, onClose } = renderFollowing({ ...suggestion, replacement: null });
 			await vi.waitFor(() => expect(popover().style.left).toBe('548px'));
 			const before = placed();
+			host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click(); flushSync();
 			const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 			input.value = 'A half-written reply';
 			input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -198,6 +212,7 @@ describe('DocCommentSurface suggestions', () => {
 	it('does not turn a reply input click into text navigation', () => {
 		const onFocus = vi.fn();
 		render({ state: { kind: 'list' }, comments: [{ ...suggestion, replacement: null }], onFocus });
+		host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click(); flushSync();
 		host.querySelector<HTMLInputElement>('.ct-input')!.click();
 		expect(onFocus).not.toHaveBeenCalled();
 	});
