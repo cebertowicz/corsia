@@ -52,6 +52,11 @@ def scoped_costs(isolated_db, monkeypatch):
     from api import costs
     from infra.database import get_db
 
+    # Keep the completed-week seed in September while the monthly-only row is
+    # in October. The assertions below distinguish those two periods.
+    clock = datetime(2026, 10, 1, 12)
+    monkeypatch.setattr("infra.time.utc_now", lambda: clock)
+    monkeypatch.setattr(costs, "utc_now", lambda: clock)
     monkeypatch.setattr(costs, "authenticate", lambda _: {"id": "steve"})
     db = get_db()
     try:
