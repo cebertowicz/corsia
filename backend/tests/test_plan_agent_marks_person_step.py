@@ -134,7 +134,10 @@ def test_a_decisions_review_row_stays_with_the_decision(db):
         mutation_id="decision-raise", **common,
     ).result["decision"]
 
-    with pytest.raises(node_settlement.LaneOwnedNodeError, match="decision operations.*ask_artifact_id"):
+    with pytest.raises(
+        node_settlement.LaneOwnedNodeError,
+        match="decision operations.*invalidate this decision, then block.*ask_artifact_id",
+    ):
         _mark(db, plan.id, raised["node_id"])
     assert row(db, raised["node_id"])["state"] == "review_requested"
 
