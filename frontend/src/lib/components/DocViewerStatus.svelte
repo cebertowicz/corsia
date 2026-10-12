@@ -178,15 +178,28 @@
 {#if freshness && freshnessPresentation}
 	<div class="document-metadata" class:expanded={detailsOpen}>
 		<div class="metadata-owner">Owner: {freshness.owner_name}</div>
-		{#if freshnessPresentation.datetime}<time datetime={freshnessPresentation.datetime}>{freshnessPresentation.phrase}{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}</time>{:else}<span class="metadata-secondary">{freshnessPresentation.phrase}</span>{/if}
+		{#if freshnessPresentation.datetime}
+			<time datetime={freshnessPresentation.datetime}>
+				{freshnessPresentation.phrase}
+				{#if freshnessPresentation.dateText}<span class="sr-only"> ({freshnessPresentation.dateText})</span>{/if}
+			</time>
+		{:else}
+			<span class="metadata-secondary">{freshnessPresentation.phrase}</span>
+		{/if}
 		{#if freshnessPresentation.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
-		{#if shouldOfferVerification(freshness)}<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>{/if}
+		{#if shouldOfferVerification(freshness)}
+			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>
+		{/if}
+		<!-- Verification recovery is rendered outside the static metadata disclosure. -->
 	</div>
 {/if}
 
-<DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead} connectionStatusId={liveConnectionDescriptionId} />
+<DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
+	connectionStatusId={liveConnectionDescriptionId} />
 <span class:sr-only={!verificationError && !placementAnnouncement} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || placementAnnouncement || staleAnnouncement}</span>
-{#if readonly && ready}<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>{/if}
+{#if readonly && ready}
+	<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>
+{/if}
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
 	<div class="document-status-row document-notices">
 		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
