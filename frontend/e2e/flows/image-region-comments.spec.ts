@@ -165,7 +165,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			expect(description).toContain('Region 3: box at x 0%, y 0%, 100% wide, 100% tall');
 			const marked = description.match(/Marked-up image \(numbered boxes\): (\S+\.png)/);
 			expect(marked, description).not.toBeNull();
-			expect(fs.existsSync(marked![1])).toBe(true);
+			// The copy is drawn after the delivery commits, so it lands a moment after the batch reads delivered.
+			await expect.poll(() => fs.existsSync(marked![1]), { timeout: 15_000 }).toBe(true);
 			fs.copyFileSync(marked![1], testInfo.outputPath('1440-11-delivered-marked-up-image.png'));
 
 			// An agent's comment carries its name beside the number.

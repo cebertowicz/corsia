@@ -395,11 +395,13 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	// the filter was while the sheet was still moving.
 	await settled(page);
 	await expect(hitAtCentre(filters)).resolves.toBe(true);
+	await shot(page, 'rs-09-half-sheet-after-quote-tap', info);
 	const reopenedBox = (await filters.boundingBox())!;
 	await page.touchscreen.tap(reopenedBox.x + reopenedBox.width / 2, reopenedBox.y + reopenedBox.height / 2);
 	await expect(filters).toHaveAttribute('aria-expanded', 'true');
 	const menu = drawer.getByRole('menu', { name: 'Filter comments', exact: true });
 	await expect(menu.getByRole('menuitemradio')).toHaveCount(3);
+	await shot(page, 'rs-10-filter-menu-open', info);
 	await menu.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
 	await expect(filters).toHaveText('Filter');
 	await expect(filters).toHaveAttribute('aria-label', 'Filter comments: Resolved');
@@ -467,6 +469,7 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	expect(fit.listBottom, 'the list ends where the footer starts').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.lastCardBottom, 'scrolled to the end, the last card is above the footer').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.background, 'the footer is opaque --bg-secondary').toBe(fit.token);
+	await shot(page, mode === 'phone' ? 'rs-12-send-now-sheet' : 'rs-11-send-now-inline', info);
 	// The inline drawer extends its grid cap by the measured footer. The phone sheet is portaled outside that grid.
 	if (fit.docContentHeight !== null) {
 		const drawerCap = fit.docContentHeight * 0.36;
