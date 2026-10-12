@@ -27,9 +27,8 @@ CLOSE_NEXT_DESCRIPTION = (
 #: Appended to the plan mutation tool's description after ``CLOSE_NEXT_DESCRIPTION``.
 USER_TASKS_DESCRIPTION = (
     "Tasks assigned to the user are theirs to complete: activate, start and "
-    "next_node_id leave them untouched and report user_assigned. To have the "
-    "user act, ask in chat, or block on an ask for something to review. You "
-    "may still close or settle them."
+    "next_node_id leave them untouched and report user_assigned. Ask the user "
+    "in chat, or block on an artifact ask. You may still close or settle them."
 )
 
 #: The next steps after a thread cannot mutate another agent's plan.
