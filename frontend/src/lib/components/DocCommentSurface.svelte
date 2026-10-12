@@ -158,6 +158,8 @@
 	}
 	// An image's selected comment, picked on the image or there when the drawer opens, is scrolled to and marked in it.
 	// The drawer opens already at its card, so only the drawer moves; a pick while it is open glides the list.
+	// The drawer says what to do; the raw transport error stays in the log.
+	$effect(() => { if (load?.state === 'error') console.warn('Could not load comments', load.error); });
 	let listShown = false;
 	$effect(() => {
 		const id = focusedId;
@@ -316,7 +318,7 @@
 		{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments" in:menuPop={{ origin: 'top right' }} out:menuPop={{ origin: 'top right' }}>{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
 	</div><IconButton ariaLabel="Close comments" variant="ghost" size="sm" onclick={closeDrawer}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
-	{#if load?.state === 'error'}<div class="drawer-status" role="status">Couldn't load comments. {load.error}<Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
+	{#if load?.state === 'error'}<div class="drawer-status" role="status">Couldn't load comments. Check the connection and retry.<Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
 	<div class="drawer-comments">
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}

@@ -220,8 +220,13 @@ describe('DocCommentSurface suggestions', () => {
 
 	it('keeps loading and error states truthful and delegates Retry', () => {
 		const onRetry = vi.fn();
-		render({ state: { kind: 'list' }, comments: [], load: { state: 'error', error: 'Offline' }, onRetry });
-		expect(host.textContent).toContain("Couldn't load comments. Offline");
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		render({ state: { kind: 'list' }, comments: [], load: { state: 'error', error: 'Failed to fetch' }, onRetry });
+		// It says what to do; the raw transport error goes to the log.
+		expect(host.textContent).toContain("Couldn't load comments. Check the connection and retry.");
+		expect(host.textContent).not.toContain('Failed to fetch');
+		expect(warn).toHaveBeenCalledWith('Could not load comments', 'Failed to fetch');
+		warn.mockRestore();
 		expect(host.textContent).not.toContain('No comments yet.');
 		[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Retry')!.click();
 		expect(onRetry).toHaveBeenCalledOnce();
