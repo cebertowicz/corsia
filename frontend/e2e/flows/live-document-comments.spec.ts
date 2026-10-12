@@ -26,7 +26,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await openLiveDocument(writer, document);
 			await openLiveDocument(reader, document);
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
-			await reader.getByRole('button', { name: '3 comments', exact: true }).click();
+			await reader.getByRole('button', { name: /^3 open threads\b/ }).click();
 			const comments = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await expect(comments).toBeVisible();
 			const jump = comments.getByRole('button', { name: `Go to text: ${quote}`, exact: true }).first();
@@ -68,7 +68,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await reload.click();
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await expect(reply).toHaveValue(`draft ${stamp}`);
-			await expect(reader.getByRole('button', { name: '3 comments', exact: true })).toBeFocused();
+			await expect(reader.getByRole('button', { name: /^3 open threads\b/ })).toBeFocused();
 			await expect(reader.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
 			await expect(reload).toHaveCount(0);
 			await reader.screenshot({ path: testInfo.outputPath(`comment-reload-success-${width}.png`) });
@@ -76,7 +76,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			if (width <= 768) await reader.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await reader.getByText(document.title, { exact: true }).first().click();
 			await expect(reader.locator('.cm-content')).toContainText(quote);
-			await reader.getByRole('button', { name: '3 comments', exact: true }).click();
+			await reader.getByRole('button', { name: /^3 open threads\b/ }).click();
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await expect(reader.getByText(`First ${stamp}`, { exact: true })).toBeVisible();
 			await expect(reader.getByText(`Second ${stamp}`, { exact: true })).toBeVisible();

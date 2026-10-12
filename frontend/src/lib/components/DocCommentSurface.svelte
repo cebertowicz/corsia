@@ -16,6 +16,7 @@
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
+	import type { FeedbackSummary } from './DocFeedbackStatus.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
 	/**
 	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
@@ -27,7 +28,7 @@
 	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
 	 */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, unsent = null, onSendNow }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -60,6 +61,9 @@
 		onRetry?: () => void;
 		image?: ImageCommentSurface | null;
 		images?: DocImageComments | null;
+		/** The open document's batch not sent yet: while it holds messages the drawer ends in their Send now footer. */
+		unsent?: FeedbackSummary | null;
+		onSendNow?: () => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
 	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
@@ -82,6 +86,14 @@
 		return image ? [...shown].sort(byNumber) : shown;
 	});
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
+	// Leaving the document sends the batch (DocFeedback.leave); in its grace period it says when it goes instead.
+	const unsentText = $derived.by(() => {
+		if (!unsent?.pending) return '';
+		const count = `${unsent.pending} message${unsent.pending === 1 ? '' : 's'} not sent yet`;
+		const owner = unsent.owner ?? 'the owner';
+		if (unsent.graceMinutes !== null) return `${count} · sending to ${owner} in ${unsent.graceMinutes} min`;
+		return `${count} · ${unsent.pending === 1 ? 'it goes' : 'they go'} to ${owner} when you leave.`;
+	});
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
 		if (surfaceState?.kind !== 'thread' || typeof anchor !== 'function' || load?.state === 'loading') return;
@@ -284,6 +296,12 @@
 				{#if displayed.length}{@render content()}
 				{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
 			</div>
+			{#if unsentText}
+				<div class="drawer-unsent" data-drawer-unsent>
+					<p role="status">{unsentText}</p>
+					<Button size="sm" onclick={onSendNow} loading={unsent?.sending}>Send now</Button>
+				</div>
+			{/if}
 		</section>
 	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>
 	{:else}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
@@ -306,6 +324,11 @@
 	@media (pointer: coarse) { .drawer-heading :global(button), .comment-filters button { min-height: 44px; } }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
+	/* Pinned under the list, edge to edge over the drawer's padding, opaque so cards never show through it. */
+	.drawer-unsent { flex: none; display: flex; align-items: center; gap: var(--space-2); margin: 0 calc(-1 * var(--space-2)) calc(-1 * var(--space-2)); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
+	.drawer-unsent p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
+	.drawer-unsent :global(.btn) { flex: none; }
+	@media (pointer: coarse) { .drawer-unsent :global(.btn) { min-height: 44px; } }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent); cursor: pointer; }
 	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }

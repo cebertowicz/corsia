@@ -62,6 +62,28 @@ describe('DocCommentSurface suggestions', () => {
 		expect(drawer!.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
 	});
 
+	it('ends the drawer in a Send now footer only while messages are not sent', () => {
+		const onSendNow = vi.fn();
+		const unsent = writable({ pending: 2, owner: 'Style' as string | null, graceMinutes: null as number | null, sending: false });
+		const live = fromStore(unsent);
+		render({ state: { kind: 'list' }, comments: [suggestion], onSendNow, get unsent() { return live.current; } });
+		const footer = () => host.querySelector<HTMLElement>('[data-doc-comments-drawer] > [data-drawer-unsent]');
+		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('2 messages not sent yet · they go to Style when you leave.');
+		const send = footer()!.querySelector<HTMLButtonElement>('button')!;
+		expect(send.textContent?.trim()).toBe('Send now');
+		send.click();
+		expect(onSendNow).toHaveBeenCalledOnce();
+		// The drawer's last child, after the scrolling list, so the list scrolls and the footer stays.
+		expect(host.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer());
+
+		unsent.set({ pending: 1, owner: null, graceMinutes: 4, sending: true }); flushSync();
+		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('1 message not sent yet · sending to the owner in 4 min');
+		expect(footer()!.querySelector('button')!.disabled).toBe(true);
+
+		unsent.set({ pending: 0, owner: 'Style', graceMinutes: null, sending: false }); flushSync();
+		expect(footer()).toBeNull();
+	});
+
 	it('closes a card that follows its text only once that comment is deleted', () => {
 		const reading = () => new DOMRect(520, 100, 20, 20);
 		const gone = vi.fn();

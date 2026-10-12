@@ -27,6 +27,8 @@
 			overlay = !$paneCollapsed && shouldOverlayPane(
 				protectArtifactSplit, window.innerWidth, inlineCanvasWidth,
 			);
+			// How much of the canvas's inline end the overlaid pane covers, so controls there can keep clear of it.
+			main.style.setProperty('--pane-overlay-inset', overlay ? `${PANE_DRAWER_WIDTH}px` : '0px');
 		};
 		updateOverlay();
 
@@ -37,6 +39,7 @@
 		return () => {
 			observer.disconnect();
 			window.removeEventListener('resize', updateOverlay);
+			main.style.removeProperty('--pane-overlay-inset');
 		};
 	});
 </script>

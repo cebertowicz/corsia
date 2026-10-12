@@ -140,7 +140,7 @@ describe('ReviewBar', () => {
 		let fail!: (error: Error) => void;
 		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
 		await render();
-		const region = host.querySelector<HTMLElement>('.rb-status[role="status"]');
+		const region = host.querySelector<HTMLElement>('.rb-status[role="status"]')!;
 		expect(region).toBeTruthy();
 		expect(region.textContent).toBe('');
 		button('Approve')!.click();

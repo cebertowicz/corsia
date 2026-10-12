@@ -68,14 +68,14 @@ describe('document review toolbar and popover', () => {
 	it('requires artifactId without hiding the comment control', async () => {
 		render({ commentCount: 2 }); await settle(); expect(button('Request review')).toBeTruthy();
 		component.$set({ artifactId: null }); flushSync();
-		expect(maybeButton('Request review')).toBeUndefined(); expect(button('2 comments')).toBeTruthy();
+		expect(maybeButton('Request review')).toBeUndefined(); expect(button('2 open threads')).toBeTruthy();
 	});
 	it('shows only the Request review button when nobody is reviewing, and one control style across the row', async () => {
 		render({ commentCount: 1, stale: true }); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
-		const names = [...document.body.querySelectorAll<HTMLElement>('.document-status-row button')].map(nameOf);
-		expect(names).toEqual(['File changed · Reload', '1 comment', 'Request review']);
-		expect([...document.body.querySelectorAll('.document-status-row button')].every((item) => item.classList.contains('doc-tool'))).toBe(true);
+		const names = [...document.body.querySelectorAll<HTMLElement>('.document-tools button')].map(nameOf);
+		expect(names).toEqual(['File changed · Reload', '1 open thread', 'Request review']);
+		expect([...document.body.querySelectorAll('.document-tools button')].every((item) => item.classList.contains('doc-tool'))).toBe(true);
 	});
 	it('lists the chosen agents as chips, removes the last on Backspace, and keeps Send disabled with its reason until one is chosen', async () => {
 		render(); const search = await picker(); expect(document.activeElement).toBe(search);
@@ -186,6 +186,15 @@ describe('document review toolbar and popover', () => {
 		expect(maybeButton('Cancel request to Structured Plans')).toBeUndefined();
 		button('Cancel request to Quality Gate').click(); await settle();
 		expect(fetchMock.mock.calls.some(([input, init]) => String(input).startsWith('/api/doc-reviews/') && init?.method === 'DELETE')).toBe(true);
+	});
+	it('returns focus to the comments pill in the header when cancelling the last request removed its trigger', async () => {
+		rows = [row('review-1')];
+		render({ viewingThreadId: null, commentCount: 1 }); await settle();
+		button('Reviewers: Quality Gate (requested)').click(); await settle();
+		button('Cancel request to Quality Gate').click(); await settle();
+		expect(maybeButton('Reviewers: Quality Gate (requested)')).toBeUndefined();
+		key(document.activeElement as HTMLElement ?? document.body, 'Escape'); await settle();
+		expect(document.activeElement).toBe(button('1 open thread'));
 	});
 	it('collapses a long group to three avatars and a +N', async () => {
 		rows = Array.from({ length: 5 }, (_, index) => row(`review-${index}`, { reviewer_thread_id: `r${index}`, reviewer_name: `Reviewer ${index}` }));

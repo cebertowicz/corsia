@@ -14,6 +14,7 @@
 		targetInstanceId,
 		onFeedbackChanged,
 		compact = false,
+		withSend = true,
 		summary = $bindable({ pending: 0, owner: null, graceMinutes: null, sending: false }),
 	}: {
 		artifactId: string | null;
@@ -21,6 +22,8 @@
 		onFeedbackChanged?: () => void;
 		/** Shown in a narrow bar (DocFeedbackControls). */
 		compact?: boolean;
+		/** Show Send here (DocFeedbackControls); false where another surface shows it. */
+		withSend?: boolean;
 		/** Header and drawer state derived from the one feedback owner. */
 		summary?: FeedbackSummary;
 	} = $props();
@@ -48,4 +51,4 @@
 	));
 </script>
 
-<DocFeedbackControls {feedback} {compact} />
+<DocFeedbackControls {feedback} {compact} {withSend} />

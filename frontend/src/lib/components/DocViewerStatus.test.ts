@@ -75,6 +75,10 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(pill?.getAttribute('aria-label')).toBe('2 open threads, 3 messages not sent yet');
 		expect(pill?.querySelector('.unsent-dot')).toBeTruthy();
 		expect(host.textContent).not.toContain('Send 3 comments');
+		// Send and its countdown live in the comments drawer's footer: none of it is in the header, not even clipped.
+		expect(host.querySelector('.sending-now')).toBeNull();
+		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Send now');
+		expect(host.textContent).not.toContain('Sending to');
 	});
 
 	it('closes metadata on scoped Escape, restores its toggle, and preserves it from other header controls', () => {

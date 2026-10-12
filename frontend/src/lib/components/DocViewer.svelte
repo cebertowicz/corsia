@@ -385,6 +385,8 @@
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
+		unsent={feedbackSummary}
+		onSendNow={() => void feedbackStatus?.sendNow()}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}

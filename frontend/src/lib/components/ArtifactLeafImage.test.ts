@@ -97,7 +97,10 @@ describe('artifact leaf renderer choice', () => {
 		await vi.waitFor(() => expect(host.querySelector('.image-viewer .review-bar')).toBeTruthy());
 
 		expect(mocks.fetchReviewBar).toHaveBeenCalledWith('art-1');
-		expect(host.querySelector('.image-viewer')!.firstElementChild!.classList.contains('review-bar')).toBe(true);
+		// The bar lives in its height-holding slot, which comes first: above the image.
+		const first = host.querySelector('.image-viewer')!.firstElementChild!;
+		expect(first.classList.contains('rb-slot')).toBe(true);
+		expect(first.querySelector(':scope > .review-bar')).toBeTruthy();
 		expect(host.textContent).toContain('Is this the right diagram?');
 	});
 

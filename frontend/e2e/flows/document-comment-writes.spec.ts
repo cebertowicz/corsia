@@ -35,7 +35,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	}, { threadId, docPath, title });
 	// Comments live in the canvas drawer, which starts closed on every load.
 	const openComments = async () => {
-		await page.getByRole('button', { name: '1 comment', exact: true }).click();
+		await page.getByRole('button', { name: /^1 open thread\b/ }).click();
 		await expect(page.getByRole('region', { name: 'Document comments', exact: true })).toBeVisible();
 	};
 	await loginByUrl(page);

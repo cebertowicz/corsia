@@ -56,7 +56,7 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await openLiveDocument(writer, document);
 		await openLiveDocument(reader, document);
 		await expect(reader.locator('.cm-comment-anchor')).toHaveCount(2);
-		await reader.getByRole('button', { name: '2 comments', exact: true }).click();
+		await reader.getByRole('button', { name: /^2 open threads\b/ }).click();
 		const comments = reader.getByRole('region', { name: 'Document comments', exact: true });
 		const retainedCard = comments.locator('[data-comment-id]').filter({ hasText: `Keep ${stamp}` });
 		const retainedId = await retainedCard.getAttribute('data-comment-id');

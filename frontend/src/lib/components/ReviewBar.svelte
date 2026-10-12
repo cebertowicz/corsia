@@ -151,9 +151,11 @@
 		<section class="review-bar ask" class:noting class:expanded aria-label="Review request" aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
 			<span class="rb-head">
 				<button type="button" class="rb-line" aria-expanded={expanded} aria-label={label} title={ask} onclick={() => (expanded = !expanded)}>
-					<Avatar name={asker} color={agentColor(read?.asker?.id ?? asker)} hidden />
-					<span class="rb-who"><strong>{asker}</strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
-					<span class="rb-ask">{ask}</span>
+					<span class="rb-lead">
+						<Avatar name={asker} color={agentColor(read?.asker?.id ?? asker)} hidden />
+						<span class="rb-who"><strong>{asker}</strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
+						<span class="rb-ask">{ask}</span>
+					</span>
 					<svg class="rb-icon rb-chev" aria-hidden="true" viewBox="0 0 16 16"><path d="M4 6.5l4 4 4-4" /></svg>
 				</button>
 				{#if expanded}<p class="rb-ask-full">{ask}</p>{/if}
@@ -193,8 +195,9 @@
 	.review-bar { --rb-hit: calc(var(--space-8) - var(--space-1)); flex: none; display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); padding: 0 var(--space-1) 0 0; font-size: var(--text-footnote); color: var(--text-secondary); min-width: 0; }
 	/* The block grows from nothing (height through grid rows, clipped only while it moves) so the text below slides down instead of jumping; its own margin cancels the header's gap until it has height. An answer swaps in at the block's own height: the rows share one grid cell and crossfade (the transitions in the script). No transform on any ancestor of the capsule: it would make the floating capsule position against the row instead of the viewport. */
 	.rb-slot { display: grid; grid-template-rows: 1fr; min-width: 0; animation: rb-grow var(--dur-standard) var(--ease-entrance) backwards, rb-clip var(--dur-standard) step-end; }
-	.rb-slot > .review-bar { grid-area: 1 / 1; min-height: 0; }
-	.rb-head, .rb-row2 { opacity: var(--rb-fade, 1); }
+	/* `--rb-fade` rests at 1; the swap transition's tick overrides it inline on this same element while the ask's text crossfades. */
+	.rb-slot > .review-bar { grid-area: 1 / 1; min-height: 0; --rb-fade: 1; }
+	.rb-head, .rb-row2 { opacity: var(--rb-fade); }
 	@keyframes rb-grow { from { grid-template-rows: 0fr; margin-top: calc(var(--space-1) * -1); opacity: 0; } }
 	@keyframes rb-grow-solid { from { grid-template-rows: 0fr; margin-top: calc(var(--space-1) * -1); } }
 	@keyframes rb-clip { from, to { overflow: hidden; } }
@@ -206,6 +209,8 @@
 	.rb-head { display: flex; flex-direction: column; min-width: 0; }
 	.rb-line { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); min-width: 0; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	/* The avatar, name and ask; it lays nothing out itself except in the narrow header below. */
+	.rb-lead { display: contents; }
 	.rb-who { flex: none; white-space: nowrap; }
 	.rb-who strong { font-weight: var(--fw-semibold); }
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
@@ -251,6 +256,20 @@
 	:global(.document-header) .review-bar.receipt, :global(.document-header) .review-bar.stale { align-items: flex-start; }
 	:global(.document-header) .review-bar.receipt .rb-icon, :global(.document-header) .review-bar.stale .rb-icon { margin-block: calc((var(--space-7) - var(--text-subhead)) / 2); }
 	:global(.document-header) .rb-receipt, :global(.document-header) .review-bar.stale .rb-text, :global(.document-header) .review-bar.stale .rb-sub { line-height: var(--space-7); }
+	/* Narrow header: line 1 no longer fits a 21-character name, a small ask, the chevron and the tools, so the chevron joins the tools on a row of their
+	   own and the avatar, full name and ask take the full row beneath. The name never truncates; it wraps if even that row is short. Line 2 is unchanged.
+	   Threshold, measured at a fine pointer with a narrow canvas (the pill shows its count only):
+	     avatar 19 + gap 8 + 21-character name 129 + gap 8 + ask minimum 48 + gap 8 + chevron 13
+	     + two header column gaps 8 + tools 94 (comments pill 52 + gap 4 + Request review 38) = 335px of header content.
+	   Measured header content: 195px at 1280 with the pane overlaid (rearranges); 345px on a 393 phone, 355px at 1440 with the pane docked,
+	   635px with it closed (none rearranges). */
+	@container doc-header (width < 335px) {
+		:global(.document-header) .review-bar.ask { grid-template-rows: var(--space-7); }
+		:global(.document-header) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 2; grid-template-columns: subgrid; grid-template-rows: subgrid; }
+		:global(.document-header) .review-bar.ask .rb-chev { grid-column: 1; grid-row: 1; justify-self: end; align-self: center; margin-left: 0; }
+		:global(.document-header) .review-bar.ask .rb-lead { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
+		:global(.document-header) .review-bar.ask .rb-who { flex: 0 1 auto; white-space: normal; }
+	}
 
 	/* Expanded, the ask text (`.rb-ask-full`) is its own grid item spanning every column under line 1, so it has the header's full width, not what the pill and Request review leave it. */
 	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and Request changes, as the phone capsule does. */

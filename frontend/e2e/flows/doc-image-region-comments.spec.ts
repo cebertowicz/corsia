@@ -56,8 +56,9 @@ const marker = (page: Page) => page.locator('.cm-comment-marker').first();
 const drawer = (page: Page) => page.locator('.canvas-comment-drawer, .drawer-panel[role="dialog"]');
 const tag = (page: Page, number: number) => overlay(page).locator(`[data-region-tag="${number}"]:not([inert])`);
 const viewerSend = (page: Page) => bar(page).getByRole('button', { name: /^Send/ });
-const docSend = (page: Page) => page.locator('.document-status-row').getByRole('button', { name: /^Send/ });
-const docComments = (page: Page) => page.locator('.document-status-row .comment-status');
+const docComments = (page: Page) => page.locator('.document-header .comment-status');
+/** The document's pending batch, as its header pill names it; its Send now is in the comments drawer's footer. */
+const unsentName = (count: number) => new RegExp(`, ${count} messages? not sent yet$`);
 const drawerThumb = (page: Page) => drawer(page).locator('[data-region-thumb]').first();
 const surface = (page: Page) => overlay(page).locator('[data-image-regions]');
 
@@ -229,7 +230,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		// Back is not leaving: the document's own row shows the same pending comment, and the image its margin marker.
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(docSend(page)).toHaveText(/^\s*Send 1 comment to /);
+		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(1));
 		await expect(marker(page)).toBeVisible();
 		await expectMarkersBesideImages(page, testInfo, 'doc-1440-04-document-marker-pending');
 
@@ -248,6 +249,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		const card = page.locator('.canvas-comment-drawer .ct').filter({ hasText: 'The header crowds the logo' });
 		await expect(card).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
+		await expect(drawer(page).locator('[data-drawer-unsent]')).toContainText('1 message not sent yet');
 		await shoot(page, testInfo, 'doc-1440-06-drawer-image-group', true);
 		await card.click();
 		await expect(overlay(page)).toBeVisible();
@@ -265,7 +267,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(bar(page).locator('.sending-now')).toHaveCount(0);
 		await shoot(page, testInfo, 'doc-1440-07-viewer-sent', true);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
-		await expect(docSend(page)).toHaveCount(0);
+		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
 		await shoot(page, testInfo, 'doc-1440-08-document-sent', true);
 	});
 
@@ -298,11 +300,12 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, 'doc-393-03-viewer-pending-send', true);
 
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
-		await expect(docSend(page)).toHaveText(/^\s*Send 1 comment to /);
+		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(1));
 		await expectMarkersBesideImages(page, testInfo, 'doc-393-04-document-marker-pending');
 		await docComments(page).click();
 		await expect(page.locator('.drawer-panel[role="dialog"], .canvas-comment-drawer').getByText('Tap target too small')).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
+		await expect(drawer(page).locator('[data-drawer-unsent]')).toContainText('1 message not sent yet');
 		await shoot(page, testInfo, 'doc-393-05-drawer-image-group', true);
 	});
 
@@ -336,7 +339,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(overlay(page)).toHaveCount(0);
 		// A marker beside each image, and the document's row counting all six.
 		await expect(page.locator('.cm-comment-marker')).toHaveCount(2);
-		await expect(docSend(page)).toHaveText(/^\s*Send 6 comments to /);
+		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(6));
 		await expectMarkersBesideImages(page, testInfo, `doc-${width}-many-02-document-two-markers`);
 
 		// The drawer: one group per image, each under one thumbnail, comments in number order; scrolled to the second.

@@ -317,7 +317,8 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		mocks.setComments({ 'art-narrow': [{ id: 'comment', from: 0, to: 1, anchor: 'D', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
 		openArtifactTab(THREAD, { path: '/narrow.md', title: 'narrow.md' });
 		render('compact');
-		await vi.waitFor(() => expect(host.querySelector('.comment-status')).not.toBeNull());
+		// The pill sits in the header from the first frame and stays disabled until the comments load.
+		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('.comment-status')?.disabled).toBe(false));
 		paneOpen.set(false);
 		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 		flushSync();
@@ -454,7 +455,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		}
 	});
 
-	it('shows the viewer first and keeps same-title agent avatars and cursors separate', async () => {
+	it('shows only the other participants and keeps same-title agent avatars and cursors separate', async () => {
 		mocks.fetchContent.mockResolvedValue({ text: 'alpha beta gamma', revision: 'r-1', writable: true, artifact: { id: 'art-presence' } });
 		const at = new Date().toISOString();
 		recordDocActivity({ type: 'doc_activity', artifact_id: 'art-presence', thread_id: 'agent-a', agent: 'Reviewer', kind: 'read', span: { from: 0, to: 5 }, comment_id: null, revision: 'r-1', at });
@@ -462,7 +463,8 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		openArtifactTab(THREAD, { path: '/presence.md', title: 'presence.md' });
 		render();
 		await vi.waitFor(() => expect(host.querySelector('.presence-row')).not.toBeNull());
-		expect(host.querySelector('.presence-row .avatar')?.getAttribute('aria-label')).toBe('You');
+		// The viewer alone says nothing the viewer does not know, so no "You" avatar.
+		expect([...host.querySelectorAll('.presence-row .avatar')].map((avatar) => avatar.getAttribute('aria-label'))).not.toContain('You');
 		expect([...host.querySelectorAll<HTMLElement>('.participant-trigger')].map((row) => row.dataset.participantId)).toEqual(['agent-a', 'agent-b']);
 		expect([...host.querySelectorAll<HTMLElement>('.cm-presence-cursor')].map((row) => row.dataset.threadId)).toEqual(['agent-a', 'agent-b']);
 		expect(host.querySelector('.presence-row')?.textContent?.toLowerCase()).not.toContain('now');

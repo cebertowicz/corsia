@@ -191,7 +191,7 @@
 {#if readonly && ready}<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>{/if}
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
 	<div class="document-status-row document-notices">
-		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} bind:summary={feedbackSummary} /></span>
+		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} bind:summary={feedbackSummary} /></span>
 		{#if orphanedCount && placementReloadVisible}<button type="button" class="doc-tool orphan-reload" aria-label="Reload comment placements" aria-disabled={placementReloadUnavailable || placementReloading ? 'true' : undefined} aria-describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</button>{/if}
 	</div>
 {/if}
@@ -204,10 +204,6 @@
 	.document-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.identity-age { display: none; }
 	.feedback-controls { display: contents; }
-	/* The grace text gives way first (ellipsis); Send now keeps its whole label and the row keeps one line. */
-	.feedback-controls :global(> .sending-now.grace) { flex: 1 1 8rem; min-width: min-content; }
-	.feedback-controls :global(> .sending-now > .btn) { flex: none; }
-	.feedback-controls :global(> .sending-now > .sending-grace) { flex: 1 1 0; min-width: 0; contain: inline-size; }
 	.identity-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 	.document-metadata, .document-status-row { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 	/* One toolbar: every control is the same quiet ghost button in the app's UI type. */
@@ -237,15 +233,13 @@
 		.document-metadata:not(.expanded) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
-		.feedback-controls :global(> .sending-now > .btn), .feedback-controls :global(> .sending-now > .sent) { min-height: 44px; }
-		/* Send alone fills the rest of the row. */
-		.feedback-controls :global(> .sending-now:not(.grace)) { flex: 1; min-width: 0; }
-		.feedback-controls :global(> .sending-now:not(.grace) > .btn) { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
 	}
 
 	/* Slice-one review header: the title is already named by the tab or app bar, so only document tools remain in the slim row. */
-	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); }
+	/* Where the plan pane overlays the canvas (PaneShell), the header's content ends before it instead of under it: the tools, both ask lines and the notices.
+	   The header is a container, so the ask's line 1 can rearrange when that leaves it too narrow (ReviewBar). */
+	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); padding-inline-end: var(--pane-overlay-inset, 0px); container: doc-header / inline-size; }
 	.document-identity { justify-content: flex-end; }
 	.identity-details { display: none; }
 	.document-tools { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
