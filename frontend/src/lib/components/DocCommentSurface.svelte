@@ -14,21 +14,16 @@
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
+	import { drawerFooterHeight, drawerKeys } from '$lib/docCommentDrawer';
 	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
-	/**
-	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
-	 * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
-	 */
+	/** Image comments keep their thumbnail, numbered cards, hover link, and selected-card scroll. */
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
-	/**
-	 * A document's images with comments on parts of them (DCOL-FR13.6): each image's comments sit together in the drawer
-	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
-	 */
+	/** Document image comments group below a thumbnail; a missing source has no thumbnail. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
 	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null }: {
 		state: SurfaceState;
@@ -154,16 +149,7 @@
 		if (feedback.sendingGrace) return { before: `${count} · sending to `, owner, after: ` in ${feedback.graceMinutes} min` };
 		return { before: `${count} · ${feedback.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner, after: ' when you leave.' };
 	});
-	/** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
-	function drawerFooterHeight(node: HTMLElement) {
-		const doc = node.closest<HTMLElement>('.doc');
-		const update = () => doc?.style.setProperty('--doc-drawer-footer-height', `${node.getBoundingClientRect().height}px`);
-		update();
-		const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
-		observer?.observe(node);
-		return { destroy() { observer?.disconnect(); doc?.style.removeProperty('--doc-drawer-footer-height'); } };
-	}
-	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
+	// Footer measurement is shared with the document canvas.	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
 		if (surfaceState?.kind !== 'thread' || typeof anchor !== 'function' || load?.state === 'loading') return;
 		if (!followed) onClose();
@@ -235,16 +221,6 @@
 		if (useHalf) detent = 'half';
 		if (useHalf) onFocus(id, 'top');
 		else onFocus(id);
-	}
-	function onDrawerKey(event: KeyboardEvent) {
-		if (event.key !== 'Escape') return;
-		event.preventDefault();
-		event.stopPropagation();
-		closeDrawer();
-	}
-	function drawerKeys(element: HTMLElement) {
-		element.addEventListener('keydown', onDrawerKey);
-		return { destroy() { element.removeEventListener('keydown', onDrawerKey); } };
 	}
 	const authorsWithOpenSuggestions = $derived.by(() => Object.entries(
 		comments.filter((comment) => !comment.resolved && !comment.orphaned && comment.replacement !== null && comment.replacement !== undefined)
@@ -374,9 +350,9 @@
 
 {#if surfaceState || closingMobileState}
 	{#if surfaceState?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys={() => closeDrawer()}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
-		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
+		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys={closeDrawer} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if sheetDrawer && renderedMobileState}<AdaptiveDrawer ariaLabel="Document comments" heading={renderedMobileState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}>{@render content()}</AdaptiveDrawer>
 	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}

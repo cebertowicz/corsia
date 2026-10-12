@@ -32,10 +32,7 @@
 		onClosed = () => {},
 	}: {
 		ariaLabel: string;
-		/**
-		 * Optional chrome-level title. Omit it when the drawer's content already
-		 * carries its own titled header, so the two never say the same thing twice.
-		 */
+		/** Omit the chrome title when the content already names itself. */
 		heading?: string | null;
 		/** A short fact beside the title, such as a count; shown smaller in the accent colour. */
 		headingMeta?: string | null;
@@ -48,11 +45,7 @@
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
-		/**
-		 * Sit on the visible part of the screen, above an on-screen keyboard, for a
-		 * drawer whose text field must stay in view while typing. It reads the
-		 * visual viewport the app already publishes as CSS variables.
-		 */
+		/** Keep a text field above the published visual viewport. */
 		followKeyboard?: boolean;
 		/** Content may own the header, leaving the chrome with its grabber only. */
 		headless?: boolean;
