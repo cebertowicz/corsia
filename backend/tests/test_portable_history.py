@@ -359,7 +359,7 @@ def test_completed_turn_boundary_survives_later_nonsemantic_system_rows() -> Non
     assert tail.turns == ()
 
 
-def test_turn_owner_lookup_is_bounded_by_thread_not_turn_count() -> None:
+def test_turn_owner_lookup_reads_only_the_named_turns() -> None:
     from history.projection import render_portable_history
 
     db = _db()
@@ -376,7 +376,7 @@ def test_turn_owner_lookup_is_bounded_by_thread_not_turn_count() -> None:
     ]
     assert len(owner_queries) == 1
     assert "WHERE thread_id = 'thread-1'" in owner_queries[0]
-    assert " IN (" not in owner_queries[0]
+    assert "id IN ('turn-1','turn-2','turn-active')" in owner_queries[0]
 
 
 def test_adapters_preserve_assistant_and_tool_artifact_references_without_reordering(
