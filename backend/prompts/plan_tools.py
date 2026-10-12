@@ -28,7 +28,8 @@ CLOSE_NEXT_DESCRIPTION = (
 USER_TASKS_DESCRIPTION = (
     "Tasks assigned to the user are theirs to complete: activate, start and "
     "next_node_id leave them untouched and report user_assigned. Ask the user "
-    "in chat, or block on an artifact ask. You may still close or settle them."
+    "in chat, by an artifact ask, or a decision. You may still close or settle "
+    "them."
 )
 
 #: The next steps after a thread cannot mutate another agent's plan.
