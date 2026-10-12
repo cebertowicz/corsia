@@ -24,7 +24,7 @@
     "backend/api/project_scaffolding.py": 447,
     "backend/connections/harness_models.py": 599,
     "backend/core/step_handler.py": 428,
-    "backend/core/thread_lifecycle.py": 499,
+    "backend/core/thread_lifecycle.py": 498,
     "backend/e2e_mock.py": 410,
     "backend/host_access/processes.py": 1428,
     "backend/host_access/redaction.py": 968,
