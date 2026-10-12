@@ -87,7 +87,8 @@
 			? { y: 0, duration: 0 }
 			: { y: 72, duration: 260, easing: cubicOut },
 	);
-	const fadeParams = $derived({ duration: $prefersReducedMotion || !mountMotion ? 0 : 160 });
+	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
+	const fadeParams = $derived({ duration: !mountMotion ? 0 : $prefersReducedMotion ? Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 120 : 160 });
 
 	function onBackdrop(event: MouseEvent): void {
 		if (modal && event.target === event.currentTarget) onClose();
@@ -180,7 +181,7 @@
 			aria-label={ariaLabel}
 			tabindex="-1"
 			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
-			use:settleHeight={{ enabled: mountMotion && !dragging && !$prefersReducedMotion }}
+			use:settleHeight={{ enabled: mountMotion && !dragging, reduced: $prefersReducedMotion }}
 		>
 			<div class="drawer-chrome">
 				<div
