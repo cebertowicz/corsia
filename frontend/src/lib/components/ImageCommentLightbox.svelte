@@ -167,7 +167,7 @@
 						onOpenList={image.ui.openList}
 					/>
 					<!-- The bar is narrow at any window size (a canvas panel beside the chat): Send is short here, read out in full. -->
-					{#if feedback}
+					{#if feedback && !inDocument}
 						<DocFeedbackControls {feedback} compact />
 					{/if}
 				{/if}

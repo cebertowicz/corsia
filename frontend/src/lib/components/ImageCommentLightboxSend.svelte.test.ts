@@ -125,7 +125,7 @@ afterEach(() => {
 });
 
 describe('Send in the image viewer (DCOL-FR13.12)', () => {
-	it('closes the same batch the document’s Send closes, and going Back is not leaving it', async () => {
+	it('keeps send controls in the document review surface, and going Back is not leaving it', async () => {
 		const doc = documentStatus();
 		doc.component.sync('art-doc', pending(2));
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(2) });
@@ -136,16 +136,9 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(),
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
-		const send = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(send.getAttribute('aria-label')).toBe('Send 2 comments to Design');
-		send.click();
-		await settle();
-
-		expect(mocks.send).toHaveBeenCalledOnce();
-		expect(mocks.send).toHaveBeenCalledWith('art-doc');
-		// The document's row shows the batch closed too: one batch, not a copy.
-		expect(sendIn(doc.target)).toBeNull();
-		expect(sendIn(shown.target)).toBeNull();
+		// The in-document lightbox has no review controls; the document bar remains the one place to send.
+		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
+		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 2 comments to Design');
 
 		doc.component.sync('art-doc', pending(1));
 		flushSync();
@@ -172,10 +165,8 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		await settle();
 		shown.target.querySelector<HTMLButtonElement>('button.submit')!.click();
 		await settle();
-		// The bar is narrow at any window size: Send is short there and read out in full; the document row spells it out.
-		const inBar = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(inBar.textContent!.trim()).toBe('Send 1');
-		expect(inBar.getAttribute('aria-label')).toBe('Send 1 comment to Design');
+		// The document’s review surface owns the pending batch; the in-document lightbox has no duplicate control.
+		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
 		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment to Design');
 	});
 
@@ -214,7 +205,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(mocks.leave).toHaveBeenCalledWith('art-img');
 	});
 
-	it('on a phone, a short Send that reads out in full beside Back, Fit, Comment and the count', async () => {
+	it('on a phone, keeps the in-document lightbox bar free of review controls', async () => {
 		(isMobile as Writable<boolean>).set(true);
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(2) });
 		const doc = documentStatus();
@@ -224,9 +215,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const bar = shown.target.querySelector('.bar')!;
-		const send = sendIn(bar)!;
-		expect(send.textContent!.trim()).toBe('Send 2');
-		expect(send.getAttribute('aria-label')).toBe('Send 2 comments to Design');
+		expect(sendIn(bar)).toBeNull();
 		expect(bar.querySelector('[data-image-comment]')).not.toBeNull();
 		expect(bar.querySelector('[data-image-comments-pill]')).not.toBeNull();
 		expect([...bar.querySelectorAll('button')].map((button) => button.textContent!.trim())).toEqual(expect.arrayContaining(['Back', 'Fit']));
