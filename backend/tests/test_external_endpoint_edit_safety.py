@@ -4,6 +4,7 @@ discovery status never reports a snapshot the edit has already replaced."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sqlite3
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,6 +12,8 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
+from infra.key_store_servers import resolve_server, set_server_key
+from key_store_fixtures import fail_the_commit_after_a_key_write, values_after_a_sweep
 from omlx_provider_fixtures import _patch_httpx, _resp, _Router
 
 _OLD = "https://old.example.com/v1"
@@ -22,13 +25,15 @@ _CAPS = {"context_window": None, "supports_vision": 0,
 def edit(isolated_db, monkeypatch):
     from api import network_server_helpers as helpers
     from infra import product_events
+    from infra.key_store_servers import set_server_key
     from llm import network_discovery as nd
 
     sid = nd.upsert_server(
         provider="external", instance_id="old.example.com:443/v1", instance_name="External",
         host="old.example.com", port=443, status="online", kind="external", dialect="openai",
     )
-    nd.set_server_metadata(sid, base_url=_OLD, api_key="stored-key")
+    nd.set_server_metadata(sid, base_url=_OLD)
+    set_server_key(sid, "stored-key")
     real_probe = helpers._probe_external
     probe = AsyncMock(return_value=[{"id": "m"}])
     events: list = []
@@ -52,7 +57,8 @@ def _update(ctx, base: str, key: str | None = None, dialect: str = "openai") -> 
 def _unchanged(ctx) -> None:
     server = ctx.nd.get_server(ctx.sid)
     assert server["instance_id"] == "old.example.com:443/v1"
-    assert ctx.nd.get_server_metadata(ctx.sid) == {"base_url": _OLD, "api_key": "stored-key"}
+    assert ctx.nd.get_server_metadata(ctx.sid) == {"base_url": _OLD}
+    assert resolve_server(ctx.sid) == "stored-key"
 
 
 # ── the saved key stays with the origin it was saved for ────────────────────
@@ -81,18 +87,57 @@ def test_moving_with_a_new_key_sends_and_saves_only_the_new_key(edit) -> None:
 
     assert result["models"] == 1
     assert edit.probe.call_args.args[2] == {"Authorization": "Bearer new-key"}
-    assert edit.nd.get_server_metadata(edit.sid)["api_key"] == "new-key"
+    assert resolve_server(edit.sid) == "new-key"
     assert edit.nd.get_server(edit.sid)["instance_id"] == "elsewhere.example.net:443/v1"
     assert edit.events == [("edited", {
         "dialect": "openai", "models": 1, "moved": True, "key_replaced": True,
     })]
 
 
+def test_a_failed_base_write_puts_the_old_key_back_and_keeps_the_old_base(edit, monkeypatch) -> None:
+    def broken(*args, **kwargs):
+        raise RuntimeError("metadata write failed")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(edit.nd, "set_server_metadata", broken)
+        with pytest.raises(RuntimeError, match="metadata write failed"):
+            _update(edit, "https://elsewhere.example.net/v1", "new-key")
+
+    _unchanged(edit)
+
+
+def test_a_failed_commit_puts_the_old_key_back(edit, monkeypatch) -> None:
+    real = edit.helpers.write_transaction
+
+    @contextlib.contextmanager
+    def failing_commit(*args, **kwargs):
+        with real(*args, **kwargs) as db:
+            yield db
+            raise sqlite3.OperationalError("commit failed")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(edit.helpers, "write_transaction", failing_commit)
+        with pytest.raises(sqlite3.OperationalError):
+            _update(edit, "https://elsewhere.example.net/v1", "new-key")
+
+    assert resolve_server(edit.sid) == "stored-key"
+
+
+def test_a_refused_commit_keeps_the_old_key_and_base_and_a_sweep_removes_the_new_one(edit, monkeypatch) -> None:
+    with monkeypatch.context() as patched:
+        fail_the_commit_after_a_key_write(patched)
+        with pytest.raises(RuntimeError, match="commit failed"):
+            _update(edit, "https://elsewhere.example.net/v1", "new-key")
+
+    _unchanged(edit)
+    assert list(values_after_a_sweep().values()) == ["stored-key"]
+
+
 def test_a_same_origin_edit_keeps_the_saved_key_and_is_measured(edit) -> None:
     _update(edit, "https://old.example.com/v2")
 
     assert edit.probe.call_args.args[2] == {"Authorization": "Bearer stored-key"}
-    assert edit.nd.get_server_metadata(edit.sid)["api_key"] == "stored-key"
+    assert resolve_server(edit.sid) == "stored-key"
     assert edit.events == [("edited", {
         "dialect": "openai", "models": 1, "moved": False, "key_replaced": False,
     })]
@@ -173,14 +218,13 @@ def test_an_unchanged_endpoint_reconciles_and_records_its_models(edit, monkeypat
 
 
 @pytest.mark.parametrize("change", [
-    {"base_url": "https://old.example.com/v2"},
-    {"api_key": "new-key"},
+    lambda ctx: ctx.nd.set_server_metadata(ctx.sid, base_url="https://old.example.com/v2"),
+    lambda ctx: set_server_key(ctx.sid, "new-key"),
 ])
 def test_a_discovery_that_read_the_old_endpoint_cannot_overwrite_an_edit(
     edit, monkeypatch, change,
 ) -> None:
-    result = _discover(edit, monkeypatch,
-                       during_fetch=lambda: edit.nd.set_server_metadata(edit.sid, **change))
+    result = _discover(edit, monkeypatch, during_fetch=lambda: change(edit))
 
     assert result["ok"] is False
     assert result["error"] == "Superseded by an endpoint edit"

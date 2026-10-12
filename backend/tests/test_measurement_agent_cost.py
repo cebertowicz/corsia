@@ -8,6 +8,7 @@ import pytest
 
 from api.cost_identity import IdentityResolver
 from api.measurement_agent_cost import dollars_metric, query_task_hour_cost
+from api.measurement_chain_costs import chain_costs
 from api.measurement_agents import RANKING_MINIMUM_N
 from api.measurement_models import two_windows
 from api.measurement_model_cost import query_model_costs
@@ -53,7 +54,7 @@ def _usage(db, usage_id: str, node: str, model: str, *, source: str = "external_
 
 def _read(db) -> dict:
     prepare_outcome_periods(db, {**SCOPE, "grain": GRAIN}, roots=True)
-    return query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)})
+    return query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)}, chain_costs(db, SCOPE, GRAIN)["cost_rows"])
 
 
 def test_a_task_counts_when_it_has_priced_dollars_and_a_rating_whatever_else_its_chain_holds(db):
@@ -77,7 +78,7 @@ def test_a_task_counts_when_it_has_priced_dollars_and_a_rating_whatever_else_its
               if row["outcome"] == "priced"}
     assert set(priced) == {"m", "l", "unrated", "gap", "mixed", "before"}
 
-    costs = query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)})
+    costs = query_task_hour_cost(db, {**SCOPE, "grain": two_windows(GRAIN)}, chain_costs(db, SCOPE, GRAIN)["cost_rows"])
     counted = priced["m"] + priced["l"] + priced["gap"] + priced["mixed"]
     assert costs == {
         ("root", LATEST): {"dollars": pytest.approx(counted), "hours": 11.0, "n": 4},
@@ -120,6 +121,20 @@ def test_the_figure_is_withheld_under_the_table_floor_and_pools_across_periods()
     assert dollars_metric({("a", periods[0]): {"dollars": 1.0, "hours": 0.0, "n": 25}}, "a", GRAIN, RANKING_MINIMUM_N)["value"] is None
 
 
+def test_the_scope_figure_pools_every_agents_tasks_by_the_same_function():
+    latest, before = list(GRAIN.latest.periods), list(GRAIN.previous.periods)
+    costs = {
+        ("a", latest[0]): {"dollars": 10.0, "hours": 10.0, "n": 25},
+        ("b", latest[1]): {"dollars": 30.0, "hours": 10.0, "n": 25},
+        ("a", before[0]): {"dollars": 5.0, "hours": 10.0, "n": 25},
+    }
+    overall = dollars_metric(costs, None, GRAIN, RANKING_MINIMUM_N)
+    assert (overall["value"], overall["n"]) == (2.0, 50)
+    assert (overall["previous_value"], overall["previous_n"]) == (0.5, 25)
+    # One agent's own cell is unchanged by the other's tasks.
+    assert dollars_metric(costs, "a", GRAIN, RANKING_MINIMUM_N)["value"] == 1.0
+
+
 @pytest.mark.asyncio
 async def test_the_agents_route_serves_dollars_per_hour_and_attention_minutes(isolated_db, monkeypatch):
     from test_measurement_agents import POST_BREAK, _freeze, _read, _seed_agent, _seed_project, _seed_period, _seeded
@@ -136,7 +151,8 @@ async def test_the_agents_route_serves_dollars_per_hour_and_attention_minutes(is
             node = f"worker-2026-11-02-{index}"
             connection.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,source,created_at,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) VALUES (?, 'worker',?,1000000,0,0,0,1000000,'external_harness:claude-code','2026-11-02T10:00:00Z','plan-worker',?,'attempt',?,'execution')",
                                (f"usage-{node}", OPUS, node, f"commitment-worker-2026-11-02-{index}"))
-        connection.execute("INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES ('m1','worker','user','x','{}','2026-11-03T12:00:00Z')")
+        connection.execute("INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+                           "VALUES ('steve','chat','worker','2026-11-03T12:00:00Z','2026-11-03T12:01:00Z',60,1,'hidden')")
 
     _seeded(seed)
     (row,) = (await _read())["rows"]
@@ -145,3 +161,6 @@ async def test_the_agents_route_serves_dollars_per_hour_and_attention_minutes(is
     # Each S task is 1 h of work carrying one 1M-token Opus call, so dollars per hour is that call's price.
     assert cell["value"] == pytest.approx(8.0)
     assert row["active_minutes"] == pytest.approx(1.0)
+    # The one agent is all the work there is, so the scope's pooled figure is its own.
+    overall = (await _read())["overall"]["dollars_per_work_hour"]
+    assert (overall["value"], overall["n"]) == (cell["value"], cell["n"])

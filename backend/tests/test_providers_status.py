@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
@@ -79,7 +79,7 @@ def test_omlx_update_preserves_managed_autostart_contract(client):
         )
 
     assert response.status_code == 200
-    save.assert_called_once_with("providers", {"omlx": {"autoStart": True}})
+    save.assert_called_once_with("providers", {"omlx": {"autoStart": True}}, db=ANY)
 
 
 def test_provider_status_omlx_no_servers_registered(client):

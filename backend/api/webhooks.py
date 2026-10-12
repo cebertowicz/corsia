@@ -23,10 +23,11 @@ _UNSIGNED_ALLOWED_EVENTS: frozenset[str] = frozenset({"ping"})
 
 
 def _get_webhook_secret() -> str | None:
-    """Read the GitHub webhook secret from DB settings."""
-    from infra.settings import get_setting
-    webhook_cfg = get_setting("webhook") or {}
-    return webhook_cfg.get("github_webhook_secret")
+    """Read the GitHub webhook secret from the key store."""
+    from infra.key_store import GITHUB_WEBHOOK, resolve_builtin
+
+    resolved = resolve_builtin(GITHUB_WEBHOOK)
+    return resolved[0] if resolved else None
 
 
 def verify_signature(payload_body: bytes, signature_header: str, secret: str) -> bool:

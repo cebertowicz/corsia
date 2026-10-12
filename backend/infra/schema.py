@@ -1,6 +1,7 @@
 """SQLite schema DDL used by database initialization."""
 from __future__ import annotations
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
+from infra.artifact_identity_schema import ARTIFACT_IDENTITY_SCHEMA_SQL
 from infra.bulletin_schema import BULLETIN_SCHEMA_SQL
 from infra.connection_schema import CONNECTION_SCHEMA_SQL
 from infra.vendor_policy_schema import VENDOR_SUBSCRIPTION_SCHEMA_SQL
@@ -28,28 +29,7 @@ from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
 
-SCHEMA_VERSION = 106
-#: The artifact-identity table on its own, so a focused fixture can load the
-#: real definition instead of hand-copying one that then drifts. The full schema
-#: below embeds this same text, so the two cannot diverge.
-ARTIFACT_IDENTITY_SCHEMA_SQL = """\
-CREATE TABLE IF NOT EXISTS artifact_identities (
-        id TEXT PRIMARY KEY,
-        integration TEXT NOT NULL,
-        type TEXT NOT NULL,
-        external_id TEXT NOT NULL,
-        title TEXT,
-        description TEXT,
-        path TEXT,
-        state TEXT NOT NULL DEFAULT 'active',
-        retention TEXT NOT NULL DEFAULT 'durable'
-            CHECK (retention IN ('ephemeral', 'durable')),
-        metadata TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(integration, type, external_id)
-    );
-"""
+SCHEMA_VERSION = 113
 SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,

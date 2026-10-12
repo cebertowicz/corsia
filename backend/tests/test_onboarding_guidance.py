@@ -144,7 +144,7 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
     sections = set(re.findall(r"'([a-z]+)'", navigation.split("SETTINGS_SECTIONS = [", 1)[1].split("]", 1)[0]))
     anchors = {
         anchor
-        for path in (ROOT / "frontend/src/lib/components").glob("Settings*.svelte")
+        for path in (ROOT / "frontend/src/lib/components").glob("*.svelte")
         for anchor in re.findall(r'data-settings-anchor="([\w-]+)"', path.read_text(encoding="utf-8"))
     }
     links = re.findall(r"\]\(/settings/([a-z]+)(?:#([\w-]+))?\)", first_run + web_search)

@@ -104,13 +104,16 @@ def _tail_log(server_id: str, lines: int = 20) -> str:
 
 
 def _resolve_settings(cfg: dict) -> dict:
-    """Merge the row's metadata_json with ``cfg`` so explicit cfg keys win."""
+    """Merge the row's metadata_json and stored key with ``cfg`` so explicit cfg keys win."""
     sid = cfg.get("server_id")
     base: dict = {}
     if sid:
         try:
+            from infra.key_store_servers import resolve_server
             from llm.network_discovery import get_server_metadata
             base = get_server_metadata(sid) or {}
+            if stored_key := resolve_server(sid):
+                base["api_key"] = stored_key
         except Exception as e:
             log.warning(f"server metadata lookup failed for {sid}: {e}")
             base = {}

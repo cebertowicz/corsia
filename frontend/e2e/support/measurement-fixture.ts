@@ -131,7 +131,7 @@ export function mockWindows(ids: string[]) {
 /** A populated Cost answer for the echoed period, for flows that are not about Cost. */
 export function mockCostBody(grain: string | null) {
 	const period = (day: string, dollars: number, outcomes: number) => ({
-		period: day, dollars, priced_records: 800, api_records: 1_000, outcomes, per_outcome: dollars / outcomes, sized: 120, hours: 2_400, per_hour: dollars / 2_400, average: dollars / 2_400,
+		period: day, dollars, priced_records: 800, usage_records: 1_000, outcomes, per_outcome: dollars / outcomes, sized: 120, hours: 2_400, per_hour: dollars / 2_400, average: dollars / 2_400,
 	});
 	// The served latest and previous windows are named by the days they cover, not by a `period` key.
 	const window = (row: ReturnType<typeof period>, from: string, to: string) => { const { period: _period, ...figures } = row; return { from, to, ...figures }; };
@@ -139,7 +139,7 @@ export function mockCostBody(grain: string | null) {
 	const latest = period('2026-09-28', 10_600, 3_746);
 	return {
 		definition_version: 1, period: mockPeriod(grain), series: [previous, latest], latest: window(latest, '2026-09-28', '2026-10-04'), previous: window(previous, '2026-09-21', '2026-09-27'),
-		coverage: { priced_records: 1_600, api_records: 2_000 }, not_api_priced_records: 0, excluded: [],
+		coverage: { priced_records: 1_600, usage_records: 2_000 }, not_api_priced_records: 0, excluded: [],
 		actual: { subscription_records: 0, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 0, complete: true, workspace_subscription: { subscription_dollars: null, overage_dollars: null, subscription_facts: 0, overage_facts: 0, subscription_coverage: 'none', overage_coverage: 'none', overlapping_overage: [], allocation: 'unavailable' } },
 	};
 }

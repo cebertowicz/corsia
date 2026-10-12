@@ -196,7 +196,7 @@ async def _run_job_safely(*, include_corrections: bool = False) -> None:
 
 
 async def _run_corrections_recording_safely() -> None:
-    """Run one bounded correction batch without changing maintenance disposition."""
+    """Drain corrections within their time budget without changing maintenance disposition."""
     try:
         from jobs.corrections_recording import run_corrections_recording
 
@@ -217,31 +217,60 @@ async def _reap_worktrees_safely() -> None:
         logger.exception("nightly_job: worktree reaper failed")
 
 
-async def nightly_job_loop() -> None:
-    """Background loop: check every 5 minutes whether maintenance is due.
+def _log_manual_corrections_drain(task: asyncio.Task[None]) -> None:
+    """Observe a detached manual drain; the drain logs its own failures."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        logger.info("nightly_job: manual corrections recording cancelled")
 
-    Triggers:
-    - Nightly at 02:00 local time (local timezone)
-    - On idle detection (4+ hours of inactivity, sweep not yet run today)
+
+async def nightly_job_loop() -> None:
+    """Background loop: continuously check nightly, idle, and manual triggers.
+
+    A manual corrections drain may last RUN_TIME_BUDGET_SECONDS, so it is tracked
+    separately: maintenance triggers continue to fire, and the 02:00 corrections
+    pass yields to that in-flight drain rather than duplicating provider work.
     """
+    manual_corrections_task: asyncio.Task[None] | None = None
     await asyncio.sleep(STARTUP_DELAY)
     logger.info("nightly_job: loop started (checking every {}s)", CHECK_INTERVAL)
 
-    while True:
-        try:
-            if _should_run_nightly():
-                logger.info("nightly_job: nightly trigger fired (02:00 window)")
-                await _run_job_safely(include_corrections=True)
-            elif _should_run_on_idle():
-                logger.info("nightly_job: idle trigger fired ({}h+ idle)", IDLE_THRESHOLD_HOURS)
-                await _run_job_safely()
-            else:
-                from jobs.corrections_recording import claim_manual_corrections_recording
+    try:
+        while True:
+            try:
+                if _should_run_nightly():
+                    include_corrections = (
+                        manual_corrections_task is None or manual_corrections_task.done()
+                    )
+                    logger.info("nightly_job: nightly trigger fired (02:00 window)")
+                    if not include_corrections:
+                        logger.info("nightly_job: skipping corrections; manual drain is running")
+                    await _run_job_safely(include_corrections=include_corrections)
+                elif _should_run_on_idle():
+                    logger.info("nightly_job: idle trigger fired ({}h+ idle)", IDLE_THRESHOLD_HOURS)
+                    await _run_job_safely()
+                else:
+                    from jobs.corrections_recording import claim_manual_corrections_recording
 
-                if await asyncio.to_thread(claim_manual_corrections_recording):
-                    logger.info("nightly_job: manual corrections recording trigger fired")
-                    await _run_corrections_recording_safely()
-        except Exception:
-            logger.exception("nightly_job: loop error")
+                    if await asyncio.to_thread(claim_manual_corrections_recording):
+                        if manual_corrections_task and not manual_corrections_task.done():
+                            logger.info("nightly_job: manual corrections recording already running")
+                        else:
+                            logger.info("nightly_job: manual corrections recording trigger fired")
+                            manual_corrections_task = asyncio.create_task(
+                                _run_corrections_recording_safely(),
+                                name="manual-corrections-recording",
+                            )
+                            manual_corrections_task.add_done_callback(_log_manual_corrections_drain)
+            except Exception:
+                logger.exception("nightly_job: loop error")
 
-        await asyncio.sleep(CHECK_INTERVAL)
+            await asyncio.sleep(CHECK_INTERVAL)
+    finally:
+        if manual_corrections_task and not manual_corrections_task.done():
+            manual_corrections_task.cancel()
+            try:
+                await manual_corrections_task
+            except asyncio.CancelledError:
+                pass

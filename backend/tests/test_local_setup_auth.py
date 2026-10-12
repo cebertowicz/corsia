@@ -345,7 +345,7 @@ _real_download = local_setup._wait_for_download
 def test_the_public_server_view_carries_no_key():
     row = {"id": "ns-1", "metadata_json": json.dumps({"api_key": KEY, "token": "t0ken-value", "note": "ok"})}
 
-    view = _public_server_view(dict(row))
+    view = _public_server_view(dict(row), {"ns-1": KEY})
 
     assert KEY not in json.dumps(view) and "t0ken-value" not in json.dumps(view)
     assert view["has_key"] is True and view["masked_key"] != KEY and view["metadata"] == {"note": "ok"}
@@ -355,6 +355,7 @@ def test_the_public_server_view_carries_no_key():
 def test_the_add_probe_sends_the_key_when_it_has_one(monkeypatch, api_key):
     from types import SimpleNamespace
 
+    from api import network_server_helpers
     from api.network_server_helpers import _add_omlx_server
     from llm import network_discovery
 
@@ -370,7 +371,7 @@ def test_the_add_probe_sends_the_key_when_it_has_one(monkeypatch, api_key):
         lambda self, *a, **k: real_init(self, *a, **{**k, "transport": httpx.MockTransport(handler)}),
     )
     monkeypatch.setattr(network_discovery, "upsert_server", lambda **_kw: "ns-1")
-    monkeypatch.setattr(network_discovery, "set_server_metadata", lambda *_a, **_kw: None)
+    monkeypatch.setattr(network_server_helpers, "set_server_key", lambda *_a, **_kw: None)
 
     async def discovered(_sid):
         return None

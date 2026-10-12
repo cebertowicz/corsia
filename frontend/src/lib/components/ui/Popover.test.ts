@@ -107,6 +107,18 @@ describe('Popover', () => {
 			const low = mountIn(new DOMRect(500, 0, 900, 700), new DOMRect(500, 600, 900, 50));
 			await vi.waitFor(() => expect(low.style.top).toBe('422px'));
 		});
+		it('uses empty canvas below an avoided image before covering another image tag', async () => {
+			measure(new DOMRect(500, 0, 420, 700));
+			host = document.createElement('div'); document.body.appendChild(host);
+			const bounds = document.createElement('div'); bounds.setAttribute('data-canvas', ''); host.appendChild(bounds);
+			component = mount(Popover, { target: host, props: {
+				anchor: new DOMRect(700, 260, 20, 20), bounds, avoidRect: () => new DOMRect(560, 100, 300, 400),
+				open: true, onClose: vi.fn(), children: (() => {}) as any,
+			} });
+			flushSync();
+			const surface = host.querySelector<HTMLElement>('.popover')!;
+			await vi.waitFor(() => expect(surface.style.top).toBe('508px'));
+		});
 		it('never flips onto the pane to the left of the canvas', async () => {
 			const surface = mountIn(new DOMRect(500, 0, 520, 700), new DOMRect(900, 100, 20, 20));
 			await vi.waitFor(() => expect(surface.style.left).not.toBe('12px'));

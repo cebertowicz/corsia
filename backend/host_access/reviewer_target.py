@@ -1,18 +1,38 @@
 """Which model reviews a host-access lease.
 
 A pinned reviewer (the model that reviewed the application) wins; otherwise
-the configured reviewer; otherwise the requesting thread's own model. The
-requester's model supplies only the model identity: every review still runs as
-one fresh isolated call over the application payload, never a fork of the
-requester's transcript.
+the configured reviewer, which the requester's own model replaces for one
+application review when it cannot run and the person turned fallback on;
+otherwise the requesting thread's own model. The requester's model supplies
+only the model identity: every review still runs as one fresh isolated call
+over the application payload, never a fork of the requester's transcript.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 
-from host_access.errors import HostAccessSupervisorError
+from host_access.errors import (
+    HostAccessSupervisorError,
+    ReviewerOutage,
+    ReviewerUnavailableError,
+)
 from infra.db_async import run_in_db
+from infra.product_events import emit_product_event
+from llm.resolution import ExecutionTarget
+
+
+# Key on the lease returned to the requesting tool only (never persisted): the
+# reviewer outage that blocked it, so its guidance reports that cause and not
+# whatever the outage is by the time the guidance is built.
+REVIEWER_UNAVAILABLE_ERROR_KEY = "reviewer_unavailable_error"
+
+
+def with_failure_cause(blocked: dict, exc: BaseException) -> dict:
+    """The blocked lease, carrying the reviewer outage that caused the block when there was one."""
+    if isinstance(exc, ReviewerUnavailableError):
+        return {**blocked, REVIEWER_UNAVAILABLE_ERROR_KEY: exc}
+    return blocked
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,36 +128,74 @@ def _requester_reviewer_account(db, target, requester_thread_id: str | None) -> 
         return resolve_scope_reviewer_account(target, project, db=db)
     except CCUnavailableError as exc:
         reason = getattr(exc, "reason", "unavailable")
-        raise HostAccessSupervisorError(
-            f"host-access reviewer account unavailable: {reason}"
+        raise ReviewerUnavailableError(
+            f"host-access reviewer account unavailable: {reason}",
+            outage=ReviewerOutage(
+                _model_name(target), reason, getattr(exc, "resets_at", None),
+            ),
         ) from exc
 
 
-async def resolve_reviewer_target(
-    expected_catalog_id: str | None = None,
-    *,
-    requester_thread_id: str | None = None,
-):
-    """Resolve the reviewer: pinned, else configured, else the requester's model."""
+def _model_name(target) -> str:
+    """The name a person knows this reviewer model by."""
+    return target.display_name or target.catalog_id
+
+
+@dataclass(frozen=True, slots=True)
+class _ReviewerChoice:
+    """Which model reviews, and what may stand in when it cannot run."""
+
+    selected: str
+    #: A reviewer was named (pinned or configured), so its outage is the person's to fix.
+    named: bool
+    pinned: bool
+    fallback_enabled: bool
+    #: The requester's own model; set only for an application review with fallback on.
+    fallback_model: str | None
+
+
+def _choose_reviewer(
+    expected_catalog_id: str | None, requester_thread_id: str | None,
+) -> _ReviewerChoice:
+    """Pick the reviewer model: pinned, else configured, else the requester's."""
+    from infra.database import get_db
+    from infra.settings import (
+        get_host_access_reviewer_fallback,
+        get_host_access_reviewer_model,
+    )
+
+    db = get_db()
+    try:
+        fallback_enabled = get_host_access_reviewer_fallback(db=db)
+        configured = get_host_access_reviewer_model(db=db)
+        requester = _requester_model(db, requester_thread_id)
+    finally:
+        db.close()
+    if expected_catalog_id is not None:
+        return _ReviewerChoice(expected_catalog_id, True, True, fallback_enabled, None)
+    if configured is not None:
+        return _ReviewerChoice(
+            configured, True, False, fallback_enabled,
+            requester if fallback_enabled and requester != configured else None,
+        )
+    if requester is None:
+        raise HostAccessSupervisorError(
+            "host-access reviewer has no model: none is configured "
+            "and the requesting thread has no selected model"
+        )
+    return _ReviewerChoice(requester, False, False, fallback_enabled, None)
+
+
+async def _resolve_runnable(selected: str, requester_thread_id: str | None):
+    """Resolve one exact reviewer model, or raise why it cannot run now."""
 
     def resolve():
-        """Pick the reviewer model and resolve its exact available target."""
+        """Resolve the exact target and the account its review runs on."""
         from infra.database import get_db
-        from infra.settings import get_host_access_reviewer_model
         from llm.resolution import resolve_execution_target
 
         db = get_db()
         try:
-            selected = expected_catalog_id
-            if selected is None:
-                selected = get_host_access_reviewer_model(
-                    db=db
-                ) or _requester_model(db, requester_thread_id)
-                if selected is None:
-                    raise HostAccessSupervisorError(
-                        "host-access reviewer has no model: none is configured "
-                        "and the requesting thread has no selected model"
-                    )
             target = resolve_execution_target(selected, db=db)
             target = replace(
                 target,
@@ -146,17 +204,98 @@ async def resolve_reviewer_target(
         finally:
             db.close()
         if not target.available:
-            raise HostAccessSupervisorError(
-                "host-access reviewer model is unavailable"
+            raise ReviewerUnavailableError(
+                "host-access reviewer model is unavailable",
+                outage=ReviewerOutage(
+                    _model_name(target),
+                    target.availability_reason or "model_unavailable",
+                ),
             )
         return target
 
     target = await run_in_db(resolve)
     if target.harness == "native":
-        from llm.resolution import validate_native_target
+        from llm.resolution import ModelUnavailableError, validate_native_target
 
-        await validate_native_target(target)
+        try:
+            await validate_native_target(target)
+        except ModelUnavailableError as exc:
+            raise ReviewerUnavailableError(
+                str(exc), outage=ReviewerOutage(_model_name(target), exc.reason),
+            ) from exc
     return target
+
+
+@dataclass(frozen=True, slots=True)
+class FallbackReviewerTarget(ExecutionTarget):
+    """The requester's own model, reviewing because the chosen reviewer could not run."""
+
+    reviewer_fallback: bool = True
+
+
+def _refusal(
+    exc: ReviewerUnavailableError,
+    choice: _ReviewerChoice,
+    fallback: ReviewerOutage | None = None,
+) -> ReviewerUnavailableError:
+    """The outage, carrying whether fallback applies and what it hit."""
+    return ReviewerUnavailableError(
+        str(exc),
+        outage=exc.outage,
+        pinned=choice.pinned,
+        fallback_enabled=choice.fallback_enabled,
+        fallback=fallback,
+    )
+
+
+def _report_unavailable(exc: ReviewerUnavailableError, choice: _ReviewerChoice, thread_id: str | None) -> None:
+    """Record that the chosen reviewer could not run, so outages and fallback use are measurable."""
+    emit_product_event(
+        "host_access_review",
+        "reviewer_unavailable",
+        thread_id=thread_id,
+        properties={
+            "cause": exc.outage.reason,
+            "fallback_enabled": choice.fallback_enabled,
+            "pinned": choice.pinned,
+            "named": choice.named,
+        },
+    )
+
+
+async def resolve_reviewer_target(
+    expected_catalog_id: str | None = None,
+    *,
+    requester_thread_id: str | None = None,
+):
+    """Resolve the reviewer: pinned, else configured, else the requester's model.
+
+    A configured reviewer that cannot run is replaced by the requester's own
+    model only when the fallback setting is on, and only for an application
+    review. A pinned (per-action) review keeps its exact binding and never
+    falls back. Only "cannot run" falls back: a reviewer that ran and failed
+    is never resolved here.
+    """
+    choice = await run_in_db(
+        lambda: _choose_reviewer(expected_catalog_id, requester_thread_id)
+    )
+    try:
+        return await _resolve_runnable(choice.selected, requester_thread_id)
+    except ReviewerUnavailableError as exc:
+        _report_unavailable(exc, choice, requester_thread_id)
+        if not choice.named:
+            # No reviewer was chosen: this is the requester's own model failing,
+            # which Settings cannot fix, so it stays an ordinary review failure.
+            raise HostAccessSupervisorError(str(exc)) from exc
+        if choice.fallback_model is None:
+            raise _refusal(exc, choice) from exc
+        try:
+            target = await _resolve_runnable(choice.fallback_model, requester_thread_id)
+        except ReviewerUnavailableError as second:
+            raise _refusal(exc, choice, second.outage) from second
+    return FallbackReviewerTarget(
+        **{field.name: getattr(target, field.name) for field in fields(ExecutionTarget)}
+    )
 
 
 async def resolve_bound_reviewer_target(

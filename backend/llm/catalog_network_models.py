@@ -374,7 +374,7 @@ async def discover_network_models(server_id: str) -> dict:
 
     try:
         canonical_models, status_data = await _fetch_omlx_canonical_models(
-            api_base, mgmt_base, server.get("api_key"), server_id,
+            api_base, mgmt_base, None, server_id,
         )
     except Exception as exc:
         result["error"] = f"Connection failed: {exc}"

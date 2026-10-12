@@ -35,7 +35,7 @@
 	valueFormat={(value) => value.toFixed(1)}
 	chartTitle="Minutes of your engagement per outcome"
 	axisTitle="Minutes of your engagement per outcome"
-	caption="Your engaged minutes divided by accepted outcomes; source: your messages and accepted outcomes; lower is better. n is accepted outcomes per week."
+	caption="Your engaged minutes divided by accepted outcomes; source: your time active in CORSIA and accepted outcomes; lower is better. n is accepted outcomes per week."
 >
 	{#snippet after()}<MeasurementAgentsMinutes state={$measurementAgents} /><p class="asks">{asksLine}</p>{/snippet}
 </MeasurementPeriodSection>
@@ -55,5 +55,5 @@
 />
 
 <style>
-	.asks { margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); overflow-wrap: anywhere; }
+	.asks { margin: 8px 0 0; font-size: 13px; font-style: italic; color: var(--text-secondary); overflow-wrap: anywhere; }
 </style>

@@ -23,6 +23,7 @@ SERVED_KEYS = {
     "findings_state",
     "inactive_projects",
     "metric",
+    "overall",
     "project_summaries",
     "period",
     "rows",

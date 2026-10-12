@@ -208,13 +208,14 @@ def test_empty_cloud_batch_does_not_need_snapshot(isolated_db, monkeypatch, tmp_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail_commit", [False, True])
 async def test_cloud_discovery_http_reports_only_committed_rows(
-    isolated_db, monkeypatch, caplog, fail_commit,
+    isolated_db, monkeypatch, caplog, fail_commit, tmp_path,
 ):
     from api import discovered_models, providers
-    from infra import auth, settings
+    from infra import auth, key_store_providers
 
     seed_account("operator", "cloud-token")
-    settings.set_setting("providers", {"anthropic": {"apiKey": "synthetic-key"}})
+    monkeypatch.setattr("infra.config.STATE_ROOT", tmp_path)
+    key_store_providers.set_provider_key("anthropic", "snapshot-test-value-1")
     models = _models("anthropic")
     monkeypatch.setattr(catalog_cloud, "_anthropic_discovered", lambda: models)
     db = database.get_db()

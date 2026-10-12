@@ -9,6 +9,8 @@ export interface ProviderEntry {
 	type: 'cloud' | 'network' | 'harness';
 	has_key: boolean;
 	masked_key: string | null;
+	/** An environment variable CORSIA found for this provider and ignores. */
+	ignored_env_var?: string | null;
 	api_base: string | null;
 	docs_url: string | null;
 	models: string[];

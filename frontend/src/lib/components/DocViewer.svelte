@@ -11,11 +11,14 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
+	import { createDocViewerImages } from '$lib/docViewerImages';
+	import type { DocumentImageRequest } from '$lib/stores/documentImageViewer';
+	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
 	import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, markFreshnessVerified, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer } from '$lib/docViewerOperations';
-	import { handleDocumentEscape } from '$lib/docViewerKeyboard';
+	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
 	import { canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentsInDocumentOrder, type CanvasScrollTarget } from '$lib/docCanvasComments';
@@ -51,6 +54,8 @@
 		onSignal,
 		stale = false,
 		onReload,
+		onOpenImage,
+		covered = false,
 	}: {
 		target: DocViewerTarget | null;
 		onClose?: () => void;
@@ -60,6 +65,10 @@
 		/** A newer revision exists than the one on screen. */
 		stale?: boolean;
 		onReload?: () => void;
+		/** Opens an image of the document larger in the canvas, with its comments. */
+		onOpenImage?: (request: DocumentImageRequest) => void;
+		/** The canvas shows an image viewer over this document; it keeps its state but answers no keys. */
+		covered?: boolean;
 	} = $props();
 
 	let docState = $state<DocState>('loading');
@@ -104,14 +113,7 @@
 
 	// The comments pane derives orphaning from the text currently on screen (and a refused accept)
 	// so a comment never remains highlighted after an in-editor edit changes it.
-	$effect(() => syncActiveDocumentEditor({
-		target,
-		draft: currentDraft,
-		docState,
-		artifactId: loadedArtifactId,
-		text: editText,
-		readonly,
-	}));
+	$effect(() => syncActiveDocumentEditor({ target, draft: currentDraft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
 	const { orphanedCount, placementReloading, placementReloadError } = $derived(commentSurfaceStatus(listedComments));
@@ -134,10 +136,19 @@
 		if (!commentUI.focusComment(id, anchor, viaSuggestion)) return;
 		setCommentScrollTarget(id, false, 'navigation');
 	}
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) setCommentScrollTarget(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); }
-	function onDocEdit(mapPos: (p: number) => number) {
-		if (loadedArtifactId) remapComments(loadedArtifactId, mapPos);
-	}
+	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) setCommentScrollTarget(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); }
+	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading)); }
+	function onDocEdit(mapPos: (p: number) => number) { if (loadedArtifactId) remapComments(loadedArtifactId, mapPos); images.remap(mapPos); }
+
+	const accent = $derived($projects.find((project) => project.id === target?.projectId)?.accent_color ?? null);
+	const images = createDocViewerImages({
+		onOpenImage: () => onOpenImage, root: () => docRoot, comments: () => listedComments, artifactId: () => loadedArtifactId,
+		target: () => target, readOnly: () => readonly, text: () => editText, session: () => liveSession, accent: () => accent,
+		feedback: () => feedbackStatus?.feedback(), showInText: focusInText });
+	function focusInText(id: string) { setCommentScrollTarget(id, commentUI.state?.kind === 'list', 'navigation'); focusedDocComment.set(id); }
+	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
+	function focusFromCard(id: string) { images.openOr([id], { id }, () => focusInText(id)); }
 
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, draft: () => $commentDraft, session: () => liveSession,
@@ -280,23 +291,10 @@
 	}
 
 	function onKey(event: KeyboardEvent): void {
-		if (event.defaultPrevented) return;
-		if (event.key === 'Escape' && commentUI.state?.kind === 'list' && event.target === commentUI.anchor) {
-			event.preventDefault();
-			commentUI.close();
-			commentUI.restoreFocus();
-			return;
-		}
-		handleDocumentEscape(event, {
-			hasCommentDraft: draftController.draft !== null,
-			clearCommentDraft: draftController.cancel,
-			paneOpen: $paneOpen,
-			isPaneDrawer: isPaneDrawer(),
-			hasPendingSelection: Boolean(draftController.pending),
-			clearPendingSelection: () => draftController.select(null),
-			escapeCloses,
-			flush: flushNow,
-			close: onClose,
+		handleDocumentKey(event, {
+			covered, commentUI, draftController,
+			paneOpen: $paneOpen, isPaneDrawer: isPaneDrawer(),
+			escapeCloses, flush: flushNow, close: onClose,
 		});
 	}
 </script>
@@ -362,6 +360,7 @@
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
 		readOnly={readonly || suggestionBusyId !== null}
 		imageBase={target}
+		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
 		{saveError}
 		{saveStatus}
 		pendingSel={draftController.pending}
@@ -380,7 +379,7 @@
 		onCancelDraft={draftController.cancel}
 		onClose={commentUI.close}
 		restoreFocus={commentUI.restoreFocus}
-		onFocus={(id) => { setCommentScrollTarget(id, commentUI.state?.kind === 'list', 'navigation'); focusedDocComment.set(id); }}
+		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		onSubmit={submitComment}
@@ -394,6 +393,7 @@
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
+		images={images.groups}
 	/>
 </div>
 

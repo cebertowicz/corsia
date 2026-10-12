@@ -125,11 +125,11 @@ test.describe('@surface:measurement agents populated', () => {
 			await openMeasurement(page, project);
 			const table = page.getByRole('region', { name: /Agents table/ });
 
-			// The table opens in the order the producer ranked it, with no column sorted.
+			// The table opens with the most outcomes first, with no column sorted.
 			const names = table.locator('tbody tr th .name');
-			await expect(names).toHaveText(['Behind', 'Middle', 'Ahead']);
+			await expect(names).toHaveText(['Ahead', 'Behind', 'Middle']);
 			await expect(table.locator('thead th')).toHaveText([
-				'Agent', 'Outcomes', 'First try', '$ per hour of work', 'Change in minutes per outcome, vs the previous window',
+				'Agent', 'Outcomes', 'First try', '$ per person-hour of work delivered', 'Change in minutes per outcome, vs the previous window',
 			]);
 			await expect(table.locator('thead th').nth(1)).toHaveAttribute('aria-sort', 'none');
 
@@ -154,8 +154,10 @@ test.describe('@surface:measurement agents populated', () => {
 			}));
 			expect(overflow.page).toBeLessThanOrEqual(0);
 			if (width === 393) {
-				// The narrow screen is where the table is tightest: every agent's filter action and the
-				// last column stay reachable inside the table's own region, never past the page edge.
+				// The narrow screen is where the table is tightest: all five columns fit the region, so
+				// nothing needs a sideways scroll to be read; every agent's filter action and the
+				// last column stay reachable inside it, never past the page edge.
+				expect(overflow.region).toBeLessThanOrEqual(0);
 				const reached = await page.evaluate(() => {
 					const region = document.querySelector<HTMLElement>('.table-wrap');
 					if (!region) return null;

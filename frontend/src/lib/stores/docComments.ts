@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
 import {
-	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ServerComment
+	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ImageRegion, type ServerComment
 } from '$lib/api/docs';
 import { relLabel } from '$lib/time';
 import { trackPlacements, type Placement } from './docCommentPlacement';
@@ -17,7 +17,7 @@ function findById(rows: ServerComment[], id: string): ServerComment | null {
 	return null;
 }
 
-async function postReconciled(
+export async function postReconciled(
 	artifactId: string,
 	clientId: string,
 	c: Parameters<typeof postComment>[1]
@@ -69,6 +69,14 @@ export interface DocComment {
 	/** The latest user-requested live placement reload was refused. */
 	placementReloadError?: boolean;
 	drawn?: boolean;
+	/** A comment on part of an image (DCOL-FR13.3); null for a text comment. */
+	region?: ImageRegion | null;
+	/** Its number on that image (FR13.4). */
+	regionNumber?: number | null;
+	/** The image changed after the pin was placed (FR13.9). */
+	regionStale?: boolean;
+	/** For an image inside a document, the workspace file it shows; null on an image artifact. */
+	imageSrc?: string | null;
 }
 
 export const docComments = writable<Record<string, DocComment[]>>({});
@@ -110,7 +118,18 @@ export function fromServer(r: ServerComment): DocComment {
 		decision: r.decision,
 		decidedBy: r.decided_by,
 		replyWaiting: !!r.reply_waiting,
-		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, at: relLabel(x.created_at) }))
+		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, at: relLabel(x.created_at) })),
+		...regionFromServer(r)
+	};
+}
+
+export function regionFromServer(r: ServerComment): Pick<DocComment, 'region' | 'regionNumber' | 'regionStale' | 'imageSrc'> {
+	if (r.region_number == null || r.region_x == null || r.region_y == null) return {};
+	return {
+		region: { x: r.region_x, y: r.region_y, w: r.region_w ?? 0, h: r.region_h ?? 0 },
+		regionNumber: r.region_number,
+		regionStale: !!r.region_stale,
+		imageSrc: r.image_src ?? null
 	};
 }
 
@@ -167,7 +186,7 @@ function isAgent(author: CommentAuthor): boolean {
 	return author !== 'you';
 }
 
-function upsertTop(artifactId: string, row: ServerComment) {
+export function upsertTop(artifactId: string, row: ServerComment) {
 	docComments.update((all) => {
 		const list = all[artifactId] ? [...all[artifactId]] : [];
 		if (list.some((c) => c.id === row.id)) return all;

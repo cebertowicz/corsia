@@ -18,4 +18,6 @@ bash scripts/check-pr
 
 Also run the targeted tests for the files and behavior you changed. For frontend changes, use the applicable commands from `frontend/package.json`, such as `npm run check` and `npm run test`; for backend changes, run the affected tests with the repository's Python 3.11 environment. Do not run the backend full suite locally: CI owns that suite.
 
+Every pull request reports the required check contexts. When a job is irrelevant to the changed files, its context is reported as skipped rather than omitted.
+
 For browser and end-to-end test guidance, see [`frontend/e2e/README.md`](frontend/e2e/README.md). For system design and runtime boundaries, use the architecture documents above.

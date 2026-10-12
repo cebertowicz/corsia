@@ -103,9 +103,15 @@ describe('measurement table headers', () => {
 		}
 	});
 
-	it('wraps agent names and subjects between words only, never mid-word, in the Minutes and Biggest changes tables', () => {
-		expect(midWordRules(minutesSource)).toEqual([]);
+	it('wraps agent names and subjects at their spaces; only the name cell may break an unbroken name wider than the card', () => {
+		// A name with spaces or one real word never breaks mid-word. The one exception is a single unbroken token (a path or id)
+		// wider than the card, which would otherwise widen the page; only the name cell carries that rule, never a header or a figure.
+		const minutesRules = midWordRules(minutesSource);
+		expect(minutesRules.map(([selector]) => selector)).toEqual(['tbody th']);
+		// The name column keeps room for the longest real agent name, so the rule above only reaches tokens longer than that.
+		expect(minutesRules[0][1]).toMatch(/min-width:\s*1[5-9]ch/);
 		const subjectRules = midWordRules(changesSource).flatMap(([selector]) => selector.split(',')).map((part) => part.trim());
-		expect(subjectRules.filter((part) => /first-child|\bth\b|\btd\b/.test(part))).toEqual([]);
+		// The action sentence (.act) already broke an unbroken token; the subject is the only other rule.
+		expect(subjectRules).toEqual(['.act', '.tb td.subj b']);
 	});
 });

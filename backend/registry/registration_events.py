@@ -39,6 +39,50 @@ def resolve(integration: str, type: str, external_id: str, db=None) -> dict | No
             _db.close()
 
 
+UPLOAD_IDENTITY_TYPES = ("upload", "image")
+
+
+def resolve_upload(external_id: str, db=None) -> dict | None:
+    """Resolve an active upload identity by file id, whether typed upload or image."""
+    _db = db or get_db()
+    try:
+        identity = _db.execute(
+            "SELECT integration, type, state FROM artifact_identities "
+            "WHERE integration='upload' AND type IN (?, ?) AND external_id=? "
+            "AND state='active' ORDER BY type='image' DESC LIMIT 1",
+            (*UPLOAD_IDENTITY_TYPES, external_id),
+        ).fetchone()
+        if identity is None:
+            return None
+        return resolve_normalized_owner(
+            _db, identity["integration"], identity["type"], external_id,
+        )
+    finally:
+        if not db:
+            _db.close()
+
+
+def resolve_upload_path(path: str, db=None) -> dict | None:
+    """Resolve an active upload identity by its canonical local path."""
+    _db = db or get_db()
+    try:
+        identity = _db.execute(
+            "SELECT integration, type, external_id FROM artifact_identities "
+            "WHERE integration='upload' AND type IN (?, ?) AND path=? "
+            "AND state='active' ORDER BY type='image' DESC LIMIT 1",
+            (*UPLOAD_IDENTITY_TYPES, path),
+        ).fetchone()
+        if identity is None:
+            return None
+        return resolve_normalized_owner(
+            _db, identity["integration"], identity["type"],
+            identity["external_id"],
+        )
+    finally:
+        if not db:
+            _db.close()
+
+
 def routing_registrations(
     integration: str, type: str, external_id: str, db=None
 ) -> dict[str, Any]:

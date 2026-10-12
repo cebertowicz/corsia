@@ -241,6 +241,10 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
         blocks.append(
             USER_FRAMING if _batch_value(batch, "author_kind") == "user" else AGENT_FRAMING
         )
+    # One marked-up copy per image, set by delivery on the batch's region comments.
+    # It leads, so a handoff cap that cuts the tail never drops it.
+    marked = (str(item["marked_image_line"]) for item in items if item.get("marked_image_line"))
+    blocks.extend(dict.fromkeys(marked))
     for item in items:
         if item["kind"] == "comment":
             lines = [
@@ -252,6 +256,8 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
             ]
             if item.get("anchor_text"):
                 lines.append(f"Quote: {item['anchor_text']}")
+            if item.get("region_line"):
+                lines.append(str(item["region_line"]))
             lines.append(f"Feedback: {item['body']}")
             if item.get("replacement") is not None:
                 lines.append(f"Suggested replacement: {item['replacement']}")

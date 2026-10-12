@@ -84,7 +84,7 @@ test('@surface:doc-send-on-close sends an open user batch exactly once before th
 
 test('@surface:doc-send-on-close keeps a switch-away grace and shows its server deadline on return', async ({ page, request }) => {
 	test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
-	const title = `switch-away-${Date.now()}`;
+	const title = `switch-away-with-a-long-owner-name-${Date.now()}`;
 	const threadId = await createSession(request, title);
 	const first = await seedDocument(request, threadId, title, 'first');
 	const second = await seedDocument(request, threadId, title, 'second');
@@ -103,7 +103,33 @@ test('@surface:doc-send-on-close keeps a switch-away grace and shows its server 
 	await expect.poll(() => leaves).toHaveLength(1);
 	await (await tabControl(page, first.fileName, 'select')).click();
 	await expect(page.getByRole('status').filter({ hasText: 'Sending to' })).toContainText(`Sending to ${title} in`);
-	await expect(page.getByRole('button', { name: 'Send now' })).toBeVisible();
+	const sendNow = page.getByRole('button', { name: 'Send now' });
+	await expect(sendNow).toBeVisible();
+
+	// The long grace text gives way first: Send now keeps its whole label and the toolbar stays on one row.
+	const fit = await page.evaluate(() => {
+		const send = [...document.querySelectorAll<HTMLElement>('.document-header .btn')].find((el) => el.textContent?.trim() === 'Send now')!;
+		const count = document.querySelector<HTMLElement>('.document-header .comment-status')!;
+		const review = document.querySelector<HTMLElement>('.document-header .review-request')!;
+		// Measure the label itself: at phone width the button's ::after hit area adds 8 px to its scrollWidth.
+		const label = document.createRange();
+		label.selectNodeContents(send);
+		const style = getComputedStyle(send);
+		const clipped = label.getBoundingClientRect().right - (send.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth));
+		// Only the owner name may truncate: the countdown at the end of the grace text must be whole.
+		const grace = document.querySelector<HTMLElement>('.document-header .sending-grace')!;
+		const tail = document.createRange();
+		tail.setStart(grace.lastChild!, 0);
+		tail.setEnd(grace.lastChild!, grace.lastChild!.textContent!.length);
+		const countdownClipped = tail.getBoundingClientRect().right - grace.getBoundingClientRect().right;
+		const owner = grace.querySelector<HTMLElement>('.grace-owner');
+		return { clipped, countdownClipped, ownerTruncated: !!owner && owner.scrollWidth > owner.clientWidth, sendTop: send.getBoundingClientRect().top, countTop: count.getBoundingClientRect().top, reviewTop: review.getBoundingClientRect().top };
+	});
+	expect(fit.clipped, 'Send now label is not truncated').toBeLessThanOrEqual(0.5);
+	expect(fit.countdownClipped, 'the "in N min" countdown is not clipped').toBeLessThanOrEqual(0.5);
+	expect(fit.ownerTruncated, 'the long owner name is what truncates').toBe(true);
+	expect(Math.abs(fit.reviewTop - fit.countTop), 'Request review shares a row with the comment count').toBeLessThanOrEqual(4);
+	expect(Math.abs(fit.sendTop - fit.countTop), 'Send now shares that row').toBeLessThanOrEqual(4);
 });
 
 // The pinned header once widened the canvas at phone width: its "Send N comments to <owner>" button pushed the editor sideways.

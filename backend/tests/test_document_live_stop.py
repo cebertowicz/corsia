@@ -84,7 +84,10 @@ async def test_started_stop_settles_caller_and_keeps_lane_owned_late_result(tmp_
             owner.tool_names["call"] = "lane_probe"
             monkeypatch.setattr(PROCESS_OWNER, "terminate_turn", AsyncMock())
             join = asyncio.create_task(ws._do_stop({"id": "user-1"}, "thread-1", None, None, identity.turn_id))
-            assert (await asyncio.wait_for(join, .5)).outcome == "stopped"
+            receipt = await asyncio.wait_for(join, 5)
+            assert receipt.outcome == "stopped"
+            assert not release.is_set()
+            assert not lane._worker.done()
             await _settle_stop_work()
             with pytest.raises(asyncio.CancelledError):
                 await call

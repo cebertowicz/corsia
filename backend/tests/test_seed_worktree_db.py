@@ -279,23 +279,45 @@ def test_seed_default_settings_only_fills_missing_keys(tmp_path):
     assert agents == {"defaults": {}}
 
 
-def test_seed_provider_api_key_sets_key_for_e2e_model_provider(tmp_path, monkeypatch):
-    target_db = tmp_path / "corsia.db"
-    _init_schema_db(target_db)
-    conn = sqlite3.connect(target_db)
-    conn.row_factory = sqlite3.Row
+@pytest.fixture
+def clean_openai_key():
+    from infra import key_store_providers
 
-    script = _load_script()
-    script["_seed_default_settings"](conn)
+    key_store_providers.remove_provider_key("openai")
+    yield
+    key_store_providers.remove_provider_key("openai")
+
+
+def test_seed_provider_api_key_writes_key_store_not_settings(tmp_path, monkeypatch, clean_openai_key):
+    from infra import key_store_providers
+
     monkeypatch.setenv("CORSIA_SEED_PROVIDER_API_KEY", "sk-test-key")
-    script["_seed_provider_api_key"](conn, "openai/gpt-4o")
-    conn.commit()
+    script = _load_script()
+    script["_seed_provider_api_key"](tmp_path / "state", tmp_path / "ws", "openai/gpt-4o")
 
-    providers = json.loads(
-        conn.execute("SELECT value FROM settings WHERE key='providers'").fetchone()[0]
-    )
-    conn.close()
-    assert providers == {"openai": {"apiKey": "sk-test-key"}}
+    assert key_store_providers.provider_keys() == {"openai": "sk-test-key"}
+
+
+def test_seed_provider_api_key_falls_back_to_provider_env_var(tmp_path, monkeypatch, clean_openai_key):
+    from infra import key_store_providers
+
+    monkeypatch.delenv("CORSIA_SEED_PROVIDER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    script = _load_script()
+    script["_seed_provider_api_key"](tmp_path / "state", tmp_path / "ws", "openai/gpt-4o")
+
+    assert key_store_providers.provider_keys() == {"openai": "sk-from-env"}
+
+
+def test_seed_provider_api_key_without_input_writes_nothing(tmp_path, monkeypatch, clean_openai_key):
+    from infra import key_store_providers
+
+    monkeypatch.delenv("CORSIA_SEED_PROVIDER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    script = _load_script()
+    script["_seed_provider_api_key"](tmp_path / "state", tmp_path / "ws", "openai/gpt-4o")
+
+    assert key_store_providers.provider_keys() == {}
 
 
 def test_seed_reviewer_model_merges_into_existing_agents_defaults(tmp_path, monkeypatch):
@@ -567,7 +589,7 @@ def test_seed_worktree_db_measurement_fixture_feeds_the_series_queries(tmp_path,
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     params = {"user_id": _SEED_OWNER, "scope_project": "all", "scope_agent": None,
-              "grain": _seed_grain(), "max_active_gap_seconds": 600}
+              "grain": _seed_grain()}
     _prepare_outcome_periods(conn, params)
     outcomes = {r["period"]: r for r in _query_family(conn, "outcomes", params)}
     decisions = {r["period"]: r for r in _query_family(conn, "decisions", params)}
@@ -584,25 +606,29 @@ def test_seed_worktree_db_measurement_fixture_feeds_the_series_queries(tmp_path,
 
 
 def test_seed_worktree_db_measurement_fixture_reaches_the_attention_estimate(tmp_path, monkeypatch):
-    """The fixture gives the settled weeks human activity, so the proxy Attention
+    """The fixture gives settled weeks recorded presence, so the proxy Attention
     series serves values, and the thin week stays withheld."""
     from api.measurement import _row
+    from api.measurement_presence import first_presence_period
     from api.measurement_queries import prepare_outcome_periods as _prepare_outcome_periods, query_family as _query_family
 
     db_path = _seed_with_measurement_fixture(tmp_path, monkeypatch, enabled=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     params = {"user_id": _SEED_OWNER, "scope_project": "all", "scope_agent": None,
-              "grain": _seed_grain(), "max_active_gap_seconds": 600}
+              "grain": _seed_grain()}
     _prepare_outcome_periods(conn, params)
     active = {r["period"]: r for r in _query_family(conn, "active", params)}
+    first_presence = first_presence_period(conn, _SEED_OWNER, params["grain"])
     conn.close()
 
-    rows = {period: _row("active_hours_per_outcome", period, active.get(period), False)
+    rows = {period: _row("active_hours_per_outcome", period, active.get(period), False,
+                         grain=params["grain"], first_presence_period=first_presence)
             for period in ("2026-09-07", "2026-09-14", "2026-09-21")}
     assert rows["2026-09-07"]["value"] is None
-    assert rows["2026-09-14"]["value"] == pytest.approx((60 * 60 + 59 * 600) / 3600 / 100)
-    assert rows["2026-09-21"]["value"] == pytest.approx((120 * 60 + 119 * 600) / 3600 / 762)
+    # The fixture records 60 and 120 minutes of presence, divided by that week's accepted outcomes.
+    assert rows["2026-09-14"]["value"] == pytest.approx(60 / 60 / 100)
+    assert rows["2026-09-21"]["value"] == pytest.approx(120 / 60 / 762)
     assert rows["2026-09-21"]["proxy"] is True
 
 

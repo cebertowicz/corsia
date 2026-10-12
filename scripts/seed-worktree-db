@@ -19,22 +19,21 @@ Inputs (env vars, all optional unless noted):
 
   CORSIA_E2E_MODEL
       Required for a real (non-mock) run. "<provider>/<model_id>" of the
-      agent default model, e.g. "anthropic/claude-haiku-4-5". Actual LLM
-      calls resolve its provider's real API key from the invoking shell env
-      (e.g. ANTHROPIC_API_KEY) — runtime dispatch falls back to that. The
-      *catalog* considers a cloud provider "active" (and so lists its
-      models at all) only when the target DB's `providers` setting itself
-      has a non-empty apiKey for it, regardless of provider — set
-      CORSIA_SEED_PROVIDER_API_KEY (any non-empty value works for this
-      purpose) whenever a caller needs CORSIA_E2E_MODEL's model to
-      actually show up in the seeded catalog.
+      agent default model, e.g. "anthropic/claude-haiku-4-5". The provider's
+      key is read from the key store of the target state root, never from the
+      process environment at run time: the seed writes it there from
+      CORSIA_SEED_PROVIDER_API_KEY, or else from that provider's own
+      <PROVIDER>_API_KEY variable in this script's environment. Without a key
+      in the store the catalog lists none of the provider's models.
 
   CORSIA_SEED_PROVIDER_API_KEY
-      API key seeded into the target `providers` setting for
-      CORSIA_E2E_MODEL's provider. Required for that provider's models
-      to be listed as active in the catalog at all; additionally needed for
-      *catalog discovery* itself on a non-anthropic provider (e.g. openai;
-      anthropic's discovery works from a static local table either way).
+      API key written to the target key store for CORSIA_E2E_MODEL's
+      provider. Takes precedence over <PROVIDER>_API_KEY (for example
+      OPENAI_API_KEY), which is read only here, as explicit seed input.
+      Required for the provider's models to be listed as active in the
+      catalog at all; additionally needed for *catalog discovery* itself on
+      a non-anthropic provider (anthropic's discovery works from a static
+      local table either way).
 
   CORSIA_SEED_OMLX_ENDPOINT
       Base URL of a real, reachable local oMLX server (e.g.
@@ -218,21 +217,22 @@ def _seed_default_settings(wt: sqlite3.Connection) -> None:
             )
 
 
-def _seed_provider_api_key(wt: sqlite3.Connection, e2e_model: str | None) -> None:
-    """Seed an explicit caller-provided API key for CORSIA_E2E_MODEL's
-    provider, when catalog discovery needs one. Never read from prod."""
-    api_key = os.environ.get("CORSIA_SEED_PROVIDER_API_KEY")
-    if not api_key or not e2e_model or "/" not in e2e_model:
+def _seed_provider_api_key(
+    state_root: Path, selected_workspace: Path, e2e_model: str | None
+) -> None:
+    """Write an explicit caller-provided API key for CORSIA_E2E_MODEL's
+    provider into the target key store. Never read from prod."""
+    if not e2e_model or "/" not in e2e_model:
         return
     provider, _, _ = e2e_model.partition("/")
-    row = wt.execute("SELECT value FROM settings WHERE key = 'providers'").fetchone()
-    providers = (json.loads(row["value"]) if row else {}) or {}
-    providers.setdefault(provider, {})["apiKey"] = api_key
-    wt.execute(
-        "INSERT INTO settings (key, value, updated_at) VALUES ('providers', ?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        (json.dumps(providers), now_utc()),
-    )
+    env_name = provider.upper().replace("-", "_") + "_API_KEY"
+    value = os.environ.get("CORSIA_SEED_PROVIDER_API_KEY") or os.environ.get(env_name)
+    if not value:
+        return
+    os.environ["CORSIA_WORKSPACE"] = str(selected_workspace.resolve())
+    os.environ["CORSIA_STATE_DIR"] = str(state_root.resolve())
+    providers = _import_backend_module("infra.key_store_providers")
+    providers.set_provider_key(provider, value)
 
 
 def _seed_reviewer_model(wt: sqlite3.Connection) -> None:
@@ -336,30 +336,18 @@ def _sync_e2e_model_to_catalog(
         return
     provider, _, model_id = e2e_model.partition("/")
 
-    conn = sqlite3.connect(str(target_db))
-    conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT value FROM settings WHERE key = 'providers'").fetchone()
-    conn.close()
-    api_key = ""
-    if row:
-        try:
-            providers = json.loads(row["value"]) or {}
-            api_key = (providers.get(provider) or {}).get("apiKey") or ""
-        except Exception as e:
-            raise SystemExit(
-                f"Worktree providers setting is malformed JSON: {e}"
-            )
+    os.environ["CORSIA_WORKSPACE"] = str(selected_workspace.resolve())
+    os.environ["CORSIA_STATE_DIR"] = str(state_root.resolve())
+    key_providers = _import_backend_module("infra.key_store_providers")
+    api_key = key_providers.provider_keys().get(provider, "")
 
     if not api_key and provider != "anthropic":
         print(
-            f"WARNING: no '{provider}' apiKey in target providers settings; "
+            f"WARNING: no '{provider}' key in the target key store; "
             f"can't run cloud discovery for CORSIA_E2E_MODEL={e2e_model}. "
             "Catalog sync skipped; downstream model lookup will fail loudly."
         )
         return
-
-    os.environ["CORSIA_WORKSPACE"] = str(selected_workspace.resolve())
-    os.environ["CORSIA_STATE_DIR"] = str(state_root.resolve())
 
     print(
         f"Syncing CORSIA_E2E_MODEL ({e2e_model}) into worktree catalog "
@@ -468,10 +456,9 @@ _MEASUREMENT_WEEKS = (
     ("2026-09-16", 100, 70, 100, 31, 65, 18_000_000),
     ("2026-09-23", 762, 594, 100, 43, 40, 114_300_000),
 )
-# Human messages per settlement week, ten minutes apart (a gap the active-time
-# rule counts in full), so the Attention estimate has both activity and >= 20
-# settled outcomes and its proxy state is reachable. Week 2026-09-07 has none.
-_MEASUREMENT_ACTIVE_MESSAGES = {"2026-09-16": 60, "2026-09-23": 120}
+# Recorded presence minutes per settlement week. The attention proxy needs both
+# active time and >= 20 settled outcomes; week 2026-09-07 deliberately has none.
+_MEASUREMENT_ACTIVE_MINUTES = {"2026-09-16": 60, "2026-09-23": 120}
 _MEASUREMENT_PLAN_ID = "measurement-fixture-plan"
 
 
@@ -491,6 +478,7 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
         "VALUES (?, 'thread', ?, 'active', ?, ?)",
         (_MEASUREMENT_PLAN_ID, thread_id, stamp, stamp),
     )
+    owner = wt.execute("SELECT user_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
     for week, outcomes, first_try, answered, took, other, tokens in _MEASUREMENT_WEEKS:
         for index in range(outcomes):
             node_id = f"measurement-fixture-{week}-{index}"
@@ -550,13 +538,15 @@ def _seed_measurement_fixture(wt: sqlite3.Connection, thread_id: str) -> None:
                 (f"measurement-fixture-usage-{week}-{index}", thread_id, per_row,
                  f"{week}T13:00:00Z"),
             )
-        for index in range(_MEASUREMENT_ACTIVE_MESSAGES.get(week, 0)):
-            sent_at = datetime.fromisoformat(f"{week}T14:00:00") + timedelta(minutes=10 * index)
+        minutes = _MEASUREMENT_ACTIVE_MINUTES.get(week, 0)
+        if minutes:
+            entered_at = datetime.fromisoformat(f"{week}T14:00:00")
+            exited_at = entered_at + timedelta(minutes=minutes)
             wt.execute(
-                "INSERT INTO messages (id, thread_id, role, content, metadata, created_at) "
-                "VALUES (?, ?, 'user', 'Fixture human message', '{}', ?)",
-                (f"measurement-fixture-message-{week}-{index}", thread_id,
-                 sent_at.strftime("%Y-%m-%dT%H:%M:%SZ")),
+                "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+                "VALUES (?, 'chat', ?, ?, ?, ?, 1, 'hidden')",
+                (owner, thread_id, entered_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 exited_at.strftime("%Y-%m-%dT%H:%M:%SZ"), minutes * 60),
             )
     # The nodes above were written straight to the table, so compute their stored aggregates.
     plans_public.rebuild_plan_aggregates(wt, _MEASUREMENT_PLAN_ID)
@@ -590,10 +580,12 @@ def main():
     owner = _seeded_data_owner(wt)
 
     _seed_default_settings(wt)
-    _seed_provider_api_key(wt, os.environ.get("CORSIA_E2E_MODEL"))
     omlx_catalog_id = _seed_omlx_network_model(wt)
     _seed_reviewer_model(wt)
     wt.commit()
+    _seed_provider_api_key(
+        state_root, selected_workspace, os.environ.get("CORSIA_E2E_MODEL")
+    )
     if omlx_catalog_id:
         print(f"Seeded synthetic oMLX network model: {omlx_catalog_id}")
 

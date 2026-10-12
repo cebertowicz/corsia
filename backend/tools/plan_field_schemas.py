@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.size_rating import SIZE_CLASSES, SIZE_SCALE_DESCRIPTION
+from core.size_rating import SIZE_CLASSES, SIZE_SCALE_DESCRIPTION, SIZE_TOOL_PREFIX
 from plans import public
 from prompts.plan_tools import NEXT_NODE_ID_DESCRIPTION
 from registry.attention import DEFER_CONDITION_TYPES
@@ -70,8 +70,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": ["string", "null"],
         "enum": [*SIZE_CLASSES, None],
         "description": (
-            f"Human-equivalent effort to deliver the node: {SIZE_SCALE_DESCRIPTION}. "
-            "Set it on every task you add."
+            f"{SIZE_TOOL_PREFIX}{SIZE_SCALE_DESCRIPTION}. Set it on every task you add."
         ),
     },
     "difficulty_rerated": {
@@ -119,7 +118,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "ask_artifact_id": {
         **TEXT,
-        "description": "Owned registered document to review; never a decision.",
+        "description": "Owned document or image to review, visuals embedded inline; never a decision.",
     },
     "hold_id": {**TEXT, "description": "The exact pause or blocker to clear."},
     "watchdog_budget_seconds": {

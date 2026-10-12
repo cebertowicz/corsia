@@ -22,7 +22,7 @@ A dependent in the prerequisite's *own* plan hears only a failure or a close,
 and only when someone other than that plan's owner caused it: the owner that
 failed or closed its own task already has the result and its next block. A
 done prerequisite needs no wake there, because the reconcile in the same write
-selects the dependent and ``plan_wake.notify_selected`` says so.
+selects the dependent and ``selection_wake.notify`` says so.
 """
 
 from __future__ import annotations

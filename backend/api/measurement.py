@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import date, datetime, timedelta, timezone
 from threading import Event
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
@@ -16,12 +16,12 @@ from api.measurement_findings import derive_findings_state
 from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
+from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_registry import REGISTRY, instrument_period, period_measured
-from api.measurement_models import models_payload
-from api.measurement_agent_attention import MAX_ACTIVE_GAP_SECONDS
+from api.measurement_models import models_read, task_chain_costs
 from api.measurement_partial import current_period_outcomes
 from api.measurement_queries import prepare_outcome_periods, query_family
-from api.measurement_size import size_family, size_rows, size_window_periods
+from api.measurement_size import size_family, size_rows
 from api.measurement_windows import series_windows
 from api.measurement_scope import resolve_grain, scope_cte, validate_scope
 from infra.auth import require_user
@@ -100,7 +100,7 @@ def period_comparable(metric: str, period: str) -> bool:
 
 
 def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: bool, partial: bool = False,
-         grain: Grain | None = None) -> dict[str, Any]:
+         grain: Grain | None = None, first_presence_period: str | None = None) -> dict[str, Any]:
     """Apply registry-owned thresholds and presentation flags to one aggregate row.
 
     ``partial`` marks the period still in progress, served for ``fresh_tokens`` and, on Days, for ``outcomes``.
@@ -116,7 +116,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
     elif metric == "outcomes_per_active_hour":
         active_hours = source.get("active_hours", 0)
         value = n / active_hours if active_hours else None
-    elif metric == "time_on_platform_h": value, n = source.get("value"), int(source.get("n", 0) or 0)
+    elif metric == "time_on_platform_h": value, n = source.get("value", 0), int(source.get("n", 0) or 0)
     elif metric == "limit_hits": value, n = int(source.get("hits", 0) or 0), int(source.get("hits", 0) or 0)
     elif metric == "asks_per_outcome": value = (source.get("raised", 0) + source.get("user_holds", 0)) / n if n else None
     elif metric == "took_recommendation_pct":
@@ -136,7 +136,7 @@ def _row(metric: str, period: str, source: dict[str, Any] | None, scoped_agent: 
         value = None if not n or (unknown_records and not source.get("tokens")) else int(source.get("tokens") or 0)
     else: value = source.get("tokens", 0) / n if n else None
     thin = scoped_agent and metric in {"took_recommendation_pct", "answered_other_pct", "answered_neither_pct"} and n < 6
-    if not period_measured(metric, period, grain):
+    if not period_measured(metric, period, grain, first_presence_period):
         # An instrument measures nothing before it exists. The period is served as not
         # measured -- never as a zero the chart could draw a baseline through.
         value, n = None, 0
@@ -175,6 +175,15 @@ def requested_series(ids: str) -> list[str]:
     return requested
 
 
+def _metric_spine(metric: str, spine: list[str], first_limit_period: str | None,
+                  first_presence_period: str | None, grain: Grain) -> list[str]:
+    """Return only periods the metric can describe for this scope."""
+    if metric == "limit_hits":
+        first = max(first_limit_period, instrument_period(REGISTRY[metric].start, grain)) if first_limit_period else None
+        return [period for period in spine if first and period >= first]
+    return [period for period in spine if period_measured(metric, period, grain, first_presence_period)]
+
+
 @joined_read
 async def series_payload(requested: list[str], project: str, agent: str, page_grain: Grain, user: dict) -> dict[str, Any]:
     """The ``/series`` body for one resolved grain, which must carry the averaging lead-in.
@@ -187,49 +196,50 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
     # total (and, on Days, the outcome count) also shows this one, flagged partial, so a first period is not an empty page.
     current_period = page_grain.current
 
-    def query() -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None]:
+    def query() -> tuple[dict[str, str | None], dict[str, list[dict[str, Any]]], str | None, int | None, PresenceCoverage]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
             scope_params = selected_scope.params(user["id"])
-            params = {**scope_params, "grain": page_grain, "max_active_gap_seconds": MAX_ACTIVE_GAP_SECONDS}
+            params = {**scope_params, "grain": page_grain}
             so_far = current_period_outcomes(db, scope_params, page_grain) if "outcomes" in requested and page_grain.kind == "days" else None
             families = {REGISTRY[metric].family for metric in requested}
+            coverage = presence_coverage(db, user["id"], page_grain.zone)
             first_limit_period = first_recorded_period(db, params) if "limits" in families else None
             prepare_outcome_periods(db, params)
             return selected_scope.response(), {family: (size_family(db, params) if family == "size" else
                                                       [{"period": period, "hits": hits} for period, hits in limits_by_period(db, params).items()] if family == "limits" else
                                                       query_family(db, family, params))
-                                               for family in families}, first_limit_period, so_far
+                                               for family in families}, first_limit_period, so_far, coverage
         finally:
             db.close()
 
-    selected_scope, family_rows, first_limit_period, outcomes_so_far = await run_bulk(query)
+    selected_scope, family_rows, first_limit_period, outcomes_so_far, coverage = await run_bulk(query)
+    first_presence = coverage.start_period(page_grain)
     rows: list[dict[str, Any]] = []
     windows: dict[str, dict[str, Any]] = {}
     spine = list(page_grain.periods)
-
     def measured(metric: str, period: str) -> bool:
-        return period_measured(metric, period, page_grain)
+        return period_measured(metric, period, page_grain, first_presence)
 
     for metric in requested:
         family = REGISTRY[metric].family
         by_period = {row["period"]: row for row in family_rows[family]}
         sources = by_period if family != "tokens" else {}
-        metric_spine = spine
-        if metric == "limit_hits":
-            # A zero is a recorded result only after this scope had a retained turn
-            # and after the metric's instrument existed. Limit errors themselves do
-            # not define when observation began.
-            first_measured_period = max(first_limit_period, instrument_period(REGISTRY[metric].start, page_grain)) if first_limit_period else None
-            metric_spine = [period for period in spine if first_measured_period and period >= first_measured_period]
-        # Every series starts at the period its instrument first observed; no leading row stands for earlier time.
-        metric_spine = [period for period in metric_spine if measured(metric, period)]
+        metric_spine = _metric_spine(metric, spine, first_limit_period, first_presence, page_grain)
         eligible, first_row = set(metric_spine), len(rows)
         drawn = [period for period in metric_spine if period in page_grain.served]
+        # Sized hours run from the instrument's start, but the size rate divides them by presence
+        # time, which exists only from the first recorded presence. Before that the rate is not
+        # measured: no row or window may divide earlier work by later time.
+        rate_start = coverage.rate_start(REGISTRY[metric].start) if family == "size" else REGISTRY[metric].start
+        rate_period = instrument_period(rate_start, page_grain) if family == "size" else ""
+
+        def rate_measured(name: str, period: str, start: str = rate_period) -> bool:
+            return measured(name, period) and period >= start
         if family == "size":
-            rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, drawn, family_rows[family], period_comparable, measured,
-                                   dates={"data_start": REGISTRY[metric].start, "comparability_before": _COMPARABILITY_BREAK}))
+            rows.extend(size_rows(metric, REGISTRY[metric].minimum_n, drawn, family_rows[family], period_comparable, rate_measured,
+                                   dates={"data_start": rate_period, "comparability_before": _COMPARABILITY_BREAK}))
         elif family == "tokens":
             by_period = {row["period"]: row for row in family_rows[family]}
             periods = [*drawn, current_period] if metric == "fresh_tokens" else drawn
@@ -239,16 +249,15 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
                 # The total starts at its first recorded period; no leading gap or uncounted mark precedes it.
                 recorded = [period for period in periods if measured(metric, period) and (by_period.get(period) or {}).get("usage_rows")]
                 periods = [period for period in periods if recorded and period >= recorded[0]]
-            rows.extend(_row(metric, period, by_period.get(period), selected_scope["agent"] is not None, period == current_period and metric == "fresh_tokens", page_grain) for period in periods)
+            rows.extend(_row(metric, period, by_period.get(period), selected_scope["agent"] is not None, period == current_period and metric == "fresh_tokens", page_grain, first_presence) for period in periods)
         else:
-            rows.extend(_row(metric, period, sources.get(period), selected_scope["agent"] is not None, grain=page_grain) for period in drawn)
+            rows.extend(_row(metric, period, sources.get(period), selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence) for period in drawn)
             if metric == "outcomes" and outcomes_so_far is not None:
-                rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain))
-        pooling = {"measured": measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,
-                   "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain)}
-        # A size window pools the run its chart draws: nothing before a comparability break.
-        pooled = size_window_periods(rows[first_row:]) if family == "size" else set(metric_spine)
-        windows[metric] = series_windows(metric, page_grain, by_period, periods=pooled, **pooling)
+                rows.append(_row(metric, current_period, {"outcomes": outcomes_so_far}, False, True, page_grain, first_presence))
+        pooling = {"measured": rate_measured, "size_minimum_n": REGISTRY[metric].minimum_n if family == "size" else None,
+                   "row": lambda name, period, source: _row(name, period, source, selected_scope["agent"] is not None, grain=page_grain, first_presence_period=first_presence)}
+        # Every series pools the window its card names; a size series' comparability marks its rows, never its window.
+        windows[metric] = series_windows(metric, page_grain, by_period, periods=set(metric_spine), **pooling)
         add_averages(rows[first_row:], metric, page_grain, eligible, by_period, **pooling)
     # The page reads each series' minimum n and the moving average's length from here, never from a copy of its own.
     return {"definition_version": 1, "scope": selected_scope, "period": page_grain.describe(), "average_periods": page_grain.average_periods,
@@ -256,9 +265,15 @@ async def series_payload(requested: list[str], project: str, agent: str, page_gr
 
 
 @router.get("/series/index")
-async def measurement_index(project: str = Query(...), agent: str = Query(...), user: dict = Depends(require_user)):
-    """Return the registry and scoped cost metadata for the composite scope."""
-    def query() -> tuple[dict[str, str | None], dict[str, float | int]]:
+async def measurement_index(project: str = Query(...), agent: str = Query(...),
+                            timezone_name: Annotated[str, Query(alias="timezone")] = "UTC", user: dict = Depends(require_user)):
+    """Return the registry and scoped cost metadata for the composite scope.
+
+    Presence-backed and size-rate starts are the viewer-local days ``PresenceCoverage`` gives the series.
+    """
+    zone = resolve_grain("days", timezone_name).zone
+
+    def query() -> tuple[dict[str, str | None], dict[str, float | int], PresenceCoverage]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
@@ -270,15 +285,20 @@ async def measurement_index(project: str = Query(...), agent: str = Query(...), 
             """, params).fetchone()
             total = int(cost["n"] or 0)
             return selected_scope.response(), {"known_cost_usd": float(cost["known_cost_usd"] or 0),
-                                               "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}
+                                               "unknown_cost_share": (int(cost["unknown_cost_rows"] or 0) / total if total else 0)}, presence_coverage(db, user["id"], zone)
         finally:
             db.close()
 
-    selected_scope, cost_metadata = await run_bulk(query)
+    selected_scope, cost_metadata, coverage = await run_bulk(query)
+
+    def data_start(item: Any) -> str:
+        if item.presence_backed:
+            return coverage.start_day or item.start
+        return coverage.rate_start(item.start) if item.family == "size" else item.start
     definitions = [{"id": name, "display_name": name.replace("_", " ").title(),
                     "definition": f"Weekly aggregate for {name.replace('_', ' ')}.", "unit": item.unit,
                     "minimum_n": item.minimum_n, "owner": "Self-Improvement Infrastructure",
-                    "data_start": item.start, "proxy": item.proxy,
+                    "data_start": data_start(item), "proxy": item.proxy,
                     "proxy_explanation": "Proxy measurement" if item.proxy else None,
                     "comparability": {"before": _COMPARABILITY_BREAK, "restricted": name != "outcomes"},
                     "breaks": [{"period": _ASKS_BREAK, "kind": "definition"}] if name == "asks_per_outcome" else [],
@@ -322,17 +342,21 @@ async def measurement_agents(
 async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str, metric: str, dollars: bool,
                          user: dict) -> dict[str, Any]:
     """The ``/agents`` body for one resolved grain and an already validated metric and sort."""
+    # The dollars per hour read the task chains Models reads for the same page load: awaited here, outside the
+    # lane, so this read holds no worker while it waits for them.
+    cost_rows = (await task_chain_costs(project, agent, page_grain, user))["cost_rows"] if dollars else []
 
     def query() -> dict[str, Any]:
         db = get_db()
         try:
             selected_scope = validate_scope(db, user["id"], project, agent)
             params = {**selected_scope.params(user["id"]), "grain": page_grain}
+            first_presence = presence_coverage(db, user["id"], page_grain.zone).start_period(page_grain)
             # One prepared window covers every period the grain draws, so nothing reads live plans.
             prepare_outcome_periods(db, params, roots=True)
-            rows, findings, summaries, agent_count = build_agents(
+            rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain, period_comparable,
-                lambda name, period: period_measured(name, period, page_grain), with_dollars=dollars)
+                lambda name, period: period_measured(name, period, page_grain, first_presence), cost_rows, with_dollars=dollars)
             return {
                 "definition_version": 1,
                 "scope": selected_scope.response(),
@@ -343,6 +367,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
                 "rows": rows,
                 "findings": findings,
                 "findings_state": derive_findings_state(rows, findings, agent_count),
+                "overall": overall,
                 "project_summaries": summaries["active"],
                 "inactive_projects": summaries["inactive"],
             }
@@ -367,34 +392,8 @@ async def measurement_models(
     grain's latest window (and the previous window for the change), with model identity
     and price from Cost's owners; see ``api.measurement_models``.
     """
-    page_grain = resolve_grain(grain, timezone_name)
-
-    def query() -> dict[str, Any]:
-        db = get_db()
-        try:
-            from llm.model_status import catalog_base_rows
-
-            selected_scope = validate_scope(db, user["id"], project, agent)
-            models = models_payload(db, selected_scope.params(user["id"]), page_grain, catalog_base_rows())
-            return {
-                "definition_version": 3,
-                "scope": selected_scope.response(),
-                "period": page_grain.describe(),
-                **models,
-            }
-        finally:
-            db.close()
-
-    return await run_bulk(query)
+    return await models_read(project, agent, resolve_grain(grain, timezone_name), user)
 
 
-register_cost_route(
-    router,
-    require_user=require_user,
-    resolve_grain=resolve_grain,
-    get_db=get_db,
-    validate_scope=validate_scope,
-    prepare_outcome_periods=prepare_outcome_periods,
-    run_in_db=run_bulk,
-)
+register_cost_route(router, require_user=require_user, resolve_grain=resolve_grain)
 

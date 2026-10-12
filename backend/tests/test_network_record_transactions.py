@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from infra.key_store_servers import resolve_server
+
 
 def _read(path, sql):
     with closing(sqlite3.connect(str(path))) as db:
@@ -39,7 +41,7 @@ def _change(operation):
     if operation == "server":
         nd.upsert_server("omlx", "instance", "Changed", "127.0.0.1", 5200, "online")
     elif operation == "metadata":
-        nd.set_server_metadata("server", api_key="test-key")
+        nd.set_server_metadata("server", context_window=1234)
     elif operation == "status":
         nd.update_server_status("server", status="online")
     elif operation == "remove":
@@ -99,6 +101,20 @@ def test_record_read_holds_its_write_owner(server, monkeypatch, operation, prefi
     _writer_available(server)
 
 
+def test_server_key_removal_failure_rolls_back_server_removal(server, monkeypatch):
+    from llm import network_discovery as nd
+
+    def fail_key_removal(*_args, **_kwargs):
+        raise RuntimeError("key removal failed")
+
+    monkeypatch.setattr(nd, "remove_server_key", fail_key_removal)
+
+    with pytest.raises(RuntimeError, match="key removal failed"):
+        nd.remove_server("server")
+
+    assert _read(server, "SELECT status FROM network_servers WHERE id='server'") == [("offline",)]
+
+
 @pytest.mark.parametrize("existing", [False, True])
 def test_endpoint_failure_rolls_back_its_server(server, existing):
     from llm.network_discovery import upsert_server
@@ -120,7 +136,7 @@ def test_endpoint_failure_rolls_back_its_server(server, existing):
 
 def _registration_records(path):
     return _read(path,
-        "SELECT s.instance_name,s.status,e.host,json_extract(s.metadata_json,'$.api_key') "
+        "SELECT s.instance_name,s.status,e.host "
         "FROM network_servers s JOIN network_server_endpoints e ON e.server_id=s.id"
     )
 
@@ -158,7 +174,9 @@ def registration(isolated_db, monkeypatch):
 
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[require_user] = lambda: {"id": "u-test", "name": "u-test"}
+    app.dependency_overrides[require_user] = lambda: {
+        "id": "u-test", "name": "u-test", "token_kind": "session",
+    }
     with TestClient(app, raise_server_exceptions=False) as client:
         yield SimpleNamespace(
             client=client, path=isolated_db, observed=observed,
@@ -166,11 +184,11 @@ def registration(isolated_db, monkeypatch):
         )
 
 
-def test_registration_metadata_failure_leaves_no_partial_records(registration):
+def test_registration_key_failure_leaves_no_partial_records(registration):
     with closing(sqlite3.connect(str(registration.path))) as db:
         db.execute(
-            "CREATE TRIGGER reject_metadata BEFORE UPDATE OF metadata_json ON network_servers "
-            "BEGIN SELECT RAISE(FAIL, 'metadata unavailable'); END"
+            "CREATE TRIGGER reject_key_entry BEFORE INSERT ON key_store_entries "
+            "BEGIN SELECT RAISE(FAIL, 'key entry unavailable'); END"
         )
         db.commit()
     response = registration.client.post("/api/settings/network-servers", json={
@@ -188,12 +206,14 @@ def test_registration_commits_before_response_and_discovery(registration):
         "name": "Test server", "hostname": "127.0.0.1", "port": 5200, "api_key": "test-key",
     })
     assert response.status_code == 200
-    expected = [("Test server", "online", "127.0.0.1", "test-key")]
+    expected = [("Test server", "online", "127.0.0.1")]
     assert _registration_records(registration.path) == expected
     assert registration.completed.wait(timeout=2)
     assert registration.observed == expected
     server_id = _read(registration.path, "SELECT id FROM network_servers")[0][0]
     assert response.json() == {"ok": True, "server_id": server_id, "status": "online"}
+    assert resolve_server(server_id) == "test-key"
+    assert _read(registration.path, "SELECT metadata_json FROM network_servers") == [(None,)]
     assert [url for _, url, _ in registration.external.calls] == [
         "http://127.0.0.1:5200/health", "http://127.0.0.1:5200/v1/models",
     ]
@@ -214,26 +234,26 @@ def test_failed_probe_keeps_the_last_success_and_latency(server, monkeypatch):
 def test_readding_server_keeps_identity_and_existing_metadata(server):
     from llm import network_discovery as nd
 
-    nd.set_server_metadata("server", api_key="retained-key", context_window=1234)
+    nd.set_server_metadata("server", base_url="https://retained/v1", context_window=1234)
     sid = nd.upsert_server(
         "omlx", "instance", "Renamed", "127.0.0.1", 5200, "online", machine_id="machine",
     )
-    nd.set_server_metadata(sid, api_key=None, context_window=5678)
+    nd.set_server_metadata(sid, base_url=None, context_window=5678)
     assert sid == "server"
     assert _read(server,
-        "SELECT instance_name,machine_id,json_extract(metadata_json,'$.api_key'),"
+        "SELECT instance_name,machine_id,json_extract(metadata_json,'$.base_url'),"
         "json_extract(metadata_json,'$.context_window') FROM network_servers"
-    ) == [("Renamed", "machine", "retained-key", 5678)]
+    ) == [("Renamed", "machine", "https://retained/v1", 5678)]
 
 
 def test_cleared_metadata_keys_are_removed_and_the_rest_kept(server):
     from llm import network_discovery as nd
 
     nd.set_server_metadata(
-        "server", api_key="old-key", cache_warm_seconds=3600, context_window=1234,
+        "server", declared_models=["m"], cache_warm_seconds=3600, context_window=1234,
     )
     nd.set_server_metadata(
-        "server", clear=("cache_warm_seconds", "api_key"), base_url="https://h/v1",
+        "server", clear=("cache_warm_seconds", "declared_models"), base_url="https://h/v1",
     )
     assert nd.read_server_metadata("server") == {"context_window": 1234, "base_url": "https://h/v1"}
 

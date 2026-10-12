@@ -65,7 +65,7 @@ describe('kept charts on Days', () => {
 			expect(section.querySelector('.lg')?.textContent).toContain('One day');
 			expect(section.querySelector('.lg')?.textContent).toContain('7-day moving average');
 			expect(section.querySelector('figcaption')?.textContent).not.toContain('per week');
-			expect(section.querySelector('figcaption')?.textContent).toContain('the line is the 7-day moving average');
+			expect(section.querySelector('figcaption')?.textContent).not.toContain('moving average');
 			expect(section.querySelector('figcaption')?.textContent).not.toContain('no moving average');
 		});
 	}
@@ -267,7 +267,7 @@ describe('kept charts on Weeks', () => {
 		expect(section.querySelectorAll('.dsk svg rect.bar')).toHaveLength(8);
 		expect(section.querySelector('.dsk svg polyline.ma')?.getAttribute('points')?.split(' ')).toHaveLength(5);
 		expect(section.querySelector('.lg')?.textContent).toContain('4-week moving average');
-		expect(section.querySelector('figcaption')?.textContent).toContain('the line is the 4-week moving average');
+		expect(section.querySelector('figcaption')?.textContent).not.toContain('moving average');
 	});
 });
 
@@ -279,23 +279,21 @@ describe('the caption names the line only when the chart draws it', () => {
 		rejections_per_outcome: make('rejections_per_outcome'), fresh_tokens_per_outcome: make('fresh_tokens_per_outcome'),
 	});
 	for (const id of ['outcomes', 'alignment', 'asks', 'rejections', 'tokens']) {
-		it(`${id}: three weeks with no moving average read "Each bar is one week." and no line in the legend`, () => {
+		it(`${id}: three weeks with no moving average name no line in the caption or the legend`, () => {
 			render(all(periods(null)), periodsPeriod(wk(2)));
 			const caption = card(id).querySelector('figcaption')!.textContent!;
-			expect(caption).toContain('Each bar is one week.');
 			expect(caption).not.toContain('moving average');
 			expect(card(id).querySelector('.lg')?.textContent).not.toContain('moving average');
 			expect(card(id).querySelector('svg polyline.ma')).toBeNull();
 		});
-		it(`${id}: a served moving average keeps the sentence and the legend entry${id === 'alignment' ? ' only where a line is drawn' : ''}`, () => {
+		it(`${id}: a served moving average keeps the legend entry and leaves the caption without a line sentence${id === 'alignment' ? ' only where a line is drawn' : ''}`, () => {
 			render(all((series) => periods(VALUES[series])(series)), periodsPeriod(wk(2)));
 			if (id === 'alignment') {
 				// The shares chart draws no line, so its caption never names one.
-				expect(card(id).querySelector('figcaption')?.textContent).toContain('Each bar is one week.');
 				expect(card(id).querySelector('figcaption')?.textContent).not.toContain('moving average');
 				return;
 			}
-			expect(card(id).querySelector('figcaption')?.textContent).toContain('the line is the 4-week moving average.');
+			expect(card(id).querySelector('figcaption')?.textContent).not.toContain('moving average');
 			expect(card(id).querySelector('.lg')?.textContent).toContain('4-week moving average');
 		});
 	}

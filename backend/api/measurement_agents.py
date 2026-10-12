@@ -107,10 +107,8 @@ def _metric_value(registry: dict[str, Any], metric: str, row: dict[str, Any],
             return None
         return float(row["tokens"]) / outcomes
     if metric == "active_hours_per_outcome":
-        # No human message to that agent that period: unknown attention, not zero.
-        if row.get("active_hours") is None:
-            return None
-        return float(row["active_hours"]) / outcomes
+        # A measured period with no presence on that agent is a true zero (``PresenceCoverage``).
+        return float(row.get("active_hours") or 0) / outcomes
     return float(outcomes)
 
 
@@ -194,12 +192,8 @@ def _pooled_value(registry: dict[str, Any], metric: str, trailing: list[dict[str
         raised = sum(int(row.get("raised") or 0) + int(row.get("user_holds") or 0) for row in present)
         return float(raised) / outcomes
     if metric == "active_hours_per_outcome":
-        # Pool only periods that recorded attention, never a zero for one that did not.
-        timed = [row for row in present if row.get("active_hours") is not None]
-        timed_outcomes = sum(_denominator(row) for row in timed)
-        if timed_outcomes < _minimum_n(registry, metric):
-            return None
-        return sum(float(row["active_hours"]) for row in timed) / timed_outcomes
+        # Every measured period pools; one with no presence adds its outcomes at zero time (``PresenceCoverage``).
+        return sum(float(row.get("active_hours") or 0) for row in present) / outcomes
     if any(_denominator(row) and not _measured_cost(row) for row in present):
         return None
     tokens = sum(float(row.get("tokens") or 0) for row in present if _measured_cost(row))
@@ -254,9 +248,8 @@ def _worsening(registry: dict[str, Any], rows: dict[str, dict[str, Any]], metric
 
 def _active_minutes(window: list[dict[str, Any] | None], measured: Callable[[str, str], bool]) -> float | None:
     """The window's recorded human attention in minutes, pooled the way minutes per outcome pools it."""
-    timed = [row for row in window if row and row.get("active_hours") is not None
-             and measured("active_hours_per_outcome", row["period"])]
-    return 60 * sum(float(row["active_hours"]) for row in timed) if timed else None
+    timed = [row for row in window if row and measured("active_hours_per_outcome", row["period"])]
+    return 60 * sum(float(row.get("active_hours") or 0) for row in timed) if timed else None
 
 
 def _aggregate_agent(registry: dict[str, Any], agent: dict[str, Any], grain: Grain, metric: str,
@@ -350,10 +343,10 @@ def _rank(registry: dict[str, Any], rows: list[dict[str, Any]], metric: str, sor
 
 
 def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: str, sort: str,
-                 grain: Grain, comparable: Callable[[str, str], bool],
-                 measured: Callable[[str, str], bool], with_dollars: bool = True,
-                 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]], int]:
-    """Return ranked rows, findings, PL-4 project summaries and the agent population.
+                 grain: Grain, comparable: Callable[[str, str], bool], measured: Callable[[str, str], bool],
+                 cost_rows: list[dict[str, Any]], with_dollars: bool = True,
+                 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]], int, dict[str, Any]]:
+    """Return ranked rows, findings, PL-4 project summaries, the agent population and the scope's pooled cells.
 
     ``registry``, ``comparable`` and ``measured`` are the caller's: the route that owns
     the ids, thresholds, comparability bound and instrument starts passes its own, so
@@ -362,7 +355,9 @@ def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: s
     prepared window and the periods these rows answer for, so no period can fall outside
     the data prepared for it. The table pools the grain's latest window and carries the
     previous window beside it; the findings frame is its last nine periods; the project
-    summaries count outcomes in the latest window.
+    summaries count outcomes in the latest window. ``cost_rows`` are
+    ``api.measurement_chain_costs.chain_costs`` for the same scope and grain; the dollars per hour reads those
+    rows instead of walking the rated tasks' chains again.
     """
     # Invariants, not caller validation: the route answers an unknown metric or sort
     # with a 400 before any of this runs, so reaching here with one is a server fault.
@@ -385,9 +380,11 @@ def build_agents(db, params: dict[str, Any], registry: dict[str, Any], metric: s
     aggregated = [_aggregate_agent(registry, agent, grain, metric, comparable, measured) for agent in agents.values()]
     # Dollars per hour reads each task's whole chain, so it covers only the two windows the table shows.
     # ``with_dollars=False`` is for a reader of the other columns only (Biggest changes), so it does not pay for it.
-    costs = query_task_hour_cost(db, {**query, "grain": two_windows(grain)}) if with_dollars else None
+    costs = query_task_hour_cost(db, {**query, "grain": two_windows(grain)}, cost_rows) if with_dollars else None
     for row in aggregated if costs is not None else ():
         row["metrics"][DOLLARS_PER_HOUR] = dollars_metric(costs, row["agent"]["id"], grain, RANKING_MINIMUM_N)
+    # What an agent's own cell is read against: every agent's tasks pooled, by the same function.
+    overall = {DOLLARS_PER_HOUR: dollars_metric(costs, None, grain, RANKING_MINIMUM_N)} if costs is not None else {}
     rows = _rank(registry, aggregated, metric, sort)
     findings = _findings(rows)
-    return rows, findings, _project_summaries(db, rows, grain), len(agents)
+    return rows, findings, _project_summaries(db, rows, grain), len(agents), overall

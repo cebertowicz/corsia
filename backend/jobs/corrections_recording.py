@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from core.measurement_scope import scope_cte
 from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS,
@@ -23,25 +24,35 @@ from core.corrections_recording import (
     classifier_prompt,
     dedupe_key,
     fact_attributes,
-    is_owner_authored_message,
     refusal_classification,
     subject_key,
     validate_classification,
 )
 from infra.db_async import run_in_db
+from jobs.corrections_scanning import (
+    PendingCandidateKey,
+    hydrate_candidates,
+    pending_candidate_keys,
+)
 from llm.isolated_contract import IsolatedStructuredTelemetry
 from llm.isolated_structured import (
     IsolatedStructuredContextOverflowError,
-    IsolatedStructuredError,
+    IsolatedStructuredIdentityError,
     IsolatedStructuredOutputTruncatedError,
+    IsolatedStructuredProviderError,
+    IsolatedStructuredRateLimitError,
+    IsolatedStructuredTimeoutError,
+    IsolatedStructuredUnavailableError,
     invoke_isolated_structured,
 )
 
 DEFAULT_BATCH_SIZE = 20
+# Four hours bounds a deliberate drain while the scheduler continues to service
+# maintenance triggers; at the 60-second call timeout it permits at least 240 calls.
+RUN_TIME_BUDGET_SECONDS = 4 * 60 * 60
 # Fortissimo reasons by default (as in the gated run), so the cap must leave room
 # for thinking plus the verdict; the 60s call timeout bounds it (~80 tok/s).
 CLASSIFIER_MAX_OUTPUT_TOKENS = 4096
-MAX_PENDING_SCAN_MULTIPLIER = 8
 MANUAL_REQUEST_SETTING = "corrections_recording_manual_request"
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -81,8 +92,8 @@ class _UsageTelemetry:
                 source="corrections_recording",
                 ttft_ms=None,
             )
-        except Exception as exc:
-            logger.warning("corrections recording usage telemetry failed: {}", type(exc).__name__)
+        except Exception:
+            logger.exception("corrections recording usage telemetry failed")
 
 
 def _resolve_target(model_id: str):
@@ -115,79 +126,8 @@ def _owner_user_ids() -> list[str]:
         db.close()
 
 
-def _pending_candidates(
-    version: CheckerVersion, batch_size: int, owner_user_id: str,
-) -> list[CorrectionCandidate]:
-    """Read one owner's oldest pending rows through Measurement's canonical closure."""
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        rows = db.execute(
-            scope_cte() + """
-            SELECT m.rowid,m.id,m.thread_id,t.project_id,m.role,m.content,m.metadata,m.created_at
-            FROM messages m
-            JOIN scope_threads scoped ON scoped.id=m.thread_id
-            JOIN threads t ON t.id=m.thread_id
-            WHERE m.role='user' AND length(trim(m.content))>0
-              AND m.content NOT LIKE '[EVENT:%'
-              AND m.content NOT LIKE '[DELIVERY WARNING%'
-              AND m.content NOT LIKE '[PASSIVE CONTEXT DIGEST]%'
-              AND m.content NOT LIKE '[AGENT-SEND%'
-              AND m.content NOT LIKE '[CORSIA%'
-              AND (m.metadata IS NULL OR NOT json_valid(m.metadata) OR (
-                json_type(m.metadata,'$.sender_kind') IS NULL
-                AND json_type(m.metadata,'$.routed_event') IS NULL
-                AND json_type(m.metadata,'$.send_idempotency_key') IS NULL
-              ))
-              AND NOT EXISTS (
-                SELECT 1 FROM outcome_events e
-                WHERE e.event_name=:correction_event
-                  AND e.subject_key=:message_prefix || m.id AND e.retracted_at IS NULL
-                  AND json_extract(e.attributes,'$.checker_model_id')=:model_id
-                  AND json_extract(e.attributes,'$.rubric_sha256')=:rubric_sha256
-                  AND json_extract(e.attributes,'$.prompt_sha256')=:prompt_sha256
-              )
-            ORDER BY m.created_at ASC,m.id ASC LIMIT :scan_limit
-            """,
-            {
-                "user_id": owner_user_id,
-                "scope_project": "all",
-                "scope_agent": None,
-                "correction_event": CORRECTION_EVENT,
-                "message_prefix": "message:",
-                "model_id": version.model_id,
-                "rubric_sha256": version.rubric_sha256,
-                "prompt_sha256": version.prompt_sha256,
-                "scan_limit": batch_size * MAX_PENDING_SCAN_MULTIPLIER,
-            },
-        ).fetchall()
-        candidates: list[CorrectionCandidate] = []
-        for row in rows:
-            if not is_owner_authored_message(
-                role=row[4], content=row[5], metadata=row[6],
-            ):
-                continue
-            preceding = db.execute(
-                """SELECT content FROM messages
-                   WHERE thread_id=? AND role='assistant'
-                     AND (created_at < ? OR (created_at=? AND rowid < ?))
-                   ORDER BY created_at DESC,rowid DESC LIMIT 1""",
-                (row[2], row[7], row[7], row[0]),
-            ).fetchone()
-            candidates.append(CorrectionCandidate(
-                message_id=row[1], thread_id=row[2], project_id=row[3], content=row[5],
-                created_at=row[7], preceding_agent=preceding[0] if preceding else "",
-            ))
-            if len(candidates) == batch_size:
-                break
-        return candidates
-    finally:
-        db.close()
-
-
 def request_manual_corrections_recording() -> None:
-    """Durably ask the existing nightly loop to run one bounded batch."""
+    """Durably ask the existing nightly loop to drain for RUN_TIME_BUDGET_SECONDS."""
     from infra.settings import set_setting
 
     set_setting(MANUAL_REQUEST_SETTING, {"pending": True})
@@ -266,8 +206,8 @@ async def _classify_and_record(
 ) -> str:
     """Classify one candidate and write its fact.
 
-    Returns "recorded", "refused", "failed", or "duplicate" when the fact
-    already existed and nothing was inserted.
+    Returns "recorded", "refused", "failed", "provider_unavailable", or
+    "duplicate" when the fact already existed and nothing was inserted.
     """
     try:
         classification = await invoke(
@@ -293,13 +233,25 @@ async def _classify_and_record(
         logger.warning(
             "corrections recording refused {}: {}", candidate.message_id, classification["reason"],
         )
-    except Exception as exc:
-        # Rate limit, provider, timeout, unavailable or anything unexpected:
-        # no fact, so the next run retries this message.
-        if isinstance(exc, IsolatedStructuredError):
-            logger.warning("corrections recording skipped {}: {}", candidate.message_id, type(exc).__name__)
-        else:
-            logger.exception("corrections recording failed {}", candidate.message_id)
+    except (
+        IsolatedStructuredRateLimitError,
+        IsolatedStructuredUnavailableError,
+        IsolatedStructuredIdentityError,
+    ) as exc:
+        # Only these say the provider itself cannot serve whatever is asked:
+        # leave this message pending and stop the run.
+        logger.warning("corrections recording provider unavailable {}: {}", candidate.message_id, type(exc).__name__)
+        return "provider_unavailable"
+    except (IsolatedStructuredProviderError, IsolatedStructuredTimeoutError) as exc:
+        # These failures belong to the attempted message: leave it pending,
+        # record the failed mapping, and continue to older candidates.
+        logger.warning("corrections recording call failed {}: {}", candidate.message_id, exc)
+        await run_in_db(_record_failure)
+        return "failed"
+    except Exception:
+        # An unexpected local error is likewise one message failure, never a
+        # provider outage; preserve it in logs and continue the bounded run.
+        logger.exception("corrections recording failed {}", candidate.message_id)
         await run_in_db(_record_failure)
         return "failed"
     try:
@@ -314,19 +266,62 @@ async def _classify_and_record(
     return "refused" if classification["label"] == LABEL_REFUSED else "recorded"
 
 
+@dataclass(slots=True)
+class _PendingBatch:
+    """One selected page and its hydrated owner-authored candidates."""
+
+    selected_keys: list[PendingCandidateKey]
+    candidates: list[CorrectionCandidate]
+
+
+async def _next_pending_batch(
+    version: CheckerVersion, batch_size: int, before: tuple[str, str] | None,
+) -> _PendingBatch:
+    """Globally select keys before reading the 20 classifier inputs."""
+    keys: list[PendingCandidateKey] = []
+    for owner_user_id in await run_in_db(_owner_user_ids):
+        keys.extend(
+            await run_in_db(pending_candidate_keys, version, batch_size, owner_user_id, before)
+        )
+    selected = sorted(
+        keys, key=lambda key: (key.created_at, key.message_id), reverse=True,
+    )[:batch_size]
+    return _PendingBatch(selected, await run_in_db(hydrate_candidates, selected))
+
+
+async def _finish_run(
+    counts: dict[str, int], stop_reason: str, *, status: str | None = None,
+) -> dict[str, int | str | None]:
+    recorded, refused, failed = counts["recorded"], counts["refused"], counts["failed"]
+    status = status or ("ok" if not failed else "partial")
+    reason = None if status == "ok" else "One or more classifications failed and will retry"
+    if status == "cancelled":
+        reason = "Run stopped by shutdown; pending candidates will retry"
+    elif status == "provider_unavailable":
+        reason = "Provider unavailable; pending candidates will retry"
+    result: dict[str, int | str | None] = {
+        "status": status, "processed": sum(counts.values()), "recorded": recorded,
+        "refused": refused, "failed": failed,
+    }
+    await run_in_db(
+        _write_status, status, reason, stop_reason=stop_reason,
+        processed=result["processed"], recorded=recorded, refused=refused, failed=failed,
+    )
+    return result
+
+
 async def run_corrections_recording(
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
     invoke: Invoke = invoke_isolated_structured,
+    time_budget_seconds: float = RUN_TIME_BUDGET_SECONDS,
+    clock: Callable[[], float] = monotonic,
 ) -> dict[str, int | str | None]:
-    """Classify one bounded, serial batch; malformed output writes no fact.
-
-    A missing or unavailable configured model records its reason and leaves every
-    candidate eligible for the next nightly or manual run.  Every provider call
-    is awaited before the next candidate begins.
-    """
+    """Drain newest pending batches serially until empty or the run budget expires."""
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
+    if time_budget_seconds <= 0:
+        raise ValueError("time_budget_seconds must be positive")
     from infra.settings import get_corrections_checker_model
     from llm.resolution import ModelUnavailableError
 
@@ -334,6 +329,12 @@ async def run_corrections_recording(
     if model_id is None:
         await run_in_db(_write_status, "unconfigured", "No checker model configured")
         return {"status": "unconfigured", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
+    from llm.endpoint_policy import endpoint_agent_use
+    if await run_in_db(endpoint_agent_use, model_id) == "interactive_only":
+        reason = "Configured checker model is restricted to interactive use"
+        logger.warning(reason)
+        await run_in_db(_write_status, "unavailable", reason)
+        return {"status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
     try:
         target, binary = await run_in_db(_resolve_target, model_id)
     except (ModelUnavailableError, ValueError) as exc:
@@ -344,31 +345,25 @@ async def run_corrections_recording(
         await run_in_db(_write_status, "unavailable", reason)
         return {"status": "unavailable", "processed": 0, "recorded": 0, "refused": 0, "failed": 0}
 
-    version = checker_version(model_id)
-    candidates: list[CorrectionCandidate] = []
-    for owner_user_id in await run_in_db(_owner_user_ids):
-        candidates.extend(
-            await run_in_db(_pending_candidates, version, batch_size, owner_user_id)
-        )
-    candidates = sorted(
-        candidates, key=lambda candidate: (candidate.created_at, candidate.message_id)
-    )[:batch_size]
     counts = {"recorded": 0, "refused": 0, "failed": 0, "duplicate": 0}
-    for candidate in candidates:
-        outcome = await _classify_and_record(candidate, target, binary, version, invoke)
-        counts[outcome] += 1
-    recorded, refused, failed = counts["recorded"], counts["refused"], counts["failed"]
-    status = "ok" if not failed else "partial"
-    await run_in_db(
-        _write_status,
-        status,
-        None if not failed else "One or more classifications failed and will retry",
-        processed=len(candidates),
-        recorded=recorded,
-        refused=refused,
-        failed=failed,
-    )
-    return {
-        "status": status, "processed": len(candidates), "recorded": recorded,
-        "refused": refused, "failed": failed,
-    }
+    before: tuple[str, str] | None = None
+    version, started_at = checker_version(model_id), clock()
+    try:
+        while clock() - started_at < time_budget_seconds:
+            batch = await _next_pending_batch(version, batch_size, before)
+            if not batch.selected_keys:
+                return await _finish_run(counts, "empty")
+            before = batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id
+            for candidate in batch.candidates:
+                if clock() - started_at >= time_budget_seconds:
+                    return await _finish_run(counts, "budget")
+                outcome = await _classify_and_record(candidate, target, binary, version, invoke)
+                if outcome == "provider_unavailable":
+                    return await _finish_run(
+                        counts, "provider_unavailable", status="provider_unavailable",
+                    )
+                counts[outcome] += 1
+    except asyncio.CancelledError:
+        await _finish_run(counts, "shutdown", status="cancelled")
+        raise
+    return await _finish_run(counts, "budget")

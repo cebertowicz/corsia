@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Callable
 
 import plans.service as service
 from plans.node_states import open_user_block_sql
@@ -29,6 +28,12 @@ NO_ASK = (
 DECISION_HOLDS = (
     "this task has an open decision, which already holds it until the user "
     "answers; do not block it as well."
+)
+NOT_ASKABLE = (
+    "ask_artifact_id must name an active registered document or image. For "
+    "a mockup or other visuals, embed the rendered images in a markdown "
+    "document as relative images (![caption](name.assets/screen.png)) and "
+    "ask on that document."
 )
 #: The user outcomes that end an ask, as the agent is told them. Defer keeps
 #: the task held.
@@ -46,18 +51,17 @@ ASKABLE_TYPES = ("document", "image")
 class AskRelease:
     """What the answering side hands Plans when it clears an ask, opaque to Plans.
 
-    ``detail`` rides in the clearance event; ``text(ask, kind, title)`` is the notice the
-    asking agent wakes on, given the artifact's title and the held task's kind and title.
+    ``detail`` rides in the clearance event. Plans owns the one durable wake
+    summary, so every ask answer names the task, answer, and remaining holds.
     """
 
     detail: dict
-    text: Callable[[str, str, str], str]
 
 
 def raised_asks(db, artifact_id: str) -> list:
     """The user holds that wait on this artifact, newest first, with their asking agent."""
     return db.execute(
-        """SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
+        f"""SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
                   n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name
              FROM plan_node_artifact_links l
              JOIN plan_nodes n ON n.id = l.node_id
@@ -65,8 +69,7 @@ def raised_asks(db, artifact_id: str) -> list:
              JOIN plan_node_holds h ON h.node_id = n.id
              LEFT JOIN threads t ON t.id = p.owner_id AND p.owner_kind = 'thread'
             WHERE l.artifact_id=? AND l.role='attention'
-              AND h.kind='blocked' AND h.owner_kind='user'
-              AND h.owner_id=l.artifact_id AND h.cleared_at IS NULL
+              AND {open_user_block_sql('h')} AND h.owner_id=l.artifact_id
             ORDER BY h.created_at DESC, h.id DESC""",
         (artifact_id,),
     ).fetchall()
@@ -231,9 +234,7 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
             "a decision is not blocked on; raise it, and it holds its task by itself"
         )
     if identity["type"] not in ASKABLE_TYPES or identity["state"] != "active":
-        raise service.PlanInputError(
-            "ask_artifact_id must name an active registered document or image"
-        )
+        raise service.PlanInputError(NOT_ASKABLE)
     return ask.strip()
 
 
@@ -269,15 +270,22 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
 def _release(
     db, artifact_id: str, done: str, *, retired: bool = False, release: AskRelease | None = None,
 ) -> int:
-    from plans import admission, holds, plan_wake
+    from plans import admission_projection, holds, plan_wake
     from plans.plan_events import append_owner_event
     from plans.user_steering import CHANGE_KIND
+    from prompts import plan_wakes as wakes
 
     rows = db.execute(
         f"""SELECT h.id AS hold_id, n.id AS node_id, n.plan_id, n.kind, n.title,
+                  n.revision, n.executor_thread_id, n.owner_thread_id,
+                  p.owner_kind, p.owner_id,
+                  EXISTS (SELECT 1 FROM plan_node_holds other
+                          WHERE other.node_id=n.id AND other.id<>h.id
+                            AND other.cleared_at IS NULL) AS other_holds,
                   i.title AS ask
              FROM plan_node_artifact_links l
              JOIN plan_nodes n ON n.id = l.node_id
+             JOIN plans p ON p.id = n.plan_id
              JOIN plan_node_holds h ON h.node_id = n.id
              JOIN artifact_identities i ON i.id = l.artifact_id
             WHERE l.artifact_id=? AND l.role='attention'
@@ -285,35 +293,83 @@ def _release(
             ORDER BY h.created_at, h.id""",
         (artifact_id,),
     ).fetchall()
-    for row in rows:
+    causes = [
         holds.clear_write(
             row["node_id"], row["hold_id"], expected_kind="blocked",
             actor_id=None, provenance=_PROVENANCE, db=db,
             detail=release.detail if release else None,
         )
-        cause = db.execute(
-            """SELECT id, created_at FROM plan_node_events
-               WHERE node_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1""",
-            (row["node_id"],),
-        ).fetchone()
-        ask = row["ask"] or "your ask"
-        summary = (
-            f'Your ask "{ask}" became unavailable, so {row["kind"]} '
-            f'"{row["title"]}" no longer waits on it: pick it up.'
-            if retired else
-            release.text(ask, row["kind"], row["title"]) if release else
-            f'The user {done} "{ask}", so {row["kind"]} '
-            f'"{row["title"]}" no longer waits on them: pick it up.'
+        for row in rows
+    ]
+    executors = {row["hold_id"]: admission_projection.executor_of(row, row) for row in rows}
+    handoffs = _reconcile_for_askers(db, rows, executors)
+    for row, (cause_id, cause_at) in zip(rows, causes):
+        summary = _release_summary(row, done, retired=retired, release=release)
+        executor = executors[row["hold_id"]]
+        wake_id = None if executor is None else plan_wake.append(
+            db,
+            recipient=executor,
+            kind=plan_wake.ASK_RELEASED,
+            subject_id=str(row["node_id"]),
+            revision=int(row["revision"]),
+            about=str(row["hold_id"]),
+            plan_id=str(row["plan_id"]),
+            content=plan_wake.with_next(
+                db, str(row["plan_id"]), executor,
+                wakes.WAKE_ASK_RELEASED.format(summary=summary),
+                **handoffs.pop((str(row["plan_id"]), executor), {}),
+            ),
+            open_node_id=str(row["node_id"]),
         )
         append_owner_event(
-            db, plan_id=str(row["plan_id"]), event_id=str(cause["id"]),
-            actor_id=None, event_type=CHANGE_KIND, summary=summary,
-            details={"node_id": str(row["node_id"]), "action": "ask_cleared"},
-            created_at=cause["created_at"],
+            db,
+            plan_id=str(row["plan_id"]),
+            event_id=cause_id,
+            actor_id=None,
+            event_type=CHANGE_KIND,
+            summary=summary,
+            details={
+                "node_id": str(row["node_id"]),
+                "action": "ask_cleared",
+                "ask_wake_id": wake_id,
+            },
+            created_at=cause_at,
         )
-    for plan_id in dict.fromkeys(row["plan_id"] for row in rows):
-        reconciled = admission.reconcile_plan(
-            plan_id, actor_id=None, provenance=_PROVENANCE, db=db,
-        )
-        plan_wake.notify_selected(db, reconciled, plan_id=plan_id, causing_executor=None)
     return len(rows)
+
+
+def _reconcile_for_askers(db, rows, executors: dict) -> dict[tuple[str, str], dict]:
+    """Reconcile each plan an answer released, and return the askers' handoff facts.
+
+    The ask wake is the asker's result of this write, so reconcile is told not
+    to wake the asker again (``causing_executor``), and runs before the wake so
+    its next block is the state the asker returns to. Standing in for the
+    work-selected wake, the asker's first wake on each plan also carries what
+    that wake would have: its facts, keyed by plan and asker (``selected_fact``).
+    """
+    from plans import admission, plan_wake
+
+    handoffs: dict[tuple[str, str], dict] = {}
+    for plan_id in dict.fromkeys(str(row["plan_id"]) for row in rows):
+        causing = next(
+            executors[row["hold_id"]] for row in rows if str(row["plan_id"]) == plan_id
+        )
+        reconciled = admission.reconcile_plan(
+            plan_id, actor_id=None, provenance=_PROVENANCE, causing_executor=causing, db=db,
+        )
+        if causing is not None:
+            handoffs[(plan_id, causing)] = plan_wake.selected_fact(db, reconciled, causing)
+    return handoffs
+
+
+def _release_summary(row, done: str, *, retired: bool, release: AskRelease | None) -> str:
+    """Return the one-line answer the wake and its receipt carry."""
+    from prompts import plan_wakes as wakes
+
+    detail = release.detail if release is not None else {}
+    return wakes.ask_release_summary(
+        ask=str(row["ask"] or "your ask"), done=done, retired=retired,
+        kind=str(row["kind"]), title=str(row["title"]), node_id=str(row["node_id"]),
+        verdict=detail.get("verdict"), note=detail.get("note"),
+        other_holds=bool(row["other_holds"]),
+    )

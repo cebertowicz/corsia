@@ -66,14 +66,14 @@
 		{@render extra?.()}
 		<h4>{chartTitle}, {chart.rangeText}, by {chart.unit}</h4>
 		{#if drawChart}
-			{@render drawChart({ points: chart.points, unit: chart.unit, axisTitle: perUnit(axisTitle), caption: `${perUnit(caption)} ${grainChart(state.period, [], state.averagePeriods).note}`, ariaLabel: `${chartTitle}, ${chart.rangeText}` })}
+			{@render drawChart({ points: chart.points, unit: chart.unit, axisTitle: perUnit(axisTitle), caption: perUnit(caption), ariaLabel: `${chartTitle}, ${chart.rangeText}` })}
 		{:else}
 		<MeasurementBarChart
 			points={chart.points}
 			axisTitle={perUnit(axisTitle)}
 			unit={chart.unit}
 			averageName={chart.averageName}
-			caption={`${perUnit(caption)} ${chart.note}`}
+			caption={perUnit(caption)}
 			minN={minimum}
 			{minNText}
 			ariaLabel={`${chartTitle}, ${chart.rangeText}`}
@@ -89,7 +89,7 @@
 </section>
 
 <style>
-	.card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; min-width: 0; }
+	.card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 0; padding: 14px; min-width: 0; }
 	.sh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 6px; }
 	h3 { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
 	h4 { margin: 0 0 6px; color: var(--text-secondary); font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; overflow-wrap: anywhere; }

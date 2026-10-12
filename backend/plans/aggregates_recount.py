@@ -10,8 +10,8 @@ for the plan's top level the figures the design stores as aggregates:
               ``folded_ids`` decide (all-descendants rule);
 ``done``      accepted leaves in the work, ``operator_node_state`` bucket "done";
 ``failed``    failed leaves in the work, bucket "failed";
-``closed``    closed nodes, excluding sent-back rounds (``rollup``'s
-              ``rejected_round_sql``);
+``closed``    closed nodes, excluding sent-back rounds (the stored
+              ``plan_nodes.sent_back`` the readers use, derived here from events);
 ``in_work``   nodes in the work (``node_states.work_ids``).
 
 It calls the existing functions for every classification: ``work_ids``,
@@ -40,7 +40,8 @@ R4. *Work counts cross a retired node by its own contribution only.* A closed
 R5. *A closed node counts as closed for its ancestors when its parent is in the
     work* (or it is a root). A closed node under a closed node counts nowhere.
 R6. *Sent-back.* ``sent_back_ids = {id : review_rejected event and state is
-    closed}``, the ``rejected_round_sql`` predicate. A sent-back node is never
+    closed}``, derived from the events so it checks the stored ``sent_back``
+    every reader uses (``stored_mismatches``). A sent-back node is never
     counted as closed. Its descendants are already cut by R4.
 R7. *``done`` / ``failed`` are leaves in the work only* (``node_states.leaves``),
     bucketed by ``leaf_bucket_from_facts``; a settled parent with a child in

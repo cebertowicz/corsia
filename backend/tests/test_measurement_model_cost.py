@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from api import measurement_model_cost, measurement_models
+from api import measurement_chain_costs, measurement_model_cost, measurement_models
 from api.cost_identity import IdentityResolver, ModelIdentity
 from api.measurement_model_cost import query_model_costs
 from api.measurement_models import build_models, models_payload
@@ -36,9 +36,21 @@ def _cost(key: str, task: str, outcome: str = "priced", dollars: float | None = 
     return {"period": period, "task_id": task, "identity": _identity(key), "outcome": outcome, "dollars": dollars}
 
 
-def _build(tokens=(), turns=(), errors=(), costs=(), offered=frozenset(), gaps=()):
+def _call(key: str, dollars: float | None = 1.0, outcome: str = "priced", period: str = LATEST) -> dict:
+    """One classified ledger record shape, as ``measurement_cost._usage_rows`` and ``classify_usage_rows`` yield it."""
+    return {"period": period, "model": key, "outcome": outcome, "dollars": dollars}
+
+
+def _chain_calls(costs) -> list[dict]:
+    """The ledger holds every call, so by default it holds the chain calls in ``costs`` and nothing more."""
+    return [_call(row["identity"].key, row["dollars"], row["outcome"], row["period"]) for row in costs]
+
+
+def _build(tokens=(), turns=(), errors=(), costs=(), offered=frozenset(), gaps=(), ledger=None):
+    ledger = _chain_calls(costs) if ledger is None else ledger
     return build_models(list(tokens), list(turns), list(errors), list(costs), resolve=_resolve,
-                        latest=(LATEST,), previous=(PREVIOUS,), offered=set(offered), **({"gaps": gaps} if gaps else {}))
+                        latest=(LATEST,), previous=(PREVIOUS,), offered=set(offered), ledger_rows=list(ledger),
+                        **({"gaps": gaps} if gaps else {}))
 
 
 def _top(count: int = 6) -> list[dict]:
@@ -52,13 +64,13 @@ def test_models_past_the_sixth_by_spend_pool_into_one_counted_other_row():
     built = _build(turns=[{"model": "small-a", "turns": 60}, {"model": "small-b", "turns": 60}],
                    errors=[{"model": "small-a", "error": "socket closed"}], costs=costs, offered={"big"})
     labels = [row["label"] for row in built["rows"]]
-    # Six named rows by priced spend, then big (14 tasks, $14) and small-a ($1) pool; small-b spent nothing and is unlisted.
-    assert labels == [f"top{model}" for model in range(6)] + ["Other (2 more models)"]
+    # Six named rows by priced spend, then big (14 tasks, $14), small-a ($1) and small-b (an unpriced task) pool.
+    assert labels == [f"top{model}" for model in range(6)] + ["Other (3 more models)"]
     other = built["rows"][-1]
     assert other["other"] is True and other["model"] == ""
-    assert (other["tasks"], other["failed_turns_per_100"]) == (15, pytest.approx(100 / 60))
-    # Other keeps its members' priced dollars over their tasks: $14 and $1 over 15 distinct tasks.
-    assert (other["recorded_cost_per_task"], other["cost_class"]) == (pytest.approx(1.0), "priced")
+    assert (other["tasks"], other["failed_turns_per_100"]) == (16, pytest.approx(100 / 120))
+    # Other keeps its members' priced dollars over their tasks, $15 over 16, and marks the unpriced one partial.
+    assert (other["recorded_cost_per_task"], other["cost_class"]) == (pytest.approx(15 / 16), "no_pricing")
 
 
 def test_a_listed_model_has_spend_or_the_task_floor_and_ranks_by_spend_then_tasks():
@@ -67,8 +79,8 @@ def test_a_listed_model_has_spend_or_the_task_floor_and_ranks_by_spend_then_task
     costs += [_cost("cheap", f"c{index}", dollars=1.0) for index in range(3)]
     costs += [_cost("local-small", "l1", outcome="not_api_priced", dollars=None)]
     built = _build(tokens=[{"model": "token-only", "tokens": 10}], costs=costs)
-    # token-only and local-small neither spent nor reached 14 tasks, so only their token share names them.
-    assert [row["model"] for row in built["rows"]] == ["pricey", "cheap", "free-big"]
+    # token-only and local-small neither spent nor reached 14 tasks, so they pool into Other rather than vanish.
+    assert [row["label"] for row in built["rows"]] == ["pricey", "cheap", "free-big", "Other (2 more models)"]
     assert [row["label"] for row in built["token_shares"]] == ["token-only"]
 
 
@@ -130,7 +142,8 @@ def test_a_local_model_has_no_list_price_in_both_cells():
 
 def test_a_row_with_no_tasks_this_period_names_no_cause():
     costs = [_cost("spent-before", "s0", dollars=5.0, period=PREVIOUS)]
-    assert _build(tokens=[{"model": "token-only", "tokens": 10}], costs=costs)["rows"] == []
+    (other,) = _build(tokens=[{"model": "token-only", "tokens": 10}], costs=costs)["rows"]
+    assert (other["tasks"], other["rate_reason"], other["change_reason"], other["cost_change"]) == (0, "no_tasks", "none", None)
 
 
 def test_a_task_using_two_pooled_models_counts_once_in_the_other_row():
@@ -173,6 +186,39 @@ def test_spend_is_the_priced_dollars_and_none_when_nothing_is_priced():
     costs += [_cost("ext", f"e{index}", outcome="contract_unproven", dollars=None) for index in range(14)]
     rows = {row["model"]: row for row in _build(costs=costs)["rows"]}
     assert (rows["big"]["spend_usd"], rows["ext"]["spend_usd"]) == (28.0, None)
+
+
+def test_share_and_rank_are_ledger_dollars_of_all_calls_not_the_accepted_tasks_chains():
+    costs = [_cost("chain-first", f"a{index}", dollars=10.0) for index in range(14)]
+    costs += [_cost("ledger-first", f"b{index}", dollars=1.0) for index in range(14)]
+    # ledger-first also spent $500 on calls no accepted task's chain holds, and orphan spent $60 with no task at all.
+    ledger = [_call("chain-first", 140.0), _call("ledger-first", 14.0), _call("ledger-first", 500.0), _call("orphan", 60.0)]
+    built = _build(costs=costs, ledger=ledger)
+    assert [row["model"] for row in built["rows"]] == ["ledger-first", "chain-first", "orphan"]
+    assert [row["spend_usd"] for row in built["rows"]] == [514.0, 140.0, 60.0]
+    # The denominator is the whole window's ledger spend, whoever holds a row.
+    assert built["total_spend_usd"] == 714.0
+    # The rate still divides chain dollars by tasks.
+    assert built["rows"][0]["recorded_cost_per_task"] == 1.0
+
+
+def test_ledger_spend_counts_the_latest_window_priced_calls_only():
+    costs = [_cost("big", f"b{index}", dollars=1.0) for index in range(14)]
+    ledger = [_call("big", 14.0), _call("big", 99.0, period=PREVIOUS), _call("big", None, outcome="no_list_price"),
+              _call("local", None, outcome="not_api_priced")]
+    built = _build(costs=costs, ledger=ledger)
+    assert (built["rows"][0]["spend_usd"], built["total_spend_usd"]) == (14.0, 14.0)
+
+
+def test_the_other_row_pools_its_members_ledger_spend():
+    costs = _top() + [_cost("small-a", "s1"), _cost("small-b", "s2")]
+    built = _build(costs=costs, ledger=[_call(f"top{model}", 1400.0) for model in range(6)] + [_call("small-a", 3.0), _call("small-b", 4.0)])
+    assert (built["rows"][-1]["label"], built["rows"][-1]["spend_usd"]) == ("Other (2 more models)", 7.0)
+    assert built["total_spend_usd"] == 8407.0
+
+
+def test_nothing_priced_serves_a_zero_total():
+    assert _build(costs=[_cost("local", "l1", outcome="not_api_priced", dollars=None)])["total_spend_usd"] == 0.0
 
 
 def test_rate_is_unknown_only_when_nothing_is_priced():
@@ -295,7 +341,7 @@ def test_a_call_that_failed_to_record_before_acceptance_marks_the_served_rate(db
     assert row["recording_gap"] is True and row["recorded_cost_per_task"] is not None
 
 
-def test_one_models_read_walks_the_chains_once_and_leaves_no_table(db, monkeypatch):
+def test_models_shares_its_gap_walk_and_leaves_no_table(db, monkeypatch):
     walks = []
     ctes = measurement_model_cost.chain_ctes
     monkeypatch.setattr(measurement_model_cost, "chain_ctes", lambda **kwargs: walks.append(kwargs) or ctes(**kwargs))
@@ -317,6 +363,18 @@ def test_tasks_are_accepted_tasks_only(db):
     assert {row["task_id"] for row in _costs(db)} == {"accepted"}
 
 
+def test_total_spend_is_every_priced_call_of_the_window_with_or_without_an_accepted_task(db):
+    _task(db, "task")
+    _usage(db, "in-chain", "task", "claude-code/claude-opus-5-5")
+    _usage(db, "no-task", None, "claude-code/claude-opus-5-5")
+    _usage(db, "before", None, "claude-code/claude-opus-5-5", at="2026-09-01T12:00:00Z")
+    built = models_payload(db, SCOPE, GRAIN, [])
+    (row,) = [row for row in built["rows"] if row["model"] == "claude-code/claude-opus-5-5"]
+    # Two priced calls of the latest window, one outside it.
+    assert row["spend_usd"] == pytest.approx(2 * row["recorded_cost_per_task"])
+    assert built["total_spend_usd"] == pytest.approx(row["spend_usd"])
+
+
 def test_token_share_follows_the_selected_range(db):
     _usage(db, "early", None, "claude-code/claude-opus-5-5", at="2026-09-08T12:00:00Z")
     built = models_payload(db, SCOPE, GRAIN, [])
@@ -325,8 +383,8 @@ def test_token_share_follows_the_selected_range(db):
 
 def test_tasks_and_prices_read_only_the_two_windows_models_shows(db, monkeypatch):
     seen = []
-    walk = measurement_models.materialize_chain
-    monkeypatch.setattr("api.measurement_models.materialize_chain",
+    walk = measurement_chain_costs.materialize_chain
+    monkeypatch.setattr("api.measurement_chain_costs.materialize_chain",
                         lambda _db, params: seen.append(params["grain"]) or walk(_db, params))
     models_payload(db, SCOPE, GRAIN, [])
     (read,) = seen
@@ -355,7 +413,7 @@ def _sized(costs, sizes: dict[str, str], first_try: frozenset[str] = frozenset()
     """Rows' size cells, with ``sizes`` naming each task's class and ``first_try`` its first-try tasks."""
     outcomes = {cost["task_id"]: (sizes.get(cost["task_id"]), int(cost["task_id"] in first_try)) for cost in costs}
     built = build_models([], [], [], list(costs), resolve=_resolve, latest=(LATEST,), previous=(PREVIOUS,),
-                         offered=set(), outcomes=outcomes)
+                         offered=set(), outcomes=outcomes, ledger_rows=_chain_calls(costs))
     return {row["model"]: row["sizes"] for row in built["rows"]}
 
 
@@ -371,7 +429,7 @@ def test_a_size_cell_is_the_rate_of_that_class_with_its_change_and_first_try_sha
     sizes = {cost["task_id"]: "M" for cost in latest + previous} | {cost["task_id"]: "S" for cost in small}
     first = frozenset(cost["task_id"] for cost in latest[:7])
     (cell,) = _sized(costs, sizes, first)["m"]
-    assert cell == {"size": "M", "tasks": 14, "cost_per_task": 2.0, "cost_change": pytest.approx(1.0),
+    assert cell == {"size": "M", "tasks": 14, "cost_per_task": 2.0, "previous_cost_per_task": 1.0, "cost_change": pytest.approx(1.0),
                     "change_reason": "none", "first_try": 0.5, "partial": False, "recording_gap": False}
 
 
@@ -386,6 +444,17 @@ def test_a_class_with_no_priced_dollars_has_no_cell():
     unpriced = _period("u", 14, outcome="no_pricing", dollars=None)
     cells = _sized(local + unpriced, {cost["task_id"]: "M" for cost in local + unpriced})
     assert cells == {"m": [], "u": []}
+
+
+def test_the_overall_size_cells_pool_every_models_tasks_of_a_class_whatever_each_models_own_cell():
+    costs = [*_period("a", 7, dollars=2.0), *_period("b", 7, dollars=4.0),
+             *_period("a", 7, PREVIOUS, dollars=1.0), *_period("b", 7, PREVIOUS, dollars=1.0)]
+    outcomes = {cost["task_id"]: ("S", 0) for cost in costs}
+    built = build_models([], [], [], costs, resolve=_resolve, latest=(LATEST,), previous=(PREVIOUS,),
+                         offered=set(), outcomes=outcomes)
+    # Neither model has 14 S tasks alone; together they do, and that is the class's figure.
+    (cell,) = built["size_overall"]
+    assert (cell["size"], cell["tasks"], cell["cost_per_task"], cell["previous_cost_per_task"]) == ("S", 14, 3.0, 1.0)
 
 
 def test_the_floor_rows_cells_pool_its_members_tasks():
@@ -407,3 +476,21 @@ def test_cells_read_each_tasks_declared_size_and_first_try_from_the_outcome(db):
     (cell,) = row["sizes"]
     assert (cell["size"], cell["tasks"], cell["first_try"]) == ("M", 14, pytest.approx(13 / 14))
     assert cell["cost_per_task"] == pytest.approx(row["recorded_cost_per_task"])
+
+
+async def test_the_served_read_shares_the_ledger_with_cost_and_prices_the_same_shares_as_one_connection(db, monkeypatch):
+    from api.measurement_join import _flights
+    from core import measurement_scope
+
+    monkeypatch.setattr(measurement_scope, "_now", lambda: datetime(2026, 10, 5, 12, tzinfo=timezone.utc))
+    _flights.clear()
+    for index in range(14):
+        _task(db, f"t{index}")
+        _usage(db, f"u{index}", f"t{index}", "claude-code/claude-opus-5-5")
+    db.commit()
+    grain = resolve_grain("weeks", "UTC")
+    served = await measurement_models.models_read("all", "none", grain, {"id": "steve"})
+    alone = models_payload(db, SCOPE, grain, [])
+    assert served["total_spend_usd"] == alone["total_spend_usd"] > 0
+    assert [(row["model"], row["spend_usd"], row["tasks"]) for row in served["rows"]] == [
+        (row["model"], row["spend_usd"], row["tasks"]) for row in alone["rows"]]

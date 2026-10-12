@@ -39,7 +39,7 @@ export interface MeasurementModelRow {
 	tasks: number;
 	failed_turns_per_100: number | null;
 	recorded_cost_per_task: number | null;
-	/** Priced API-equivalent dollars in the latest window; null when nothing was priced, never 0. */
+	/** Ledger priced API-equivalent dollars of every call in the latest window; null when nothing was priced, never 0. */
 	spend_usd: number | null;
 	cost_class: ModelCostClass | null;
 	/** The rate excludes local calls, which have no list price, and the group includes some. */
@@ -72,6 +72,8 @@ export interface ModelsState {
 	tokenShares: ModelTokenShare[];
 	unmatchedFailedTurns: number;
 	unresolvedTokenShare: number;
+	/** Ledger priced dollars of every call in the latest window: what each row's `spend_usd` is a share of. */
+	totalSpendUsd: number;
 	/** The windows the response answered for; null when it served none. */
 	period: MeasurementPeriod | null;
 	scopeKey: string | null;
@@ -84,6 +86,11 @@ const number = (value: unknown): number | null => typeof value === 'number' && N
 const integer = (value: unknown): number => {
 	if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error('models response carried invalid count');
 	return value as number;
+};
+
+const spendTotal = (value: unknown): number => {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('models response carried invalid spend total');
+	return value;
 };
 
 const share = (value: unknown): number => {
@@ -114,7 +121,7 @@ function decodeSizeCell(raw: unknown): ModelSizeCell {
 	};
 }
 
-type Decoded = Pick<ModelsState, 'rows' | 'minTasks' | 'tokenShares' | 'unmatchedFailedTurns' | 'unresolvedTokenShare' | 'period'>;
+type Decoded = Pick<ModelsState, 'rows' | 'minTasks' | 'tokenShares' | 'unmatchedFailedTurns' | 'unresolvedTokenShare' | 'totalSpendUsd' | 'period'>;
 
 function decodeRow(raw: unknown): MeasurementModelRow {
 	const row = raw as Record<string, unknown>;
@@ -164,11 +171,12 @@ export function decodeModelsResponse(data: unknown): Decoded {
 		tokenShares: payload.token_shares.map(decodeShare),
 		unmatchedFailedTurns: integer(payload.unmatched_failed_turns),
 		unresolvedTokenShare: share(payload.unresolved_token_share),
+		totalSpendUsd: spendTotal(payload.total_spend_usd),
 		period: payload.period === undefined ? null : decodePeriod(payload.period),
 	};
 }
 
-const EMPTY = { rows: [], minTasks: null, tokenShares: [], unmatchedFailedTurns: 0, unresolvedTokenShare: 0, period: null } satisfies Decoded;
+const EMPTY = { rows: [], minTasks: null, tokenShares: [], unmatchedFailedTurns: 0, unresolvedTokenShare: 0, totalSpendUsd: 0, period: null } satisfies Decoded;
 
 export const measurementModels = writable<ModelsState>({
 	loading: true, error: null, ...EMPTY, scopeKey: null, grain: null,

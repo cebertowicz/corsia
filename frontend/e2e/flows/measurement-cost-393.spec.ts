@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
 import { agentsBody, createAgent, createProject, mockAveragePeriods, mockPeriod, mockWindows, selectProjectScope } from '../support/measurement-fixture';
 
-const latest = { period: '2026-09-28', dollars: 10_600, priced_records: 3_000, api_records: 3_746, outcomes: 3746, per_outcome: 2.83, sized: 40, hours: 2_000, per_hour: 5.3, families: { 'Claude Code': 10_600 } };
-const previous = { period: '2026-09-21', dollars: 5_300, priced_records: 900, api_records: 1_425, outcomes: 1425, per_outcome: 3.72, sized: 30, hours: 1_500, per_hour: 3.53, families: { 'Claude Code': 5_300 } };
+const latest = { period: '2026-09-28', dollars: 10_600, priced_records: 3_000, usage_records: 3_746, outcomes: 3746, per_outcome: 2.83, sized: 40, hours: 2_000, per_hour: 5.3, families: { 'Claude Code': 10_600 } };
+const previous = { period: '2026-09-21', dollars: 5_300, priced_records: 900, usage_records: 1_425, outcomes: 1425, per_outcome: 3.72, sized: 30, hours: 1_500, per_hour: 3.53, families: { 'Claude Code': 5_300 } };
 /** A pooled comparison window as the Cost payload serves it: named by the days it covers, with no `period` key. */
 const pooled = ({ period: from, ...figures }: typeof latest) => ({ from, to: from, ...figures });
 const partialActual = { subscription_records: 5_000, unknown_charge_records: 0, external_unset_records: 0, direct_api_dollars: 4.2, complete: true, workspace_subscription: { subscription_dollars: 22, overage_dollars: null, subscription_facts: 1, overage_facts: 0, subscription_coverage: 'partial', overage_coverage: 'absent', overlapping_overage: [], allocation: 'unavailable' } };
@@ -14,7 +14,7 @@ async function serveMeasurement(page: import('@playwright/test').Page, project: 
 		const url = new URL(route.request().url());
 		if (url.pathname.endsWith('/agents')) return route.fulfill({ json: agentsBody(project, agent.id, agent.name, url) });
 		if (url.pathname.endsWith('/models')) return route.fulfill({ json: { rows: [] } });
-		if (url.pathname.endsWith('/cost')) return route.fulfill({ json: { definition_version: 1, period: mockPeriod(url.searchParams.get('grain')), series: [previous, latest], latest: pooled(latest), previous: pooled(previous), coverage: { priced_records: 3_900, api_records: 5_171 }, not_api_priced_records: 12, excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 1_271 }], actual } });
+		if (url.pathname.endsWith('/cost')) return route.fulfill({ json: { definition_version: 1, period: mockPeriod(url.searchParams.get('grain')), series: [previous, latest], latest: pooled(latest), previous: pooled(previous), coverage: { priced_records: 3_900, usage_records: 5_171 }, not_api_priced_records: 12, excluded: [{ kind: 'contract_unproven', text: 'usage records whose token counting format is not proven', records: 1_271 }], actual } });
 		const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
 		return route.fulfill({ json: { period: mockPeriod(url.searchParams.get('grain')), average_periods: mockAveragePeriods(url.searchParams.get('grain')), windows: mockWindows(ids), rows: ids.flatMap((series) => ['2026-09-21', '2026-09-28'].map((period) => ({ period, series, value: series === 'outcomes' ? 20 : 1, average: series === 'outcomes' ? 20 : 1, n: 20, proxy: false, partial: false, comparable: true, break: null, dimension: null, thin: false }))), definitions: [] } });
 	});
@@ -40,7 +40,7 @@ test.describe('@flow:measurement-cost-393 @surface:measurement Cost is usable on
 	test('shows the approved API-equivalent and incomplete Actual states without sideways scrolling', async ({ page, request }, testInfo) => {
 		const section = await openCost(page, request, testInfo);
 		await expect(section.getByText('Total spend, Sep 28 to Oct 4')).toBeVisible();
-		await expect(section.getByText('3,900 of 5,171 usage records priced in this range.')).toBeVisible();
+		await expect(section.getByText('3,900 of 5,171 usage records in Sep 28 to Oct 4 are priced; the rest are local, unlisted or unproven prices and are not in any dollar figure.')).toBeVisible();
 		await section.scrollIntoViewIfNeeded();
 		let box = await section.boundingBox();
 		expect(box!.x + box!.width).toBeLessThanOrEqual(393);
@@ -73,7 +73,7 @@ test.describe('@flow:measurement-cost-desktop @surface:measurement Cost remains 
 	test('keeps the API-equivalent summary and charts legible beside the Measurement controls in both themes', async ({ page, request }, testInfo) => {
 		const section = await openCost(page, request, testInfo);
 		await expect(section.getByText('Total spend, Sep 28 to Oct 4')).toBeVisible();
-		await expect(section.getByRole('heading', { name: 'API-equivalent $ per hour of delivered work, Sep 21 to Oct 4, by day' })).toBeVisible();
+		await expect(section.getByRole('heading', { name: 'API-equivalent $ per person-hour of work delivered, Sep 21 to Oct 4, by day' })).toBeVisible();
 		await section.scrollIntoViewIfNeeded();
 		for (const theme of ['light', 'dark'] as const) {
 			await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);

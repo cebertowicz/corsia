@@ -67,6 +67,23 @@ def _notices(db) -> list[str]:
     ]
 
 
+def _last_ask_wake(db) -> str:
+    """Return the last ask wake's line; the next block under it is the owner's real one."""
+    wake = [notice for notice in _notices(db) if notice.startswith("[CORSIA plan] ")][-1]
+    line, block = wake.split("\n", 1)
+    assert json.loads(block)["next"]["executor_thread_id"] == "owner"
+    return line
+
+
+def _answer_notice(node_id: str, *, ask: str, title: str, verdict: str,
+                   answer: str | None = None) -> str:
+    return (
+        f'[CORSIA plan] The user answered "{ask}" for task "{title}" (node {node_id}). '
+        f'Verdict: {verdict}.' + (f" User answer: {answer}." if answer else "")
+        + " Other holds remain: no."
+    )
+
+
 def _open_holds(db, node_id: str) -> int:
     return db.execute(
         "SELECT COUNT(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL",
@@ -89,10 +106,8 @@ def test_a_plain_approval_reaches_the_agent_with_its_note(db):
 
     _answer(db, artifact, "approved", "Ship it.")
 
-    text = _notices(db)[-1]
-    assert text == (
-        'The user approved "proposal.md", so task "Review the proposal" '
-        "no longer waits on them: pick it up.\nTheir note: Ship it."
+    assert _last_ask_wake(db) == _answer_notice(
+        node, ask="proposal.md", title="Review the proposal", verdict="approved", answer="Ship it.",
     )
     assert _open_holds(db, node) == 0
     stored = _clearance(db, node)
@@ -120,7 +135,7 @@ def test_the_round_feedback_switches_approve_to_approve_with_changes(db):
     assert state["round_feedback_counts"] == {"comments": 1, "suggestions": 1, "edits": 0}
     # The label the client last showed does not decide: the round does.
     _answer(db, artifact, "approved")
-    assert "approved with changes" in _notices(db)[-1]
+    assert "approved with changes" in _last_ask_wake(db)
 
 
 def test_approve_with_changes_and_the_feedback_task_pointer(db):
@@ -135,13 +150,12 @@ def test_approve_with_changes_and_the_feedback_task_pointer(db):
         "SELECT COUNT(*) FROM doc_feedback_batches WHERE state='open'",
     ).fetchone()[0]
     assert open_batches == 0
-    task = db.execute(
-        "SELECT title FROM plan_nodes WHERE title LIKE 'Steve left%'",
-    ).fetchone()["title"]
-    assert _notices(db)[-1] == (
-        'The user approved with changes "proposal.md" (1 comment, 1 suggestion, '
-        f'in task "{task}"), so task "Review the proposal" no longer waits on '
-        "them: pick it up.\nTheir note: Mostly fine."
+    assert _last_ask_wake(db) == _answer_notice(
+        node,
+        ask="proposal.md",
+        title="Review the proposal",
+        verdict="approved with changes",
+        answer="Mostly fine.",
     )
     assert _clearance(db, node)["feedback_counts"] == {
         "comments": 1, "suggestions": 1, "edits": 0,
@@ -171,19 +185,28 @@ def test_request_changes_with_no_feedback_needs_a_note(db):
     assert attention.get_attention_state(artifact, db=db) == "raised"
 
     _answer(db, artifact, "changes_requested", "Cut section 3.")
-    assert _notices(db)[-1].startswith('The user requested changes on "proposal.md", so')
-    assert _notices(db)[-1].endswith("\nTheir note: Cut section 3.")
+    assert _last_ask_wake(db) == _answer_notice(
+        node,
+        ask="proposal.md",
+        title="Review the proposal",
+        verdict="changes requested",
+        answer="Cut section 3.",
+    )
 
 
 def test_request_changes_with_round_feedback_needs_no_note(db):
     artifact = seed_document(db, "owner", name="proposal.md")
-    _ask(db, artifact)
+    node = _ask(db, artifact)
     _comment(db, artifact)
 
     _answer(db, artifact, "changes_requested")
 
-    assert "requested changes on" in _notices(db)[-1]
-    assert "Their note" not in _notices(db)[-1]
+    assert _last_ask_wake(db) == _answer_notice(
+        node,
+        ask="proposal.md",
+        title="Review the proposal",
+        verdict="changes requested",
+    )
 
 
 def test_one_answer_releases_every_ask_on_the_artifact(db):
@@ -194,7 +217,10 @@ def test_one_answer_releases_every_ask_on_the_artifact(db):
     _answer(db, artifact, "approved")
 
     assert _open_holds(db, first) == 0 and _open_holds(db, second) == 0
-    notices = [text for text in _notices(db) if text.startswith("The user approved")]
+    notices = [
+        text for text in _notices(db)
+        if text.startswith("[CORSIA plan] The user answered") and "Verdict: approved." in text
+    ]
     assert len(notices) == 2
     assert any('task "Review the proposal"' in text for text in notices)
     assert any('task "Check the numbers"' in text for text in notices)
@@ -266,7 +292,13 @@ def test_an_image_can_be_asked_about_and_answered(db):
     _answer(db, artifact, "changes_requested", "Darker header.")
 
     assert _open_holds(db, node) == 0
-    assert "requested changes on" in _notices(db)[-1]
+    assert _last_ask_wake(db) == _answer_notice(
+        node,
+        ask="mock.png",
+        title="Look at the mock",
+        verdict="changes requested",
+        answer="Darker header.",
+    )
 
 
 def test_other_artifact_types_still_cannot_be_asked_about(db):

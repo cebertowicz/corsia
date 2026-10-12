@@ -163,6 +163,14 @@ from infra.migration_102_to_103_recovered_errors import migrate_102_to_103
 from infra.migration_103_to_104_retype_legacy_images import migrate_103_to_104
 from infra.migration_104_to_105_review_time import migrate_104_to_105
 from infra.migration_105_to_106_plan_aggregates import migrate_105_to_106
+from infra.migration_106_to_107_key_store_credentials import migrate_106_to_107
+from infra.migration_107_to_108_server_keys import migrate_107_to_108
+from infra.migration_109_to_110_agent_use_restriction import migrate_109_to_110
+from infra.migration_110_to_111_token_plan_by_host import migrate_110_to_111
+from infra.migration_111_to_112_image_regions import migrate_111_to_112
+from infra.migration_112_to_113_retype_upload_images import migrate_112_to_113
+from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
+from infra.migration_mcp_secrets import migrate_mcp_secrets
 
 log = logging.getLogger(__name__)
 
@@ -742,6 +750,13 @@ MIGRATIONS[102] = migrate_102_to_103
 MIGRATIONS[103] = migrate_103_to_104
 MIGRATIONS[104] = migrate_104_to_105
 MIGRATIONS[105] = migrate_105_to_106
+MIGRATIONS[106] = migrate_106_to_107
+MIGRATIONS[107] = migrate_107_to_108
+MIGRATIONS[MCP_SECRETS_FROM_VERSION] = migrate_mcp_secrets
+MIGRATIONS[109] = migrate_109_to_110
+MIGRATIONS[110] = migrate_110_to_111
+MIGRATIONS[111] = migrate_111_to_112
+MIGRATIONS[112] = migrate_112_to_113
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -901,6 +916,9 @@ def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
     target = source.with_name(f"{source.name}.pre-migration-v{from_version}-{stamp}.bak")
     if target.exists():
         raise MigrationError(f"backup path already exists, refusing to overwrite: {target}")
+    # The copy holds whatever the database holds, credentials included before
+    # the key-store migrations move them, so only the owner may read it.
+    os.close(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
     reader = sqlite3.connect(source, timeout=_BACKUP_TIMEOUT_SECONDS)
     try:
         backup = sqlite3.connect(target)
@@ -938,14 +956,65 @@ def _plan(from_version: int, to_version: int) -> list[int]:
     return steps
 
 
-def _validate(conn: sqlite3.Connection) -> None:
-    """Prove the migrated database is sound, still inside the transaction."""
+def _schema_snapshot(
+    conn: sqlite3.Connection,
+) -> set[tuple[str, str, str, str | None, int]]:
+    """Return the schema entries whose changes require table validation.
+
+    ``rootpage`` is part of the entry so a table or index rebuilt with
+    byte-identical DDL still counts as changed: its b-tree is new even when
+    its definition text is not.
+    """
+    return {
+        tuple(row)
+        for row in conn.execute(
+            "SELECT type, name, tbl_name, sql, rootpage FROM sqlite_schema "
+            "WHERE type IN ('table', 'index')"
+        )
+    }
+
+
+def _changed_tables(
+    before: set[tuple[str, str, str, str | None, int]],
+    after: set[tuple[str, str, str, str | None, int]],
+) -> list[str]:
+    """Find tables created or changed by migration schema entries.
+
+    A table entry names itself while an index entry names its owning table in
+    ``tbl_name``. Removed entries do not need validation because they no
+    longer describe a live table.
+    """
+    return sorted(
+        {
+            tbl_name
+            for _entry_type, _name, tbl_name, _sql, _rootpage in after - before
+            if tbl_name
+        }
+    )
+
+
+def _validate(conn: sqlite3.Connection, changed_tables: list[str]) -> None:
+    """Check the migrated database inside the transaction, before commit.
+
+    Foreign keys and page structure are checked across the whole database;
+    row-to-index agreement only for tables the migration created or rebuilt.
+    Data-only steps rely on SQLite maintaining their indexes.
+    """
     broken = conn.execute("PRAGMA foreign_key_check").fetchall()
     if broken:
         raise MigrationError(f"foreign_key_check failed after migration: {broken[:5]}")
-    integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
-    if integrity != "ok":
-        raise MigrationError(f"integrity_check failed after migration: {integrity}")
+    quick = conn.execute("PRAGMA quick_check").fetchone()[0]
+    if quick != "ok":
+        raise MigrationError(f"quick_check failed after migration: {quick}")
+    for table in changed_tables:
+        quoted_table = table.replace('"', '""')
+        integrity = conn.execute(
+            f'PRAGMA integrity_check("{quoted_table}")'
+        ).fetchone()[0]
+        if integrity != "ok":
+            raise MigrationError(
+                f"integrity_check({table}) failed after migration: {integrity}"
+            )
 
 
 def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> MigrationResult:
@@ -1001,11 +1070,12 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
                 )
                 from plans.public import sanctioned_plan_write  # lazy: plans imports infra
 
+                before_schema = _schema_snapshot(conn)
                 for version in _plan(locked_version, target_version):
                     with sanctioned_plan_write():
                         MIGRATIONS[version](conn)
                 conn.execute(f"PRAGMA user_version={target_version}")
-                _validate(conn)
+                _validate(conn, _changed_tables(before_schema, _schema_snapshot(conn)))
             except BaseException as error:
                 # Only claim a backup that exists. The failure can now come from
                 # the room check *before* any copy is made, and an in-memory

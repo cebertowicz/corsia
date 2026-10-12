@@ -63,7 +63,7 @@ def test_settings_reports_exact_ready_and_missing_reviewer(isolated_db):
     assert missing.json()["host_access_reviewer_status"] == "unavailable"
     assert missing.json()["host_access_reviewer_message"] == (
         "claude-code/removed can't review requests right now (not in the catalog). "
-        "Choose another model."
+        "Host-access requests will fail. Choose another model or turn on fallback."
     )
 
 
@@ -189,3 +189,45 @@ def test_harness_cleanup_retains_configured_reviewer_reference(isolated_db):
     assert retained is not None
     assert tuple(retained) == ("reference", 0, 0)
     db.close()
+
+
+def _owner_patch(client: TestClient, body: dict):
+    return client.patch(
+        "/api/settings",
+        headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"},
+        json=body,
+    )
+
+
+def test_reviewer_fallback_defaults_off_and_saves_a_boolean(isolated_db):
+    from infra.settings import get_agent_defaults
+
+    _set_defaults()
+    with _client() as client:
+        initial = _get_settings(client)
+        enabled = _owner_patch(client, {"host_access_reviewer_fallback": True})
+        invalid = _owner_patch(client, {"host_access_reviewer_fallback": "yes"})
+        after_invalid = _get_settings(client)
+        disabled = _owner_patch(client, {"host_access_reviewer_fallback": False})
+
+    assert initial.json()["host_access_reviewer_fallback"] is False
+    assert enabled.status_code == 200
+    assert enabled.json()["host_access_reviewer_fallback"] is True
+    assert invalid.status_code == 400
+    assert after_invalid.json()["host_access_reviewer_fallback"] is True
+    assert disabled.json()["host_access_reviewer_fallback"] is False
+    assert get_agent_defaults()["host_access_reviewer_fallback"] is False
+
+
+def test_reviewer_fallback_survives_a_reviewer_model_change(isolated_db):
+    _set_defaults(host_access_reviewer_fallback=True)
+    with _client() as client:
+        chosen = _owner_patch(client, {"host_access_reviewer_model": "codex/gpt-5-codex"})
+        after_choice = _get_settings(client)
+        cleared = _owner_patch(client, {"host_access_reviewer_model": None})
+        after_clear = _get_settings(client)
+
+    assert chosen.status_code == 200
+    assert cleared.status_code == 200
+    assert after_choice.json()["host_access_reviewer_fallback"] is True
+    assert after_clear.json()["host_access_reviewer_fallback"] is True

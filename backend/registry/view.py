@@ -17,7 +17,6 @@ on record.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from datetime import datetime, timezone
@@ -185,7 +184,7 @@ def _not_exempt_artifact_ids(db, thread_id: str) -> set[str]:
 
 
 def _artifact_item(a: dict, not_exempt_ids: set[str]) -> dict:
-    meta = _metadata(a.get("metadata"))
+    meta = parse_metadata(a.get("metadata"))
     descriptor = presentation.resolve_descriptor(a["integration"], a["type"])
     disabled_reason = (
         None
@@ -337,17 +336,6 @@ def reconcile_for_thread(thread_id: str, *, mode: str = "preview") -> dict:
         raise ValueError(f"unknown reconcile mode: {mode!r}")
     return preview_for_thread(thread_id)
 
-
-def _metadata(raw: object) -> dict:
-    if not raw:
-        return {}
-    if isinstance(raw, dict):
-        return raw
-    try:
-        parsed = json.loads(str(raw))
-    except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
 
 
 _UUID_RE = re.compile(

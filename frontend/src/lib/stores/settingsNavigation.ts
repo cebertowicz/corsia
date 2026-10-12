@@ -7,13 +7,18 @@ export const settingsActiveSection = writable<SettingsSection>('providers');
 export const settingsOpenRequest = writable(0);
 /** An element inside the opened section (its `data-settings-anchor`) to bring into view once, then cleared. */
 export const settingsAnchorRequest = writable<string | null>(null);
-/** The harness connection whose Providers card should open expanded and scroll into view. */
+/** The harness connection or cloud provider whose Providers card should open expanded and scroll into view. */
 export const providerCardRequest = writable<string | null>(null);
 
 export function requestSettingsSection(section: SettingsSection, anchor: string | null = null) {
 	settingsActiveSection.set(section);
 	settingsAnchorRequest.set(anchor);
 	settingsOpenRequest.update((value) => value + 1);
+}
+
+/** Open one registered server's Providers card; a server id never collides with a provider name. */
+export function requestServerCard(serverId: string) {
+	requestProviderCard(serverId);
 }
 
 export function requestProviderCard(connection: string) {

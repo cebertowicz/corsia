@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
 import { agentsBody, createAgent, createProject } from '../support/measurement-fixture';
+import { waitForMainSlideToSettle } from '../support/sidebar';
 
 /**
  * The Models section at phone width.
@@ -93,7 +94,7 @@ function serveModels(mode: ModelsOutcome) {
 					await route.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"models unavailable"}' });
 					return;
 				}
-				await route.fulfill({ json: { rows: mode === 'none' ? [] : PAIRS, min_tasks: 14, token_shares: mode === 'none' ? [] : TOKEN_SHARES, unmatched_failed_turns: 0, unresolved_token_share: 0, period: { grain: 'days', timezone: 'UTC', current: '2026-10-05', range: { from: '2026-09-21', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } } } });
+				await route.fulfill({ json: { rows: mode === 'none' ? [] : PAIRS, min_tasks: 14, token_shares: mode === 'none' ? [] : TOKEN_SHARES, unmatched_failed_turns: 0, unresolved_token_share: 0, total_spend_usd: mode === 'none' ? 0 : 1400, period: { grain: 'days', timezone: 'UTC', current: '2026-10-05', range: { from: '2026-09-21', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } } } });
 				return;
 			}
 			const ids = url.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
@@ -111,11 +112,18 @@ function serveModels(mode: ModelsOutcome) {
 async function openMeasurement(page: import('@playwright/test').Page) {
 	// At phone width the rail is collapsed, so Measurement lives behind the sidebar
 	// toggle; on a wide viewport it is already on screen.
-	if ((page.viewportSize()?.width ?? 0) <= 768) {
+	const phone = (page.viewportSize()?.width ?? 0) <= 768;
+	if (phone) {
 		await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
 	}
 	await page.getByRole('link', { name: 'Measurement', exact: true }).click();
 	await expect(page.locator('.shell-header .h-title')).toHaveText('All work', { timeout: 20_000 });
+	if (phone) {
+		// Following the link closes the rail and slides the main surface back; a box read
+		// mid-slide sits up to the rail's width to the right, so measure only once it has landed.
+		await expect(page.locator('aside.sidebar'), 'the phone rail closed after navigation').not.toHaveClass(/\bopen\b/);
+		await waitForMainSlideToSettle(page);
+	}
 	// The page opens on All work, which shows every chart, Models inside the Cost card.
 	const section = page.locator('section.models');
 	await expect(section).toBeVisible({ timeout: 20_000 });
@@ -174,7 +182,7 @@ test.describe('@flow:measurement-models-393 @surface:measurement the Models sect
 			expect(await item.locator('td.tasks').evaluate((td) => getComputedStyle(td, '::before').content), `${pair.label} labels its task count`).toBe('"Tasks"');
 			// The pair reads as words, not a one-character column (a desktop width share once leaked in).
 			expect((await item.locator('td.tasks').boundingBox())!.width, `${pair.label} task cell is wide enough to read`).toBeGreaterThan(60);
-			const priced = pair.rate_reason === 'none' && pair.spend_usd !== null;
+			const priced = pair.spend_usd !== null;
 			const spend = item.locator('td.spend');
 			if (priced) await expect(spend, `${pair.label} shows its share of spend`).toBeVisible();
 			else await expect(spend, `${pair.label} has no priced spend, so no Share pair`).toBeHidden();

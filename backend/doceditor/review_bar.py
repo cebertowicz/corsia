@@ -7,7 +7,7 @@ and answering closes the user's open feedback batch through the same writer as
 send-on-close, so the comments reach the owner once as the usual feedback task.
 Plans owns the hold; this module composes the answer and hands Plans the
 release it applies (``plans.public.AskRelease``): an opaque payload for the
-clearance event and the text the asking agent wakes on.
+clearance event and Plans-owned agent wake.
 ``shared/documents/DRAFT-review-bar-design.md``.
 """
 
@@ -38,7 +38,7 @@ class AnswerRefused(ValueError):
 
 @dataclass(frozen=True)
 class ReviewAnswer:
-    """What the user decided, as the release notice and the clearance event carry it."""
+    """What the user decided, as the clearance event carries it."""
 
     verdict: str
     note: str | None = None
@@ -52,38 +52,10 @@ class ReviewAnswer:
         }
 
     def release(self):
-        """The part of the answer Plans applies: its event payload and the agent's notice."""
+        """Return the answer payload Plans records and delivers."""
         from plans.public import AskRelease
 
-        return AskRelease(
-            detail=self.payload(),
-            text=lambda ask, kind, title: release_summary(self, ask=ask, kind=kind, title=title),
-        )
-
-
-def _plural(count: int, noun: str) -> str:
-    return f"{count} {noun}{'' if count == 1 else 's'}"
-
-
-def counts_phrase(counts: dict) -> str:
-    """``2 comments, 1 suggestion`` for the kinds the round holds, in a fixed order."""
-    return ", ".join(
-        _plural(counts[kind], kind[:-1]) for kind in ("comments", "suggestions", "edits")
-        if counts.get(kind)
-    )
-
-
-def release_summary(answer: ReviewAnswer, *, ask: str, kind: str, title: str) -> str:
-    """The notice an asking agent wakes on (design D5)."""
-    detail = counts_phrase(answer.counts)
-    if answer.feedback_task:
-        detail = f'{detail + ", " if detail else ""}in task "{answer.feedback_task}"'
-    text = (
-        f'The user {VERDICTS[answer.verdict]} "{ask}"'
-        f'{f" ({detail})" if detail else ""}, so {kind} "{title}" '
-        "no longer waits on them: pick it up."
-    )
-    return f"{text}\nTheir note: {answer.note}" if answer.note else text
+        return AskRelease(detail=self.payload())
 
 
 def round_counts(db, artifact_id: str, since: str | None) -> dict:
@@ -159,6 +131,7 @@ def round_state(db, artifact_id: str) -> dict:
             other_asks.append({"name": others[-1], "reason": ask["reason"]})
     return {
         "ask_raised": newest is not None,
+        "hold_ids": [str(ask["hold_id"]) for ask in asks],
         "ask_reason": newest["reason"] if newest else None,
         "ask_raised_at": newest["raised_at"] if newest else None,
         "asker": (

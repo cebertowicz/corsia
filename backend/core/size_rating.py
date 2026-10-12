@@ -37,6 +37,13 @@ CLASS_MIDPOINT_HOURS: dict[str, float] = {
     "XS": 0.1, "S": 0.5, "M": 2.0, "L": 8.0, "XL": 40.0, "XXL": 120.0,
 }
 SIZE_CLASSES = (*CLASS_MIDPOINT_HOURS, UNKNOWN)
+# The full meaning goes where it costs nothing per Turn (skill, refusal); the
+# published tool field carries only a short prefix and the scale.
+SIZE_MEANING = (
+    "How long a capable person would need to deliver this result by hand, including the reading, "
+    "thinking, drafting, checking and revising it takes; not how long you will take."
+)
+SIZE_TOOL_PREFIX = "Effort for a capable person, not your time: "
 SIZE_SCALE_DESCRIPTION = (
     "XS under 15 min, S under 1 h, M under 4 h, L under 16 h, XL under 80 h, "
     "XXL more; unknown if you cannot tell"

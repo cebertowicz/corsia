@@ -63,6 +63,7 @@ def _db(path: Path | None = None) -> sqlite3.Connection:
             purged_at TEXT,
             pinned INTEGER DEFAULT 0,
             agent_enabled INTEGER DEFAULT 0,
+            spawned_by TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             history_epoch INTEGER NOT NULL DEFAULT 0,
@@ -233,16 +234,16 @@ def _iso(dt: datetime) -> str:
 
 def _add_session(db, sid, *, state="active", last_activity=None, created=None,
                  dormant_at=None, archived_at=None, archived_reason=None,
-                 pinned=0, agent_enabled=0):
+                 pinned=0, agent_enabled=0, spawned_by=None):
     created = created or (NOW - timedelta(days=400))
     db.execute(
         "INSERT INTO threads (id, lifecycle_state, dormant_at, archived_at, "
-        "archived_reason, pinned, agent_enabled, created_at, updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
+        "archived_reason, pinned, agent_enabled, spawned_by, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
         (sid, state,
          _iso(dormant_at) if dormant_at else None,
          _iso(archived_at) if archived_at else None,
-         archived_reason, pinned, agent_enabled,
+         archived_reason, pinned, agent_enabled, spawned_by,
          _iso(created), _iso(created)),
     )
     if last_activity is not None:
@@ -1862,6 +1863,120 @@ def test_working_tmp_trim_never_touches_other_thread_folders(
 
     assert report.working_files_trimmed == 0
     assert durable.read_text() == "durable"
+
+
+def test_settled_worker_working_unit_uses_normal_ttl(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(
+        db, "settled", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
+        archived_at=NOW - timedelta(days=8), spawned_by="parent",
+    )
+    root = _thread_root(tmp_path, "settled")
+    stale = root / "working" / "snapshot"
+    stale.write_text("old")
+    durable = root / "scratch" / "snapshot"
+    durable.parent.mkdir(parents=True)
+    durable.write_text("keep")
+    _age(stale, 8)
+    _age(durable, 30)
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 1
+    assert not stale.exists()
+    assert durable.read_text() == "keep"
+
+
+def test_settled_worker_working_unit_under_normal_ttl_is_kept(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(
+        db, "settled", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
+        archived_at=NOW - timedelta(days=6), spawned_by="parent",
+    )
+    fresh = _thread_root(tmp_path, "settled") / "working" / "fresh"
+    fresh.write_text("new")
+    _age(fresh, 6)
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert fresh.exists()
+
+
+@pytest.mark.parametrize("reason", ["user", "dormancy"])
+def test_non_settled_archived_worker_working_is_untouched(tmp_path, mtime_as_added_time, reason):
+    db = _db()
+    _add_session(
+        db, "archived", state="archived", archived_reason=reason,
+        archived_at=NOW - timedelta(days=2), spawned_by="parent",
+    )
+    stale = _thread_root(tmp_path, "archived") / "working" / "stale"
+    stale.write_text("old")
+    _age(stale, 30)
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert stale.exists()
+
+
+@pytest.mark.parametrize("spawned_by,agent_enabled", [(None, 0), ("parent", 1)])
+def test_non_temporary_or_agent_settled_archived_working_is_untouched(
+    tmp_path, mtime_as_added_time, spawned_by, agent_enabled,
+):
+    db = _db()
+    _add_session(
+        db, "excluded", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
+        archived_at=NOW - timedelta(days=2), spawned_by=spawned_by,
+        agent_enabled=agent_enabled,
+    )
+    stale = _thread_root(tmp_path, "excluded") / "working" / "stale"
+    stale.write_text("old")
+    _age(stale, 30)
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert stale.exists()
+
+
+def test_settled_worker_keep_marker_prevents_working_trim(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(
+        db, "settled", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
+        archived_at=NOW - timedelta(days=2), spawned_by="parent",
+    )
+    working = _thread_root(tmp_path, "settled") / "working"
+    kept = working / "snapshot"
+    kept.write_text("old")
+    (working / ".corsia-keep").write_text("")
+    _age(kept, 30)
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert kept.exists()
+
+
+def test_settled_worker_with_running_turn_is_skipped(tmp_path, mtime_as_added_time):
+    db = _db()
+    _add_session(
+        db, "settled", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
+        archived_at=NOW - timedelta(days=2), spawned_by="parent",
+    )
+    db.execute(
+        "INSERT INTO active_turns (id, thread_id, status, started_at) VALUES (?,?,?,?)",
+        ("turn", "settled", "running", NOW.isoformat()),
+    )
+    db.commit()
+    stale = _thread_root(tmp_path, "settled") / "working" / "stale"
+    stale.write_text("old")
+    _age(stale, 30)
+
+    report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
+
+    assert report.working_files_trimmed == 0
+    assert stale.exists()
 
 
 def test_working_tmp_trim_includes_agent_threads(tmp_path, mtime_as_added_time):

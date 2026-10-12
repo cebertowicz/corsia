@@ -68,24 +68,26 @@ def _settle_reviewer_verdict(
 
     if verdict is None:
         log.error(
-            "reviewer-gate: reviewer produced no terminal result for PR #{} "
-            "sha={} — skip-guard NOT written; gate remains retryable",
-            pr_number, head_sha[:8],
+            "reviewer-gate: reviewer produced no terminal result for PR #{} sha={} — "
+            "skip-guard NOT written; gate remains retryable", pr_number, head_sha[:8],
         )
         emit_product_event(
-            "reviewer_gate", "reviewer_no_terminal_result",
+            "reviewer_gate",
+            "reviewer_no_terminal_result",
             properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]},
+        )
+        github_reviewer_notifications.notify_reviewer_terminal_error(
+            repo, pr_number, head_sha, "reviewer returned no terminal verdict", loop,
         )
         return
 
     if isinstance(verdict, dict) and verdict.get("verdict") == "skipped":
+        from reviewer.reviewer_status import set_presence_absent
+        if not set_presence_absent(repo, head_sha, "no review ran: qa/override-reviewer skipped it at this head"):
+            _presence_unpublished(repo, pr_number, head_sha, "override skip; presence failure status not published", loop)
+            return
         reviewer_gate_state.mark_reviewed(pr_key, head_sha)
-        log.info(
-            "reviewer-gate: PR #{} sha={} base={} — marked reviewed after skip",
-            pr_number,
-            head_sha[:8],
-            base_ref,
-        )
+        log.info("reviewer-gate: PR #{} sha={} base={} — marked reviewed after skip", pr_number, head_sha[:8], base_ref)
         return
 
     if not isinstance(verdict, dict):
@@ -94,15 +96,12 @@ def _settle_reviewer_verdict(
             "sha={} — skip-guard NOT written; gate remains retryable",
             verdict, pr_number, head_sha[:8],
         )
-        emit_product_event(
-            "reviewer_gate", "reviewer_unexpected_result",
-            properties={
-                "repo": repo,
-                "pr_number": pr_number,
-                "head_sha": head_sha[:8],
-                "result_type": type(verdict).__name__,
-            },
-        )
+        reason = f"reviewer returned invalid terminal verdict ({type(verdict).__name__})"
+        from reviewer.reviewer_status import set_error
+
+        set_error(repo, head_sha, f"qa/llm-reviewer: {reason}; retry required")
+        emit_product_event("reviewer_gate", "reviewer_unexpected_result", properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8], "result_type": type(verdict).__name__})
+        github_reviewer_notifications.notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
         return
 
     delivery_result = github_reviewer_notifications.notify_reviewer_verdict(
@@ -111,20 +110,24 @@ def _settle_reviewer_verdict(
     if delivery_result == "failed":
         from reviewer.reviewer_status import set_error
 
-        set_error(
-            repo,
-            head_sha,
-            "qa/llm-reviewer: owner wake delivery failed; retry required",
-        )
+        set_error(repo, head_sha, "qa/llm-reviewer: owner wake delivery failed; retry required")
+        return
+
+    from reviewer.reviewer_status import set_presence
+
+    if not set_presence(repo, head_sha):
+        _presence_unpublished(repo, pr_number, head_sha, "verdict delivered; presence status not published, so the next gate event re-runs the review", loop)
         return
 
     reviewer_gate_state.mark_reviewed(pr_key, head_sha)
-    log.info(
-        "reviewer-gate: PR #{} sha={} base={} — marked reviewed",
-        pr_number,
-        head_sha[:8],
-        base_ref,
-    )
+    log.info("reviewer-gate: PR #{} sha={} base={} — marked reviewed", pr_number, head_sha[:8], base_ref)
+
+
+def _presence_unpublished(repo: str, pr_number: int, head_sha: str, reason: str, loop: asyncio.AbstractEventLoop | None) -> None:
+    """Leave the head unmarked, so the gate retries it, and say why."""
+    log.error("reviewer-gate: PR #{} sha={} — {}; gate remains retryable", pr_number, head_sha[:8], reason)
+    emit_product_event("reviewer_gate", "presence_unpublished", properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]})
+    github_reviewer_notifications.notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
 
 
 def on_check_suite_completed(
@@ -246,7 +249,7 @@ def _evaluate_ready_pr(
             mergeability_retry_attempt,
         ):
             return
-        _report_mergeability_unresolved(repo, pr_number, head_sha)
+        _report_mergeability_unresolved(repo, pr_number, head_sha, loop)
         return
     if github_reviewer_gate.hold_pr_until_reviewable(repo, pr_number, head_sha, pr_info):
         return
@@ -344,18 +347,20 @@ def _log_mergeability_retry_failure(
         log.exception("reviewer-gate: delayed retry raised for PR #{} sha={}", pr_number, head_sha[:8])
 
 
-def _report_mergeability_unresolved(repo: str, pr_number: int, head_sha: str) -> None:
-    """Make exhausted process-local mergeability retries visible to operators."""
-    log.warning(
-        "reviewer-gate: PR #{} sha={} — mergeability remained UNKNOWN after retries",
-        pr_number,
-        head_sha[:8],
-    )
-    emit_product_event(
-        "reviewer_gate",
-        "mergeability_unresolved",
-        properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]},
-    )
+def _report_mergeability_unresolved(
+    repo: str,
+    pr_number: int,
+    head_sha: str,
+    loop: asyncio.AbstractEventLoop | None,
+) -> None:
+    """Report exhausted mergeability retries as a retryable terminal gate error."""
+    reason = "mergeability remained unresolved after retries"
+    log.warning("reviewer-gate: PR #{} sha={} — {}", pr_number, head_sha[:8], reason)
+    from reviewer.reviewer_status import set_error
+
+    set_error(repo, head_sha, f"qa/llm-reviewer: {reason}; retry required")
+    emit_product_event("reviewer_gate", "mergeability_unresolved", properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]})
+    github_reviewer_notifications.notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
 
 
 def _report_pr_info_unreadable(

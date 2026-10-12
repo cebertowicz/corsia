@@ -197,6 +197,27 @@ async def test_reviewer_model_save_uses_run_in_db(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reviewer_fallback_save_uses_run_in_db(monkeypatch):
+    import api.system as api_system
+
+    calls = []
+
+    async def fake_run_in_db(function, *args):
+        calls.append((function, args))
+
+    monkeypatch.setattr(api_system, "run_in_db", fake_run_in_db)
+    result = await api_system.update_settings(
+        {"host_access_reviewer_fallback": True},
+        user={"id": "steve", "token_kind": "session"},
+    )
+
+    assert calls == [
+        (api_system.save_agent_defaults, ({"host_access_reviewer_fallback": True},)),
+    ]
+    assert result["host_access_reviewer_fallback"] is True
+
+
+@pytest.mark.asyncio
 async def test_bulletin_tool_and_loop_use_the_db_worker(monkeypatch):
     import infra.bulletin_live as bulletin_live
     import infra.db_async as db_async
@@ -293,3 +314,35 @@ async def test_provider_status_read_never_blocks_the_event_loop(monkeypatch):
 
     assert delay < 0.1
     assert result["server"]["servers"] == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_secret_resolution_never_blocks_the_event_loop(monkeypatch):
+    from contextlib import AsyncExitStack
+
+    from tools import mcp, mcp_secrets
+
+    event_loop_thread = threading.get_ident()
+    worker_started = threading.Event()
+    worker_release = threading.Event()
+
+    def slow_resolve(*_args, **_kwargs):
+        assert threading.get_ident() != event_loop_thread
+        worker_started.set()
+        assert worker_release.wait(timeout=5)
+        return {}, {}
+
+    async def worker(function, *args):
+        return await asyncio.to_thread(function, *args)
+
+    monkeypatch.setattr(mcp_secrets, "resolve", slow_resolve)
+    monkeypatch.setattr(mcp, "run_in_db", worker)
+
+    task = asyncio.create_task(mcp._open_session("server", {}, AsyncExitStack()))
+    try:
+        await asyncio.wait_for(asyncio.to_thread(worker_started.wait), timeout=5)
+        assert await _heartbeat_delay() < 0.1
+    finally:
+        worker_release.set()
+    with pytest.raises(mcp.MCPConfigError):
+        await task

@@ -1239,12 +1239,16 @@ class TestTerminateDrains:
         from subagents.cc_stream import CCStreamSession
 
         script = tmp_path / "event_then_sleep"
+        # One write puts both lines in the pipe before the reader can see the
+        # first, so the kill can never land between them on a loaded runner.
         script.write_text(
             f"#!{sys.executable}\n"
             "import json, sys, time\n"
-            "for text in ('first', 'second'):\n"
-            " print(json.dumps({'type': 'assistant', 'message': {'content': "
-            "[{'type': 'text', 'text': text}]}}), flush=True)\n"
+            "sys.stdout.write(''.join(\n"
+            " json.dumps({'type': 'assistant', 'message': {'content': "
+            "[{'type': 'text', 'text': text}]}}) + '\\n'\n"
+            " for text in ('first', 'second')))\n"
+            "sys.stdout.flush()\n"
             "time.sleep(60)\n"
         )
         script.chmod(script.stat().st_mode | stat.S_IEXEC)

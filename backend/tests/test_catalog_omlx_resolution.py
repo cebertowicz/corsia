@@ -88,7 +88,6 @@ def test_discovery_enriches_context_window_from_generation_config(monkeypatch, f
             "id": sid, "provider": "omlx",
             "instance_id": "inst-1", "instance_name": "Mac",
             "host": "127.0.0.1", "port": 5100, "status": "online",
-            "api_key": "admin-key",
         } if sid == "srv-test" else None,
     )
 
@@ -189,7 +188,6 @@ def test_api_list_models_returns_canonical_id_only(monkeypatch, fresh_db):
             "id": sid, "provider": "omlx",
             "instance_id": "inst-1", "instance_name": "Mac",
             "host": "127.0.0.1", "port": 5100, "status": "online",
-            "api_key": "admin-key",
         } if sid == "srv-test" else None,
     )
     monkeypatch.setattr(ne, "build_api_base", lambda sid: "http://127.0.0.1:5100/v1")
@@ -262,7 +260,6 @@ def test_alias_change_updates_display_name_not_pmid(monkeypatch, fresh_db):
             "id": sid, "provider": "omlx",
             "instance_id": "inst-1", "instance_name": "Mac",
             "host": "127.0.0.1", "port": 5100, "status": "online",
-            "api_key": "admin-key",
         } if sid == "srv-test" else None,
     )
 

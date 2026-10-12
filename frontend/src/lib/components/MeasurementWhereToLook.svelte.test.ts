@@ -116,6 +116,16 @@ describe('MeasurementWhereToLook', () => {
 		expect(phone).toMatch(/div\.stacked \{ display: block;/);
 	});
 
+	it('fits the card at 430px and under: no width floor on the subject column, headers wrap at spaces, the long-name rule is the subject alone', () => {
+		const phone = media('(max-width: 430px)');
+		expect(phone).toContain('.tb td:first-child, .tb th:first-child { min-width: 0; }');
+		expect(phone).toContain('.tb th { white-space: normal; word-break: normal; }');
+		expect(phone).toContain('.tb td.subj b { overflow-wrap: anywhere; }');
+		// Outside the phone block the subject column keeps its 10ch floor.
+		expect(css).toContain('.tb td:first-child, .tb th:first-child { min-width: 10ch; }');
+		expect(phone).not.toContain('table-layout');
+	});
+
 	it('gives the worse and improved tables the same fixed column widths on a wide screen', () => {
 		render(state({ worse: [row()], improved: [row({ subject: { id: 'ag-2', name: 'Docs', kind: 'agent' }, change: 0.4 })] }));
 		const columns = [...host.querySelectorAll('table.tb')].map((table) => [...table.querySelectorAll('colgroup col')].map((col) => [...col.classList].find((name) => name.startsWith('c-'))));
@@ -157,6 +167,7 @@ describe('where-to-look store helpers', () => {
 		expect(formatWhereToLookValue(2.345, 'hours')).toBe('2.3 h');
 		expect(formatWhereToLookValue(12.34, 'minutes')).toBe('12.3');
 		expect(formatWhereToLookValue(1.236, 'ratio')).toBe('1.24');
+		expect(formatWhereToLookValue(1.964, 'dollars')).toBe('$1.96');
 		expect(formatChange(0.1)).toBe('+10%');
 		expect(formatChange(-0.256)).toBe('-26%');
 	});
@@ -168,6 +179,21 @@ describe('where-to-look store helpers', () => {
 
 	it('refuses a response with no period instead of naming one', () => {
 		expect(() => decodeWhereToLook({ worse: [], improved: [], minimum_n: 20 })).toThrow('period shape');
+	});
+
+	it('reads a model subject and a dollars row, and shows no Agent or Model tag under the subject', () => {
+		const model = { subject: { id: 'opus', name: 'Opus 5.5', kind: 'model' }, measure: 'cost_per_task', label: 'M $ per task', action: 'x', format: 'dollars', previous: 8, latest: 12, change: 0.5, n: 40, overall: 8.5 };
+		const decoded = decodeWhereToLook({
+			worse: [model], improved: [], period: { grain: 'weeks' as const, timezone: 'America/Los_Angeles', current: '2026-10-05', range: { from: '2026-07-13', to: '2026-10-04' }, latest: { from: '2026-09-28', to: '2026-10-04' }, previous: { from: '2026-09-21', to: '2026-09-27' } }, minimum_n: 20,
+		});
+		expect(decoded.worse[0].subject.kind).toBe('model');
+		render(state({ worse: decoded.worse }));
+		const text = host.textContent ?? '';
+		expect(text).toContain('Opus 5.5');
+		expect(host.querySelector('.kind')).toBeNull();
+		expect(text).toContain('M $ per task');
+		expect(text).toContain('$8.00 to $12.00');
+		expect(text).toContain('$8.50');
 	});
 
 	it('keeps an absent overall as null', () => {
