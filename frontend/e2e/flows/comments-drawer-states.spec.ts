@@ -61,6 +61,12 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await toggle.click();
 	await expect(drawer.getByText('Agreed, ring two waits for the canary.')).toBeVisible();
 	await settled(page);
+	// Visible text passes on a zero-height clipped box: both replies must be rendered at full height, fully inside the viewport.
+	for (const text of ['Agreed, ring two waits for the canary.', 'I will move it after the canary window.']) {
+		const reply = drawer.getByText(text);
+		await expect.poll(async () => (await reply.boundingBox())?.height ?? 0, { message: `reply "${text}" has a rendered height` }).toBeGreaterThan(12);
+		await expect(reply).toBeInViewport({ ratio: 1 });
+	}
 	await shot(page, 'rs-13b-thread-replies-expanded', info);
 
 	// The All filter counts every thread, and its menu item carries a visible check, not colour alone.
@@ -92,6 +98,9 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await settled(page);
 	await expect(page.locator('.cm-content')).toContainText('Step 12:');
 	await expect(drawer).toBeVisible();
+	// The first thread's reply field was empty and untouched, so it closes when focus moves on: one field is open, in view.
+	await expect(drawer.locator('.ct-input')).toHaveCount(1);
+	await expect(drawer.locator('.ct-input')).toBeInViewport({ ratio: 1 });
 	await shot(page, 'rs-17-quote-jump-near-document-end', info);
 });
 
@@ -183,6 +192,8 @@ journey('a failed refresh offers Retry, and Retry reads as Loading', [['1440 lig
 		await reply(request, doc, first, 'Agreed, ring two waits for the canary.');
 		await expect(drawer.getByText(/Couldn't load comments/)).toBeVisible({ timeout: 15_000 });
 		await settled(page);
+		await expect(drawer.getByText("Couldn't load comments. Check the connection and retry.")).toBeVisible();
+		await expect(drawer).not.toContainText('Failed to fetch');
 		await shot(page, 'rs-22a-load-failed-retry', info);
 		reads = 'hold';
 		await drawer.getByRole('button', { name: 'Retry', exact: true }).click();

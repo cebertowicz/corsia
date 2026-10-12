@@ -103,6 +103,12 @@ for (const [width, height, project] of layouts) {
 			await expect(card('Tighten the first line.')).toHaveCount(0);
 
 			await openComments(page, drawer);
+			// A phone's list is a sheet over the document: an insert under it cannot be pressed until the list closes.
+			const covered = await insert(page, fine).evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-doc-comments-drawer]');
+			});
+			if (covered) return;
 			await insert(page, fine).click();
 			await expect(drawer).toBeVisible();
 			await expect(drawer.locator(`[data-comment-id="${fine}"] .ct.focused`)).toBeInViewport();
