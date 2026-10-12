@@ -44,6 +44,43 @@ async function seedArtifact(request: APIRequestContext, baseTitle: string, image
 	return { threadId, title, name, path: artifactPath, artifactId: (await saved.json()).artifact.id as string };
 }
 
+/** Nine registered references on one message exercise the real card cap, desktop wrap, and phone scroll cue. */
+async function seedChipArtifacts(request: APIRequestContext, baseTitle: string): Promise<Artifact> {
+	const title = `${baseTitle} ${Math.random().toString(36).slice(2, 7)}`;
+	const threadId = await createSession(request, title);
+	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
+	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
+	const artifacts: Artifact[] = [];
+	for (let index = 1; index <= 9; index++) {
+		const name = `${title} artifact ${index} enough words to wrap.md`;
+		const artifactPath = path.join(workspace, name);
+		const saved = await request.put('/api/files/content', {
+			params: { token: TEST_TOKEN },
+			data: { path: artifactPath, text: `# Artifact ${index}\n`, thread_id: threadId, create: true },
+		});
+		expect(saved.ok(), await saved.text()).toBeTruthy();
+		artifacts.push({ threadId, title, name, path: artifactPath, artifactId: (await saved.json()).artifact.id as string });
+	}
+	const message = artifacts.map((artifact) => `[${artifact.name}](${encodeURI(artifact.path)})`).join('\n');
+	const state = process.env.CORSIA_E2E_STATE_DIR;
+	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The card fixture requires isolated E2E mock state');
+	execFileSync(python(), ['-c', [
+		'import sys, uuid',
+		'from infra.database import get_db',
+		'from thread.transcript_order import draw_transcript_position',
+		'thread, content = sys.argv[1:]',
+		'db = get_db()',
+		'seq = draw_transcript_position(db, thread)',
+		'db.execute("INSERT INTO messages (id, thread_id, role, content, metadata, created_at, seq) VALUES (?, ?, ?, ?, ?, datetime(\'now\'), ?)", (uuid.uuid4().hex, thread, "assistant", content, "{}", seq))',
+		'db.commit()',
+	].join('\n'), threadId, message], {
+		cwd: backendDir,
+		encoding: 'utf8',
+		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
+	});
+	return artifacts[0];
+}
+
 function recordAsk(artifact: Artifact, { retire = false }: { retire?: boolean } = {}): void {
 	const state = process.env.CORSIA_E2E_STATE_DIR;
 	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The card fixture requires isolated E2E mock state');
@@ -134,6 +171,7 @@ for (const [label, width, theme] of SURFACES) {
 			await expect(reviewBar).toBeVisible();
 			await reviewBar.getByRole('button', { name: 'Approve', exact: true }).click();
 			await expect(row).toHaveAttribute('data-card-state', 'approved');
+			await screenshot(page, `chat-card-answer-flip-${width}-${theme}`);
 			release();
 			await expect(reviewBar.locator('.rb-receipt')).toContainText('You approved this');
 		});
@@ -146,6 +184,7 @@ for (const [label, width, theme] of SURFACES) {
 			await openTranscript(page, image, width, theme);
 			const imageCard = card(page, image);
 			await expect(imageCard.locator('img.thumb')).toHaveAttribute('src', /\/api\/files\/content/);
+			await screenshot(page, `chat-card-image-${width}-${theme}`);
 			await imageCard.click();
 			await expect(page.locator('.review-bar')).toBeVisible();
 
@@ -158,6 +197,70 @@ for (const [label, width, theme] of SURFACES) {
 			await expect(unavailableCard).toContainText('No longer available');
 			expect(await unavailableCard.evaluate((element) => element.tagName)).toBe('DIV');
 			await screenshot(page, `chat-card-unavailable-${width}-${theme}`);
+		});
+	});
+}
+
+for (const theme of ['light', 'dark'] as const) {
+	test.describe(`393 ${theme} evidence states`, () => {
+		test.use({ hasTouch: true, isMobile: true });
+
+		test(`@surface:chat-cards nine chips retain their phone cue and wrap on desktop (${theme})`, async ({ page, request }, info) => {
+			test.skip(info.project.name !== 'chromium-mobile', 'phone is proved by the mobile project');
+			await setFocusMode(request, false);
+			const artifacts = await seedChipArtifacts(request, `Chat chips ${theme}`);
+			await openTranscript(page, artifacts, 393, theme);
+			const chips = page.locator('.chips');
+			await expect(chips).toHaveAttribute('data-more', '');
+			await screenshot(page, `chat-chips-393-${theme}-unscrolled`);
+			await chips.evaluate((node) => { node.scrollLeft = Math.round((node.scrollWidth - node.clientWidth) / 2); });
+			await expect(chips).toHaveAttribute('data-before', '');
+			await expect(chips).toHaveAttribute('data-more', '');
+			await screenshot(page, `chat-chips-393-${theme}-scrolled`);
+
+			await page.setViewportSize({ width: 1440, height: 900 });
+			await expect(chips.locator('li')).toHaveCount(9);
+			await expect(chips.getByRole('button', { name: '+1 more' })).toBeVisible();
+			await screenshot(page, `chat-chips-1440-${theme}-wrapped`);
+		});
+
+		test(`@surface:chat-cards settled counts show and yield at the phone width (${theme})`, async ({ page, request }, info) => {
+			test.skip(info.project.name !== 'chromium-mobile', 'phone is proved by the mobile project');
+			await setFocusMode(request, true);
+			const artifact = await seedArtifact(request, `Chat settled ${theme}`);
+			recordAsk(artifact);
+			await page.route('**/api/attention/*/clear', (route) => route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ review: { verdict: 'approved_with_changes', note: null, feedback_counts: { comments: 2, suggestions: 1, edits: 0 } } }),
+			}));
+			await openTranscript(page, artifact, 393, theme);
+			const row = card(page, artifact);
+			await row.click();
+			await page.locator('.review-bar').getByRole('button', { name: 'Approve', exact: true }).click();
+			await expect(row).toHaveAttribute('data-card-state', 'approved_with_changes');
+			await expect(row).toContainText('2 comments, 1 suggestion');
+			await screenshot(page, `chat-card-settled-counts-${theme}`);
+		});
+
+		test(`@surface:chat-cards answer failure reverts the optimistic row (${theme})`, async ({ page, request }, info) => {
+			test.skip(info.project.name !== 'chromium-mobile', 'phone is proved by the mobile project');
+			await setFocusMode(request, true);
+			const artifact = await seedArtifact(request, `Chat reverted ${theme}`);
+			recordAsk(artifact);
+			let release!: () => void;
+			const held = new Promise<void>((resolve) => { release = resolve; });
+			await page.route('**/api/attention/*/clear', async (route) => { await held; await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }); });
+			await openTranscript(page, artifact, 393, theme);
+			const row = card(page, artifact);
+			await screenshot(page, `chat-card-failed-send-${theme}-before`);
+			await row.click();
+			await page.locator('.review-bar').getByRole('button', { name: 'Approve', exact: true }).click();
+			await expect(row).toHaveAttribute('data-card-state', 'approved');
+			await screenshot(page, `chat-card-failed-send-${theme}-during`);
+			release();
+			await expect(row).toHaveAttribute('data-card-state', 'needs_review');
+			await screenshot(page, `chat-card-failed-send-${theme}-reverted`);
 		});
 	});
 }

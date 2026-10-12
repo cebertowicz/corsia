@@ -245,7 +245,7 @@
 	   stronger border colour so it holds in dark mode too, no chevron. */
 	.tile.gone :global(.ic.filled) { background: transparent; outline: 1px dashed var(--text-tertiary); outline-offset: -1px; }
 	.tile.gone .title, .tile.muted .title { color: var(--text-secondary); }
-	.tile.gone .title { color: var(--text-tertiary); }
+	.tile.gone .title, .tile.gone .ctx { color: var(--text-tertiary); }
 	@keyframes state-in { from { opacity: 0; } to { opacity: 1; } }
 	@media (prefers-reduced-motion: reduce) {
 		.state { animation: none; }

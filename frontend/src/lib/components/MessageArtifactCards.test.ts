@@ -49,6 +49,7 @@ describe('MessageArtifactCards', () => {
 
 		const [tile] = tiles();
 		expect(tile.tagName).toBe('BUTTON');
+		expect(tile.classList.contains('press-tint')).toBe(true);
 		expect(tile.getAttribute('aria-label')).toBe('Launch plan, document, Needs your review');
 		expect(tile.querySelector('.title')?.textContent).toBe('Launch plan');
 		expect(tile.querySelector('.state')?.textContent).toBe('Needs your review');
@@ -93,6 +94,7 @@ describe('MessageArtifactCards', () => {
 		expect(tile.tagName).toBe('DIV');
 		expect(tile.classList.contains('gone')).toBe(true);
 		expect(tile.querySelector('.title')?.textContent).toBe('Launch plan');
+		expect(tile.querySelector('.ctx')?.textContent).toContain('No longer available');
 		expect(tile.querySelector('.state')?.textContent).toBe('No longer available');
 		tile.click();
 		expect(get(threadWorkspaces).t1?.tabs ?? []).toEqual([]);
