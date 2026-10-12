@@ -1,6 +1,6 @@
 import {
 	answerReview, fetchReviewBar, ReviewRefusal,
-	type ReviewBarRead, type ReviewVerdict,
+	type ReviewAnswer, type ReviewBarRead, type ReviewVerdict,
 } from '$lib/api/reviewBar';
 
 export type ReviewBarPhase = 'ask' | 'noting' | 'sending' | 'answered' | 'stale';
@@ -74,11 +74,12 @@ export function createReviewBarState() {
 		onSendStarted?.();
 		try {
 			const sent = await answerReview(id, verdict, verdict === 'changes_requested' ? note : '');
+			// The hold-keyed card overlay must receive the canonical server response even if this bar moved on.
+			onSendConfirmed?.(sent);
 			if (!current(id, stamp)) return 'sent';
 			const counts = sent.feedback_counts;
 			settledAsk = read?.ask_raised_at ?? null;
 			receipt = { verdict: sent.verdict, sent: counts.comments + counts.suggestions + counts.edits, at: new Date() };
-			onSendConfirmed?.(sent);
 			phase = 'answered';
 			return 'sent';
 		} catch (error) {

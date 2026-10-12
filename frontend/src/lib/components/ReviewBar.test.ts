@@ -168,8 +168,8 @@ describe('ReviewBar', () => {
 		expect(get(submittedAnswers)).toEqual({});
 	});
 
-	it('keeps the original hold verdict when the ReviewBar switches artifacts before a successful send resolves', async () => {
-		const response = { verdict: 'approved' as const, note: null, feedback_counts: counts(0) };
+	it('reconciles the original hold with the server response when the ReviewBar switches artifacts before a successful send resolves', async () => {
+		const response = { verdict: 'approved_with_changes' as const, note: null, feedback_counts: { comments: 1, suggestions: 2, edits: 3 } };
 		api.fetchReviewBar.mockResolvedValueOnce(read(0)).mockResolvedValueOnce({ ...read(0), hold_ids: ['h2'] });
 		let succeed!: (value: typeof response) => void;
 		api.answerReview.mockReturnValue(new Promise<typeof response>((resolve) => { succeed = resolve; }));
@@ -184,7 +184,25 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
 		succeed(response);
 
-		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: counts(0) } }));
+		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved_with_changes', feedback: { comments: 1, suggestions: 2, edits: 3 } } }));
+	});
+
+	it('clears the original hold overlay when the ReviewBar switches artifacts before a failed send resolves', async () => {
+		api.fetchReviewBar.mockResolvedValueOnce(read(0)).mockResolvedValueOnce({ ...read(0), hold_ids: ['h2'] });
+		let fail!: (error: Error) => void;
+		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
+		const harness = mount(ReviewBarHarness, { target: host });
+		component = harness as Record<string, unknown>;
+		await vi.waitFor(() => expect(button('Approve')).toBeTruthy());
+
+		button('Approve')!.click();
+		flushSync();
+		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: counts(0) } });
+		harness.switchArtifact('doc-2');
+		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
+		fail(new Error('500'));
+
+		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({}));
 	});
 
 	it('announces the send through a status region that is already mounted when it starts', async () => {
