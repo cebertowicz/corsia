@@ -2,10 +2,10 @@
 
 A task held for the user with nothing to act on reads red while the user's
 queue is empty, so the plan looks stalled and no one moves it. An agent's
-``block_node`` on the user therefore names its ask. A question is a raised
+``block_node`` on the user therefore names its ask. A real tradeoff is a raised
 decision, which already holds its source task (``plans.wait_causes``), so a
-block beside one is refused. Something to read is a registered artifact the
-plan's thread owns: the block links it to the task with the existing
+block beside one is refused. Something to review or approve is a registered
+artifact the plan's thread owns: the block links it to the task with the existing
 ``attention`` role and raises it in the user's one attention pile. When the
 user clears that ask, the holds it placed clear and the agent is told
 (``cleared``). ``shared/planning/plans-simplify-2026-09-29.md``.
