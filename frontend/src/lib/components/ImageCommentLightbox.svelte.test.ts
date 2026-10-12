@@ -152,6 +152,7 @@ describe('ImageCommentLightbox', () => {
 		it('drops Show on image: each card selects its tag itself', async () => {
 			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 			await openDrawer();
+			expect(drawer()!.querySelector('[data-region-thumb]')).not.toBeNull();
 			expect(drawer()!.textContent).not.toContain('Show on image');
 			card('second').querySelector<HTMLElement>('.ct')!.click();
 			await settle();

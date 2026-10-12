@@ -220,7 +220,7 @@
 			target={null}
 			{artifactId}
 			readOnly={!canComment}
-			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
+			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>
 	{/if}
 </div>
