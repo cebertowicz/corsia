@@ -7,6 +7,7 @@
 	import { loadPickerPolicy, pickerAccounts, policyFor, vendorRows, type PickerAccount } from '$lib/stores/accountPicker';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import AccountPickerRows from './AccountPickerRows.svelte';
+	import CurrentCheck from './CurrentCheck.svelte';
 	import PickerAccountHeader from './PickerAccountHeader.svelte';
 	import PickerModelGroupHeader from './PickerModelGroupHeader.svelte';
 	import { choosePickerAccount } from '$lib/stores/pickerAccountChoice';
@@ -184,7 +185,7 @@
 									ontoggle={() => (accountOpened = { ...accountOpened, [group.key]: !accountOpen })}
 								/>
 								{#if accountOpen && accountRows.length > 0}
-									<AccountPickerRows rows={accountRows} suppressMarked={policy?.rollover === true} />
+									<AccountPickerRows rows={accountRows} />
 									{#if policy?.rollover === true}
 										<div class="rollover-settings"><button type="button" onclick={openRolloverSettings}>Rollover settings</button></div>
 									{/if}
@@ -251,7 +252,7 @@
 											{/if}
 										</span>
 										{#if modelMatchesId(model, $activeModelId)}
-											<svg class="check-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Current"><path d="M20 6L9 17l-5-5"/></svg>
+											<CurrentCheck />
 										{/if}
 									</button>
 								{/each}
