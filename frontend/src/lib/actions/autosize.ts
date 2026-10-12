@@ -28,5 +28,5 @@ export function autosize(node: HTMLTextAreaElement, _value?: string) {
 	const hold = () => { if (node.style.overflowY === 'hidden' && node.scrollTop !== 0) node.scrollTop = 0; };
 	node.addEventListener('scroll', hold);
 	fit();
-	return { update: fit, destroy: () => node.removeEventListener('scroll', hold) };
+	return { update: (_next?: string) => fit(), destroy: () => node.removeEventListener('scroll', hold) };
 }

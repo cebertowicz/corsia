@@ -19,7 +19,7 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 	};
 	/** Content that animates its own height already carries the panel with it, frame by frame. */
 	const contentEases = () => typeof node.getAnimations === 'function' && node.getAnimations({ subtree: true }).some((item) =>
-		item !== animation && item.playState === 'running' && item.effect?.getKeyframes().some((frame) => 'height' in frame));
+		item !== animation && item.playState === 'running' && (item.effect as KeyframeEffect | null)?.getKeyframes?.().some((frame) => 'height' in frame));
 	const fadeIn = () => {
 		const style = getComputedStyle(node);
 		const duration = Number.parseFloat(style.getPropertyValue('--dur-tight')) || 120;
