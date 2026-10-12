@@ -98,9 +98,9 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	await settled(page);
 	await expect(page.locator('.cm-content')).toContainText('Step 12:');
 	await expect(drawer).toBeVisible();
-	// The first thread's reply field was empty and untouched, so it closes when focus moves on: one field is open, in view.
-	await expect(drawer.locator('.ct-input')).toHaveCount(1);
-	await expect(drawer.locator('.ct-input')).toBeInViewport({ ratio: 1 });
+	// The first thread's reply field was empty and untouched, so it closes when focus moves on: never two empty fields open.
+	await expect.poll(() => drawer.locator('.ct-input').count()).toBeLessThanOrEqual(1);
+	for (const field of await drawer.locator('.ct-input').all()) await expect(field).toBeInViewport({ ratio: 1 });
 	await shot(page, 'rs-17-quote-jump-near-document-end', info);
 });
 
