@@ -68,14 +68,16 @@ def _settle_reviewer_verdict(
 
     if verdict is None:
         log.error(
-            "reviewer-gate: reviewer produced no terminal result for PR #{} "
-            "sha={} — skip-guard NOT written; gate remains retryable",
-            pr_number, head_sha[:8],
+            "reviewer-gate: reviewer produced no terminal result for PR #{} sha={} — "
+            "skip-guard NOT written; gate remains retryable", pr_number, head_sha[:8],
         )
-        reason = "reviewer returned no terminal verdict"
-        github_reviewer_notifications.report_reviewer_terminal_error(
-            repo, pr_number, head_sha, reason, "reviewer_no_terminal_result", None, loop,
-            preserve_existing_failure=True,
+        emit_product_event(
+            "reviewer_gate",
+            "reviewer_no_terminal_result",
+            properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]},
+        )
+        github_reviewer_notifications.notify_reviewer_terminal_error(
+            repo, pr_number, head_sha, "reviewer returned no terminal verdict", loop,
         )
         return
 
@@ -96,10 +98,11 @@ def _settle_reviewer_verdict(
             verdict, pr_number, head_sha[:8],
         )
         reason = f"reviewer returned invalid terminal verdict ({type(verdict).__name__})"
-        github_reviewer_notifications.report_reviewer_terminal_error(
-            repo, pr_number, head_sha, reason, "reviewer_unexpected_result",
-            {"result_type": type(verdict).__name__}, loop,
-        )
+        from reviewer.reviewer_status import set_error
+
+        set_error(repo, head_sha, f"qa/llm-reviewer: {reason}; retry required")
+        emit_product_event("reviewer_gate", "reviewer_unexpected_result", properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8], "result_type": type(verdict).__name__})
+        github_reviewer_notifications.notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
         return
 
     delivery_result = github_reviewer_notifications.notify_reviewer_verdict(
@@ -349,15 +352,12 @@ def _report_mergeability_unresolved(
 ) -> None:
     """Report exhausted mergeability retries as a retryable terminal gate error."""
     reason = "mergeability remained unresolved after retries"
-    log.warning(
-        "reviewer-gate: PR #{} sha={} — {}",
-        pr_number,
-        head_sha[:8],
-        reason,
-    )
-    github_reviewer_notifications.report_reviewer_terminal_error(
-        repo, pr_number, head_sha, reason, "mergeability_unresolved", None, loop,
-    )
+    log.warning("reviewer-gate: PR #{} sha={} — {}", pr_number, head_sha[:8], reason)
+    from reviewer.reviewer_status import set_error
+
+    set_error(repo, head_sha, f"qa/llm-reviewer: {reason}; retry required")
+    emit_product_event("reviewer_gate", "mergeability_unresolved", properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]})
+    github_reviewer_notifications.notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
 
 
 def _report_pr_info_unreadable(

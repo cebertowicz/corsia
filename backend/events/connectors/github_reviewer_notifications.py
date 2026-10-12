@@ -134,33 +134,6 @@ def notify_pr_info_unreadable(
     )
 
 
-def report_reviewer_terminal_error(
-    repo: str,
-    pr_number: int,
-    head_sha: str,
-    reason: str,
-    event: str,
-    properties: dict[str, Any] | None,
-    loop: asyncio.AbstractEventLoop | None,
-    *,
-    preserve_existing_failure: bool = False,
-) -> None:
-    """Report a retryable terminal gate error before waking the owner."""
-    from reviewer.reviewer_status import set_error
-
-    payload = {"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]}
-    if properties:
-        payload.update(properties)
-    emit_product_event("reviewer_gate", event, properties=payload)
-    if preserve_existing_failure:
-        from reviewer.reviewer_status import has_existing_failure_or_error
-
-        if has_existing_failure_or_error(repo, head_sha):
-            return
-    set_error(repo, head_sha, f"qa/llm-reviewer: {reason}; retry required")
-    notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
-
-
 def notify_reviewer_terminal_error(
     repo: str,
     pr_number: int,
@@ -170,18 +143,27 @@ def notify_reviewer_terminal_error(
 ) -> None:
     """Wake the PR owner with a retry-safe recovery path for a terminal gate error."""
     short_sha = head_sha[:8]
-    deliver_owner_event(
-        repo,
-        pr_number,
-        "reviewer.terminal_error",
-        (
+    if reason == "reviewer returned no terminal verdict":
+        summary = (
+            f"PR #{pr_number} reviewer ended without verdict on {short_sha}. The "
+            "qa/llm-reviewer status on that SHA names the cause. Re-fire only after "
+            "the cause clears and only if it remains the current head; do not push, "
+            "add a no-op commit, or add an empty commit."
+        )
+    else:
+        summary = (
             f"PR #{pr_number} reviewer gate terminal error on {short_sha}: {reason}. "
             "Re-fire only if that is still the current head. If a current-head CI run "
             "exists, run `gh run rerun <run-id>`; otherwise run "
             f"`gh pr ready {pr_number} --undo` then `gh pr ready {pr_number}`. "
             "Do not push, add a no-op commit, or add an empty commit. Done means a "
             "reviewer verdict publishes on that exact head."
-        ),
+        )
+    deliver_owner_event(
+        repo,
+        pr_number,
+        "reviewer.terminal_error",
+        summary,
         {
             "repo": repo,
             "pr_number": pr_number,

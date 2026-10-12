@@ -72,16 +72,14 @@ class TestMergeabilityRetry:
             "fetch_pr_info_awaiting_mergeability",
             side_effect=[unknown, _DEFAULT_PR_INFO],
         ), patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), patch.object(
-            gate_mod.github_reviewer_notifications,
+            gate_mod,
             "emit_product_event",
             side_effect=lambda scope, event, **_kw: emitted.append((scope, event)),
         ), patch.object(
             gate_mod.github_reviewer_notifications, "notify_reviewer_terminal_error",
         ) as notify_error, patch(
             "reviewer.reviewer_status.set_error",
-        ) as set_error, patch(
-            "reviewer.reviewer_status.has_existing_failure_or_error", return_value=False,
-        ), patch.object(gate_mod, "_run_reviewer") as run_reviewer:
+        ) as set_error, patch.object(gate_mod, "_run_reviewer") as run_reviewer:
             gate_mod._evaluate_review_gate(
                 "owner/repo", "abc123def", 42, "webhook.github.check_suite_completed", None,
                 mergeability_retry_attempt=len(gate_mod.MERGEABILITY_RETRY_DELAYS_S),

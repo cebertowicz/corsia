@@ -461,7 +461,7 @@ class TestMergeableGate:
             "fetch_pr_info_awaiting_mergeability",
             return_value=unresolved,
         ), patch.object(
-            github_reviewer_notifications, "emit_product_event",
+            gate_mod, "emit_product_event",
         ) as emit_event, patch.object(
             github_reviewer_notifications, "notify_reviewer_terminal_error",
         ) as notify_error, patch(

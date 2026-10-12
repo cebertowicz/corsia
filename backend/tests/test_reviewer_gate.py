@@ -784,61 +784,43 @@ class TestSkipGuardWrite:
         )
         assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") == "abc123def"
 
-    @pytest.mark.parametrize(
-        ("invalid_verdict", "reason", "status_text"),
-        [
-            (
-                None,
-                "reviewer returned no terminal verdict",
-                "qa/llm-reviewer: reviewer returned no terminal verdict; retry required",
-            ),
-            (
-                "bad-result",
-                "reviewer returned invalid terminal verdict (str)",
-                "qa/llm-reviewer: reviewer returned invalid terminal verdict (str); retry required",
-            ),
-        ],
-    )
-    def test_invalid_verdict_reports_error_and_allows_current_head_refire(
-        self, _reload_gate, invalid_verdict, reason, status_text,
-    ):
-        """Invalid reviewer output is loud, retryable, and does not set the skip guard."""
+    def test_unexpected_verdict_reports_error_and_allows_current_head_refire(self, _reload_gate):
+        """Unexpected reviewer output is loud, retryable, and does not set the skip guard."""
         from events.connectors import github_reviewer_notifications
 
         gate_mod = _reload_gate
+        reason = "reviewer returned invalid terminal verdict (str)"
         clean_verdict = {"verdict": "clean"}
 
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
-             patch.object(github_reviewer_notifications, "emit_product_event") as emit_event, \
+             patch.object(gate_mod, "emit_product_event") as emit_event, \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch("reviewer.on_pr_review.on_pr_review", side_effect=[invalid_verdict, clean_verdict]), \
+             patch("reviewer.on_pr_review.on_pr_review", side_effect=["bad-result", clean_verdict]), \
              patch.object(github_reviewer_notifications, "notify_reviewer_terminal_error") as notify_error, \
              patch.object(github_reviewer_notifications, "notify_reviewer_verdict", return_value="no_owner"), \
-             patch("reviewer.reviewer_status.has_existing_failure_or_error", return_value=False), \
              patch("reviewer.reviewer_status.set_error") as set_error:
             _call_gate(gate_mod)
             assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") is None
             _call_gate(gate_mod)
 
-        set_error.assert_called_once_with("owner/repo", "abc123def", status_text)
+        set_error.assert_called_once_with(
+            "owner/repo", "abc123def", f"qa/llm-reviewer: {reason}; retry required",
+        )
         notify_error.assert_called_once_with("owner/repo", 42, "abc123def", reason, ANY)
-        expected_event = "reviewer_no_terminal_result" if invalid_verdict is None else "reviewer_unexpected_result"
-        expected_properties = {
-            "repo": "owner/repo",
-            "pr_number": 42,
-            "head_sha": "abc123de",
-        }
-        if invalid_verdict is not None:
-            expected_properties["result_type"] = "str"
         assert any(
-            call.args[:2] == ("reviewer_gate", expected_event)
-            and call.kwargs["properties"] == expected_properties
+            call.args[:2] == ("reviewer_gate", "reviewer_unexpected_result")
+            and call.kwargs["properties"] == {
+                "repo": "owner/repo",
+                "pr_number": 42,
+                "head_sha": "abc123de",
+                "result_type": "str",
+            }
             for call in emit_event.call_args_list
         )
         assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") == "abc123def"
 
-    def test_none_verdict_alone_preserves_prior_specific_failure(self, _reload_gate):
-        """Only a terminal None preserves the reviewer's more specific failure."""
+    def test_none_verdict_preserves_reviewer_failure_and_wakes_owner(self, _reload_gate):
+        """The gate never reads or overwrites the reviewer's failure before a None return."""
         from events.connectors import github_reviewer_notifications
 
         gate_mod = _reload_gate
@@ -846,18 +828,30 @@ class TestSkipGuardWrite:
             "state": "failure",
             "description": "qa/llm-reviewer: model-unavailable-no-fallback",
         }
-
         with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
              patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
-             patch("reviewer.on_pr_review.on_pr_review", return_value=None), \
-             patch.object(github_reviewer_notifications, "emit_product_event") as emit_event, \
-             patch.object(github_reviewer_notifications, "notify_reviewer_terminal_error") as notify_error, \
-             patch("reviewer.reviewer_status.get_commit_status_for_context", return_value=standing_failure), \
+             patch("reviewer.on_pr_review.on_pr_review") as on_review, \
+             patch.object(gate_mod, "emit_product_event") as emit_event, \
+             patch.object(github_reviewer_notifications, "deliver_owner_event") as deliver_owner, \
+             patch("reviewer.reviewer_status.get_commit_status_for_context", return_value=standing_failure) as get_status, \
+             patch("reviewer.reviewer_status.set_failure") as set_failure, \
              patch("reviewer.reviewer_status.set_error") as set_error:
+            def reviewer_writes_failure_then_returns_none(*_args):
+                set_failure("owner/repo", "abc123def", standing_failure["description"])
+                return None
+
+            on_review.side_effect = reviewer_writes_failure_then_returns_none
             _call_gate(gate_mod)
 
+        set_failure.assert_called_once_with("owner/repo", "abc123def", standing_failure["description"])
+        get_status.assert_not_called()
         set_error.assert_not_called()
-        notify_error.assert_not_called()
+        deliver_owner.assert_called_once()
+        summary = deliver_owner.call_args.args[3]
+        assert "reviewer ended without verdict" in summary
+        assert "qa/llm-reviewer status on that SHA names the cause" in summary
+        assert "only after the cause clears and only if it remains the current head" in summary
+        assert "do not push" in summary
         assert any(
             call.args[:2] == ("reviewer_gate", "reviewer_no_terminal_result")
             and call.kwargs["properties"] == {
@@ -865,6 +859,29 @@ class TestSkipGuardWrite:
                 "pr_number": 42,
                 "head_sha": "abc123de",
             }
+            for call in emit_event.call_args_list
+        )
+        assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") is None
+
+    def test_none_verdict_without_failure_is_loud_and_retryable(self, _reload_gate):
+        """A None without a reviewer status still emits and wakes without a gate status write."""
+        from events.connectors import github_reviewer_notifications
+
+        gate_mod = _reload_gate
+        with patch.object(gate_mod.github_reviewer_gate, "fetch_pr_info", return_value=_DEFAULT_PR_INFO), \
+             patch.object(gate_mod.github_reviewer_gate, "checks_green", return_value=True), \
+             patch("reviewer.on_pr_review.on_pr_review", return_value=None), \
+             patch.object(gate_mod, "emit_product_event") as emit_event, \
+             patch.object(github_reviewer_notifications, "notify_reviewer_terminal_error") as notify_error, \
+             patch("reviewer.reviewer_status.set_error") as set_error:
+            _call_gate(gate_mod)
+
+        set_error.assert_not_called()
+        notify_error.assert_called_once_with(
+            "owner/repo", 42, "abc123def", "reviewer returned no terminal verdict", ANY,
+        )
+        assert any(
+            call.args[:2] == ("reviewer_gate", "reviewer_no_terminal_result")
             for call in emit_event.call_args_list
         )
         assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") is None
