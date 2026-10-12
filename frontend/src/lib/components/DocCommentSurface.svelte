@@ -325,7 +325,7 @@
 
 {#if surfaceState}
 	{#if surfaceState.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque modal={false} {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {onClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer ariaLabel="Document comments" mountMotion headless fill opaque modal={false} {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {onClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>

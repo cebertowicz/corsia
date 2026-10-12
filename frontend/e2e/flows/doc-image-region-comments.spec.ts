@@ -349,6 +349,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, `doc-${width}-many-03-drawer-two-groups`, true);
 		await thumbs.nth(1).scrollIntoViewIfNeeded();
 		await expect(drawer(page).getByText('Save should be primary')).toBeVisible();
+		// The frame is named "scrolled": the list has actually moved, with the first group's thumbnail above the fold.
+		await expect.poll(() => drawer(page).locator('.drawer-comments').evaluate((list) => list.scrollTop), 'the drawer list scrolled').toBeGreaterThan(0);
 		await shoot(page, testInfo, `doc-${width}-many-04-drawer-scrolled`, true);
 	});
 

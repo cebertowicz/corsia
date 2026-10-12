@@ -5,6 +5,7 @@
 	import type { Snippet } from 'svelte';
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import { portal } from '$lib/actions/portal';
+	import { settleHeight } from '$lib/actions/settleHeight';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 
@@ -25,6 +26,7 @@
 		within = null,
 		detent = 'full',
 		onDetent,
+		mountMotion = false,
 	}: {
 		ariaLabel: string;
 		/**
@@ -58,24 +60,43 @@
 		within?: HTMLElement | null;
 		detent?: 'full' | 'half';
 		onDetent?: (detent: 'full' | 'half') => void;
+		/**
+		 * Slide and fade in and out when a parent block mounts or removes the drawer, and ease its height when its
+		 * content changes it. Every consumer shows the drawer from a parent block, where Svelte's local transitions
+		 * never play, so without this opt-in the sheet appears, disappears and resizes in a single frame.
+		 */
+		mountMotion?: boolean;
 	} = $props();
 
 	let box = $state<{ top: number; right: number; bottom: number; left: number; height: number } | null>(null);
 	$effect(() => {
 		if (!within) { box = null; return; }
-		let frame = 0;
-		const read = () => { const rect = within.getBoundingClientRect(); box = { top: rect.top, right: innerWidth - rect.right, bottom: innerHeight - rect.bottom, left: rect.left, height: rect.height }; };
-		const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(read); };
-		// A neighbouring pane resizes this column as it slides, which the observer sees; a move that
-		// keeps the column's size only shows when the pane's own layout transition ends, so listen for
-		// that on the shared container, ignoring transitions inside the column and non-layout ones.
-		const root = within.closest('main') ?? within.parentElement ?? within;
-		const settled = (event: TransitionEvent) => {
-			if (event.target instanceof Node && !within.contains(event.target) && /^(width|padding|margin|transform|left|right|inset)/.test(event.propertyName)) schedule();
+		let frame = 0, running = 0;
+		const read = () => {
+			const rect = within.getBoundingClientRect();
+			const next = { top: rect.top, right: innerWidth - rect.right, bottom: innerHeight - rect.bottom, left: rect.left, height: rect.height };
+			if (!box || (Object.keys(next) as Array<keyof typeof next>).some((key) => box![key] !== next[key])) box = next;
 		};
+		const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(read); };
+		// A neighbouring pane slides this column as its own layout transition runs, anywhere in the app shell and
+		// not only inside the column's container, and a slide that keeps the column's size never trips the resize
+		// observer. Follow every layout transition outside the column and the sheet itself, frame by frame while it
+		// runs and once more when it ends.
+		const layout = (event: TransitionEvent) => event.target instanceof Element && !within.contains(event.target)
+			&& !event.target.closest('[data-adaptive-drawer]') && /^(width|height|padding|margin|transform|translate|left|right|top|bottom|inset|flex|grid)/.test(event.propertyName);
+		const follow = () => { read(); if (running > 0) frame = requestAnimationFrame(follow); };
+		const started = (event: TransitionEvent) => { if (layout(event) && running++ === 0) { cancelAnimationFrame(frame); follow(); } };
+		const ended = (event: TransitionEvent) => { if (layout(event)) { running = Math.max(0, running - 1); schedule(); } };
 		read(); const observer = new ResizeObserver(schedule); observer.observe(within); addEventListener('resize', schedule);
-		root.addEventListener('transitionend', settled, true);
-		return () => { cancelAnimationFrame(frame); observer.disconnect(); removeEventListener('resize', schedule); root.removeEventListener('transitionend', settled, true); };
+		document.addEventListener('transitionrun', started, true);
+		document.addEventListener('transitionend', ended, true);
+		document.addEventListener('transitioncancel', ended, true);
+		return () => {
+			cancelAnimationFrame(frame); observer.disconnect(); removeEventListener('resize', schedule);
+			document.removeEventListener('transitionrun', started, true);
+			document.removeEventListener('transitionend', ended, true);
+			document.removeEventListener('transitioncancel', ended, true);
+		};
 	});
 	let panel = $state<HTMLElement | null>(null);
 	let dragY = $state(0);
@@ -86,11 +107,11 @@
 	let dragRaw = 0;
 
 	const flyParams = $derived(
-		$prefersReducedMotion
+		$prefersReducedMotion || !mountMotion
 			? { y: 0, duration: 0 }
 			: { y: 72, duration: 260, easing: cubicOut },
 	);
-	const fadeParams = $derived({ duration: $prefersReducedMotion ? 0 : 160 });
+	const fadeParams = $derived({ duration: $prefersReducedMotion || !mountMotion ? 0 : 160 });
 
 	function onBackdrop(event: MouseEvent): void {
 		if (modal && event.target === event.currentTarget) onClose();
@@ -167,10 +188,10 @@
 	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
 	onclick={onBackdrop}
-	transition:fade={fadeParams}
+	transition:fade|global={fadeParams}
 	use:portal
 >
-	<div class="drawer-motion" transition:fly={flyParams}>
+	<div class="drawer-motion" transition:fly|global={flyParams}>
 		<div
 			bind:this={panel}
 			class="drawer-panel"
@@ -183,6 +204,7 @@
 			aria-label={ariaLabel}
 			tabindex="-1"
 			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
+			use:settleHeight={{ enabled: mountMotion && !dragging && !$prefersReducedMotion }}
 		>
 			<div class="drawer-chrome">
 				<div
