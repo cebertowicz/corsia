@@ -27,6 +27,7 @@ class Schedule:
     state: str
     payload: dict | None
     created_by_actor: str
+    asked_by_user: int
     created_at: str
     updated_at: str
 
@@ -76,6 +77,7 @@ def create(
     spec: str,
     max_runs: int,
     payload: dict | None = None,
+    asked_by_user: bool = False,
     now: str,
     db,
 ) -> Schedule:
@@ -88,8 +90,8 @@ def create(
         connection.execute(
             """INSERT INTO automation_schedules
                (id,thread_id,scope_id,kind,spec,next_run_at,max_runs,state,
-                payload_json,created_by_actor,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,'active',?,?,?,?)""",
+                payload_json,created_by_actor,asked_by_user,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,'active',?,?,?,?,?)""",
             (
                 schedule_id,
                 thread_id,
@@ -100,6 +102,7 @@ def create(
                 max_runs,
                 payload_json,
                 actor_id,
+                int(asked_by_user),
                 now,
                 now,
             ),

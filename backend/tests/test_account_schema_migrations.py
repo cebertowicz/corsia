@@ -76,7 +76,7 @@ def _snapshot(db):
 # This predecessor is not a fresh schema83 database relabelled as schema82.
 def canonical82():
     source = (Path(__file__).parent / 'fixtures' / 'canonical_dev79.sql').read_bytes()
-    assert hashlib.sha256(source).hexdigest() == '978b0c5d0856ba71219d19b273482c1b4a91363c378fc41a1326a0caabcd1615'
+    assert hashlib.sha256(source).hexdigest() == '72acf5ab6a442d32dc4cf21b26a5d22f33709326c20f5bdecf5d439f4fa32f66'
     db = sqlite3.connect(':memory:')
     db.row_factory = sqlite3.Row
     db.executescript(source.decode())
@@ -114,7 +114,7 @@ def unrelated_rows(db):
 _CANONICAL_DEV78_PATH = Path(__file__).parent / "fixtures" / "canonical_dev78.sql"
 
 
-_DIGEST = "2cf7e22968d668eed6de7232ccb63f9efb7a6e0c4e026d816780ec9d1634544c"
+_DIGEST = "4f4a57a08fd744e8d077f34d0ac8e3c12b5a0269c6592f2d27d1d9bb1b49ea4e"
 
 
 _OLD_ACCOUNT = """
@@ -176,10 +176,10 @@ def _synthetic_preexisting(db):
 _FIXTURES = Path(__file__).parent / "fixtures"
 
 
-_DEPLOYED80 = ("canonical_dev80_459.sql", "86ec9526498f9587aa183f2117008d08cb10541a0ccf359d9ce5d4734945daa7")
+_DEPLOYED80 = ("canonical_dev80_459.sql", "435aeff72927a926b4fcf956a6279d391ed8aed3b3b2356f52c4932a40a06a42")
 
 
-_CANONICAL79 = ("canonical_dev79.sql", "978b0c5d0856ba71219d19b273482c1b4a91363c378fc41a1326a0caabcd1615")
+_CANONICAL79 = ("canonical_dev79.sql", "72acf5ab6a442d32dc4cf21b26a5d22f33709326c20f5bdecf5d439f4fa32f66")
 
 
 _BULLETIN_TABLES = {"system_bulletins", "system_bulletin_identity"}
@@ -251,8 +251,8 @@ def _ddl(db: sqlite3.Connection, names: set[str]) -> dict[str, str]:
 
 
 _FROZEN = {
-    78: ("canonical_dev78.sql", "2cf7e22968d668eed6de7232ccb63f9efb7a6e0c4e026d816780ec9d1634544c"),
-    79: ("canonical_dev79.sql", "978b0c5d0856ba71219d19b273482c1b4a91363c378fc41a1326a0caabcd1615"),
+    78: ("canonical_dev78.sql", "4f4a57a08fd744e8d077f34d0ac8e3c12b5a0269c6592f2d27d1d9bb1b49ea4e"),
+    79: ("canonical_dev79.sql", "72acf5ab6a442d32dc4cf21b26a5d22f33709326c20f5bdecf5d439f4fa32f66"),
 }
 
 
@@ -875,7 +875,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_81_to_82_vendor_policy import migrate_81_to_82
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
 
-    assert SCHEMA_VERSION == 113
+    assert SCHEMA_VERSION == 114
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
     assert max(MIGRATIONS) == SCHEMA_VERSION - 1

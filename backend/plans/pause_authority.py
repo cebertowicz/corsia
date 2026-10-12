@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 
+from core.message_history import NON_HUMAN_MARKERS
 from plans.errors import PlanRefusal
 from plans.scheduled_wait import pause_refusal
 
@@ -49,24 +50,60 @@ def _paused_plan(db, thread_id: str) -> tuple[str | None, str | None]:
 
 
 #: Inputs that are not a person's message yet still reach a paused agent: the
-#: user's decision answer. A scheduled wake is not one: only the agent's own
-#: tool creates schedules and nothing records whether the user asked, so while
-#: paused it lands in the digest (#2286 records that provenance).
+#: user's decision answer and a scheduled wake that a user-origin schedule
+#: created. Other scheduled wakes land in the paused digest.
 _REACH_PAUSED_EVENTS = frozenset({"plan.decision_answered"})
 
 
-def reaches_paused_agent(row) -> bool:
+def _metadata(row) -> dict:
+    try:
+        metadata = json.loads(row["metadata"] or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def is_users_word(row) -> bool:
+    """Whether one claimed input is the user's word under the pause contract."""
+    metadata = _metadata(row)
+    return (
+        row["role"] == "user" and not any(key in metadata for key in NON_HUMAN_MARKERS)
+    ) or metadata.get("event_type") == "plan.decision_answered"
+
+
+def turn_carries_users_word(db, turn_id: str) -> bool:
+    """Whether inputs claimed by one Turn include the user's word."""
+    return any(
+        is_users_word(row)
+        for row in db.execute(
+            "SELECT role,metadata FROM messages WHERE active_turn_id=?", (turn_id,),
+        )
+    )
+
+
+def _user_asked_schedule(db, schedule_id) -> bool:
+    """Whether the input names a user-origin schedule by its primary key."""
+    if not isinstance(schedule_id, str) or not schedule_id:
+        return False
+    row = db.execute(
+        "SELECT asked_by_user FROM automation_schedules WHERE id=?", (schedule_id,),
+    ).fetchone()
+    return row is not None and row["asked_by_user"] == 1
+
+
+def reaches_paused_agent(row, *, db) -> bool:
     """Whether this queued input may start a paused agent's Turn.
 
-    The user's message or decision answer, another agent's message, and the
-    continuation of a Turn a restart interrupted do. A worker's completion, a
-    connected system's event, a scheduled wake and plan news do not.
+    The user's message or decision answer, another agent's message, a
+    scheduled wake from a schedule the user asked for, and the continuation of
+    a Turn a restart interrupted do. A worker's completion, a connected
+    system's event, every other scheduled wake and plan news do not.
     """
-    metadata = json.loads(row["metadata"] or "{}")
-    if not isinstance(metadata, dict):
-        return False
+    metadata = _metadata(row)
     if row["role"] == "user":
         return not metadata.get("completion")
+    if metadata.get("event_type") == "automation.scheduled_wake":
+        return _user_asked_schedule(db, metadata.get("subject_id"))
     return (
         metadata.get("event_type") in _REACH_PAUSED_EVENTS
         or "restart_registration_id" in metadata
@@ -86,7 +123,7 @@ def set_aside_while_paused(db, thread_id: str, rows) -> bool:
     from infra.thread_input_rows import starts_turn
 
     plan_id, since = _paused_plan(db, thread_id)
-    if since is None or any(reaches_paused_agent(row) for row in rows):
+    if since is None or any(reaches_paused_agent(row, db=db) for row in rows):
         return False
     for row in rows:
         if not starts_turn(row):

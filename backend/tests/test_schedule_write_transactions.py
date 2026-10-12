@@ -144,17 +144,26 @@ def test_standalone_commit_failure_is_loud_and_leaves_no_schedule_change(
 
 @pytest.mark.asyncio
 async def test_real_tools_commit_bounded_schedule_and_preserve_actor_visibility(schedule_scope):
-    created = json.loads(await automations.AutomationScheduleTool().execute(
+    result = json.loads(await automations.AutomationScheduleTool().execute(
         _thread_id="schedule-thread", kind="cadence", spec="60", max_runs=2,
         payload={"note": "later"},
-    ))["schedule"]
+    ))
+    created = result["schedule"]
+    assert result["notice"] == (
+        "Held while your plan is paused: not created in a Turn with the user's message."
+    )
+    assert len(result["notice"].encode()) < 90
     assert (created["thread_id"], created["scope_id"], created["created_by_actor"]) == (
         "schedule-thread", "schedule-project", "schedule-thread",
     )
     assert (created["state"], created["runs"], created["max_runs"], created["payload"]) == (
         "active", 0, 2, {"note": "later"},
     )
+    assert "asked_by_user" not in created
     assert (created["id"], "active") in _snapshot(schedule_scope)[1]
+    assert database.get_db().execute(
+        "SELECT asked_by_user FROM automation_schedules WHERE id=?", (created["id"],),
+    ).fetchone()[0] == 0
     _writer_free(schedule_scope)
     foreign = json.loads(await automations.AutomationListTool().execute(_thread_id="other-thread"))
     assert foreign == {"schedules": []}
@@ -168,6 +177,32 @@ async def test_real_tools_commit_bounded_schedule_and_preserve_actor_visibility(
     assert cancelled == {"cancelled": True}
     assert (created["id"], "cancelled") in _snapshot(schedule_scope)[1]
     _writer_free(schedule_scope)
+
+
+def test_schedule_created_from_a_users_turn_records_provenance(schedule_scope):
+    db = database.get_db()
+    try:
+        from infra import queries
+
+        queries.insert_message("schedule-thread", "user", "schedule this", {}, "user-input", db=db)
+        db.execute("UPDATE messages SET active_turn_id='turn-1' WHERE id='user-input'")
+        db.commit()
+        result = automations._operate(
+            "schedule-thread", {"project_id": "schedule-project"}, "schedule",
+            {"kind": "cadence", "spec": "60", "max_runs": 2}, turn_id="turn-1",
+        )
+
+        assert result["notice"] == (
+            "Runs while your plan is paused: created in a Turn with the user's message."
+        )
+        assert len(result["notice"].encode()) < 90
+        assert "asked_by_user" not in result["schedule"]
+        assert db.execute(
+            "SELECT asked_by_user FROM automation_schedules WHERE id=?",
+            (result["schedule"]["id"],),
+        ).fetchone()[0] == 1
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio
