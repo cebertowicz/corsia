@@ -9,6 +9,7 @@
 	import { trackColumnBox, type ColumnBox } from '$lib/actions/trackColumnBox';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
+	import { toastClearance } from '$lib/stores/toastClearance';
 
 	let {
 		ariaLabel,
@@ -27,7 +28,8 @@
 		within = null,
 		detent = 'full',
 		onDetent,
-		mountMotion = false,
+		open = true,
+		onClosed = () => {},
 	}: {
 		ariaLabel: string;
 		/**
@@ -54,6 +56,7 @@
 		followKeyboard?: boolean;
 		/** Content may own the header, leaving the chrome with its grabber only. */
 		headless?: boolean;
+		/** Use over media or dense content where the glass material hurts reading. */
 		opaque?: boolean;
 		/** Keep the sheet interactive without blocking controls outside it. */
 		modal?: boolean;
@@ -61,12 +64,10 @@
 		within?: HTMLElement | null;
 		detent?: 'full' | 'half';
 		onDetent?: (detent: 'full' | 'half') => void;
-		/**
-		 * Slide and fade in and out when a parent block mounts or removes the drawer, and ease its height when its
-		 * content changes it. Every consumer shows the drawer from a parent block, where Svelte's local transitions
-		 * never play, so without this opt-in the sheet appears, disappears and resizes in a single frame.
-		 */
-		mountMotion?: boolean;
+		/** Whether the caller keeps the drawer mounted for its local close transition. */
+		open?: boolean;
+		/** Runs after the drawer's 260ms local outro completes. */
+		onClosed?: () => void;
 	} = $props();
 
 	let box = $state<ColumnBox | null>(null);
@@ -81,19 +82,21 @@
 	let dragStartY = 0;
 	let dragStartedAt = 0;
 	let dragRaw = 0;
+	let stopToastClearance: (() => void) | undefined;
 
 	const flyParams = $derived(
-		$prefersReducedMotion || !mountMotion
+		$prefersReducedMotion
 			? { y: 0, duration: 0 }
 			: { y: 72, duration: 260, easing: cubicOut },
 	);
 	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
-	// The token is read once, when the drawer is created, never inside the derivation.
-	const tightMs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 120;
-	const fadeParams = $derived({ duration: !mountMotion ? 0 : $prefersReducedMotion ? tightMs : 160 });
+	// The token is read once on mount, never inside the derivation.
+	let tightMs = $state(120);
+	onMount(() => { tightMs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 120; });
+	const fadeParams = $derived({ duration: $prefersReducedMotion ? tightMs : 160 });
 
 	function onBackdrop(event: MouseEvent): void {
-		if (modal && event.target === event.currentTarget) onClose();
+		if (modal && detent !== 'half' && event.target === event.currentTarget) onClose();
 	}
 
 	function startDrag(event: PointerEvent): void {
@@ -129,7 +132,21 @@
 		dragY = 0;
 	}
 
-	onMount(() => {
+	function restingViewportBottomOccupancy(node: HTMLElement): number {
+		const bottomMargin = Number.parseFloat(getComputedStyle(node).marginBottom) || 0;
+		return node.offsetHeight + bottomMargin;
+	}
+
+	function releaseToastClearance(): void {
+		stopToastClearance?.();
+		stopToastClearance = undefined;
+	}
+
+	$effect(() => {
+		if (!open || !panel) return;
+		stopToastClearance = toastClearance.register(panel, {
+			measure: () => restingViewportBottomOccupancy(panel!),
+		});
 		const removeBackLayer = pushBackLayer(() => {
 			onClose();
 			return true;
@@ -141,6 +158,7 @@
 		});
 		return () => {
 			mounted = false;
+			releaseToastClearance();
 			removeBackLayer();
 		};
 	});
@@ -152,14 +170,15 @@
 	band it was painted only over the chat column in a WebKit webview, leaving the
 	rail, the open document and the right pane uncovered.
 -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
+{#if open}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
 	class="drawer-backdrop"
 	class:follow-keyboard={followKeyboard}
 	class:within={!!box}
 	class:half={detent === 'half'}
-	class:nonmodal={!modal}
+	class:nonmodal={!modal || detent === 'half'}
 	style:--drawer-top="{box?.top ?? 0}px"
 	style:--drawer-right="{box?.right ?? 0}px"
 	style:--drawer-bottom="{box?.bottom ?? 0}px"
@@ -167,10 +186,12 @@
 	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
 	onclick={onBackdrop}
-	transition:fade|global={fadeParams}
-	use:portal
->
-	<div class="drawer-motion" transition:fly|global={flyParams}>
+		onoutrostart={releaseToastClearance}
+		in:fade|global={fadeParams}
+		out:fade={fadeParams}
+		use:portal
+	>
+		<div class="drawer-motion" in:fly|global={flyParams} out:fly={flyParams} onoutroend={onClosed}>
 		<div
 			bind:this={panel}
 			class="drawer-panel"
@@ -179,11 +200,11 @@
 			class:half={detent === 'half'}
 			style:--drawer-drag-y="{dragY}px"
 			role="dialog"
-			aria-modal={modal ? 'true' : 'false'}
+			aria-modal={modal && detent !== 'half' ? 'true' : 'false'}
 			aria-label={ariaLabel}
 			tabindex="-1"
 			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
-			use:settleHeight={{ enabled: mountMotion && !dragging, reduced: $prefersReducedMotion }}
+			use:settleHeight={{ enabled: open && !dragging, reduced: $prefersReducedMotion }}
 		>
 			<div class="drawer-chrome">
 				<div
@@ -207,7 +228,8 @@
 			</div>
 		</div>
 	</div>
-</div>
+	</div>
+{/if}
 
 <style>
 	.drawer-backdrop {

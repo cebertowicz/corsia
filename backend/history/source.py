@@ -10,12 +10,15 @@ from history.messages import (
     _turn_provenance,
 )
 from history.types import HistoryBoundary, PortableHistoryError, _SourceTurn
+from infra.context_preview_timing import record_rows_read
 
 
 _SEMANTIC_ROLES = frozenset({"user", "assistant", "tool"})
 _TERMINAL_TURN_STATES = frozenset({"completed", "cancelled", "interrupted", "error"})
 _NONTERMINAL_TURN_STATES = frozenset({"running"})
 SOURCE_COLUMNS = "id,thread_id,role,content,metadata,created_at,seq,active_turn_id"
+# Below SQLite's oldest default host-parameter limit (999).
+_TURN_ID_CHUNK = 500
 
 
 def thread_history_epoch(db, thread_id: str) -> int:
@@ -24,6 +27,7 @@ def thread_history_epoch(db, thread_id: str) -> int:
         "SELECT history_epoch FROM threads WHERE id = ?",
         (thread_id,),
     ).fetchone()
+    record_rows_read(int(thread_row is not None))
     if thread_row is None:
         raise PortableHistoryError(f"thread {thread_id!r} does not exist")
     return int(thread_row["history_epoch"])
@@ -40,6 +44,7 @@ def _validated_rows(
         "ORDER BY seq",
         (thread_id,),
     ).fetchall()
+    record_rows_read(len(source))
     return epoch, validate_source_rows(source, thread_id)
 
 
@@ -97,16 +102,18 @@ def _turn_owners(db, thread_id: str, rows: list[dict[str, Any]]) -> dict[str, di
     )
     if not turn_ids:
         return {}
-    turn_id_set = set(turn_ids)
-    owners = {
-        str(row["id"]): dict(row)
-        for row in db.execute(
+    # Read only the named Turns: a whole-thread read grows with thread lifetime,
+    # and every fetched row is a GIL re-acquire on the render path.
+    owners: dict[str, dict] = {}
+    for start in range(0, len(turn_ids), _TURN_ID_CHUNK):
+        chunk = turn_ids[start:start + _TURN_ID_CHUNK]
+        fetched = db.execute(
             "SELECT id,thread_id,status,turn_order FROM active_turns "
-            "WHERE thread_id = ?",
-            (thread_id,),
+            f"WHERE thread_id = ? AND id IN ({','.join('?' for _ in chunk)})",
+            (thread_id, *chunk),
         ).fetchall()
-        if str(row["id"]) in turn_id_set
-    }
+        record_rows_read(len(fetched))
+        owners.update((str(row["id"]), dict(row)) for row in fetched)
     for turn_id in turn_ids:
         owner = owners.get(turn_id)
         if owner is None:

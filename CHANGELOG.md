@@ -3,6 +3,61 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
+## v2026.10.11 — Images you can review, keys in one place, and a sharper Measurement page
+
+### Upgrading
+
+- The first start after upgrading runs several database upgrades. Each takes a backup first, and older upgrade backups are now removed automatically so they can no longer fill the disk and stop startup.
+- Every stored credential (provider, web search, webhook, server and tool keys) moves into the key store on first start. You keep entering keys where you do today; `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `BRAVE_API_KEY` from the environment are imported once.
+- The Measurement API's `api_records` field is now `usage_records`.
+
+### Documents and Images
+
+- Images open as rendered images in the artifact canvas, with zoom and pan, including images you upload from your computer.
+- Markdown images show inline in documents, without their markdown source.
+- You can comment on part of an image, whether it stands alone or sits inside a document, and send waiting comments straight from the image viewer.
+- Comments and suggestions appear in the document as the model writes them.
+- A typed suggestion's insert always lands, however it arrives.
+- The review bar and comments drawer take the glass look, and you can answer a review request from the document or image itself; a cleared request shows the verdict it was given.
+- Send now and the document toolbar stay on one row while comments wait to send, and phones get equal text margins with the header below the notch.
+
+### Chat and Interface
+
+- Shared documents and review requests appear as cards on the chat message that carries them, and opening one keeps it as the active surface.
+- Another agent's typing marker fades two seconds after it stops.
+- On a phone, closing the side rail no longer overshoots the page to the left.
+
+### Measurement
+
+- The page gains a dollars-per-hour-of-work measure for agents and models, plus dollars per task and a model's share of spend.
+- Each headline names the dates it pooled and counts only that window; the cost line counts local records and classifies by the model that actually ran.
+- Attention is measured from when you were actually present, and minutes between your messages count across your whole message stream.
+- Tasks are sized by the effort a person would need, and corrections you make in messages are recorded and checked independently.
+- Biggest changes ranks only the page's own measures; cards are square, tables fit a phone, and the phone scroller starts below the header.
+- The page loads faster by reading costs and outcomes once per refresh.
+
+### Agents and Plans
+
+- Answering a review request wakes the agent that asked, once, and starts its turn right away.
+- A worker without a plan returns its final reply to the agent that started it.
+- Reading a plan costs only its open work, not its whole history.
+- Saved notes are reviewed in rotation so none goes unchecked, and Claude Code may again skip an optional history checkpoint.
+- Stop records the outcome it caused and keeps its own cancellation.
+- The default coordination model sends approvals as a review request on the artifact, keeps decisions for real tradeoffs, and has you approve a rendered design before it is built.
+- Settled temporary workers' leftover working files are cleaned up after the normal retention period.
+
+### Providers and Keys
+
+- An endpoint is treated as interactive-only when its address is a Token Plan host, never because of the name you gave it; installs marked under the old rule are repaired.
+- A discarded network key is refused rather than silently kept.
+- An optional Settings switch lets an unavailable host-access reviewer fall back to your own ready model; off by default.
+
+### Reliability and Security
+
+- Agents read and search code in any language without words next to credential names being garbled; only real secret values are masked.
+- The code reviewer runs confined to its own folders with tighter rules on what it may run.
+- Git branch and layout answers are reused while nothing changes, and chat card refreshes are bounded.
+
 ## v2026.10.09 — A guided start, live documents, and a measured view
 
 ### Upgrading

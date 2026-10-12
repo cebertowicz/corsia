@@ -13,10 +13,9 @@
 	 * thread to that account; during a running turn it applies at the next turn, as a model choice
 	 * does. A draft chat has no thread, so its rows are read-only.
 	 */
-	// Automatic rollover still shows every permitted account in server order. Its
-	// header names the account currently in use, so the list deliberately has no
-	// duplicate selected fill.
-	let { rows, suppressMarked = false }: { rows: PickerAccount[]; suppressMarked?: boolean } = $props();
+	// Every permitted account shows, in server order, and the one the next turn runs on carries
+	// the same selected treatment as the header that names it, with or without rollover.
+	let { rows }: { rows: PickerAccount[] } = $props();
 
 	let error = $state('');
 	let busy = false;
@@ -37,7 +36,7 @@
 		<AccountUsageRow
 			account={row.account}
 			variant="picker"
-			marked={suppressMarked ? false : row.marked}
+			marked={row.marked}
 			pending={row.pending}
 			order={row.order}
 			choosable={row.choosable}

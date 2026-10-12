@@ -95,6 +95,44 @@
 	const openCount = $derived(comments.filter((comment) => !comment.resolved).length);
 	// Open counts threads that are open: the resolved card kept for an unsent reply says why it is still listed, and the document's chip agrees.
 	const headerCount = $derived(filter === 'open' ? `${openCount} open` : filter === 'resolved' ? `${comments.length - openCount} resolved` : `${comments.length} ${comments.length === 1 ? 'thread' : 'threads'}`);
+	let mobileDrawerOpen = $state(false);
+	let mobileCloseAction = $state<(() => void) | null>(null);
+	let closingMobileState = $state<SurfaceState>(null);
+	let closingMobileDraft = $state<{ text: string; body?: string; label?: string } | null>(null);
+	const renderedMobileState = $derived(closingMobileState ?? surfaceState);
+	const renderedMobileDraft = $derived(closingMobileDraft ?? draft);
+	$effect(() => {
+		if (surfaceState && sheetDrawer) {
+			closingMobileState = null;
+			closingMobileDraft = null;
+			mobileDrawerOpen = true;
+		}
+	});
+	function closeMobileDrawer(action: () => void = onClose): void {
+		mobileCloseAction = action;
+		mobileDrawerOpen = false;
+	}
+	function closeMobileSurface(): void {
+		if (sheetDrawer) closeMobileDrawer();
+		else onClose();
+	}
+	function cancelMobileDraft(): void {
+		const action = onCancelDraft ?? onClose;
+		if (!sheetDrawer) { action(); return; }
+		// Cancel commits state immediately, but the captured content owns the local outro.
+		closingMobileState = surfaceState;
+		closingMobileDraft = draft;
+		mobileCloseAction = null;
+		mobileDrawerOpen = false;
+		action();
+	}
+	function finishMobileClose(): void {
+		const action = mobileCloseAction;
+		mobileCloseAction = null;
+		closingMobileState = null;
+		closingMobileDraft = null;
+		action?.();
+	}
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
@@ -179,7 +217,7 @@
 	/**
 	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with
 	 * reduced motion it crossfades instead. A document's side drawer (a canvas wide enough for a column) appears and leaves
-	 * at once; its sheet form moves through AdaptiveDrawer's mountMotion.
+	 * at once; its sheet form uses AdaptiveDrawer's open/onClosed lifecycle.
 	 */
 	function drawerMotion(_node: Element, { leaving }: { leaving: boolean }) {
 		if (!isImage) return { duration: 0 };
@@ -302,7 +340,7 @@
 {/snippet}
 
 {#snippet content()}
-	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} label={draft.label} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={onCancelDraft ?? onClose} />
+	{#if renderedMobileState?.kind === 'draft' && renderedMobileDraft}<CommentComposer quote={renderedMobileDraft.text} label={renderedMobileDraft.label} body={renderedMobileDraft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={cancelMobileDraft} />
 	{:else}
 		{#if !readOnly && surfaceState?.kind !== 'thread'}
 			<div class="suggestion-status">
@@ -334,13 +372,13 @@
 	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
 {/snippet}
 
-{#if surfaceState}
-	{#if surfaceState.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer ariaLabel="Document comments" mountMotion headless fill opaque modal={false} {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {onClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>{@render listBody()}</section></AdaptiveDrawer>
-	{:else if surfaceState.kind === 'list'}
+{#if surfaceState || closingMobileState}
+	{#if surfaceState?.kind === 'list' && sheetDrawer}
+		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>{@render listBody()}</section></AdaptiveDrawer>
+	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>
-	{:else}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+	{:else if sheetDrawer && renderedMobileState}<AdaptiveDrawer ariaLabel="Document comments" heading={renderedMobileState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}>{@render content()}</AdaptiveDrawer>
+	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>

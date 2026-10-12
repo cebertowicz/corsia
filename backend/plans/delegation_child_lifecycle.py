@@ -32,6 +32,7 @@ def notify_turn_error(
     import hashlib
 
     from plans import delegation_turn_end, wait_causes
+    from plans.delegation_child_rollover import has_rollover_successor
     from plans.delegation_notice import _wake_parent
     from prompts import plan_wakes as text
     from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
@@ -81,6 +82,8 @@ def notify_turn_error(
         _wake_parent(connection, parent_plan_id, worker, kind='child_provider_refused',
                      subject_id=episode(f'account\n{refused_on}\n{error}'), child_plan_id=str(plan['id']),
                      model=refused_on, account_hold_state=state, **fields)
+        return
+    if not held and has_rollover_successor(connection, worker, turn_id):  # recovered on another account
         return
     resume_note = (
         text.REFUSED_RESUMES_AT.format(

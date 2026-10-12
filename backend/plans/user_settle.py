@@ -148,7 +148,7 @@ def _accept(db, node_id: str, actor, common: dict) -> None:
     """
     from plans import review_evidence
 
-    _clear_stops(db, node_id, common)
+    clear_stops(db, node_id, common)
     if service._node_row(db, node_id)["state"] == "pending":
         service.transition_node(node_id, "active", **common)
     if service._node_row(db, node_id)["state"] == "active":
@@ -164,8 +164,12 @@ def _accept(db, node_id: str, actor, common: dict) -> None:
     )
 
 
-def _clear_stops(db, node_id: str, common: dict) -> None:
-    """End every hold, unmet prerequisite and armed watch through its owner."""
+def clear_stops(db, node_id: str, common: dict) -> None:
+    """End every hold, unmet prerequisite and armed watch through its owner.
+
+    Also the owner agent's settle of a person's step (``plans.user_step_settle``),
+    which refuses a pause the user owns before it gets here.
+    """
     from plans import archival, dependencies, holds, node_waits
 
     for hold in holds.active_holds(node_id, db=db):

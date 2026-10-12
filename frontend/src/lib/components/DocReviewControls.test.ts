@@ -11,7 +11,7 @@ vi.mock('$lib/ws/events', () => ({ on: (name: string, handler: (frame: unknown) 
 } }));
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: toastShow } }));
 let host: HTMLElement;
-let component: { $destroy(): void; $set(props: Record<string, unknown>): void };
+let component: { $destroy(): void; $set(props: Record<string, unknown>): void } | undefined;
 let width = 900;
 let rows: Record<string, unknown>[];
 let reviewers: Record<string, unknown>[];
@@ -217,6 +217,13 @@ describe('document review toolbar and popover', () => {
 		expect(document.body.querySelector('[data-adaptive-drawer]')).toBeTruthy(); expect(document.body.querySelector('[data-popover]')).toBeNull();
 		expect(document.body.querySelectorAll('h2')).toHaveLength(1); expect(document.body.querySelector('h2')?.textContent).toBe('Request review');
 		expect(search.placeholder).toBe('Find an agent'); button('Close').click(); await settle(); expect(document.activeElement).toBe(button('Request review'));
+	});
+	it('removes its narrow review drawer synchronously when its caller is destroyed', async () => {
+		width = 393; render(); await picker();
+		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(1);
+		component.$destroy();
+		component = undefined;
+		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
 	});
 	it('says plainly when nobody can review, and offers Retry rather than an empty claim on a roster failure', async () => {
 		reviewers = []; render(); await picker();

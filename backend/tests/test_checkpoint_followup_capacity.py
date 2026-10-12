@@ -109,15 +109,19 @@ async def test_cutoff_installs_prior_state_and_warning_without_inventing_complet
 @pytest.mark.parametrize("failure_surface", ["result", "stderr"])
 def test_cc_context_limit_preserves_partial_output(body, failure_surface):
     from core.checkpoint_cc_fork import _result_after_process
+    from core.checkpoint_types import ProviderCheckpointRejected
 
     records = [{"type": "assistant", "message": {"content": body}}]
     failure = "prompt is too long: context_length_exceeded"
     if failure_surface == "result":
         records.append({"type": "result", "is_error": True, "result": failure})
     stdout = b"\n".join(json.dumps(record).encode() for record in records)
-    result = _result_after_process(
-        stdout, failure if failure_surface == "stderr" else None, 1,
-    )
+    stderr = failure if failure_surface == "stderr" else None
+    if not body:  # No narrative is a named failure, never an empty success.
+        with pytest.raises(ProviderCheckpointRejected, match="checkpoint_context_truncated"):
+            _result_after_process(stdout, stderr, 1)
+        return
+    result = _result_after_process(stdout, stderr, 1)
     assert result.raw_body == body
     assert result.diagnostic == "checkpoint_context_truncated"
 
@@ -152,12 +156,20 @@ async def test_codex_context_limit_preserves_streamed_partial_output(
 
     events = None
     monkeypatch.setattr(codex, "_checkpoint_session", session)
-    result = await codex._run_app_server_checkpoint(
+    run = codex._run_app_server_checkpoint(
         _request(_target("codex"), None, binary="unused"), None,
         source_home=tmp_path, isolated_home=tmp_path, cwd=str(tmp_path),
         cancel_event=asyncio.Event(),
         cold_input=SimpleNamespace(input_tokens=10),
     )
+    if not (prior or body):  # No narrative is a named failure.
+        from core.checkpoint_types import ProviderCheckpointRejected
+
+        with pytest.raises(ProviderCheckpointRejected, match="checkpoint_context_truncated"):
+            await run
+        assert terminated == [True]
+        return
+    result = await run
     assert result.raw_body == "\n".join(part for part in (prior, body) if part)
     assert result.diagnostic == "checkpoint_context_truncated"
     assert terminated == [True]

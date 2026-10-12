@@ -141,6 +141,14 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector('.drawer-backdrop')?.classList.contains('follow-keyboard')).toBe(true);
 	});
 
+	it('removes its narrow drawer synchronously when its caller is destroyed', () => {
+		render({ narrow: true, state: { kind: 'thread', id: suggestion.id } });
+		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(1);
+		unmount(component!);
+		component = null;
+		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
+	});
+
 	describe('a card that follows its text when the comment stops having a place in it', () => {
 		// Where the text is drawn until it is not, then nothing: what the editor reports once the comment is orphaned.
 		let drawn: DOMRect | null;

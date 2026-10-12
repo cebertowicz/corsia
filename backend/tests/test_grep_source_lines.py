@@ -75,18 +75,20 @@ def workspace(tmp_path, monkeypatch):
 
 
 async def _grep(ws: Path, search: str, monkeypatch, pattern: str, *, context: int = 0,
-                output_mode: str = "content", glob: str | None = None) -> str:
+                output_mode: str = "content", glob: str | None = None,
+                path: Path | None = None) -> str:
     tool = GrepTool(workspace=ws)
+    search_path = path or ws
     if search == "reviewed":
         return tool._search_reviewed(
-            pattern, ws, glob, output_mode, False, context, 50, _CUR, False,
+            pattern, search_path, glob, output_mode, False, context, 50, _CUR, False,
         )
     if search == "ripgrep" and not grep_mod._RG_AVAILABLE:
         pytest.skip("ripgrep not available")
     monkeypatch.setattr(grep_mod, "_RG_AVAILABLE", search == "ripgrep")
     return await tool.execute(
         pattern=pattern, output_mode=output_mode, context=context, glob=glob,
-        _thread_id=_CUR,
+        path=str(path) if path else None, _thread_id=_CUR,
     )
 
 
@@ -107,6 +109,16 @@ def _parsed(output: str, relative: str, search: str) -> list[tuple[str, int, str
         match = tail.match(line, len(relative))
         assert match is not None, line
         rows.append((match.group("sep"), int(match.group("number")), line[match.end():]))
+    return rows
+
+
+def _parsed_single_file(output: str) -> list[tuple[str, int, str]]:
+    """``(separator, number, text)`` for filename-free single-file output."""
+    rows = []
+    for line in output.splitlines():
+        match = re.match(r"(?P<number>[0-9]+)(?P<sep>[:-])", line)
+        if match is not None:
+            rows.append((match.group("sep"), int(match.group("number")), line[match.end():]))
     return rows
 
 
@@ -133,6 +145,47 @@ async def test_a_match_line_equals_the_same_line_of_read_file(workspace, monkeyp
     assert _VENDOR not in output
     assert _PEM_BODY not in output
     assert isinstance(output, CredentialSafeText)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search", _SEARCHES)
+@pytest.mark.parametrize(("relative", "pattern"), [
+    ("pkg/module.py", f"{_API_KEY}|{_TOKEN}"),
+    ("src/settings.ts", _APIKEY),
+])
+async def test_single_file_lines_equal_read_file(workspace, monkeypatch, search, relative, pattern):
+    output = await _grep(
+        workspace, search, monkeypatch, pattern, path=workspace / relative,
+    )
+    read = await _read_lines(workspace, relative)
+    rows = _parsed_single_file(output)
+
+    assert rows
+    assert all(text == read[number - 1] for _sep, number, text in rows)
+
+
+@pytest.mark.asyncio
+async def test_single_file_ripgrep_context_lines_are_faithful(workspace, monkeypatch):
+    output = await _grep(
+        workspace, "ripgrep", monkeypatch, "interface", context=1,
+        path=workspace / "src" / "settings.ts",
+    )
+    rows = _parsed_single_file(output)
+
+    assert [(separator, number) for separator, number, _text in rows] == [(":", 1), ("-", 2)]
+    assert rows[1][2] == (await _read_lines(workspace, "src/settings.ts"))[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search", _SEARCHES)
+async def test_single_file_redacts_secret_values(workspace, monkeypatch, search):
+    output = await _grep(
+        workspace, search, monkeypatch, "fallback|MIIEvQ",
+        path=workspace / "pkg" / "module.py",
+    )
+
+    assert _VENDOR not in output
+    assert _PEM_BODY not in output
 
 
 @pytest.mark.asyncio

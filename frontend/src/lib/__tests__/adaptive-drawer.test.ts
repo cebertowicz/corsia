@@ -1,5 +1,7 @@
+import { get } from "svelte/store";
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toastClearance } from "$lib/stores/toastClearance";
 import AdaptiveDrawerHarness from "./fixtures/AdaptiveDrawerHarness.svelte";
 
 let host: HTMLElement;
@@ -84,6 +86,23 @@ describe("AdaptiveDrawer", () => {
     expect(dialog?.getAttribute("aria-modal")).toBe("false");
   });
 
+  it("calls onClosed once after the local outro", async () => {
+    const closed = vi.fn();
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { callerControlled: true, onClose: closed },
+    });
+    await settle();
+
+    (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+    await settle();
+    (host.querySelector(".drawer-done") as HTMLButtonElement).click();
+    await settle();
+
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(0);
+  });
+
   it("closes from its explicit control and Escape", async () => {
     const close = vi.fn();
     component = mount(AdaptiveDrawerHarness, {
@@ -145,6 +164,21 @@ describe("AdaptiveDrawer", () => {
     handle.dispatchEvent(pointer("pointermove", 280, 8));
     handle.dispatchEvent(pointer("pointerup", 280, 8));
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers desktop resting occupancy including its bottom margin and releases it at close start", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
+    await settle();
+
+    const panel = host.querySelector(".drawer-panel") as HTMLElement;
+    panel.style.marginBottom = "16px";
+    Object.defineProperty(panel, "offsetHeight", { configurable: true, value: 440 });
+    window.dispatchEvent(new Event("resize"));
+
+    expect(get(toastClearance)).toBe(456);
+
+    (host.querySelector("[data-adaptive-drawer]") as HTMLElement).dispatchEvent(new Event("outrostart"));
+    expect(get(toastClearance)).toBe(0);
   });
 
   it("keeps a dedicated independently scrollable body for long content", async () => {

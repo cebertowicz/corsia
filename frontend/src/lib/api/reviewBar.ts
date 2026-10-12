@@ -9,6 +9,8 @@ export interface FeedbackCounts { comments: number; suggestions: number; edits: 
 /** The review bar's read of one artifact: the newest raised ask and what the user did since it was raised. */
 export interface ReviewBarRead {
 	ask_raised: boolean;
+	/** The Plans-owned holds this answer closes; each one identifies one review round. */
+	hold_ids: string[];
 	ask_reason: string | null;
 	ask_raised_at: string | null;
 	asker: { id: string; name: string } | null;
