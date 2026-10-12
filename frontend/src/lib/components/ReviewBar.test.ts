@@ -140,6 +140,21 @@ describe('ReviewBar', () => {
 		expect(get(submittedAnswers)).toEqual({});
 	});
 
+	it('reconciles the submitted verdict and feedback with the server response after success', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		api.answerReview.mockResolvedValue({
+			verdict: 'approved_with_changes', note: null,
+			feedback_counts: { comments: 1, suggestions: 2, edits: 3 },
+		});
+		await render();
+
+		button('Approve')!.click();
+
+		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({
+			h1: { state: 'approved_with_changes', feedback: { comments: 1, suggestions: 2, edits: 3 } },
+		}));
+	});
+
 	it('does not flash a submitted verdict for an empty required note', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();

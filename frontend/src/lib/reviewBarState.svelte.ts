@@ -60,7 +60,11 @@ export function createReviewBarState() {
 	function cancelNote() { if (phase === 'noting') { note = ''; failure = ''; phase = 'ask'; } }
 
 	/** Send the verdict; `from` is where a failed send returns to, with the note kept. */
-	async function answer(verdict: ReviewVerdict, onSendStarted?: () => void): Promise<ReviewAnswerOutcome> {
+	async function answer(
+		verdict: ReviewVerdict,
+		onSendStarted?: () => void,
+		onSendConfirmed?: (answer: ReviewAnswer) => void,
+	): Promise<ReviewAnswerOutcome> {
 		const id = artifactId, stamp = generation;
 		if (!id || (phase !== 'ask' && phase !== 'noting')) return 'ignored';
 		if (verdict === 'changes_requested' && noteRequired() && !note.trim()) { failure = NOTE_NEEDED; return 'ignored'; }
@@ -74,6 +78,7 @@ export function createReviewBarState() {
 			const counts = sent.feedback_counts;
 			settledAsk = read?.ask_raised_at ?? null;
 			receipt = { verdict: sent.verdict, sent: counts.comments + counts.suggestions + counts.edits, at: new Date() };
+			onSendConfirmed?.(sent);
 			phase = 'answered';
 			return 'sent';
 		} catch (error) {

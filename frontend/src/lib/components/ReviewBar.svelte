@@ -74,9 +74,11 @@
 		const targetId = artifactId;
 		if (!targetId) return;
 		const targetHoldIds = [...holdIds];
-		const outcome = await bar.answer(verdict, () => {
-			answerSubmitted(targetHoldIds, { state: verdict, feedback: bar.read?.round_feedback_counts });
-		});
+		const outcome = await bar.answer(
+			verdict,
+			() => answerSubmitted(targetHoldIds, { state: verdict, feedback: bar.read?.round_feedback_counts }),
+			(sent) => answerSubmitted(targetHoldIds, { state: sent.verdict, feedback: sent.feedback_counts }),
+		);
 		if (outcome === 'sent') {
 			if (bar.artifactId === targetId) onAnswered?.();
 			return;
