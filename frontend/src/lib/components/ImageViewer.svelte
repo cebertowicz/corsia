@@ -10,7 +10,6 @@
 	import { fetchRevision } from '$lib/api/docs';
 	import { imageContentUrl } from '$lib/artifactImage';
 	import { holdDocFeedback } from '$lib/docFeedback.svelte';
-	import { trackCapsuleClearance } from '$lib/actions/capsuleClearance';
 	import { token } from '$lib/stores/auth';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
@@ -33,6 +32,8 @@
 	let reloadNonce = $state(0);
 	let loadSeq = 0;
 	let draftOpen = $state(false);
+	// The review bar reports how much of the viewer its floating phone capsule covers.
+	let capsuleClearance = $state(0);
 	let lightbox = $state<ReturnType<typeof ImageCommentLightbox>>();
 	const artifactId = $derived(resolvedArtifactId ?? target.artifactId ?? null);
 	// The image's own batch is held by its tab, not the lightbox: a reload remounts that, and is not leaving.
@@ -98,8 +99,8 @@
 </script>
 
 <!-- The canvas ends above the review bar's floating capsule on a phone, so the capsule never covers its edge or focus ring. -->
-<div class="image-viewer" use:trackCapsuleClearance>
-	<ReviewBar {artifactId} {draftOpen} />
+<div class="image-viewer" style:--capsule-clearance="{capsuleClearance}px">
+	<ReviewBar {artifactId} {draftOpen} bind:capsuleClearance />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
 			<button type="button" class="stale-control" onclick={() => onReload?.()}>File changed · Reload</button>

@@ -14,7 +14,12 @@
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, draftOpen = false, suppressed = false, onAnswered }: { artifactId: string | null; draftOpen?: boolean; suppressed?: boolean; onAnswered?: () => void } = $props();
+	let { artifactId, draftOpen = false, suppressed = false, capsuleClearance = $bindable(0), onAnswered }: {
+		artifactId: string | null; draftOpen?: boolean; suppressed?: boolean;
+		/** Out: px the bar's container leaves at its bottom so the floating capsule never covers it; 0 while it does not float. */
+		capsuleClearance?: number;
+		onAnswered?: () => void;
+	} = $props();
 
 	const bar = createReviewBarState();
 	let expanded = $state(false);
@@ -22,6 +27,8 @@
 	let requestButton = $state<HTMLButtonElement>();
 	let approveButton = $state<HTMLButtonElement>();
 	let receiptEl = $state<HTMLElement>();
+	let slotEl = $state<HTMLElement>();
+	let capsuleEl = $state<HTMLElement>();
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const read = $derived(bar.read);
@@ -138,6 +145,37 @@
 		const distance = window.innerHeight - capsule.getBoundingClientRect().top;
 		return { duration: token('--dur-standard') * 0.7, easing: cubicIn, css: (_t: number, u: number) => `transform: translateY(${u * distance}px)` };
 	}
+	/**
+	 * How far the floating capsule (a touch screen at a narrow canvas) reaches up into the bar's container (its offset
+	 * parent, else the window), plus the capsule's side inset as the gap above it. Zero while the capsule sits in the
+	 * bar's own row, is tucked away, or is not there.
+	 */
+	function measureClearance(): number {
+		const capsule = capsuleEl;
+		if (!capsule || suppressed) return 0;
+		const style = getComputedStyle(capsule);
+		if (style.position !== 'fixed') return 0;
+		// From its layout box, not its rect: the capsule slides in by a transform, which would move the measured top.
+		const top = window.innerHeight - (Number.parseFloat(style.bottom) || 0) - capsule.offsetHeight;
+		const container = slotEl?.offsetParent;
+		const reach = (container ? container.getBoundingClientRect().bottom : window.innerHeight) - top;
+		return reach > 0 ? Math.round(reach + (Number.parseFloat(style.left) || 0)) : 0;
+	}
+	// The capsule's own size (it grows with a status or the note) and the window's decide whether and how far it
+	// floats over the container; its tucked-away state is the `suppressed` prop, read by the measure.
+	$effect(() => {
+		const capsule = capsuleEl;
+		const update = () => { capsuleClearance = measureClearance(); };
+		update();
+		if (!capsule) return;
+		const sizes = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
+		sizes?.observe(capsule);
+		window.addEventListener('resize', update);
+		return () => {
+			sizes?.disconnect();
+			window.removeEventListener('resize', update);
+		};
+	});
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendNote(); }
 		else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void cancelNote(); }
@@ -146,7 +184,7 @@
 
 {#if bar.visible}
 	<!-- The slot outlives the phase: it grows once when the first ask arrives, and an answer or a replaced notice swaps inside it at the same height. -->
-	<div class="rb-slot">
+	<div class="rb-slot" bind:this={slotEl}>
 	{#if bar.phase === 'answered'}
 		<section class="review-bar receipt" class:changes={bar.receipt?.verdict === 'changes_requested'} aria-label="Review answered" in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
 			<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16">
@@ -186,7 +224,7 @@
 				{/if}
 			</span>
 			<span class="rb-row2">
-				<div class="rb-capsule" class:suppressed out:capsuleOut|global>
+				<div class="rb-capsule" class:suppressed bind:this={capsuleEl} out:capsuleOut|global>
 					<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward; when nothing else is said there it names whom the answer goes to. -->
 					<span class="rb-status" class:busy role="status">{busy ? 'Sending your review…' : bar.failure}</span>
 					{#if !busy && !bar.failure && !noting}<span class="rb-to">{toText}</span>{/if}
