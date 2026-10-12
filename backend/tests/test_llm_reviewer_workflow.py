@@ -18,8 +18,12 @@ class TestWorkflowIntegration:
 
     @pytest.fixture(autouse=True)
     def _setup(self, _isolated_db):
-        """Set up isolated DB for reviewer gate tests."""
-        yield
+        """Set up isolated DB and stub the presence status write."""
+        with patch(
+            "reviewer.on_pr_review.set_presence", return_value=True,
+        ) as presence:
+            self.set_presence = presence
+            yield
 
     @patch("reviewer.on_pr_review._review_diff")
     @patch("reviewer.reviewer_runner.invoke_cc_subagent")
@@ -79,6 +83,7 @@ class TestWorkflowIntegration:
         assert mock_publish.call_args.kwargs["resolve_replies"] == []
         # Status should be success (no block findings)
         mock_success.assert_called_once()
+        self.set_presence.assert_called_once_with("owner/repo", "abc123def", "pass")
 
     @patch("reviewer.on_pr_review._review_diff")
     @patch("reviewer.reviewer_runner.invoke_cc_subagent")
@@ -120,6 +125,7 @@ class TestWorkflowIntegration:
 
         mock_fail.assert_called_once()
         assert "1 block" in mock_fail.call_args[0][2]
+        assert self.set_presence.call_args.args[2] == "block"
 
     @patch("reviewer.on_pr_review.set_success")
     @patch("reviewer.on_pr_review.emit_product_event")
