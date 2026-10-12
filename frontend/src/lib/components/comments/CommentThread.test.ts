@@ -60,7 +60,7 @@ describe('CommentThread', () => {
 		const author = host.querySelector<HTMLElement>('.ct-author')!;
 		expect(author.getAttribute('aria-label')).toBe(name);
 		expect(author.title).toBe(name);
-		expect(author.querySelector('.ct-author-tail')?.textContent).toBe('5058');
+		expect(author.querySelector('.name-tail')?.textContent).toBe('5058');
 		expect(host.querySelector('.ct-at.compact')?.textContent).toBe('now');
 	});
 
@@ -147,6 +147,16 @@ describe('CommentThread', () => {
 		render(thread({ anchor: 'old text', replacement: 'new text' }));
 		expect(host.querySelector('.diff')?.textContent).toContain('old text');
 		expect(host.querySelector('.diff')?.textContent).toContain('new text');
+	});
+
+	it('keeps the Reply action on an open suggestion, which is how a touch screen reaches its reply field', () => {
+		render(thread({ anchor: 'old text', replacement: 'new text' }));
+		const reply = host.querySelector<HTMLButtonElement>('button.ct-act.reply[aria-label="Reply"]')!;
+		expect(reply).toBeTruthy();
+		reply.click(); flushSync();
+		expect(host.querySelector('textarea[placeholder="Reply…"]')).toBeTruthy();
+		expect(host.querySelector('.ct-act.ack')).toBeNull();
+		expect(host.querySelector('.ct-act.resolve')).toBeNull();
 	});
 
 	it('wraps the suggestion diff between words, on the open and the decided card alike', () => {
