@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Callable
 from unittest.mock import Mock, patch
 
-from reviewer_gate_fixtures import _DEFAULT_PR_INFO, _reload_gate  # noqa: F401
+from reviewer_gate_fixtures import _DEFAULT_PR_INFO, _reload_gate, _stub_presence  # noqa: F401
 
 
 class _RetryLoop:

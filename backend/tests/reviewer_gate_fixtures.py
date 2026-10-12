@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+from unittest.mock import patch
 
 import pytest
 
@@ -16,6 +17,13 @@ def _reload_gate(isolated_db):
 @pytest.fixture(autouse=True)
 def _disable_analytics(monkeypatch):
     monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
+
+
+@pytest.fixture(autouse=True)
+def _stub_presence():
+    """Gate settlement posts the presence status; keep it off the real gh."""
+    with patch("reviewer.reviewer_status.set_presence", return_value=True) as presence:
+        yield presence
 
 
 def _check_suite_payload(

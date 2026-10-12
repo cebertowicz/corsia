@@ -15,6 +15,7 @@ from reviewer_gate_fixtures import (  # noqa: F401
     _check_suite_payload,
     _disable_analytics,
     _reload_gate,
+    _stub_presence,
 )
 
 

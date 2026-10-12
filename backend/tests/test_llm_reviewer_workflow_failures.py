@@ -19,9 +19,8 @@ class TestWorkflowFailureOutcomes:
 
     @pytest.fixture(autouse=True)
     def _setup(self, _isolated_db):
-        """Set up isolated DB and stub the presence status write."""
-        with patch("reviewer.on_pr_review.set_presence", return_value=True):
-            yield
+        """Set up isolated DB for reviewer gate tests."""
+        yield
 
     @patch("reviewer.on_pr_review._review_diff")
     @patch("reviewer.reviewer_runner.invoke_cc_subagent")

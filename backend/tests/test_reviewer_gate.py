@@ -12,6 +12,7 @@ from reviewer_gate_fixtures import (  # noqa: F401
     _call_gate,
     _disable_analytics,
     _reload_gate,
+    _stub_presence,
 )
 
 
@@ -28,8 +29,7 @@ class TestReviewerVerdictReturn:
             },
         }
 
-        with patch.object(on_pr_review, "set_success") as set_success, \
-             patch.object(on_pr_review, "set_presence") as set_presence:
+        with patch.object(on_pr_review, "set_success") as set_success:
             verdict = on_pr_review.on_pr_review("pull_request", payload)
 
         assert verdict == {
@@ -42,7 +42,6 @@ class TestReviewerVerdictReturn:
             "abc123def",
             "qa/override-reviewer -- review skipped by override",
         )
-        set_presence.assert_not_called()
 
     def test_process_findings_returns_clean_verdict(self):
         from reviewer import on_pr_review
@@ -52,8 +51,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
              patch.object(on_pr_review, "classify_review_findings", return_value=([], [], 0)), \
              patch.object(on_pr_review, "publish_review"), \
-             patch.object(on_pr_review, "set_success"), \
-             patch.object(on_pr_review, "set_presence") as set_presence:
+             patch.object(on_pr_review, "set_success"):
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
             )
@@ -62,7 +60,6 @@ class TestReviewerVerdictReturn:
         assert verdict["block_count"] == 0
         assert verdict["flag_count"] == 0
         assert verdict["model_label"] == "codex"
-        set_presence.assert_called_once_with("owner/repo", "abc123def")
 
     def test_process_findings_returns_code_fail_verdict(self):
         from reviewer import on_pr_review
@@ -78,8 +75,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
              patch.object(on_pr_review, "classify_review_findings", return_value=(findings, [], 0)), \
              patch.object(on_pr_review, "publish_review"), \
-             patch.object(on_pr_review, "set_failure"), \
-             patch.object(on_pr_review, "set_presence") as set_presence:
+             patch.object(on_pr_review, "set_failure"):
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
             )
@@ -88,7 +84,6 @@ class TestReviewerVerdictReturn:
         assert verdict["block_count"] == 1
         assert verdict["flag_count"] == 0
         assert verdict["finding_count"] == 1
-        set_presence.assert_called_once_with("owner/repo", "abc123def")
 
     def test_reraised_resolved_finding_is_published_without_changing_the_verdict(self):
         from reviewer import on_pr_review
@@ -121,8 +116,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
              patch("reviewer.review_thread_lifecycle.fetch_existing_review_threads", return_value=None), \
              patch.object(on_pr_review, "publish_review") as publish_review, \
-             patch.object(on_pr_review, "set_failure"), \
-             patch.object(on_pr_review, "set_presence"):
+             patch.object(on_pr_review, "set_failure"):
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
             )
@@ -147,8 +141,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "fetch_existing_issue_comments", return_value=[]), \
              patch.object(on_pr_review, "classify_review_findings", return_value=([finding], [], 0)), \
              patch.object(on_pr_review, "publish_review"), \
-             patch.object(on_pr_review, "set_failure"), \
-             patch.object(on_pr_review, "set_presence"):
+             patch.object(on_pr_review, "set_failure"):
             verdict = on_pr_review._process_findings(
                 "ignored", 42, "owner/repo", "abc123", "codex",
             )
@@ -189,7 +182,7 @@ class TestReviewerVerdictReturn:
             side_effect=lambda **kwargs: published.append(kwargs),
         ), patch.object(
             on_pr_review, "set_failure", return_value=True,
-        ) as set_failure, patch.object(on_pr_review, "set_presence"):
+        ) as set_failure:
             verdict = on_pr_review._process_findings(
                 "ignored", 42, "owner/repo", "abc123", "codex",
             )
@@ -242,9 +235,7 @@ class TestReviewerVerdictReturn:
             on_pr_review,
             "publish_review",
             side_effect=lambda **kwargs: published.append(kwargs),
-        ), patch.object(on_pr_review, "set_failure", return_value=True), patch.object(
-            on_pr_review, "set_presence", return_value=True,
-        ):
+        ), patch.object(on_pr_review, "set_failure", return_value=True):
             on_pr_review._process_findings(
                 "ignored", 42, "owner/repo", "abc123", "codex",
             )
@@ -281,8 +272,7 @@ class TestReviewerVerdictReturn:
              patch.object(on_pr_review, "classify_review_findings", return_value=(findings, [], 0)), \
              patch.object(on_pr_review, "publish_review", side_effect=lambda **kw: published.append(kw)), \
              patch.object(on_pr_review, "set_failure") as failure, \
-             patch.object(on_pr_review, "set_success", return_value=True) as success, \
-             patch.object(on_pr_review, "set_presence"):
+             patch.object(on_pr_review, "set_success", return_value=True) as success:
             verdict = on_pr_review._process_findings(
                 "[]", 42, "owner/repo", "abc123def", "codex",
             )
@@ -308,8 +298,6 @@ class TestReviewerPublicationFailures:
             "issue-comment-history",
             "clean-status",
             "code-fail-status",
-            "clean-presence-status",
-            "code-fail-presence-status",
         ],
     )
     def test_failed_publication_stays_loud_and_retryable(
@@ -319,9 +307,8 @@ class TestReviewerPublicationFailures:
         from reviewer import on_pr_review as reviewer_mod
         from reviewer.review_publication import ReviewPublicationError
 
-        presence_failed = failure.endswith("presence-status")
         findings = []
-        if failure.startswith("code-fail"):
+        if failure == "code-fail-status":
             # Must be a block: only a block produces a code_fail verdict, and
             # this case exercises a failed publication of that status.
             findings = [{
@@ -354,7 +341,6 @@ class TestReviewerPublicationFailures:
             publish_review=DEFAULT,
             set_success=DEFAULT,
             set_failure=DEFAULT,
-            set_presence=DEFAULT,
             set_error=DEFAULT,
             emit_product_event=DEFAULT,
         ) as reviewer_mocks, patch.multiple(
@@ -395,7 +381,6 @@ class TestReviewerPublicationFailures:
             reviewer_mocks["set_failure"].return_value = (
                 failure != "code-fail-status"
             )
-            reviewer_mocks["set_presence"].return_value = not presence_failed
             reviewer_mocks["set_error"].return_value = True
             notification_mocks["notify_reviewer_verdict"].return_value = "no_owner"
 
@@ -410,30 +395,10 @@ class TestReviewerPublicationFailures:
             reviewer_mocks[
                 "set_success" if failure == "clean-status" else "set_failure"
             ].assert_called_once()
-        elif presence_failed:
-            # The verdict is published once and is never replaced by an error.
-            if failure == "clean-presence-status":
-                reviewer_mocks["set_success"].assert_called_once()
-                reviewer_mocks["set_failure"].assert_not_called()
-            else:
-                reviewer_mocks["set_failure"].assert_called_once()
-                assert reviewer_mocks["set_failure"].call_args.kwargs == {
-                    "verdict": True,
-                }
-                reviewer_mocks["set_success"].assert_not_called()
-            reviewer_mocks["set_presence"].assert_called_once_with(
-                "owner/repo", "abc123def",
-            )
         else:
             reviewer_mocks["set_success"].assert_not_called()
             reviewer_mocks["set_failure"].assert_not_called()
-        if not presence_failed:
-            reviewer_mocks["set_presence"].assert_not_called()
-        if presence_failed:
-            # The published verdict is never replaced by an infra error.
-            reviewer_mocks["set_error"].assert_not_called()
-        else:
-            reviewer_mocks["set_error"].assert_called_once()
+        reviewer_mocks["set_error"].assert_called_once()
         if failure == "lost-block":
             # The one shortfall that must survive the 140-char status budget.
             status_text = reviewer_mocks["set_error"].call_args[0][2]
@@ -1199,12 +1164,8 @@ class TestInfraRedRespectsStandingSuccess:
             )
 
         assert verdict["verdict"] == "code_fail"
-        assert [p["state"] for p in posts] == ["failure", "success"]
-        assert [p["context"] for p in posts] == [
-            "qa/llm-reviewer", "qa/llm-reviewer-present",
-        ]
+        assert [p["state"] for p in posts] == ["failure"]
         assert "1 block" in posts[0]["description"]
-        assert "reviewer verdict published at this head" in posts[1]["description"]
         assert reads == []  # a verdict never depends on the standing status
 
     def test_infra_set_failure_default_is_guarded(self):
@@ -1312,11 +1273,8 @@ class TestInfraRedRespectsStandingSuccess:
             "review_history"
         ]
         assert result is not None and result["verdict"] == "clean"
-        # No pending post — the terminal verdict and its presence marker follow it.
-        assert [p["state"] for p in posts] == ["success", "success"]
-        assert [p["context"] for p in posts] == [
-            "qa/llm-reviewer", "qa/llm-reviewer-present",
-        ]
+        # No pending post — only the terminal verdict replaced the waiver.
+        assert [p["state"] for p in posts] == ["success"]
         assert "review proceeding silently" in caplog.text
 
 
@@ -1350,7 +1308,6 @@ def test_completed_exact_head_supplies_thread_state_for_resolution():
          patch("reviewer.review_thread_lifecycle.fetch_existing_review_threads", return_value=snapshot), \
          patch.object(on_pr_review, "publish_review") as publish_review, \
          patch.object(on_pr_review, "set_success", return_value=True), \
-         patch.object(on_pr_review, "set_presence"), \
          patch.object(on_pr_review, "emit_product_event"):
         on_pr_review._process_findings("[]", 42, "owner/repo", head, "claude")
 
@@ -1385,7 +1342,6 @@ def test_stale_thread_snapshot_does_not_enable_lifecycle_mutations():
          patch("reviewer.review_thread_lifecycle.fetch_existing_review_threads", return_value=snapshot), \
          patch.object(on_pr_review, "publish_review") as publish_review, \
          patch.object(on_pr_review, "set_success", return_value=True), \
-         patch.object(on_pr_review, "set_presence"), \
          patch("reviewer.review_thread_lifecycle.emit_product_event") as emit_event:
         on_pr_review._process_findings("[]", 42, "owner/repo", "a" * 40, "claude")
 

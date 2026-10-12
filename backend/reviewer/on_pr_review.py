@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from infra.config import WORKSPACE
 from infra.product_events import emit_product_event
@@ -47,19 +47,12 @@ from reviewer.review_comment_fetch import (
 )
 from reviewer.review_publication import prepare_findings_for_publication, publish_review
 from reviewer.reviewer_comment import format_status_summary
-from reviewer.reviewer_status import (
-    set_error,
-    set_failure,
-    set_pending,
-    set_presence,
-    set_success,
-)
+from reviewer.reviewer_status import set_error, set_failure, set_pending, set_success
 from reviewer.reviewer_subsystems import extract_changed_files_from_diff
 from reviewer.reviewer_threads import (
     build_review_history,
     classify_review_findings,
 )
-from reviewer.reviewer_types import ReviewerPresenceError, ReviewerResult, ReviewerVerdict
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +64,28 @@ _PROJECT_ROOT = str(WORKSPACE / "projects" / "corsia" / "source" / "corsia")
 _CODE_REVIEW_STANDARDS = ["development-doctrine", "eng-arch", "product"]
 
 
+class ReviewerVerdict(TypedDict):
+    """Terminal reviewer verdict delivered back to the PR owner."""
+
+    verdict: Literal["clean", "code_fail"]
+    required_action: Literal["none", "approach_reset"]
+    summary: str
+    block_count: int
+    flag_count: int
+    nit_count: int
+    finding_count: int
+    model_label: str
+
+
+class ReviewerSkipped(TypedDict):
+    """Explicit non-review success result for override-skipped PRs."""
+
+    verdict: Literal["skipped"]
+    summary: str
+    model_label: str
+
+
+ReviewerResult = ReviewerVerdict | ReviewerSkipped
 ReviewComments = tuple[list[dict[str, Any]], list[dict[str, Any]]]
 
 
@@ -126,8 +141,7 @@ def on_pr_review(event_type: str, payload: dict[str, Any]) -> ReviewerResult | N
     except Exception as exc:
         elapsed = int((time.monotonic() - start_time) * 1000)
         log.error("PR #%d: reviewer failed: %s", pr_number, exc)
-        if not isinstance(exc, ReviewerPresenceError):  # else the verdict stands
-            set_error(repo, head_sha, _error_status_text(exc))
+        set_error(repo, head_sha, _error_status_text(exc))
         emit_product_event(
             "reviewer", "errored",
             properties={
@@ -339,7 +353,13 @@ def _process_findings(
     )
 
     verdict = "code_fail" if block_count > 0 else "clean"
-    _publish_verdict_and_presence(repo, head_sha, verdict, summary)
+    if verdict == "code_fail":
+        # A real verdict is senior to a standing success waiver.
+        status_published = set_failure(repo, head_sha, summary, verdict=True)
+    else:
+        status_published = set_success(repo, head_sha, summary)
+    if not status_published:
+        raise RuntimeError(f"failed to publish {verdict} reviewer status")
 
     emit_product_event(
         "reviewer", "completed",
@@ -362,21 +382,6 @@ def _process_findings(
         "finding_count": len(findings),
         "model_label": model_label,
     }
-
-
-def _publish_verdict_and_presence(
-    repo: str, head_sha: str, verdict: str, summary: str,
-) -> None:
-    """Publish a genuine verdict, then its presence marker; a failure raises."""
-    if verdict == "code_fail":
-        # A real verdict is senior to a standing success waiver.
-        status_published = set_failure(repo, head_sha, summary, verdict=True)
-    else:
-        status_published = set_success(repo, head_sha, summary)
-    if not status_published:
-        raise RuntimeError(f"failed to publish {verdict} reviewer status")
-    if not set_presence(repo, head_sha):
-        raise ReviewerPresenceError(f"{verdict} verdict published; presence status not published")
 
 
 def _build_context(
