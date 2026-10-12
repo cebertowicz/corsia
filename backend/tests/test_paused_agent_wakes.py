@@ -1,8 +1,8 @@
 """Pause contract rules 2 and 3 (#1971): what may start a paused agent's Turn.
 
-A person's own message, decision answer, or schedule the user asked for reaches
-an agent while paused. A connected-system event, peer message, worker completion
-and every other scheduled wake start no Turn: each ends as a cancelled row that
+People reach a paused agent, and so does a scheduled wake from a schedule the
+user asked for (#2286). A connected system's event, a worker's completion and
+every other scheduled wake start no Turn: each ends as a cancelled row that
 says why, plus one line in the digest the agent reads with its next Turn.
 """
 
@@ -160,22 +160,15 @@ def test_a_held_worker_completion_names_the_worker_and_its_result(
 
 @pytest.mark.parametrize(("role", "metadata"), [
     ("user", None),
+    ("user", {"sender_kind": "agent", "sender_thread_id": "peer"}),
     ("system", {"event_type": "plan.decision_answered", "origin": "plan"}),
     ("system", {"restart_registration_id": "restart-1"}),
-], ids=["user", "decision_answer", "restart"])
+], ids=["user", "peer", "decision_answer", "restart"])
 def test_people_reach_a_paused_agent(agent, role, metadata) -> None:
     agent.change("pause")
     agent.queue("reach", role=role, metadata=metadata)
 
     assert _named(agent.start()) == ["reach"]
-
-
-def test_a_peer_message_is_held_while_paused(agent) -> None:
-    agent.change("pause")
-    agent.queue("peer", role="user", metadata={"sender_kind": "agent"})
-
-    assert agent.start() is None
-    assert agent.ending("peer") == ("cancelled", "held_while_paused")
 
 
 def test_a_running_agent_starts_on_an_event(agent) -> None:

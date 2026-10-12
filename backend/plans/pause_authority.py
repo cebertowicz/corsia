@@ -94,13 +94,14 @@ def _user_asked_schedule(db, schedule_id) -> bool:
 def reaches_paused_agent(row, *, db) -> bool:
     """Whether this queued input may start a paused agent's Turn.
 
-    The user's message, decision answer, a qualifying scheduled wake, and the
-    continuation of a Turn a restart interrupted do. Worker completions,
-    connected-system events, and every other schedule do not.
+    The user's message or decision answer, another agent's message, a
+    scheduled wake from a schedule the user asked for, and the continuation of
+    a Turn a restart interrupted do. A worker's completion, a connected
+    system's event, every other scheduled wake and plan news do not.
     """
     metadata = _metadata(row)
-    if is_users_word(row):
-        return True
+    if row["role"] == "user":
+        return not metadata.get("completion")
     if metadata.get("event_type") == "automation.scheduled_wake":
         return _user_asked_schedule(db, metadata.get("subject_id"))
     return (
