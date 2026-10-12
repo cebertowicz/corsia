@@ -38,7 +38,7 @@ test('@flow:document-second-canvas a reply and a resolve made in one canvas appe
 		await loginByUrl(canvas);
 		await canvas.getByText(title, { exact: true }).first().click();
 		await waitForWsConnected(canvas);
-		await canvas.getByRole('button', { name: '1 comment', exact: true }).click();
+		await canvas.getByRole('button', { name: /^1 open thread\b/ }).click();
 		await expect(canvas.getByRole('region', { name: 'Document comments', exact: true })).toBeVisible();
 		const comment = canvas.getByRole('region', { name: /^Comment by / });
 		await expect(comment).toContainText('Review this sentence.');

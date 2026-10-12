@@ -10,7 +10,6 @@
 	import { commentArrivalDelay, commentHoldMs, selectSweepMs } from '$lib/typingPace';
 	import { displayedDocument } from '$lib/ws/presence';
 	import { arrivalSelectIn } from '$lib/cm/typed-reveal-arrival';
-	import { userParticipant } from '$lib/stores/participants';
 	import {
 		agentColor, commentAnchor, docPresence, isViewing, presenceDetail, presenceFor,
 		type DocActivityFrame,
@@ -65,16 +64,14 @@
 	const viewing = $derived(isViewing(artifactId, target.threadId, $displayedDocument, visibility));
 	const participants = $derived.by((): PresenceParticipant[] => {
 		if (!viewing) return [];
-		return [
-			{ id: $userParticipant.id, name: $userParticipant.name, color: $userParticipant.color },
-			...recentAgents.map((agent) => ({
-				id: agent.id,
-				name: agent.name,
-				color: agent.color,
-				detail: presenceDetail(agent, clock),
-				active: agent.arrivalActive,
-			})),
-		];
+		// Only the others: the viewer alone says nothing the viewer does not know (PE round 3 M1).
+		return recentAgents.map((agent) => ({
+			id: agent.id,
+			name: agent.name,
+			color: agent.color,
+			detail: presenceDetail(agent, clock),
+			active: agent.arrivalActive,
+		}));
 	});
 
 	$effect(() => {
@@ -195,5 +192,5 @@
 {/if}
 
 <style>
-	.presence-row { align-self: flex-end; display: flex; align-items: center; gap: 8px; min-height: 28px; color: var(--text-tertiary); font-size: var(--text-caption); }
+	.presence-row { align-self: center; display: flex; align-items: center; gap: 8px; min-height: 28px; color: var(--text-tertiary); font-size: var(--text-caption); }
 </style>

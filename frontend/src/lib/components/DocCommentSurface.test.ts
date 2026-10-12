@@ -12,6 +12,7 @@ vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: mocks.flushDraft, seedD
 vi.mock('$lib/stores/docComments', () => ({ loadComments: mocks.loadComments }));
 
 import DocCommentSurface from './DocCommentSurface.svelte';
+import { DocFeedback } from '$lib/docFeedback.svelte';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 
@@ -60,6 +61,35 @@ describe('DocCommentSurface suggestions', () => {
 		resolved!.click(); flushSync();
 		expect(drawer!.querySelectorAll('[data-comment-id]')).toHaveLength(1);
 		expect(drawer!.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
+	});
+
+	it('ends the drawer in a Send now footer only while messages are not sent', () => {
+		// The open document's one batch: the footer reads it and Send now is its own Send.
+		const feedback = new DocFeedback();
+		const send = vi.fn(async () => {});
+		feedback.send = send;
+		feedback.pendingCount = 2;
+		feedback.feedback = { open_count: 2, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] };
+		render({ state: { kind: 'list' }, comments: [suggestion], feedback });
+		const footer = () => host.querySelector<HTMLElement>('[data-doc-comments-drawer] > [data-drawer-unsent]');
+		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('2 messages not sent yet · they go to Style when you leave.');
+		const button = footer()!.querySelector<HTMLButtonElement>('button')!;
+		expect(button.textContent?.trim()).toBe('Send now');
+		button.click();
+		expect(send).toHaveBeenCalledOnce();
+		// The drawer's last child, after the scrolling list, so the list scrolls and the footer stays.
+		expect(host.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer());
+
+		feedback.countdownNow = Date.parse('2026-10-11T22:00:00Z');
+		feedback.feedback = { open_count: 1, owner_label: null, grace_closes_at: '2026-10-11T22:04:00Z', undelivered_batches: [] };
+		feedback.pendingCount = 1;
+		feedback.sending = true; flushSync();
+		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('1 message not sent yet · sending to the owner in 4 min');
+		expect(footer()!.querySelector('button')!.disabled).toBe(true);
+
+		feedback.sending = false;
+		feedback.pendingCount = 0; flushSync();
+		expect(footer()).toBeNull();
 	});
 
 	it('closes a card that follows its text only once that comment is deleted', () => {

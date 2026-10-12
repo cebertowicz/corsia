@@ -145,7 +145,7 @@ async function openDocument(page: Page, info: TestInfo, { comments = true, orpha
 	await expect(page.locator('.cm-content')).toContainText(tall ? 'Last qmlast line.' : 'Margin heading qmhead');
 	const expectedCount = (comments ? ANCHORS.length : 0) + (orphan ? 1 : 0);
 	if (expectedCount) {
-		await expect(page.getByRole('button', { name: `${expectedCount} comment${expectedCount === 1 ? '' : 's'}`, exact: true })).toBeEnabled();
+		await expect(page.getByRole('button', { name: new RegExp(`^${expectedCount} open thread${expectedCount === 1 ? '' : 's'}\\b`) })).toBeEnabled();
 	}
 	await settle(page);
 	return { threadId, title, ids, byId, artifactId };
@@ -499,7 +499,7 @@ test.describe('@flow:doc-margin-marker', () => {
 
 		// The drawer narrows the canvas: markers re-seat and stay clustered the same way.
 		const before = (await markers(page)).map((marker) => keysOf(opened, marker));
-		await page.getByRole('button', { name: `${ANCHORS.length} comments`, exact: true }).click();
+		await page.getByRole('button', { name: new RegExp(`^${ANCHORS.length} open threads\\b`) }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
 		await settle(page);
 		const withDrawer = await markers(page);

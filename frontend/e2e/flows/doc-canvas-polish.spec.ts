@@ -40,9 +40,12 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	else await page.setViewportSize({ width: 1440, height: 1000 });
 	await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'light' });
 	const stamp = Date.now(), viewerTitle = `canvas-viewer-${stamp}`, agentTitle = `Canvas Reviewer ${stamp}`, secondAgentTitle = `Canvas Reader ${stamp}`;
+	// The viewer is not in their own presence row, so a second reader keeps three avatars in the stack.
+	const thirdAgentTitle = `Canvas Skimmer ${stamp}`;
 	const viewerId = await createSession(request, viewerTitle);
 	await createSession(request, agentTitle);
 	await createSession(request, secondAgentTitle);
+	await createSession(request, thirdAgentTitle);
 	const token = encodeURIComponent(TEST_TOKEN);
 	const tree = await request.get(`/api/files/tree?token=${token}`);
 	expect(tree.ok()).toBeTruthy();
@@ -64,7 +67,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await loginByUrl(page);
 	await chooseThread(page, viewerTitle);
 	await expect(page.locator('.cm-content')).toContainText('Paragraph 1:');
-	await expect(page.getByRole('button', { name: '0 comments', exact: true })).toBeEnabled();
+	await expect(page.getByRole('button', { name: /^0 open threads\b/ })).toBeEnabled();
 	if (!mobile) {
 		await expect(page.locator('.leaf:not(.compact)')).toBeVisible();
 		await measurements(page, testInfo, 'canvas-desktop-expanded');
@@ -83,14 +86,16 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	// A real tool call creates the comment and emits doc_activity. No websocket frame is injected.
 	const reader = await page.context().newPage();
 	await loginByUrl(reader);
-	await chooseThread(reader, secondAgentTitle);
-	await waitForWsConnected(reader);
-	await seedMockResponses(request, [
-		{ tool_calls: [{ id: `canvas-read-${stamp}`, name: 'read_file', arguments: JSON.stringify({ path: docPath }) }], finish_reason: 'tool_calls' },
-		{ content: 'Read complete.', finish_reason: 'stop' },
-	]);
-	await sendChatMessage(reader, 'Read this document.');
-	await expect.poll(() => readMockCallCount(request), { timeout: 20_000 }).toBe(2);
+	for (const [index, title] of [thirdAgentTitle, secondAgentTitle].entries()) {
+		await chooseThread(reader, title);
+		await waitForWsConnected(reader);
+		await seedMockResponses(request, [
+			{ tool_calls: [{ id: `canvas-read-${stamp}-${index}`, name: 'read_file', arguments: JSON.stringify({ path: docPath }) }], finish_reason: 'tool_calls' },
+			{ content: 'Read complete.', finish_reason: 'stop' },
+		]);
+		await sendChatMessage(reader, 'Read this document.');
+		await expect.poll(() => readMockCallCount(request), { timeout: 20_000 }).toBe(2);
+	}
 	await chooseThread(reader, agentTitle);
 	await seedMockResponses(request, [
 		{ tool_calls: [{ id: `canvas-comment-${stamp}`, name: 'doc_comment_create', arguments: JSON.stringify({ artifact_id: artifactId, quote, body: 'Review the off-screen target.' }) }], finish_reason: 'tool_calls' },
@@ -118,7 +123,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(page.locator('[data-doc-activity-pill]')).toHaveCount(0);
 	await scroller.evaluate((element) => { element.scrollTop = 0; });
 	const paneLabel = await page.locator('.pane-scope').textContent();
-	await page.getByRole('button', { name: '1 comment', exact: true }).click();
+	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	await expect(drawer).toBeVisible();
 	const viewportBefore = await page.evaluate(() => window.visualViewport?.height ?? window.innerHeight);
@@ -184,7 +189,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await drawer.getByRole('button', { name: 'Open', exact: true }).focus();
 	await page.keyboard.press('Escape');
 	await expect(drawer).toHaveCount(0);
-	await expect(page.getByRole('button', { name: '1 comment', exact: true })).toBeFocused();
+	await expect(page.getByRole('button', { name: /^1 open thread\b/ })).toBeFocused();
 
 	// Removing a known quote in the real editor produces the recovery row without hiding it in details.
 	const edited = text.replace(quote, 'The selected text has been removed.');

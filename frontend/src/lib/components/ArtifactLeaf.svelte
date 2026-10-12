@@ -348,7 +348,8 @@
 	.image-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: 8px 12px 12px; box-sizing: border-box; background: var(--bg-primary); }
 	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
-	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }
+	/* The document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
+	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; padding-top: 0; } }
 
 	.gone {
 		display: flex; flex-direction: column; align-items: flex-start; gap: 6px;

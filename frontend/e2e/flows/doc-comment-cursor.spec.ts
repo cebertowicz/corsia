@@ -117,7 +117,7 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 	if (size.width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-content')).toBeVisible();
-	await expect(page.getByRole('button', { name: commentsButton(comments.length), exact: true })).toBeEnabled();
+	await expect(page.getByRole('button', { name: commentsButton(comments.length) })).toBeEnabled();
 	// The editor mounts before the text arrives; no line can be found until it has, and scrolls in the editor.
 	const opening = text.split('\n')[0].replace(/^#+ /, '');
 	await expect.poll(() => page.locator('.cm-scroller').evaluate((scroller, opening) => ({
@@ -139,8 +139,8 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 	return `${size.width}x${size.height}, ${motion.name}`;
 }
 
-function commentsButton(count: number): string {
-	return `${count} comment${count === 1 ? '' : 's'}`;
+function commentsButton(count: number): RegExp {
+	return new RegExp(`^${count} open thread${count === 1 ? '' : 's'}\\b`);
 }
 
 /**
@@ -321,7 +321,7 @@ for (const motion of MOTIONS) {
 
 		// Opening the comments list resizes the editor; the first click lands before anything scrolls.
 		await locateLine(page, 'qx-a-plain', true);
-		await page.getByRole('button', { name: commentsButton(comments.length), exact: true }).click();
+		await page.getByRole('button', { name: commentsButton(comments.length) }).click();
 		const list = page.getByRole('region', { name: 'Document comments', exact: true });
 		await expect(list).toBeVisible();
 		await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });

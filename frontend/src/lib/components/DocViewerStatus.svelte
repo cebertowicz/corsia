@@ -82,6 +82,10 @@
 	let placementReloadRequested = $state(false);
 	let placementReloadSeenBusy = $state(false);
 	let commentStatus = $state<HTMLButtonElement>();
+	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
+	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
+	// Threads name the pill; messages name the unsent delivery state.
+	const commentLabel = $derived(`${commentCount} open thread${commentCount === 1 ? '' : 's'}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
 	const uid = $props.id();
 	const unplacedId = `unplaced-${uid}`;
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
@@ -158,6 +162,18 @@
 		</button>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
+		<span class="document-tools">
+			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
+			<button type="button" class="doc-tool comment-status" bind:this={commentStatus} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
+				aria-label={commentsLoading ? 'Loading comments' : commentLabel}
+				aria-describedby={orphanedCount ? unplacedId : undefined}
+				title={commentsLoading ? 'Comments are loading' : orphanedCount ? unplacedPhrase : undefined} onclick={(event) => onOpenComments(event.currentTarget)}>
+				<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if orphanedCount}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
+				<span class="count">{commentsLoading ? '…' : commentCount}</span>{#if !commentsLoading}<span class="count-unit">{commentCount === 1 ? 'thread' : 'threads'}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
+				{#if orphanedCount}<span id={unplacedId} class="sr-only">{unplacedPhrase}</span>{/if}
+			</button>
+			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
+		</span>
 	</div>
 {#if freshness && freshnessPresentation}
 	<div class="document-metadata" class:expanded={detailsOpen}>
@@ -185,31 +201,9 @@
 	<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>
 {/if}
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
-	<div class="document-status-row">
-		<span class="feedback-controls"><DocFeedbackStatus
-			bind:this={feedbackStatus}
-			{artifactId}
-			{targetInstanceId}
-			{onFeedbackChanged}
-		/></span>
-		{#if stale && ready}
-			<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
-		{/if}
-		<button type="button" class="doc-tool comment-status" bind:this={commentStatus} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
-			aria-label={commentsLoading ? 'Loading comments' : `${commentCount} comment${commentCount === 1 ? '' : 's'}`}
-			aria-describedby={orphanedCount ? unplacedId : undefined}
-			title={commentsLoading ? 'Comments are loading' : orphanedCount ? unplacedPhrase : undefined} onclick={(event) => onOpenComments(event.currentTarget)}>
-			<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if orphanedCount}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
-			<span class="count">{commentsLoading ? '…' : commentCount}</span>
-			{#if orphanedCount}<span id={unplacedId} class="sr-only">{unplacedPhrase}</span>{/if}
-		</button>
-		{#if orphanedCount && placementReloadVisible}
-			<button type="button" class="doc-tool orphan-reload" aria-label="Reload comment placements"
-				aria-disabled={placementReloadUnavailable || placementReloading ? 'true' : undefined}
-				aria-describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined}
-				onclick={reloadPlacements}>Place again</button>
-		{/if}
-		{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
+	<div class="document-status-row document-notices">
+		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
+		{#if orphanedCount && placementReloadVisible}<button type="button" class="doc-tool orphan-reload" aria-label="Reload comment placements" aria-disabled={placementReloadUnavailable || placementReloading ? 'true' : undefined} aria-describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</button>{/if}
 	</div>
 {/if}
 </header>
@@ -221,10 +215,6 @@
 	.document-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.identity-age { display: none; }
 	.feedback-controls { display: contents; }
-	/* The grace text gives way first (ellipsis); Send now keeps its whole label and the row keeps one line. */
-	.feedback-controls :global(> .sending-now.grace) { flex: 1 1 8rem; min-width: min-content; }
-	.feedback-controls :global(> .sending-now > .btn) { flex: none; }
-	.feedback-controls :global(> .sending-now > .sending-grace) { flex: 1 1 0; min-width: 0; contain: inline-size; }
 	.identity-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 	.document-metadata, .document-status-row { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 	/* One toolbar: every control is the same quiet ghost button in the app's UI type. */
@@ -254,10 +244,45 @@
 		.document-metadata:not(.expanded) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
-		.feedback-controls :global(> .sending-now > .btn), .feedback-controls :global(> .sending-now > .sent) { min-height: 44px; }
-		/* Send alone fills the rest of the row. */
-		.feedback-controls :global(> .sending-now:not(.grace)) { flex: 1; min-width: 0; }
-		.feedback-controls :global(> .sending-now:not(.grace) > .btn) { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
+	}
+
+	/* Slice-one review header: the title is already named by the tab or app bar, so only document tools remain in the slim row. */
+	/* Where the plan pane overlays the canvas (PaneShell), the header's content ends before it instead of under it: the tools, both ask lines and the notices.
+	   The header is a container, so the ask's line 1 can rearrange when that leaves it too narrow (ReviewBar). */
+	.document-header { gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-1); padding-inline-end: var(--pane-overlay-inset, 0px); container: doc-header / inline-size; }
+	.document-identity { justify-content: flex-end; }
+	.identity-details { display: none; }
+	.document-tools { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
+	.count-unit { color: var(--text-tertiary); }
+	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
+	.document-notices:not(:has(.undelivered:not(.idle), .orphan-reload)) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+	.document-header :global(.doc-tool) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
+	.document-header :global(.doc-tool:hover:not(:disabled)) { background: var(--bg-tertiary); color: var(--text-primary); }
+	.document-header :global(.doc-tool:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+	.document-header :global(.doc-tool:disabled) { opacity: 0.5; cursor: not-allowed; }
+	.document-header :global(.doc-tool.warn) { background: var(--amber-bg); color: var(--amber-text); }
+	.document-header :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
+	.document-header :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
+	@container doc-canvas (max-width: 600px) {
+		.identity-details:has(.identity-age) { display: flex; }
+		.count-unit { display: none; }
+		.document-title { display: none; }
+		.document-header :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
+	}
+	/* When an ask exists, its first line and the tool cluster share one row; the second ask line spans the canvas. */
+	.document-header:has(:global(.rb-slot)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; column-gap: var(--space-1); }
+	.document-header:has(:global(.rb-slot)) > :global(*) { grid-column: 1 / -1; }
+	.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-column: 1 / -1; grid-row: 1 / 3; }
+	.document-header:has(:global(.rb-slot)) > .document-identity { display: contents; }
+	.document-header:has(:global(.rb-slot)) .identity-details { grid-column: 1 / -1; grid-row: 3; }
+	.document-header:has(:global(.rb-slot)) :global(.presence-row) { grid-column: 2; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
+	.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 3; grid-row: 1; align-self: start; min-height: var(--space-7); position: relative; z-index: 1; }
+	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
+	@media (any-pointer: coarse) {
+		@container doc-canvas (max-width: 600px) {
+			.document-header:has(:global(.rb-slot)) { align-items: center; }
+			.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: 44px; }
+		}
 	}
 </style>

@@ -116,7 +116,7 @@
 	$effect(() => syncActiveDocumentEditor({ target, draft: currentDraft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
-	const { orphanedCount, placementReloading, placementReloadError } = $derived(commentSurfaceStatus(listedComments));
+	const headerCommentStatus = $derived(commentSurfaceStatus(listedComments));
 	let scrollTarget = $state<CanvasScrollTarget | null>(null);
 	$effect(() => {
 		const fc = focusedComment;
@@ -311,16 +311,13 @@
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !openRefusal}
-		commentCount={listedComments.length}
-		{orphanedCount}
+		{...headerCommentStatus}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
 		{onReload}
 		onReloadPlacements={loadedArtifactId ? () => reloadPlacements(loadedArtifactId!) : undefined}
-		{placementReloading}
-		{placementReloadError}
 		{liveConnection}
 		onOpenComments={commentUI.openList}
 		{freshness}
@@ -332,7 +329,7 @@
 		onReopen={() => reloadNonce += 1}
 		onRead={() => reloadNonce += 1}
 	>
-		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
+		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
 		{#snippet presence()}
 			{#if target && loadedArtifactId}
 				<DocPresenceStatus {target} artifactId={loadedArtifactId} {docState} root={docRoot}
@@ -382,6 +379,7 @@
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
+		feedback={feedbackStatus?.feedback()}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}

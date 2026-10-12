@@ -59,12 +59,26 @@ describe('DocViewerStatus freshness metadata', () => {
 		const header = host.querySelector('header');
 		expect(header?.textContent).toContain('Review document');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
-		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 comments');
+		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 open threads');
 		const details = header?.querySelector<HTMLButtonElement>('[aria-label="Document details"]');
 		expect(details?.getAttribute('aria-expanded')).toBe('false');
 		details!.click();
 		flushSync();
 		expect(details?.getAttribute('aria-expanded')).toBe('true');
+	});
+
+	it('marks unsent feedback on the open-thread pill without restoring Send to the header', () => {
+		render(value(), undefined, { commentCount: 2 });
+		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', grace_closes_at: '2026-10-11T22:32:00Z', undelivered_batches: [] });
+		flushSync();
+		const pill = host.querySelector('.comment-status');
+		expect(pill?.getAttribute('aria-label')).toBe('2 open threads, 3 messages not sent yet');
+		expect(pill?.querySelector('.unsent-dot')).toBeTruthy();
+		expect(host.textContent).not.toContain('Send 3 comments');
+		// Send and its countdown live in the comments drawer's footer: none of it is in the header, not even clipped.
+		expect(host.querySelector('.sending-now')).toBeNull();
+		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Send now');
+		expect(host.textContent).not.toContain('Sending to');
 	});
 
 	it('closes metadata on scoped Escape, restores its toggle, and preserves it from other header controls', () => {

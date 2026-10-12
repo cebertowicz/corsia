@@ -22,6 +22,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--chat-attention-occupied-height',
 	'--floater-bottom-pad',
 	'--input-bar-height',
+	// PaneShell writes it on the canvas: the pane's width while it overlays the canvas, else 0.
+	'--pane-overlay-inset',
 	// Set per-instance via Svelte `style:--x` or a parent inline style.
 	'--drawer-drag-y',
 	'--depth',
