@@ -56,6 +56,8 @@
 	let layer = $state<ReturnType<typeof ImageRegionLayer>>();
 	const all = $derived(artifactId ? $docComments[artifactId] ?? [] : []);
 	const comments = $derived(inDocument ? commentsAtImage(all, inDocument.occurrence) : all);
+	// The pill counts open threads, as the document's does: resolved ones are in the drawer's other filters.
+	const openThreads = $derived(comments.filter((comment) => !comment.resolved).length);
 	const accent = $derived($projects.find((project) => project.id === projectId)?.accent_color ?? null);
 	const colorOf = (comment: DocComment) => regionColor(comment, projectId, accent);
 	const canComment = $derived(!readOnly && !!artifactId);
@@ -159,7 +161,8 @@
 						ready={loaded}
 						moving={!!image.moving}
 						savingMove={image.moveSaving}
-						count={comments.length}
+						count={openThreads}
+						unsent={feedback?.pendingCount ?? 0}
 						loading={$commentLoads[artifactId]?.state === 'loading'}
 						listOpen={image.ui.state?.kind === 'list'}
 						readOnly={!canComment}
@@ -197,6 +200,7 @@
 		</ImageLightbox>
 	</div>
 	{#if artifactId}
+		<!-- The drawer lists this one image's comments while the image itself is on screen above or beside it, so it has no thumbnail group header repeating the image. -->
 		<DocCommentSurface
 			state={image.ui.state}
 			anchor={image.ui.anchor}
@@ -221,7 +225,7 @@
 			{artifactId}
 			readOnly={!canComment}
 			feedback={inDocument ? null : feedback}
-			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
+			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>
 	{/if}
 </div>

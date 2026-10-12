@@ -81,6 +81,23 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.textContent).not.toContain('Sending to');
 	});
 
+	it('counts open threads on the pill with their unit, and no dot once nothing waits to be sent', () => {
+		render(value(), undefined, { commentCount: 1 });
+		const pill = host.querySelector('.comment-status')!;
+		expect(pill.querySelector('.count')!.textContent).toBe('1');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('thread');
+		expect(pill.getAttribute('aria-label')).toBe('1 open thread');
+		expect(pill.querySelector('.unsent-dot')).toBeNull();
+		component!.sync('artifact-1', { open_count: 1, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] });
+		flushSync();
+		expect(pill.getAttribute('aria-label')).toBe('1 open thread, 1 message not sent yet');
+		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
+		component!.sync('artifact-1', { open_count: 0, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] });
+		flushSync();
+		expect(pill.getAttribute('aria-label')).toBe('1 open thread');
+		expect(pill.querySelector('.unsent-dot')).toBeNull();
+	});
+
 	it('closes metadata on scoped Escape, restores its toggle, and preserves it from other header controls', () => {
 		render(value({ state: 'overdue' }));
 		const toggle = host.querySelector<HTMLButtonElement>('.identity-details')!;

@@ -27,7 +27,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 		const seeded = await seedImage(page, request, 'region-1440');
 		try {
 			await openThread(page, seeded.sessionTitle, 1440);
-			await expect(pill(page)).toHaveAttribute('aria-label', '0 comments');
+			await expect(pill(page)).toHaveAttribute('aria-label', '0 open threads');
 			await expect(commentButton(page)).toBeVisible();
 			await shoot(page, testInfo, '1440-01-open', true);
 
@@ -111,7 +111,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await shoot(page, testInfo, '1440-08-number-not-reused', true);
 
 			// The viewer sits directly above this drawer, so its thumbnail would repeat the image and hide the first card.
-			await expect(pill(page)).toHaveAttribute('aria-label', '3 comments');
+			await expect(pill(page)).toHaveAttribute('aria-label', /^2 open threads(, |$)/);
 			await pill(page).click();
 			const drawer = page.locator('.canvas-comment-drawer');
 			await expect(drawer).toBeVisible();
@@ -222,7 +222,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await page.getByRole('button', { name: 'Toggle panel' }).click();
 			await expect.poll(async () => (await viewer(page).boundingBox())!.width).toBeGreaterThan(800);
-			await expect(pill(page)).toHaveAttribute('aria-label', '0 comments');
+			await expect(pill(page)).toHaveAttribute('aria-label', '0 open threads');
 			// The fit settles after the canvas widens; draw on the settled image.
 			let last = 0;
 			await expect.poll(async () => { const w = (await frame(page)).width; const settled = w === last; last = w; return settled; }).toBe(true);
