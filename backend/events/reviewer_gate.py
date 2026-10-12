@@ -82,13 +82,12 @@ def _settle_reviewer_verdict(
         return
 
     if isinstance(verdict, dict) and verdict.get("verdict") == "skipped":
+        from reviewer.reviewer_status import set_presence_absent
+        if not set_presence_absent(repo, head_sha, "no review ran: qa/override-reviewer skipped it at this head"):
+            _presence_unpublished(repo, pr_number, head_sha, "override skip; presence failure status not published", loop)
+            return
         reviewer_gate_state.mark_reviewed(pr_key, head_sha)
-        log.info(
-            "reviewer-gate: PR #{} sha={} base={} — marked reviewed after skip",
-            pr_number,
-            head_sha[:8],
-            base_ref,
-        )
+        log.info("reviewer-gate: PR #{} sha={} base={} — marked reviewed after skip", pr_number, head_sha[:8], base_ref)
         return
 
     if not isinstance(verdict, dict):
@@ -111,20 +110,24 @@ def _settle_reviewer_verdict(
     if delivery_result == "failed":
         from reviewer.reviewer_status import set_error
 
-        set_error(
-            repo,
-            head_sha,
-            "qa/llm-reviewer: owner wake delivery failed; retry required",
-        )
+        set_error(repo, head_sha, "qa/llm-reviewer: owner wake delivery failed; retry required")
+        return
+
+    from reviewer.reviewer_status import set_presence
+
+    if not set_presence(repo, head_sha):
+        _presence_unpublished(repo, pr_number, head_sha, "verdict delivered; presence status not published, so the next gate event re-runs the review", loop)
         return
 
     reviewer_gate_state.mark_reviewed(pr_key, head_sha)
-    log.info(
-        "reviewer-gate: PR #{} sha={} base={} — marked reviewed",
-        pr_number,
-        head_sha[:8],
-        base_ref,
-    )
+    log.info("reviewer-gate: PR #{} sha={} base={} — marked reviewed", pr_number, head_sha[:8], base_ref)
+
+
+def _presence_unpublished(repo: str, pr_number: int, head_sha: str, reason: str, loop: asyncio.AbstractEventLoop | None) -> None:
+    """Leave the head unmarked, so the gate retries it, and say why."""
+    log.error("reviewer-gate: PR #{} sha={} — {}; gate remains retryable", pr_number, head_sha[:8], reason)
+    emit_product_event("reviewer_gate", "presence_unpublished", properties={"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]})
+    github_reviewer_notifications.notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
 
 
 def on_check_suite_completed(

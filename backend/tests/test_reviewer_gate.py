@@ -12,6 +12,8 @@ from reviewer_gate_fixtures import (  # noqa: F401
     _call_gate,
     _disable_analytics,
     _reload_gate,
+    _stub_presence,
+    _stub_presence_absent,
 )
 
 
