@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import DocFeedbackStatus, { type FeedbackSummary } from './DocFeedbackStatus.svelte';
+	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
@@ -40,7 +40,6 @@
 		tabText = '',
 		onReopen,
 		onRead,
-		feedbackSummary = $bindable({ pending: 0, owner: null, graceMinutes: null, sending: false }),
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
@@ -72,8 +71,6 @@
 		tabText?: string;
 		onReopen?: () => void;
 		onRead?: () => void;
-		/** The unsent comments, for the pill's dot and accessible summary. */
-		feedbackSummary?: FeedbackSummary;
 	} = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
@@ -85,8 +82,10 @@
 	let placementReloadRequested = $state(false);
 	let placementReloadSeenBusy = $state(false);
 	let commentStatus = $state<HTMLButtonElement>();
+	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
+	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	// Threads name the pill; messages name the unsent delivery state.
-	const commentLabel = $derived(`${commentCount} open thread${commentCount === 1 ? '' : 's'}${feedbackSummary.pending ? `, ${feedbackSummary.pending} message${feedbackSummary.pending === 1 ? '' : 's'} not sent yet` : ''}`);
+	const commentLabel = $derived(`${commentCount} open thread${commentCount === 1 ? '' : 's'}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
 	const uid = $props.id();
 	const unplacedId = `unplaced-${uid}`;
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
@@ -151,7 +150,6 @@
 	export function commentCreated(): void { feedbackStatus?.commentCreated(); }
 	export function sync(id: string, feedback: CommentFeedback): void { feedbackStatus?.sync(id, feedback); }
 	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
-	export function sendNow(): Promise<void> | undefined { return feedbackStatus?.sendNow(); }
 </script>
 
 <header class="document-header" use:detailsKeys>
@@ -171,7 +169,7 @@
 				aria-describedby={orphanedCount ? unplacedId : undefined}
 				title={commentsLoading ? 'Comments are loading' : orphanedCount ? unplacedPhrase : undefined} onclick={(event) => onOpenComments(event.currentTarget)}>
 				<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if orphanedCount}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
-				<span class="count">{commentsLoading ? '…' : commentCount}</span>{#if !commentsLoading}<span class="count-unit">{commentCount === 1 ? 'thread' : 'threads'}</span>{/if}{#if feedbackSummary.pending}<span class="unsent-dot" aria-hidden="true"></span>{/if}
+				<span class="count">{commentsLoading ? '…' : commentCount}</span>{#if !commentsLoading}<span class="count-unit">{commentCount === 1 ? 'thread' : 'threads'}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
 				{#if orphanedCount}<span id={unplacedId} class="sr-only">{unplacedPhrase}</span>{/if}
 			</button>
 			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
@@ -191,7 +189,7 @@
 {#if readonly && ready}<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>{/if}
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
 	<div class="document-status-row document-notices">
-		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} bind:summary={feedbackSummary} /></span>
+		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
 		{#if orphanedCount && placementReloadVisible}<button type="button" class="doc-tool orphan-reload" aria-label="Reload comment placements" aria-disabled={placementReloadUnavailable || placementReloading ? 'true' : undefined} aria-describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</button>{/if}
 	</div>
 {/if}

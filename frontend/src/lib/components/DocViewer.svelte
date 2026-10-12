@@ -38,7 +38,6 @@
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
 	import DocCanvasActivity from './DocCanvasActivity.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
-	import type { FeedbackSummary } from './DocFeedbackStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { toasts } from '$lib/stores/toast';
 	import { shouldReloadPresenceEdit } from '$lib/docPresence';
@@ -84,7 +83,6 @@
 	let editText = $state('');
 	let suggestionBusyId = $state<string | null>(null);
 	let feedbackStatus = $state<DocViewerStatus>();
-	let feedbackSummary = $state<FeedbackSummary>({ pending: 0, owner: null, graceMinutes: null, sending: false });
 
 	// Reactive save state for the currently loaded target, sourced from the
 	// per-tab-instance save queue — never a single shared "current doc" flag.
@@ -118,7 +116,7 @@
 	$effect(() => syncActiveDocumentEditor({ target, draft: currentDraft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
-	const { orphanedCount, placementReloading, placementReloadError } = $derived(commentSurfaceStatus(listedComments));
+	const headerCommentStatus = $derived(commentSurfaceStatus(listedComments));
 	let scrollTarget = $state<CanvasScrollTarget | null>(null);
 	$effect(() => {
 		const fc = focusedComment;
@@ -310,20 +308,16 @@
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
 		bind:this={feedbackStatus}
-		bind:feedbackSummary
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !openRefusal}
-		commentCount={listedComments.filter((comment) => !comment.resolved).length}
-		{orphanedCount}
+		{...headerCommentStatus}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
 		{onReload}
 		onReloadPlacements={loadedArtifactId ? () => reloadPlacements(loadedArtifactId!) : undefined}
-		{placementReloading}
-		{placementReloadError}
 		{liveConnection}
 		onOpenComments={commentUI.openList}
 		{freshness}
@@ -385,8 +379,7 @@
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
-		unsent={feedbackSummary}
-		onSendNow={() => void feedbackStatus?.sendNow()}
+		feedback={feedbackStatus?.feedback()}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}

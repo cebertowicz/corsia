@@ -16,7 +16,7 @@
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
-	import type { FeedbackSummary } from './DocFeedbackStatus.svelte';
+	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
 	/**
 	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
@@ -28,7 +28,7 @@
 	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
 	 */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, unsent = null, onSendNow }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -61,9 +61,8 @@
 		onRetry?: () => void;
 		image?: ImageCommentSurface | null;
 		images?: DocImageComments | null;
-		/** The open document's batch not sent yet: while it holds messages the drawer ends in their Send now footer. */
-		unsent?: FeedbackSummary | null;
-		onSendNow?: () => void;
+		/** The open document's batch: while it holds messages not sent yet the drawer ends in their Send now footer. */
+		feedback?: DocFeedback | null;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
 	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
@@ -88,11 +87,11 @@
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// Leaving the document sends the batch (DocFeedback.leave); in its grace period it says when it goes instead.
 	const unsentText = $derived.by(() => {
-		if (!unsent?.pending) return '';
-		const count = `${unsent.pending} message${unsent.pending === 1 ? '' : 's'} not sent yet`;
-		const owner = unsent.owner ?? 'the owner';
-		if (unsent.graceMinutes !== null) return `${count} · sending to ${owner} in ${unsent.graceMinutes} min`;
-		return `${count} · ${unsent.pending === 1 ? 'it goes' : 'they go'} to ${owner} when you leave.`;
+		if (!feedback?.pendingCount) return '';
+		const count = `${feedback.pendingCount} message${feedback.pendingCount === 1 ? '' : 's'} not sent yet`;
+		const owner = feedback.ownerName ?? 'the owner';
+		if (feedback.sendingGrace) return `${count} · sending to ${owner} in ${feedback.graceMinutes} min`;
+		return `${count} · ${feedback.pendingCount === 1 ? 'it goes' : 'they go'} to ${owner} when you leave.`;
 	});
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
@@ -299,7 +298,7 @@
 			{#if unsentText}
 				<div class="drawer-unsent" data-drawer-unsent>
 					<p role="status">{unsentText}</p>
-					<Button size="sm" onclick={onSendNow} loading={unsent?.sending}>Send now</Button>
+					<Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button>
 				</div>
 			{/if}
 		</section>
