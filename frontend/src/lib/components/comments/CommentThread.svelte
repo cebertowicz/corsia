@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
-	import { keepInView } from '$lib/actions/keepInView';
-	import { autosize } from '$lib/actions/autosize';
 	import { slide } from 'svelte/transition';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
@@ -35,6 +33,7 @@
 	import { agentColor } from '$lib/docPresence';
 	import { retryPlacement } from '$lib/stores/docComments';
 	import CommentMeta from './CommentMeta.svelte';
+	import ReplyField from './ReplyField.svelte';
 
 	let { comment, focused = false, activeId = null, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
 		comment: CommentThreadData;
@@ -91,7 +90,7 @@
 	let headOpen = $state(false);
 	let openReplies = $state<Set<number>>(new Set());
 	let el = $state<HTMLElement>();
-	let replyInput = $state<HTMLTextAreaElement>();
+	let replyField = $state<ReplyField>();
 	// Plain variables: the stamp effect must not re-run when an attempt fails.
 	let lastViewAttempt: string | null = null;
 	let retryOnVisible = false;
@@ -104,7 +103,7 @@
 		untrack(() => { if (active && active !== comment.id && replyOpen && !replyText.trim()) replyOpen = false; });
 	});
 	$effect(() => { if ((showReply || focusReply || (focused && selectable)) && !readOnly) replyOpen = true; });
-	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly && replyOpen) replyInput?.focus(); });
+	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly && replyOpen) replyField?.focus(); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	function stampRenderedReply() {
 		const latest = comment.replies.at(-1)?.id;
@@ -145,14 +144,7 @@
 		replyOpen = true;
 		await tick();
 		await tick();
-		replyInput?.focus();
-	}
-	// As in the chat composer: Enter sends, Shift+Enter breaks the line; on touch Enter breaks it and Cmd or Ctrl+Enter sends.
-	function onKey(e: KeyboardEvent) {
-		if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.repeat) return;
-		if (!(e.metaKey || e.ctrlKey) && window.matchMedia?.('(pointer: coarse)').matches) return;
-		e.preventDefault();
-		postReply();
+		replyField?.focus();
 	}
 	async function decide(decision: 'accept' | 'reject') {
 		if (readOnly || decisionBusy || (decision === 'accept' && comment.orphaned)) return;
@@ -232,11 +224,15 @@
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
 			{#if !isSuggestion}
-				<button class="ct-act ack" class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree — end the exchange" title="Agree — ends the back-and-forth"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg></button>
+				<button class="ct-act ack" class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree — end the exchange" title="Agree — ends the back-and-forth">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
+				</button>
 			{/if}
 			<button class="ct-act reply" disabled={readOnly} onclick={(e) => { e.stopPropagation(); void openReply(); }} aria-label="Reply" title="Reply"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4z" /></svg></button>
 			{#if !isSuggestion}
-				<button class="ct-act resolve" disabled={readOnly} onclick={(e) => { e.stopPropagation(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg></button>
+				<button class="ct-act resolve" disabled={readOnly} onclick={(e) => { e.stopPropagation(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+				</button>
 			{/if}
 			{#if !comment.acked && !readOnly && !comment.replies.length && !replyOpen}
 				<button class="ct-reply-open ct-reply-head" onclick={(e) => { e.stopPropagation(); void openReply(); }}>Reply</button>
@@ -291,14 +287,7 @@
 			<div class="ct-agreed"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
 		{:else if !readOnly}
 			{#if replyOpen}
-				<div class="ct-compose" class:open={replyOpen}>
-					<textarea class="ct-input" rows="1" placeholder="Reply…" aria-label="Reply" bind:this={replyInput} use:keepInView={keepReplyVisible} use:autosize={replyText} bind:value={replyText} onkeydown={onKey} onclick={(e) => e.stopPropagation()}></textarea>
-					{#if replyText.trim()}
-						<button class="ct-send" onclick={(e) => { e.stopPropagation(); postReply(); }} aria-label="Send reply" title="Reply">
-							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
-						</button>
-					{/if}
-				</div>
+				<ReplyField bind:this={replyField} bind:value={replyText} keepVisible={keepReplyVisible} onSend={postReply} />
 			{/if}
 		{/if}
 	</div>
@@ -319,7 +308,7 @@
 	.ct.flat.focused, .ct.flat.acked, .ct.flat.orphaned { border-color: transparent; box-shadow: none; }
 	/* Lit with its mark on the image while either is hovered or focused; lighter than selected. */
 	.ct.linked:not(.focused) { background: color-mix(in srgb, var(--text-primary) 8%, transparent); border-color: color-mix(in srgb, var(--text-primary) 14%, transparent); }
-	.ct.read-only .ct-act, .ct.read-only .ct-compose, .ct.read-only .ct-res-acts { display: none; }
+	.ct.read-only .ct-act, .ct.read-only .ct-res-acts { display: none; }
 	.ct.focused { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: var(--glass-rim), 0 0 0 3px var(--accent-subtle); }
 	.ct.acked { border-color: color-mix(in srgb, var(--green) 30%, transparent); }
 	.ct.orphaned { border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
@@ -367,22 +356,10 @@
 
 	.ct-agreed { display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--green); margin-top: 2px; }
 
-	.ct-compose { display: flex; max-height: 0; overflow: hidden; align-items: flex-end; gap: 6px; margin-top: 0; transition: max-height var(--dur-standard) var(--ease-entrance), margin var(--dur-standard) var(--ease-entrance); }
-	.ct-compose.open { max-height: 8rem; margin-top: var(--space-1); }
 	.ct-reply-open { min-height: var(--space-6); padding: 0; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; }
 	.ct-reply-head { margin-left: var(--space-1); }
 	.ct-act.reply { display: none; }
 	@media (pointer: coarse) { .ct-act { min-width: calc(var(--space-8) - var(--space-1)); min-height: calc(var(--space-8) - var(--space-1)); align-items: center; justify-content: center; } .ct-act.reply { display: flex; } .ct-reply-open { display: none; } }
-	.ct-input {
-		flex: 1; min-width: 0; font: inherit; font-size: var(--text-footnote);
-		padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
-		/* Grows with its text up to five lines (autosize sets the height), then scrolls. */
-		box-sizing: border-box; resize: none; overflow-y: hidden; line-height: var(--lh-snug); max-height: calc(5lh + 14px);
-		transition: height var(--dur-tight) var(--ease-snap);
-	}
-	.ct-input:focus { outline: none; border-color: var(--accent); }
-	.ct-send { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent); border: none; color: #fff; cursor: pointer; transition: filter var(--dur-tight); }
-	.ct-send:hover { filter: brightness(1.08); }
 
 	.ct.resolved { padding: 0; background: none; cursor: default; gap: 0; }
 	.ct-res-head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 6px 10px; }
