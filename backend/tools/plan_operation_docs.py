@@ -20,7 +20,7 @@ _OPERATION_NOTES = {
     # remains runtime-compatible, but the published vocabulary never recommends it.
     "mark_done": (
         "active self-completion, or a user step once really done (evidence in "
-        "plain words, they read it; approvals go in a decision); accepts as "
+        "plain words, they read it; approvals go in an ask); accepts as "
         "Done without another reviewer"
     ),
     "request_review": "active handoff; leaves work awaiting another reviewer",

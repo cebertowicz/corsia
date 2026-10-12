@@ -114,8 +114,12 @@ def lane_refusing(
 
 
 #: What an agent's ``mark_done`` also learns: a plain step can be settled by the
-#: owner agent now, so an approval only the user may give belongs in a decision.
-_APPROVAL_NOTE = "; an approval belongs in a decision, never a plain step"
+#: owner agent now, so an approval only the user may give goes to them as an
+#: artifact ask.
+_APPROVAL_NOTE = (
+    "; an approval goes to the user as an artifact ask (block_node with "
+    "ask_artifact_id), never a plain step"
+)
 
 
 def refusal_message(lane: str, operation: str) -> str:
