@@ -344,7 +344,9 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_decision 2,600 -> 3,000 (pick-any): `pick` and the list form of `recommendation` are published at the field, because an agent never told of them raises combination options instead.
 # plan_update 8,975 -> 9,076 (+101): `mark_done` also settles a step assigned to the user, so the line says
 # so, asks for evidence in plain words because the person reads it, and sends approvals to a decision.
-_PUBLISHED_BYTES = {"plan_update": 9_076, "plan_decision": 3_000}
+# plan_update 9,076 -> 9,102 (+26, #333): approvals and user action now go to an ask or chat, not a
+# decision; the user-tasks line names both routes because it was the schema's one "raise a decision" pointer.
+_PUBLISHED_BYTES = {"plan_update": 9_102, "plan_decision": 3_000}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():

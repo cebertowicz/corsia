@@ -20,10 +20,11 @@ import plans.service as service
 from plans.node_states import open_user_block_sql
 
 NO_ASK = (
-    "work waits on the user only with something they can act on. For a "
-    "question, raise a decision on this task: it holds the task by itself, so "
-    "do not block it. For something to read, register the document and pass "
-    "its artifact id as ask_artifact_id."
+    "work waits on the user only with something they can act on. For "
+    "something to review or approve, register the document or image and pass "
+    "its artifact id as ask_artifact_id. For a real tradeoff with nothing to "
+    "review, raise a decision on this task: it holds the task by itself, so do "
+    "not block it. Ask anything else in chat."
 )
 DECISION_HOLDS = (
     "this task has an open decision, which already holds it until the user "
