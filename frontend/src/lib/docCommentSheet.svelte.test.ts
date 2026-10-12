@@ -99,6 +99,47 @@ describe('createCommentSheet', () => {
 		t.teardown();
 	});
 
+	it('plays the outro when the surface closes itself while the sheet is open', () => {
+		const t = setup({ narrow: false });
+		t.set({ state: { kind: 'list' } });
+		// Escape or the header's close clear the surface's state directly, not through the sheet.
+		t.set({ state: null });
+		expect(t.sheet.open).toBe(false);
+		expect(t.sheet.closing).toBe(true);
+		expect(t.sheet.state).toEqual({ kind: 'list' });
+		// The drawer's onClosed ends it once; the surface is already closed, so nothing closes it again.
+		t.sheet.finishClose();
+		flushSync();
+		expect(t.sheet.closing).toBe(false);
+		expect(t.sheet.state).toBeNull();
+		expect(t.onClose).not.toHaveBeenCalled();
+		t.teardown();
+	});
+
+	it('holds a card and its draft through the outro on a narrow canvas', () => {
+		const t = setup({ narrow: true });
+		t.set({ state: { kind: 'draft' }, draft: { text: '', label: 'Box on the image', body: 'typed' } });
+		t.set({ state: null, draft: null });
+		expect(t.sheet.closing).toBe(true);
+		expect(t.sheet.state).toEqual({ kind: 'draft' });
+		expect(t.sheet.draft).toEqual({ text: '', label: 'Box on the image', body: 'typed' });
+		t.sheet.finishClose();
+		flushSync();
+		expect(t.sheet.draft).toBeNull();
+		t.teardown();
+	});
+
+	it('holds nothing for a card that is not a sheet, so no outro waits on a drawer that is not there', () => {
+		// A wide canvas below 900 px lists in a sheet, but its cards are popovers.
+		const t = setup({ narrow: false });
+		t.set({ state: { kind: 'thread', id: 'c1' } });
+		t.set({ state: null });
+		expect(t.sheet.open).toBe(false);
+		expect(t.sheet.closing).toBe(false);
+		expect(t.sheet.state).toBeNull();
+		t.teardown();
+	});
+
 	it('drops held closing content when the sheet reopens', () => {
 		const t = setup({ narrow: true });
 		t.set({ state: { kind: 'draft' }, draft: { text: 'quote' } });

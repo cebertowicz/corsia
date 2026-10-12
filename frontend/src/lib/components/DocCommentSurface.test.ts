@@ -270,6 +270,31 @@ describe('DocCommentSurface suggestions', () => {
 		} finally { window.removeEventListener('keydown', documentEscape); }
 	});
 
+	it('keeps the comments sheet on screen through its outro however the surface closes, then removes it once', async () => {
+		const state = writable<{ kind: 'list' } | null>(null);
+		const live = fromStore(state);
+		const onClose = vi.fn(() => state.set(null));
+		render({ get state() { return live.current; }, narrow: true, comments: [{ ...suggestion, replacement: null }], onClose });
+		const sheets = () => document.body.querySelectorAll('[data-adaptive-drawer] [data-doc-comments-drawer]');
+		const close = {
+			header: () => document.body.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click(),
+			// The image viewer's Escape, in the capture phase, clears the state without going through the sheet.
+			outside: () => state.set(null),
+		};
+		for (const [path, run] of Object.entries(close)) {
+			onClose.mockClear();
+			state.set({ kind: 'list' }); flushSync();
+			expect(sheets(), path).toHaveLength(1);
+			run(); flushSync();
+			// Still mounted, rows and all, while the drawer plays its outro.
+			expect(sheets(), path).toHaveLength(1);
+			expect(document.body.querySelector('[data-doc-comments-drawer] [data-comment-id="comment-1"]'), path).not.toBeNull();
+			await vi.waitFor(() => expect(sheets(), path).toHaveLength(0));
+			// The outro's end does not close the surface a second time.
+			expect(onClose, path).toHaveBeenCalledTimes(path === 'header' ? 1 : 0);
+		}
+	});
+
 	it('flushes, applies, re-seeds and reloads after accept', async () => {
 		mocks.flushDraft.mockResolvedValue(true);
 		mocks.decideSuggestion.mockResolvedValue({ comment: suggestion, text: 'new document', revision: 'r2' });
