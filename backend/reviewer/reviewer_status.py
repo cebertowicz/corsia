@@ -1,7 +1,11 @@
 """Publish GHA commit status checks for the LLM reviewer.
 
-Uses ``gh api`` to set commit statuses on the PR's head SHA. The status
-context is ``qa/llm-reviewer``.
+Uses ``gh api`` to set commit statuses on the PR's head SHA. The verdict
+context is ``qa/llm-reviewer``. A second context, ``qa/llm-reviewer-present``,
+posts ``success`` only after a genuine verdict is published at that SHA, so a
+required check can demand that a review ran without making a block
+unwaivable. It carries no outcome: the verdict context alone says pass or
+block.
 
 States:
 - ``pending``: Review in progress (or retrying after rate limit).
@@ -236,17 +240,21 @@ def set_success(repo: str, sha: str, description: str) -> bool:
     return set_status(repo, sha, "success", description)
 
 
-def set_presence(repo: str, sha: str, verdict_state: str) -> bool:
-    """Publish a successful marker after a same-SHA reviewer verdict."""
-    if verdict_state not in ("pass", "block"):
-        log.error("Invalid reviewer presence verdict state: %s", verdict_state)
-        return False
+def set_presence(repo: str, sha: str) -> bool:
+    """Mark that a genuine reviewer verdict is published at this SHA."""
     return set_status(
         repo,
         sha,
         "success",
-        f"verdict published at this head ({verdict_state})",
+        "reviewer verdict published at this head",
         context=STATUS_PRESENCE_CONTEXT,
+    )
+
+
+def set_presence_error(repo: str, sha: str, description: str) -> bool:
+    """Report a failed presence post without touching the published verdict."""
+    return set_status(
+        repo, sha, "error", description, context=STATUS_PRESENCE_CONTEXT,
     )
 
 

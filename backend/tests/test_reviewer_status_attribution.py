@@ -61,12 +61,12 @@ def test_presence_status_uses_its_own_context_after_a_verdict(mock_run: MagicMoc
 
     mock_run.return_value = _proc()
 
-    assert reviewer_status.set_presence("owner/repo", "a" * 40, "block")
+    assert reviewer_status.set_presence("owner/repo", "a" * 40)
 
     payload = _posted_payloads(mock_run)[0]
     assert payload["state"] == "success"
     assert payload["context"] == STATUS_PRESENCE_CONTEXT
-    assert payload["description"].startswith("verdict published at this head (block)")
+    assert payload["description"].startswith("reviewer verdict published at this head")
 
 
 @patch("reviewer.gh_helpers._run_gh")

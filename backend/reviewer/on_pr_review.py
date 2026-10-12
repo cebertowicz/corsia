@@ -52,6 +52,7 @@ from reviewer.reviewer_status import (
     set_failure,
     set_pending,
     set_presence,
+    set_presence_error,
     set_success,
 )
 from reviewer.reviewer_subsystems import extract_changed_files_from_diff
@@ -72,6 +73,10 @@ _CODE_REVIEW_STANDARDS = ["development-doctrine", "eng-arch", "product"]
 
 
 ReviewComments = tuple[list[dict[str, Any]], list[dict[str, Any]]]
+
+
+class ReviewerPresenceError(RuntimeError):
+    """The verdict is published at the head, but its presence marker is not."""
 
 
 def on_pr_review(event_type: str, payload: dict[str, Any]) -> ReviewerResult | None:
@@ -126,7 +131,11 @@ def on_pr_review(event_type: str, payload: dict[str, Any]) -> ReviewerResult | N
     except Exception as exc:
         elapsed = int((time.monotonic() - start_time) * 1000)
         log.error("PR #%d: reviewer failed: %s", pr_number, exc)
-        set_error(repo, head_sha, _error_status_text(exc))
+        if isinstance(exc, ReviewerPresenceError):
+            # The genuine verdict stands; only the presence context is missing.
+            set_presence_error(repo, head_sha, str(exc))
+        else:
+            set_error(repo, head_sha, _error_status_text(exc))
         emit_product_event(
             "reviewer", "errored",
             properties={
@@ -338,8 +347,7 @@ def _process_findings(
     )
 
     verdict = "code_fail" if block_count > 0 else "clean"
-    if not _publish_verdict_and_presence(repo, head_sha, verdict, summary):
-        raise RuntimeError(f"failed to publish {verdict} reviewer status")
+    _publish_verdict_and_presence(repo, head_sha, verdict, summary)
 
     emit_product_event(
         "reviewer", "completed",
@@ -366,18 +374,22 @@ def _process_findings(
 
 def _publish_verdict_and_presence(
     repo: str, head_sha: str, verdict: str, summary: str,
-) -> bool:
-    """Publish a genuine reviewer verdict and its same-head presence marker."""
+) -> None:
+    """Publish a genuine reviewer verdict, then its same-head presence marker.
+
+    Either failure raises so the head stays retryable.
+    """
     if verdict == "code_fail":
         # A real verdict is senior to a standing success waiver.
         status_published = set_failure(repo, head_sha, summary, verdict=True)
     else:
         status_published = set_success(repo, head_sha, summary)
     if not status_published:
-        return False
-    return set_presence(
-        repo, head_sha, "block" if verdict == "code_fail" else "pass",
-    )
+        raise RuntimeError(f"failed to publish {verdict} reviewer status")
+    if not set_presence(repo, head_sha):
+        raise ReviewerPresenceError(
+            f"{verdict} verdict published; presence status not published",
+        )
 
 
 def _build_context(

@@ -62,7 +62,7 @@ class TestReviewerVerdictReturn:
         assert verdict["block_count"] == 0
         assert verdict["flag_count"] == 0
         assert verdict["model_label"] == "codex"
-        set_presence.assert_called_once_with("owner/repo", "abc123def", "pass")
+        set_presence.assert_called_once_with("owner/repo", "abc123def")
 
     def test_process_findings_returns_code_fail_verdict(self):
         from reviewer import on_pr_review
@@ -88,7 +88,7 @@ class TestReviewerVerdictReturn:
         assert verdict["block_count"] == 1
         assert verdict["flag_count"] == 0
         assert verdict["finding_count"] == 1
-        set_presence.assert_called_once_with("owner/repo", "abc123def", "block")
+        set_presence.assert_called_once_with("owner/repo", "abc123def")
 
     def test_reraised_resolved_finding_is_published_without_changing_the_verdict(self):
         from reviewer import on_pr_review
@@ -308,7 +308,8 @@ class TestReviewerPublicationFailures:
             "issue-comment-history",
             "clean-status",
             "code-fail-status",
-            "presence-status",
+            "clean-presence-status",
+            "code-fail-presence-status",
         ],
     )
     def test_failed_publication_stays_loud_and_retryable(
@@ -318,8 +319,9 @@ class TestReviewerPublicationFailures:
         from reviewer import on_pr_review as reviewer_mod
         from reviewer.review_publication import ReviewPublicationError
 
+        presence_failed = failure.endswith("presence-status")
         findings = []
-        if failure == "code-fail-status":
+        if failure.startswith("code-fail"):
             # Must be a block: only a block produces a code_fail verdict, and
             # this case exercises a failed publication of that status.
             findings = [{
@@ -353,6 +355,7 @@ class TestReviewerPublicationFailures:
             set_success=DEFAULT,
             set_failure=DEFAULT,
             set_presence=DEFAULT,
+            set_presence_error=DEFAULT,
             set_error=DEFAULT,
             emit_product_event=DEFAULT,
         ) as reviewer_mocks, patch.multiple(
@@ -393,7 +396,8 @@ class TestReviewerPublicationFailures:
             reviewer_mocks["set_failure"].return_value = (
                 failure != "code-fail-status"
             )
-            reviewer_mocks["set_presence"].return_value = failure != "presence-status"
+            reviewer_mocks["set_presence"].return_value = not presence_failed
+            reviewer_mocks["set_presence_error"].return_value = True
             reviewer_mocks["set_error"].return_value = True
             notification_mocks["notify_reviewer_verdict"].return_value = "no_owner"
 
@@ -408,17 +412,34 @@ class TestReviewerPublicationFailures:
             reviewer_mocks[
                 "set_success" if failure == "clean-status" else "set_failure"
             ].assert_called_once()
-        elif failure == "presence-status":
-            reviewer_mocks["set_success"].assert_called_once()
+        elif presence_failed:
+            # The verdict is published once and is never replaced by an error.
+            if failure == "clean-presence-status":
+                reviewer_mocks["set_success"].assert_called_once()
+                reviewer_mocks["set_failure"].assert_not_called()
+            else:
+                reviewer_mocks["set_failure"].assert_called_once()
+                assert reviewer_mocks["set_failure"].call_args.kwargs == {
+                    "verdict": True,
+                }
+                reviewer_mocks["set_success"].assert_not_called()
             reviewer_mocks["set_presence"].assert_called_once_with(
-                "owner/repo", "abc123def", "pass",
+                "owner/repo", "abc123def",
             )
         else:
             reviewer_mocks["set_success"].assert_not_called()
             reviewer_mocks["set_failure"].assert_not_called()
-        if failure != "presence-status":
+        if not presence_failed:
             reviewer_mocks["set_presence"].assert_not_called()
-        reviewer_mocks["set_error"].assert_called_once()
+        if presence_failed:
+            reviewer_mocks["set_error"].assert_not_called()
+            reviewer_mocks["set_presence_error"].assert_called_once()
+            assert "presence status not published" in reviewer_mocks[
+                "set_presence_error"
+            ].call_args[0][2]
+        else:
+            reviewer_mocks["set_presence_error"].assert_not_called()
+            reviewer_mocks["set_error"].assert_called_once()
         if failure == "lost-block":
             # The one shortfall that must survive the 140-char status budget.
             status_text = reviewer_mocks["set_error"].call_args[0][2]
@@ -1189,7 +1210,7 @@ class TestInfraRedRespectsStandingSuccess:
             "qa/llm-reviewer", "qa/llm-reviewer-present",
         ]
         assert "1 block" in posts[0]["description"]
-        assert "verdict published at this head (block)" in posts[1]["description"]
+        assert "reviewer verdict published at this head" in posts[1]["description"]
         assert reads == []  # a verdict never depends on the standing status
 
     def test_infra_set_failure_default_is_guarded(self):
