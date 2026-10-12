@@ -53,6 +53,22 @@ def test_every_reviewer_status_write_has_instance_and_write_stamp(
         assert len(payload["description"]) <= 140
 
 
+@patch("reviewer.gh_api.subprocess.run")
+def test_presence_status_uses_its_own_context_after_a_verdict(mock_run: MagicMock):
+    """Presence is a second success context, distinct from the verdict."""
+    from reviewer import reviewer_status
+    from reviewer.reviewer_categories import STATUS_PRESENCE_CONTEXT
+
+    mock_run.return_value = _proc()
+
+    assert reviewer_status.set_presence("owner/repo", "a" * 40, "block")
+
+    payload = _posted_payloads(mock_run)[0]
+    assert payload["state"] == "success"
+    assert payload["context"] == STATUS_PRESENCE_CONTEXT
+    assert payload["description"].startswith("verdict published at this head (block)")
+
+
 @patch("reviewer.gh_helpers._run_gh")
 def test_unattributed_success_is_returned_as_success_and_logged(
     mock_run: MagicMock, caplog,

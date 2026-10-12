@@ -45,7 +45,10 @@ from reviewer.gh_helpers import (
     STATUS_WRITE_STAMP,
     get_commit_status_for_context,
 )
-from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT
+from reviewer.reviewer_categories import (
+    STATUS_CHECK_CONTEXT,
+    STATUS_PRESENCE_CONTEXT,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +92,7 @@ def set_status(
     state: str,
     description: str,
     target_url: str | None = None,
+    context: str = STATUS_CHECK_CONTEXT,
 ) -> bool:
     """Set a commit status check via the GitHub API.
 
@@ -98,6 +102,7 @@ def set_status(
         state: One of ``pending``, ``success``, ``failure``, ``error``.
         description: Short description (max 140 chars per GitHub API).
         target_url: Optional URL for the "Details" link on the status.
+        context: Commit-status context; defaults to the reviewer verdict context.
 
     Returns:
         True if the status was set successfully.
@@ -113,7 +118,7 @@ def set_status(
     body: dict[str, Any] = {
         "state": state,
         "description": description,
-        "context": STATUS_CHECK_CONTEXT,
+        "context": context,
     }
     if target_url:
         body["target_url"] = target_url
@@ -229,6 +234,20 @@ def set_success(repo: str, sha: str, description: str) -> bool:
     140-char form GitHub stores.
     """
     return set_status(repo, sha, "success", description)
+
+
+def set_presence(repo: str, sha: str, verdict_state: str) -> bool:
+    """Publish a successful marker after a same-SHA reviewer verdict."""
+    if verdict_state not in ("pass", "block"):
+        log.error("Invalid reviewer presence verdict state: %s", verdict_state)
+        return False
+    return set_status(
+        repo,
+        sha,
+        "success",
+        f"verdict published at this head ({verdict_state})",
+        context=STATUS_PRESENCE_CONTEXT,
+    )
 
 
 def set_failure(repo: str, sha: str, description: str, *, verdict: bool = False) -> bool:
