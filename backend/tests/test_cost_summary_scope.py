@@ -6,23 +6,24 @@ import pytest
 from fastapi import HTTPException
 
 
-def _seed(db) -> None:
-    """Four scoped rows inside every Trend window, plus one current-month row.
+_SEEDED_COST = 15.0
 
-    The scoped rows land on the Wednesday of the last completed week: that is
-    inside 12w/26w/all by construction and never in the partial week the windows
-    exclude, so no seeded row can fall out of the window by calendar.
+
+def _window_day() -> date:
+    """The Wednesday of the last completed week, in UTC.
+
+    It is inside 12w/26w/all by construction and never in the partial week the
+    windows exclude, so no seeded row can fall out of the window by calendar.
     """
     from infra.time import utc_now
 
-    clock = utc_now()
-    # Keep the trend rows in the previous calendar month. The current-month row
-    # below is the only one the period-spend assertion is meant to observe.
-    last_day_of_previous_month = clock.date().replace(day=1) - timedelta(days=1)
-    window_day = last_day_of_previous_month - timedelta(
-        days=(last_day_of_previous_month.weekday() - 2) % 7
-    )
-    now = f"{window_day.isoformat()}T12:00:00Z"
+    today = utc_now().date()
+    return today - timedelta(days=today.weekday() + 5)
+
+
+def _seed(db) -> None:
+    """Four scoped rows inside every Trend window, plus one current-month row."""
+    now = f"{_window_day().isoformat()}T12:00:00Z"
     for seed_project_id in ("project", "elsewhere"):
         db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,'t','t')", (seed_project_id, seed_project_id))
     threads: tuple[tuple[str, str | None, str | None, int], ...] = (
@@ -120,7 +121,9 @@ async def test_agent_scope_excludes_project_peers_and_unrelated_threads(scoped_c
     # which a seed near a month boundary would break.
     assert summary["totals"]["cost_usd"] == 3.0 != workspace["totals"]["cost_usd"]
     assert summary["period_spend"] == workspace["period_spend"]
-    assert summary["period_spend"]["monthly_cost_usd"] == 6.0
+    # The seeded window day shares the current UTC month for most of each month.
+    seeded_this_month = _window_day().replace(day=1) == utc_now().date().replace(day=1)
+    assert summary["period_spend"]["monthly_cost_usd"] == 6.0 + (_SEEDED_COST if seeded_this_month else 0.0)
 
 
 @pytest.mark.asyncio
