@@ -32,9 +32,10 @@ def mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
     settles through the writers the user's own Mark done uses. A row with open
     children or one the user paused is refused, because only the user ends what
     they paused. Its other stops (a blocker, an unmet prerequisite, a watch)
-    end with it, as on the user's own Mark done: the step is done.
+    end with it, as on the user's own Mark done: the step is done, so the
+    questions drafted from it are withdrawn too.
     """
-    from plans import archival, boundary_dispatch, holds
+    from plans import archival, boundary_dispatch, decision_lifecycle, holds
 
     node_id = params["node_id"]
     node = service._node_row(db, node_id)
@@ -69,6 +70,10 @@ def mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
     service.transition_node(
         node_id, "accepted", verification_result="passed",
         verified_by=actor.audit_id, **expected, **common,
+    )
+    decision_lifecycle.withdraw_for_source(
+        db, node_id, reason=decision_lifecycle.SOURCE_MARKED_DONE,
+        actor_id=common["actor_id"], provenance=common["provenance"],
     )
     return after.after_close(
         node_id, "accepted", params, common, executor=actor.thread_id,

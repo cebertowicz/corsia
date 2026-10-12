@@ -70,6 +70,8 @@ _FROM_SOURCE_SQL = _ACTIVE_DECISIONS_SQL + """
 SOURCE_CLOSED = "The task this decision was about was closed"
 #: Why a question left the queue when the user marked its task done.
 SOURCE_DONE = "The user marked the task this decision was about done"
+#: Why a question left the queue when the plan's agent marked the user's step done.
+SOURCE_MARKED_DONE = "The agent marked the task this decision was about done"
 
 
 #: The close reason every withdrawn decision's review node records.
@@ -207,7 +209,8 @@ def withdraw_for_source(
 ) -> int:
     """Withdraw the open decisions drafted from this task: it no longer needs them.
 
-    A closed task, or one the user marked done (``plans.user_settle``). The
+    A closed task, or one marked done by the user (``plans.user_settle``) or
+    by the plan's agent on a user step (``plans.user_step_settle``). The
     caller owns the commit.
     """
     plan = db.execute(
