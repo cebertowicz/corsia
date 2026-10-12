@@ -171,10 +171,20 @@ def announce_published_write(result: str) -> str:
     return result
 
 
-def save_guided_write(path: Path, text: str, target, kwargs: dict, expected: str | None = None, **write_args) -> str:
-    """Blocking. Save an agent tool's guidance write through the history primitive, which
-    writes with :func:`managed_write`. ``kwargs`` carries the tool's ``reason`` and ``evidence``;
-    ``expected`` is the text an edit was computed from, and a file that moved on is not written.
+def save_guided_write(
+    path: Path,
+    text: str,
+    target,
+    kwargs: dict,
+    expected: str | None = None,
+    return_receipt: bool = False,
+    **write_args,
+) -> str | tuple[str, str | None]:
+    """Blocking. Save an agent tool's guidance write through the history primitive.
+
+    ``return_receipt`` gives an off-loop caller the undecorated managed-write
+    receipt to announce after control returns to its event loop. The displayed
+    result remains the existing history-decorated text.
     """
     from infra.config import WORKSPACE
 
@@ -183,8 +193,27 @@ def save_guided_write(path: Path, text: str, target, kwargs: dict, expected: str
         {path: text.encode()}, workspace=WORKSPACE, target=target,
         author=saver_author(thread_id=kwargs.get("_thread_id")), reason=kwargs.get("reason"),
         evidence=kwargs.get("evidence"), expected=None if expected is None else {path: digest(expected)},
-        write=lambda target_path, data: results.append(managed_write(target_path, data.decode(), kwargs, **write_args)),
+        write=lambda target_path, data: results.append(
+            managed_write(target_path, data.decode(), kwargs, **write_args)
+        ),
     )
-    if not results:
-        return saved.line or ""
-    return _with_line(results[0], "guidance_history", saved.line) if saved.line else results[0]
+    receipt = results[0] if results else None
+    result = (
+        _with_line(receipt, "guidance_history", saved.line)
+        if receipt is not None and saved.line
+        else receipt or saved.line or ""
+    )
+    return (result, receipt) if return_receipt else result
+
+
+async def save_guided_write_and_announce(path: Path, text: str, target, kwargs: dict, **write_args) -> str:
+    """Save guidance off-loop, then nudge its managed artifact from the caller loop."""
+    from infra.db_async import run_off_db
+
+    result, receipt = await run_off_db(
+        save_guided_write, path, text, target, kwargs,
+        notify=False, return_receipt=True, **write_args,
+    )
+    if receipt is not None:
+        announce_published_write(receipt)
+    return result
