@@ -5,7 +5,7 @@
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false }: {
+	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false }: {
 		comments: Comment[];
 		documentOrder?: boolean;
 		focusedId?: string | null;
@@ -33,6 +33,8 @@
 		focusReply?: boolean;
 		/** A text jump exposes the selected thread's reply field. */
 		showReply?: boolean;
+		/** A sheet owns the card scroller, so a shortened visual viewport keeps its reply field visible. */
+		keepReplyVisible?: boolean;
 	} = $props();
 	// Replies being typed, kept here so a card that moves groups (its text changed, or it was resolved) keeps what was typed.
 	let replyDrafts = $state<Record<string, string>>({});
@@ -71,6 +73,7 @@
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				data-comment-id={comment.id}
+				class:focused={focusedId === comment.id}
 				onpointerenter={region && onHover ? () => onHover(comment.id) : undefined}
 				onpointerleave={region && onHover ? () => onHover(null) : undefined}
 				onfocusin={region && onHover ? () => onHover(comment.id) : undefined}
@@ -81,7 +84,7 @@
 						{#if comment.review || comment.orphaned}{comment.review ? 'Review comment' : 'Text changed'}{comment.anchor ? `: “${comment.anchor}”` : ''}{:else}{comment.anchor ? `“${comment.anchor}”` : 'Go to text'}{/if}
 					</button>
 				{/if}
-				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} flat={documentOrder} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
+				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} flat={documentOrder} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
 			</div>
 			{/each}
 		{/each}
@@ -95,7 +98,8 @@
 
 <style>
 	.comment-jump { display: block; width: 100%; min-height: var(--space-6); padding: 0 0 0 var(--space-2); text-align: left; border: 0; border-left: 2px solid var(--border); background: none; color: var(--text-tertiary); font: inherit; font-size: var(--text-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-	@media (pointer: coarse) { .comment-jump { min-height: calc(var(--space-8) - var(--space-1)); } :global(.focused) .comment-jump:not(:disabled) { border-left-color: var(--accent); } }
+	:global([data-comment-id].focused) .comment-jump:not(:disabled) { border-left-color: var(--accent); }
+	@media (pointer: coarse) { .comment-jump { min-height: calc(var(--space-8) - var(--space-1)); } }
 	.comment-jump:disabled { color: var(--text-tertiary); cursor: default; }
 	.comment-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
 

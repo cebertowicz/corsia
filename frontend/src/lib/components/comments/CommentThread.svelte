@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
@@ -12,6 +12,7 @@
 		authorThreadId?: string | null;
 		text: string;
 		at: string;
+		createdAt?: string;
 		resolved: boolean;
 		orphaned?: boolean;
 		acked?: boolean;
@@ -31,8 +32,9 @@
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import { retryPlacement } from '$lib/stores/docComments';
+	import { compactRelLabel, formatDateTime } from '$lib/time';
 
-	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, flat = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
+	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
 		comment: CommentThreadData;
 		focused?: boolean;
 		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
@@ -43,6 +45,8 @@
 		focusReply?: boolean;
 		/** A text jump exposes this thread's Reply field without moving focus from the document. */
 		showReply?: boolean;
+		/** Scroll this reply into its owning sheet when a short visual viewport could hide it. */
+		keepReplyVisible?: boolean;
 		/** Drawer rows are flat; other consumers retain the established card treatment. */
 		flat?: boolean;
 		/** Off where the caller scrolls its own list to the focused card. */
@@ -72,6 +76,9 @@
 	// Avatar owns the shared initials presentation.
 	const author = $derived(who(comment.author, comment.authorKind));
 	const avatarColor = $derived(author.kind === 'agent' && comment.authorThreadId ? agentColor(comment.authorThreadId) : author.color);
+	const authorName = $derived.by(() => ({ head: author.name.length > 20 ? author.name.slice(0, -4) : author.name, tail: author.name.length > 20 ? author.name.slice(-4) : '' }));
+	const compactTime = $derived(compactRelLabel(comment.createdAt, comment.at));
+	const fullTime = $derived(comment.createdAt ? formatDateTime(comment.createdAt) : comment.at);
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
 	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.anchor, comment.replacement!) : null);
@@ -92,6 +99,17 @@
 	$effect(() => { if (replyText) replyOpen = true; });
 	$effect(() => { if ((showReply || focusReply || (focused && selectable)) && !readOnly) replyOpen = true; });
 	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly && replyOpen) replyInput?.focus(); });
+	function revealReply() { if (typeof replyInput?.scrollIntoView === 'function') replyInput.scrollIntoView({ block: 'nearest' }); }
+	$effect(() => {
+		if (!keepReplyVisible || !replyOpen) return;
+		void tick().then(revealReply);
+	});
+	onMount(() => {
+		const viewport = window.visualViewport;
+		const onViewportResize = () => { if (keepReplyVisible && replyOpen) void tick().then(revealReply); };
+		viewport?.addEventListener('resize', onViewportResize);
+		return () => viewport?.removeEventListener('resize', onViewportResize);
+	});
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	function stampRenderedReply() {
 		const latest = comment.replies.at(-1)?.id;
@@ -213,9 +231,9 @@
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
-			<span class="ct-author">{author.name}</span>
+			<span class="ct-author" title={author.name} aria-label={author.name}><span class="ct-author-head">{authorName.head}</span>{#if authorName.tail}<span class="ct-author-tail">{authorName.tail}</span>{/if}</span>
 			{#if author.kind === 'agent' && agentTag(author)}<span class="ct-tag" title="via {author.provider} · {author.thread}">{agentTag(author)}</span>{/if}
-			<span class="ct-at">{comment.at}</span>
+			<span class="ct-at full" title={fullTime} aria-label={fullTime}>{comment.at}</span><span class="ct-at compact" title={fullTime} aria-label={fullTime}>{compactTime}</span>
 			{#if !isSuggestion}
 				<button class="ct-act ack" class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree — end the exchange" title="Agree — ends the back-and-forth">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
@@ -250,7 +268,7 @@
 			{/if}
 			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else}
-			{#if comment.orphaned}<div class="ct-orphan">The text this comment was on has changed</div>{/if}
+			{#if comment.orphaned && !flat}<div class="ct-orphan">The text this comment was on has changed</div>{/if}
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
@@ -303,6 +321,7 @@
 		/* Keep a row fully revealable at either edge of the drawer's own scroller. */
 		scroll-margin-block: var(--space-1);
 	}
+	.ct.flat.focused, .ct.flat.acked, .ct.flat.orphaned { border-color: transparent; box-shadow: none; }
 	/* Lit with its mark on the image while either is hovered or focused; lighter than selected. */
 	.ct.linked:not(.focused) { background: color-mix(in srgb, var(--text-primary) 8%, transparent); border-color: color-mix(in srgb, var(--text-primary) 14%, transparent); }
 	.ct.read-only .ct-act, .ct.read-only .ct-compose, .ct.read-only .ct-res-acts { display: none; }
@@ -312,12 +331,15 @@
 
 	.ct-head { display: flex; align-items: center; gap: 7px; }
 	/* Avatar owns the shared initials presentation. */
-	.ct-author { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-secondary); }
+	.ct-author { display: flex; flex: 1 1 auto; min-width: 0; font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-secondary); white-space: nowrap; }
+	.ct-author-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+	.ct-author-tail { flex: none; }
 	.ct-tag {
 		font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--text-tertiary);
 		background: color-mix(in srgb, var(--text-primary) 7%, transparent); border-radius: var(--radius-2xs); padding: 1px 6px; white-space: nowrap;
 	}
-	.ct-at { font-size: var(--text-caption); color: var(--text-tertiary); }
+	.ct-at { flex: none; font-size: var(--text-caption); color: var(--text-tertiary); white-space: nowrap; }
+	.ct-at.compact { display: none; }
 	.ct-placement { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-caption); color: var(--text-tertiary); }
 	.ct-act { display: flex; padding: 3px; border-radius: var(--radius-2xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; transition: opacity var(--dur-tight), background var(--dur-tight), color var(--dur-tight); }
 	.ct-act.ack { margin-left: auto; }
@@ -364,7 +386,7 @@
 	.ct-reply-open { min-height: var(--space-6); padding: 0; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; }
 	.ct-reply-head { margin-left: var(--space-1); }
 	.ct-act.reply { display: none; }
-	@media (pointer: coarse) { .ct-act { min-width: calc(var(--space-8) - var(--space-1)); min-height: calc(var(--space-8) - var(--space-1)); align-items: center; justify-content: center; } .ct-act.reply { display: flex; } .ct-reply-open { display: none; } }
+	@media (pointer: coarse) { .ct-act { min-width: calc(var(--space-8) - var(--space-1)); min-height: calc(var(--space-8) - var(--space-1)); align-items: center; justify-content: center; } .ct-act.reply { display: flex; } .ct-reply-open { display: none; } .ct-at.full { display: none; } .ct-at.compact { display: inline; } }
 	.ct-input {
 		flex: 1; min-width: 0; font: inherit; font-size: var(--text-footnote);
 		padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);

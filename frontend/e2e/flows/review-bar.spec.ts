@@ -397,6 +397,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await expect(hitAtCentre(filters)).resolves.toBe(true);
 	const reopenedBox = (await filters.boundingBox())!;
 	await page.touchscreen.tap(reopenedBox.x + reopenedBox.width / 2, reopenedBox.y + reopenedBox.height / 2);
+	await expect(filters).toHaveAttribute('aria-expanded', 'true');
 	const menu = drawer.getByRole('menu', { name: 'Filter comments', exact: true });
 	await expect(menu.getByRole('menuitemradio')).toHaveCount(3);
 	await menu.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
@@ -428,6 +429,14 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	const send = footer.getByRole('button', { name: 'Send now', exact: true });
 	await expect(send).toBeVisible();
 	await settled(page);
+	if (mode === 'closed') {
+		const [sheet, column] = await Promise.all([
+			page.locator('[data-adaptive-drawer] .drawer-panel').boundingBox(),
+			page.locator('.leaf-body.document-canvas').boundingBox(),
+		]);
+		expect(sheet!.x, 'the narrow-canvas sheet starts at the document column').toBeCloseTo(column!.x, 0);
+		expect(sheet!.width, 'the narrow-canvas sheet spans only the document column').toBeCloseTo(column!.width, 0);
+	}
 
 	// Pinned to the drawer's foot, opaque, and the list still scrolls above it: its last card ends above the footer.
 	const list = drawer.locator('.drawer-comments');

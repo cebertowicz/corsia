@@ -129,6 +129,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await shoot(page, testInfo, '1440-09-drawer-open', true);
 			const filter = drawer.getByRole('button', { name: 'Filter comments: All', exact: true });
 			await filter.click();
+			await expect(filter).toHaveAttribute('aria-expanded', 'true');
+			await expect(drawer.getByRole('menu', { name: 'Filter comments', exact: true })).toBeVisible();
 			await drawer.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
 			await expect(drawer.locator('.ct')).toHaveCount(1);
 			await shoot(page, testInfo, '1440-09b-drawer-resolved');

@@ -104,11 +104,11 @@
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// Leaving the document sends the batch (DocFeedback.leave); in its grace period it says when it goes instead.
 	const unsentText = $derived.by(() => {
-		if (!feedback?.pendingCount) return '';
+		if (!feedback?.pendingCount) return null;
 		const count = `${feedback.pendingCount} message${feedback.pendingCount === 1 ? '' : 's'} not sent yet`;
 		const owner = feedback.ownerName ?? 'the owner';
-		if (feedback.sendingGrace) return `${count} · sending to ${owner} in ${feedback.graceMinutes} min`;
-		return `${count} · ${feedback.pendingCount === 1 ? 'it goes' : 'they go'} to ${owner} when you leave.`;
+		if (feedback.sendingGrace) return { before: `${count} · sending to `, owner, after: ` in ${feedback.graceMinutes} min` };
+		return { before: `${count} · ${feedback.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner, after: ' when you leave.' };
 	});
 	/** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
 	function drawerFooterHeight(node: HTMLElement) {
@@ -304,7 +304,7 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && surfaceState?.kind === 'thread'} showReply={shouldShowReply} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && surfaceState?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && surfaceState?.kind === 'list'} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 
@@ -318,9 +318,9 @@
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
 	<div class="drawer-comments">
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
-		{#if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
+		{#if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 	</div>
-	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight><p role="status">{unsentText}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
+	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
 {/snippet}
 
 {#if surfaceState}
@@ -350,9 +350,12 @@
 	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: 44px; } }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
+	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
+	.drawer-empty-action:hover { text-decoration: underline; }
 	/* Pinned under the list and contained by the drawer, opaque so cards never show through it. */
 	.drawer-unsent { flex: none; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
 	.drawer-unsent p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
+	.drawer-footer-owner { display: inline-block; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; }
 	.drawer-unsent :global(.btn) { flex: none; }
 	@media (max-width: 420px) { .drawer-unsent { gap: var(--space-1); padding-inline: var(--space-2); } }
 	@media (pointer: coarse) { .drawer-unsent :global(.btn) { min-height: 44px; } }

@@ -41,6 +41,29 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-compose.open .ct-input')).not.toBeNull();
 	});
 
+	it('keeps a sheet reply visible after it expands', async () => {
+		const original = HTMLElement.prototype.scrollIntoView;
+		const scrollIntoView = vi.fn();
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+		try {
+			render(thread(), false, { showReply: true, keepReplyVisible: true });
+			await vi.waitFor(() => expect(host.querySelector('.ct-input')).not.toBeNull());
+			await vi.waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }));
+		} finally {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: original });
+		}
+	});
+
+	it('keeps a long drawer author accessible while reserving a compact time label', () => {
+		const name = 'Canvas Reviewer 1791789535058';
+		render(thread({ author: name, createdAt: new Date().toISOString() }));
+		const author = host.querySelector<HTMLElement>('.ct-author')!;
+		expect(author.getAttribute('aria-label')).toBe(name);
+		expect(author.title).toBe(name);
+		expect(author.querySelector('.ct-author-tail')?.textContent).toBe('5058');
+		expect(host.querySelector('.ct-at.compact')?.textContent).toBe('now');
+	});
+
 	it('posts a reply on Cmd+Enter', () => {
 		const { onReply } = render(thread());
 		button('.ct-reply-open').click(); flushSync();
@@ -110,6 +133,14 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-input')).toBeNull();
 		button('.ct-act.ack').click();
 		expect(onAgree).not.toHaveBeenCalled();
+	});
+
+	it('keeps the text-changed fact in the quote instead of duplicating it in a flat row', () => {
+		render(thread({ orphaned: true }), false, { flat: true });
+		expect(host.querySelector('.ct-orphan')).toBeNull();
+		unmount(component!); host.remove();
+		render(thread({ orphaned: true }));
+		expect(host.querySelector('.ct-orphan')?.textContent).toContain('text this comment was on has changed');
 	});
 
 	it('renders a suggestion diff inside the thread', () => {

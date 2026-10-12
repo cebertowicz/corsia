@@ -63,9 +63,16 @@
 	let box = $state<{ top: number; right: number; bottom: number; left: number; height: number } | null>(null);
 	$effect(() => {
 		if (!within) { box = null; return; }
+		let frame = 0;
 		const read = () => { const rect = within.getBoundingClientRect(); box = { top: rect.top, right: innerWidth - rect.right, bottom: innerHeight - rect.bottom, left: rect.left, height: rect.height }; };
-		read(); const observer = new ResizeObserver(read); observer.observe(within); addEventListener('resize', read);
-		return () => { observer.disconnect(); removeEventListener('resize', read); };
+		const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(read); };
+		// Width changes are not the only way a document column moves: an adjacent pane
+		// can slide over it. Resize observes size; mutations and transition completion
+		// refresh the final position before the sheet is measured for interaction.
+		read(); const observer = new ResizeObserver(schedule); observer.observe(within); addEventListener('resize', schedule);
+		const mutations = new MutationObserver(schedule); mutations.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class', 'style'] });
+		document.addEventListener('transitionend', schedule, true);
+		return () => { cancelAnimationFrame(frame); observer.disconnect(); mutations.disconnect(); removeEventListener('resize', schedule); document.removeEventListener('transitionend', schedule, true); };
 	});
 	let panel = $state<HTMLElement | null>(null);
 	let dragY = $state(0);

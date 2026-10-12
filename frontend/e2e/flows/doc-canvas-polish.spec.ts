@@ -177,6 +177,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		await expect(drawer).toBeVisible();
 		await expect(reply).toBeFocused();
 		await expect.poll(async () => (await drawer.boundingBox())!.y + (await drawer.boundingBox())!.height).toBeLessThanOrEqual(520);
+		await expect(reply).toBeInViewport();
 		await saveEvidenceScreenshot(page, testInfo, 'canvas-reply-short-viewport', { fullPage: false });
 		await page.setViewportSize({ width: 393, height: 852 });
 	}

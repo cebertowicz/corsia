@@ -78,6 +78,18 @@ describe('DocCommentSurface suggestions', () => {
 		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
 	});
 
+	it('offers the open comments when the resolved filter has none', () => {
+		render({ state: { kind: 'list' }, comments: [suggestion] });
+		const drawer = host.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
+		drawer.querySelector<HTMLButtonElement>('[data-drawer-filter]')!.click(); flushSync();
+		[...drawer.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((button) => button.textContent === 'Resolved')!.click(); flushSync();
+		const showOpen = [...drawer.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Show open · 1')!;
+		expect(showOpen).not.toBeNull();
+		showOpen.click(); flushSync();
+		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-1');
+	});
+
 	it('ends the drawer in a Send now footer only while messages are not sent', () => {
 		// The open document's one batch: the footer reads it and Send now is its own Send.
 		const feedback = new DocFeedback();
@@ -88,6 +100,9 @@ describe('DocCommentSurface suggestions', () => {
 		render({ state: { kind: 'list' }, comments: [suggestion], feedback });
 		const footer = () => host.querySelector<HTMLElement>('[data-doc-comments-drawer] > [data-drawer-unsent]');
 		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('2 messages not sent yet · they go to Style when you leave.');
+		const owner = footer()!.querySelector<HTMLElement>('.drawer-footer-owner')!;
+		expect(owner.textContent).toBe('Style');
+		expect(owner.title).toBe('Style');
 		const button = footer()!.querySelector<HTMLButtonElement>('button')!;
 		expect(button.textContent?.trim()).toBe('Send now');
 		button.click();
