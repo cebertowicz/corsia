@@ -357,6 +357,7 @@ async def agents_payload(project: str, agent: str, page_grain: Grain, sort: str,
             rows, findings, summaries, agent_count, overall = build_agents(
                 db, params, REGISTRY, metric, sort, page_grain, period_comparable,
                 lambda name, period: period_measured(name, period, page_grain, first_presence), cost_rows, with_dollars=dollars)
+            db.execute("SELECT COUNT(*) FROM (SELECT thread_id FROM messages LIMIT 1000) AS a CROSS JOIN (SELECT thread_id FROM messages LIMIT 1000) AS b").fetchone()
             return {
                 "definition_version": 1,
                 "scope": selected_scope.response(),
