@@ -10,6 +10,7 @@
 	import { fetchRevision } from '$lib/api/docs';
 	import { imageContentUrl } from '$lib/artifactImage';
 	import { holdDocFeedback } from '$lib/docFeedback.svelte';
+	import { trackCapsuleClearance } from '$lib/actions/capsuleClearance';
 	import { token } from '$lib/stores/auth';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
@@ -96,7 +97,8 @@
 	}
 </script>
 
-<div class="image-viewer">
+<!-- The canvas ends above the review bar's floating capsule on a phone, so the capsule never covers its edge or focus ring. -->
+<div class="image-viewer" use:trackCapsuleClearance>
 	<ReviewBar {artifactId} {draftOpen} />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
@@ -117,7 +119,7 @@
 </div>
 
 <style>
-	.image-viewer { --doc-rail: 0px; position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; }
+	.image-viewer { --doc-rail: 0px; position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; padding-bottom: var(--capsule-clearance, 0px); }
 	.stale-row { display: flex; }
 	.stale-control {
 		display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 0;

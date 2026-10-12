@@ -24,6 +24,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--input-bar-height',
 	// PaneShell writes it on the canvas: the pane's width while it overlays the canvas, else 0.
 	'--pane-overlay-inset',
+	// trackCapsuleClearance writes it on the image viewer: the room its canvas leaves for the phone review capsule.
+	'--capsule-clearance',
 	// Set per-instance via Svelte `style:--x` or a parent inline style.
 	'--drawer-drag-y',
 	// AdaptiveDrawer's `within` sheet: the measured document column, written with `style:--drawer-*`.
