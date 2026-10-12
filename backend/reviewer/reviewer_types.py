@@ -27,3 +27,7 @@ class ReviewerSkipped(TypedDict):
 
 
 ReviewerResult = ReviewerVerdict | ReviewerSkipped
+
+
+class ReviewerPresenceError(RuntimeError):
+    """The verdict is published at the head, but its presence marker is not."""

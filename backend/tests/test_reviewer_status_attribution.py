@@ -69,6 +69,23 @@ def test_presence_status_uses_its_own_context_after_a_verdict(mock_run: MagicMoc
     assert payload["description"].startswith("reviewer verdict published at this head")
 
 
+@patch("reviewer.gh_api.subprocess.run")
+def test_failed_presence_post_reports_error_on_presence_only(mock_run: MagicMock):
+    """A failed marker is visible on its own context and never on the verdict."""
+    from reviewer import reviewer_status
+    from reviewer.reviewer_categories import STATUS_PRESENCE_CONTEXT
+
+    failed = _proc()
+    failed.returncode = 1
+    mock_run.side_effect = [failed, _proc()]
+
+    assert not reviewer_status.set_presence("owner/repo", "a" * 40)
+
+    payloads = _posted_payloads(mock_run)
+    assert [p["state"] for p in payloads] == ["success", "error"]
+    assert {p["context"] for p in payloads} == {STATUS_PRESENCE_CONTEXT}
+
+
 @patch("reviewer.gh_helpers._run_gh")
 def test_unattributed_success_is_returned_as_success_and_logged(
     mock_run: MagicMock, caplog,

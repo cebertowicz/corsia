@@ -355,7 +355,6 @@ class TestReviewerPublicationFailures:
             set_success=DEFAULT,
             set_failure=DEFAULT,
             set_presence=DEFAULT,
-            set_presence_error=DEFAULT,
             set_error=DEFAULT,
             emit_product_event=DEFAULT,
         ) as reviewer_mocks, patch.multiple(
@@ -397,7 +396,6 @@ class TestReviewerPublicationFailures:
                 failure != "code-fail-status"
             )
             reviewer_mocks["set_presence"].return_value = not presence_failed
-            reviewer_mocks["set_presence_error"].return_value = True
             reviewer_mocks["set_error"].return_value = True
             notification_mocks["notify_reviewer_verdict"].return_value = "no_owner"
 
@@ -432,13 +430,9 @@ class TestReviewerPublicationFailures:
         if not presence_failed:
             reviewer_mocks["set_presence"].assert_not_called()
         if presence_failed:
+            # The published verdict is never replaced by an infra error.
             reviewer_mocks["set_error"].assert_not_called()
-            reviewer_mocks["set_presence_error"].assert_called_once()
-            assert "presence status not published" in reviewer_mocks[
-                "set_presence_error"
-            ].call_args[0][2]
         else:
-            reviewer_mocks["set_presence_error"].assert_not_called()
             reviewer_mocks["set_error"].assert_called_once()
         if failure == "lost-block":
             # The one shortfall that must survive the 140-char status budget.

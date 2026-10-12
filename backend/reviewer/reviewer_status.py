@@ -241,21 +241,21 @@ def set_success(repo: str, sha: str, description: str) -> bool:
 
 
 def set_presence(repo: str, sha: str) -> bool:
-    """Mark that a genuine reviewer verdict is published at this SHA."""
-    return set_status(
-        repo,
-        sha,
-        "success",
-        "reviewer verdict published at this head",
+    """Mark that a genuine reviewer verdict is published at this SHA.
+
+    A failed marker posts ``error`` on the presence context, best effort, so
+    the miss is visible without replacing the verdict already published.
+    """
+    if set_status(
+        repo, sha, "success", "reviewer verdict published at this head",
+        context=STATUS_PRESENCE_CONTEXT,
+    ):
+        return True
+    set_status(
+        repo, sha, "error", "verdict published; presence marker post failed",
         context=STATUS_PRESENCE_CONTEXT,
     )
-
-
-def set_presence_error(repo: str, sha: str, description: str) -> bool:
-    """Report a failed presence post without touching the published verdict."""
-    return set_status(
-        repo, sha, "error", description, context=STATUS_PRESENCE_CONTEXT,
-    )
+    return False
 
 
 def set_failure(repo: str, sha: str, description: str, *, verdict: bool = False) -> bool:
