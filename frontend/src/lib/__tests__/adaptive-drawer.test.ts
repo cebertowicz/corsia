@@ -71,6 +71,19 @@ describe("AdaptiveDrawer", () => {
     expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(1);
   });
 
+  it("can keep a sheet non-modal without changing the modal default", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { onClose: vi.fn(), modal: false },
+    });
+    await settle();
+
+    const backdrop = host.querySelector("[data-adaptive-drawer]");
+    const dialog = host.querySelector('[role="dialog"]');
+    expect(backdrop?.classList.contains("nonmodal")).toBe(true);
+    expect(dialog?.getAttribute("aria-modal")).toBe("false");
+  });
+
   it("closes from its explicit control and Escape", async () => {
     const close = vi.fn();
     component = mount(AdaptiveDrawerHarness, {

@@ -384,6 +384,9 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	const box = (await openFilter.boundingBox())!;
 	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
 	await expect(openFilter).toHaveAttribute('aria-expanded', 'true');
+	// Close the menu before tapping another drawer control; the menu intentionally owns its overlay.
+	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+	await expect(openFilter).toHaveAttribute('aria-expanded', 'false');
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
 	await expect(drawer).toBeVisible();
@@ -392,7 +395,8 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	const menu = drawer.getByRole('menu', { name: 'Filter comments', exact: true });
 	await expect(menu.getByRole('menuitemradio')).toHaveCount(3);
 	await menu.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
-	await expect(filters).toHaveText('Resolved');
+	await expect(filters).toHaveText('Filter');
+	await expect(filters).toHaveAttribute('aria-label', 'Filter comments: Resolved');
 	await expect(filters).toHaveAttribute('aria-expanded', 'false');
 	await shot(page, 'drawer-touch', info);
 	const closeBox = (await close.boundingBox())!;

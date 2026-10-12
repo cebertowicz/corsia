@@ -186,7 +186,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeVisible();
 	await page.keyboard.press('Escape');
 	await expect(drawer).toBeVisible();
-	await drawer.getByRole('button', { name: 'Open', exact: true }).focus();
+	await drawer.getByRole('button', { name: 'Filter comments: Open', exact: true }).focus();
 	await page.keyboard.press('Escape');
 	await expect(drawer).toHaveCount(0);
 	await expect(page.getByRole('button', { name: /^1 open thread\b/ })).toBeFocused();

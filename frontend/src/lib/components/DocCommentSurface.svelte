@@ -83,13 +83,15 @@
 		read(); const observer = new ResizeObserver(read); observer.observe(bounds);
 		return () => observer.disconnect();
 	});
-	const sheetDrawer = $derived(narrow || canvasWidth < 900);
+	// Image viewers already decide whether their canvas is a sheet; document canvases use the 900 px rule.
+	const sheetDrawer = $derived(narrow || (!image && canvasWidth < 900));
 	let detent = $state<'full' | 'half'>('full');
 	const column = $derived(bounds?.closest<HTMLElement>('.leaf-body') ?? bounds);
 	const openCount = $derived(comments.filter((comment) => !comment.resolved).length);
 	const headerCount = $derived(filter === 'open' ? `${openCount} open` : filter === 'resolved' ? `${comments.length - openCount} resolved` : `${comments.length} ${comments.length === 1 ? 'thread' : 'threads'}`);
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
+	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
 	const picks = $derived(image?.picks ?? 0);
 	let navigationNotice = $state('');
 	const byNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
@@ -179,6 +181,7 @@
 	}
 	function closeDrawer() { onClose(); restoreFocus(); }
 	function navigate(id: string) {
+		filterOpen = false;
 		const comment = comments.find((item) => item.id === id);
 		navigationNotice = comment?.orphaned || comment?.review ? 'This comment has no text to jump to. Its quote and discussion remain here.' : '';
 		const useHalf = sheetDrawer && !comment?.regionNumber && !comment?.orphaned && !comment?.review;
@@ -301,22 +304,28 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && surfaceState?.kind === 'thread'} showReply={shouldShowReply} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 
 {#snippet listBody()}
-	<div class="drawer-heading"><h2>Comments <span>{headerCount}</span></h2><div class="drawer-tools"><div class="filter-menu"><button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>{filterName}</button>{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments">{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}>{name}</button>{/each}</div>{/if}</div><IconButton ariaLabel="Close comments" variant="ghost" size="sm" onclick={closeDrawer}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></IconButton></div></div>
+	<div class="drawer-heading"><h2>Comments <span>{headerCount}</span></h2><div class="drawer-tools"><div class="filter-menu">
+		<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
+		{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments">{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}>{name}</button>{/each}</div>{/if}
+	</div><IconButton ariaLabel="Close comments" variant="ghost" size="sm" onclick={closeDrawer}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status" role="status">Couldn't load comments. {load.error}<Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
-	<div class="drawer-comments">{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}{#if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}</div>
+	<div class="drawer-comments">
+		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
+		{#if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
+	</div>
 	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight><p role="status">{unsentText}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
 {/snippet}
 
 {#if surfaceState}
 	{#if surfaceState.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={narrow ? null : column} {onClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque modal={false} {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {onClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>
@@ -334,7 +343,7 @@
 	.drawer-tools { display: inline-flex; align-items: center; gap: var(--space-1); }
 	.filter-menu { position: relative; }
 	.filter-button, .filter-popup button { min-height: var(--space-6); border: 0; border-radius: var(--radius-xs); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
-	.filter-button { padding: 0 var(--space-2); }
+	.filter-button { display: inline-flex; align-items: center; gap: 4px; padding: 0 var(--space-2); }
 	.filter-popup { position: absolute; z-index: 2; right: 0; top: calc(100% + var(--space-1)); display: grid; min-width: 9rem; padding: var(--space-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); box-shadow: var(--shadow-chip); }
 	.filter-popup button { padding: 0 var(--space-2); text-align: left; }
 	.filter-popup button[aria-checked="true"] { color: var(--accent); font-weight: var(--fw-semibold); }
@@ -345,6 +354,7 @@
 	.drawer-unsent { flex: none; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
 	.drawer-unsent p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 	.drawer-unsent :global(.btn) { flex: none; }
+	@media (max-width: 420px) { .drawer-unsent { gap: var(--space-1); padding-inline: var(--space-2); } }
 	@media (pointer: coarse) { .drawer-unsent :global(.btn) { min-height: 44px; } }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent); cursor: pointer; }

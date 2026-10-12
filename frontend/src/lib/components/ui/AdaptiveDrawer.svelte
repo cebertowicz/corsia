@@ -21,6 +21,7 @@
 		followKeyboard = false,
 		headless = false,
 		opaque = false,
+		modal = true,
 		within = null,
 		detent = 'full',
 		onDetent,
@@ -51,6 +52,8 @@
 		/** Content may own the header, leaving the chrome with its grabber only. */
 		headless?: boolean;
 		opaque?: boolean;
+		/** Keep the sheet interactive without blocking controls outside it. */
+		modal?: boolean;
 		/** Constrain this sheet and its scrim to a document column rather than the viewport. */
 		within?: HTMLElement | null;
 		detent?: 'full' | 'half';
@@ -80,7 +83,7 @@
 	const fadeParams = $derived({ duration: $prefersReducedMotion ? 0 : 160 });
 
 	function onBackdrop(event: MouseEvent): void {
-		if (event.target === event.currentTarget) onClose();
+		if (modal && event.target === event.currentTarget) onClose();
 	}
 
 	function startDrag(event: PointerEvent): void {
@@ -146,6 +149,7 @@
 	class:follow-keyboard={followKeyboard}
 	class:within={!!box}
 	class:half={detent === 'half'}
+	class:nonmodal={!modal}
 	style:--drawer-top="{box?.top ?? 0}px"
 	style:--drawer-right="{box?.right ?? 0}px"
 	style:--drawer-bottom="{box?.bottom ?? 0}px"
@@ -165,7 +169,7 @@
 			class:half={detent === 'half'}
 			style:--drawer-drag-y="{dragY}px"
 			role="dialog"
-			aria-modal="true"
+			aria-modal={modal ? 'true' : 'false'}
 			aria-label={ariaLabel}
 			tabindex="-1"
 			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
@@ -212,6 +216,8 @@
 	}
 	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: none; backdrop-filter: brightness(0.78); -webkit-backdrop-filter: brightness(0.78); }
 	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+	.drawer-backdrop.nonmodal { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
+	.drawer-backdrop.nonmodal .drawer-motion { pointer-events: auto; }
 	.within .drawer-motion { max-width: none; padding: 0; }
 	.within .drawer-panel { max-height: calc(var(--drawer-h) * 0.82); }
 	.drawer-backdrop.follow-keyboard {
@@ -248,7 +254,9 @@
 		-webkit-backdrop-filter: var(--glass-blur);
 		box-shadow: 0 -18px 64px rgba(0, 0, 0, 0.32), var(--glass-rim);
 	}
-	.drawer-panel.dragging { transition: none; }
+	.drawer-panel.dragging {
+		transition: none;
+	}
 	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, env(safe-area-inset-top, 0px)))); }
 	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
@@ -276,7 +284,9 @@
 		touch-action: none;
 	}
 	.drawer-panel.half .drawer-drag-region { padding-bottom: var(--space-3); }
-	.drawer-drag-region:active { cursor: grabbing; }
+	.drawer-drag-region:active {
+		cursor: grabbing;
+	}
 	.drawer-grabber {
 		width: 36px;
 		height: 4px;

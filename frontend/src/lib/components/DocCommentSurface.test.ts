@@ -69,7 +69,9 @@ describe('DocCommentSurface suggestions', () => {
 		const drawer = host.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
 		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 open');
 		const menu = drawer.querySelector<HTMLButtonElement>('[data-drawer-filter]')!;
-		expect(menu.textContent).toBe('Open'); menu.click(); flushSync();
+		expect(menu.textContent?.trim()).toBe('Filter');
+		expect(menu.querySelector('svg')).not.toBeNull();
+		menu.click(); flushSync();
 		const resolved = [...drawer.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((button) => button.textContent === 'Resolved')!;
 		resolved.click(); flushSync();
 		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 resolved');
@@ -209,10 +211,22 @@ describe('DocCommentSurface suggestions', () => {
 		[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Retry')!.click();
 		expect(onRetry).toHaveBeenCalledOnce();
 	});
-	it('does not turn a reply input click into text navigation', () => {
+	it('opens Reply for the selected card in a narrow canvas drawer', async () => {
+		const original = HTMLElement.prototype.scrollIntoView;
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		try {
+			render({ state: { kind: 'list' }, narrow: true, focusedId: suggestion.id, comments: [{ ...suggestion, replacement: null }] });
+			await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('.ct-input')).not.toBeNull());
+			expect(document.activeElement?.classList.contains('ct-input')).not.toBe(true);
+		} finally {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: original });
+		}
+	});
+	it('focuses Reply without turning input clicks into text navigation', async () => {
 		const onFocus = vi.fn();
 		render({ state: { kind: 'list' }, comments: [{ ...suggestion, replacement: null }], onFocus });
-		host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click(); flushSync();
+		host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click();
+		await vi.waitFor(() => expect(document.activeElement?.classList.contains('ct-input')).toBe(true));
 		host.querySelector<HTMLInputElement>('.ct-input')!.click();
 		expect(onFocus).not.toHaveBeenCalled();
 	});
