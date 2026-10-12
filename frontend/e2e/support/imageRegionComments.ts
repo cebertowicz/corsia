@@ -263,3 +263,26 @@ export async function postComment(page: Page, text: string) {
 export function newRevision(seeded: Seeded) {
 	fs.writeFileSync(seeded.imagePath, syntheticPng(NATURAL.width, NATURAL.height + 2));
 }
+
+/**
+ * Sends the open comments drawer's batch with Send now from the keyboard (R2: focus unchanged). Once the footer has gone,
+ * focus rests on the drawer's heading with its ring, still inside the drawer, and Escape then closes only the drawer:
+ * `remains`, on the canvas under it, stays. `name` shoots that rest in both themes. Returns the send request.
+ */
+export async function sendFromDrawerByKeyboard(page: Page, testInfo: TestInfo, remains: Locator, name?: string) {
+	const footer = page.locator('[data-doc-comments-drawer] [data-drawer-unsent]');
+	await footer.getByRole('button', { name: 'Send now', exact: true }).focus();
+	const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().includes('/api/doc-feedback/send'));
+	await page.keyboard.press('Enter');
+	const request = await sent;
+	await expect(footer).toHaveCount(0);
+	const home = page.locator('[data-doc-comments-drawer] [data-drawer-focus-home]');
+	await expect(home).toBeFocused();
+	expect(await home.evaluate((el) => el.matches(':focus-visible')), 'the heading shows its focus ring').toBe(true);
+	if (name) await shoot(page, testInfo, name, true);
+	await expect(home).toBeFocused();
+	await page.keyboard.press('Escape');
+	await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
+	await expect(remains).toBeVisible();
+	return request;
+}

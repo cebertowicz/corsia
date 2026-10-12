@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { fromStore, get, writable } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({
@@ -90,7 +90,7 @@ describe('DocCommentSurface suggestions', () => {
 		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-1');
 	});
 
-	it('ends the drawer in a Send now footer only while messages are not sent', () => {
+	it('ends the drawer in a Send now footer only while messages are not sent', async () => {
 		// The open document's one batch: the footer reads it and Send now is its own Send.
 		const feedback = new DocFeedback();
 		const send = vi.fn(async () => {});
@@ -117,9 +117,45 @@ describe('DocCommentSurface suggestions', () => {
 		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('1 message not sent yet · sending to the owner in 4 min');
 		expect(footer()!.querySelector('button')!.disabled).toBe(true);
 
-		feedback.sending = false;
+		// Sending from the keyboard: the footer leaves with focus in it, which lands on the drawer's heading, not the page.
+		feedback.sending = false; flushSync();
+		footer()!.querySelector('button')!.focus();
 		feedback.pendingCount = 0; flushSync();
 		expect(footer()).toBeNull();
+		await Promise.resolve();
+		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
+	});
+
+	it('keeps the drawer while an image opened from a card covers it, then gives that card focus back', async () => {
+		const covering = writable(false);
+		const live = fromStore(covering);
+		render({ state: { kind: 'list' }, comments: [suggestion, secondSuggestion], get covered() { return live.current; } });
+		await tick();
+		const card = host.querySelector<HTMLElement>('[data-comment-id="comment-2"]')!;
+		const control = card.querySelector<HTMLButtonElement>('button:not(:disabled)')!;
+		// A click on the card's text focuses nothing; what it opened from is still known.
+		card.click();
+		covering.set(true); flushSync();
+		expect(host.querySelector('[data-doc-comments-drawer]')).not.toBeNull();
+		// The image over the document held focus, and it went to the page as the image closed.
+		(document.activeElement as HTMLElement | null)?.blur();
+		expect(document.activeElement).toBe(document.body);
+		covering.set(false); flushSync();
+		await tick();
+		expect(document.activeElement).toBe(control);
+	});
+
+	it('leaves focus alone when the drawer is uncovered and nothing in it opened the image', async () => {
+		const covering = writable(false);
+		const live = fromStore(covering);
+		render({ state: { kind: 'list' }, comments: [suggestion], get covered() { return live.current; } });
+		// The drawer puts focus on its filter as it opens; the image was opened from outside it, which took focus.
+		await tick();
+		(document.activeElement as HTMLElement | null)?.blur();
+		covering.set(true); flushSync();
+		covering.set(false); flushSync();
+		await tick();
+		expect(document.activeElement).toBe(document.body);
 	});
 
 	it('closes a card that follows its text only once that comment is deleted', () => {

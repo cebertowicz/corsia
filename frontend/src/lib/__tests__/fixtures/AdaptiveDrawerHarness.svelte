@@ -1,7 +1,7 @@
 <script lang="ts">
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 
-	let { onClose, tall = false, fill = false, followKeyboard = false, modal = true, detent = 'full', callerControlled = false }: { onClose: () => void; tall?: boolean; fill?: boolean; followKeyboard?: boolean; modal?: boolean; detent?: 'full' | 'half'; callerControlled?: boolean } = $props();
+	let { onClose, tall = false, fill = false, followKeyboard = false, modal = true, detent = 'full', callerControlled = false, covered = false }: { onClose: () => void; tall?: boolean; fill?: boolean; followKeyboard?: boolean; modal?: boolean; detent?: 'full' | 'half'; callerControlled?: boolean; covered?: boolean } = $props();
 	let surfaceOpen = $state(false);
 	let drawerOpen = $state(false);
 
@@ -33,7 +33,7 @@
 		</AdaptiveDrawer>
 	{/if}
 {:else}
-	<AdaptiveDrawer ariaLabel="Focused action" {onClose} {fill} {followKeyboard} {modal} {detent}>
+	<AdaptiveDrawer ariaLabel="Focused action" {onClose} {fill} {followKeyboard} {modal} {detent} {covered}>
 		<button type="button" data-drawer-autofocus>Primary action</button>
 		{#if tall}
 			<div class="tall-content">Long content</div>

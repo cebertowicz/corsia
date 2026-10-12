@@ -9,7 +9,8 @@
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { toastClearance } from '$lib/stores/toastClearance';
-	import { releaseSheetDrag, sheetFly } from '$lib/sheetMotion';
+	import { sheetFly } from '$lib/sheetMotion';
+	import { createSheetDrag } from '$lib/sheetDrag.svelte';
 
 	let {
 		ariaLabel,
@@ -30,6 +31,7 @@
 		onDetent,
 		open = true,
 		onClosed = () => {},
+		covered = false,
 	}: {
 		ariaLabel: string;
 		/**
@@ -68,6 +70,11 @@
 		open?: boolean;
 		/** Runs after the drawer's 260ms local outro completes. */
 		onClosed?: () => void;
+		/**
+		 * Something opened from the drawer covers what it belongs to (an image over its document): the drawer stays open
+		 * underneath, its place kept, but out of sight and reach, with no scrim over what covers it, until uncovered.
+		 */
+		covered?: boolean;
 	} = $props();
 
 	let box = $state<ColumnBox | null>(null);
@@ -76,12 +83,12 @@
 		return trackColumnBox(within, (next) => { box = next; });
 	});
 	let panel = $state<HTMLElement | null>(null);
-	let dragY = $state(0);
-	let dragging = $state(false);
-	let dragPointer: number | null = null;
-	let dragStartY = 0;
-	let dragStartedAt = 0;
-	let dragRaw = 0;
+	const drag = createSheetDrag({
+		detent: () => detent,
+		height: () => panel?.clientHeight ?? 480,
+		onExpand: () => onDetent?.('full'),
+		onDismiss: () => onClose(),
+	});
 	let stopToastClearance: (() => void) | undefined;
 
 	const flyParams = $derived(sheetFly($prefersReducedMotion));
@@ -93,34 +100,6 @@
 
 	function onBackdrop(event: MouseEvent): void {
 		if (modal && detent !== 'half' && event.target === event.currentTarget) onClose();
-	}
-
-	function startDrag(event: PointerEvent): void {
-		if (event.button !== 0) return;
-		const handle = event.currentTarget as HTMLElement;
-		dragPointer = event.pointerId;
-		dragStartY = event.clientY;
-		dragStartedAt = performance.now();
-		dragY = 0;
-		dragRaw = 0;
-		dragging = true;
-		handle.setPointerCapture?.(event.pointerId);
-	}
-
-	function moveDrag(event: PointerEvent): void {
-		if (!dragging || dragPointer !== event.pointerId) return;
-		dragRaw = event.clientY - dragStartY;
-		dragY = Math.max(0, dragRaw);
-	}
-
-	function finishDrag(event: PointerEvent): void {
-		if (!dragging || dragPointer !== event.pointerId) return;
-		const release = releaseSheetDrag({ detent, released: event.type === 'pointerup', raw: dragRaw, elapsed: performance.now() - dragStartedAt, height: panel?.clientHeight ?? 480 });
-		dragging = false;
-		dragPointer = null;
-		if (release === 'expand') onDetent?.('full');
-		else if (release === 'dismiss') onClose();
-		else dragY = 0;
 	}
 
 	function restingViewportBottomOccupancy(node: HTMLElement): number {
@@ -170,6 +149,8 @@
 	class:within={!!box}
 	class:half={detent === 'half'}
 	class:nonmodal={!modal || detent === 'half'}
+	class:covered
+	inert={covered}
 	style:--drawer-top="{box?.top ?? 0}px"
 	style:--drawer-right="{box?.right ?? 0}px"
 	style:--drawer-bottom="{box?.bottom ?? 0}px"
@@ -186,25 +167,25 @@
 		<div
 			bind:this={panel}
 			class="drawer-panel"
-			class:dragging
+			class:dragging={drag.dragging}
 			class:opaque
 			class:half={detent === 'half'}
-			style:--drawer-drag-y="{dragY}px"
+			style:--drawer-drag-y="{drag.y}px"
 			role="dialog"
 			aria-modal={modal && detent !== 'half' ? 'true' : 'false'}
 			aria-label={ariaLabel}
 			tabindex="-1"
 			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
-			use:settleHeight={{ enabled: open && !dragging, reduced: $prefersReducedMotion }}
+			use:settleHeight={{ enabled: open && !drag.dragging, reduced: $prefersReducedMotion }}
 		>
 			<div class="drawer-chrome">
 				<div
 					class="drawer-drag-region"
 					aria-hidden="true"
-					onpointerdown={startDrag}
-					onpointermove={moveDrag}
-					onpointerup={finishDrag}
-					onpointercancel={finishDrag}
+					onpointerdown={drag.start}
+					onpointermove={drag.move}
+					onpointerup={drag.finish}
+					onpointercancel={drag.finish}
 				>
 					<span class="drawer-grabber"></span>
 				</div>
@@ -242,6 +223,7 @@
 	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-backdrop.nonmodal { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
 	.drawer-backdrop.nonmodal .drawer-motion { pointer-events: auto; }
+	.drawer-backdrop.covered { visibility: hidden; }
 	.within .drawer-motion { max-width: none; padding: 0; }
 	.within .drawer-panel { max-height: calc(var(--drawer-h) * 0.82); }
 	.drawer-backdrop.follow-keyboard {

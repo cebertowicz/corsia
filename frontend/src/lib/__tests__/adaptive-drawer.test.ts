@@ -100,6 +100,22 @@ describe("AdaptiveDrawer", () => {
     expect(dialog?.getAttribute("aria-modal")).toBe("false");
   });
 
+  it("stays open but hidden and out of reach while something opened from it covers it", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
+    await settle();
+    const uncovered = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+    expect(uncovered.classList.contains("covered")).toBe(false);
+    expect(uncovered.inert).toBeFalsy();
+    unmount(component);
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn(), covered: true } });
+    await settle();
+    // Still mounted, so its scroll and place are kept for when it is uncovered.
+    const covered = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+    expect(covered.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(covered.classList.contains("covered")).toBe(true);
+    expect(covered.inert).toBe(true);
+  });
+
   it("calls onClosed once after the local outro", async () => {
     const closed = vi.fn();
     component = mount(AdaptiveDrawerHarness, {

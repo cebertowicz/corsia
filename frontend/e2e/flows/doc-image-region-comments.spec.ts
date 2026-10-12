@@ -3,7 +3,7 @@ import path from 'node:path';
 import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
-import { drag, shoot } from '../support/imageRegionComments';
+import { drag, sendFromDrawerByKeyboard, shoot } from '../support/imageRegionComments';
 
 // Comments on parts of an image inside a document (DCOL-FR13.3, 13.5, 13.6, 13.12): the viewer over the document,
 // the margin marker and drawer group back in it, and the one feedback batch both show and send.
@@ -72,10 +72,50 @@ async function backToDocumentDrawer(page: Page) {
 	await docComments(page).click();
 	await expect(footer(page)).toBeVisible();
 }
-/** The document's comments drawer closed with its own Close button (open over the viewer, its scrim takes the viewer's taps). */
+/** The document's comments drawer closed with its own Close button. */
 async function closeDocumentDrawer(page: Page) {
 	await drawer(page).getByRole('button', { name: 'Close comments', exact: true }).click();
 	await expect(drawer(page)).toHaveCount(0);
+}
+/** The document drawer's list, which keeps its own scroll. */
+const drawerList = (page: Page) => page.locator('[data-doc-comments-drawer] .drawer-comments');
+/**
+ * J3 from the drawer: a card opens the viewer at its tag, over the document and the drawer, which stays open beneath
+ * it out of sight, with no scrim over the viewer, so a tap on Back reaches Back. Back, or Escape, returns to the
+ * document with the drawer where it was and that card focused. `name` shoots the viewer, then the document after.
+ */
+async function cardOpensViewerAndReturns(page: Page, testInfo: TestInfo, text: string, how: 'back' | 'escape', name: string) {
+	const card = drawer(page).locator('.ct').filter({ hasText: text });
+	await card.scrollIntoViewIfNeeded();
+	const scrolled = await drawerList(page).evaluate((list) => list.scrollTop);
+	await card.click();
+	await expect(overlay(page)).toBeVisible();
+	await expect(overlay(page).locator('[data-region-tag][aria-pressed="true"]:not([inert])')).toHaveCount(1);
+	await expect(page.locator('[data-doc-comments-drawer]')).toBeHidden();
+	await shoot(page, testInfo, `${name}-viewer`, true);
+	// Escape first closes the comment's own card in the viewer; on a phone its sheet pops its history entry afterwards.
+	const layer = () => page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
+	const open = await layer();
+	await page.keyboard.press('Escape');
+	if ((page.viewportSize()?.width ?? 1440) <= 768 && open !== null) await expect.poll(layer).not.toBe(open);
+	const back = bar(page).getByRole('button', { name: 'Back to walkthrough.md' });
+	const box = (await back.boundingBox())!;
+	const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label') ?? null, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+	expect(hit, 'a tap on Back reaches Back').toBe('Back to walkthrough.md');
+	if (how === 'back') await back.click();
+	else await page.keyboard.press('Escape');
+	await expect(overlay(page)).toHaveCount(0);
+	await expect(card).toBeVisible();
+	await expect.poll(() => card.evaluate((el) => el.contains(document.activeElement)), 'that card has focus').toBe(true);
+	expect(await drawerList(page).evaluate((list) => list.scrollTop), 'the drawer list is where it was').toBe(scrolled);
+	// The shell slides its panes back as the viewer leaves, and a sheet follows the document column frame by frame;
+	// the frame is taken once it is back over that column, not mid-slide.
+	await expect.poll(() => page.evaluate(() => {
+		const sheet = document.querySelector('[data-adaptive-drawer].within')?.getBoundingClientRect();
+		const column = document.querySelector('.leaf-body')?.getBoundingClientRect();
+		return !sheet || !column || (Math.abs(sheet.left - column.left) < 1 && Math.abs(sheet.right - column.right) < 1);
+	}), 'the drawer sits over the document column').toBe(true);
+	await shoot(page, testInfo, `${name}-back`, true);
 }
 const surface = (page: Page) => overlay(page).locator('[data-image-regions]');
 
@@ -265,24 +305,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(drawerThumb(page)).toBeVisible();
 		await expect(drawer(page).locator('[data-drawer-unsent]')).toContainText('1 message not sent yet');
 		await shoot(page, testInfo, 'doc-1440-06-drawer-image-group', true);
-		await card.click();
-		await expect(overlay(page)).toBeVisible();
-		await expect(tag(page, 1)).toHaveAttribute('aria-pressed', 'true');
-		await page.keyboard.press('Escape');
+		await cardOpensViewerAndReturns(page, testInfo, 'The header crowds the logo', 'back', 'doc-1440-06b-drawer-card');
 
-		// The document's drawer stays open over the viewer; Send now in its footer closes the document's batch, and
-		// nothing is left to send in either place.
-		await expect(viewerSend(page)).toHaveCount(0);
+		// Send now in the drawer's footer closes the document's batch, and nothing is left to send in either place.
 		await expect(footerSend(page)).toBeInViewport({ ratio: 1 });
-		const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().includes(`/api/doc-feedback/send`));
-		await footerSend(page).click();
-		const body = (await sent).postDataJSON() as { artifact_id?: string } | null;
+		const sent = await sendFromDrawerByKeyboard(page, testInfo, docImage(page), 'doc-1440-06c-drawer-sent-focus');
+		const body = sent.postDataJSON() as { artifact_id?: string } | null;
 		if (body?.artifact_id) expect(body.artifact_id).toBe(seeded.artifactId);
-		// The footer goes; back in the document, its row says what was sent.
-		await expect(footer(page)).toHaveCount(0);
-		await closeDocumentDrawer(page);
-		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
-		await expect(overlay(page)).toHaveCount(0);
+		// Back in the document, its row says what was sent.
 		await expect(docDelivery(page)).toContainText(/1 comment sent/);
 		await saveEvidenceScreenshot(page, testInfo, 'doc-1440-07-drawer-sent-confirmed-dark', { fullPage: false });
 		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
@@ -326,14 +356,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(drawerThumb(page)).toBeVisible();
 		await expect(drawer(page).locator('[data-drawer-unsent]')).toContainText('1 message not sent yet');
 		await shoot(page, testInfo, 'doc-393-05-drawer-image-group', true);
+		await cardOpensViewerAndReturns(page, testInfo, 'Tap target too small', 'escape', 'doc-393-05b-drawer-card');
 
 		// Send now in the footer, whole inside the screen, sends the batch; the footer goes. (Its 44 px target under a
 		// coarse pointer is doc-send-on-close's phone case.)
 		await expect(footerSend(page)).toBeInViewport({ ratio: 1 });
-		await footerSend(page).click();
-		await expect(footer(page)).toHaveCount(0);
+		await sendFromDrawerByKeyboard(page, testInfo, docImage(page), 'doc-393-05c-drawer-sent-focus');
 		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
-		await shoot(page, testInfo, 'doc-393-06-drawer-sent', true);
+		await shoot(page, testInfo, 'doc-393-06-document-sent', true);
 	});
 
 	for (const width of [1440, 393]) test(`many comments on two images: tags in the viewer, a marker per image, a drawer group per image (${width})`, async ({ page, request }, testInfo) => {
@@ -379,6 +409,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		// The frame is named "scrolled": the list has actually moved, with the first group's thumbnail above the fold.
 		await expect.poll(() => drawer(page).locator('.drawer-comments').evaluate((list) => list.scrollTop), 'the drawer list scrolled').toBeGreaterThan(0);
 		await shoot(page, testInfo, `doc-${width}-many-04-drawer-scrolled`, true);
+		// From the scrolled drawer a card opens its image, and the way back (Escape here, Back in the single-image journey) finds the drawer where it was.
+		await cardOpensViewerAndReturns(page, testInfo, 'Save should be primary', width > 768 ? 'escape' : 'back', `doc-${width}-many-05-scrolled-card`);
 	});
 
 	for (const width of [1440, 393]) test(`the document drawer's footer shows the sending countdown, and a batch not delivered with Retry (${width})`, async ({ page, request }, testInfo) => {
