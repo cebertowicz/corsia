@@ -258,6 +258,7 @@ class GrepTool(Tool):
         source = SourceLines()
         counts: dict[str, int] = {}
         content_result_count = 0
+        kind = bound_path_kind(search_path)
 
         def process(relative: Path, size: int, content: str) -> None:
             nonlocal content_result_count
@@ -285,7 +286,7 @@ class GrepTool(Tool):
                         break
                     separator = ":" if regex.search(lines[index]) else "-"
                     emitted.append(GrepLine(
-                        f"{rel}{separator}{index + 1}{separator}", lines[index], index + 1,
+                        f"{'' if kind == 'file' else rel + separator}{index + 1}{separator}", lines[index], index + 1,
                     ))
                     content_result_count += 1
             results.extend(emitted)
@@ -294,7 +295,6 @@ class GrepTool(Tool):
             ))
 
         scope = _grep_scope(search_path, current_thread_id, all_threads)
-        kind = bound_path_kind(search_path)
         if kind == "file":
             if keep_path(search_path, current_thread_id, all_threads):
                 with open_bound_text(search_path) as (handle, file_stat):
@@ -392,7 +392,7 @@ class GrepTool(Tool):
                     files_matched.add(rel)
 
                     if output_mode == "content":
-                        emitted.append(GrepLine(f"{rel}:{i}: ", line, i))
+                        emitted.append(GrepLine(f"{i}:" if fpath == search_dir else f"{rel}:{i}: ", line, i))
                         if len(results) + len(emitted) >= max_results:
                             break
             faithful = source.substitute(resolved_path.suffix, content, emitted)

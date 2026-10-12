@@ -188,7 +188,7 @@ def _mode_arguments(output_mode: str, case_insensitive: bool, context: int) -> l
     elif output_mode == "count":
         arguments = ["--count"]
     else:
-        arguments = ["--null", "--line-number", *(["-C", str(context)] if context > 0 else [])]
+        arguments = ["--null", "--line-number", "--with-filename", *(["-C", str(context)] if context > 0 else [])]
     return [*arguments, *(["-i"] if case_insensitive else [])]
 
 
@@ -270,6 +270,7 @@ def _content_lines(
     groups and carries no path.
     """
     prefix = f"{search_dir}/"
+    direct_file = search_dir.is_file()
     parsed: list[tuple[str | None, GrepLine]] = []
     for line in output.split("\n"):
         path, nul, rest = line.partition("\0")
@@ -279,12 +280,15 @@ def _content_lines(
         elif nul and match is not None:
             if not keep_path(Path(path), scope.current_thread_id, scope.all_threads):
                 continue
-            display = path.removeprefix(prefix)
             separator = match.group("separator")
+            number = match.group("number")
+            line_prefix = (
+                f"{number}{separator}"
+                if direct_file
+                else f"{path.removeprefix(prefix)}{separator}{number}{separator}"
+            )
             parsed.append((path, GrepLine(
-                f"{display}{separator}{match.group('number')}{separator}",
-                rest[match.end():],
-                int(match.group("number")),
+                line_prefix, rest[match.end():], int(number),
             )))
         elif line:
             parsed.append((None, GrepLine("", line)))
