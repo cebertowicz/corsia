@@ -56,6 +56,60 @@ afterEach(() => {
 });
 
 describe('MessageList provider-pending apply-now region', () => {
+	describe('in Focus', () => {
+		beforeEach(() => {
+			coreSettings.set({ features: { focus_mode: true } } as any);
+		});
+
+		it('shows a waiting human message', () => {
+			messages.set([pendingInput({ id: 'waiting-human' })]);
+			renderList();
+
+			expect(rowIds(host.querySelector('.pending-input-region')!)).toEqual(['waiting-human']);
+		});
+
+		it('hides a waiting agent send', () => {
+			messages.set([pendingInput({ id: 'waiting-agent-send', metadata: { sender_kind: 'agent' } })]);
+			renderList();
+
+			expect(host.querySelector('.pending-input-region')).toBeNull();
+			expect(host.querySelector('[data-message-id="waiting-agent-send"]')).toBeNull();
+		});
+
+		it('hides a waiting plan or system notice', () => {
+			messages.set([{
+				id: 'waiting-plan-notice', thread_id: THREAD_ID, role: 'system',
+				content: '[EVENT: plan.changed]', created_at: '2026-10-11T10:00:00Z',
+				metadata: { type: 'context_event', event_type: 'plan.changed', event_disposition: 'passive' },
+				delivery_state: 'queued', delivery_revision: 1,
+			}]);
+			renderList();
+
+			expect(host.querySelector('.pending-input-region')).toBeNull();
+			expect(host.querySelector('[data-message-id="waiting-plan-notice"]')).toBeNull();
+		});
+
+		it('shows a retry wake as one retry line', () => {
+			messages.set([{
+				id: 'retry-wake', thread_id: THREAD_ID, role: 'system',
+				content: 'Retry this wake', created_at: '2026-10-11T10:00:00Z',
+				metadata: { type: 'context_event', event_disposition: 'wake', summary: 'Retry this wake' },
+				delivery_state: 'failed', delivery_revision: 1,
+			}]);
+			renderList();
+
+			expect(host.querySelectorAll('[data-wake-retry]')).toHaveLength(1);
+			expect(host.querySelectorAll('[data-message-id="retry-wake"]')).toHaveLength(0);
+		});
+	});
+
+	it('keeps waiting agent sends in the pending region when Focus is off', () => {
+		messages.set([pendingInput({ id: 'waiting-agent-send', metadata: { sender_kind: 'agent' } })]);
+		renderList();
+
+		expect(rowIds(host.querySelector('.pending-input-region')!)).toEqual(['waiting-agent-send']);
+	});
+
 	it('moves an unreceipted optimistic echo into the transcript when its turn ends', () => {
 		messages.set([
 			{
@@ -330,6 +384,15 @@ describe('MessageList provider-pending apply-now region', () => {
 		expect(host.querySelector('.delivery-status')).toBeNull();
 	});
 });
+
+function pendingInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		id: 'waiting-human', thread_id: THREAD_ID, role: 'user',
+		content: 'waiting input', created_at: '2026-10-11T10:00:00Z',
+		metadata: { input_id: 'input-1' }, delivery_state: 'queued', delivery_revision: 1,
+		...overrides,
+	};
+}
 
 function queuedInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {

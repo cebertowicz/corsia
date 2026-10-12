@@ -11,7 +11,9 @@
 		onSent: () => void; onHide: () => void; restoreFocus: () => void;
 	} = $props();
 	let content = $state<HTMLElement>();
-	function close() { onHide(); restoreFocus(); }
+	let drawerOpen = $state(true);
+	function close() { drawerOpen = false; }
+	function finishClose() { onHide(); restoreFocus(); }
 	$effect(() => { void tick().then(() => content?.querySelector<HTMLElement>('[data-review-autofocus]')?.focus()); });
 </script>
 
@@ -23,7 +25,7 @@
 	</section>
 {/snippet}
 {#if narrow}
-	<AdaptiveDrawer fill ariaLabel="Document reviews" heading="Request review" doneLabel="Close" onClose={close} initialFocusSelector="[data-review-autofocus]">{@render body()}</AdaptiveDrawer>
+	<AdaptiveDrawer fill ariaLabel="Document reviews" heading="Request review" doneLabel="Close" open={drawerOpen} onClose={close} onClosed={finishClose} initialFocusSelector="[data-review-autofocus]">{@render body()}</AdaptiveDrawer>
 {:else}
 	<Popover fill {anchor} open={true} onClose={onHide} {restoreFocus} placement="bottom">{@render body()}</Popover>
 {/if}

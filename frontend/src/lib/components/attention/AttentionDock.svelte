@@ -272,10 +272,12 @@
 				</span>
 			</button>
 			</div>
-		{:else if current.renderer === 'decision'}
+		{/if}
+		{#if current.renderer === 'decision'}
 			{#key current.external_id}
 				<AdaptiveDrawer
 					ariaLabel={`Decision — ${label(current)}`}
+					open={showChip}
 					onClose={close}
 				>
 					<!-- No chrome heading: the decision's own header already carries a
@@ -288,7 +290,7 @@
 					/>
 				</AdaptiveDrawer>
 			{/key}
-		{:else}
+		{:else if showChip}
 			{#key current.external_id}
 				<ExternalReviewRow
 					review={current.detail as ExternalReviewDetail}

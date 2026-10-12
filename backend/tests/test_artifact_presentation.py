@@ -12,6 +12,7 @@ def test_known_core_types_resolve_expected_capability():
         ("workspace", "code"): presentation.CAPABILITY_LEAF_PACKAGE,
         ("workspace", "skill"): presentation.CAPABILITY_LEAF_PACKAGE,
         ("workspace", "image"): presentation.CAPABILITY_LEAF_PACKAGE,
+        ("upload", "image"): presentation.CAPABILITY_LEAF_PACKAGE,
         ("upload", "upload"): presentation.CAPABILITY_DOWNLOAD,
         ("github", "pull-request"): presentation.CAPABILITY_EXTERNAL_LINK,
     }
@@ -59,3 +60,11 @@ def test_claude_code_session_and_codex_thread_are_non_pane_types():
 def test_workspace_image_descriptor_is_labelled_and_iconned():
     descriptor = presentation.resolve_descriptor("workspace", "image")
     assert (descriptor.label, descriptor.icon) == ("Image", "image")
+
+
+def test_upload_image_descriptor_is_labelled_iconned_and_openable():
+    descriptor = presentation.resolve_descriptor("upload", "image")
+
+    assert (descriptor.label, descriptor.icon, descriptor.capability) == (
+        "Image", "image", presentation.CAPABILITY_LEAF_PACKAGE,
+    )

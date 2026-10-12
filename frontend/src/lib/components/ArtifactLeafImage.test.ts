@@ -61,7 +61,7 @@ beforeEach(() => {
 		exists: true, path: null, revision: 'r-image', media_type: 'image/png', writable: false, artifact_id: 'art-1',
 	});
 	mocks.fetchReviewBar.mockReset().mockResolvedValue({
-		ask_raised: true, ask_reason: 'Is this the right diagram?', ask_raised_at: '2026-10-10T10:00:00',
+		ask_raised: true, hold_ids: ['h1'], ask_reason: 'Is this the right diagram?', ask_raised_at: '2026-10-10T10:00:00',
 		asker: { id: 'a1', name: 'Docs agent' }, other_askers: [], other_asks: [], other_request_count: 0,
 		round_feedback_count: 0, round_feedback_counts: { comments: 0, suggestions: 0, edits: 0 },
 	});

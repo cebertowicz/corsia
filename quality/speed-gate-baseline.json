@@ -18,7 +18,7 @@
     "/api/threads/{thread_id}/context-snapshot/next-turn"
   ],
   "progress_every": 100,
-  "reason": "Counter keeps counting when the application sets its own progress handler: the three routes that replace or clear it no longer drop to zero steps; recorded from the hosted artifact of the same tree",
+  "reason": "Hosted speed-gate run 38217142983 re-recorded /api/measurement/agents and /api/measurement/series.",
   "routes": {
     "/api/agents": {
       "bytes": 221,
@@ -106,9 +106,9 @@
       "steps": 0
     },
     "/api/measurement/agents": {
-      "bytes": 68990,
-      "statements": 55,
-      "steps": 3363200
+      "bytes": 68825,
+      "statements": 56,
+      "steps": 2042900
     },
     "/api/measurement/cost": {
       "bytes": 1115,
@@ -136,14 +136,14 @@
       "steps": 5151600
     },
     "/api/measurement/series": {
-      "bytes": 49740,
-      "statements": 32,
-      "steps": 7397500
+      "bytes": 49645,
+      "statements": 33,
+      "steps": 3249000
     },
     "/api/measurement/series/index": {
       "bytes": 6514,
-      "statements": 4,
-      "steps": 899200
+      "statements": 5,
+      "steps": 909000
     },
     "/api/measurement/where-to-look": {
       "bytes": 276,
@@ -276,7 +276,7 @@
       "steps": 0
     },
     "/api/system/update-status": {
-      "bytes": 238,
+      "bytes": 185,
       "statements": 1,
       "steps": 0
     },
@@ -341,7 +341,7 @@
       "steps": 0
     },
     "/api/version": {
-      "bytes": 662,
+      "bytes": 766,
       "statements": 0,
       "steps": 0
     }

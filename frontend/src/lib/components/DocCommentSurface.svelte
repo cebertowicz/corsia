@@ -70,6 +70,44 @@
 	}
 	let filter = $state<'all' | 'open' | 'resolved'>('all');
 	let drawer = $state<HTMLElement>();
+	let mobileDrawerOpen = $state(false);
+	let mobileCloseAction = $state<(() => void) | null>(null);
+	let closingMobileState = $state<SurfaceState>(null);
+	let closingMobileDraft = $state<{ text: string; body?: string; label?: string } | null>(null);
+	const renderedMobileState = $derived(closingMobileState ?? surfaceState);
+	const renderedMobileDraft = $derived(closingMobileDraft ?? draft);
+	$effect(() => {
+		if (surfaceState && narrow) {
+			closingMobileState = null;
+			closingMobileDraft = null;
+			mobileDrawerOpen = true;
+		}
+	});
+	function closeMobileDrawer(action: () => void = onClose): void {
+		mobileCloseAction = action;
+		mobileDrawerOpen = false;
+	}
+	function closeMobileSurface(): void {
+		if (narrow) closeMobileDrawer();
+		else onClose();
+	}
+	function cancelMobileDraft(): void {
+		const action = onCancelDraft ?? onClose;
+		if (!narrow) { action(); return; }
+		// Cancel commits state immediately, but the captured content owns the local outro.
+		closingMobileState = surfaceState;
+		closingMobileDraft = draft;
+		mobileCloseAction = null;
+		mobileDrawerOpen = false;
+		action();
+	}
+	function finishMobileClose(): void {
+		const action = mobileCloseAction;
+		mobileCloseAction = null;
+		closingMobileState = null;
+		closingMobileDraft = null;
+		action?.();
+	}
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const picks = $derived(image?.picks ?? 0);
@@ -252,7 +290,7 @@
 {/snippet}
 
 {#snippet content()}
-	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} label={draft.label} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={onCancelDraft ?? onClose} />
+	{#if renderedMobileState?.kind === 'draft' && renderedMobileDraft}<CommentComposer quote={renderedMobileDraft.text} label={renderedMobileDraft.label} body={renderedMobileDraft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={cancelMobileDraft} />
 	{:else}
 		{#if !readOnly && surfaceState?.kind !== 'thread'}
 			<div class="suggestion-status">
@@ -267,8 +305,8 @@
 	{/if}
 {/snippet}
 
-{#if surfaceState}
-	{#if surfaceState.kind === 'list'}
+{#if surfaceState || closingMobileState}
+	{#if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>
 			<div class="drawer-heading"><h2>Comments <span>{comments.length}</span></h2><Button size="sm" variant="ghost" onclick={closeDrawer}>Done</Button></div>
 			<div class="comment-filters" role="group" aria-label="Filter comments">
@@ -285,8 +323,8 @@
 				{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
 			</div>
 		</section>
-	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>
-	{:else}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+	{:else if narrow && renderedMobileState}<AdaptiveDrawer ariaLabel="Document comments" heading={renderedMobileState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}>{@render content()}</AdaptiveDrawer>
+	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>

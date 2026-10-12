@@ -9,12 +9,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-#: What a thread is told when a plan result it did not cause reaches it. The
-#: ask-answer wake carries ``next: null`` because an answer does not change
-#: selection; other wakes carry the same `next` block a close returns.
+#: What a thread is told when a plan result it did not cause reaches it. Each
+#: line is followed by the same `next` block a close returns.
 WAKE_TASK_CLOSED = "[CORSIA plan] {title} was closed by another actor."
 WAKE_WORK_SELECTED = "[CORSIA plan] {title} is now your current task."
-WAKE_ASK_RELEASED = "[CORSIA plan] {summary}\n{{\"next\": null}}"
+WAKE_ASK_RELEASED = "[CORSIA plan] {summary}"
+#: The ask-answer sentence the wake and its plan receipt share. A verdict or
+#: note the user did not give is left out rather than named as missing.
+ASK_ANSWERED = 'The user {done} "{ask}"'
+ASK_UNAVAILABLE = 'Your ask "{ask}" became unavailable'
+ASK_RELEASE_SUMMARY = '{event} for {kind} "{title}" (node {node_id}).{verdict}{note} Other holds remain: {other}.'
+ASK_RELEASE_VERDICT = " Verdict: {verdict}."
+ASK_RELEASE_NOTE = " User answer: {note}."
 WAKE_CHILD_RETURNED = (
     "[CORSIA plan] The work delegated for {title} has returned and awaits your verdict."
 )
@@ -120,6 +126,21 @@ PAUSED_LINE = (
 def paused_line(since: str) -> str:
     """Return the line opening an input stamped with its plan's pause time."""
     return PAUSED_LINE.format(since=since[:16].replace("T", " ") + " UTC") + "\n\n"
+
+
+def ask_release_summary(
+    *, ask: str, done: str, retired: bool, kind: str, title: str, node_id: str,
+    verdict, note, other_holds: bool,
+) -> str:
+    """Return the one-line answer to an ask, naming only the fields the user gave."""
+    note = " ".join(str(note).split()) if note else ""
+    return ASK_RELEASE_SUMMARY.format(
+        event=(ASK_UNAVAILABLE if retired else ASK_ANSWERED).format(done=done, ask=ask),
+        kind=kind, title=title, node_id=node_id,
+        verdict=ASK_RELEASE_VERDICT.format(verdict=str(verdict).replace("_", " ")) if verdict else "",
+        note=ASK_RELEASE_NOTE.format(note=note) if note else "",
+        other="yes" if other_holds else "no",
+    )
 
 
 #: One step's own friction crossed the threshold: named once, at the step

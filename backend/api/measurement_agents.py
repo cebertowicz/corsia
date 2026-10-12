@@ -107,10 +107,8 @@ def _metric_value(registry: dict[str, Any], metric: str, row: dict[str, Any],
             return None
         return float(row["tokens"]) / outcomes
     if metric == "active_hours_per_outcome":
-        # No human message to that agent that period: unknown attention, not zero.
-        if row.get("active_hours") is None:
-            return None
-        return float(row["active_hours"]) / outcomes
+        # A measured period with no presence on that agent is a true zero (``PresenceCoverage``).
+        return float(row.get("active_hours") or 0) / outcomes
     return float(outcomes)
 
 
@@ -194,12 +192,8 @@ def _pooled_value(registry: dict[str, Any], metric: str, trailing: list[dict[str
         raised = sum(int(row.get("raised") or 0) + int(row.get("user_holds") or 0) for row in present)
         return float(raised) / outcomes
     if metric == "active_hours_per_outcome":
-        # Pool only periods that recorded attention, never a zero for one that did not.
-        timed = [row for row in present if row.get("active_hours") is not None]
-        timed_outcomes = sum(_denominator(row) for row in timed)
-        if timed_outcomes < _minimum_n(registry, metric):
-            return None
-        return sum(float(row["active_hours"]) for row in timed) / timed_outcomes
+        # Every measured period pools; one with no presence adds its outcomes at zero time (``PresenceCoverage``).
+        return sum(float(row.get("active_hours") or 0) for row in present) / outcomes
     if any(_denominator(row) and not _measured_cost(row) for row in present):
         return None
     tokens = sum(float(row.get("tokens") or 0) for row in present if _measured_cost(row))
@@ -254,9 +248,8 @@ def _worsening(registry: dict[str, Any], rows: dict[str, dict[str, Any]], metric
 
 def _active_minutes(window: list[dict[str, Any] | None], measured: Callable[[str, str], bool]) -> float | None:
     """The window's recorded human attention in minutes, pooled the way minutes per outcome pools it."""
-    timed = [row for row in window if row and row.get("active_hours") is not None
-             and measured("active_hours_per_outcome", row["period"])]
-    return 60 * sum(float(row["active_hours"]) for row in timed) if timed else None
+    timed = [row for row in window if row and measured("active_hours_per_outcome", row["period"])]
+    return 60 * sum(float(row.get("active_hours") or 0) for row in timed) if timed else None
 
 
 def _aggregate_agent(registry: dict[str, Any], agent: dict[str, Any], grain: Grain, metric: str,

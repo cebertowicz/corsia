@@ -8,10 +8,19 @@ def notify(
 ) -> str | None:
     """Tell the parent its delegated work has returned and name the result to judge.
 
-    The wake carries the worker's steps, each one's state, the evidence it was
+    One wake per attachment epoch: the harvest that calls this fires once per
+    epoch. It carries the worker's steps, each one's state, the evidence it was
     put up for review with and the result artifacts that evidence names, so no
     second harvest is needed to learn the outcome. Bulky evidence stays where
-    it is; the parent retrieves it when verification needs it.
+    it is; the parent retrieves it when verification needs it. The wake is
+    bounded like every default read: at most ``RETURNED_STEPS_MAX`` steps in
+    plan order, titles and evidence cut to their byte caps, and a truthful
+    ``omitted_count`` for the rest -- the child's plan is one read away.
+
+    Returns the accepted input's id, or None when the parent could not take
+    it (no model, or nothing left to act on). The harvest is one unit with
+    this wake: a return the parent cannot take is not harvested yet, and
+    waits, whole, for a later sweep.
     """
     from plans import delegation_harvest, delegation_reply, plan_wake, review_evidence, service
     from plans.close_next_bounds import bounded
@@ -67,4 +76,4 @@ def _close_reason(db, leaf) -> str | None:
     """A closed step's whole content is why it closed; that is its evidence."""
     from plans import closure
 
-    return closure.close_reasons(db, [leaf]).get(str(leaf["id"]))
+    return closure.settled_reasons(db, [leaf]).get(str(leaf["id"]))

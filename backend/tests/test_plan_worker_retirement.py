@@ -13,11 +13,18 @@ retired this way, and an explicit new assignment brings a retired worker back.
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock
 
+import pytest
+
 from automation import schedules, watches
+from core import thread_lifecycle_trims
+from core.thread_lifecycle import run_retention_sweep
 from automation.continuation import runner
 from automation.continuation.sources.harvest import HarvestSource
 from infra.schema import SCHEMA_SQL
@@ -132,6 +139,54 @@ def test_the_verdict_retires_the_worker_and_keeps_its_evidence(monkeypatch):
         assert review_evidence.latest(
             leaf.id, requirements_revision=node.requirements_revision, db=db,
         )["evidence"] == "Write the tests done"
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("retention", ["ephemeral", "durable"])
+def test_settled_worker_trim_keeps_released_active_identity(
+    monkeypatch, tmp_path, retention,
+):
+    now = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    db = _db(monkeypatch)
+    try:
+        project = tmp_path / "projects" / "project"
+        project.mkdir(parents=True)
+        db.execute("UPDATE projects SET path=?", (str(project),))
+        unit = project / ".threads" / "worker" / "working" / "unit"
+        nested = unit / "a" / "b" / "result.md"
+        nested.parent.mkdir(parents=True)
+        nested.write_text("keep")
+        stale = project / ".threads" / "worker" / "working" / "stale"
+        stale.write_text("remove")
+        fresh = project / ".threads" / "worker" / "working" / "fresh"
+        fresh.write_text("keep")
+        for path, days in ((nested, 8), (stale, 8), (fresh, 6)):
+            os.utime(path, ((now - timedelta(days=days)).timestamp(),) * 2)
+        for directory in (nested.parent, nested.parent.parent, unit, stale.parent):
+            os.utime(directory, ((now - timedelta(days=8)).timestamp(),) * 2)
+        models.register_artifact(
+            integration="workspace", type="file", external_id=f"worker-{retention}",
+            parent_thread_id="worker", path=str(nested), retention=retention, db=db,
+        )
+        db.commit()
+        parent_plan, delegated, _plan, _leaves, _watch, _schedule = _returned(
+            db, "Write the tests",
+        )
+        submit_review_evidence(delegated.id, db=db, actor_id="parent")
+        _verdict(db, parent_plan.id, "accept", delegated.id)
+        db.commit()
+        monkeypatch.setattr(thread_lifecycle_trims, "_entry_times", lambda st: st.st_mtime)
+
+        report = run_retention_sweep(db, now=now, workspace=tmp_path)
+
+        assert report.working_files_trimmed == 1
+        assert nested.exists()
+        assert fresh.exists()
+        assert not stale.exists()
+        assert db.execute(
+            "SELECT state FROM artifact_identities WHERE external_id=?", (f"worker-{retention}",)
+        ).fetchone()["state"] == "active"
     finally:
         db.close()
 

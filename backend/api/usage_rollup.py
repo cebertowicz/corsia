@@ -13,9 +13,10 @@ The rollup is a cache that is never trusted past what it can prove:
   passes ``now - GRACE`` (``infra.usage_rollup_schema``). Newer rows, and any
   hour a late insert marked dirty, are grouped from the raw ledger by the same
   SQL, so a read is exact whatever the rollup's state.
-* Its rows are tagged with ``definition()``, a hash of the grouping SQL and the
-  schema version. A changed grouping makes every read raw until a refresh has
-  rebuilt it.
+* Its rows are tagged with ``definition()``, a hash of the grouping SQL and
+  grace rule. A changed grouping makes every read raw until a refresh has
+  rebuilt it; a migration that changes a rollup-grain ``llm_usage`` value calls
+  the schema-layer invalidator, which clears coverage through the same reset-and-refresh path.
 * The plan columns are not in the grain, so attributing a turn's usage to a
   plan node (the ledger's one runtime UPDATE) changes nothing it stores.
 
@@ -39,12 +40,14 @@ from typing import Any
 from core.measurement_scope import query_params
 from infra.database import get_db, write_transaction
 from infra.db_async import run_bulk, run_in_db
-from infra.schema import SCHEMA_VERSION
 from infra.usage_rollup_schema import GRACE, grace_limit, hour_key
 
 logger = logging.getLogger(__name__)
 
 CHUNK_ROWS = 5000
+# Clearing stale cache rows has no per-hour atomicity requirement, unlike building.
+# Keep its write transaction small without reducing productive build batches.
+CLEAR_CHUNK_ROWS = 500
 _STEP = timedelta(days=1)
 _HOUR = timedelta(hours=1)
 _HOUR_FORMAT = "%Y-%m-%dT%H"
@@ -88,7 +91,7 @@ def _grouped_select(minutes: bool = False) -> str:
 @functools.cache
 def definition() -> str:
     """Names the grouping that built the rows; any change to it rebuilds the rollup."""
-    text = f"{SCHEMA_VERSION}|{GRACE}|{_grouped_select()}|{_GROUP_BY}"
+    text = f"{GRACE}|{_grouped_select()}|{_GROUP_BY}"
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
@@ -253,7 +256,7 @@ def plan_step(db, now: datetime | None = None) -> tuple[list[functools.partial],
         return [functools.partial(_reset)], True
     through, limit = str(state[1]), grace_limit(now)
     if not through:
-        stale = db.execute("SELECT rowid FROM llm_usage_hourly LIMIT ?", (CHUNK_ROWS,)).fetchall()
+        stale = db.execute("SELECT rowid FROM llm_usage_hourly LIMIT ?", (CLEAR_CHUNK_ROWS,)).fetchall()
         if stale:
             return [functools.partial(_clear, stale=[tuple(row) for row in stale])], True
         first = db.execute("SELECT MIN(created_at) FROM llm_usage").fetchone()[0]

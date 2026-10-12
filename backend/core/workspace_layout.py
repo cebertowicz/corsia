@@ -106,6 +106,23 @@ def resolve_thread_uploads_root(scope_root: str | Path, thread_id: str) -> Path:
     return uploads
 
 
+def uploads_root_for_path(path: str | Path) -> Path | None:
+    """Return the canonical thread uploads root containing ``path``, if any."""
+    canonical = Path(path)
+    parts = canonical.parts
+    for index, component in enumerate(parts[:-2]):
+        if component != THREADS_DIR or parts[index + 2] != "uploads":
+            continue
+        try:
+            root = resolve_thread_uploads_root(
+                Path(*parts[:index]), parts[index + 1],
+            ).resolve(strict=False)
+        except ValueError:
+            return None
+        return root if canonical.is_relative_to(root) else None
+    return None
+
+
 def thread_tray_owners(path: str | Path) -> tuple[str, ...]:
     """Return every thread id whose private ``.threads/<id>/`` tray holds ``path``.
 

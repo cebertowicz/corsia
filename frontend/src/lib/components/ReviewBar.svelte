@@ -4,6 +4,7 @@
 	import { agentColor } from '$lib/docPresence';
 	import { on } from '$lib/ws';
 	import { createReviewBarState, DRAFT_OPEN } from '$lib/reviewBarState.svelte';
+	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
 
 	/**
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
@@ -22,6 +23,7 @@
 	const read = $derived(bar.read);
 	const asker = $derived(read?.asker?.name ?? 'An agent');
 	const ask = $derived(read?.ask_reason ?? '');
+	const holdIds = $derived(read?.hold_ids ?? []);
 	const others = $derived(read?.other_askers ?? []);
 	const round = $derived(read?.round_feedback_count ?? 0);
 	const pending = $derived(`${round} comment${round === 1 ? '' : 's'}`);
@@ -68,16 +70,29 @@
 		return true;
 	}
 	/** The answer closes the user's feedback batch on the server; the viewer's pending-batch state re-reads it. */
-	async function settle(sent: Promise<boolean>) {
-		if (await sent) { onAnswered?.(); return; }
-		// A send that came back without a receipt leaves focus on the control that sent it.
+	async function settle(verdict: 'approved' | 'approved_with_changes' | 'changes_requested') {
+		const targetId = artifactId;
+		if (!targetId) return;
+		const targetHoldIds = [...holdIds];
+		const outcome = await bar.answer(
+			verdict,
+			() => answerSubmitted(targetHoldIds, { state: verdict, feedback: bar.read?.round_feedback_counts }),
+			(sent) => answerSubmitted(targetHoldIds, { state: sent.verdict, feedback: sent.feedback_counts }),
+		);
+		if (outcome === 'sent') {
+			if (bar.artifactId === targetId) onAnswered?.();
+			return;
+		}
+		if (outcome === 'failed') answerSubmissionFailed(targetHoldIds);
+		if (outcome === 'ignored') return;
+		// A failed send that came back without a receipt leaves focus on the control that sent it.
 		await tick();
 		if (bar.phase === 'noting') noteInput?.focus();
 		else if (bar.phase === 'ask') approveButton?.focus();
 	}
 	function approve() {
 		if (round > 0 && blocked()) return;
-		void settle(bar.answer(round > 0 ? 'approved_with_changes' : 'approved'));
+		void settle(round > 0 ? 'approved_with_changes' : 'approved');
 	}
 	async function requestChanges() {
 		if (blocked()) return;
@@ -92,7 +107,7 @@
 	}
 	function sendNote() {
 		if (blocked()) return;
-		void settle(bar.answer('changes_requested'));
+		void settle('changes_requested');
 	}
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter') { event.preventDefault(); sendNote(); }

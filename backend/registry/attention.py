@@ -128,11 +128,13 @@ def list_raised(*, thread_id: str | None = None, db=None) -> list[dict[str, Any]
 def clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
-    db=None,
+    db=None, drives: list[str] | None = None,
 ) -> AttentionResult:
     """Clear attention through one of the public user/system outcomes.
 
     A review ``verdict`` (with its optional ``note``) rides only on ``answer``.
+    ``drives`` collects the threads this write gave a plan wake (an answered
+    ask's asker), for the caller to drive once the write has committed.
     """
     if outcome not in CLEAR_OUTCOMES:
         raise AttentionError(f"unknown clearing outcome {outcome!r}")
@@ -142,7 +144,7 @@ def clear_attention(
         raise AttentionError("a note needs a verdict")
     return _clear_attention(
         artifact_id, outcome=outcome, condition=condition, reason=reason,
-        verdict=verdict, note=note, db=db,
+        verdict=verdict, note=note, db=db, drives=drives,
     )
 
 
@@ -156,7 +158,7 @@ def retire_attention(artifact_id: str, *, db=None) -> AttentionResult:
 def _clear_attention(
     artifact_id: str, *, outcome: str, condition: dict | None = None,
     reason: str | None = None, verdict: str | None = None, note: str | None = None,
-    db=None,
+    db=None, drives: list[str] | None = None,
 ) -> AttentionResult:
     """Own the one atomic attention closeout for public clear and retirement.
 
@@ -165,7 +167,10 @@ def _clear_attention(
     archives the artifact or any subscription. ``defer`` records the concrete
     condition for S7 to arm; it does not arm a watch here.
     """
-    with write_transaction(db, scope="clear_attention") as _db:
+    from plans import public as plans_public
+
+    with write_transaction(db, scope="clear_attention") as _db, \
+            plans_public.collect_wake_recipients(_db, drives):
         row = _identity_row(artifact_id, _db)
         identity = _identity(row)
         record = AR.register_or_resolve(identity, db=_db)
@@ -198,8 +203,6 @@ def _clear_attention(
         # Attention owns every way an ask stops being raised. Plans owns what
         # that lifecycle means for a linked task; its public hook is a no-op for
         # ordinary artifacts and decisions, and ``defer`` keeps the hold.
-        from plans import public as plans_public
-
         plans_public.ask_cleared(
             str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
         )

@@ -189,6 +189,22 @@ def recipients(reconciled, *, causing_executor: str | None) -> tuple[str, ...]:
     )
 
 
+def selected_fact(db, reconciled, executor: str) -> dict:
+    """Return the handoff fact for the task a reconciliation gave ``executor``.
+
+    A write that wakes ``executor`` itself, as ``causing_executor``, stands in
+    for its work-selected wake, so it carries this beside its own ``next`` and
+    the task arrives with the same description either way (``handoff_brief``).
+    Empty when the reconciliation selected nothing for ``executor``.
+    """
+    from plans import handoff_brief
+
+    for node_id, selected in reconciled.selected:
+        if selected == executor:
+            return handoff_brief.fact(db, node_id, executor)
+    return {}
+
+
 def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
     """Return one wake's text: what happened, then the same facts a close returns."""
     from memory import node_start_recall

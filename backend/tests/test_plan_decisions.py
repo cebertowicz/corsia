@@ -697,7 +697,7 @@ def test_invalidate_clears_the_same_attention_and_closes_the_review_node(db):
     node = service._node_row(db, decision["node_id"])
     # A withdrawn question is not a failure: it closes, never red (#2589).
     assert node["state"] == "closed"
-    assert closure.close_reasons(db, [node]) == {node["id"]: "Decision withdrawn"}
+    assert closure.settled_reasons(db, [node]) == {node["id"]: "Decision withdrawn"}
     assert db.execute(
         "SELECT COUNT(*) FROM artifact_identities WHERE type='plan-decision'"
     ).fetchone()[0] == 1
