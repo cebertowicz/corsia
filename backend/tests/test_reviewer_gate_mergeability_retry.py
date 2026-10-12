@@ -163,6 +163,6 @@ class TestMergeabilityRetry:
             loop,
             1,
         )
-        assert task in gate_mod._PENDING_RETRIES
+        assert task in gate_mod._PENDING_BACKGROUND_EVALUATIONS
         task.finish()
-        assert task not in gate_mod._PENDING_RETRIES
+        assert task not in gate_mod._PENDING_BACKGROUND_EVALUATIONS

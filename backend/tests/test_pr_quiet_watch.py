@@ -1157,7 +1157,7 @@ async def test_missing_event_dispatches_one_non_blocking_canonical_gate(
     assert calls == [(REPO, H, number)], "the reviewer gate's process-local claim suppresses a second handoff"
 
     release.set()
-    await asyncio.gather(*list(reviewer_gate._PENDING_RETRIES))
+    await asyncio.gather(*list(reviewer_gate._PENDING_BACKGROUND_EVALUATIONS))
 
 
 @pytest.mark.asyncio
@@ -1254,7 +1254,7 @@ async def test_overdue_gate_preserves_the_canonical_already_reviewed_noop(isolat
     monkeypatch.setattr(reviewer_gate.github_reviewer_gate, "checks_green", checks_green)
 
     reviewer_gate.schedule_overdue_evaluation(REPO, H, 54, asyncio.get_running_loop())
-    await asyncio.gather(*list(reviewer_gate._PENDING_RETRIES))
+    await asyncio.gather(*list(reviewer_gate._PENDING_BACKGROUND_EVALUATIONS))
 
     checks_green.assert_not_called()
 

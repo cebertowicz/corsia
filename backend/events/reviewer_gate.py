@@ -14,7 +14,7 @@ from infra.product_events import emit_product_event
 
 
 MERGEABILITY_RETRY_DELAYS_S = (30.0, 90.0, 300.0)
-_PENDING_RETRIES: set[asyncio.Task[None]] = set()
+_PENDING_BACKGROUND_EVALUATIONS: set[asyncio.Task[None]] = set()
 
 
 def _run_reviewer(
@@ -330,8 +330,8 @@ def _dispatch_background_evaluation(
         _evaluate_review_gate,
         repo, head_sha, pr_number, internal_event, loop, retry_attempt,
     ))
-    _PENDING_RETRIES.add(task)
-    task.add_done_callback(_PENDING_RETRIES.discard)
+    _PENDING_BACKGROUND_EVALUATIONS.add(task)
+    task.add_done_callback(_PENDING_BACKGROUND_EVALUATIONS.discard)
     task.add_done_callback(partial(_log_background_evaluation_failure, pr_number, head_sha))
 
 
