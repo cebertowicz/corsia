@@ -397,7 +397,7 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
 });
 
-journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light']], async ({ page, request, info, mode, theme }) => {
+journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Review long ${mode} ${theme} Platform Reliability Engineering Operations Release Coordination Agent`);
 	const reason = 'Is the rollout plan right for every region before we promote it?';
 	raiseAsk(doc.threadId, doc.artifactId, reason);
@@ -405,6 +405,7 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await expectLayout(page, mode);
 	const line = bar(page).locator('.rb-line');
 	await expect(line).toContainText('Is the rollout plan right for every region');
+	await expectNameClearOfControls(page, doc.title);
 	await shot(page, 'long-name-collapsed', info);
 
 	// The integrated row expands its full ask below the tool line, keeping the header controls in place.
@@ -412,8 +413,29 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await line.click();
 	await expect(bar(page).locator('.rb-ask-full')).toHaveText(reason);
 	expect((await bar(page).boundingBox())!.height).toBeGreaterThan(collapsedHeight);
+	await expectNameClearOfControls(page, doc.title);
 	await shot(page, 'long-name-expanded', info);
 });
+
+/** The asker's name is cut in the middle with its last four characters kept, and its box stays off the header's controls. */
+async function expectNameClearOfControls(page: Page, title: string) {
+	const name = bar(page).locator('.rb-who .name');
+	await expect(name.locator('.name-tail')).toHaveText(title.slice(-4));
+	expect(await name.locator('.name-head').evaluate((el) => el.scrollWidth > el.clientWidth), 'the name is truncated, not wrapped or clipped').toBe(true);
+	const boxes = await page.evaluate(() => {
+		const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, label: (el.getAttribute('aria-label') ?? el.className ?? '').toString().slice(0, 40) }; };
+		return {
+			name: rect(document.querySelector('.rb-who')!),
+			// A touch control's 44px hit area spills a few px into the row below; the name is held clear of what is drawn (the 28px control).
+			controls: [...document.querySelectorAll('.document-header .presence-row, .document-tools button, .rb-chev')].map(rect).filter((r) => r.right > r.left).map((r) => { const mid = (r.top + r.bottom) / 2; return r.bottom - r.top > 28 ? { ...r, top: mid - 14, bottom: mid + 14 } : r; }),
+		};
+	});
+	expect(boxes.controls.length).toBeGreaterThan(0);
+	for (const control of boxes.controls) {
+		const apart = boxes.name.right <= control.left || control.right <= boxes.name.left || boxes.name.bottom <= control.top || control.bottom <= boxes.name.top;
+		expect(apart, `the name's box ${JSON.stringify(boxes.name)} intersects a header control ${JSON.stringify(control)}`).toBe(true);
+	}
+}
 
 
 /** At 1280 the open plan pane overlays the document instead of docking beside it, so the whole header (tools and both ask lines) ends before it rather than under it. */
