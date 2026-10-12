@@ -166,9 +166,9 @@
 						onToggle={toggleBoxMode}
 						onOpenList={image.ui.openList}
 					/>
-					<!-- The bar is narrow at any window size (a canvas panel beside the chat): Send is short here, read out in full. -->
+					<!-- The bar is narrow at any window size (a canvas panel beside the chat): it keeps the batch's Retry and undelivered status; Send lives in the drawer footer (RSR-5), as in the document row. -->
 					{#if feedback && !inDocument}
-						<DocFeedbackControls {feedback} compact />
+						<DocFeedbackControls {feedback} compact withSend={false} />
 					{/if}
 				{/if}
 			{/snippet}
@@ -220,6 +220,7 @@
 			target={null}
 			{artifactId}
 			readOnly={!canComment}
+			feedback={inDocument ? null : feedback}
 			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>
 	{/if}
