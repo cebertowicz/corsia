@@ -26,6 +26,12 @@ const RUNTIME_PROVIDED = new Set([
 	'--pane-overlay-inset',
 	// Set per-instance via Svelte `style:--x` or a parent inline style.
 	'--drawer-drag-y',
+	// AdaptiveDrawer's `within` sheet: the measured document column, written with `style:--drawer-*`.
+	'--drawer-top',
+	'--drawer-right',
+	'--drawer-bottom',
+	'--drawer-left',
+	'--drawer-h',
 	'--depth',
 	// The comment rail width: DocViewer's `style:--doc-rail` and the editor's rail, both from railWidth().
 	'--doc-rail',

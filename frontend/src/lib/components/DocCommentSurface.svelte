@@ -311,7 +311,7 @@
 {#snippet listBody()}
 	<div class="drawer-heading"><h2>Comments <span>{headerCount}</span></h2><div class="drawer-tools"><div class="filter-menu">
 		<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
-		{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments">{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}>{name}</button>{/each}</div>{/if}
+		{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments">{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
 	</div><IconButton ariaLabel="Close comments" variant="ghost" size="sm" onclick={closeDrawer}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status" role="status">Couldn't load comments. {load.error}<Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
@@ -336,7 +336,7 @@
 	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; min-width: 0; padding: var(--space-1) var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 	.canvas-comment-drawer.sheet { flex: 1; padding: 0; border-top: 0; }
 	@container doc-canvas (min-width: 900px) { .canvas-comment-drawer { border-top: 0; border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); } }
-	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 4px; }
+	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 0 var(--space-1) 4px; }
 	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-secondary); }
 	.drawer-heading h2 span { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; margin-left: 2px; }
 	/* The compact menu keeps the filter choices out of the thread list. */
@@ -345,7 +345,8 @@
 	.filter-button, .filter-popup button { min-height: var(--space-6); border: 0; border-radius: var(--radius-xs); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
 	.filter-button { display: inline-flex; align-items: center; gap: 4px; padding: 0 var(--space-2); }
 	.filter-popup { position: absolute; z-index: 2; right: 0; top: calc(100% + var(--space-1)); display: grid; min-width: 9rem; padding: var(--space-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); box-shadow: var(--shadow-chip); }
-	.filter-popup button { padding: 0 var(--space-2); text-align: left; }
+	.filter-popup button { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); text-align: left; }
+	.filter-check { display: inline-flex; flex: none; width: 12px; height: 12px; }
 	.filter-popup button[aria-checked="true"] { color: var(--accent); font-weight: var(--fw-semibold); }
 	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: 44px; } }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
@@ -353,9 +354,10 @@
 	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
 	.drawer-empty-action:hover { text-decoration: underline; }
 	/* Pinned under the list and contained by the drawer, opaque so cards never show through it. */
-	.drawer-unsent { flex: none; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
+	.drawer-unsent { container: drawer-footer / inline-size; flex: none; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
 	.drawer-unsent p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
-	.drawer-footer-owner { display: inline-block; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; }
+	/* A long owner name is cut only where the footer is too narrow to hold it on one line of the sentence. */
+	@container drawer-footer (max-width: 30rem) { .drawer-footer-owner { display: inline-block; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; } }
 	.drawer-unsent :global(.btn) { flex: none; }
 	@media (max-width: 420px) { .drawer-unsent { gap: var(--space-1); padding-inline: var(--space-2); } }
 	@media (pointer: coarse) { .drawer-unsent :global(.btn) { min-height: 44px; } }

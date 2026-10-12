@@ -66,13 +66,16 @@
 		let frame = 0;
 		const read = () => { const rect = within.getBoundingClientRect(); box = { top: rect.top, right: innerWidth - rect.right, bottom: innerHeight - rect.bottom, left: rect.left, height: rect.height }; };
 		const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(read); };
-		// Width changes are not the only way a document column moves: an adjacent pane
-		// can slide over it. Resize observes size; mutations and transition completion
-		// refresh the final position before the sheet is measured for interaction.
+		// A neighbouring pane resizes this column as it slides, which the observer sees; a move that
+		// keeps the column's size only shows when the pane's own layout transition ends, so listen for
+		// that on the shared container, ignoring transitions inside the column and non-layout ones.
+		const root = within.closest('main') ?? within.parentElement ?? within;
+		const settled = (event: TransitionEvent) => {
+			if (event.target instanceof Node && !within.contains(event.target) && /^(width|padding|margin|transform|left|right|inset)/.test(event.propertyName)) schedule();
+		};
 		read(); const observer = new ResizeObserver(schedule); observer.observe(within); addEventListener('resize', schedule);
-		const mutations = new MutationObserver(schedule); mutations.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class', 'style'] });
-		document.addEventListener('transitionend', schedule, true);
-		return () => { cancelAnimationFrame(frame); observer.disconnect(); mutations.disconnect(); removeEventListener('resize', schedule); document.removeEventListener('transitionend', schedule, true); };
+		root.addEventListener('transitionend', settled, true);
+		return () => { cancelAnimationFrame(frame); observer.disconnect(); removeEventListener('resize', schedule); root.removeEventListener('transitionend', settled, true); };
 	});
 	let panel = $state<HTMLElement | null>(null);
 	let dragY = $state(0);
