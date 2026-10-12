@@ -442,13 +442,14 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	expect(fit.listBottom, 'the list ends where the footer starts').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.lastCardBottom, 'scrolled to the end, the last card is above the footer').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.background, 'the footer is opaque --bg-secondary').toBe(fit.token);
-	// The drawer adds exactly its measured footer room, until the existing 36% canvas cap. Six cards make a lost list row visible.
+	// The existing cap owns the list; the measured pinned footer extends the drawer below it. Six cards make a lost list row visible.
 	const drawerCap = fit.docContentHeight * 0.36;
-	const expectedDrawer = Math.min(drawerCap, 260 + fit.footerHeight);
+	const preFooterDrawer = Math.min(drawerCap, 260);
+	const expectedDrawer = preFooterDrawer + fit.footerHeight;
 	const drawerChrome = fit.drawerHeight - fit.listHeight - fit.footerHeight;
 	expect(Number.parseFloat(fit.measuredFooter), 'the grid receives the measured footer height').toBeCloseTo(fit.footerHeight, 0);
-	expect(fit.drawerHeight, 'the footer grows the drawer only to its existing cap').toBeCloseTo(expectedDrawer, 0);
-	expect(fit.listHeight, 'six-thread list retains all room that the cap permits').toBeGreaterThanOrEqual(expectedDrawer - drawerChrome - fit.footerHeight - 1);
+	expect(fit.drawerHeight, 'the drawer adds the footer beneath its existing cap').toBeCloseTo(expectedDrawer, 0);
+	expect(fit.listHeight, 'six-thread list keeps its pre-footer height').toBeGreaterThanOrEqual(preFooterDrawer - drawerChrome - 1);
 	expect(await hitAtCentre(send), 'Send now is hit-testable').toBe(true);
 	if (mode === 'phone') expect((await send.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
 	await shot(page, 'unsent-footer', info);
