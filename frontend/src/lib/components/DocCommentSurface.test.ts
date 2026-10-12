@@ -519,4 +519,23 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		host.querySelector<HTMLButtonElement>('[data-comment-id="a"] .ct-num')!.click();
 		expect(onFocus).toHaveBeenCalledWith('a');
 	});
+
+	it('keeps a thread being replied to in the Open list when someone else resolves it, until the reply is cleared', async () => {
+		const plain = { ...suggestion, replacement: undefined };
+		const comments = writable([plain, { ...plain, id: 'comment-2', anchor: 'other text' }]);
+		const state = fromStore(comments);
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		render({ state: { kind: 'list' }, get comments() { return state.current; } });
+		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.reply')!.click();
+		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
+		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+		comments.set([{ ...plain, resolved: true }, { ...plain, id: 'comment-2', anchor: 'other text' }]); flushSync();
+		expect(host.querySelector('[data-comment-id="comment-1"]')).not.toBeNull();
+		expect(host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!.value).toBe('half a reply');
+		const cleared = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+		cleared.value = ''; cleared.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+		expect(host.querySelector('[data-comment-id="comment-1"]')).toBeNull();
+		expect(host.querySelector('[data-comment-id="comment-2"]')).not.toBeNull();
+	});
 });

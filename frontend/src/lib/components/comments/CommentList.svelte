@@ -5,7 +5,7 @@
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false }: {
+	let { comments, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}) }: {
 		comments: Comment[];
 		documentOrder?: boolean;
 		focusedId?: string | null;
@@ -35,9 +35,9 @@
 		showReply?: boolean;
 		/** A sheet owns the card scroller, so a shortened visual viewport keeps its reply field visible. */
 		keepReplyVisible?: boolean;
+		/** Replies being typed, by comment id; the caller owns them so they outlive this list (a filter switch rebuilds it). */
+		replyDrafts?: Record<string, string>;
 	} = $props();
-	// Replies being typed, kept here so a card that moves groups (its text changed, or it was resolved) keeps what was typed.
-	let replyDrafts = $state<Record<string, string>>({});
 	let heldOrder = $state<string[] | null>(null);
 	const ordered = $derived(heldOrder ? [...comments].sort((a, b) => {
 		const rank = (id: string) => { const index = heldOrder!.indexOf(id); return index < 0 ? Infinity : index; };
