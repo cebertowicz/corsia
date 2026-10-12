@@ -19,8 +19,8 @@ Physical effects are idempotent: completed cleanup is a no-op on the next sweep.
   when the current installed checkpoint covers them. This applies across ALL
   threads (agent/roster included); user/assistant text is untouched.
 - **working/ tmp trim** — remove stale ``.threads/{id}/working/`` entries whole,
-  tombstone owned temp identities. Settled temporary workers use a 1d TTL;
-  other archived threads retain their files until permanent purge.
+  tombstone owned temp identities. Settled temporary workers use the normal
+  TTL; other archived threads retain their files until permanent purge.
 
 The retention *state machine* excludes agent-enabled threads (the roster: conductor,
 design agents, …) — an idle agent must not be archived out of the live roster — and

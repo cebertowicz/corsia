@@ -276,10 +276,10 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
         (SETTLED_WORKER_REASON, SETTLED_WORKER_REASON),
     ).fetchall()
     active_identity_dirs = _active_identity_dirs(db)
+    cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()
     working_roots: dict[str, Path] = {}
     for r in rows:
         sid = _row_get(r, "id")
-        cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()
         thread_root = _thread_dir(
             db,
             sid,
