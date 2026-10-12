@@ -1,3 +1,4 @@
+import { replyField } from '../support/commentDrawer';
 import { expect, test } from '@playwright/test';
 import {
 	createComment,
@@ -32,7 +33,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			const jump = comments.getByRole('button', { name: `Go to text: ${quote}`, exact: true }).first();
 			await jump.click();
 			await expect(reader.locator('.cm-comment-focused').filter({ hasText: quote })).toBeInViewport();
-			const reply = comments.getByPlaceholder('Reply…').last();
+			const reply = await replyField(comments.locator('[data-comment-id]').filter({ hasText: `Reply ${stamp}` }));
 			await reply.fill(`draft ${stamp}`);
 			await expect(reply).toBeFocused();
 

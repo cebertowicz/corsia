@@ -326,7 +326,7 @@ for (const motion of MOTIONS) {
 		await expect(list).toBeVisible();
 		await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });
 		for (const marker of ['qx-a-code', 'qx-a-own', 'qx-a-cmt']) await clickLine(page, viewport, { marker, note: 'comments list open' });
-		await list.getByRole('button', { name: 'Done', exact: true }).click();
+		await list.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(list).toHaveCount(0);
 
 		await clickCommentedText(page, viewport, 'qx-a-own');

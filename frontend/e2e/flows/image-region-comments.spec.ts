@@ -82,7 +82,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await tag(page, 2).click();
 			const pointCard = page.locator('.ct').filter({ hasText: 'This icon reads as disabled' });
 			await expect(pointCard).toBeVisible();
-			await pointCard.locator('input[placeholder="Reply…"]').fill('Agreed, it needs more contrast');
+			await pointCard.getByPlaceholder('Reply…').fill('Agreed, it needs more contrast');
 			await pointCard.getByRole('button', { name: 'Send reply' }).click();
 			await expect(pointCard.getByText('Agreed, it needs more contrast')).toBeVisible();
 			await shoot(page, testInfo, '1440-06-reply', true);

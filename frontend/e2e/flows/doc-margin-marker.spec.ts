@@ -254,7 +254,7 @@ const historyLayer = (page: Page) => page.evaluate(() => (history.state as { bac
 async function closeSurface(page: Page, layerBefore?: number | null) {
 	await page.keyboard.press('Escape');
 	if (await page.locator('[data-doc-comments-drawer]').count()) {
-		await page.getByRole('button', { name: 'Done', exact: true }).click();
+		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 	}
 	await expect.poll(() => surfaceOpen(page).then((s) => s.cards.length + (s.drawer ? 1 : 0))).toBe(0);
 	// A phone's sheet pushes a history entry and pops it asynchronously; the next open waits for that pop, as a user's next tap would.
@@ -509,7 +509,7 @@ test.describe('@flow:doc-margin-marker', () => {
 			expect.soft(seen.points[0].hit, `drawer open: marker ${index} is reachable`).toBe(seen.ids);
 			expect.soft(seen.rect.left + seen.rect.width, `drawer open: marker ${index} stays in the rail`).toBeLessThanOrEqual(seen.content.left + rail + 0.5);
 		}
-		await page.getByRole('button', { name: 'Done', exact: true }).click();
+		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 
 		// Scroll and zoom each get a canvas of their own at that size from the start, as a reload would give, rather than

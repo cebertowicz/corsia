@@ -1,3 +1,4 @@
+import { showAllThreads } from '../support/commentDrawer';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
@@ -11,6 +12,7 @@ const commentsButton = (page: Page) => page.getByRole('button', { name: /^\d+ op
 async function openComments(page: Page, drawer: Locator) {
 	await commentsButton(page).click();
 	await expect(drawer).toBeVisible();
+	await showAllThreads(drawer);
 }
 
 /** A colour as the browser computes it, so a hex value and an rgb() value compare. */
