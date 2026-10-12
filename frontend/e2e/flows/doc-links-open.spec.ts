@@ -22,27 +22,35 @@ const DECISIONS = '# Decisions\n\nThe decisions record body.\n';
 const query = () => new URLSearchParams({ token: TEST_TOKEN }).toString();
 const link = (page: Page, text: string) => page.locator('.cm-md-link-open', { hasText: text });
 
-/** Both color schemes of the same state, one frame each. */
-async function shoot(page: Page, testInfo: Parameters<typeof saveEvidenceScreenshot>[1], name: string) {
+type Scheme = 'light' | 'dark';
+
+// Each run is one width in one color scheme, in its own context so its recording is the whole viewport.
+for (const width of [1440, 393]) {
+	const touch = width <= 768;
+	const height = touch ? 852 : 900;
 	for (const scheme of ['light', 'dark'] as const) {
-		await page.emulateMedia({ colorScheme: scheme });
-		await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
-		await saveEvidenceScreenshot(page, testInfo, `${name}-${scheme}`, { fullPage: false });
+		runFlow(width, height, touch, scheme);
 	}
 }
 
-// The follow-and-return is kept as a recording at each width.
-test.use({ video: 'on' });
-
-for (const width of [1440, 393]) {
-	const touch = width <= 768;
-	test.describe(`@flow:doc-links-open @surface:documents a link in a document opens its target (${width}px)`, () => {
-		test.use({ viewport: { width, height: touch ? 852 : 900 }, hasTouch: touch });
-
-		test(`follows a relative link into a second tab and back, at ${width}px`, async ({ page, request }, testInfo) => {
+function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) {
+	test.describe(`@flow:doc-links-open @surface:documents a link in a document opens its target (${width}px, ${scheme})`, () => {
+		test(`follows a relative link into a second tab and back, at ${width}px in ${scheme}`, async ({ browser, request }, testInfo) => {
 			test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+			const context = await browser.newContext({
+				baseURL: testInfo.project.use.baseURL,
+				viewport: { width, height },
+				hasTouch: touch,
+				colorScheme: scheme,
+				recordVideo: { dir: testInfo.outputPath('video'), size: { width, height } },
+			});
+			const page = await context.newPage();
+			const shoot = async (name: string) => {
+				await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+				await saveEvidenceScreenshot(page, testInfo, `doc-links-${width}-${name}-${scheme}`, { fullPage: false });
+			};
 			const stamp = Date.now();
-			const sessionTitle = `doc-links-${width}-${stamp}`;
+			const sessionTitle = `doc-links-${width}-${scheme}-${stamp}`;
 			const sessionId = await createSession(request, sessionTitle);
 
 			const tree = await (await request.get(`/api/files/tree?${query()}`)).json();
@@ -50,7 +58,7 @@ for (const width of [1440, 393]) {
 			const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
 			expect(workspaceRoot).toEqual(expect.any(String));
 
-			const dir = path.join(workspaceRoot, `doc-links-${stamp}`);
+			const dir = path.join(workspaceRoot, `doc-links-${width}-${scheme}-${stamp}`);
 			const indexPath = path.join(dir, 'INDEX.md');
 			fs.mkdirSync(dir, { recursive: true });
 			fs.writeFileSync(indexPath, INDEX);
@@ -106,15 +114,23 @@ for (const width of [1440, 393]) {
 				await expect(content).not.toContainText('./DECISIONS.md');
 				await expect(link(page, 'the decisions').first()).toHaveAttribute('title', './DECISIONS.md');
 				await expect(link(page, 'a web guide')).toHaveAttribute('title', 'example.invalid/guide/start');
-				await shoot(page, testInfo, `doc-links-${width}-rest`);
+				await shoot('rest');
 
 				// The pointer and press feedback the pointer type earns.
 				const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
 				expect(coarse).toBe(touch);
 				if (!touch) {
-					await link(page, 'the decisions').first().hover();
-					expect(await link(page, 'the decisions').first().evaluate((el) => getComputedStyle(el).cursor)).toBe('pointer');
-					await shoot(page, testInfo, `doc-links-${width}-hover`);
+					const first = link(page, 'the decisions').first();
+					const underline = () => first.evaluate((el) => getComputedStyle(el).textDecorationColor);
+					const restUnderline = await underline();
+					await first.hover();
+					expect(await first.evaluate((el) => getComputedStyle(el).cursor)).toBe('pointer');
+					// The underline strengthens on hover, after its short transition.
+					await expect.poll(underline).not.toBe(restUnderline);
+					await first.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
+					fs.writeFileSync(testInfo.outputPath(`hover-link-box-${width}-${scheme}.json`),
+						JSON.stringify({ restUnderline, hoverUnderline: await underline(), box: await first.boundingBox() }));
+					await shoot('hover');
 				} else {
 					const pressRule = await page.evaluate(() => [...document.styleSheets].some((sheet) => {
 						try {
@@ -133,7 +149,7 @@ for (const width of [1440, 393]) {
 				await press(link(page, 'a page that is gone'));
 				const toast = page.getByRole('status').filter({ hasText: MISSING_TOAST });
 				await expect(toast).toBeVisible();
-				await shoot(page, testInfo, `doc-links-${width}-missing-toast`);
+				await shoot('missing-toast');
 				if (!touch) await expect(page.getByRole('tab')).toHaveCount(1);
 				else await expect(page.getByRole('button', { name: /Tabs \(1\)/ })).toBeVisible();
 				await toast.getByRole('button').click();
@@ -155,14 +171,14 @@ for (const width of [1440, 393]) {
 					await expect(page.getByRole('button', { name: /Tabs \(2\)/ })).toBeVisible();
 					await expect(page.locator('.shell-header')).toContainText('DECISIONS.md');
 				}
-				await shoot(page, testInfo, `doc-links-${width}-second-tab`);
+				await shoot('second-tab');
 
 				// Back on the first document; whether its place was kept is recorded, not asserted.
 				await goToIndex();
 				const scrollAfter = await scroller.evaluate((el) => el.scrollTop);
-				fs.writeFileSync(testInfo.outputPath('scroll-position-after-return.txt'),
+				fs.writeFileSync(testInfo.outputPath(`scroll-${width}-${scheme}.txt`),
 					`scrollTop before follow: ${scrollBefore}\nscrollTop after return: ${scrollAfter}\n`);
-				await shoot(page, testInfo, `doc-links-${width}-back`);
+				await shoot('back');
 
 				// Following the same target again focuses its open tab and adds none.
 				await scroller.evaluate((el) => { el.scrollTop = 0; });
@@ -175,6 +191,9 @@ for (const width of [1440, 393]) {
 				expect(fs.readFileSync(indexPath, 'utf8')).toBe(INDEX);
 			} finally {
 				fs.rmSync(dir, { recursive: true, force: true });
+				// The recording is finalized when the context closes.
+				await context.close();
+				await page.video()?.saveAs(testInfo.outputPath(`doc-links-${width}-${scheme}-follow-and-return.webm`));
 			}
 		});
 	});
