@@ -49,7 +49,6 @@ from infra.constants import (
     LIFECYCLE_ARCHIVE_AFTER_DAYS,
     LIFECYCLE_DORMANT_AFTER_DAYS,
     LIFECYCLE_PURGE_AFTER_DAYS,
-    LIFECYCLE_SETTLED_WORKER_WORKING_TTL_DAYS,
     LIFECYCLE_TOOL_TRIM_AFTER_DAYS,
     LIFECYCLE_WORKING_TTL_DAYS,
 )
@@ -79,7 +78,6 @@ class LifecycleConfig:
     purge_after_days: int = LIFECYCLE_PURGE_AFTER_DAYS
     tool_trim_after_days: int = LIFECYCLE_TOOL_TRIM_AFTER_DAYS
     working_ttl_days: int = LIFECYCLE_WORKING_TTL_DAYS
-    settled_worker_working_ttl_days: int = LIFECYCLE_SETTLED_WORKER_WORKING_TTL_DAYS
 
 
 @dataclass
@@ -244,8 +242,9 @@ def archive_settled_worker(db, sid: str, *, now: datetime | str | None = None) -
     the plan's, for a spawned worker with nothing left to do for the step that
     spawned it. A root thread or a durable roster owner (``agent_enabled``) is
     never retired this way. Like a user archive this changes lifecycle state
-    and withdraws open decisions. Retention later trims stale ``working/`` units
-    after its shorter TTL; this transition deletes no result. Returns whether it changed.
+    and withdraws open decisions. Retention later trims unregistered stale
+    ``working/`` units after the normal TTL; registered units stay until purge.
+    This transition deletes no result. Returns whether it changed.
     """
     timestamp = now if isinstance(now, str) else _iso(now or _now())
     cursor = db.execute(

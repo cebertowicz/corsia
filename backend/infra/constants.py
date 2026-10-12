@@ -33,4 +33,3 @@ LIFECYCLE_ARCHIVE_AFTER_DAYS = 30   # dormant -> archived (days spent dormant)
 LIFECYCLE_PURGE_AFTER_DAYS = 180    # archived -> dir-deleted (days spent archived)
 LIFECYCLE_TOOL_TRIM_AFTER_DAYS = 30  # prune verbose tool-call payloads
 LIFECYCLE_WORKING_TTL_DAYS = 7      # working/ tmp trim
-LIFECYCLE_SETTLED_WORKER_WORKING_TTL_DAYS = 1  # settled worker working/ trim

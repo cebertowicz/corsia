@@ -1865,13 +1865,11 @@ def test_working_tmp_trim_never_touches_other_thread_folders(
     assert durable.read_text() == "durable"
 
 
-def test_settled_worker_working_unit_uses_short_ttl_and_retires_identity(
-    tmp_path, mtime_as_added_time,
-):
+def test_settled_worker_working_unit_uses_normal_ttl(tmp_path, mtime_as_added_time):
     db = _db()
     _add_session(
         db, "settled", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
-        archived_at=NOW - timedelta(days=2), spawned_by="parent",
+        archived_at=NOW - timedelta(days=8), spawned_by="parent",
     )
     root = _thread_root(tmp_path, "settled")
     stale = root / "working" / "snapshot"
@@ -1879,31 +1877,25 @@ def test_settled_worker_working_unit_uses_short_ttl_and_retires_identity(
     durable = root / "scratch" / "snapshot"
     durable.parent.mkdir(parents=True)
     durable.write_text("keep")
-    _age(stale, 2)
+    _age(stale, 8)
     _age(durable, 30)
-    _add_artifact_identity(db, "snapshot", path=stale, retention="ephemeral")
-    _add_artifact_registration(db, "snapshot", "settled")
-    db.commit()
 
     report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
 
     assert report.working_files_trimmed == 1
     assert not stale.exists()
     assert durable.read_text() == "keep"
-    assert db.execute(
-        "SELECT state FROM artifact_identities WHERE id='snapshot'"
-    ).fetchone()["state"] == "tombstone"
 
 
-def test_settled_worker_working_unit_under_short_ttl_is_kept(tmp_path, mtime_as_added_time):
+def test_settled_worker_working_unit_under_normal_ttl_is_kept(tmp_path, mtime_as_added_time):
     db = _db()
     _add_session(
         db, "settled", state="archived", archived_reason=lifecycle.SETTLED_WORKER_REASON,
-        archived_at=NOW - timedelta(hours=12), spawned_by="parent",
+        archived_at=NOW - timedelta(days=6), spawned_by="parent",
     )
     fresh = _thread_root(tmp_path, "settled") / "working" / "fresh"
     fresh.write_text("new")
-    _age(fresh, 0)
+    _age(fresh, 6)
 
     report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
 

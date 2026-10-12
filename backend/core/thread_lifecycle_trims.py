@@ -36,6 +36,11 @@ TOOL_TRIM_BATCH_SIZE = 100
 TOOL_TRIM_BATCH_CHARS = 16 * 1024 * 1024
 TOOL_TRIM_BATCH_SECONDS = 0.25
 _clock = time.monotonic
+_SETTLED_WORKER = (
+    "COALESCE(lifecycle_state, 'active') = 'archived' "
+    "AND archived_reason = ? AND spawned_by IS NOT NULL "
+    "AND COALESCE(agent_enabled, 0) = 0"
+)
 
 # Kept as one predicate so the unlocked candidate read and each writer-side
 # recheck cannot drift on which payloads retention may replace.
@@ -233,15 +238,29 @@ def _remove_empty_dir(path: Path) -> bool:
     return True
 
 
+def _active_identity_paths(db) -> list[Path]:
+    rows = db.execute(
+        "SELECT path FROM artifact_identities "
+        "WHERE state='active' AND path IS NOT NULL AND path != ''"
+    ).fetchall()
+    return [Path(row["path"]).expanduser().resolve(strict=False) for row in rows
+            if "://" not in row["path"]]
+
+
+def _contains_active_identity(unit: Path, paths: list[Path]) -> bool:
+    unit = unit.resolve(strict=False)
+    return any(path == unit or path.is_relative_to(unit) for path in paths)
+
+
 def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
                       report: RetentionReport) -> None:
     """Trim stale top-level ``working/`` units for eligible threads.
 
-    Active and dormant threads use the normal TTL; only settled temporary
-    workers use the shorter one. Other archived threads, ``scratch``, and other
-    thread folders remain durable. Keep markers and active turns preserve units.
-    Removal re-judges entries before unlinking; filesystem errors keep and log
-    the unit, while ``working_files_trimmed`` counts only whole removals.
+    Active, dormant, and settled temporary workers use the normal TTL. Other
+    archived threads, ``scratch``, and other thread folders remain durable.
+    Keep markers, active turns, and active identities in settled-worker units
+    preserve units. Removal re-judges entries before unlinking; filesystem
+    errors keep and log the unit, while ``working_files_trimmed`` counts whole removals.
     """
     from core.turn_core import active_turn_thread_ids
     from registry import service as registry_service
@@ -249,23 +268,16 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
     busy = active_turn_thread_ids(db=db)
     rows = db.execute(
         "SELECT id, project_id, "
-        "CASE WHEN COALESCE(lifecycle_state, 'active') = 'archived' THEN 1 ELSE 0 END "
-        "AS settled_worker FROM threads WHERE "
-        "COALESCE(lifecycle_state, 'active') IN ('active', 'dormant') OR "
-        "(COALESCE(lifecycle_state, 'active') = 'archived' "
-        "AND archived_reason = ? AND spawned_by IS NOT NULL "
-        "AND COALESCE(agent_enabled, 0) = 0)",
-        (SETTLED_WORKER_REASON,),
+        f"CASE WHEN {_SETTLED_WORKER} THEN 1 ELSE 0 END AS settled_worker "
+        "FROM threads WHERE COALESCE(lifecycle_state, 'active') IN ('active', 'dormant') "
+        f"OR ({_SETTLED_WORKER})",
+        (SETTLED_WORKER_REASON, SETTLED_WORKER_REASON),
     ).fetchall()
+    active_identity_paths = _active_identity_paths(db)
     working_roots: dict[str, Path] = {}
     for r in rows:
         sid = _row_get(r, "id")
-        ttl_days = (
-            cfg.settled_worker_working_ttl_days
-            if _row_get(r, "settled_worker")
-            else cfg.working_ttl_days
-        )
-        cutoff = (now - timedelta(days=ttl_days)).timestamp()
+        cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()
         thread_root = _thread_dir(
             db,
             sid,
@@ -290,6 +302,9 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
             continue
         for unit in units:
             try:
+                if (_row_get(r, "settled_worker")
+                        and _contains_active_identity(unit, active_identity_paths)):
+                    continue
                 if not _unit_is_stale(unit, cutoff):
                     continue
                 if not _remove_unit(unit, cutoff):
