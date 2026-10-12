@@ -3,9 +3,10 @@
 Uses ``gh api`` to set commit statuses on the PR's head SHA. The verdict
 context is ``qa/llm-reviewer``. A second context, ``qa/llm-reviewer-present``,
 posts ``success`` only where the gate marks that SHA reviewed after a genuine
-verdict is published and delivered, so a required check can demand that a
-review ran without making a block unwaivable. It carries no outcome: the
-verdict context alone says pass or block.
+verdict is published and its owner wake did not fail, so a required check can
+demand that a review ran without making a block unwaivable. An override skip
+posts ``failure`` there with the reason, since no review ran. The context
+carries no outcome: the verdict context alone says pass or block.
 
 States:
 - ``pending``: Review in progress (or retrying after rate limit).
@@ -241,7 +242,10 @@ def set_success(repo: str, sha: str, description: str) -> bool:
 
 
 def set_presence(repo: str, sha: str) -> bool:
-    """Mark that a genuine reviewer verdict is published and delivered at this SHA.
+    """Mark that a genuine reviewer verdict is published at this SHA.
+
+    Called only after the owner wake did not fail: delivered, or no owner
+    thread is registered for the PR.
 
     A failed marker posts ``error`` on the presence context, best effort, so
     the miss is visible without replacing the verdict already published.
@@ -256,6 +260,11 @@ def set_presence(repo: str, sha: str) -> bool:
         context=STATUS_PRESENCE_CONTEXT,
     )
     return False
+
+
+def set_presence_absent(repo: str, sha: str, reason: str) -> bool:
+    """Show on the presence context that no review ran at this SHA, and why."""
+    return set_status(repo, sha, "failure", reason, context=STATUS_PRESENCE_CONTEXT)
 
 
 def set_failure(repo: str, sha: str, description: str, *, verdict: bool = False) -> bool:

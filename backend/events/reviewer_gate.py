@@ -82,6 +82,9 @@ def _settle_reviewer_verdict(
         return
 
     if isinstance(verdict, dict) and verdict.get("verdict") == "skipped":
+        from reviewer.reviewer_status import set_presence_absent
+
+        set_presence_absent(repo, head_sha, "no review ran: qa/override-reviewer skipped it at this head")
         reviewer_gate_state.mark_reviewed(pr_key, head_sha)
         log.info("reviewer-gate: PR #{} sha={} base={} — marked reviewed after skip", pr_number, head_sha[:8], base_ref)
         return

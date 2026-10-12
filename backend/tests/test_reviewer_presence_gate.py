@@ -11,6 +11,7 @@ from reviewer_gate_fixtures import (  # noqa: F401
     _disable_analytics,
     _reload_gate,
     _stub_presence,
+    _stub_presence_absent,
 )
 
 
@@ -81,9 +82,11 @@ def test_failed_presence_keeps_verdict_and_wake_and_stays_retryable(_reload_gate
     assert review.call_count == 2
 
 
-def test_override_skip_posts_no_presence(_reload_gate, _stub_presence):
+def test_override_skip_shows_presence_absent_with_reason(_reload_gate, _stub_presence, _stub_presence_absent):
     skipped = {"verdict": "skipped", "summary": "review skipped by override", "model_label": "override"}
     _run(_reload_gate, skipped, AsyncMock(return_value=True))
 
     _stub_presence.assert_not_called()
+    _stub_presence_absent.assert_called_once_with("owner/repo", "abc123def", ANY)
+    assert "qa/override-reviewer" in _stub_presence_absent.call_args.args[2]
     assert _reload_gate.reviewer_gate_state.get_reviewed_sha("owner/repo#42") == "abc123def"

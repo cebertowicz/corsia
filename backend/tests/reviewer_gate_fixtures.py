@@ -26,6 +26,13 @@ def _stub_presence():
         yield presence
 
 
+@pytest.fixture(autouse=True)
+def _stub_presence_absent():
+    """Override skips post presence failure; keep it off the real gh."""
+    with patch("reviewer.reviewer_status.set_presence_absent", return_value=True) as absent:
+        yield absent
+
+
 def _check_suite_payload(
     conclusion: str = "success",
     sha: str = "abc123def",

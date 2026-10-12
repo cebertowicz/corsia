@@ -86,6 +86,22 @@ def test_failed_presence_post_reports_error_on_presence_only(mock_run: MagicMock
     assert {p["context"] for p in payloads} == {STATUS_PRESENCE_CONTEXT}
 
 
+@patch("reviewer.gh_api.subprocess.run")
+def test_presence_absent_posts_failure_with_reason_on_presence_only(mock_run: MagicMock):
+    """An override skip says on the presence context that no review ran."""
+    from reviewer import reviewer_status
+    from reviewer.reviewer_categories import STATUS_PRESENCE_CONTEXT
+
+    mock_run.return_value = _proc()
+
+    assert reviewer_status.set_presence_absent("owner/repo", "a" * 40, "no review ran: override")
+
+    payload = _posted_payloads(mock_run)[0]
+    assert payload["state"] == "failure"
+    assert payload["context"] == STATUS_PRESENCE_CONTEXT
+    assert payload["description"].startswith("no review ran: override")
+
+
 @patch("reviewer.gh_helpers._run_gh")
 def test_unattributed_success_is_returned_as_success_and_logged(
     mock_run: MagicMock, caplog,
