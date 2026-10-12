@@ -837,8 +837,8 @@ class TestSkipGuardWrite:
         )
         assert gate_mod.reviewer_gate_state.get_reviewed_sha("owner/repo#42") == "abc123def"
 
-    def test_none_verdict_preserves_prior_specific_failure(self, _reload_gate):
-        """A terminal None must not hide the reviewer's more specific failure."""
+    def test_none_verdict_alone_preserves_prior_specific_failure(self, _reload_gate):
+        """Only a terminal None preserves the reviewer's more specific failure."""
         from events.connectors import github_reviewer_notifications
 
         gate_mod = _reload_gate

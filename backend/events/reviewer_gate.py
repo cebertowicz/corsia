@@ -75,6 +75,7 @@ def _settle_reviewer_verdict(
         reason = "reviewer returned no terminal verdict"
         github_reviewer_notifications.report_reviewer_terminal_error(
             repo, pr_number, head_sha, reason, "reviewer_no_terminal_result", None, loop,
+            preserve_existing_failure=True,
         )
         return
 

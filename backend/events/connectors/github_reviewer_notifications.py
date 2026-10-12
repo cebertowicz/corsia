@@ -142,16 +142,21 @@ def report_reviewer_terminal_error(
     event: str,
     properties: dict[str, Any] | None,
     loop: asyncio.AbstractEventLoop | None,
+    *,
+    preserve_existing_failure: bool = False,
 ) -> None:
     """Report a retryable terminal gate error before waking the owner."""
-    from reviewer.reviewer_status import has_existing_failure_or_error, set_error
+    from reviewer.reviewer_status import set_error
 
     payload = {"repo": repo, "pr_number": pr_number, "head_sha": head_sha[:8]}
     if properties:
         payload.update(properties)
     emit_product_event("reviewer_gate", event, properties=payload)
-    if has_existing_failure_or_error(repo, head_sha):
-        return
+    if preserve_existing_failure:
+        from reviewer.reviewer_status import has_existing_failure_or_error
+
+        if has_existing_failure_or_error(repo, head_sha):
+            return
     set_error(repo, head_sha, f"qa/llm-reviewer: {reason}; retry required")
     notify_reviewer_terminal_error(repo, pr_number, head_sha, reason, loop)
 

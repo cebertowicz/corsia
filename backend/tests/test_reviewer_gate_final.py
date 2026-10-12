@@ -446,6 +446,52 @@ class TestFinalGate:
 
 
 class TestMergeableGate:
+    def test_repeated_unresolved_mergeability_repeats_recovery_wake(self, _reload_gate):
+        """Each exhausted retry cycle wakes the owner, even with a stale red status."""
+        gate_mod = _reload_gate
+        unresolved = {**_DEFAULT_PR_INFO, "mergeable": "UNKNOWN"}
+        standing_failure = {
+            "state": "error",
+            "description": "qa/llm-reviewer: a prior unrelated error",
+        }
+        reason = "mergeability remained unresolved after retries"
+
+        with patch.object(
+            gate_mod.github_reviewer_gate,
+            "fetch_pr_info_awaiting_mergeability",
+            return_value=unresolved,
+        ), patch.object(
+            github_reviewer_notifications, "emit_product_event",
+        ) as emit_event, patch.object(
+            github_reviewer_notifications, "notify_reviewer_terminal_error",
+        ) as notify_error, patch(
+            "reviewer.reviewer_status.get_commit_status_for_context",
+            return_value=standing_failure,
+        ), patch("reviewer.reviewer_status.set_error") as set_error:
+            for _ in range(2):
+                gate_mod._evaluate_ready_pr(
+                    "owner/repo",
+                    42,
+                    "abc123def",
+                    "webhook.github.check_suite_completed",
+                    mergeability_retry_attempt=len(gate_mod.MERGEABILITY_RETRY_DELAYS_S),
+                )
+
+        assert set_error.call_count == 2
+        assert set_error.call_args.args == (
+            "owner/repo",
+            "abc123def",
+            f"qa/llm-reviewer: {reason}; retry required",
+        )
+        assert notify_error.call_count == 2
+        assert notify_error.call_args.args == (
+            "owner/repo", 42, "abc123def", reason, None,
+        )
+        assert sum(
+            call.args[:2] == ("reviewer_gate", "mergeability_unresolved")
+            for call in emit_event.call_args_list
+        ) == 2
+
     def test_gate_holds_on_real_conflict_without_retry(self, _reload_gate):
         """CONFLICTING is terminal — hold immediately, do not re-poll."""
         gate_mod = _reload_gate
