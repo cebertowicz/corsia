@@ -86,6 +86,20 @@ describe("AdaptiveDrawer", () => {
     expect(dialog?.getAttribute("aria-modal")).toBe("false");
   });
 
+  it("keeps a half-height RSR-8 sheet non-modal so the visible document remains interactive", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { onClose: vi.fn(), detent: "half" },
+    });
+    await settle();
+
+    const backdrop = host.querySelector("[data-adaptive-drawer]");
+    const dialog = host.querySelector('[role="dialog"]');
+    expect(backdrop?.classList.contains("half")).toBe(true);
+    expect(backdrop?.classList.contains("nonmodal")).toBe(true);
+    expect(dialog?.getAttribute("aria-modal")).toBe("false");
+  });
+
   it("calls onClosed once after the local outro", async () => {
     const closed = vi.fn();
     component = mount(AdaptiveDrawerHarness, {

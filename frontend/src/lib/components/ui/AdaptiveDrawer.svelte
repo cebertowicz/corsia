@@ -240,7 +240,7 @@
 		pointer-events: auto;
 		transition: background-color var(--dur-standard) var(--ease-entrance);
 	}
-	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: none; backdrop-filter: brightness(0.78); -webkit-backdrop-filter: brightness(0.78); }
+	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: color-mix(in srgb, var(--glass-scrim) 88%, transparent); }
 	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-backdrop.nonmodal { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
 	.drawer-backdrop.nonmodal .drawer-motion { pointer-events: auto; }
