@@ -49,8 +49,9 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 		const from = last;
 		last = now;
 		if (!enabled || typeof node.animate !== 'function' || Math.abs(now - from) <= 1) return;
+		if (contentEases()) return;
 		if (reduced) fadeIn();
-		else if (!contentEases()) run(from, now);
+		else run(from, now);
 	});
 	const moveStart = (event: TransitionEvent) => { if (event.target === node && event.propertyName === 'max-height') detentMoves++; };
 	const moveEnd = (event: TransitionEvent) => {

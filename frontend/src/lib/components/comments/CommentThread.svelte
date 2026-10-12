@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { keepInView } from '$lib/actions/keepInView';
+	import { autosize } from '$lib/actions/autosize';
 	import { slide } from 'svelte/transition';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
@@ -35,9 +36,11 @@
 	import { retryPlacement } from '$lib/stores/docComments';
 	import CommentMeta from './CommentMeta.svelte';
 
-	let { comment, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
+	let { comment, focused = false, activeId = null, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
 		comment: CommentThreadData;
 		focused?: boolean;
+		/** The thread the list has focused now. When it moves to another thread, an empty reply field here closes. */
+		activeId?: string | null;
 		/** Its mark is under the pointer or focus elsewhere (an image tag), so the card lights up with it. */
 		linked?: boolean;
 		/** An image comment in the drawer: its number is a button that selects its tag. */
@@ -88,13 +91,18 @@
 	let headOpen = $state(false);
 	let openReplies = $state<Set<number>>(new Set());
 	let el = $state<HTMLElement>();
-	let replyInput = $state<HTMLInputElement>();
+	let replyInput = $state<HTMLTextAreaElement>();
 	// Plain variables: the stamp effect must not re-run when an attempt fails.
 	let lastViewAttempt: string | null = null;
 	let retryOnVisible = false;
 
 	$effect(() => { if (focused) showReplies = true; });
 	$effect(() => { if (replyText) replyOpen = true; });
+	// Focus moving to another thread closes an untouched, empty Reply field, so two never stand open together.
+	$effect(() => {
+		const active = activeId;
+		untrack(() => { if (active && active !== comment.id && replyOpen && !replyText.trim()) replyOpen = false; });
+	});
 	$effect(() => { if ((showReply || focusReply || (focused && selectable)) && !readOnly) replyOpen = true; });
 	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly && replyOpen) replyInput?.focus(); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
@@ -139,8 +147,13 @@
 		await tick();
 		replyInput?.focus();
 	}
+	// As in the chat composer: Enter sends and Shift+Enter starts a new line; on a touch screen Enter is a new line, and
+	// Cmd or Ctrl+Enter sends everywhere.
 	function onKey(e: KeyboardEvent) {
-		if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); postReply(); }
+		if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.repeat) return;
+		if (!(e.metaKey || e.ctrlKey) && window.matchMedia?.('(pointer: coarse)').matches) return;
+		e.preventDefault();
+		postReply();
 	}
 	async function decide(decision: 'accept' | 'reject') {
 		if (readOnly || decisionBusy || (decision === 'accept' && comment.orphaned)) return;
@@ -282,7 +295,7 @@
 		{:else if !readOnly}
 			{#if replyOpen}
 				<div class="ct-compose" class:open={replyOpen}>
-					<input class="ct-input" placeholder="Reply…" bind:this={replyInput} use:keepInView={keepReplyVisible} bind:value={replyText} onkeydown={onKey} onclick={(e) => e.stopPropagation()} />
+					<textarea class="ct-input" rows="1" placeholder="Reply…" aria-label="Reply" bind:this={replyInput} use:keepInView={keepReplyVisible} use:autosize={replyText} bind:value={replyText} onkeydown={onKey} onclick={(e) => e.stopPropagation()}></textarea>
 					{#if replyText.trim()}
 						<button class="ct-send" onclick={(e) => { e.stopPropagation(); postReply(); }} aria-label="Send reply" title="Reply">
 							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
@@ -357,8 +370,8 @@
 
 	.ct-agreed { display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--green); margin-top: 2px; }
 
-	.ct-compose { display: flex; max-height: 0; overflow: hidden; align-items: center; gap: 6px; margin-top: 0; transition: max-height var(--dur-standard) var(--ease-entrance), margin var(--dur-standard) var(--ease-entrance); }
-	.ct-compose.open { max-height: var(--space-8); margin-top: var(--space-1); }
+	.ct-compose { display: flex; max-height: 0; overflow: hidden; align-items: flex-end; gap: 6px; margin-top: 0; transition: max-height var(--dur-standard) var(--ease-entrance), margin var(--dur-standard) var(--ease-entrance); }
+	.ct-compose.open { max-height: 8rem; margin-top: var(--space-1); }
 	.ct-reply-open { min-height: var(--space-6); padding: 0; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; }
 	.ct-reply-head { margin-left: var(--space-1); }
 	.ct-act.reply { display: none; }
@@ -366,6 +379,9 @@
 	.ct-input {
 		flex: 1; min-width: 0; font: inherit; font-size: var(--text-footnote);
 		padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
+		/* Grows with its text up to five lines (autosize sets the height), then scrolls. */
+		box-sizing: border-box; resize: none; overflow-y: hidden; line-height: var(--lh-snug); max-height: calc(5lh + 14px);
+		transition: height var(--dur-tight) var(--ease-snap);
 	}
 	.ct-input:focus { outline: none; border-color: var(--accent); }
 	.ct-send { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--accent); border: none; color: #fff; cursor: pointer; transition: filter var(--dur-tight); }

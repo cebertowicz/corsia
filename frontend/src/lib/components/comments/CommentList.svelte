@@ -84,7 +84,7 @@
 						{#if comment.review || comment.orphaned}{comment.review ? 'Review comment' : 'Text changed'}{comment.anchor ? `: “${comment.anchor}”` : ''}{:else}{comment.anchor ? `“${comment.anchor}”` : 'Go to text'}{/if}
 					</button>
 				{/if}
-				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} flat={documentOrder} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
+				<CommentThread bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} {comment} focused={focusedId === comment.id} activeId={focusedId} linked={region && hoveredId === comment.id} selectable={region} flat={documentOrder} {scrollOnFocus} onFocus={region ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} />
 			</div>
 			{/each}
 		{/each}
