@@ -203,7 +203,7 @@
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
 	<div class="document-status-row document-notices">
 		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
-		{#if orphanedCount && placementReloadVisible}<button type="button" class="doc-tool orphan-reload" aria-label="Reload comment placements" aria-disabled={placementReloadUnavailable || placementReloading ? 'true' : undefined} aria-describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</button>{/if}
+		{#if orphanedCount && placementReloadVisible}<span class="orphan-reload"><Button size="sm" variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={placementReloadUnavailable || placementReloading} describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</Button></span>{/if}
 	</div>
 {/if}
 </header>
@@ -256,6 +256,10 @@
 	.document-tools { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
 	.count-unit { color: var(--text-tertiary); }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
+	/* The same action as the feedback row's Retry: the shared secondary button at its size. */
+	.orphan-reload { display: inline-flex; flex: none; }
+	.orphan-reload :global(> .btn) { min-height: 44px; }
+	.orphan-reload :global(> .btn::after) { inset: 0; }
 	.document-notices:not(:has(.undelivered:not(.idle), .orphan-reload)) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 	.document-header :global(.doc-tool) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
 	.document-header :global(.doc-tool:hover:not(:disabled)) { background: var(--bg-tertiary); color: var(--text-primary); }
