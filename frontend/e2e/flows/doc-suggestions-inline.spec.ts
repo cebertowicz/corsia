@@ -1,3 +1,4 @@
+import { showAllThreads } from '../support/commentDrawer';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { openSuggestionDocument } from '../support/docSuggestions';
@@ -11,6 +12,7 @@ const commentsButton = (page: Page) => page.getByRole('button', { name: /^\d+ op
 async function openComments(page: Page, drawer: Locator) {
 	await commentsButton(page).click();
 	await expect(drawer).toBeVisible();
+	await showAllThreads(drawer);
 }
 
 /** A colour as the browser computes it, so a hex value and an rgb() value compare. */
@@ -101,6 +103,12 @@ for (const [width, height, project] of layouts) {
 			await expect(card('Tighten the first line.')).toHaveCount(0);
 
 			await openComments(page, drawer);
+			// A phone's list is a sheet over the document: an insert under it cannot be pressed until the list closes.
+			const covered = await insert(page, fine).evaluate((element) => {
+				const rect = element.getBoundingClientRect();
+				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-doc-comments-drawer]');
+			});
+			if (covered) return;
 			await insert(page, fine).click();
 			await expect(drawer).toBeVisible();
 			await expect(drawer.locator(`[data-comment-id="${fine}"] .ct.focused`)).toBeInViewport();

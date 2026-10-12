@@ -1,3 +1,4 @@
+import { replyField } from '../support/commentDrawer';
 import { expect, test, type BrowserContext } from '@playwright/test';
 import {
 	createComment,
@@ -61,7 +62,7 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		const retainedCard = comments.locator('[data-comment-id]').filter({ hasText: `Keep ${stamp}` });
 		const retainedId = await retainedCard.getAttribute('data-comment-id');
 		expect(retainedId).toBeTruthy();
-		const reply = comments.locator(`[data-comment-id="${retainedId}"]`).getByPlaceholder('Reply…');
+		const reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
 		await reply.fill(`draft ${stamp}`);
 		await expect(reply).toBeFocused();
 		await reply.evaluate(element => (element as HTMLInputElement).setSelectionRange(2, 5));

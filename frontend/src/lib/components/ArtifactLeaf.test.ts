@@ -287,18 +287,28 @@ describe('ArtifactLeaf legacy discussion compatibility', () => {
 describe('ArtifactLeaf in-canvas comments', () => {
 	it('shows an orphan marker and opens its list inside the canvas without changing the right pane', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
-		mocks.fetchContent.mockResolvedValue({ text: 'Changed document', revision: 'r-1', writable: true, artifact: { id: 'art-comments' } });
-		mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
-		openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
-		render();
-		await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('title')).toBe("1 comment couldn't be placed"));
-		paneOpen.set(true);
-		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
-		flushSync();
-		expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
-		expect(host.querySelector('.popover')).toBeNull();
-		expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
-		expect(get(paneOpen)).toBe(true);
+		// jsdom lays nothing out, so give the document column the width a wide canvas has: wide enough for the inline drawer.
+		const measure = HTMLElement.prototype.getBoundingClientRect;
+		const wide = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			const rect = measure.call(this);
+			return this.classList.contains('doc') ? { ...rect, width: 1000, right: rect.left + 1000 } as DOMRect : rect;
+		});
+		try {
+			mocks.fetchContent.mockResolvedValue({ text: 'Changed document', revision: 'r-1', writable: true, artifact: { id: 'art-comments' } });
+			mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
+			openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
+			render();
+			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('title')).toBe("1 comment couldn't be placed"));
+			paneOpen.set(true);
+			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
+			flushSync();
+			expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
+			expect(host.querySelector('.popover')).toBeNull();
+			expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
+			expect(get(paneOpen)).toBe(true);
+		} finally {
+			wide.mockRestore();
+		}
 	});
 
 	it('omits the amber marker when every thread remains anchored', async () => {
@@ -311,7 +321,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		expect(host.querySelector('.orphan-status')).toBeNull();
 	});
 
-	it('uses the local canvas drawer for the comment list on a narrow viewport without changing the right pane', async () => {
+	it('opens the comment list as a sheet contained by the document column on a narrow viewport without changing the right pane', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 });
 		mocks.fetchContent.mockResolvedValue({ text: 'Document', revision: 'r-1', writable: true, artifact: { id: 'art-narrow' } });
 		mocks.setComments({ 'art-narrow': [{ id: 'comment', from: 0, to: 1, anchor: 'D', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
@@ -322,9 +332,8 @@ describe('ArtifactLeaf in-canvas comments', () => {
 		paneOpen.set(false);
 		host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 		flushSync();
-		expect(host.querySelector('.doc [data-doc-comments-drawer]')).not.toBeNull();
+		expect(document.querySelector('[data-adaptive-drawer].within [data-doc-comments-drawer]')).not.toBeNull();
 		expect(host.querySelector('.popover')).toBeNull();
-		expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
 		expect(get(paneOpen)).toBe(false);
 	});
 

@@ -26,6 +26,7 @@ afterEach(() => { if (component) unmount(component); component = null; host?.rem
 describe('CommentThread', () => {
 	it('posts a reply and clears the input', async () => {
 		const { onReply } = render(thread());
+		button('.ct-reply-open').click(); flushSync();
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, '  looks right  ');
 		button('.ct-send').click();
@@ -33,8 +34,39 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right');
 	});
 
+	it('reveals the reply field only after Reply is pressed', () => {
+		render(thread());
+		expect(host.querySelector('.ct-input')).toBeNull();
+		button('.ct-reply-open').click(); flushSync();
+		expect(host.querySelector('.ct-compose.open .ct-input')).not.toBeNull();
+	});
+
+	it('keeps a sheet reply visible after it expands', async () => {
+		const original = HTMLElement.prototype.scrollIntoView;
+		const scrollIntoView = vi.fn();
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+		try {
+			render(thread(), false, { showReply: true, keepReplyVisible: true });
+			await vi.waitFor(() => expect(host.querySelector('.ct-input')).not.toBeNull());
+			await vi.waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }));
+		} finally {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: original });
+		}
+	});
+
+	it('keeps a long drawer author accessible while reserving a compact time label', () => {
+		const name = 'Canvas Reviewer 1791789535058';
+		render(thread({ author: name, createdAt: new Date().toISOString() }));
+		const author = host.querySelector<HTMLElement>('.ct-author')!;
+		expect(author.getAttribute('aria-label')).toBe(name);
+		expect(author.title).toBe(name);
+		expect(author.querySelector('.name-tail')?.textContent).toBe('5058');
+		expect(host.querySelector('.ct-at.compact')?.textContent).toBe('now');
+	});
+
 	it('posts a reply on Cmd+Enter', () => {
 		const { onReply } = render(thread());
+		button('.ct-reply-open').click(); flushSync();
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, 'ship it');
 		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
@@ -103,10 +135,28 @@ describe('CommentThread', () => {
 		expect(onAgree).not.toHaveBeenCalled();
 	});
 
+	it('keeps the text-changed fact in the quote instead of duplicating it in a flat row', () => {
+		render(thread({ orphaned: true }), false, { flat: true });
+		expect(host.querySelector('.ct-orphan')).toBeNull();
+		unmount(component!); host.remove();
+		render(thread({ orphaned: true }));
+		expect(host.querySelector('.ct-orphan')?.textContent).toContain('text this comment was on has changed');
+	});
+
 	it('renders a suggestion diff inside the thread', () => {
 		render(thread({ anchor: 'old text', replacement: 'new text' }));
 		expect(host.querySelector('.diff')?.textContent).toContain('old text');
 		expect(host.querySelector('.diff')?.textContent).toContain('new text');
+	});
+
+	it('keeps the Reply action on an open suggestion, which is how a touch screen reaches its reply field', () => {
+		render(thread({ anchor: 'old text', replacement: 'new text' }));
+		const reply = host.querySelector<HTMLButtonElement>('button.ct-act.reply[aria-label="Reply"]')!;
+		expect(reply).toBeTruthy();
+		reply.click(); flushSync();
+		expect(host.querySelector('textarea[placeholder="Reply…"]')).toBeTruthy();
+		expect(host.querySelector('.ct-act.ack')).toBeNull();
+		expect(host.querySelector('.ct-act.resolve')).toBeNull();
 	});
 
 	it('wraps the suggestion diff between words, on the open and the decided card alike', () => {
@@ -150,6 +200,7 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-replies')).toBeNull();
 		button('.ct-replies-toggle').click(); flushSync();
 		expect(host.querySelector('.ct-replies')?.textContent).toContain('Could we keep the old wording?');
+		button('.ct-reply-open').click(); flushSync();
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, ' fine by me ');
 		button('.ct-send').click();

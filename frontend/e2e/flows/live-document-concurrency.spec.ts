@@ -1,3 +1,4 @@
+import { replyField, showAllThreads } from '../support/commentDrawer';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createComment, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
 import {
@@ -141,6 +142,7 @@ for (const [width, height, project] of layouts) {
 			await typeAtDocumentEnd(writer, remote);
 			await expect(reader.locator('.cm-content')).toContainText(remote);
 			await reader.getByRole('button', { name: /^2 open threads\b/ }).click();
+			await showAllThreads(reader.getByRole('region', { name: 'Document comments', exact: true }));
 			await drawerRow(reader, red).getByRole('button', { name: 'Accept', exact: true }).click();
 			await expect(drawerRow(reader, red).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
 			// The accepted replacement removed the overlapping suggestion's quote, so it can no longer be accepted.
@@ -168,6 +170,7 @@ for (const [width, height, project] of layouts) {
 			const { reader, writer } = pair;
 			await reader.getByRole('button', { name: /^2 open threads\b/ }).click();
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
+			await showAllThreads(drawer);
 			await drawer.getByRole('button', { name: `Accept all from ${reviewer.title}`, exact: true }).click();
 			await expect(drawerRow(reader, red).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
 			await expect(drawer.getByText('1 skipped', { exact: true })).toBeVisible();
@@ -191,9 +194,10 @@ for (const [width, height, project] of layouts) {
 			const { reader, writer } = pair;
 			await reader.getByRole('button', { name: /^2 open threads\b/ }).click();
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
+			await showAllThreads(drawer);
 			const replyId = await drawer.locator('[data-comment-id]').filter({ hasText: `Reply ${stamp}` }).getAttribute('data-comment-id');
 			expect(replyId).toBeTruthy();
-			const reply = drawerRow(reader, replyId!).getByPlaceholder('Reply…');
+			const reply = await replyField(drawerRow(reader, replyId!));
 			const replyState = () => reply.evaluate(element => {
 				const input = element as HTMLInputElement;
 				return { value: input.value, selection: [input.selectionStart, input.selectionEnd], focused: input.ownerDocument.activeElement === input };

@@ -4,6 +4,7 @@
 	import { cubicIn } from 'svelte/easing';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { Avatar, Button } from '$lib/components/ui';
+	import MiddleName from './MiddleName.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import { on } from '$lib/ws';
 	import { createReviewBarState, DRAFT_OPEN } from '$lib/reviewBarState.svelte';
@@ -115,10 +116,10 @@
 		if (content) return { duration, tick: (t: number) => (node as HTMLElement).style.setProperty('--rb-fade', String(t)) };
 		return { duration, css: (t: number) => `opacity: ${t}` };
 	}
-	/** The capsule leaves by sliding back below the screen edge, opaque all the way; its entrance is the CSS keyframes below. */
+	/** The capsule leaves by sliding back below the screen edge, opaque all the way; its entrance is the CSS keyframes below. It slides only when an answer ends the ask: a global transition keeps the whole viewer in the DOM until it ends, so a bar torn down with its viewer leaves at once. */
 	function capsuleOut(node: Element) {
 		const capsule = node as HTMLElement;
-		if (get(prefersReducedMotion) || getComputedStyle(capsule).position !== 'fixed') return { duration: 0 };
+		if (get(prefersReducedMotion) || (bar.phase !== 'answered' && bar.phase !== 'stale') || getComputedStyle(capsule).position !== 'fixed') return { duration: 0 };
 		const distance = window.innerHeight - capsule.getBoundingClientRect().top;
 		return { duration: token('--dur-standard') * 0.7, easing: cubicIn, css: (_t: number, u: number) => `transform: translateY(${u * distance}px)` };
 	}
@@ -157,7 +158,7 @@
 				<button type="button" class="rb-line" aria-expanded={expanded} aria-label={label} title={ask} onclick={() => (expanded = !expanded)}>
 					<span class="rb-lead">
 						<Avatar name={asker} color={agentColor(read?.asker?.id ?? asker)} hidden />
-						<span class="rb-who"><strong>{asker}</strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
+						<span class="rb-who"><strong><MiddleName name={asker} /></strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
 					</span>
 					<span class="rb-ask">{ask}</span>
 					<svg class="rb-icon rb-chev" aria-hidden="true" viewBox="0 0 16 16"><path d="M4 6.5l4 4 4-4" /></svg>
@@ -215,8 +216,9 @@
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* The avatar and name; it lays nothing out itself except in the narrow header below. */
 	.rb-lead { display: contents; }
-	.rb-who { flex: none; white-space: nowrap; }
-	.rb-who strong { font-weight: var(--fw-semibold); }
+	/* A long name shrinks to its head and tail instead of pushing the ask and the header's controls out of the row. */
+	.rb-who { flex: 0 1 auto; display: flex; min-width: 0; max-width: 55%; white-space: nowrap; }
+	.rb-who strong { display: flex; min-width: 0; font-weight: var(--fw-semibold); }
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
 	.rb-ask { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }
@@ -270,7 +272,7 @@
 		:global(.document-header) .review-bar.ask { grid-template-rows: var(--space-7) var(--space-7) auto; }
 		:global(.document-header) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
 		:global(.document-header) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
-		:global(.document-header) .review-bar.ask .rb-who { flex: 0 1 auto; white-space: normal; }
+		:global(.document-header) .review-bar.ask .rb-who { max-width: none; }
 		:global(.document-header) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
 		:global(.document-header) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); }
 	}

@@ -82,7 +82,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await tag(page, 2).click();
 			const pointCard = page.locator('.ct').filter({ hasText: 'This icon reads as disabled' });
 			await expect(pointCard).toBeVisible();
-			await pointCard.locator('input[placeholder="Reply…"]').fill('Agreed, it needs more contrast');
+			await pointCard.getByPlaceholder('Reply…').fill('Agreed, it needs more contrast');
 			await pointCard.getByRole('button', { name: 'Send reply' }).click();
 			await expect(pointCard.getByText('Agreed, it needs more contrast')).toBeVisible();
 			await shoot(page, testInfo, '1440-06-reply', true);
@@ -127,7 +127,11 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			expect(firstCardBox!.y).toBeGreaterThanOrEqual(drawerBox!.y);
 			expect(firstCardBox!.y + firstCardBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
 			await shoot(page, testInfo, '1440-09-drawer-open', true);
-			await drawer.locator('[data-drawer-filter]', { hasText: 'Resolved' }).click();
+			const filter = drawer.getByRole('button', { name: 'Filter comments: All', exact: true });
+			await filter.click();
+			await expect(filter).toHaveAttribute('aria-expanded', 'true');
+			await expect(drawer.getByRole('menu', { name: 'Filter comments', exact: true })).toBeVisible();
+			await drawer.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
 			await expect(drawer.locator('.ct')).toHaveCount(1);
 			await shoot(page, testInfo, '1440-09b-drawer-resolved');
 			await page.keyboard.press('Escape');
@@ -161,7 +165,8 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			expect(description).toContain('Region 3: box at x 0%, y 0%, 100% wide, 100% tall');
 			const marked = description.match(/Marked-up image \(numbered boxes\): (\S+\.png)/);
 			expect(marked, description).not.toBeNull();
-			expect(fs.existsSync(marked![1])).toBe(true);
+			// The copy is drawn after the delivery commits, so it lands a moment after the batch reads delivered.
+			await expect.poll(() => fs.existsSync(marked![1]), { timeout: 15_000 }).toBe(true);
 			fs.copyFileSync(marked![1], testInfo.outputPath('1440-11-delivered-marked-up-image.png'));
 
 			// An agent's comment carries its name beside the number.

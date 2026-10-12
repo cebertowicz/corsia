@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
+import { showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { openUnsentFooter } from '../support/docFeedbackFooter';
 
@@ -166,6 +167,7 @@ test('@surface:doc-reopen-feedback-delivery sends a re-opened comment to the doc
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+	await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');
 	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();

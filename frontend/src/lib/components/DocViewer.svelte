@@ -146,9 +146,9 @@
 		onOpenImage: () => onOpenImage, root: () => docRoot, comments: () => listedComments, artifactId: () => loadedArtifactId,
 		target: () => target, readOnly: () => readonly, text: () => editText, session: () => liveSession, accent: () => accent,
 		feedback: () => feedbackStatus?.feedback(), showInText: focusInText });
-	function focusInText(id: string) { setCommentScrollTarget(id, commentUI.state?.kind === 'list', 'navigation'); focusedDocComment.set(id); }
+	function focusInText(id: string, placement?: 'top') { setCommentScrollTarget(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
-	function focusFromCard(id: string) { images.openOr([id], { id }, () => focusInText(id)); }
+	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
 
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, draft: () => $commentDraft, session: () => liveSession,

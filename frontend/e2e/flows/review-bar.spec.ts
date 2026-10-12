@@ -1,11 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
-import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { createSession, loginByUrl } from '../support/corsia';
 import { visibleHeaderSends } from '../support/docFeedbackFooter';
-import { syntheticPng } from '../support/syntheticImages';
+import { journey, type Case, uniqueTitle, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
 
 /**
  * The in-view review bar (DCOL-FR12.4) on the real composed canvas: an agent's raised ask on an open
@@ -59,81 +58,6 @@ function handOff(artifactId: string, fromThreadId: string, toThreadId: string): 
 		cwd: backendDir, encoding: 'utf8',
 		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
 	});
-}
-
-/** The desktop and mobile projects share one database, so every seeded thread needs a title no other run reuses. */
-const uniqueTitle = (title: string) => `${title} ${Math.random().toString(36).slice(2, 7)}`;
-
-async function seed(request: APIRequestContext, baseTitle: string) {
-	const title = uniqueTitle(baseTitle);
-	const threadId = await createSession(request, title);
-	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
-	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
-	const name = `${title} ${Date.now()}.md`, docPath = path.join(workspace, name);
-	const text = '# Rollout plan\n\n' + Array.from({ length: 12 }, (_, index) => `Step ${index + 1}: the rollout proceeds to the next ring.\n\n`).join('');
-	const seeded = await request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: docPath, text, thread_id: threadId, create: true } });
-	expect(seeded.ok(), await seeded.text()).toBeTruthy();
-	return { threadId, title, name, docPath, text, artifactId: (await seeded.json()).artifact.id as string };
-}
-type Doc = Awaited<ReturnType<typeof seed>>;
-
-/** A registered image the owning thread asks about; the same fixture shape as a document, with no text. */
-async function seedImage(request: APIRequestContext, baseTitle: string): Promise<Doc> {
-	const title = uniqueTitle(baseTitle);
-	const threadId = await createSession(request, title);
-	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
-	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
-	const name = `${title} ${Date.now()}.png`, docPath = path.join(workspace, name);
-	fs.writeFileSync(docPath, syntheticPng(640, 400));
-	const registered = await request.post('/api/files/register', { params: { token: TEST_TOKEN }, data: { path: docPath, thread_id: threadId } });
-	expect(registered.ok(), await registered.text()).toBeTruthy();
-	const artifact = (await registered.json()).artifact;
-	expect(artifact.type).toBe('image');
-	return { threadId, title, name, docPath, text: '', artifactId: artifact.id as string };
-}
-
-/** A comment on the real text of "Step <n>", anchored the way the editor anchors a selection. */
-async function comment(request: APIRequestContext, doc: Doc, body: string, step: number) {
-	const from = doc.text.indexOf(`Step ${step}:`), to = from + 'Step'.length;
-	expect(from).toBeGreaterThan(-1);
-	const created = await request.post(`/api/artifacts/${doc.artifactId}/comments`, {
-		params: { token: TEST_TOKEN }, data: { body, anchor_text: 'Step', from_off: from, to_off: to },
-	});
-	expect(created.ok(), await created.text()).toBeTruthy();
-}
-
-/**
- * The three surfaces the bar is proved on. `default` is a desktop user's first layout: the plan pane open
- * and the default split, so the document canvas is under 600px and the bar stacks, with compact buttons
- * under a fine pointer. `closed` closes the pane for the one-row layout. `phone` emulates a touch screen,
- * where the stacked buttons are 44px.
- */
-type Mode = 'default' | 'closed' | 'phone';
-const WIDTH: Record<Mode, number> = { default: 1440, closed: 1440, phone: 393 };
-
-async function open(page: Page, doc: Doc, mode: Mode, theme: 'light' | 'dark') {
-	await page.setViewportSize({ width: WIDTH[mode], height: mode === 'phone' ? 852 : 900 });
-	await page.addInitScript(({ doc, theme, wide }) => {
-		localStorage.setItem('corsia_theme', theme);
-		localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [doc.threadId]: {
-			tabs: [{ instanceId: doc.threadId, artifactId: doc.artifactId, path: doc.docPath, title: doc.name, loadedRevision: null, latestRevision: null, status: 'loading' }],
-			activeTabId: doc.threadId, visible: true, activeSurface: 'artifact',
-		} }, splitWidth: wide ? 700 : null }));
-	}, { doc, theme, wide: mode === 'closed' });
-	await loginByUrl(page, { waitForComposer: false });
-	await selectThread(page, doc, mode);
-	// The plan pane opens beside the document by default; the one-row layout needs the canvas's full width.
-	if (mode === 'closed' && !(await page.locator('.pane').evaluate((pane) => pane.classList.contains('collapsed')))) {
-		await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
-		await expect(page.locator('.pane.collapsed')).toBeVisible();
-	}
-}
-async function selectThread(page: Page, doc: Doc, mode: Mode) {
-	const image = doc.name.endsWith('.png');
-	if (mode === 'phone') await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await page.locator('.thread-item').filter({ hasText: doc.title }).click();
-	if (image) await expect(page.getByRole('img', { name: doc.name })).toBeVisible();
-	else await expect(page.locator('.cm-content')).toContainText('Step 1:');
 }
 
 const bar = (page: Page) => page.locator('.review-bar');
@@ -190,24 +114,7 @@ async function expectLayout(page: Page, mode: Mode) {
 	}
 	expect(box.x + box.width - Math.max(...buttons.map((button) => button.right)), 'right-aligned').toBeLessThanOrEqual(24);
 }
-const shot = (page: Page, name: string, info: TestInfo) =>
-	page.screenshot({ path: info.outputPath(`${name}.png`), animations: 'disabled' });
 
-type Case = readonly [label: string, mode: Mode, theme: 'light' | 'dark'];
-type Run = (args: { page: Page; request: APIRequestContext; info: TestInfo; mode: Mode; theme: 'light' | 'dark' }) => Promise<void>;
-/** One test per case; a phone case runs with a touch screen so `(pointer: coarse)` applies. */
-function journey(name: string, cases: readonly Case[], run: Run) {
-	for (const [label, mode, theme] of cases) {
-		test.describe(label, () => {
-			if (mode === 'phone') test.use({ hasTouch: true, isMobile: true });
-			test(`@surface:review-bar ${name} (${label})`, async ({ page, request }, info) => {
-				// The mobile project's Pixel 7 device is a coarse pointer, so it would turn a 1440 case's compact buttons into 44px ones.
-				test.skip(mode !== 'phone' && info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
-				await run({ page, request, info, mode, theme });
-			});
-		});
-	}
-}
 const ALL: readonly Case[] = [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
 	['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
@@ -373,23 +280,43 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await page.getByRole('button', { name: /^2 open threads\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
-	const done = drawer.getByRole('button', { name: 'Done', exact: true });
+	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
 	const filters = drawer.locator('[data-drawer-filter]');
 	const jump = drawer.locator('[data-comment-jump]').first();
-	expect(await filters.count()).toBe(3);
-	const targets = [done, jump, ...(await filters.all())];
+	expect(await filters.count()).toBe(1);
+	await settled(page);
+	const targets = [close, jump, ...(await filters.all())];
 	for (const target of targets) expect((await target.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
-	// A real tap on each control's centre lands on it.
-	const openFilter = drawer.getByRole('button', { name: 'Open', exact: true });
+	// A real tap opens the menu, selects a filter, and leaves every drawer control reachable.
+	const openFilter = drawer.getByRole('button', { name: 'Filter comments: Open', exact: true });
 	const box = (await openFilter.boundingBox())!;
 	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
-	await expect(openFilter).toHaveAttribute('aria-pressed', 'true');
+	await expect(openFilter).toHaveAttribute('aria-expanded', 'true');
+	// Close the menu before tapping another drawer control; the menu intentionally owns its overlay.
+	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+	await expect(openFilter).toHaveAttribute('aria-expanded', 'false');
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
 	await expect(drawer).toBeVisible();
+	// A quote jump moves the phone sheet to its half detent. Wait for that finite
+	// transition before calculating a touch coordinate, rather than tapping where
+	// the filter was while the sheet was still moving.
+	await settled(page);
+	await expect(hitAtCentre(filters)).resolves.toBe(true);
+	await shot(page, 'rs-09-half-sheet-after-quote-tap', info);
+	const reopenedBox = (await filters.boundingBox())!;
+	await page.touchscreen.tap(reopenedBox.x + reopenedBox.width / 2, reopenedBox.y + reopenedBox.height / 2);
+	await expect(filters).toHaveAttribute('aria-expanded', 'true');
+	const menu = drawer.getByRole('menu', { name: 'Filter comments', exact: true });
+	await expect(menu.getByRole('menuitemradio')).toHaveCount(3);
+	await shot(page, 'rs-10-filter-menu-open', info);
+	await menu.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
+	await expect(filters).toHaveText('Filter');
+	await expect(filters).toHaveAttribute('aria-label', 'Filter comments: Resolved');
+	await expect(filters).toHaveAttribute('aria-expanded', 'false');
 	await shot(page, 'drawer-touch', info);
-	const doneBox = (await done.boundingBox())!;
-	await page.touchscreen.tap(doneBox.x + doneBox.width / 2, doneBox.y + doneBox.height / 2);
+	const closeBox = (await close.boundingBox())!;
+	await page.touchscreen.tap(closeBox.x + closeBox.width / 2, closeBox.y + closeBox.height / 2);
 	await expect(drawer).toBeHidden();
 });
 
@@ -412,6 +339,14 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	const send = footer.getByRole('button', { name: 'Send now', exact: true });
 	await expect(send).toBeVisible();
 	await settled(page);
+	if (mode === 'closed') {
+		const [sheet, column] = await Promise.all([
+			page.locator('[data-adaptive-drawer] .drawer-panel').boundingBox(),
+			page.locator('.leaf-body.document-canvas').boundingBox(),
+		]);
+		expect(sheet!.x, 'the narrow-canvas sheet starts at the document column').toBeCloseTo(column!.x, 0);
+		expect(sheet!.width, 'the narrow-canvas sheet spans only the document column').toBeCloseTo(column!.width, 0);
+	}
 
 	// Pinned to the drawer's foot, opaque, and the list still scrolls above it: its last card ends above the footer.
 	const list = drawer.locator('.drawer-comments');
@@ -432,8 +367,8 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 			lastCardBottom: Math.min(cards.at(-1)!.getBoundingClientRect().bottom, list.getBoundingClientRect().bottom), footerTop: box.top,
 			background: getComputedStyle(element).backgroundColor, token,
 			drawerHeight: drawer.height, listHeight: list.getBoundingClientRect().height, footerHeight: box.height,
-			docContentHeight: (() => { const doc = frame.closest<HTMLElement>('.doc')!, style = getComputedStyle(doc); return doc.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom); })(),
-			measuredFooter: frame.closest<HTMLElement>('.doc')!.style.getPropertyValue('--doc-drawer-footer-height'),
+			docContentHeight: (() => { const doc = frame.closest<HTMLElement>('.doc'); if (!doc) return null; const style = getComputedStyle(doc); return doc.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom); })(),
+			measuredFooter: frame.closest<HTMLElement>('.doc')?.style.getPropertyValue('--doc-drawer-footer-height') ?? '',
 		};
 	});
 	expect(fit.bottomGap, 'the footer sits on the drawer\'s bottom border').toBeLessThanOrEqual(1.5);
@@ -442,14 +377,17 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	expect(fit.listBottom, 'the list ends where the footer starts').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.lastCardBottom, 'scrolled to the end, the last card is above the footer').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.background, 'the footer is opaque --bg-secondary').toBe(fit.token);
-	// The existing cap owns the list; the measured pinned footer extends the drawer below it. Six cards make a lost list row visible.
-	const drawerCap = fit.docContentHeight * 0.36;
-	const preFooterDrawer = Math.min(drawerCap, 260);
-	const expectedDrawer = preFooterDrawer + fit.footerHeight;
-	const drawerChrome = fit.drawerHeight - fit.listHeight - fit.footerHeight;
-	expect(Number.parseFloat(fit.measuredFooter), 'the grid receives the measured footer height').toBeCloseTo(fit.footerHeight, 0);
-	expect(fit.drawerHeight, 'the drawer adds the footer beneath its existing cap').toBeCloseTo(expectedDrawer, 0);
-	expect(fit.listHeight, 'six-thread list keeps its pre-footer height').toBeGreaterThanOrEqual(preFooterDrawer - drawerChrome - 1);
+	await shot(page, mode === 'phone' ? 'rs-12-send-now-sheet' : 'rs-11-send-now-inline', info);
+	// The inline drawer extends its grid cap by the measured footer. The phone sheet is portaled outside that grid.
+	if (fit.docContentHeight !== null) {
+		const drawerCap = fit.docContentHeight * 0.36;
+		const preFooterDrawer = Math.min(drawerCap, 260);
+		const expectedDrawer = preFooterDrawer + fit.footerHeight;
+		const drawerChrome = fit.drawerHeight - fit.listHeight - fit.footerHeight;
+		expect(Number.parseFloat(fit.measuredFooter), 'the grid receives the measured footer height').toBeCloseTo(fit.footerHeight, 0);
+		expect(fit.drawerHeight, 'the drawer adds the footer beneath its existing cap').toBeCloseTo(expectedDrawer, 0);
+		expect(fit.listHeight, 'six-thread list keeps its pre-footer height').toBeGreaterThanOrEqual(preFooterDrawer - drawerChrome - 1);
+	}
 	expect(await hitAtCentre(send), 'Send now is hit-testable').toBe(true);
 	if (mode === 'phone') expect((await send.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
 	await shot(page, 'unsent-footer', info);
@@ -459,7 +397,7 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
 });
 
-journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light']], async ({ page, request, info, mode, theme }) => {
+journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Review long ${mode} ${theme} Platform Reliability Engineering Operations Release Coordination Agent`);
 	const reason = 'Is the rollout plan right for every region before we promote it?';
 	raiseAsk(doc.threadId, doc.artifactId, reason);
@@ -467,6 +405,7 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await expectLayout(page, mode);
 	const line = bar(page).locator('.rb-line');
 	await expect(line).toContainText('Is the rollout plan right for every region');
+	await expectNameClearOfControls(page, doc.title);
 	await shot(page, 'long-name-collapsed', info);
 
 	// The integrated row expands its full ask below the tool line, keeping the header controls in place.
@@ -474,19 +413,30 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await line.click();
 	await expect(bar(page).locator('.rb-ask-full')).toHaveText(reason);
 	expect((await bar(page).boundingBox())!.height).toBeGreaterThan(collapsedHeight);
+	await expectNameClearOfControls(page, doc.title);
 	await shot(page, 'long-name-expanded', info);
 });
 
-/** A pointer at the element's centre lands on the element, not on whatever is drawn above it (named in the failure). */
-const hitAtCentre = (locator: ReturnType<Page['locator']>) => locator.evaluate((el) => {
-	const rect = el.getBoundingClientRect();
-	const top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-	return el.contains(top) ? true : `${top?.tagName.toLowerCase()}.${[...(top?.classList ?? [])].join('.')}`;
-});
-/** Wait out the finite animations (the ask's entrance, the pane's slide) so geometry and hit tests read the settled layout. */
-const settled = (page: Page) => page.evaluate(() => Promise.all(document.getAnimations()
-	.filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
-	.map((animation) => animation.finished.catch(() => undefined))));
+/** The asker's name is cut in the middle with its last four characters kept, and its box stays off the header's controls. */
+async function expectNameClearOfControls(page: Page, title: string) {
+	const name = bar(page).locator('.rb-who .name');
+	await expect(name.locator('.name-tail')).toHaveText(title.slice(-4));
+	expect(await name.locator('.name-head').evaluate((el) => el.scrollWidth > el.clientWidth), 'the name is truncated, not wrapped or clipped').toBe(true);
+	const boxes = await page.evaluate(() => {
+		const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, label: (el.getAttribute('aria-label') ?? el.className ?? '').toString().slice(0, 40) }; };
+		return {
+			name: rect(document.querySelector('.rb-who')!),
+			// A touch control's 44px hit area spills a few px into the row below; the name is held clear of what is drawn (the 28px control).
+			controls: [...document.querySelectorAll('.document-header .presence-row, .document-tools button, .rb-chev')].map(rect).filter((r) => r.right > r.left).map((r) => { const mid = (r.top + r.bottom) / 2; return r.bottom - r.top > 28 ? { ...r, top: mid - 14, bottom: mid + 14 } : r; }),
+		};
+	});
+	expect(boxes.controls.length).toBeGreaterThan(0);
+	for (const control of boxes.controls) {
+		const apart = boxes.name.right <= control.left || control.right <= boxes.name.left || boxes.name.bottom <= control.top || control.bottom <= boxes.name.top;
+		expect(apart, `the name's box ${JSON.stringify(boxes.name)} intersects a header control ${JSON.stringify(control)}`).toBe(true);
+	}
+}
+
 
 /** At 1280 the open plan pane overlays the document instead of docking beside it, so the whole header (tools and both ask lines) ends before it rather than under it. */
 for (const theme of ['light', 'dark'] as const) {

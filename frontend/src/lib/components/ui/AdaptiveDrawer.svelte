@@ -5,6 +5,8 @@
 	import type { Snippet } from 'svelte';
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import { portal } from '$lib/actions/portal';
+	import { settleHeight } from '$lib/actions/settleHeight';
+	import { trackColumnBox, type ColumnBox } from '$lib/actions/trackColumnBox';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 
@@ -19,6 +21,13 @@
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
 		followKeyboard = false,
+		headless = false,
+		opaque = false,
+		modal = true,
+		within = null,
+		detent = 'full',
+		onDetent,
+		mountMotion = false,
 	}: {
 		ariaLabel: string;
 		/**
@@ -43,24 +52,48 @@
 		 * visual viewport the app already publishes as CSS variables.
 		 */
 		followKeyboard?: boolean;
+		/** Content may own the header, leaving the chrome with its grabber only. */
+		headless?: boolean;
+		opaque?: boolean;
+		/** Keep the sheet interactive without blocking controls outside it. */
+		modal?: boolean;
+		/** Constrain this sheet and its scrim to a document column rather than the viewport. */
+		within?: HTMLElement | null;
+		detent?: 'full' | 'half';
+		onDetent?: (detent: 'full' | 'half') => void;
+		/**
+		 * Slide and fade in and out when a parent block mounts or removes the drawer, and ease its height when its
+		 * content changes it. Every consumer shows the drawer from a parent block, where Svelte's local transitions
+		 * never play, so without this opt-in the sheet appears, disappears and resizes in a single frame.
+		 */
+		mountMotion?: boolean;
 	} = $props();
 
+	let box = $state<ColumnBox | null>(null);
+	$effect(() => {
+		if (!within) { box = null; return; }
+		return trackColumnBox(within, (next) => { box = next; });
+	});
 	let panel = $state<HTMLElement | null>(null);
 	let dragY = $state(0);
 	let dragging = $state(false);
 	let dragPointer: number | null = null;
 	let dragStartY = 0;
 	let dragStartedAt = 0;
+	let dragRaw = 0;
 
 	const flyParams = $derived(
-		$prefersReducedMotion
+		$prefersReducedMotion || !mountMotion
 			? { y: 0, duration: 0 }
 			: { y: 72, duration: 260, easing: cubicOut },
 	);
-	const fadeParams = $derived({ duration: $prefersReducedMotion ? 0 : 160 });
+	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
+	// The token is read once, when the drawer is created, never inside the derivation.
+	const tightMs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 120;
+	const fadeParams = $derived({ duration: !mountMotion ? 0 : $prefersReducedMotion ? tightMs : 160 });
 
 	function onBackdrop(event: MouseEvent): void {
-		if (event.target === event.currentTarget) onClose();
+		if (modal && event.target === event.currentTarget) onClose();
 	}
 
 	function startDrag(event: PointerEvent): void {
@@ -70,13 +103,15 @@
 		dragStartY = event.clientY;
 		dragStartedAt = performance.now();
 		dragY = 0;
+		dragRaw = 0;
 		dragging = true;
 		handle.setPointerCapture?.(event.pointerId);
 	}
 
 	function moveDrag(event: PointerEvent): void {
 		if (!dragging || dragPointer !== event.pointerId) return;
-		dragY = Math.max(0, event.clientY - dragStartY);
+		dragRaw = event.clientY - dragStartY;
+		dragY = Math.max(0, dragRaw);
 	}
 
 	function finishDrag(event: PointerEvent): void {
@@ -86,6 +121,7 @@
 		const threshold = Math.min(180, Math.max(96, (panel?.clientHeight ?? 480) * 0.24));
 		dragging = false;
 		dragPointer = null;
+		if (detent === 'half' && event.type === 'pointerup' && (dragRaw <= -40 || (Math.abs(dragRaw) < 6 && elapsed < 350))) { onDetent?.('full'); return; }
 		if (dragY >= threshold || (dragY >= 64 && velocity > 0.75)) {
 			onClose();
 			return;
@@ -121,22 +157,33 @@
 <div
 	class="drawer-backdrop"
 	class:follow-keyboard={followKeyboard}
+	class:within={!!box}
+	class:half={detent === 'half'}
+	class:nonmodal={!modal}
+	style:--drawer-top="{box?.top ?? 0}px"
+	style:--drawer-right="{box?.right ?? 0}px"
+	style:--drawer-bottom="{box?.bottom ?? 0}px"
+	style:--drawer-left="{box?.left ?? 0}px"
+	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
 	onclick={onBackdrop}
-	transition:fade={fadeParams}
+	transition:fade|global={fadeParams}
 	use:portal
 >
-	<div class="drawer-motion" transition:fly={flyParams}>
+	<div class="drawer-motion" transition:fly|global={flyParams}>
 		<div
 			bind:this={panel}
 			class="drawer-panel"
 			class:dragging
+			class:opaque
+			class:half={detent === 'half'}
 			style:--drawer-drag-y="{dragY}px"
 			role="dialog"
-			aria-modal="true"
+			aria-modal={modal ? 'true' : 'false'}
 			aria-label={ariaLabel}
 			tabindex="-1"
 			use:focusTrap={{ onEscape: onClose, autoFocus: false }}
+			use:settleHeight={{ enabled: mountMotion && !dragging, reduced: $prefersReducedMotion }}
 		>
 			<div class="drawer-chrome">
 				<div
@@ -149,11 +196,11 @@
 				>
 					<span class="drawer-grabber"></span>
 				</div>
-				<div class="drawer-head" class:centered={!!leading}>
+				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}
 					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else}<span class="drawer-head-spacer"></span>{/if}
 					<button class="drawer-done" type="button" onclick={onClose}>{doneLabel}</button>
-				</div>
+				</div>{/if}
 			</div>
 			<div class="drawer-body" class:fill>
 				{@render children()}
@@ -176,7 +223,14 @@
 		background: color-mix(in srgb, var(--glass-scrim) 88%, transparent);
 		overscroll-behavior: contain;
 		pointer-events: auto;
+		transition: background-color var(--dur-standard) var(--ease-entrance);
 	}
+	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: none; backdrop-filter: brightness(0.78); -webkit-backdrop-filter: brightness(0.78); }
+	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+	.drawer-backdrop.nonmodal { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
+	.drawer-backdrop.nonmodal .drawer-motion { pointer-events: auto; }
+	.within .drawer-motion { max-width: none; padding: 0; }
+	.within .drawer-panel { max-height: calc(var(--drawer-h) * 0.82); }
 	.drawer-backdrop.follow-keyboard {
 		bottom: auto;
 		top: var(--doc-visual-viewport-offset, 0px);
@@ -199,7 +253,7 @@
 		flex-direction: column;
 		overflow: hidden;
 		transform: translateY(var(--drawer-drag-y));
-		transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+		transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), max-height var(--dur-standard) var(--ease-entrance);
 		border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 		border-bottom: 0;
 		border-radius: 28px 28px 0 0;
@@ -214,6 +268,9 @@
 	.drawer-panel.dragging {
 		transition: none;
 	}
+	.drawer-panel.opaque { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
+	.drawer-panel.half { max-height: min(46dvh, calc(100dvh - max(16px, env(safe-area-inset-top, 0px)))); }
+	.within .drawer-panel.half { max-height: calc(var(--drawer-h) * 0.46); }
 	.drawer-panel:focus {
 		outline: none;
 	}
@@ -237,6 +294,7 @@
 		cursor: grab;
 		touch-action: none;
 	}
+	.drawer-panel.half .drawer-drag-region { padding-bottom: var(--space-3); }
 	.drawer-drag-region:active {
 		cursor: grabbing;
 	}
