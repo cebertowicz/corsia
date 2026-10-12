@@ -3,6 +3,7 @@
 	import { get } from 'svelte/store';
 	import { Button, IconButton } from './ui';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
+	import { menuPop, peerFade } from '$lib/popoverMotion';
 	import type { CommentLoad } from '$lib/stores/docComments';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
@@ -170,7 +171,8 @@
 	});
 	/**
 	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with
-	 * reduced motion it crossfades instead. A document's drawer keeps appearing and leaving at once.
+	 * reduced motion it crossfades instead. A document's side drawer (a canvas wide enough for a column) appears and leaves
+	 * at once; its sheet form moves through AdaptiveDrawer's mountMotion.
 	 */
 	function drawerMotion(_node: Element, { leaving }: { leaving: boolean }) {
 		if (!isImage) return { duration: 0 };
@@ -311,14 +313,16 @@
 {#snippet listBody()}
 	<div class="drawer-heading"><h2>Comments <span>{headerCount}</span></h2><div class="drawer-tools"><div class="filter-menu">
 		<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
-		{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments">{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
+		{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments" in:menuPop={{ origin: 'top right' }} out:menuPop={{ origin: 'top right' }}>{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
 	</div><IconButton ariaLabel="Close comments" variant="ghost" size="sm" onclick={closeDrawer}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>
 	{#if load?.state === 'loading'}<p class="drawer-status">Loading comments…</p>{/if}
 	{#if load?.state === 'error'}<div class="drawer-status" role="status">Couldn't load comments. {load.error}<Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 	{#if navigationNotice}<p class="drawer-status">{navigationNotice}</p>{/if}
 	<div class="drawer-comments">
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
+		<div class="peers">{#key filter}<div class="peer" in:peerFade out:peerFade>
 		{#if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
+		</div>{/key}</div>
 	</div>
 	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
 {/snippet}
@@ -349,6 +353,9 @@
 	.filter-check { display: inline-flex; flex: none; width: 12px; height: 12px; }
 	.filter-popup button[aria-checked="true"] { color: var(--accent); font-weight: var(--fw-semibold); }
 	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: 44px; } }
+	/* A filter switch crossfades: the leaving and arriving lists share one grid cell, so neither moves the other. */
+	.peers { display: grid; }
+	.peer { grid-area: 1 / 1; min-width: 0; }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
 	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
