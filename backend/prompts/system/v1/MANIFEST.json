@@ -19,10 +19,10 @@
       "sha256": "2ac0f6a1e66262f6c6e8272d48f236edee50fe95b5999fafed16dbb5daabc7a3"
     },
     {
-      "bytes": 1973,
+      "bytes": 2586,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "e77a2e5081ca38e0a8e4f6a9f189dd8eeb057e486592d74644fb114bdcdf0288"
+      "sha256": "c5955b8f2b17a076b16594e95244f129905a63ffe3419756f575af87cf511972"
     },
     {
       "bytes": 862,
@@ -267,10 +267,10 @@
       "sha256": "af9258a5cb11e5c3be6ca35c2df2344849194a16fb264364e095fd9e69296fbf"
     },
     {
-      "bytes": 4397,
+      "bytes": 4698,
       "kind": "skill",
       "path": "skills/decision-brief/SKILL.md",
-      "sha256": "c5002cd7aa1857ce6d7d4ed41aea4241a4396e0709130c9a0c0c9fc5a3503ce3"
+      "sha256": "98aeb5081fd2bca3d2aed327085395c073872cd0525aa68060f28a928b10f439"
     },
     {
       "bytes": 5622,
