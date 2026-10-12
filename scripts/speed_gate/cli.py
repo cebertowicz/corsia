@@ -4,11 +4,10 @@
     python -m speed_gate.cli compare --current measurement.json --baseline quality/speed-gate-baseline.json
     python -m speed_gate.cli update-baseline --current measurement.json --baseline ... --reason "why"
 
-CI and ``scripts/check-pr`` run the same report-only ``compare`` against the same committed baseline and print one
-``speed-gate: ...`` line per finding kind, naming the routes. ``--enforce`` is the later, enforcing mode. Exit codes: 0 pass (or would-fail in report-only mode), 1 would-fail
-or an improved route with --enforce (a PR that moves a cost updates the baseline in the same PR), 2 version mismatch with --enforce
-(report-only warns and exits 0), 3 the runs of one tree disagreed with --enforce (report-only warns and exits
-0), 4 the fixture build or a harness run failed, or a measurement guard stopped the run (no verdict).
+CI and ``scripts/check-pr`` run ``measure`` and ``compare`` with ``--enforce`` against the same committed
+baseline. Exit codes: 0 pass, 1 a would-fail or improved route (update the baseline in the same PR with a
+reason), 2 a SQLite version mismatch, 3 runs of one tree disagree, or 4 the fixture build or a harness run
+failed or a measurement guard stopped the run (no verdict).
 """
 
 from __future__ import annotations
@@ -122,7 +121,7 @@ def decide(current: dict, baseline: dict, *, enforce: bool, base_label: str, sum
         with summary.open("a") as handle:
             handle.write(text + "\n")
     if verdict.status == "version_mismatch":
-        # Not a verdict, but report-only phase must not turn CI red: warn loudly, fail only when enforcing.
+        # Not a verdict: non-enforcing callers warn loudly, enforcing callers fail with exit 2.
         print(f"speed-gate: rebaseline needed, {verdict.message}")
         print(f"::warning title=Read-cost speed gate::{verdict.message}")
         return EXIT_REBASELINE if enforce else 0
@@ -131,10 +130,6 @@ def decide(current: dict, baseline: dict, *, enforce: bool, base_label: str, sum
         routes = sorted({item.route for item in verdict.findings if item.kind in kinds})
         if routes:
             print(f"speed-gate: {label} on {', '.join(routes)}")
-    if unrecorded and enforce:
-        print("The committed baseline does not match this tree. Update it in this PR from this measurement: "
-              "python -m speed_gate.cli update-baseline --current <measurement> "
-              "--baseline quality/speed-gate-baseline.json --reason \"<why the cost moved>\"", file=sys.stderr)
     return EXIT_WOULD_FAIL if unrecorded and enforce else 0
 
 
@@ -168,14 +163,14 @@ def build_parser() -> argparse.ArgumentParser:
     measure.add_argument("--out", required=True, type=Path)
     measure.add_argument("--repeats", type=int, default=2, help="independent harness runs; they must agree exactly")
     measure.add_argument("--summary", type=Path, help="append a disagreement report here (the job summary file)")
-    measure.add_argument("--enforce", action="store_true", help="exit 3 when the runs disagree; default is report-only")
+    measure.add_argument("--enforce", action="store_true", help="exit 3 when runs of one tree disagree")
     measure.set_defaults(run=_command_measure)
     compare = sub.add_parser("compare")
     compare.add_argument("--current", required=True, type=Path)
     compare.add_argument("--baseline", required=True, type=Path)
     compare.add_argument("--summary", type=Path, help="append the report here (the job summary file)")
     compare.add_argument("--enforce", action="store_true",
-                         help="exit 1 on a would-fail or improved route (update the baseline in the PR); default is report-only")
+                         help="exit 1 on a would-fail or improved route; the report gives the rebaseline command")
     compare.set_defaults(run=_command_compare)
     update = sub.add_parser("update-baseline")
     update.add_argument("--current", required=True, type=Path)
