@@ -28,6 +28,7 @@ let component: Record<string, unknown> | null = null;
 let entries: Record<string, unknown>[];
 let providerKeys: Record<string, unknown>[];
 let serverKeys: Record<string, unknown>[];
+let mcpServers: Record<string, unknown>[];
 let writeAnswer: { status: number; body: unknown };
 let checkAnswer: unknown;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -43,11 +44,12 @@ beforeEach(() => {
 	entries = [{ ...webSearch }, { ...maps }];
 	providerKeys = [];
 	serverKeys = [];
+	mcpServers = [];
 	providerCardRequest.set(null);
 	writeAnswer = { status: 200, body: { key: webSearch } };
 	checkAnswer = { outcome: 'works', reason: null };
 	fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-		if (url === '/api/keys') return json(200, { keys: entries, provider_keys: providerKeys, server_keys: serverKeys });
+		if (url === '/api/keys') return json(200, { keys: entries, provider_keys: providerKeys, server_keys: serverKeys, mcp_servers: mcpServers });
 		if (url.endsWith('/check')) return json(200, checkAnswer);
 		return json(writeAnswer.status, writeAnswer.body);
 	});
@@ -213,6 +215,34 @@ describe('Settings › Keys', () => {
 		await mountKeys();
 		button('web-search', 'Check').click();
 		await vi.waitFor(() => expect(host.textContent).toContain(text));
+	});
+
+	it('shows remote no-key status accurately and submits an empty write-only MCP form to the fixed route', async () => {
+		mcpServers = [
+			{ server: 'local', transport: 'stdio', unsupported_references: [], keys: [{ variable: 'API_TOKEN', is_set: true, set_at: '2026-10-12T10:00:00Z', pending_restart: true, supported: true }] },
+			{ server: 'remote', transport: 'remote', unsupported_references: [], keys: [] },
+		];
+		await mountKeys();
+		const local = host.querySelector<HTMLElement>('[data-mcp-server="local"]')!;
+		const remote = host.querySelector<HTMLElement>('[data-mcp-server="remote"]')!;
+		expect(remote.textContent).toContain('No editable CORSIA key is configured here. Credentials managed outside CORSIA are not shown on this page.');
+		expect(local.textContent).toContain('Restart the CORSIA backend to use this value for new MCP connections.');
+		expect(local.textContent).not.toContain('Clear');
+		expect(local.textContent).not.toContain('Remove');
+		[...local.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === 'Replace')!.click();
+		flushSync();
+		const form = local.querySelector('form')!;
+		const value = form.querySelector<HTMLInputElement>('input[aria-label="Key"]')!;
+		const password = form.querySelector<HTMLInputElement>('input[aria-label="CORSIA password"]')!;
+		type(value, VALUE);
+		type(password, PASSWORD);
+		form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/keys/mcp/secret/value')).toBe(true));
+		const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/keys/mcp/secret/value')!;
+		expect(JSON.parse((init as RequestInit).body as string)).toEqual({ server: 'local', variable: 'API_TOKEN', value: VALUE, password: PASSWORD });
+		expect(value.value).toBe('');
+		expect(password.value).toBe('');
+		expect(host.innerHTML).not.toContain(VALUE);
 	});
 
 	describe('provider keys', () => {

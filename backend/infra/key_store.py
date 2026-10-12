@@ -175,7 +175,7 @@ def set_value(name: str, value: object, *, db: sqlite3.Connection | None = None)
 
 
 def set_managed_value(name: str, value: object, *, db: sqlite3.Connection | None = None) -> None:
-    """Store a value for an entry code owns. Server code only: no route calls it."""
+    """Store a value for an entry code owns. Call only after validating its owner and target."""
     if not is_managed_name(name):
         raise KeyStoreError("No key has that name.")
     _store(name, validated_value(value), db)

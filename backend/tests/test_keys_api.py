@@ -275,3 +275,117 @@ async def test_adding_refuses_a_name_in_use(client):
 ])
 def test_the_audit_kind_names_what_the_entry_belongs_to(name, kind):
     assert keys_api._kind(name) == kind
+
+
+@pytest.mark.asyncio
+async def test_mcp_metadata_distinguishes_managed_keys_remote_servers_and_unsupported_refs(client, monkeypatch):
+    from infra.settings import set_setting
+    from tools.mcp_secrets import entry_name
+
+    remote_servers = {f"remote-{index}": {"url": f"https://service-{index}.invalid/mcp"} for index in range(1, 8)}
+    set_setting("tools", {"mcpServers": {
+        "local": {"command": "fixture", "secret_env": ["TOKEN", "NEXT"], "secret_headers": ["X-Token"]},
+        **remote_servers,
+    }})
+    key_store.set_managed_value(entry_name("local", "secret_env", "TOKEN"), "mcp-private-token-012345")
+    monkeypatch.setattr("tools.mcp_runtime.connection_started_at", lambda server: "2000-01-01T00:00:00" if server == "local" else None)
+
+    response = await client.get("/api/keys", headers=_auth())
+    assert response.status_code == 200
+    body = response.json()
+    assert not any(row["name"].startswith("mcp-") for row in body["keys"])
+    local = next(row for row in body["mcp_servers"] if row["server"] == "local")
+    assert local["transport"] == "stdio"
+    assert local["keys"] == [
+        {"variable": "TOKEN", "is_set": True, "set_at": local["keys"][0]["set_at"], "pending_restart": True, "supported": True},
+        {"variable": "NEXT", "is_set": False, "set_at": None, "pending_restart": False, "supported": True},
+    ]
+    assert local["unsupported_references"] == ["X-Token"]
+    remotes = [row for row in body["mcp_servers"] if row["transport"] == "remote"]
+    assert len(remotes) == 7
+    assert {row["server"] for row in remotes} == set(remote_servers)
+    assert all(row["keys"] == [] and row["unsupported_references"] == [] for row in remotes)
+    assert "mcp-private-token-012345" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_replacement_is_person_only_scoped_and_pending_until_restart(client, monkeypatch):
+    from infra.settings import set_setting
+    from tools.mcp_secrets import entry_name
+
+    set_setting("tools", {"mcpServers": {
+        "alpha": {"command": "fixture", "secret_env": ["TOKEN", "OTHER"]},
+        "beta": {"command": "fixture", "secret_env": ["TOKEN"]},
+        "remote": {"url": "https://example.invalid/mcp"},
+    }})
+    names = {
+        (server, variable): entry_name(server, "secret_env", variable)
+        for server, variable in (("alpha", "TOKEN"), ("alpha", "OTHER"), ("beta", "TOKEN"))
+    }
+    originals = {key: f"original-{key[0]}-{key[1]}-012345" for key in names}
+    for key, value in originals.items():
+        key_store.set_managed_value(names[key], value)
+
+    async def unexpected_reload(_config):
+        raise AssertionError("key replacement must preserve the current MCP session")
+
+    monkeypatch.setattr("tools.mcp_runtime.reload_mcp_runtime", unexpected_reload)
+    monkeypatch.setattr("tools.mcp_runtime.connection_started_at", lambda server: "2000-01-01T00:00:00" if server == "alpha" else None)
+    refused = await client.put(
+        "/api/keys/mcp/secret/value", headers=_auth(OWNER_TOKEN),
+        json={"server": "alpha", "variable": "TOKEN", "value": "replacement-secret-012345", "password": TEST_PASSWORD},
+    )
+    assert refused.status_code == 403
+    invalid = await client.put(
+        "/api/keys/mcp/secret/value", headers=_auth(),
+        json={"server": "remote", "variable": "TOKEN", "value": "replacement-secret-012345", "password": TEST_PASSWORD},
+    )
+    assert invalid.status_code == 400
+    invalid_var = await client.put(
+        "/api/keys/mcp/secret/value", headers=_auth(),
+        json={"server": "alpha", "variable": "UNKNOWN", "value": "replacement-secret-012345", "password": TEST_PASSWORD},
+    )
+    assert invalid_var.status_code == 400
+
+    saved = await client.put(
+        "/api/keys/mcp/secret/value", headers=_auth(),
+        json={"server": "alpha", "variable": "TOKEN", "value": "replacement-secret-012345", "password": TEST_PASSWORD},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json() == {"saved": True, "pending_restart": True}
+    assert "replacement-secret-012345" not in saved.text
+    listing = (await client.get("/api/keys", headers=_auth())).json()["mcp_servers"]
+    alpha_before_restart = next(row for row in listing if row["server"] == "alpha")
+    assert alpha_before_restart["keys"][0]["pending_restart"] is True
+    assert key_store.resolve_names(names.values()) == {
+        names[("alpha", "TOKEN")]: "replacement-secret-012345",
+        names[("alpha", "OTHER")]: originals[("alpha", "OTHER")],
+        names[("beta", "TOKEN")]: originals[("beta", "TOKEN")],
+    }
+    monkeypatch.setattr("tools.mcp_runtime.connection_started_at", lambda _server: "2999-01-01T00:00:00")
+    listing = (await client.get("/api/keys", headers=_auth())).json()["mcp_servers"]
+    alpha = next(row for row in listing if row["server"] == "alpha")
+    assert alpha["keys"][0]["pending_restart"] is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_replacement_rolls_back_a_partial_store_failure(client, monkeypatch):
+    from infra.settings import set_setting
+    from tools.mcp_secrets import entry_name
+
+    set_setting("tools", {"mcpServers": {"alpha": {"command": "fixture", "secret_env": ["TOKEN"]}}})
+    name = entry_name("alpha", "secret_env", "TOKEN")
+    key_store.set_managed_value(name, "original-secret-012345")
+    original = key_store.set_managed_value
+
+    def write_then_fail(entry, value, *, db=None):
+        original(entry, value, db=db)
+        raise key_store.KeyStoreError("fixed store failure")
+
+    monkeypatch.setattr(key_store, "set_managed_value", write_then_fail)
+    response = await client.put(
+        "/api/keys/mcp/secret/value", headers=_auth(),
+        json={"server": "alpha", "variable": "TOKEN", "value": "replacement-secret-012345", "password": TEST_PASSWORD},
+    )
+    assert response.status_code == 400
+    assert key_store.resolve_names((name,))[name] == "original-secret-012345"
