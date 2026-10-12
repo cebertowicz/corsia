@@ -188,10 +188,9 @@ async def _run_job_safely(*, include_corrections: bool = False) -> None:
                 status,
                 rec_err,
             )
-    # Second steps, after the terminal record: they share today's claim, and
-    # their failures can never change the retention status already written.
+    # Second step, after the terminal record: it shares today's claim, and its
+    # failure can never change the retention status already written.
     await _reap_worktrees_safely()
-    await _reap_snapshots_safely()
     if include_corrections:
         await _run_corrections_recording_safely()
 
@@ -216,16 +215,6 @@ async def _reap_worktrees_safely() -> None:
         await asyncio.to_thread(reap_all_idle)
     except Exception:
         logger.exception("nightly_job: worktree reaper failed")
-
-
-async def _reap_snapshots_safely() -> None:
-    """Run the temporary-worker snapshot reaper without breaking maintenance."""
-    try:
-        from infra.snapshot_reaper import reap_snapshot_copies_nightly
-
-        await asyncio.to_thread(reap_snapshot_copies_nightly)
-    except Exception:
-        logger.exception("nightly_job: snapshot reaper failed")
 
 
 def _log_manual_corrections_drain(task: asyncio.Task[None]) -> None:

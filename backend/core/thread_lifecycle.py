@@ -18,9 +18,9 @@ Physical effects are idempotent: completed cleanup is a no-op on the next sweep.
 - **tool-I/O trim** — after 30d, replace verbose ``role='tool'`` payloads only
   when the current installed checkpoint covers them. This applies across ALL
   threads (agent/roster included); user/assistant text is untouched.
-- **working/ tmp trim** — remove each ``.threads/{id}/working/`` entry whole once
-  nothing in it was added for 7d (see thread_lifecycle_trims), tombstone owned
-  temp identities. Archived threads retain their files until permanent purge.
+- **working/ tmp trim** — remove stale ``.threads/{id}/working/`` entries whole,
+  tombstone owned temp identities. Settled temporary workers use a 1d TTL;
+  other archived threads retain their files until permanent purge.
 
 The retention *state machine* excludes agent-enabled threads (the roster: conductor,
 design agents, …) — an idle agent must not be archived out of the live roster — and
@@ -49,6 +49,7 @@ from infra.constants import (
     LIFECYCLE_ARCHIVE_AFTER_DAYS,
     LIFECYCLE_DORMANT_AFTER_DAYS,
     LIFECYCLE_PURGE_AFTER_DAYS,
+    LIFECYCLE_SETTLED_WORKER_WORKING_TTL_DAYS,
     LIFECYCLE_TOOL_TRIM_AFTER_DAYS,
     LIFECYCLE_WORKING_TTL_DAYS,
 )
@@ -61,8 +62,7 @@ from core.thread_lifecycle_plans import (
     withdraw_owned_decisions as _withdraw_owned_decisions,
 )
 
-# Marker prefix on a trimmed tool payload — makes the trim idempotent (already
-# trimmed rows are skipped on re-run).
+# Marker prefix makes the trim idempotent: trimmed rows are skipped on re-run.
 TOOL_TRIM_MARKER = "[tool output trimmed"
 
 
@@ -79,6 +79,7 @@ class LifecycleConfig:
     purge_after_days: int = LIFECYCLE_PURGE_AFTER_DAYS
     tool_trim_after_days: int = LIFECYCLE_TOOL_TRIM_AFTER_DAYS
     working_ttl_days: int = LIFECYCLE_WORKING_TTL_DAYS
+    settled_worker_working_ttl_days: int = LIFECYCLE_SETTLED_WORKER_WORKING_TTL_DAYS
 
 
 @dataclass
@@ -243,9 +244,8 @@ def archive_settled_worker(db, sid: str, *, now: datetime | str | None = None) -
     the plan's, for a spawned worker with nothing left to do for the step that
     spawned it. A root thread or a durable roster owner (``agent_enabled``) is
     never retired this way. Like a user archive this changes lifecycle state
-    and withdraws the worker's open decisions; ``working/`` remains until
-    permanent purge, so nothing the accepted result relies on is deleted here.
-    Returns whether the state changed.
+    and withdraws open decisions. Retention later trims stale ``working/`` units
+    after its shorter TTL; this transition deletes no result. Returns whether it changed.
     """
     timestamp = now if isinstance(now, str) else _iso(now or _now())
     cursor = db.execute(

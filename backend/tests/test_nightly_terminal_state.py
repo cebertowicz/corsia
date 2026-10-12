@@ -250,18 +250,3 @@ async def test_manual_corrections_drain_keeps_scheduler_triggers_live_and_cancel
     assert starts == 1
     assert maintenance_calls == [False]
     assert manual_cancelled.is_set()
-
-
-@pytest.mark.asyncio
-async def test_snapshot_reaper_runs_in_the_nightly_failure_boundary(monkeypatch):
-    from infra import snapshot_reaper
-    from jobs import nightly
-
-    calls: list[str] = []
-    monkeypatch.setattr(
-        snapshot_reaper, "reap_snapshot_copies_nightly", lambda: calls.append("ran"),
-    )
-
-    await nightly._reap_snapshots_safely()
-
-    assert calls == ["ran"]

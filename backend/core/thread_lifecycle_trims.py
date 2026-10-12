@@ -19,6 +19,7 @@ from core.thread_lifecycle import (
     TOOL_TRIM_MARKER,
     LifecycleConfig,
     RetentionReport,
+    SETTLED_WORKER_REASON,
     _iso,
     _row_get,
     _thread_dir,
@@ -234,36 +235,37 @@ def _remove_empty_dir(path: Path) -> bool:
 
 def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
                       report: RetentionReport) -> None:
-    """Delete stale top-level entries under live threads' ``working/``.
+    """Trim stale top-level ``working/`` units for eligible threads.
 
-    Each direct child of ``working/`` is one unit, removed whole, and only when
-    nothing in it was added or changed within the TTL (see
-    ``_unit_is_stale``); a ``.corsia-keep`` file anywhere in a unit, or at the
-    top of ``working/``, keeps it. A thread with a running Turn is skipped: its
-    Turns, and the processes they start, are the writers of its ``working/``.
-    Nothing outside ``working/`` is touched, so any other folder under
-    ``.threads/<id>/`` is durable. Global — includes agent/roster threads;
-    archived threads retain their files until purge.
-
-    Not a lock, but removal re-judges every entry just before unlinking it
-    (``_remove_unit``), so a write that lands mid-sweep keeps that entry and
-    its directories. Every filesystem error, including a failed existence or
-    type check, keeps the entry, is logged, and is counted in
-    ``report.working_trim_errors``; ``report.working_files_trimmed`` counts
-    units removed whole.
+    Active and dormant threads use the normal TTL; only settled temporary
+    workers use the shorter one. Other archived threads, ``scratch``, and other
+    thread folders remain durable. Keep markers and active turns preserve units.
+    Removal re-judges entries before unlinking; filesystem errors keep and log
+    the unit, while ``working_files_trimmed`` counts only whole removals.
     """
     from core.turn_core import active_turn_thread_ids
     from registry import service as registry_service
 
-    cutoff = (now - timedelta(days=cfg.working_ttl_days)).timestamp()
     busy = active_turn_thread_ids(db=db)
     rows = db.execute(
-        "SELECT id, project_id FROM threads "
-        "WHERE COALESCE(lifecycle_state, 'active') IN ('active', 'dormant')"
+        "SELECT id, project_id, "
+        "CASE WHEN COALESCE(lifecycle_state, 'active') = 'archived' THEN 1 ELSE 0 END "
+        "AS settled_worker FROM threads WHERE "
+        "COALESCE(lifecycle_state, 'active') IN ('active', 'dormant') OR "
+        "(COALESCE(lifecycle_state, 'active') = 'archived' "
+        "AND archived_reason = ? AND spawned_by IS NOT NULL "
+        "AND COALESCE(agent_enabled, 0) = 0)",
+        (SETTLED_WORKER_REASON,),
     ).fetchall()
     working_roots: dict[str, Path] = {}
     for r in rows:
         sid = _row_get(r, "id")
+        ttl_days = (
+            cfg.settled_worker_working_ttl_days
+            if _row_get(r, "settled_worker")
+            else cfg.working_ttl_days
+        )
+        cutoff = (now - timedelta(days=ttl_days)).timestamp()
         thread_root = _thread_dir(
             db,
             sid,
