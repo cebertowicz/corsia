@@ -16,7 +16,12 @@ def _seed(db) -> None:
     from infra.time import utc_now
 
     clock = utc_now()
-    window_day = clock.date() - timedelta(days=clock.date().weekday() + 5)
+    # Keep the trend rows in the previous calendar month. The current-month row
+    # below is the only one the period-spend assertion is meant to observe.
+    last_day_of_previous_month = clock.date().replace(day=1) - timedelta(days=1)
+    window_day = last_day_of_previous_month - timedelta(
+        days=(last_day_of_previous_month.weekday() - 2) % 7
+    )
     now = f"{window_day.isoformat()}T12:00:00Z"
     for seed_project_id in ("project", "elsewhere"):
         db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES (?,?,'t','t')", (seed_project_id, seed_project_id))
