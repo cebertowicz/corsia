@@ -93,6 +93,15 @@
 		if (feedback.sendingGrace) return `${count} · sending to ${owner} in ${feedback.graceMinutes} min`;
 		return `${count} · ${feedback.pendingCount === 1 ? 'it goes' : 'they go'} to ${owner} when you leave.`;
 	});
+	/** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
+	function drawerFooterHeight(node: HTMLElement) {
+		const doc = node.closest<HTMLElement>('.doc');
+		const update = () => doc?.style.setProperty('--doc-drawer-footer-height', `${node.getBoundingClientRect().height}px`);
+		update();
+		const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+		observer?.observe(node);
+		return { destroy() { observer?.disconnect(); doc?.style.removeProperty('--doc-drawer-footer-height'); } };
+	}
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
 		if (surfaceState?.kind !== 'thread' || typeof anchor !== 'function' || load?.state === 'loading') return;
@@ -296,7 +305,7 @@
 				{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}</p>{/if}
 			</div>
 			{#if unsentText}
-				<div class="drawer-unsent" data-drawer-unsent>
+				<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight>
 					<p role="status">{unsentText}</p>
 					<Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button>
 				</div>

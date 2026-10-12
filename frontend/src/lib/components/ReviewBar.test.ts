@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }
 vi.mock('$lib/api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
 
-const counts = (comments = 0) => ({ comments, suggestions: 0, edits: 0 });
+const counts = (comments = 0, suggestions = 0, edits = 0) => ({ comments, suggestions, edits });
 function read(comments = 0): ReviewBarRead {
 	return {
 		ask_raised: true, ask_reason: 'Is the rollout plan right?', ask_raised_at: '2026-10-10T10:00:00',
@@ -61,6 +61,8 @@ describe('ReviewBar', () => {
 		});
 		await render();
 		expect(host.textContent).toContain('Docs agent');
+		expect(host.querySelector('.rb-lead .rb-ask')).toBeNull();
+		expect(host.querySelector('.rb-line > .rb-ask')?.textContent).toContain('Please review the detailed deployment');
 		expect(host.textContent).not.toContain('Check the evidence links.');
 		host.querySelector<HTMLButtonElement>('.rb-line')!.click();
 		flushSync();
@@ -161,6 +163,22 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(document.activeElement).toBe(receipt));
 		expect(receipt.closest('[role="status"]') ?? receipt.getAttribute('role')).toBeTruthy();
 		expect(host.textContent).toContain('You approved this');
+		expect(receipt.textContent).not.toMatch(/sent \d/);
+	});
+
+	it('lists delivered feedback kinds in canonical order with singular and plural wording', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(2, 1, 3) });
+		await render();
+		button('Approve')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('sent 2 comments, 1 suggestion, 3 edits'));
+		unmount(component!); component = null; host.innerHTML = '';
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(0, 0, 1) });
+		await render();
+		button('Approve')!.click();
+		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('sent 1 edit'));
+		expect(host.querySelector('.rb-receipt')?.textContent).not.toContain('comments');
 	});
 
 	it('R3: an open comment draft blocks Approve with changes and Request changes', async () => {

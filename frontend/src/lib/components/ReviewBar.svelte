@@ -43,8 +43,12 @@
 		if (!receipt) return [];
 		const said = { approved: 'You approved this', approved_with_changes: 'You approved this with changes', changes_requested: 'You requested changes' }[receipt.verdict];
 		const time = receipt.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-		const sent = receipt.sent ? `sent ${receipt.sent} comment${receipt.sent === 1 ? '' : 's'}` : '';
-		return [said, sent, time].filter(Boolean);
+		const delivered = (['comments', 'suggestions', 'edits'] as const)
+			.map((kind) => [kind, receipt.sent[kind]] as const)
+			.filter(([, count]) => count > 0)
+			.map(([kind, count]) => `${count} ${kind === 'edits' ? 'edit' : kind.slice(0, -1)}${count === 1 ? '' : 's'}`)
+			.join(', ');
+		return [said, delivered ? `sent ${delivered}` : '', time].filter(Boolean);
 	});
 
 	// A new artifact starts a new bar; the read follows the artifact's and the plans' changes.
@@ -154,8 +158,8 @@
 					<span class="rb-lead">
 						<Avatar name={asker} color={agentColor(read?.asker?.id ?? asker)} hidden />
 						<span class="rb-who"><strong>{asker}</strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
-						<span class="rb-ask">{ask}</span>
 					</span>
+					<span class="rb-ask">{ask}</span>
 					<svg class="rb-icon rb-chev" aria-hidden="true" viewBox="0 0 16 16"><path d="M4 6.5l4 4 4-4" /></svg>
 				</button>
 				{#if expanded}<p class="rb-ask-full">{ask}</p>{/if}
@@ -209,7 +213,7 @@
 	.rb-head { display: flex; flex-direction: column; min-width: 0; }
 	.rb-line { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); min-width: 0; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	/* The avatar, name and ask; it lays nothing out itself except in the narrow header below. */
+	/* The avatar and name; it lays nothing out itself except in the narrow header below. */
 	.rb-lead { display: contents; }
 	.rb-who { flex: none; white-space: nowrap; }
 	.rb-who strong { font-weight: var(--fw-semibold); }
@@ -256,19 +260,19 @@
 	:global(.document-header) .review-bar.receipt, :global(.document-header) .review-bar.stale { align-items: flex-start; }
 	:global(.document-header) .review-bar.receipt .rb-icon, :global(.document-header) .review-bar.stale .rb-icon { margin-block: calc((var(--space-7) - var(--text-subhead)) / 2); }
 	:global(.document-header) .rb-receipt, :global(.document-header) .review-bar.stale .rb-text, :global(.document-header) .review-bar.stale .rb-sub { line-height: var(--space-7); }
-	/* Narrow header: line 1 no longer fits a 21-character name, a small ask, the chevron and the tools, so the chevron joins the tools on a row of their
-	   own and the avatar, full name and ask take the full row beneath. The name never truncates; it wraps if even that row is short. Line 2 is unchanged.
+	/* A 16ch ask needs more room than the prior 48px floor. Below this point the tools keep their row, while the review line keeps the avatar, full name and chevron together and gives the ellipsized ask the next full-width row. The name never truncates; it wraps if even its row is short. Line 2 is unchanged.
 	   Threshold, measured at a fine pointer with a narrow canvas (the pill shows its count only):
-	     avatar 19 + gap 8 + 21-character name 129 + gap 8 + ask minimum 48 + gap 8 + chevron 13
-	     + two header column gaps 8 + tools 94 (comments pill 52 + gap 4 + Request review 38) = 335px of header content.
-	   Measured header content: 195px at 1280 with the pane overlaid (rearranges); 345px on a 393 phone, 355px at 1440 with the pane docked,
-	   635px with it closed (none rearranges). */
-	@container doc-header (width < 335px) {
-		:global(.document-header) .review-bar.ask { grid-template-rows: var(--space-7); }
-		:global(.document-header) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 2; grid-template-columns: subgrid; grid-template-rows: subgrid; }
-		:global(.document-header) .review-bar.ask .rb-chev { grid-column: 1; grid-row: 1; justify-self: end; align-self: center; margin-left: 0; }
-		:global(.document-header) .review-bar.ask .rb-lead { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
+	     avatar 19 + gap 8 + 21-character name 129 + gap 8 + ask minimum 16ch (122) + gap 8 + chevron 13
+	     + two header column gaps 8 + tools 94 (comments pill 52 + gap 4 + Request review 38) = 401px of header content; 408px keeps a small tolerance.
+	   Measured header content: 195px at 1280 with the pane overlaid, 345px on a 393 phone, 355px at 1440 with the pane docked,
+	   635px with it closed. The first three use this fallback. */
+	@container doc-header (width < 408px) {
+		:global(.document-header) .review-bar.ask { grid-template-rows: var(--space-7) var(--space-7) auto; }
+		:global(.document-header) .review-bar.ask .rb-line { display: grid; grid-column: 1 / -1; grid-row: 1 / span 3; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: subgrid; }
+		:global(.document-header) .review-bar.ask .rb-lead { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 		:global(.document-header) .review-bar.ask .rb-who { flex: 0 1 auto; white-space: normal; }
+		:global(.document-header) .review-bar.ask .rb-chev { grid-column: 2; grid-row: 2; align-self: center; margin-left: 0; }
+		:global(.document-header) .review-bar.ask .rb-ask { grid-column: 1 / -1; grid-row: 3; min-height: var(--space-7); }
 	}
 
 	/* Expanded, the ask text (`.rb-ask-full`) is its own grid item spanning every column under line 1, so it has the header's full width, not what the pill and Request review leave it. */

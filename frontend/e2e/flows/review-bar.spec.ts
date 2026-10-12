@@ -147,7 +147,7 @@ async function expectLayout(page: Page, mode: Mode) {
 		await expect.poll(canvas).toBeGreaterThan(600);
 	}
 	else if (mode === 'default') expect(await canvas(), 'the default layout is a narrow canvas').toBeLessThan(600);
-	// The narrow-header fallback is for a header the overlaid pane squeezes; none of these surfaces rearranges line 1.
+	// A 16ch ask gets a full-width ellipsized row once the 408px review-line budget cannot fit it with the name and tools.
 	const line = page.locator('.document-header .review-bar.ask .rb-line');
 	if (await line.count()) {
 		const header = await page.locator('.document-header').evaluate((el) => {
@@ -155,7 +155,20 @@ async function expectLayout(page: Page, mode: Mode) {
 			return el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
 		});
 		test.info().annotations.push({ type: 'header-content-width', description: `${mode}: ${header}` });
-		expect(await line.evaluate((el) => getComputedStyle(el).display), `line 1 whole at a ${header}px header`).toBe('flex');
+		const fallback = header < 408;
+		expect(await line.evaluate((el) => getComputedStyle(el).display), `review line at a ${header}px header`).toBe(fallback ? 'grid' : 'flex');
+		if (fallback) {
+			const rows = await line.evaluate((el) => {
+				const rect = (selector: string) => el.querySelector<HTMLElement>(selector)!.getBoundingClientRect();
+				const who = rect('.rb-who'), ask = rect('.rb-ask'), chevron = rect('.rb-chev');
+				const probe = document.createElement('span'); probe.style.cssText = 'position:absolute;visibility:hidden;font:inherit;white-space:pre'; probe.textContent = '0'.repeat(16); el.append(probe);
+				const sixteenCh = probe.getBoundingClientRect().width; probe.remove();
+				return { who, ask, chevron, sixteenCh };
+			});
+			expect(rows.chevron.top, 'the chevron stays with the full asker name').toBeLessThanOrEqual(rows.who.bottom + 0.5);
+			expect(rows.ask.top, 'the ask gets the row below the asker').toBeGreaterThanOrEqual(Math.max(rows.who.bottom, rows.chevron.bottom) - 0.5);
+			expect(rows.ask.width, 'the ask keeps about 16 characters').toBeGreaterThanOrEqual(rows.sixteenCh - 1);
+		}
 	}
 	const box = (await bar(page).boundingBox())!;
 	const buttons = await bar(page).locator('.btn').evaluateAll((els) =>
@@ -260,6 +273,22 @@ journey('approve with changes after two comments', ALL, async ({ page, request, 
 	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
 	await expect(page.getByText('Place again')).toHaveCount(0);
 	await shot(page, 'receipt-with-changes', info);
+});
+
+journey('a receipt names mixed feedback kinds', [
+	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
+], async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Review mixed receipt ${mode} ${theme}`);
+	raiseAsk(doc.threadId, doc.artifactId, 'Check the handoff.');
+	await open(page, doc, mode, theme);
+	await page.route('**/api/attention/*/clear', async (route) => {
+		await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ review: { verdict: 'approved_with_changes', note: null, feedback_counts: { comments: 2, suggestions: 1, edits: 0 } } }) });
+	});
+	await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
+	const receipt = bar(page).locator('.rb-receipt');
+	await expect(receipt).toContainText('sent 2 comments, 1 suggestion');
+	expect(await receipt.evaluate((el) => el.textContent?.includes('sent 2 comments, 1 suggestion'))).toBe(true);
+	await shot(page, 'receipt-mixed-counts', info);
 });
 
 journey('request changes with only a note', [
@@ -370,16 +399,16 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
 ], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Review unsent ${mode} ${theme}`);
-	const notes = ['Ring two should wait.', 'Add a rollback line.', 'Name the owner of ring three.', 'Link the rollout dashboard.'];
-	for (const [index, note] of notes.entries()) await comment(request, doc, note, index * 3 + 2);
+	const notes = ['Ring two should wait.', 'Add a rollback line.', 'Name the owner of ring three.', 'Link the rollout dashboard.', 'Confirm the rollback owner.', 'Add the incident channel.'];
+	for (const [index, note] of notes.entries()) await comment(request, doc, note, index * 2 + 2);
 	await open(page, doc, mode, theme);
 	// The header keeps only the pill's unsent dot; Send now is in the drawer.
 	await expect(page.locator('.comment-status .unsent-dot')).toBeVisible();
 	expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
-	await page.getByRole('button', { name: /^4 open threads, 4 messages not sent yet$/ }).click();
+	await page.getByRole('button', { name: /^6 open threads, 6 messages not sent yet$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	const footer = drawer.locator('[data-drawer-unsent]');
-	await expect(footer.getByRole('status')).toHaveText(`4 messages not sent yet · they go to ${doc.title} when you leave.`);
+	await expect(footer.getByRole('status')).toHaveText(`6 messages not sent yet · they go to ${doc.title} when you leave.`);
 	const send = footer.getByRole('button', { name: 'Send now', exact: true });
 	await expect(send).toBeVisible();
 	await settled(page);
@@ -402,6 +431,9 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 			listOverflow: getComputedStyle(list).overflowY, listBottom: list.getBoundingClientRect().bottom,
 			lastCardBottom: Math.min(cards.at(-1)!.getBoundingClientRect().bottom, list.getBoundingClientRect().bottom), footerTop: box.top,
 			background: getComputedStyle(element).backgroundColor, token,
+			drawerHeight: drawer.height, listHeight: list.getBoundingClientRect().height, footerHeight: box.height,
+			docContentHeight: (() => { const doc = frame.closest<HTMLElement>('.doc')!, style = getComputedStyle(doc); return doc.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom); })(),
+			measuredFooter: frame.closest<HTMLElement>('.doc')!.style.getPropertyValue('--doc-drawer-footer-height'),
 		};
 	});
 	expect(fit.bottomGap, 'the footer sits on the drawer\'s bottom border').toBeLessThanOrEqual(1.5);
@@ -410,6 +442,13 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	expect(fit.listBottom, 'the list ends where the footer starts').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.lastCardBottom, 'scrolled to the end, the last card is above the footer').toBeLessThanOrEqual(fit.footerTop + 0.5);
 	expect(fit.background, 'the footer is opaque --bg-secondary').toBe(fit.token);
+	// The drawer adds exactly its measured footer room, until the existing 36% canvas cap. Six cards make a lost list row visible.
+	const drawerCap = fit.docContentHeight * 0.36;
+	const expectedDrawer = Math.min(drawerCap, 260 + fit.footerHeight);
+	const drawerChrome = fit.drawerHeight - fit.listHeight - fit.footerHeight;
+	expect(Number.parseFloat(fit.measuredFooter), 'the grid receives the measured footer height').toBeCloseTo(fit.footerHeight, 0);
+	expect(fit.drawerHeight, 'the footer grows the drawer only to its existing cap').toBeCloseTo(expectedDrawer, 0);
+	expect(fit.listHeight, 'six-thread list retains all room that the cap permits').toBeGreaterThanOrEqual(expectedDrawer - drawerChrome - fit.footerHeight - 1);
 	expect(await hitAtCentre(send), 'Send now is hit-testable').toBe(true);
 	if (mode === 'phone') expect((await send.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
 	await shot(page, 'unsent-footer', info);
@@ -487,8 +526,7 @@ for (const theme of ['light', 'dark'] as const) {
 			expect(await hitAtCentre(control), `${await control.getAttribute('aria-label') ?? await control.textContent()} not covered`).toBe(true);
 		}
 
-		// The squeezed header moves the chevron up beside the tools; the avatar, full name and question take the row beneath,
-		// where the question yields its width first but stays readable and uncovered.
+		// The squeezed header keeps the full name and chevron together, then gives the question its own full-width row.
 		const who = bar(page).locator('.rb-who');
 		const question = bar(page).locator('.rb-ask');
 		await expect(who).toHaveText(`${doc.title}:`);
@@ -507,16 +545,16 @@ for (const theme of ['light', 'dark'] as const) {
 			};
 		});
 		await info.attach(`geometry-1280-${theme}`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
-		expect(geometry.line, 'line 1 rearranged for the squeezed header').toBe('grid');
-		expect(geometry.chevron.right, 'chevron on the tools row').toBeLessThanOrEqual(geometry.tools.left);
-		expect(geometry.chevron.bottom, 'chevron on the tools row').toBeLessThanOrEqual(geometry.tools.bottom);
-		expect(geometry.lead.top, 'name row beneath the tools').toBeGreaterThanOrEqual(geometry.tools.bottom);
+		expect(geometry.line, 'review line rearranged for the squeezed header').toBe('grid');
+		expect(geometry.lead.top, 'name row follows the tools').toBeGreaterThanOrEqual(geometry.tools.bottom);
+		expect(geometry.chevron.top, 'chevron stays beside the asker name').toBeLessThanOrEqual(geometry.who.bottom);
+		expect(geometry.ask.top, 'question occupies the full row below the name').toBeGreaterThanOrEqual(Math.max(geometry.who.bottom, geometry.chevron.bottom) - 0.5);
 		expect(geometry.whoScroll, 'asker name not clipped').toBeLessThanOrEqual(geometry.whoClient);
 		expect(geometry.who.right, 'asker name inside its row').toBeLessThanOrEqual(geometry.lead.right);
 		expect(geometry.lead.right, 'name row clear of the overlaid pane').toBeLessThanOrEqual(paneLeft);
 		expect(await hitAtCentre(who), 'asker name not covered').toBe(true);
 		expect(await hitAtCentre(bar(page).locator('.rb-chev')), 'chevron not covered').toBe(true);
-		expect(geometry.ask.width, 'question has width').toBeGreaterThan(0);
+		expect(geometry.ask.width, 'question retains a visible full-width row').toBeGreaterThan(0);
 		expect(await hitAtCentre(question), 'question not covered').toBe(true);
 		await shot(page, `overlay-1280-${theme}-pane-open`, info);
 
