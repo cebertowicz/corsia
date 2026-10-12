@@ -238,18 +238,20 @@ def _remove_empty_dir(path: Path) -> bool:
     return True
 
 
-def _active_identity_paths(db) -> list[Path]:
+def _active_identity_dirs(db) -> set[Path]:
+    """Each active identity path with its ancestors, so a unit check is one lookup."""
     rows = db.execute(
         "SELECT path FROM artifact_identities "
         "WHERE state='active' AND path IS NOT NULL AND path != ''"
     ).fetchall()
-    return [Path(row["path"]).expanduser().resolve(strict=False) for row in rows
-            if "://" not in row["path"]]
-
-
-def _contains_active_identity(unit: Path, paths: list[Path]) -> bool:
-    unit = unit.resolve(strict=False)
-    return any(path == unit or path.is_relative_to(unit) for path in paths)
+    protected: set[Path] = set()
+    for row in rows:
+        if "://" in row["path"]:
+            continue
+        path = Path(row["path"]).expanduser().resolve(strict=False)
+        protected.add(path)
+        protected.update(path.parents)
+    return protected
 
 
 def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
@@ -273,7 +275,7 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
         f"OR ({_SETTLED_WORKER})",
         (SETTLED_WORKER_REASON, SETTLED_WORKER_REASON),
     ).fetchall()
-    active_identity_paths = _active_identity_paths(db)
+    active_identity_dirs = _active_identity_dirs(db)
     working_roots: dict[str, Path] = {}
     for r in rows:
         sid = _row_get(r, "id")
@@ -303,7 +305,7 @@ def _trim_working_tmp(db, now: datetime, cfg: LifecycleConfig, workspace: Path,
         for unit in units:
             try:
                 if (_row_get(r, "settled_worker")
-                        and _contains_active_identity(unit, active_identity_paths)):
+                        and unit.resolve(strict=False) in active_identity_dirs):
                     continue
                 if not _unit_is_stale(unit, cutoff):
                     continue
