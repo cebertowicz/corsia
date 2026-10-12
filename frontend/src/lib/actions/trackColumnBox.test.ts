@@ -48,6 +48,22 @@ describe('trackColumnBox', () => {
 		stop();
 	});
 
+	it('restarts the follow when a delayed layout transition starts moving, not only when it is created', () => {
+		const seen: ColumnBox[] = [];
+		const stop = trackColumnBox(column(), (box) => seen.push(box));
+		const neighbour = document.createElement('aside');
+		document.body.append(neighbour);
+		transition('transitionrun', neighbour, 'width');
+		// The delay passes with the box still: the follow gives up after two still frames.
+		run(100);
+		now += 300;
+		transition('transitionstart', neighbour, 'width');
+		left = 160;
+		run(100);
+		expect(seen.at(-1)?.left).toBe(160);
+		stop();
+	});
+
 	it('follows a neighbour layout transition frame by frame, then stops once the box holds still', () => {
 		const seen: ColumnBox[] = [];
 		const stop = trackColumnBox(column(), (box) => seen.push(box));

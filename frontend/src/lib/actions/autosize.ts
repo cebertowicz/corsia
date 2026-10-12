@@ -21,7 +21,12 @@ export function autosize(node: HTMLTextAreaElement, _value?: string) {
 		node.style.overflowY = Number.isFinite(cap) && wanted > cap ? 'auto' : 'hidden';
 		current = Number.isFinite(cap) ? Math.min(wanted, cap) : wanted;
 		node.style.height = `${current}px`;
+		hold();
 	};
+	// Below the cap the field holds all its text: the caret's line scrolling into view while the height still eases would lift the
+	// text one line for a frame, so the scroll is put back before it is drawn.
+	const hold = () => { if (node.style.overflowY === 'hidden' && node.scrollTop !== 0) node.scrollTop = 0; };
+	node.addEventListener('scroll', hold);
 	fit();
-	return { update: fit };
+	return { update: fit, destroy: () => node.removeEventListener('scroll', hold) };
 }

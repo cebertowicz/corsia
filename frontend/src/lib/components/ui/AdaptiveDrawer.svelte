@@ -88,7 +88,9 @@
 			: { y: 72, duration: 260, easing: cubicOut },
 	);
 	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
-	const fadeParams = $derived({ duration: !mountMotion ? 0 : $prefersReducedMotion ? Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 120 : 160 });
+	// The token is read once, when the drawer is created, never inside the derivation.
+	const tightMs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 120;
+	const fadeParams = $derived({ duration: !mountMotion ? 0 : $prefersReducedMotion ? tightMs : 160 });
 
 	function onBackdrop(event: MouseEvent): void {
 		if (modal && event.target === event.currentTarget) onClose();

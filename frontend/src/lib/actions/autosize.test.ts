@@ -25,6 +25,18 @@ describe('autosize', () => {
 		expect(node.style.overflowY).toBe('auto');
 	});
 
+	it('keeps the text at the top while the height eases below the cap, and scrolls freely past it', () => {
+		const small = field(() => 54);
+		const action = autosize(small, 'a line');
+		small.scrollTop = 18; small.dispatchEvent(new Event('scroll'));
+		expect(small.scrollTop).toBe(0);
+		action.destroy?.();
+		const capped = field(() => 240);
+		autosize(capped, 'many lines');
+		capped.scrollTop = 18; capped.dispatchEvent(new Event('scroll'));
+		expect(capped.scrollTop).toBe(18);
+	});
+
 	it('refits when the value changes, and leaves the transition to CSS', () => {
 		let tall = 54;
 		const node = field(() => tall);

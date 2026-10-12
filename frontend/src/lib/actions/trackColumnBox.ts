@@ -49,11 +49,14 @@ export function trackColumnBox(column: HTMLElement, report: (box: ColumnBox) => 
 	observer.observe(column);
 	addEventListener('resize', schedule);
 	document.addEventListener('transitionrun', started, true);
+	// transitionrun fires before a delay; the box starts moving at transitionstart, so the follow restarts there too.
+	document.addEventListener('transitionstart', started, true);
 	document.addEventListener('transitionend', ended, true);
 	document.addEventListener('transitioncancel', ended, true);
 	return () => {
 		cancelAnimationFrame(once); cancelAnimationFrame(loop); observer.disconnect(); removeEventListener('resize', schedule);
 		document.removeEventListener('transitionrun', started, true);
+		document.removeEventListener('transitionstart', started, true);
 		document.removeEventListener('transitionend', ended, true);
 		document.removeEventListener('transitioncancel', ended, true);
 	};
