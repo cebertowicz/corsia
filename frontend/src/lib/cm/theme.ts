@@ -59,6 +59,8 @@ export const docTheme = EditorView.theme({
 		padding: '0.05em 0.35em'
 	},
 	'.cm-md-link': { color: 'var(--accent)', textDecoration: 'underline', textDecorationColor: 'var(--violet-line)' },
+	'@media (hover: hover) and (pointer: fine)': { '.cm-md-link-open': { cursor: 'pointer' } },
+	'@media (pointer: coarse)': { '.cm-md-link-open:active': { backgroundColor: 'var(--accent-bg)' } },
 	'.cm-md-bullet': { color: 'var(--text-tertiary)' },
 	'.cm-md-task-control': { display: 'inline-flex', width: '28px', height: '28px', margin: '-3px 4px -3px 0', verticalAlign: 'middle', alignItems: 'center', justifyContent: 'center' },
 	'.cm-md-task-checkbox': { width: '18px', height: '18px', margin: '0', accentColor: 'var(--accent)', cursor: 'pointer' },

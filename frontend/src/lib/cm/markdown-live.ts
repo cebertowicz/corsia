@@ -5,6 +5,7 @@ import type { SyntaxNodeRef } from '@lezer/common';
 import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
 import { markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick } from './markdown-image';
+import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -142,7 +143,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 						break;
 					}
 					case 'Link':
-						decos.push(Decoration.mark({ class: 'cm-md-link' }).range(node.from, node.to));
+						decos.push(linkDecoration(view.state, node.node).range(node.from, node.to));
 						break;
 					case 'Image':
 						if (renderableImage(view.state, node.node)) return false; // hidden and drawn by `markdown-image.ts`
@@ -259,5 +260,7 @@ export const markdownLivePreview: Extension = [
 	markdownMermaidDecorations,
 	markdownImages,
 	selectImageOnClick,
-	openSelectedImageOnEnter
+	openSelectedImageOnEnter,
+	openLinkOnClick,
+	openLinkOnAltEnter
 ];
