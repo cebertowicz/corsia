@@ -64,3 +64,26 @@ def test_only_the_conductor_principal_may_set_the_reviewer_without_a_session(iso
             assert refused.status_code == 403
 
     assert "host_access_reviewer_model" not in get_agent_defaults()
+
+
+def test_reviewer_fallback_changes_require_a_human_session(isolated_db):
+    from infra.settings import get_agent_defaults
+
+    with _client() as client:
+        refused = client.patch(
+            "/api/settings",
+            headers={"Authorization": f"Bearer {OWNER_TOKEN}"},
+            json={"host_access_reviewer_fallback": True},
+        )
+        saved = client.patch(
+            "/api/settings",
+            headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"},
+            json={"host_access_reviewer_fallback": True},
+        )
+
+    assert refused.status_code == 403
+    assert refused.json()["detail"] == (
+        "This change needs the signed-in person: open CORSIA and make it there."
+    )
+    assert saved.status_code == 200
+    assert get_agent_defaults()["host_access_reviewer_fallback"] is True

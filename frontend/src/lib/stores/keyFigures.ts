@@ -9,6 +9,8 @@ export type KpiPeriod = {
 	start: string; end: string;
 	/** The local dates the period covers, both inclusive. */
 	from: string; to: string;
+	/** False when the period began before the token total was fully recorded: a change against it reads new. */
+	tokens_recorded?: boolean;
 	tokens: { total: KpiTokenFigure; input: KpiTokenFigure; cache_write: KpiTokenFigure; cache_read: KpiTokenFigure; output: KpiTokenFigure };
 };
 export type Kpi = { current: KpiPeriod; previous: KpiPeriod };

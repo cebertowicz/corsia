@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from tests.plan_writer_authorizer import raw_plan_seed
 
 SECRET_ENOUGH = "long-enough-passphrase"
 SETUP_TITLES = [
@@ -274,9 +275,10 @@ class TestWakeAndSetupPlan:
         assert has_open_setup_task("no-such-thread") is False
 
         with write_transaction(None, scope="test_settle_setup_tasks") as db:
-            db.execute(
-                "UPDATE plan_nodes SET state = 'accepted' WHERE plan_id IN "
-                "(SELECT id FROM plans WHERE owner_id = ?)", (conductor_id,))
+            with raw_plan_seed(db):
+                db.execute(
+                    "UPDATE plan_nodes SET state = 'accepted' WHERE plan_id IN "
+                    "(SELECT id FROM plans WHERE owner_id = ?)", (conductor_id,))
         assert has_open_setup_task(conductor_id) is False
 
         from infra.database import get_db

@@ -4,7 +4,7 @@ Resolves a stable label/icon/capability descriptor by ``(integration, type)``
 for the pane and Artifact Leaf. This is new internal infra — deliberately not
 ``tools/catalog.py``, which resolves harness-tool schemas, not artifact
 presentation. Core ships handlers for the types this backend actually
-produces (workspace document/code/skill, upload, GitHub pull request); any
+produces (workspace document/code/image/skill, upload, GitHub pull request); any
 other type falls back to an honest unsupported descriptor rather than a
 silently-broken row. A connector contributes a new descriptor by registering
 one here, never by branching pane control flow.
@@ -42,8 +42,14 @@ _DESCRIPTORS: dict[tuple[str, str], PresentationDescriptor] = {
     ("workspace", "code"): PresentationDescriptor(
         label="Code", icon="file-code", capability=CAPABILITY_LEAF_PACKAGE,
     ),
+    ("workspace", "image"): PresentationDescriptor(
+        label="Image", icon="image", capability=CAPABILITY_LEAF_PACKAGE,
+    ),
     ("workspace", "skill"): PresentationDescriptor(
         label="Skill", icon="sparkles", capability=CAPABILITY_LEAF_PACKAGE,
+    ),
+    ("upload", "image"): PresentationDescriptor(
+        label="Image", icon="image", capability=CAPABILITY_LEAF_PACKAGE,
     ),
     ("upload", "upload"): PresentationDescriptor(
         label="Upload", icon="paperclip", capability=CAPABILITY_DOWNLOAD,
@@ -65,7 +71,7 @@ NON_PANE_TYPES: frozenset[tuple[str, str]] = frozenset({
 
 
 def resolve_descriptor(integration: str, type_: str) -> PresentationDescriptor:
-    """Return the trusted descriptor for ``(integration, type)``.
+    """Return the trusted descriptor for an artifact's integration and type.
 
     Never raises: an unregistered type renders as the honest unsupported
     state rather than breaking the pane.

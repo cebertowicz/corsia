@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MeasurementRow, SeriesWindows } from '$lib/stores/measurement';
 import { versusPrevious } from './measurementSize';
-import { ratePeriods, periodChange, periodView as viewOf } from './measurementPeriodView';
+import { ratePeriods, periodChange, changeOnly, periodView as viewOf } from './measurementPeriodView';
 import { periodsPeriod } from '../__tests__/fixtures/measurementPeriod';
 
 const SERIES = 'active_hours_per_outcome';
@@ -15,10 +15,10 @@ const periodView = (rows: MeasurementRow[], series: string, scale = 1, windows?:
 const win = (latest: [number | null, number], previous: [number | null, number]): SeriesWindows => ({ latest: { value: latest[0], n: latest[1] }, previous: { value: previous[0], n: previous[1] } });
 
 describe('versusPrevious', () => {
-	it('prints no previous window and no previous n when the comparison reads new', () => {
-		expect(versusPrevious('new', 'Aug 10 to Sep 6', 494)).toBe('new');
-		expect(versusPrevious('new', 'Aug 10 to Sep 6')).toBe('new');
-		expect(versusPrevious('new', 'Aug 10 to Sep 6', 494)).not.toMatch(/vs|\bn\b/);
+	it('names the previous window and its n when the comparison reads new, as the render does', () => {
+		expect(versusPrevious('new', 'Aug 10 to Sep 6', 494)).toBe('new vs Aug 10 to Sep 6 (n 494)');
+		expect(versusPrevious('new', 'Aug 10 to Sep 6')).toBe('new vs Aug 10 to Sep 6');
+		expect(versusPrevious('new', null, 494)).toBe('new');
 	});
 	it('names the previous window and its n for every other reading', () => {
 		expect(versusPrevious('-4%', 'Sep 21 to Sep 27', 1451)).toBe('-4% vs Sep 21 to Sep 27 (n 1,451)');
@@ -38,9 +38,12 @@ describe('weekly outcome rates', () => {
 		// The server pooled 105 outcomes (the 5 behind the withheld week included); the drawn weeks alone would pool to 100.
 		const view = periodView(rows, SERIES, 1, win([2.5, 105], [null, 0]));
 		expect(view.current).toEqual({ value: 2.5, n: 105, periods: [0, 1, 2, 3].map(periodAt) });
-		expect(view.previous).toBeNull();
-		expect(periodChange(view)).toBe('new');
+		expect(view.previous).toEqual({ value: null, n: 0, periods: [] });
+		expect(periodChange(view)).toBe(`new vs ${view.prevText}`);
 		expect(view.nowText).toBe('Aug 10 to Sep 6');
+		// A window the server pooled only in part (a break left one week) is named by the dates it pooled, not the 4 weeks around them.
+		const narrowed: SeriesWindows = { latest: { value: 2, n: 20, from: periodAt(3), to: '2026-09-06' }, previous: { value: null, n: 0 } };
+		expect(periodView(rows, SERIES, 1, narrowed).nowText).toBe('Aug 31 to Sep 6');
 		// A scale converts the served figure into the reader's unit; with no served window there is no figure and no pool of our own.
 		expect(periodView(rows, SERIES, 60, win([2.5, 105], [null, 0])).current.value).toBe(150);
 		expect(periodView(rows, SERIES).current).toEqual({ value: null, n: 0, periods: [0, 1, 2, 3].map(periodAt) });
@@ -50,9 +53,19 @@ describe('weekly outcome rates', () => {
 		const rows = Array.from({ length: 8 }, (_, i) => row(i, i < 4 ? 2 : 1, 25));
 		const view = periodView(rows, SERIES, 1, win([1, 100], [2, 100]));
 		expect(periodChange(view)).toBe(`-50% vs ${view.prevText}`);
-		expect(periodChange(periodView([row(0, 1, 6), row(1, 1, 6)], SERIES, 1, win([1, 12], [null, 0])))).toBe('low n');
+		expect(periodChange(periodView([row(0, 1, 6), row(1, 1, 6)], SERIES, 1, win([1, 12], [null, 0])))).toBe('low n vs Jun 29 to Jul 26');
 		const partlyCovered = periodView([row(0, 2, 25), row(1, 2, 25), row(2, 1, 25), row(3, 1, 25), row(4, 1, 25), row(5, 1, 25)], SERIES, 1, win([1, 100], [1.5, 100]));
-		expect(periodChange(partlyCovered)).toBe('new');
+		expect(periodChange(partlyCovered)).toBe(`new vs ${partlyCovered.prevText}`);
+		expect(changeOnly(partlyCovered)).toBe('new');
+	});
+
+	it('names the previous window and its n when the series drew none of it, as it does for a part-covered one', () => {
+		// The series begins inside the latest window (the first-try rate on Weeks): nothing is drawn for the previous window, which the server still served.
+		const rows = [4, 5, 6, 7].map((i) => row(i, 0.9, 30));
+		const view = viewOf(rows, SERIES, 1, periodsPeriod(periodAt(7)), win([0.9, 120], [null, 0]));
+		expect(view.prevText).not.toBe('');
+		expect(periodChange(view, true)).toBe(`new vs ${view.prevText} (n 0)`);
+		expect(changeOnly(view)).toBe('new');
 	});
 
 	it('draws a week the server withheld as unknown, and the served moving average with a gap where it serves none', () => {

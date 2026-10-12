@@ -28,8 +28,8 @@
 	const colors = ['#2f6fdb', '#0f8a6c', '#d9822b', '#8a5cc2', '#c4476a', '#6b7787'];
 	/** The "Other (N more models)" slice's own neutral, lighter than the slate slice in both themes. */
 	const restColor = '#9aa4b2';
-	/** Priced dollars of every row, so each row's share is of the window's whole API-equivalent spend. */
-	const totalSpend = $derived(rows.reduce((sum, row) => sum + (row.spend_usd ?? 0), 0));
+	/** The window's whole API-equivalent spend, served: ledger dollars of every call, with or without a row here. */
+	const totalSpend = $derived(state.totalSpendUsd);
 	const windowSuffix = $derived(state.period ? `, ${periodName(state.period.latest)}` : '');
 	const pieHeading = $derived(`Share of tokens by model${windowSuffix}`);
 
@@ -166,14 +166,13 @@
 			</div>
 		</div>
 		<p class="note">
-			{#if state.minTasks !== null && rows.some((row) => row.other)}Models with under {state.minTasks} accepted tasks share the last table row.{/if}
-			Share of spend is the model's priced API-equivalent dollars over every row's; a row with no priced calls shows a dash.
+			Models{windowSuffix}.
 			{#if sizeColumns.length}
-				Each size column is the $ per accepted task for that size class, shown at {state.minTasks ?? 14} or more tasks of the class;
-				its change is against the previous window, or new when that window had fewer. First try is graded by the agents.
+				$ per task within each size class, whole chain, API-equivalent; a class shows only with {state.minTasks ?? 14} or more tasks.
+				A change compares one named size class that has {state.minTasks ?? 14} or more tasks in both windows, otherwise n/a, mix changed.
+			{:else}
+				$ per accepted task, whole chain, API-equivalent.
 			{/if}
-			API-equivalent: list price of recorded tokens, not a charge; local models have no list price and are left out of it.
-			Includes the task's workers and sent-back attempts; each model is charged for its own share.
 		</p>
 		{#if blendedRows.some(partial) || cells.some((entry) => entry.partial)}
 			<p class="note">* Some calls were unpriced; the figure covers priced calls only.</p>

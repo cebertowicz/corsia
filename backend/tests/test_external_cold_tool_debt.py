@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.checkpoint_types import CheckpointNotAdmitted
+from core.checkpoint_types import CheckpointNotAdmitted, OptionalCheckpointSkipped
 from core.turn_core import TurnIdentity
 from llm.resolution import ExecutionTarget
 
@@ -92,7 +92,13 @@ async def test_cold_prepare_refuses_live_debt_before_publication(debt_db, monkey
 
     context = _context(debt_db, monkeypatch, harness, outstanding=True)
     live = SimpleNamespace(tool_step_ids={"older": "older-step"}, session=SimpleNamespace())
-    with pytest.raises(CheckpointNotAdmitted, match="tool calls are outstanding"):
+    # An optional Claude Code fold with no warm source skips before cold admission.
+    refusal = (
+        pytest.raises(OptionalCheckpointSkipped)
+        if harness == "claude-code" and not required
+        else pytest.raises(CheckpointNotAdmitted, match="tool calls are outstanding")
+    )
+    with refusal:
         await _prepare_external_checkpoint(
             "blocked", context=context, live=live, identity=TurnIdentity("current", 1),
             warm_source=None, required=required,

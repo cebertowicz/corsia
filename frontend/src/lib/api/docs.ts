@@ -1,12 +1,13 @@
 import { get } from 'svelte/store';
-import { DocOpenError, docOpenRefusal } from '$lib/docOpenRefusal';
+import { docOpenFailure } from '$lib/docOpenRefusal';
 import { token } from '$lib/stores/auth';
 import type { PaneData } from './artifactPane';
 import type { ArtifactRow, DocContent, DocRevision } from './docTypes';
 import type { DocumentFreshness } from '$lib/docFreshness';
-import type { UndeliveredBatch } from './docFeedback';
+import type { CommentList, ImageRegion, ServerComment } from './docCommentTypes';
 
 export type { ArtifactRow, DocContent, DocRevision } from './docTypes';
+export type { CommentFeedback, CommentList, ImageRegion, ServerComment } from './docCommentTypes';
 
 function tok(): string {
 	return encodeURIComponent(get(token) ?? '');
@@ -17,8 +18,8 @@ export async function ok(res: Response) {
 		const detail = await res.text().catch(() => '');
 		let parsed: unknown;
 		try { parsed = JSON.parse(detail)?.detail; } catch { /* Non-JSON failures keep the HTTP status below. */ }
-		const refusal = docOpenRefusal(parsed);
-		if (refusal) throw new DocOpenError(refusal);
+		const refusal = docOpenFailure(parsed);
+		if (refusal) throw refusal;
 		throw new Error(`${res.status} ${detail.slice(0, 200)}`);
 	}
 	return res.json();
@@ -149,42 +150,6 @@ export async function markArtifactVerified(artifactId: string): Promise<Artifact
 	return (await response.json()).artifact;
 }
 
-export interface ServerComment {
-	id: string;
-	artifact_id: string;
-	parent_id: string | null;
-	author: string;
-	author_kind: 'user' | 'agent';
-	author_thread_id?: string | null;
-	body: string;
-	anchor_text: string | null;
-	from_off: number | null;
-	to_off: number | null;
-	review: number;
-	resolved: number;
-	acked: number;
-	replacement?: string | null;
-	decision?: 'accepted' | 'rejected' | null;
-	decided_by?: string | null;
-	orphaned?: boolean;
-	created_at: string;
-	updated_at: string;
-	reply_waiting?: boolean;
-	replies?: ServerComment[];
-}
-
-export interface CommentFeedback {
-	open_count: number;
-	owner_label: string | null;
-	grace_closes_at: string | null;
-	undelivered_batches: UndeliveredBatch[];
-}
-
-export interface CommentList {
-	comments: ServerComment[];
-	feedback: CommentFeedback;
-}
-
 export async function fetchComments(artifactId: string): Promise<CommentList> {
 	const data = await ok(await fetch(`/api/artifacts/${artifactId}/comments?token=${tok()}`));
 	return data;
@@ -192,7 +157,7 @@ export async function fetchComments(artifactId: string): Promise<CommentList> {
 
 export async function postComment(
 	artifactId: string,
-	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean }
+	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion }
 ): Promise<ServerComment> {
 	const data = await ok(await fetchWithTimeout(
 		`/api/artifacts/${artifactId}/comments?token=${tok()}`,
@@ -202,7 +167,7 @@ export async function postComment(
 	return data.comment;
 }
 
-export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; body: string; from_off: number; to_off: number; anchor_text: string }>): Promise<ServerComment> {
+export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; body: string; from_off: number; to_off: number; anchor_text: string; region: ImageRegion }>): Promise<ServerComment> {
 	const data = await ok(await fetch(`/api/comments/${commentId}?token=${tok()}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },

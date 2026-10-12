@@ -266,6 +266,16 @@ describe('merging a refetched page into a live row', () => {
 		expect(row.content).toBe('streamed answer');
 	});
 
+	it('takes the cards a page states, and drops cards the page no longer states', () => {
+		const cards = [{ kind: 'ask', artifact_id: 'a1', title: 'Plan' }];
+		const [withCards] = mergeFetchedHistoryRows([liveRow], [{ ...pageRow, cards, cards_more: 2 }]);
+		expect(withCards.cards).toEqual(cards);
+		expect(withCards.cards_more).toBe(2);
+		const [cleared] = mergeFetchedHistoryRows([withCards], [pageRow]);
+		expect(cleared.cards).toBeUndefined();
+		expect(cleared.cards_more).toBeUndefined();
+	});
+
 	it('keeps streaming content the page does not extend while the typewriter is active', () => {
 		const [row] = mergeFetchedHistoryRows(
 			[{ ...liveRow, content: 'streamed' }], [{ ...pageRow, content: 'other text' }],

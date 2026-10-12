@@ -96,17 +96,18 @@
 			: $liveHostGroups,
 	);
 
-	// The chat held line's "Spend past plan limit" lands here: open that
-	// account's card so its switch shows, then bring it into view. It never toggles.
+	// The chat held line's "Spend past plan limit" and Settings › Keys land here: open
+	// that card (a harness account or a cloud provider), then bring it into view. It never toggles.
 	$effect(() => {
 		const connection = $providerCardRequest;
 		if (!connection) return;
-		const group = groups.find((g) => g.providers.some((p) => p.type === 'harness' && p.name === connection));
-		const card = group?.providers.find((p) => p.type === 'harness' && p.name === connection);
+		const matches = (p: { name: string; server?: { id: string } }) => p.name === connection || p.server?.id === connection;
+		const group = groups.find((g) => g.providers.some(matches));
+		const card = group?.providers.find(matches);
 		if (!group || !card) return;
 		expanded.add(rowKey(group.key, card.name, card.server?.id));
 		providerCardRequest.set(null);
-		void tick().then(() => document.querySelector(`[data-provider-card="${connection}"]`)?.scrollIntoView({ block: 'start' }));
+		void tick().then(() => document.querySelector(`[data-provider-card="${connection}"], [data-server-card="${connection}"]`)?.scrollIntoView({ block: 'start' }));
 	});
 
 	// A link to an account's billing row opens the settings of the provider that holds it

@@ -1,0 +1,103 @@
+name: Read-cost speed gate
+
+# Runs on every pull request, with no paths filter: a required check that a
+# filter skips would never report. A PR that touches nothing that can change a
+# read cost exits successfully in seconds (the "Decide whether to measure" step).
+on:
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: speed-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  read-cost:
+    # The check-run name is the job name below; keep it stable.
+    name: Read-cost speed gate
+    # The verdict counts SQLite VM steps, statements and response bytes, never
+    # time, so it does not depend on the host's load. The count depends on the
+    # SQLite build, so the harness runs on one pinned build (sqlean.py, exact
+    # version and hashes in scripts/speed_gate/requirements.txt) and the
+    # baseline records it. The baseline is generated from this job's own
+    # measurement artifact.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CORSIA_ANALYTICS_DISABLE: '1'
+      CORSIA_TEST_MODE: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether to measure
+        id: scope
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "measure=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          changed="$(git diff --name-only "$base" HEAD -- backend scripts/speed_gate quality/speed-gate-baseline.json .github/workflows/speed-gate.yml)"
+          if [ -z "$changed" ]; then
+            echo "measure=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Read-cost speed gate"
+              echo
+              echo "Nothing under backend/ or the gate itself changed since the merge-base, so no read cost can have changed. Not measured."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "measure=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.scope.outputs.measure == 'true'
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install deps
+        if: steps.scope.outputs.measure == 'true'
+        run: |
+          if [ ! -x .venv/bin/python ]; then python -m venv .venv; fi
+          .venv/bin/pip install --quiet --upgrade pip
+          .venv/bin/pip install --quiet -r backend/requirements.txt
+          # Dev/CI only; never in backend/requirements.txt and never imported by product code.
+          .venv/bin/pip install --quiet --require-hashes --only-binary :all: -r scripts/speed_gate/requirements.txt
+
+      - name: Measure every read route
+        if: steps.scope.outputs.measure == 'true'
+        # Three independent runs must agree exactly on steps and statements (bytes too, except the routes with a
+        # committed tolerance). A gate whose own counts move is a defect; phase 1 reports it (warning and job
+        # summary) and stays green.
+        run: |
+          PYTHONPATH=scripts .venv/bin/python -m speed_gate.cli measure \
+            --backend backend --out "$RUNNER_TEMP/speed-gate.json" --repeats 3 \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare with the baseline (report-only)
+        if: steps.scope.outputs.measure == 'true'
+        # Phase 1 reports and never blocks: a regression prints "would fail" and the job stays green.
+        # A SQLite version that differs from the baseline's is not a verdict: while report-only it emits a
+        # warning and a "REBASELINE NEEDED" block in the job summary and stays green; with --enforce it exits 2.
+        run: |
+          PYTHONPATH=scripts .venv/bin/python -m speed_gate.cli compare \
+            --current "$RUNNER_TEMP/speed-gate.json" \
+            --baseline quality/speed-gate-baseline.json \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the measurement
+        if: always() && steps.scope.outputs.measure == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: speed-gate-measurement
+          path: ${{ runner.temp }}/speed-gate*.json
+          if-no-files-found: ignore

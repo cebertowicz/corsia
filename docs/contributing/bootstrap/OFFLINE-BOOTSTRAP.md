@@ -103,14 +103,13 @@ cp .env.example .env                           # stays in the checkout; never co
   example `ln -s ~/.corsia/scripts/corsia /usr/local/bin/corsia`. Nothing
   depends on the symlink existing. The script only operates its own checkout
   (`scripts/corsia`, the `CORSIA_DIR` check).
-- **Web search:** set `export BRAVE_API_KEY=...` in `.env`. The tool reads
-  `BRAVE_API_KEY`, not `BRAVE_SEARCH_API_KEY` (`.env.example`,
-  `backend/tools/web.py`). A key saved in Settings › Keys wins, then the
-  settings key `tools.web.search.apiKey`, then the environment; each search
-  reads them afresh, so no restart is needed (`backend/infra/key_store.py`).
-- **Cloud API keys** (optional, for the native loop) come from settings
-  `providers.<anthropic|openai>.apiKey`, not from `.env`
-  (`backend/infra/settings.py` `bootstrap_env`).
+- **Web search:** the person enters the Brave Search key in Settings › Keys
+  (entry `web-search`); it is not read from `.env` or the environment. Each
+  search reads it afresh, so no restart is needed (`backend/infra/key_store.py`).
+- **Cloud API keys** (optional, for the native loop) are entered in Settings ›
+  Providers and saved in the key store (`backend/infra/key_store_providers.py`),
+  not in `.env`. An `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the environment
+  is ignored; Settings says so on the provider's card.
 - **Service label:** the launchd job defaults to `com.corsia.prod`. Set
   `CORSIA_SERVICE_LABEL` in `.env` only if this Mac already runs another
   CORSIA instance (`scripts/corsia.d/service.sh`).

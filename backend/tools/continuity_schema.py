@@ -189,7 +189,9 @@ _OPERATION_FIELDS = {
     "add": {"field", "body"},
     "replace": {"entry_id", "body", "field"},
     "drop": {"entry_id", "reason", "source_ref", "field"},
-    "review": {"entry_id", "verdict", "destination", "quote", "placement", "room"},
+    "review": {
+        "entry_id", "verdict", "destination", "quote", "placement", "room", "reason",
+    },
     "place": {"entry_id", "verdict", "destination", "quote", "placement"},
 }
 _REQUIRED_FIELDS = {
@@ -286,7 +288,10 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "reason": {
         "type": "string",
         "minLength": 1,
-        "description": "Why the entry stopped applying.",
+        "description": (
+            "drop: why the entry stopped applying. review reaffirm: why it "
+            "still belongs in continuity."
+        ),
     },
     "source_ref": {
         "type": "string",
@@ -297,8 +302,8 @@ _FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "string",
         "enum": sorted({v for verdicts in VERDICTS.values() for v in verdicts}),
         "description": (
-            "review: reaffirm, select or already. place: written, already, "
-            "proposed or trial."
+            "review: reaffirm (keep it, with reason), select or already. "
+            "place: written, already, proposed or trial."
         ),
     },
     "destination": {

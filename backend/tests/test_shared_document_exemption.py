@@ -27,6 +27,7 @@ from registry.retirement_predicate import (
     bind_shared_documents,
 )
 from tests.registry_helpers import make_session
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _WS = "workspace://ws-1"
 _PROJECT = f"{_WS}/projects/alpha"
@@ -409,7 +410,8 @@ def test_the_one_time_pass_settles_rows_finished_tasks_left_behind(db):
     pinning.update_pinned(kept["id"], pinned=True, parent_thread_id=thread_id, db=db)
     # The task finished while its thread-folder rows were still exempt, so
     # settlement skipped them: the node is terminal and nothing was stamped.
-    db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (finished.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (finished.id,))
     db.execute("DELETE FROM active_turns WHERE thread_id=?", (thread_id,))
     db.commit()
     open_node = _node(db, thread_id, "Open")

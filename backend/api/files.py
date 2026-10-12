@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from api.files_roots import (
@@ -15,7 +16,6 @@ from api.files_roots import (
     shared_projector,
     walk,
 )
-from core.workspace_context_sources import is_workspace_context_path
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
 from doceditor.document_scope import UI_THREAD
 from infra import config
@@ -23,16 +23,9 @@ from infra.auth import authenticate, owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db
 from registry import service as registry_service
+from registry.path_access import path_allowed
 
 router = APIRouter(prefix="/api/files", tags=["files"])
-
-
-def _path_allowed(path: Path, bases: list[Path], *, db=None) -> bool:
-    return (
-        any(path == b or b in path.parents for b in bases)
-        or is_workspace_context_path(path, config.WORKSPACE, db=db)
-    )
-
 
 
 @router.get("/tree")
@@ -68,11 +61,26 @@ async def tree(token: str, project_id: str | None = None):
 
 
 @router.get("/content")
-async def content(token: str, path: str, project_id: str | None = None, thread_id: str | None = None):
-    """One file's text. With ``session_id``, registers the open to that thread."""
+async def content(token: str, path: str, project_id: str | None = None, thread_id: str | None = None, raw: bool = False):
+    """One file's text. With ``session_id``, registers the open to that thread.
+
+    ``raw`` serves an image file's bytes with its image Content-Type instead.
+    """
     user = authenticate(token)
     if not user:
         raise HTTPException(401)
+
+    if raw:
+        from api.files_load import read_image_file
+
+        image, media_type = await run_in_db(read_image_file, path, project_id)
+        # nosniff keeps the declared type authoritative; the sandboxed policy makes
+        # a scripted SVG inert even if someone navigates to this URL directly.
+        return FileResponse(image, media_type=media_type, headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            "Cache-Control": "private, no-cache",
+        })
 
     from api.files_load import read_document
 
@@ -156,7 +164,7 @@ async def register(token: str, body: RegisterBody):
                 p = Path(body.path).expanduser().resolve(strict=True)
             except OSError as e:
                 raise HTTPException(404, f"No such file: {e}") from e
-            if not _path_allowed(p, bases, db=db):
+            if not path_allowed(p, bases, db=db):
                 raise HTTPException(400, "Path is outside this scope's roots")
             row = registry_service.register_write_strict(
                 body.thread_id or UI_THREAD,

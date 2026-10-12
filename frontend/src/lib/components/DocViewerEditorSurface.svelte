@@ -4,6 +4,7 @@
 	import type { CommentSelection } from '$lib/stores/commentSelection';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import type { PreviewFrameSource } from '$lib/stores/livePreviewFeed';
+	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
@@ -27,6 +28,8 @@
 		onEdit,
 		onLayout,
 		readOnly,
+		imageBase = null,
+		onOpenImage,
 		saveError,
 		saveStatus,
 		pendingSel,
@@ -49,6 +52,8 @@
 		onEdit: (mapPos: (position: number) => number) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;
 		readOnly: boolean;
+		imageBase?: { path: string; projectId: string | null } | null;
+		onOpenImage?: (request: OpenImageRequest) => void;
 		saveError: string;
 		saveStatus: 'idle' | 'saving' | 'saved';
 		pendingSel: PendingSelection | null;
@@ -79,7 +84,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} />
+			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}

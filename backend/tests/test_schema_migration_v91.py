@@ -10,6 +10,7 @@ import pytest
 from infra.database import initialize_schema
 from infra.migration_90_to_91_plan_node_size import migrate_90_to_91
 from plans import service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def test_v91_adds_nullable_size_with_the_canonical_check():
@@ -18,10 +19,12 @@ def test_v91_adds_nullable_size_with_the_canonical_check():
         migrate_90_to_91(db)
         migrate_90_to_91(db)
 
-        db.execute("INSERT INTO plan_nodes (id,size) VALUES ('sized','XL')")
-        db.execute("INSERT INTO plan_nodes (id,size) VALUES ('unsized',NULL)")
+        with raw_plan_seed(db):
+            db.execute("INSERT INTO plan_nodes (id,size) VALUES ('sized','XL')")
+            db.execute("INSERT INTO plan_nodes (id,size) VALUES ('unsized',NULL)")
         with pytest.raises(sqlite3.IntegrityError):
-            db.execute("INSERT INTO plan_nodes (id,size) VALUES ('invalid','huge')")
+            with raw_plan_seed(db):
+                db.execute("INSERT INTO plan_nodes (id,size) VALUES ('invalid','huge')")
 
 
 def test_pre_v51_node_creation_refuses_size_and_workflow_fields():

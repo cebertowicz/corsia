@@ -17,11 +17,15 @@ async def on_tool_input_start(ctx: CCEventContext, ev: dict) -> None:
     if tool is None or not isinstance(call_id, str) or not isinstance(index, int):
         return
     registry = ctx.live.tool_registry
-    bound = registry.get(tool) if registry is not None else None
+
+    def workspace_of(name: str):
+        bound = registry.get(name) if registry is not None else None
+        return getattr(bound, "workspace", None)
+
     turn = ctx.live.corsia_turn
     ctx.live.preview_blocks[index] = call_id
     previews.start(call_id, thread_id=ctx.child_id, turn_id=turn.turn_id if turn else None, tool=tool,
-                   workspace=getattr(bound, "workspace", None))
+                   workspace=workspace_of(tool), workspace_for=workspace_of)
 
 
 async def on_tool_input_delta(ctx: CCEventContext, ev: dict) -> None:

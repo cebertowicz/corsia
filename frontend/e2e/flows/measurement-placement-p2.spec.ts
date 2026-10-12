@@ -106,7 +106,7 @@ async function serveMeasurement(page: import('@playwright/test').Page, project: 
 					{ model: 'codex/gpt-6.1-sol', label: 'gpt-6.1-sol', tasks: 14, failed_turns_per_100: 1.2, recorded_cost_per_task: 1.6, cost_class: 'priced', rate_reason: 'none', cost_change: -0.1, change_reason: 'none', previous_tasks: 18, not_offered_now: false, other: false, includes_local: false, recording_gap: false },
 				],
 				token_shares: [{ model: 'claude-code/claude-opus-5-5', label: 'Claude Opus 5.5', share_of_tokens: 0.75 }, { model: 'codex/gpt-6.1-sol', label: 'gpt-6.1-sol', share_of_tokens: 0.25 }],
-				min_tasks: 14, unmatched_failed_turns: 0, unresolved_token_share: 0,
+				min_tasks: 14, unmatched_failed_turns: 0, unresolved_token_share: 0, total_spend_usd: 0,
 			} });
 			return;
 		}
@@ -198,6 +198,17 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 
 		await openRail(page);
 		await page.getByRole('link', { name: 'Measurement', exact: true }).click();
+		const smallestMainX = await page.locator('main.main').evaluate((main) => new Promise<number>((resolve) => {
+			let smallest = Number.POSITIVE_INFINITY;
+			const until = performance.now() + 500;
+			const sample = () => {
+				smallest = Math.min(smallest, main.getBoundingClientRect().x);
+				if (performance.now() < until) requestAnimationFrame(sample);
+				else resolve(smallest);
+			};
+			requestAnimationFrame(sample);
+		}));
+		expect(smallestMainX, 'the closing rail never overshoots left of the phone viewport').toBeGreaterThanOrEqual(0);
 		// The rail closed itself when its destination was chosen.
 		railDismissed(page);
 		await page.getByRole('button', { name: /Measurement scope:/ }).click();
@@ -208,14 +219,23 @@ test.describe('@flow:measurement-placement-p2 @surface:navigation place Measurem
 		// PL-5: agents are listed under their project, so narrowing to a name shows both.
 		await expect(page.getByRole('option', { name: new RegExp(agentTitle) })).toBeVisible();
 
-		// Regression proof: the popover never escapes the viewport it is opened in.
-		// Dev's mobile project is a 412px Pixel 7 rather than the 393px case the
-		// placement note named, so the bound is the live viewport width.
-		if ((page.viewportSize()?.width ?? 0) <= 768) {
-			const box = await page.locator('.picker-panel').boundingBox();
-			expect(box).not.toBeNull();
-			expect(box!.x).toBeGreaterThanOrEqual(0);
-			expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+		// Regression proof: a long search result keeps the open popover and the page
+		// inside each supported phone viewport, in either theme.
+		const capture = (name: string) => process.env.SHOT_DIR
+			? `${process.env.SHOT_DIR}/${name}`
+			: testInfo.outputPath(name);
+		for (const scheme of ['light', 'dark'] as const) {
+			await page.emulateMedia({ colorScheme: scheme });
+			for (const width of [393, 412] as const) {
+				await page.setViewportSize({ width, height: 915 });
+				const box = await page.locator('.picker-panel').boundingBox();
+				expect(box).not.toBeNull();
+				expect(box!.x, `${scheme}: picker starts in the ${width}px viewport`).toBeGreaterThanOrEqual(0);
+				expect(box!.x + box!.width, `${scheme}: picker ends in the ${width}px viewport`).toBeLessThanOrEqual(width);
+				const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+				expect(overflow, `${scheme}: no sideways page scroll at ${width}px`).toBeLessThanOrEqual(0);
+				if (process.env.SHOT_DIR) await page.screenshot({ path: capture(`measurement-scope-picker-${scheme}-${width}.png`), animations: 'disabled' });
+			}
 		}
 
 		await page.keyboard.press('Escape');

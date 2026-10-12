@@ -35,7 +35,7 @@ def client(isolated_db, tmp_path, monkeypatch):
     root = tmp_path / "state"
     root.mkdir()
     monkeypatch.setattr("infra.config.STATE_ROOT", root)
-    monkeypatch.delenv(key_store.WEB_SEARCH.env_var, raising=False)
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
     # A lock binds to the first loop that waits on it; each test has its own loop.
     monkeypatch.setattr(key_write_guard, "_key_write_lock", asyncio.Lock())
     monkeypatch.setattr(key_write_guard, "_pending", {})
@@ -81,7 +81,7 @@ async def test_set_with_the_password_saves_and_never_shows_the_value(client, cap
 
 
 @pytest.mark.asyncio
-async def test_set_deletes_the_older_settings_copy_and_a_refused_set_keeps_it(client):
+async def test_set_leaves_the_settings_table_alone_and_a_refused_set_changes_nothing(client):
     from infra.settings import get_setting, set_setting
 
     tools = {"web": {"search": {"apiKey": "legacy-settings-value"}}}
@@ -91,7 +91,7 @@ async def test_set_deletes_the_older_settings_copy_and_a_refused_set_keeps_it(cl
     assert get_setting("tools") == tools
     saved = await _set(client)
     assert saved.status_code == 200, saved.text
-    assert get_setting("tools") == {"web": {"search": {}}}
+    assert get_setting("tools") == tools
     assert key_store.resolve_builtin(key_store.WEB_SEARCH) == (VALUE, key_store.SOURCE_STORE)
 
 
@@ -263,3 +263,15 @@ async def test_adding_refuses_a_name_in_use(client):
     taken = await client.post("/api/keys", headers=_auth(), json={"name": "web-search", "label": "Search"})
     assert taken.status_code == 400
     assert "already exists" in taken.json()["detail"]["message"]
+
+
+@pytest.mark.parametrize("name, kind", [
+    ("web-search", "builtin"),
+    ("provider-anthropic", "provider"),
+    ("server-ns-live1", "server"),
+    ("mcp-svc-0123456789", "mcp"),
+    ("maps", "added"),
+    ("provider-unknown", "added"),
+])
+def test_the_audit_kind_names_what_the_entry_belongs_to(name, kind):
+    assert keys_api._kind(name) == kind

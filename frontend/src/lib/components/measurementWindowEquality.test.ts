@@ -74,7 +74,7 @@ describe.each(['days', 'weeks'] as const)('a previous window with no data reads 
 	});
 
 	it('reads new for the cost per hour', () => {
-		const figures = (to: string, dollars: number | null, sized: number) => ({ from: to, to, dollars, priced_records: 10, api_records: 10, outcomes: sized, per_outcome: null, sized, hours: sized * 2, per_hour: dollars === null ? null : dollars / (sized * 2) });
+		const figures = (to: string, dollars: number | null, sized: number) => ({ from: to, to, dollars, priced_records: 10, usage_records: 10, outcomes: sized, per_outcome: null, sized, hours: sized * 2, per_hour: dollars === null ? null : dollars / (sized * 2) });
 		const latest = figures(period.latest.to, 800, 40), previous = figures(period.previous.to, null, 0);
 		const view = costView({ series: [{ ...previous, period: previous.to, average: null }, { ...latest, period: latest.to, average: null }], latest, previous, period });
 		expect(view?.change).toMatch(/^new\b/);
@@ -84,7 +84,7 @@ describe.each(['days', 'weeks'] as const)('a previous window with no data reads 
 
 describe.each(['days', 'weeks'] as const)('the cost change follows the one partial-previous-window rule at %s', (grain) => {
 	const period = periodFor(grain);
-	const figures = (to: string, dollars: number, sized: number) => ({ from: to, to, dollars, priced_records: 10, api_records: 10, outcomes: sized, per_outcome: null, sized, hours: sized * 2, per_hour: dollars / (sized * 2) });
+	const figures = (to: string, dollars: number, sized: number) => ({ from: to, to, dollars, priced_records: 10, usage_records: 10, outcomes: sized, per_outcome: null, sized, hours: sized * 2, per_hour: dollars / (sized * 2) });
 	const latest = figures(period.latest.to, 800, 40), previous = figures(period.previous.to, 400, 40);
 	const served = (from: string) => Array.from({ length: COUNT }, (_, i) => at(grain, i)).filter((key) => key >= from)
 		.map((key) => ({ ...figures(key, 100, 40), period: key, average: null }));
@@ -92,10 +92,10 @@ describe.each(['days', 'weeks'] as const)('the cost change follows the one parti
 	it('reads new when the series began inside the previous window, even with a previous figure, as the outcome rates do', () => {
 		const began = served(period.previous.to);
 		const view = costView({ series: began, latest, previous, period });
-		expect(view?.change).toBe('new');
+		expect(view?.change).toMatch(/^new( vs .+)?$/);
 		const rate = periodView(began.map((w) => ({ ...base, period: w.period, series: 'first_try_acceptance', value: 0.3, n: 40 })), 'first_try_acceptance', 1, period,
 			{ latest: { value: 0.6, n: 40 }, previous: { value: 0.3, n: 40 } });
-		expect(periodChange(rate)).toBe(view?.change);
+		expect(periodChange(rate, true)).toBe(view?.change);
 	});
 
 	it('compares a previous window the series covers in full', () => {

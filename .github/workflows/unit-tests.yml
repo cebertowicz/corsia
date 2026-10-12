@@ -3,90 +3,97 @@ name: Unit tests (L1)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'requirements*.txt'
-      - 'frontend/package*.json'
-      - '.github/workflows/unit-tests.yml'
   workflow_dispatch:
 
 concurrency:
   group: unit-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UNIT_TEST_RELEVANCE_PATTERNS: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$|^\.github/actions/relevance/action\.yml$'
+
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: ${{ env.UNIT_TEST_RELEVANCE_PATTERNS }}
+
   backend:
+    needs: relevance
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: Backend unit tests
-    runs-on: [self-hosted, macOS, ARM64, mac-studio, backend-l1]
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    # The Mac Studios finished the three shards in about 6 minutes; a hosted
+    # runner has four slower cores, so the cap leaves room for that hardware.
+    timeout-minutes: 25
     env:
+      # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
+      # the HOME-prefix guard (it protects a shared host's live workspace)
+      # has nothing to protect; RUNNER_TEMP sits under HOME on these VMs.
+      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI: '1'
+      # The 10 GiB pre-migration backup reserve protects a long-lived host's
+      # disk; the in-memory test root is about 8 GB and holds only test-sized
+      # databases, so a 1 GiB reserve keeps the check without refusing them.
+      CORSIA_BACKUP_FREE_FLOOR_BYTES: '1073741824'
       CORSIA_ANALYTICS_DISABLE: '1'
       CORSIA_CONTRACT_SUITE: '1'
       CORSIA_TEST_MODE: '1'
       PYTHONPATH: backend
       PYTHONUNBUFFERED: '1'
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
         run: |
-          set -e
-          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
-          echo "/usr/local/bin" >> "$GITHUB_PATH"
-          PY_BIN="$(command -v python3.11 || true)"
-          if [ -z "$PY_BIN" ]; then echo "::error::python3.11 not found"; exit 1; fi
-          mkdir -p "$RUNNER_TEMP/python-shim/bin"
-          ln -sf "$PY_BIN" "$RUNNER_TEMP/python-shim/bin/python"
-          echo "$RUNNER_TEMP/python-shim/bin" >> "$GITHUB_PATH"
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # uv's managed CPython bundles the same current SQLite the Mac Python
+      # does; setup-python on Ubuntu links the distro's older SQLite, whose
+      # parser and query planner differ from what CORSIA runs on.
+      - uses: astral-sh/setup-uv@v6
+
 
       - name: Install deps
         run: |
-          if [ ! -x .venv/bin/python ]; then python -m venv .venv; fi
+          # The search tests assert real ripgrep semantics.
+          sudo apt-get update --quiet
+          sudo apt-get install --yes --no-install-recommends ripgrep
+          rg --version
+          uv venv --python 3.11 --managed-python --seed .venv
+          .venv/bin/python -c 'import sqlite3, sys; print(sys.version.split()[0], "SQLite", sqlite3.sqlite_version)'
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install -r backend/requirements.txt
           .venv/bin/pip install -r backend/requirements-test.txt
 
-      - name: Mount test RAM disk
+      - name: Use in-memory test root
+
         # Each SQLite-backed test builds its schema with ~240 commits, and every
-        # commit flushes to the SSD. Twelve concurrent shards (four L1 jobs x
-        # three) queue those flushes behind each other and behind the serving
-        # app on the same disk, which more than doubled the suite's wall time
-        # under load. Test state needs no durability, so keep it in memory.
-        # A failure here falls back to RUNNER_TEMP rather than failing the job.
-        # The volume is remounted under the user temp directory: sandboxed git
-        # tests cannot resolve a path through /Volumes.
+        # commit flushes to disk. Test state needs no durability, so keep it in
+        # the runner's tmpfs; fall back to RUNNER_TEMP if /dev/shm is missing.
         run: |
-          set -uo pipefail
-          volume="ci-l1-${RUNNER_NAME// /-}"
-          tmp_parent="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"
-          # mount(8) lists the resolved /private/var path, not TMPDIR's /var.
-          tmp_parent="$(cd "$tmp_parent" 2>/dev/null && pwd -P || echo "${tmp_parent%/}")"
-          mount_point="$tmp_parent/$volume"
-          # A runner runs one job at a time, so a volume with its name is a
-          # leftover from a job that died before its detach step.
-          for leftover in "/Volumes/$volume" "$mount_point"; do
-            if mount | grep -qF " on $leftover ("; then
-              hdiutil detach "$leftover" -force >/dev/null 2>&1 || true
-            fi
-          done
           root="$RUNNER_TEMP"
-          device="$(hdiutil attach -nobrowse -nomount ram://33554432 2>/dev/null | awk 'NR==1{print $1}')"
-          node=""
-          if [ -n "$device" ] && diskutil erasevolume APFS "$volume" "$device" >/dev/null 2>&1; then
-            node="$(df "/Volumes/$volume" | awk 'NR==2{print $1}')"
-          fi
-          if [ -n "$node" ] && mkdir -p "$mount_point" \
-            && diskutil unmount "$node" >/dev/null \
-            && diskutil mount -mountPoint "$mount_point" "$node" >/dev/null; then
-            root="$mount_point"
-            # Spotlight would otherwise index every test database written here.
-            touch "$root/.metadata_never_index" 2>/dev/null || true
-            echo "CI_RAMDISK_DEVICE=$device" >> "$GITHUB_ENV"
+          if [ -d /dev/shm ] && [ -w /dev/shm ]; then
+            root="/dev/shm/corsia-ci-l1"
+            mkdir -p "$root"
           else
-            [ -n "$device" ] && hdiutil detach "$device" -force >/dev/null 2>&1
-            echo "::warning::RAM disk unavailable; backend test state stays on disk"
+            echo "::warning::/dev/shm unavailable; backend test state stays on disk"
           fi
           echo "CI_TEST_ROOT=$root" >> "$GITHUB_ENV"
           echo "Backend test state root: $root"
@@ -100,7 +107,7 @@ jobs:
           run_backend_shard() {
             local shard="$1"
             shift
-          local isolated_root="$CI_TEST_ROOT/corsia-ci-backend/${shard}"
+            local isolated_root="$CI_TEST_ROOT/corsia-ci-backend/${shard}"
             (
               set -e
               export CORSIA_WORKSPACE="$isolated_root/workspace"
@@ -119,16 +126,36 @@ jobs:
             names+=("$shard")
           }
 
-          # One CI job owns all concurrency. The three-worker cap is measured
-          # for this Mac; worktree agents remain targeted-test only.
+          # Files listed in macos_only_tests.txt run in the macOS job instead,
+          # so every test file runs exactly once across the two jobs.
+          mapfile -t macos_only < <(grep -v '^[[:space:]]*#' backend/tests/macos_only_tests.txt | grep -v '^[[:space:]]*$')
+          macos_ignores=()
+          for path in "${macos_only[@]}"; do macos_ignores+=("--ignore=$path"); done
+          linux_files() {
+            local path macos_path listed
+            for path in "$@"; do
+              listed=0
+              for macos_path in "${macos_only[@]}"; do
+                [ "$path" = "$macos_path" ] && listed=1
+              done
+              [ "$listed" = 0 ] && printf '%s\n' "$path"
+            done
+            return 0
+          }
+          mapfile -t cgr_files < <(linux_files backend/tests/test_[cgr]*.py)
+          mapfile -t aehilsuw_files < <(linux_files backend/tests/test_[aehilsuw]*.py)
+
+          # One CI job owns all concurrency: three shards on the hosted
+          # runner's four cores; worktree agents remain targeted-test only.
           # The letter split keeps the three shards' summed test time within
           # a few percent of each other (measured from the junit reports); a
           # lopsided shard is what pushes the job past its timeout under load.
-          run_backend_shard core-cgr backend/tests/test_[cgr]*.py
+          run_backend_shard core-cgr "${cgr_files[@]}"
           run_backend_shard remainder backend/tests \
             '--ignore-glob=backend/tests/test_[cgr]*.py' \
-            '--ignore-glob=backend/tests/test_[aehilsuw]*.py'
-          run_backend_shard core-aehilsuw backend/tests/test_[aehilsuw]*.py
+            '--ignore-glob=backend/tests/test_[aehilsuw]*.py' \
+            "${macos_ignores[@]}"
+          run_backend_shard core-aehilsuw "${aehilsuw_files[@]}"
 
           status=0
           for index in "${!pids[@]}"; do
@@ -253,19 +280,82 @@ jobs:
             ${{ runner.temp }}/backend-*.log
           if-no-files-found: warn
 
-      - name: Detach test RAM disk
-        if: always() && env.CI_RAMDISK_DEVICE != ''
-        continue-on-error: true
-        run: hdiutil detach "$CI_RAMDISK_DEVICE" -force
+  backend-macos:
+    needs: relevance
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
+    name: Backend unit tests (macOS-only files)
+    # Only the files that need macOS run here; macOS minutes cost more than
+    # Linux, so everything else stays in the Linux job above.
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      CORSIA_ANALYTICS_DISABLE: '1'
+      CORSIA_CONTRACT_SUITE: '1'
+      CORSIA_TEST_MODE: '1'
+      PYTHONPATH: backend
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The jailed-export cases require the real Safehouse sandbox.
+      - name: Install Safehouse
+        run: scripts/install-ci-safehouse
+
+      - name: Install deps
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r backend/requirements.txt
+          .venv/bin/pip install -r backend/requirements-test.txt
+
+      - name: Run macOS-only backend tests
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r path; do files+=("$path"); done < <(grep -v '^[[:space:]]*#' backend/tests/macos_only_tests.txt | grep -v '^[[:space:]]*$')
+          # Safehouse denies HOME, where RUNNER_TEMP sits, so sandboxed git
+          # tests cannot resolve a path there; use the user temp directory.
+          tmp_parent="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}"
+          tmp_parent="$(cd "$tmp_parent" && pwd -P)"
+          isolated_root="$tmp_parent/corsia-ci-backend/macos"
+          export CORSIA_WORKSPACE="$isolated_root/workspace"
+          export CORSIA_STATE_DIR="$isolated_root/state"
+          mkdir -p "$CORSIA_WORKSPACE/.corsia" "$CORSIA_STATE_DIR"
+          .venv/bin/python -c "from infra.database import init_db; init_db()"
+          .venv/bin/python -m pytest -c backend/pytest.ini "${files[@]}" \
+            -m "not integration and not cloud_required" \
+            --tb=short -vv -o faulthandler_timeout=60 \
+            --basetemp="$isolated_root/pytest" \
+            -o tmp_path_retention_policy=failed
 
   frontend:
+    needs: relevance
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: Frontend unit tests
-    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
-    # job to a hosted runner needs the repository owner's explicit approval.
-    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-node@v4
         with:

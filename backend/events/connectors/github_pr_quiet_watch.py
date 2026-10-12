@@ -138,11 +138,12 @@ def _log_answers_from() -> datetime | None:
     the webhook was configured, and after the log's last pre-column row. None
     while no webhook is configured.
     """
-    from infra.database import get_db
+    from infra.key_store import GITHUB_WEBHOOK, entry_metadata
+    from infra.time import utc_storage_iso_to_api
     from infra.webhook_delivery_log import last_check_suite_without_id
 
-    row = get_db().execute("SELECT updated_at FROM settings WHERE key='webhook'").fetchone()
-    configured = reasons.parse_time(row[0]) if row else None
+    set_at = entry_metadata(GITHUB_WEBHOOK.name)["set_at"]  # naive UTC storage form
+    configured = reasons.parse_time(utc_storage_iso_to_api(set_at)) if set_at else None
     if configured is None:
         return None
     legacy = reasons.parse_time(last_check_suite_without_id())

@@ -4,6 +4,21 @@
 # Usage: corsia-backup-db [--keep N]  (default: keep last 7 backups)
 #
 # 2026-03-31: Created after git-clean incident destroyed production database.
+#
+# Each backup is two files: corsia-<timestamp>.db and, when the key store has
+# values, corsia-<timestamp>.keys.json (a copy of STATE_ROOT/keys/values.json).
+# The database holds only which keys exist; the values live in that file, so a
+# database restore without it loses every saved key. The backup folder is 0700
+# and the key copy 0600, and the copy is rotated with its database.
+#
+# Restore, with CORSIA stopped (state root = the folder holding corsia.db):
+#   cp ~/backups/corsia/corsia-<timestamp>.db        <state root>/corsia.db
+#   rm -f <state root>/corsia.db-wal <state root>/corsia.db-shm
+#   mkdir -p -m 700 <state root>/keys
+#   cp ~/backups/corsia/corsia-<timestamp>.keys.json <state root>/keys/values.json
+#   chmod 600 <state root>/keys/values.json
+# (skip the last three lines if that backup has no .keys.json: it was taken
+# before any key was saved). Then start CORSIA.
 
 set -euo pipefail
 
@@ -57,6 +72,7 @@ TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP_FILE="$BACKUP_DIR/corsia-${TIMESTAMP}.db"
 
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
 
 if [ ! -f "$DB_PATH" ]; then
     echo "ERROR: Database not found at $DB_PATH" >&2
@@ -76,10 +92,18 @@ else
     exit 1
 fi
 
+# Keep the key store's values file beside the database copy, private to this user.
+KEYS_FILE="$(dirname "$DB_PATH")/keys/values.json"
+if [ -f "$KEYS_FILE" ]; then
+    KEYS_BACKUP="${BACKUP_FILE%.db}.keys.json"
+    ( umask 077 && cp "$KEYS_FILE" "$KEYS_BACKUP" ) && chmod 600 "$KEYS_BACKUP"
+    echo "OK: Key store copied to $KEYS_BACKUP"
+fi
+
 # Prune old backups (keep last N). The digit anchor matches only the
 # timestamped names this script writes, so unrelated files are never pruned.
 cd "$BACKUP_DIR"
 ls -t corsia-[0-9]*.db 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do
-    rm -f "$old"
+    rm -f "$old" "${old%.db}.keys.json"
     echo "Pruned: $old"
 done

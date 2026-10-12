@@ -1132,7 +1132,7 @@ async def request_reviewed_lease(
                     lease["id"], exception_chain_summary(exc),
                 )
                 reason = lease_failure_reason(exc, review_recorded=review_recorded)
-                return await _safe_block(lease["id"], reason)
+                return reviewer_target.with_failure_cause(await _safe_block(lease["id"], reason), exc)
     finally:
         if _application_locks.get(lease["id"]) is lock:
             _application_locks.pop(lease["id"], None)

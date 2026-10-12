@@ -9,6 +9,7 @@ store's tables is registered at 96.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import closing
 
@@ -19,6 +20,7 @@ from infra.conductor import set_conductor
 from infra.database import get_db
 from infra.database_migrations import MIGRATIONS
 from infra.migration_96_to_97_key_store import migrate_96_to_97
+from infra.migration_106_to_107_key_store_credentials import _add_value_ref
 from infra.schema import SCHEMA_VERSION
 from tests.registry_helpers import make_session
 from tools.conductor_api_policy import off_limits
@@ -32,7 +34,7 @@ def conductor(isolated_db, tmp_path, monkeypatch):
     root = tmp_path / "state"
     root.mkdir()
     monkeypatch.setattr("infra.config.STATE_ROOT", root)
-    monkeypatch.delenv(key_store.WEB_SEARCH.env_var, raising=False)
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
     db = get_db()
     thread_id = make_session(db, prefix="conductor")
     assert set_conductor("workspace", thread_id, db=db)
@@ -88,16 +90,17 @@ async def test_every_value_route_is_off_limits(conductor, method, path, body):
 
 
 def test_the_key_store_step_is_registered_at_96_on_the_current_ladder():
-    assert SCHEMA_VERSION == 103
+    assert SCHEMA_VERSION == 113
     assert MIGRATIONS[96] is migrate_96_to_97
 
 
-def test_the_step_adds_both_tables_idempotently_and_matches_a_fresh_schema():
+def test_the_steps_add_both_tables_idempotently_and_match_a_fresh_schema():
     from infra.database import initialize_schema
 
     def tables(db: sqlite3.Connection) -> dict[str, str]:
         return {
-            name: " ".join(sql.split())
+            # ALTER TABLE ADD COLUMN splices in its own spacing; only the tokens matter.
+            name: re.sub(r"\s*([,()])\s*", r"\1", " ".join(sql.split()))
             for name, sql in db.execute(
                 "SELECT name, sql FROM sqlite_master WHERE type='table'"
                 " AND name IN ('key_store_entries', 'key_write_attempts')"
@@ -108,6 +111,9 @@ def test_the_step_adds_both_tables_idempotently_and_matches_a_fresh_schema():
         db.execute("CREATE TABLE auth_tokens (token_hash TEXT PRIMARY KEY)")
         migrate_96_to_97(db)
         migrate_96_to_97(db)
+        # The 105 -> 106 step adds value_ref; the fresh schema has it from the start.
+        _add_value_ref(db)
+        _add_value_ref(db)
         migrated = tables(db)
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)

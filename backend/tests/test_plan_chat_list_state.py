@@ -16,6 +16,7 @@ from plans import decisions, not_moving, operator_chat_state, operator_node_stat
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import HUMAN, plan_update, revision, task
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixture
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _thread(db, thread_id: str, *, user_id: str = "user") -> PlanActor:
@@ -412,7 +413,8 @@ def test_actionable_user_asks_outrank_failed_and_settled_failures_never_show(db)
     archived = _failed_task(db, settled_plan.id, "Archived", settled_actor)
     follow_up = task(db, settled_plan.id, "Retry")
     db.execute("UPDATE plan_nodes SET follow_up_of=? WHERE id=?", (followed.id, follow_up.id))
-    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (archived.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (archived.id,))
 
     agent_actor = _thread(db, "agent-hold")
     agent_plan = _plan(db, "agent-hold")
@@ -492,10 +494,11 @@ def test_work_under_a_closed_parent_asks_nothing_of_the_row(db):
         "owner_kind": "user", "owner_id": None, "expected_revision": revision(db, held.id),
     }, actor=actor)
     parent = task(db, plan.id, "Dropped phase")
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent.id,))
-    db.execute(
-        "UPDATE plan_nodes SET parent_id=? WHERE id IN (?,?)", (parent.id, failed.id, held.id),
-    )
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent.id,))
+        db.execute(
+            "UPDATE plan_nodes SET parent_id=? WHERE id IN (?,?)", (parent.id, failed.id, held.id),
+        )
     db.commit()
 
     states = _states(db, ["closed-branch"])

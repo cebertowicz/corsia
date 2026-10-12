@@ -101,9 +101,9 @@ async def _admin_key(cfg: dict) -> str | None:
     if not server_id:
         return None
     from infra.db_async import run_in_db
-    from llm.network_discovery import get_server_metadata
+    from infra.key_store_servers import resolve_server
 
-    stored = (await run_in_db(get_server_metadata, server_id)).get("api_key")
+    stored = await run_in_db(resolve_server, server_id)
     return str(stored) if stored else None
 
 

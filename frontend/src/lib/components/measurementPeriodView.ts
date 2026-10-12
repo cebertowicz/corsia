@@ -11,9 +11,9 @@ export interface RatePeriod { period: string; value: number | null; n: number; /
 export interface RateWindow { value: number | null; n: number; periods: string[]; size?: WindowSize }
 
 /** The served latest and previous windows, and the dates that name them. */
-export interface WindowPair { current: RateWindow; previous: RateWindow | null; prevText: string; previousExpected: number }
+export interface WindowPair { current: RateWindow; previous: RateWindow | null; nowText: string; prevText: string; previousExpected: number }
 
-export interface PeriodView extends WindowPair { periods: RatePeriod[]; points: BarPoint[]; nowText: string }
+export interface PeriodView extends WindowPair { periods: RatePeriod[]; points: BarPoint[] }
 
 /**
  * Completed, comparable periods of one series, from the first with a value on. The server marks a period partial while
@@ -56,9 +56,13 @@ const served = (figure: WindowFigure | undefined, periods: string[], scale: numb
  */
 export function windowPair(drawn: string[], period?: MeasurementPeriod, windows?: SeriesWindows, scale = 1): WindowPair {
 	const cur = period ? drawn.filter((key) => inSpan(key, period.latest)) : [], prev = period ? drawn.filter((key) => inSpan(key, period.previous)) : [];
+	// A served previous window is named even when the series drew none of it: the comparison then reads "new vs <window> (n N)", as it does for a part-covered one.
+	const hasPrevious = !!(period && windows?.previous);
 	return {
-		current: served(windows?.latest, cur, scale), previous: prev.length && windows?.previous ? served(windows.previous, prev, scale) : null,
-		prevText: period && prev.length ? periodName(period.previous) : '',
+		current: served(windows?.latest, cur, scale), previous: hasPrevious ? served(windows!.previous, prev, scale) : null,
+		// The latest figure is named by the dates the server pooled for it, never by a wider window it did not pool.
+		nowText: period ? periodName(windows?.latest?.from && windows.latest.to ? { from: windows.latest.from, to: windows.latest.to } : period.latest) : '',
+		prevText: period && hasPrevious ? periodName(period.previous) : '',
 		// With no served period there is no previous window to cover, so nothing reads new for covering it in part.
 		previousExpected: period ? spanPeriods(period, period.previous) : 0,
 	};
@@ -68,11 +72,8 @@ export function windowPair(drawn: string[], period?: MeasurementPeriod, windows?
 export function periodView(rows: MeasurementRow[], series: string, scale = 1, period?: MeasurementPeriod, windows?: SeriesWindows): PeriodView {
 	const daily = period?.grain === 'days';
 	const periods = ratePeriods(rows, series, scale, daily);
-	return {
-		periods, points: ratePoints(daily ? dropTrailingEmptyDays(periods) : periods),
-		...windowPair(periods.filter((w) => !w.partial).map((w) => w.period), period, windows, scale),
-		nowText: period && periods.length ? periodName(period.latest) : '',
-	};
+	const pair = windowPair(periods.filter((w) => !w.partial).map((w) => w.period), period, windows, scale);
+	return { periods, points: ratePoints(daily ? dropTrailingEmptyDays(periods) : periods), ...pair, nowText: periods.length ? pair.nowText : '' };
 }
 
 export interface SizeView extends WindowPair { periods: PeriodSize[]; points: BarPoint[] }
@@ -88,7 +89,12 @@ export function sizeView(rows: MeasurementRow[], period?: MeasurementPeriod, win
  * `figure` reads another measure from the same two windows; `minimum` is the series' served minimum n where it has one.
  */
 export function periodChange(view: WindowPair, withPreviousN = false, figure: (w: RateWindow) => number | null = (w) => w.value, minimum?: number): string {
+	const { previous } = view;
+	return versusPrevious(changeOnly(view, figure, minimum), previous ? view.prevText : null, withPreviousN && previous ? previous.n : undefined);
+}
+
+/** The change alone ("-69%", "new", "low n"), without the window it is against, for a line that names no windows. */
+export function changeOnly(view: WindowPair, figure: (w: RateWindow) => number | null = (w) => w.value, minimum?: number): string {
 	const { current, previous } = view;
-	const change = changeText(figure(current), previous ? figure(previous) : null, current.n, previous?.n ?? 0, !!previous && previous.periods.length < view.previousExpected, minimum);
-	return versusPrevious(change, previous ? view.prevText : null, withPreviousN && previous ? previous.n : undefined);
+	return changeText(figure(current), previous ? figure(previous) : null, current.n, previous?.n ?? 0, !!previous && previous.periods.length < view.previousExpected, minimum);
 }

@@ -396,6 +396,13 @@ def test_rearming_supersedes_only_past_armed_deadlines():
 
 
 def test_rearming_keeps_future_and_expired_deadline_rows():
+    """Event waits keep every future and expired row; only a schedule is replaced.
+
+    #903 changed the rule for a scheduled wait (``reason``, no artifact): a task
+    has one schedule, so arming it again retires the earlier one even while it
+    is still in the future. A deadline-backed wait for an event keeps its old
+    behaviour (one node may wait on two PRs), and a schedule never retires one.
+    """
     db = _db()
     try:
         plan = service.ensure_plan("thread", "owner", db=db)
@@ -428,6 +435,26 @@ def test_rearming_keeps_future_and_expired_deadline_rows():
             )
         }
         assert statuses == {first: "expired", second: "armed", third: "armed"}
+
+        def schedule(value):
+            return _update(db, plan.id, "arm_watch", {
+                "node_id": watched.id, "reason": "Come back later",
+                "condition": {"type": "deadline", "value": value},
+                "expected_revision": service._node_row(db, watched.id)["revision"],
+            })["watch"]["id"]
+
+        fourth = schedule("2099-04-01T00:00:00+00:00")
+        fifth = schedule("2099-05-01T00:00:00+00:00")
+
+        statuses = {
+            row["id"]: row["status"] for row in db.execute(
+                "SELECT id,status FROM expected_event_watches WHERE plan_node_id=?", (watched.id,),
+            )
+        }
+        assert statuses == {
+            first: "expired", second: "armed", third: "armed",
+            fourth: "resolved", fifth: "armed",
+        }
     finally:
         db.close()
 

@@ -1,7 +1,9 @@
 import type { OperatorNode } from '$lib/api/plans';
 import { nodeStateTone } from './planDisplay';
+import type { OperatorFoldLevel } from '$lib/api/plans';
+import type { FoldedWork, FoldLevelView } from './planFoldLevels';
 import {
-	arrangeItems, foldedByLevel, openBlockedIds, revealedIds, ROOT_LEVEL, type PlanTreeItem,
+	arrangeItems, openBlockedIds, revealedIds, ROOT_LEVEL, type PlanTreeItem,
 } from './planTreeFold';
 
 /**
@@ -28,7 +30,8 @@ export interface PlanTreeViewInput {
 	index: PlanTreeIndex;
 	maxDepth: number;
 	isBranchExpanded: (nodeId: string) => boolean;
-	/** Folded rows each level has paged open, keyed by level (`planTreeFold`). */
+	/** Each level that has folded work (`planFoldLevels`), and how many of its rows the user has paged open. */
+	levels: Map<string, FoldLevelView>;
 	revealed: Record<string, number>;
 	/** The clock the Scheduled rows are read against, and which levels have theirs open (`planScheduled`). */
 	now?: number;
@@ -55,29 +58,43 @@ export interface PlanTreeView {
  * A wrapper with state of its own stays too, since no other row would show
  * it: its own delegated child plan, the current-step marker, or a failure or
  * ask for the user (debt 88).
+ *
+ * "Sole" is the server's root count (`root_count`, folded roots included),
+ * not the roots this read listed: a plan with one open root and settled roots
+ * keeps its wrapper. The wrapper's folded children, which the read may not
+ * list, take over the top level and are paged from the wrapper (`rootParent`).
  */
-export function withoutSoleWrapper(nodes: OperatorNode[], currentNodeIds: string[] = []): OperatorNode[] {
+export function withoutSoleWrapper(
+	nodes: OperatorNode[], currentNodeIds: string[] = [], work: FoldedWork | null = null, rootCount?: number,
+): { nodes: OperatorNode[]; work: FoldedWork | null } {
 	const roots = nodes.filter((node) => !node.parent_id);
-	if (roots.length !== 1) return nodes;
 	const wrapper = roots[0];
-	if (!nodes.some((node) => node.parent_id === wrapper.id)) return nodes;
-	if (hasOwnState(wrapper, currentNodeIds)) return nodes;
-	return nodes
-		.filter((node) => node.id !== wrapper.id)
-		.map((node) => ({
-			...node,
-			parent_id: node.parent_id === wrapper.id ? null : node.parent_id,
-			depth: Math.max(0, node.depth - 1),
-		}));
+	if (roots.length !== 1 || (rootCount ?? 1) !== 1) return { nodes, work };
+	const folded = work?.levels.some((level) => level.parent_id === wrapper.id) ?? false;
+	if (!nodes.some((node) => node.parent_id === wrapper.id) && !folded) return { nodes, work };
+	if (hasOwnState(wrapper, currentNodeIds)) return { nodes, work };
+	const levels = (work?.levels ?? [])
+		.filter((level) => level.parent_id !== null)
+		.map((level): OperatorFoldLevel => (level.parent_id === wrapper.id ? { ...level, parent_id: null } : level));
+	return {
+		nodes: nodes
+			.filter((node) => node.id !== wrapper.id)
+			.map((node) => ({
+				...node,
+				parent_id: node.parent_id === wrapper.id ? null : node.parent_id,
+				depth: Math.max(0, node.depth - 1),
+			})),
+		work: work && { ...work, levels, rootParent: wrapper.id },
+	};
 }
 
-/** The nodes a subagent's plan hands its nested tree under its step: none until that plan has loaded. */
-export function childPlanNodes(
-	child: { status: string; nodes: OperatorNode[]; currentNodeIds: string[] },
-): OperatorNode[] {
-	return child.status === 'ready' || child.status === 'stale'
-		? withoutSoleWrapper(child.nodes, child.currentNodeIds)
-		: [];
+/** The nodes and folds a subagent's plan hands its nested tree under its step: none until that plan has loaded. */
+export function childPlanView(
+	child: { status: string; nodes: OperatorNode[]; currentNodeIds: string[]; planId?: string | null; folds?: OperatorFoldLevel[]; rootCount?: number },
+): { nodes: OperatorNode[]; work: FoldedWork | null } {
+	if (child.status !== 'ready' && child.status !== 'stale') return { nodes: [], work: null };
+	const work = { planId: child.planId ?? '', levels: child.folds ?? [] };
+	return withoutSoleWrapper(child.nodes, child.currentNodeIds, work, child.rootCount);
 }
 
 const OWN_STATE_TONES = new Set(['failed']);
@@ -108,7 +125,7 @@ export function ancestorChain(byId: Map<string, OperatorNode>, id: string): stri
 /** Index the flat node list once for every rule that needs structure. */
 export function indexPlanNodes(
 	nodes: OperatorNode[],
-	{ maxDepth, currentNodeIds }: { maxDepth: number; currentNodeIds: string[] },
+	{ maxDepth, currentNodeIds, deepFolded = [] }: { maxDepth: number; currentNodeIds: string[]; deepFolded?: Iterable<string> },
 ): PlanTreeIndex {
 	const byId = new Map(nodes.map((node) => [node.id, node]));
 	const defaultExpandedBranches = new Set<string>();
@@ -124,6 +141,8 @@ export function indexPlanNodes(
 	for (const node of nodes) {
 		if (node.depth === maxDepth + 1 && node.parent_id) boundaryParents.add(node.parent_id);
 	}
+	// Folded work past the rendered depth is not listed, but its parent still offers the drill.
+	for (const parent of deepFolded) boundaryParents.add(parent);
 
 	return { byId, defaultExpandedBranches, boundaryParents, openBlocked: openBlockedIds(byId) };
 }
@@ -161,8 +180,7 @@ function isHiddenByCollapsedAncestor(
 
 /** Resolve the rows to render and the parents allowed to offer disclosure. */
 export function buildPlanTreeView(input: PlanTreeViewInput): PlanTreeView {
-	const { nodes, index } = input;
-	const levels = foldedByLevel(nodes, index.byId, input.maxDepth);
+	const { nodes, index, levels } = input;
 	const revealed = revealedIds(levels, input.revealed);
 	const passing = nodes.filter((node) => passesModeFilter(node, input, revealed));
 

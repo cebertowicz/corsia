@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { A, B, TEXT, append, hiddenOf, lane, trackRigs } from './typed-reveal-rig';
 import { createTypedReveal, revealTypedThrough, revealTypedUnder, settleTypedReveals, typedReveals } from './typed-reveal';
 import { hiddenCount } from './typed-reveal-segments';
+import { LABEL_FADE_MS } from './typed-reveal-driver';
+import { AGENT_PRESENT_FOR } from '$lib/docPresence';
 
 const { make, cleanup } = trackRigs();
 beforeEach(() => { vi.useFakeTimers(); });
@@ -137,11 +139,47 @@ describe('typing lanes', () => {
 		expect(lane(r, A.threadId)).toBeUndefined();
 	});
 
+	it('row 27: an idle caret wakes only at its next state change, not on a poll', () => {
+		const r = make();
+		r.edit(A, append('hi'));
+		vi.advanceTimersByTime(13_000);
+		expect(lane(r, A.threadId)?.quiet).toBe(true);
+		const timers = vi.spyOn(globalThis, 'setTimeout');
+		vi.advanceTimersByTime(6 * 60_000);
+		expect(lane(r, A.threadId)).toBeUndefined();
+		expect(timers.mock.calls.length).toBeLessThanOrEqual(2);
+	});
+
+	it('row 27: the label fades and the lane drops at their own times', () => {
+		const r = make();
+		r.edit(A, append('hi'));
+		vi.advanceTimersByTime(1_000);
+		expect(hiddenOf(r, A.threadId)).toBe(0);
+		expect(lane(r, A.threadId)?.quiet).toBe(false);
+		vi.advanceTimersByTime(LABEL_FADE_MS);
+		expect(lane(r, A.threadId)?.quiet).toBe(true);
+		vi.advanceTimersByTime(AGENT_PRESENT_FOR - LABEL_FADE_MS - 1_000);
+		expect(lane(r, A.threadId)).toBeDefined();
+		vi.advanceTimersByTime(1_000);
+		expect(lane(r, A.threadId)).toBeUndefined();
+	});
+
 	it('row 27: a long backlog finishes inside the 12 s cap', () => {
 		const r = make();
 		r.edit(A, append('x'.repeat(3_000)));
 		vi.advanceTimersByTime(12_500);
 		expect(hiddenOf(r, A.threadId)).toBe(0);
+	});
+});
+
+describe('rig cost', () => {
+	it('row 2: a typed backlog runs no jsdom style cascade per frame, so its run time does not scale with machine load', () => {
+		const cascade = vi.spyOn(window, 'getComputedStyle');
+		const r = make();
+		r.edit(A, append(TEXT));
+		vi.advanceTimersByTime(13_000);
+		expect(hiddenOf(r, A.threadId)).toBe(0);
+		expect(cascade.mock.calls.length).toBeLessThan(20);
 	});
 });
 

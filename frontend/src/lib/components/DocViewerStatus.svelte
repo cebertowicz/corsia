@@ -8,10 +8,12 @@
 	import { Button, StatePill } from '$lib/components/ui';
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import type { CommentFeedback } from '$lib/api/docs';
+	import type { DocFeedback } from '$lib/docFeedback.svelte';
 
 	let {
 		title = 'Document',
 		presence,
+		reviewBar,
 		commentsOpen = false,
 		commentsLoading = false,
 		ready,
@@ -41,6 +43,8 @@
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
+		/** The review bar sits first in the header, so its buttons come before the document in tab order. */
+		reviewBar?: import('svelte').Snippet;
 		commentsOpen?: boolean;
 		commentsLoading?: boolean;
 		ready: boolean;
@@ -141,9 +145,11 @@
 
 	export function commentCreated(): void { feedbackStatus?.commentCreated(); }
 	export function sync(id: string, feedback: CommentFeedback): void { feedbackStatus?.sync(id, feedback); }
+	export function feedback(): DocFeedback | undefined { return feedbackStatus?.controller(); }
 </script>
 
 <header class="document-header" use:detailsKeys>
+	{#if reviewBar}{@render reviewBar()}{/if}
 	<div class="document-identity">
 		<button type="button" class="identity-details" aria-label="Document details" aria-expanded={detailsOpen}
 			onclick={() => detailsOpen = !detailsOpen}>
@@ -209,12 +215,16 @@
 </header>
 
 <style>
-	.document-header { grid-area: header; min-width: 0; flex: none; display: flex; flex-direction: column; gap: 6px; padding-left: var(--doc-rail, 44px); background: var(--bg-primary); }
+	.document-header { grid-area: header; min-width: 0; flex: none; display: flex; flex-direction: column; gap: 6px; padding-left: var(--doc-phone-inset, var(--doc-rail, 44px)); background: var(--bg-primary); }
 	.document-identity { display: flex; align-items: center; gap: 6px; min-width: 0; }
 	.identity-details { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; border: 0; padding: 2px 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
 	.document-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.identity-age { display: none; }
 	.feedback-controls { display: contents; }
+	/* The grace text gives way first (ellipsis); Send now keeps its whole label and the row keeps one line. */
+	.feedback-controls :global(> .sending-now.grace) { flex: 1 1 8rem; min-width: min-content; }
+	.feedback-controls :global(> .sending-now > .btn) { flex: none; }
+	.feedback-controls :global(> .sending-now > .sending-grace) { flex: 1 1 0; min-width: 0; contain: inline-size; }
 	.identity-details:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 	.document-metadata, .document-status-row { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 	/* One toolbar: every control is the same quiet ghost button in the app's UI type. */
@@ -244,7 +254,10 @@
 		.document-metadata:not(.expanded) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
-		.feedback-controls :global(> .btn) { display: block; flex: 1; min-width: 0; min-height: 44px; overflow: hidden; text-overflow: ellipsis; }
+		.feedback-controls :global(> .sending-now > .btn), .feedback-controls :global(> .sending-now > .sent) { min-height: 44px; }
+		/* Send alone fills the rest of the row. */
+		.feedback-controls :global(> .sending-now:not(.grace)) { flex: 1; min-width: 0; }
+		.feedback-controls :global(> .sending-now:not(.grace) > .btn) { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }
 	}
 </style>

@@ -67,8 +67,9 @@ def _harness_discovery_envelope(provider: str) -> dict | None:
 
 def _cloud_providers_active() -> set[str]:
     from infra import settings as _settings
+    from infra.key_store_providers import provider_keys
 
-    api_keys = _settings.get_api_keys()
+    api_keys = provider_keys()
     cfg_providers = _settings.get_providers()
     active: set[str] = set()
     for prefix, cfg in [("anthropic", "anthropic"), ("openai", "openai")]:

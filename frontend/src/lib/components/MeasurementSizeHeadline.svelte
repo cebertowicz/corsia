@@ -3,7 +3,6 @@
 	import MeasurementBarChart from './MeasurementBarChart.svelte';
 	import { SIZE_SERIES, grainChart, hoursPerOutcome, minutesPerOutcome } from './measurementSize';
 	import { periodChange, sizeView, type RateWindow } from './measurementPeriodView';
-	import { periodName } from '$lib/stores/measurementPeriod';
 
 	let { state, onRetry }: { state: PanelState; onRetry: () => void } = $props();
 
@@ -35,7 +34,7 @@
 	const size = $derived(latest?.size ?? null);
 	const current = $derived(view.current);
 	const rate = $derived(current.value);
-	const nowText = $derived(state.period && view.periods.length ? periodName(state.period.latest) : '');
+	const nowText = $derived(view.periods.length ? view.nowText : '');
 	const chart = $derived(grainChart(state.period, view.points, state.averagePeriods));
 	/** "+206% vs Sep 21 to Sep 27"; with no previous window, or one the series covers only in part, it reads new. */
 	const vsPrevious = (figure: (w: RateWindow) => number | null, withPreviousN = false) => periodChange(view, withPreviousN, figure);
@@ -73,7 +72,7 @@
 				axisTitle="Hours of work per hour you spend"
 				unit={chart.unit}
 				averageName={chart.averageName}
-				caption={`Estimated hours of work delivered divided by your engaged hours; source: size-rated accepted outcomes and your messages; higher is better. n is size-rated accepted outcomes per ${chart.unit}. ${chart.note}`}
+				caption={`Estimated hours of work delivered divided by your engaged hours; source: size-rated accepted outcomes and your time active in CORSIA; higher is better. n is size-rated accepted outcomes per ${chart.unit}.`}
 				minN={20}
 				minNText="fewer than 20 outcomes"
 				ariaLabel={`Hours of work per hour you spend, ${chart.rangeText}`}
@@ -97,7 +96,7 @@
 </section>
 
 <style>
-	.card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 14px; min-width: 0; }
+	.card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 0; padding: 14px; min-width: 0; }
 	.sh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 6px; }
 	h3 { margin: 0; color: var(--text-primary); font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
 	h4 { margin: 0 0 6px; color: var(--text-secondary); font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; overflow-wrap: anywhere; }

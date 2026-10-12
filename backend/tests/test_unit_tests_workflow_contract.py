@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path
@@ -13,60 +14,132 @@ RUNTIME_REQUIREMENTS = REPO_ROOT / "backend/requirements.txt"
 TEST_REQUIREMENTS = REPO_ROOT / "backend/requirements-test.txt"
 LOCKED_REQUIREMENTS = REPO_ROOT / "backend/requirements.lock"
 E2E_PORT_HELPER = REPO_ROOT / "scripts/assign-e2e-runner-ports"
+RELEVANCE_ACTION = REPO_ROOT / ".github/actions/relevance/action.yml"
+RELEVANCE_ACTION_PATH = r"\.github/actions/relevance/action\.yml$"
+RELEVANCE_ACTION_PATH_PATTERN = rf"^{RELEVANCE_ACTION_PATH}"
+RELEVANCE_CONSUMER_JOBS = {
+    "antipatterns.yml": ("antipatterns",),
+    "code-health.yml": ("file-sizes",),
+    "integration.yml": ("integration", "live-reviewer"),
+    "lint.yml": ("ruff", "mypy"),
+    "unit-tests.yml": ("backend", "backend-macos", "frontend"),
+}
+RELEVANCE_PATTERN_ENV = {
+    "lint.yml": "LINT_RELEVANCE_PATTERNS",
+    "unit-tests.yml": "UNIT_TEST_RELEVANCE_PATTERNS",
+}
+RELEVANCE_PATTERN_CASES = {
+    "antipatterns.yml": {
+        "must_run": ("backend/module.py", "frontend/app.ts", "tools/check.py", "scripts/check", "infra/config"),
+        "must_skip": ("README.md",),
+    },
+    "code-health.yml": {
+        "must_run": ("root_module.py", "frontend/app.ts", "frontend/App.svelte", "quality/file-size-limits.json"),
+        "must_skip": ("README.md",),
+    },
+    "integration.yml": {
+        "must_run": ("backend/module.py", "requirements-test.txt"),
+        "must_skip": ("frontend/app.ts",),
+    },
+    "lint.yml": {
+        "must_run": ("backend/module.py", "tools/check.py", "pyproject.toml"),
+        "must_skip": ("frontend/app.ts",),
+    },
+    "unit-tests.yml": {
+        "must_run": ("backend/module.py", "frontend/app.ts", "requirements-test.txt", "frontend/package-lock.json"),
+        "must_skip": ("README.md",),
+    },
+}
 HISTORICAL_SCENARIO_TESTS = (
     REPO_ROOT / "backend/tests/test_yaml_scenario_loading.py",
     REPO_ROOT / "backend/tests/test_yaml_scenario_solver.py",
 )
-BACKEND_RUNNER = "runs-on: [self-hosted, macOS, ARM64, mac-studio, backend-l1]"
-HOSTED_RUNNER = "runs-on: ubuntu-latest"
-# Light checks run on any Mac runner, without taking a backend-l1 or
-# ci-integration lane label. GitHub-hosted runners bill paid Actions minutes;
-# moving a job there needs the repository owner's explicit approval.
-LIGHT_RUNNER = "runs-on: [self-hosted, macOS, ARM64, mac-studio]"
-INTEGRATION_RUNNER = "runs-on: [self-hosted, macOS, ARM64, mac-studio, ci-integration]"
-LIGHT_WORKFLOW_JOBS = {
-    "antipatterns.yml": 1,
-    "code-health.yml": 1,
+LINUX_RUNNER = "runs-on: ubuntu-24.04"
+MACOS_RUNNER = "runs-on: macos-15"
+MACOS_ONLY_TESTS = REPO_ROOT / "backend/tests/macos_only_tests.txt"
+# Every job runs on a GitHub-hosted runner. macOS only where a job needs it:
+# the L3 contract suite (Seatbelt + Safehouse) and the macOS-only L1 files.
+LINUX_WORKFLOW_JOBS = {
+    "antipatterns.yml": 2,
+    "code-health.yml": 2,
     "docs-drift.yml": 1,
-    "lint.yml": 2,
+    "lint.yml": 3,
     "large-files.yml": 1,
     "close-on-dev-merge.yml": 1,
-}
-INTEGRATION_WORKFLOW_JOBS = {
     "e2e.yml": 2,
     "evals.yml": 1,
-    "integration.yml": 1,
+}
+MACOS_WORKFLOW_JOBS: dict[str, int] = {}
+MIXED_RUNNER_WORKFLOW_JOBS = {
+    "integration.yml": (1, 2),
+}
+BLOCKING_CONTEXTS = {
+    "antipatterns.yml": {"Anti-pattern detector (error-severity, blocking)"},
+    "code-health.yml": {"File size ratchet"},
+    "docs-drift.yml": {"Documentation drift check (citations + private-name scan)"},
+    "integration.yml": {"Integration tests (L3)"},
+    "large-files.yml": {"No file over 500 KB"},
+    "lint.yml": {"mypy (regression gate)"},
+    "unit-tests.yml": {
+        "Backend unit tests",
+        "Backend unit tests (macOS-only files)",
+        "Frontend unit tests",
+    },
+}
+RELEVANCE_CONSUMER_JOB_COUNTS = {
+    "antipatterns.yml": 1,
+    "code-health.yml": 1,
+    "integration.yml": 2,
+    "lint.yml": 2,
+    "unit-tests.yml": 3,
 }
 
+def _macos_only_files() -> list[str]:
+    return [
+        line.strip()
+        for line in MACOS_ONLY_TESTS.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
 
-def test_unit_jobs_use_self_hosted_capacity_and_controlled_shards() -> None:
+
+def test_unit_jobs_use_hosted_runners_and_controlled_shards() -> None:
     workflow = WORKFLOW.read_text()
-    backend_job = workflow.split("  frontend:", 1)[0]
+    relevance_job = _workflow_job(workflow, "relevance")
+    backend_job = _workflow_job(workflow, "backend")
+    macos_job = _workflow_job(workflow, "backend-macos")
+    frontend_job = _workflow_job(workflow, "frontend")
 
-    assert workflow.count(BACKEND_RUNNER) == 1
-    assert workflow.count(LIGHT_RUNNER) == 1
-    assert LIGHT_RUNNER in workflow.split("  frontend:", 1)[1]
-    assert HOSTED_RUNNER not in workflow
-    assert "runs-on: macos-14" not in workflow
-    assert "runs-on: self-hosted" not in workflow
+    for job in (relevance_job, backend_job, frontend_job):
+        assert LINUX_RUNNER in job
+        assert MACOS_RUNNER not in job
+    assert MACOS_RUNNER in macos_job
+    assert LINUX_RUNNER not in macos_job
+    assert "self-hosted" not in workflow
+    assert "hdiutil" not in workflow
+    # Linux uses uv's managed CPython so its SQLite matches the Mac's, not the distro's.
+    assert "uv venv --python 3.11 --managed-python --seed .venv" in backend_job
+    assert "actions/setup-python" not in backend_job
+    assert "CORSIA_BACKUP_FREE_FLOOR_BYTES:" in backend_job
+    assert "python-version: '3.11'" in macos_job
+    assert "scripts/install-ci-safehouse" in macos_job
     assert "PYTHONUNBUFFERED: '1'" in workflow
     assert "CORSIA_TEST_MODE: '1'" in workflow
     assert 'local isolated_root="$CI_TEST_ROOT/corsia-ci-backend/${shard}"' in workflow
     assert '--basetemp="$isolated_root/pytest"' in workflow
     assert "-o tmp_path_retention_policy=failed" in workflow
-    assert 'diskutil mount -mountPoint "$mount_point"' in backend_job
-    assert "Mount test RAM disk" in backend_job
-    assert "if: always() && env.CI_RAMDISK_DEVICE != ''" in backend_job
+    assert "Use in-memory test root" in backend_job
     assert "/private/tmp/corsia-ci-" not in workflow
     assert "CORSIA_WORKSPACE=$RUNNER_TEMP" not in workflow
-    assert "actions/setup-python" not in backend_job
     assert "actions/setup-node" not in backend_job
     assert "matrix:" not in workflow
     assert "pytest-xdist" not in workflow
     assert "run_backend_shard()" in workflow
-    assert "run_backend_shard core-cgr backend/tests/test_[cgr]*.py" in workflow
-    assert "run_backend_shard core-aehilsuw backend/tests/test_[aehilsuw]*.py" in workflow
+    assert "mapfile -t cgr_files < <(linux_files backend/tests/test_[cgr]*.py)" in workflow
+    assert "mapfile -t aehilsuw_files < <(linux_files backend/tests/test_[aehilsuw]*.py)" in workflow
+    assert 'run_backend_shard core-cgr "${cgr_files[@]}"' in workflow
+    assert 'run_backend_shard core-aehilsuw "${aehilsuw_files[@]}"' in workflow
     assert "run_backend_shard remainder backend/tests" in workflow
+    assert '"${macos_ignores[@]}"' in workflow
     # The remainder must skip exactly what the named shards run, so every
     # test file runs once.
     assert "'--ignore-glob=backend/tests/test_[cgr]*.py'" in workflow
@@ -113,25 +186,409 @@ def test_l3_enables_contract_suite_for_integration_matrix() -> None:
     assert "branches: [main, dev]" in workflow
 
 
-def test_non_backend_workflows_use_their_dedicated_runner_lane() -> None:
+def test_blocking_contexts_are_created_for_every_pull_request() -> None:
     workflow_root = REPO_ROOT / ".github/workflows"
 
-    for filename, expected_jobs in LIGHT_WORKFLOW_JOBS.items():
+    for filename, contexts in BLOCKING_CONTEXTS.items():
         workflow = (workflow_root / filename).read_text()
-        assert workflow.count(LIGHT_RUNNER) == expected_jobs
-        assert HOSTED_RUNNER not in workflow
-        assert BACKEND_RUNNER not in workflow
-        assert INTEGRATION_RUNNER not in workflow
-        assert "actions/setup-python" not in workflow
-        assert "/tmp/" not in workflow
+        for context in contexts:
+            assert f"\n    name: {context}\n" in workflow, (filename, context)
 
-    for filename, expected_jobs in INTEGRATION_WORKFLOW_JOBS.items():
+    for filename, expected_consumer_jobs in RELEVANCE_CONSUMER_JOB_COUNTS.items():
         workflow = (workflow_root / filename).read_text()
-        assert workflow.count(INTEGRATION_RUNNER) == expected_jobs
-        assert "runs-on: self-hosted" not in workflow
-        assert BACKEND_RUNNER not in workflow
-        assert HOSTED_RUNNER not in workflow
+        pull_request = workflow.split("  pull_request:\n", 1)[1].split(
+            "  workflow_dispatch:", 1
+        )[0]
+        assert "branches: [main, dev]" in pull_request, filename
+        assert "paths:" not in pull_request, filename
+        assert "paths-ignore:" not in pull_request, filename
+        assert workflow.count("uses: ./.github/actions/relevance") == 1, filename
+        assert workflow.count("\n    needs: relevance\n") == expected_consumer_jobs, filename
 
+
+def test_live_reviewer_proof_is_a_separate_static_workflow_dispatch_job() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/integration.yml").read_text()
+    integration = _workflow_job(workflow, "integration")
+    live_reviewer = _workflow_job(workflow, "live-reviewer")
+
+    assert "name: Integration tests (L3)" in integration
+    assert "timeout-minutes: 15" in integration
+    assert "Run integration tests" in integration
+    assert "Run bounded live Haiku reviewer proof" not in integration
+    assert "!(github.event_name == 'workflow_dispatch' && inputs.live_reviewer)" in integration
+
+    assert "name: Live host reviewer proof (Haiku)" in live_reviewer
+    assert "github.event_name == 'workflow_dispatch'" in live_reviewer
+    assert "inputs.live_reviewer" in live_reviewer
+    assert "timeout-minutes: 30" in live_reviewer
+    assert "Run bounded live Haiku reviewer proof" in live_reviewer
+
+
+def _workflow_job(workflow: str, job_name: str) -> str:
+    start = workflow.index(f"  {job_name}:\n")
+    next_job = re.search(r"^  [A-Za-z][A-Za-z0-9_-]*:\n", workflow[start + 1 :], re.MULTILINE)
+    end = start + 1 + next_job.start() if next_job else len(workflow)
+    return workflow[start:end]
+
+
+def _workflow_jobs(workflow: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"^  ([A-Za-z][A-Za-z0-9_-]*):\n", workflow, re.MULTILINE))
+    jobs = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(workflow)
+        jobs.append((match.group(1), workflow[match.start() : end]))
+    return jobs
+
+
+def _workflow_pattern_env_value(workflow: str, env_name: str) -> str:
+    match = re.search(rf"^env:\n  {env_name}: '([^']+)'$", workflow, re.MULTILINE)
+    assert match, env_name
+    return match.group(1)
+
+
+def _relevance_pattern(workflow: str) -> str:
+    preflight = _workflow_job(workflow, "relevance")
+    match = re.search(r"^          patterns: (.+)$", preflight, re.MULTILINE)
+    assert match, "relevance"
+    pattern_reference = match.group(1)
+    env_reference = re.fullmatch(r"\$\{\{ env\.([A-Z_]+) \}\}", pattern_reference)
+    return _workflow_pattern_env_value(workflow, env_reference.group(1)) if env_reference else pattern_reference.strip("'")
+
+
+def _grep_matches(pattern: str, changed_path: str) -> int:
+    return subprocess.run(
+        ["grep", "-Eq", pattern], input=f"{changed_path}\n", text=True, check=False
+    ).returncode
+
+
+def test_relevance_action_is_the_shared_fail_closed_producer_for_every_gated_job() -> None:
+    action = RELEVANCE_ACTION.read_text()
+    assert "event_name:" in action
+    assert "base_ref:" in action
+    assert "patterns:" in action
+    assert "value: ${{ steps.detect.outputs.relevant }}" in action
+    assert "git fetch --no-tags origin" in action
+    assert "git merge-base" in action
+    assert "git diff --name-only --no-renames -z" in action
+    assert 'echo "relevant=false"' in action
+
+    workflow_root = REPO_ROOT / ".github/workflows"
+    actual_consumers = {
+        path.name: tuple(
+            name for name, job in _workflow_jobs(path.read_text()) if "needs: relevance" in job
+        )
+        for path in sorted(workflow_root.glob("*.yml"))
+    }
+    actual_consumers = {filename: jobs for filename, jobs in actual_consumers.items() if jobs}
+    assert actual_consumers == RELEVANCE_CONSUMER_JOBS
+
+    for filename, jobs in actual_consumers.items():
+        workflow = (workflow_root / filename).read_text()
+        preflight = _workflow_job(workflow, "relevance")
+        assert "uses: ./.github/actions/relevance" in preflight, filename
+        assert workflow.count("uses: ./.github/actions/relevance") == 1, filename
+        assert "runs-on: ubuntu-24.04" in preflight, filename
+        assert "fetch-depth: 0" in preflight, filename
+        assert "id: detect" in preflight, filename
+        assert "event_name: ${{ github.event_name }}" in preflight, filename
+        assert "base_ref: ${{ github.base_ref }}" in preflight, filename
+        assert "relevant: ${{ steps.detect.outputs.relevant }}" in preflight, filename
+        assert RELEVANCE_ACTION_PATH in _relevance_pattern(workflow), filename
+        for job_name in jobs:
+            job = _workflow_job(workflow, job_name)
+            assert "needs: relevance" in job, (filename, job_name)
+            assert "if: ${{ !cancelled() && (" in job, (filename, job_name)
+            assert "needs.relevance.result != 'success'" in job, (filename, job_name)
+            assert "needs.relevance.outputs.relevant == 'true'" in job, (filename, job_name)
+            steps = job.split("    steps:\n", 1)[1]
+            assert steps.startswith(
+                "      - name: Fail when relevance preflight did not succeed\n"
+                "        if: ${{ needs.relevance.result != 'success' }}\n"
+                "        run: |\n"
+            ), (filename, job_name)
+            assert "exit 1" in steps.split("\n      - ", 1)[0], (filename, job_name)
+            assert "fetch-depth: 1" in job, (filename, job_name)
+            assert "fetch-depth: 0" not in job, (filename, job_name)
+
+
+def test_relevance_patterns_have_one_workflow_local_source() -> None:
+    workflow_root = REPO_ROOT / ".github/workflows"
+    for filename, env_name in RELEVANCE_PATTERN_ENV.items():
+        workflow = (workflow_root / filename).read_text()
+        pattern = _workflow_pattern_env_value(workflow, env_name)
+        assert workflow.count(pattern) == 1, filename
+        expected_reference = f"patterns: ${{{{ env.{env_name} }}}}"
+        assert expected_reference in _workflow_job(workflow, "relevance"), filename
+        for job_name in RELEVANCE_CONSUMER_JOBS[filename]:
+            assert expected_reference not in _workflow_job(workflow, job_name), (filename, job_name)
+
+
+def test_every_relevance_consumer_pattern_matches_its_required_paths() -> None:
+    workflow_root = REPO_ROOT / ".github/workflows"
+    for filename, jobs in RELEVANCE_CONSUMER_JOBS.items():
+        workflow = (workflow_root / filename).read_text()
+        cases = RELEVANCE_PATTERN_CASES[filename]
+        pattern = _relevance_pattern(workflow)
+        for job_name in jobs:
+            for changed_path in (*cases["must_run"], f".github/workflows/{filename}", ".github/actions/relevance/action.yml"):
+                assert _grep_matches(pattern, changed_path) == 0, (filename, job_name, changed_path, pattern)
+            for changed_path in cases["must_skip"]:
+                assert _grep_matches(pattern, changed_path) == 1, (filename, job_name, changed_path, pattern)
+
+
+def _run_git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def _scratch_relevance_repo(tmp_path: Path, changed_path: str) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    _run_git(repo, "init")
+    _run_git(repo, "config", "user.email", "ci@example.test")
+    _run_git(repo, "config", "user.name", "CI test")
+    (repo / "README.md").write_text("base\n")
+    _run_git(repo, "add", "README.md")
+    _run_git(repo, "commit", "-m", "base")
+    _run_git(repo, "branch", "-M", "main")
+    _run_git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    changed = repo / changed_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("change\n")
+    _run_git(repo, "add", changed_path)
+    _run_git(repo, "commit", "-m", "change")
+    return repo
+
+
+def _run_relevance_action(
+    repo: Path, tmp_path: Path, *, base_ref: str, patterns: str, event_name: str = "pull_request"
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    action = RELEVANCE_ACTION.read_text()
+    run = textwrap.dedent(action.split("      run: |\n", 1)[1])
+    github_output = tmp_path / "github-output"
+    github_output.parent.mkdir(parents=True, exist_ok=True)
+    environment = {
+        **os.environ,
+        "EVENT_NAME": event_name,
+        "BASE_REF": base_ref,
+        "PATTERNS": patterns,
+        "GITHUB_OUTPUT": str(github_output),
+    }
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-c", run],
+        cwd=repo,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, github_output
+
+
+def test_relevance_action_fails_closed_and_emits_only_successful_results(tmp_path: Path) -> None:
+    bogus_repo = _scratch_relevance_repo(tmp_path / "bogus", "README.md")
+    bogus, bogus_output = _run_relevance_action(
+        bogus_repo, tmp_path / "bogus", base_ref="missing", patterns="^backend/"
+    )
+    assert bogus.returncode != 0
+    assert "::error::unable to fetch pull_request base ref origin/missing" in bogus.stderr
+    assert not bogus_output.exists() or not bogus_output.read_text()
+
+    unrelated_repo = _scratch_relevance_repo(tmp_path / "unrelated", "README.md")
+    unrelated, unrelated_output = _run_relevance_action(
+        unrelated_repo, tmp_path / "unrelated", base_ref="main", patterns="^backend/"
+    )
+    assert unrelated.returncode == 0, unrelated.stderr
+    assert unrelated_output.read_text() == "relevant=false\n"
+
+    matching_repo = _scratch_relevance_repo(tmp_path / "matching", "backend/example.py")
+    matching, matching_output = _run_relevance_action(
+        matching_repo, tmp_path / "matching", base_ref="main", patterns="^backend/"
+    )
+    assert matching.returncode == 0, matching.stderr
+    assert matching_output.read_text() == "relevant=true\n"
+
+    # A matching path comes first and is followed by more than a typical pipe
+    # buffer of unrelated names. A producer-side pipe can receive SIGPIPE when
+    # grep exits after this early match under `set -o pipefail`.
+    large_repo = _scratch_relevance_repo(tmp_path / "large", "backend/match.py")
+    bulk_dir = large_repo / "docs"
+    bulk_dir.mkdir()
+    for index in range(2_048):
+        (bulk_dir / f"unrelated-change-{index:05d}-abcdefghijklmnopqrstuvwxyz.md").write_text("x\n")
+    _run_git(large_repo, "add", "docs")
+    _run_git(large_repo, "commit", "-m", "large unrelated change set")
+    changed_paths = subprocess.run(
+        ["git", "diff", "--name-only", "origin/main...HEAD"],
+        cwd=large_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert changed_paths.splitlines()[0] == "backend/match.py"
+    assert len(changed_paths) > 65_536
+    large_match, large_match_output = _run_relevance_action(
+        large_repo, tmp_path / "large", base_ref="main", patterns="^backend/"
+    )
+    assert large_match.returncode == 0, large_match.stderr
+    assert large_match_output.read_text() == "relevant=true\n"
+
+    action_repo = _scratch_relevance_repo(
+        tmp_path / "action", ".github/actions/relevance/action.yml"
+    )
+    action_change, action_change_output = _run_relevance_action(
+        action_repo,
+        tmp_path / "action",
+        base_ref="main",
+        patterns=RELEVANCE_ACTION_PATH_PATTERN,
+    )
+    assert action_change.returncode == 0, action_change.stderr
+    assert action_change_output.read_text() == "relevant=true\n"
+
+    renamed_repo = _scratch_relevance_repo(tmp_path / "renamed", "backend/example.py")
+    _run_git(renamed_repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (renamed_repo / "docs").mkdir()
+    _run_git(renamed_repo, "mv", "backend/example.py", "docs/example.py")
+    _run_git(renamed_repo, "commit", "-m", "rename backend example")
+    renamed, renamed_output = _run_relevance_action(
+        renamed_repo, tmp_path / "renamed", base_ref="main", patterns="^backend/"
+    )
+    assert renamed.returncode == 0, renamed.stderr
+    assert renamed_output.read_text() == "relevant=true\n"
+
+    renamed_to_backend_repo = _scratch_relevance_repo(tmp_path / "renamed-to-backend", "docs/example.py")
+    _run_git(renamed_to_backend_repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (renamed_to_backend_repo / "backend").mkdir()
+    _run_git(renamed_to_backend_repo, "mv", "docs/example.py", "backend/example.py")
+    _run_git(renamed_to_backend_repo, "commit", "-m", "rename docs example")
+    renamed_to_backend, renamed_to_backend_output = _run_relevance_action(
+        renamed_to_backend_repo, tmp_path / "renamed-to-backend", base_ref="main", patterns="^backend/"
+    )
+    assert renamed_to_backend.returncode == 0, renamed_to_backend.stderr
+    assert renamed_to_backend_output.read_text() == "relevant=true\n"
+
+    unicode_path = "backend/résumé notes.py"
+    unicode_repo = _scratch_relevance_repo(tmp_path / "unicode", unicode_path)
+    _run_git(unicode_repo, "config", "core.quotePath", "true")
+    unicode_change, unicode_output = _run_relevance_action(
+        unicode_repo,
+        tmp_path / "unicode",
+        base_ref="main",
+        patterns=r"^backend/résumé notes\.py$",
+    )
+    assert unicode_change.returncode == 0, unicode_change.stderr
+    assert unicode_output.read_text() == "relevant=true\n"
+
+    dispatched, dispatched_output = _run_relevance_action(
+        matching_repo,
+        tmp_path / "dispatched",
+        base_ref="",
+        patterns="[",
+        event_name="workflow_dispatch",
+    )
+    assert dispatched.returncode == 0, dispatched.stderr
+    assert dispatched_output.read_text() == "relevant=true\n"
+
+
+def test_relevance_action_fails_closed_when_diff_fails(tmp_path: Path) -> None:
+    repo = _scratch_relevance_repo(tmp_path, "backend/example.py")
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    real_git = shutil.which("git")
+    assert real_git is not None
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [[ \"$1\" == \"diff\" ]]; then exit 42; fi\n"
+        f"exec {real_git} \"$@\"\n"
+    )
+    fake_git.chmod(0o755)
+
+    action = RELEVANCE_ACTION.read_text()
+    run = textwrap.dedent(action.split("      run: |\n", 1)[1])
+    github_output = tmp_path / "github-output"
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-c", run],
+        cwd=repo,
+        env={
+            **os.environ,
+            "EVENT_NAME": "pull_request",
+            "BASE_REF": "main",
+            "PATTERNS": "^backend/",
+            "GITHUB_OUTPUT": str(github_output),
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert not github_output.exists() or not github_output.read_text()
+
+
+def test_every_workflow_uses_its_hosted_runner() -> None:
+    workflow_root = REPO_ROOT / ".github/workflows"
+
+    for path in sorted(workflow_root.glob("*.yml")):
+        workflow = path.read_text()
+        assert "self-hosted" not in workflow, path.name
+        assert "mac-python" not in workflow, path.name
+        assert "/opt/homebrew" not in workflow, path.name
+
+    for filename, expected_jobs in LINUX_WORKFLOW_JOBS.items():
+        workflow = (workflow_root / filename).read_text()
+        assert workflow.count(LINUX_RUNNER) == expected_jobs, filename
+        assert MACOS_RUNNER not in workflow, filename
+
+    for filename, expected_jobs in MACOS_WORKFLOW_JOBS.items():
+        workflow = (workflow_root / filename).read_text()
+        assert workflow.count(MACOS_RUNNER) == expected_jobs, filename
+        assert LINUX_RUNNER not in workflow, filename
+
+    for filename, (linux_jobs, macos_jobs) in MIXED_RUNNER_WORKFLOW_JOBS.items():
+        workflow = (workflow_root / filename).read_text()
+        assert workflow.count(LINUX_RUNNER) == linux_jobs, filename
+        assert workflow.count(MACOS_RUNNER) == macos_jobs, filename
+
+    integration = (workflow_root / "integration.yml").read_text()
+    assert "scripts/install-ci-safehouse" in integration
+    assert "CORSIA_REQUIRE_SAFEHOUSE: '1'" in integration
+
+
+def test_macos_only_files_run_exactly_once() -> None:
+    files = _macos_only_files()
+    assert files, "macos_only_tests.txt lists no files"
+    assert len(files) == len(set(files))
+    for path in files:
+        assert (REPO_ROOT / path).is_file(), path
+        assert path.startswith("backend/tests/test_") and path.endswith(".py"), path
+
+    workflow = WORKFLOW.read_text()
+    backend_job = workflow.split("  backend-macos:", 1)[0]
+    macos_job = workflow.split("  backend-macos:", 1)[1].split("  frontend:", 1)[0]
+    # Linux skips the listed files (explicit globs filtered, remainder ignored);
+    # the macOS job runs exactly the listed files.
+    assert "backend/tests/macos_only_tests.txt" in backend_job
+    assert 'macos_ignores+=("--ignore=$path")' in backend_job
+    assert "backend/tests/macos_only_tests.txt" in macos_job
+    assert '"${files[@]}"' in macos_job
+    assert '-m "not integration and not cloud_required"' in macos_job
+
+
+def test_linux_shard_file_filter_drops_only_listed_files(tmp_path: Path) -> None:
+    workflow = WORKFLOW.read_text()
+    start = workflow.index("          linux_files() {\n")
+    end = workflow.index("          }\n", start) + len("          }\n")
+    function = textwrap.dedent(workflow[start:end])
+    script = (
+        "macos_only=(backend/tests/test_a.py backend/tests/test_c.py)\n"
+        + function
+        + "linux_files backend/tests/test_a.py backend/tests/test_b.py backend/tests/test_c.py\n"
+    )
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-c", script], text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["backend/tests/test_b.py"]
 
 def test_backend_ci_runs_the_contract_suite() -> None:
     workflow = WORKFLOW.read_text()
@@ -222,91 +679,32 @@ def test_historical_scenario_tests_require_explicit_opt_in() -> None:
         assert "Path.home()" not in source
 
 
-def _ramdisk_mount_step() -> str:
+def _test_root_step() -> str:
     workflow = WORKFLOW.read_text()
-    step = "      - name: Mount test RAM disk\n"
+    step = "      - name: Use in-memory test root\n"
     start = workflow.index(step)
     run_start = workflow.index("        run: |\n", start) + len("        run: |\n")
     run_end = workflow.index("\n      - name:", run_start)
     return textwrap.dedent(workflow[run_start:run_end])
 
 
-def _run_ramdisk_mount(
-    tmp_path: Path, hdiutil: str, diskutil: str, *, mount: str = "exit 0\n", tmpdir: Path | None = None,
-) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir(parents=True)
-    df = 'echo "Filesystem 512-blocks"; echo "/dev/disk99s1 67108864"\n'
-    for name, body in (("hdiutil", hdiutil), ("diskutil", diskutil), ("df", df), ("mount", mount)):
-        (fake_bin / name).write_text("#!/usr/bin/env bash\n" + body)
-        (fake_bin / name).chmod(0o755)
+def test_backend_test_root_is_tmpfs_or_runner_temp(tmp_path: Path) -> None:
     github_env = tmp_path / "github-env"
     env = {
         **os.environ,
-        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
-        "RUNNER_NAME": "mac-studio-backend-l1-1",
         "RUNNER_TEMP": str(tmp_path / "runner-temp"),
-        "TMPDIR": f"{tmpdir or tmp_path / 'user-tmp'}/",
         "GITHUB_ENV": str(github_env),
     }
     result = subprocess.run(
-        ["/bin/bash", "-c", _ramdisk_mount_step()], text=True, capture_output=True, check=False, env=env,
+        ["/bin/bash", "-e", "-c", _test_root_step()], text=True, capture_output=True, check=False, env=env,
     )
-    lines = github_env.read_text().splitlines() if github_env.exists() else []
-    return result, dict(line.split("=", 1) for line in lines)
-
-
-def test_backend_test_state_uses_a_ram_disk_when_one_mounts(tmp_path: Path) -> None:
-    result, values = _run_ramdisk_mount(
-        tmp_path,
-        hdiutil='[ "$1" = attach ] && echo "/dev/disk99"\nexit 0\n',
-        diskutil="exit 0\n",
-    )
-
     assert result.returncode == 0, result.stderr
-    assert values == {
-        "CI_RAMDISK_DEVICE": "/dev/disk99",
-        # Not under /Volumes, which sandboxed git cannot resolve.
-        "CI_TEST_ROOT": str(tmp_path / "user-tmp" / "ci-l1-mac-studio-backend-l1-1"),
-    }
-
-
-def test_a_leftover_ram_disk_is_found_at_its_resolved_mount_point(tmp_path: Path) -> None:
-    # mount(8) lists /private/var/..., never the /var/... that TMPDIR names.
-    real_tmp = tmp_path / "real-tmp"
-    real_tmp.mkdir()
-    linked_tmp = tmp_path / "linked-tmp"
-    linked_tmp.symlink_to(real_tmp)
-    leftover = real_tmp / "ci-l1-mac-studio-backend-l1-1"
-    detached = tmp_path / "detached"
-    result, values = _run_ramdisk_mount(
-        tmp_path,
-        hdiutil=(
-            f'[ "$1" = detach ] && echo "$2" >> "{detached}"\n'
-            '[ "$1" = attach ] && echo "/dev/disk99"\nexit 0\n'
-        ),
-        diskutil="exit 0\n",
-        mount=f'echo "/dev/disk98s1 on {leftover} (apfs, local, nodev, nosuid)"\n',
-        tmpdir=linked_tmp,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert detached.read_text().splitlines() == [str(leftover)]
-    assert values["CI_TEST_ROOT"] == str(leftover)
-
-
-def test_backend_test_state_falls_back_to_runner_temp_without_a_ram_disk(tmp_path: Path) -> None:
-    for hdiutil, diskutil in (
-        ("exit 1\n", "exit 0\n"),
-        ('[ "$1" = attach ] && echo "/dev/disk99"\nexit 0\n', "exit 1\n"),
-        ('[ "$1" = attach ] && echo "/dev/disk99"\nexit 0\n', '[ "$1" = mount ] && exit 1\nexit 0\n'),
-    ):
-        case = tmp_path / str(len(list(tmp_path.iterdir())))
-        result, values = _run_ramdisk_mount(case, hdiutil=hdiutil, diskutil=diskutil)
-
-        assert result.returncode == 0, result.stderr
-        assert values == {"CI_TEST_ROOT": str(case / "runner-temp")}
-        assert "RAM disk unavailable" in result.stdout
+    values = dict(line.split("=", 1) for line in github_env.read_text().splitlines())
+    if Path("/dev/shm").is_dir() and os.access("/dev/shm", os.W_OK):
+        assert values == {"CI_TEST_ROOT": "/dev/shm/corsia-ci-l1"}
+    else:
+        assert values == {"CI_TEST_ROOT": str(tmp_path / "runner-temp")}
+        assert "/dev/shm unavailable" in result.stdout
 
 
 def _run_e2e_port_assignment(
@@ -315,6 +713,7 @@ def _run_e2e_port_assignment(
     occupied_port: int | None = None,
     lsof_exit: int | None = 1,
     lsof_diagnostic: str = "",
+    runner_environment: str = "self-hosted",
 ) -> tuple[subprocess.CompletedProcess[str], list[str], str]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir(parents=True)
@@ -333,6 +732,7 @@ def _run_e2e_port_assignment(
         **os.environ,
         "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}" if lsof_exit is not None else str(fake_bin),
         "RUNNER_NAME": runner_name,
+        "RUNNER_ENVIRONMENT": runner_environment,
         "GITHUB_ENV": str(github_env),
         "FAKE_LSOF_LOG": str(lsof_log),
         "FAKE_LSOF_DIAGNOSTIC": lsof_diagnostic,
@@ -369,6 +769,15 @@ def test_e2e_port_helper_uses_disjoint_slot_ports_and_refuses_before_e2e_local(
         assert not pair & assigned
         assigned |= pair
         assert lsof_log.count("-iTCP:") == 2
+
+    hosted, lines, lsof_log = _run_e2e_port_assignment(
+        tmp_path / "hosted", "GitHub Actions 7", runner_environment="github-hosted",
+    )
+    assert hosted.returncode == 0, hosted.stderr
+    assert dict(line.split("=", 1) for line in lines) == {
+        "CORSIA_E2E_BACKEND_PORT": "32000", "CORSIA_E2E_FRONTEND_PORT": "32001",
+    }
+    assert lsof_log.count("-iTCP:") == 2
 
     unknown, lines, lsof_log = _run_e2e_port_assignment(tmp_path / "unknown", "unverified")
     assert unknown.returncode != 0

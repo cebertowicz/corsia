@@ -285,8 +285,8 @@ def test_shell_login_cannot_write_home_ro_grant(agent, tmp_path, monkeypatch):
     safehouse = tmp_path / "safehouse"
     safehouse.write_text("")
     monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: str(safehouse))
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path / "rw"])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path / "rw"])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     argv = shell_guard.safehouse_argv("true", tmp_path, tmp_path / "p.sb", agent_account=view)
     home = str(Path(view.home).resolve())
     assert f"--add-dirs-ro={home}" in argv
@@ -437,10 +437,21 @@ def test_concurrent_readers_join_single_flight(agent, monkeypatch, tmp_path):
     monkeypatch.setenv("API_GATE", str(gate))
     _signed_in()
     views = []
+    joined = []
+    start = github_agent._start
+
+    def counting_start(*args):
+        future = start(*args)
+        joined.append(future)
+        return future
+
+    monkeypatch.setattr(github_agent, "_start", counting_start)
     readers = [threading.Thread(target=lambda: views.append(github_agent.verify_now())) for _ in range(4)]
     for reader in readers:
         reader.start()
-    _wait(lambda: len(github_agent._inflight) == 1)
+    # Every reader must be in the flight before it can finish; a reader that arrives after it runs its own.
+    _wait(lambda: len(joined) == 4)
+    assert len(set(joined)) == 1
     gate.write_text("open")
     for reader in readers:
         reader.join(15)
@@ -460,8 +471,8 @@ def test_spawn_env_grant_and_deny_from_one_view(agent, tmp_path, monkeypatch):
     safehouse = tmp_path / "safehouse"
     safehouse.write_text("")
     monkeypatch.setattr(shell_guard.shutil, "which", lambda _name: str(safehouse))
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     monkeypatch.setattr(github_agent, "view", lambda db=None: pytest.fail("a spawn reads its view once"))
     argv = shell_guard.safehouse_argv("true", tmp_path, tmp_path / "p.sb", agent_account=view)
     rules = shell_guard._terminal_boundary_profile(tmp_path / "p.sb", tmp_path, leased=False, agent_account=view)

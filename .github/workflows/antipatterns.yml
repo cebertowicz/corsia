@@ -3,13 +3,6 @@ name: Anti-patterns (blocking)
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'tools/**'
-      - 'scripts/**'
-      - 'infra/**'
-      - '.github/workflows/antipatterns.yml'
   workflow_dispatch:
 
 concurrency:
@@ -20,15 +13,39 @@ permissions:
   contents: read
 
 jobs:
+  relevance:
+    name: Determine relevance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        uses: ./.github/actions/relevance
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          patterns: '^(backend/|frontend/|tools/|scripts/|infra/|\.github/workflows/antipatterns\.yml$|\.github/actions/relevance/action\.yml$)'
+
   antipatterns:
+    needs: relevance
+    if: ${{ !cancelled() && (needs.relevance.result != 'success' || needs.relevance.outputs.relevant == 'true') }}
     name: Anti-pattern detector (error-severity, blocking)
-    # Self-hosted: GitHub-hosted runners bill paid Actions minutes. Moving this
-    # job to a hosted runner needs the repository owner's explicit approval.
-    runs-on: [self-hosted, macOS, ARM64, mac-studio]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       CORSIA_ANALYTICS_DISABLE: '1'
     steps:
+      - name: Fail when relevance preflight did not succeed
+        if: ${{ needs.relevance.result != 'success' }}
+        run: |
+          echo "::error::relevance preflight ended with '${{ needs.relevance.result }}'; refusing to skip this required context"
+          exit 1
+
       - name: Prepare isolated workspace
         run: |
           set -e
@@ -37,8 +54,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/corsia-ci-workspace/.corsia" "$RUNNER_TEMP/corsia-ci-state"
 
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - uses: ./.github/actions/mac-python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Run full error-severity antipattern gate (whole repo, blocking)
         run: |

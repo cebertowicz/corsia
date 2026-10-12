@@ -212,6 +212,15 @@ class Grain:
         """The same calendar at the same instant without the averaging lead-in: only the drawn periods."""
         return replace(self, periods=self.served, starts=self.starts[self.lead:], lead=0)
 
+    def averaged(self) -> Grain:
+        """The same calendar at the same instant with the averaging lead-in: what ``unaveraged`` drops, read again.
+
+        Equal to the grain ``resolve_grain(..., averaged=True)`` gave for any request that day, so a read keyed
+        by it joins the one the page's own averaged panels made.
+        """
+        noon = datetime.combine(date.fromisoformat(self.current), time(12), parse_zone(self.zone))
+        return resolve_grain(self.kind, self.zone, now=noon, averaged=True)
+
     def _window(self, back: int) -> Window:
         size = _COMPARE_PERIODS[self.kind]
         stop = len(self.periods) - back * size

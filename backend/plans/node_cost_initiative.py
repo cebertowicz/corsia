@@ -176,15 +176,15 @@ def _with_sharers(connection, lineages, loaded, clock) -> tuple[dict, dict, dict
     }
     if not outside:
         return loaded
-    more_nodes: dict[str, list[dict]] = defaultdict(list)
+    # An outside row can sit in a loaded plan (a scoped read loads only the members'
+    # subtrees), so it joins that plan's rows rather than replacing them.
+    merged: dict[str, list[dict]] = {plan_id: list(rows) for plan_id, rows in nodes_by_plan.items()}
     for row in outside.values():
-        more_nodes[str(row["plan_id"])].append(row)
+        merged.setdefault(str(row["plan_id"]), []).append(row)
     more_own = node_cost.own_many(list(outside), db=connection, now=clock)
     outside_roots = {str(row["id"]): outside[str(row["id"])] for row in roots if str(row["id"]) in outside}
     more_attached = _reattachments(connection, [by_id[m] for m in members], outside_roots)
-    return (
-        {**nodes_by_plan, **more_nodes}, {**own, **more_own}, {**attached, **more_attached},
-    )
+    return merged, {**own, **more_own}, {**attached, **more_attached}
 
 
 def _reattachments(connection, members: list[dict], roots: dict[str, dict]) -> dict[str, str]:

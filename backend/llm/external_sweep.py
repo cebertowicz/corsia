@@ -11,6 +11,7 @@ import time
 import httpx
 
 from infra.db_async import run_in_db
+from infra.key_store_servers import resolve_server
 from llm.external_declared_models import LIST_UNSUPPORTED, declared_model_ids
 from llm.network_endpoints import external_probe_url
 from llm.server_observation import record_reachable, record_unreachable
@@ -27,7 +28,7 @@ async def sweep_external(client: httpx.AsyncClient, server: dict) -> None:
     stored = await run_in_db(nd.read_server_metadata, sid)
     meta = stored or {}
     declared = declared_model_ids(meta)
-    headers = auth_headers(dialect, meta.get("api_key"))
+    headers = auth_headers(dialect, await run_in_db(resolve_server, sid))
 
     online = False
     fastest_latency: int | None = None

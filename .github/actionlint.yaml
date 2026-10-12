@@ -1,5 +1,0 @@
-self-hosted-runner:
-  labels:
-    - mac-studio
-    - ci-integration
-    - backend-l1

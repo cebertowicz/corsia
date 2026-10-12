@@ -171,7 +171,7 @@ Updates arrive through **Settings → Update**, which waits for running turns to
 | Agent Safehouse 0.11.1+, on `PATH` as `safehouse` | `brew install eugene1g/safehouse/agent-safehouse` |
 | GitHub CLI, signed in with `gh auth login` | `brew install gh` |
 | `agent-browser` 0.31.x (the installer adds it) | `npm install -g agent-browser@0.31 && agent-browser install` |
-| Optional: web search | A Brave Search API key |
+| Optional: web search | A Brave Search API key (entered in **Settings → Keys**) |
 
 ```bash
 git clone --branch main https://github.com/cebertowicz/corsia.git ~/.corsia
@@ -179,7 +179,7 @@ cd ~/.corsia
 python3.11 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements.lock
 (cd frontend && npm ci && npm run build)
-cp .env.example .env                  # optional: set BRAVE_API_KEY for web search
+cp .env.example .env                  # optional
 scripts/corsia start
 ```
 

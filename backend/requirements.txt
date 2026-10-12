@@ -32,6 +32,9 @@ python-frontmatter==1.3.0
 # Yjs-compatible live document state and relative positions.
 pycrdt==0.14.8
 psutil==7.2.2
+# Lexers that prove which characters of a source read are code, so credential
+# redaction leaves them as written (host_access/source_redaction.py).
+Pygments==2.20.0
 # Inspect AI is the runner / scorer-host; OTel is the in-process tracer used
 # by the seam-latency scorer and null-tool protocol.
 inspect-ai==0.3.239

@@ -6,6 +6,7 @@ import type { OperatorCostAmount, OperatorInitiative, OperatorNode } from '$lib/
 import { decodeOperatorEnvelope } from '$lib/api/plansDecode';
 import contract from './fixtures/operator-envelope.contract.json';
 import { node } from './fixtures/planTreeNode';
+import { withFolds } from './fixtures/planFolds';
 
 const TURNS = { completed: 1, error: 0, cancelled: 0, running: 0, waiting_retry: 0 };
 const NO_TURNS = { completed: 0, error: 0, cancelled: 0, running: 0, waiting_retry: 0 };
@@ -114,7 +115,7 @@ describe('the Initiative total line in details', () => {
 	});
 
 	async function open(target: OperatorNode) {
-		component = mount(PlanTree, { target: host, props: { nodes: [target] } });
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [target] }) });
 		flushSync();
 		(host.querySelector('.row-body') as HTMLButtonElement).click();
 		await tick();

@@ -19,6 +19,7 @@ from tests.plan_execution_helpers import agent_pause
 from tests.test_attention_queue import _mid
 from tests.test_plan_archival import OWNER, _plan, _row, _task, db  # noqa: F401 - fixture
 from tests.test_plan_user_action_http import _client
+from tests.plan_writer_authorizer import raw_plan_seed
 
 FIELD_DEFAULT_REASON = "Closed by the user"
 USER = PlanActor(None, "user-1", None, kind="user")
@@ -64,10 +65,11 @@ def _delegated(db, plan_id: str, worker: str = "child"):
     """A task handed to a live worker, and that worker's plan under this one."""
     node = _task(db, plan_id, title="Delegated work")
     worker_plan = _plan(db, worker)
-    db.execute(
-        "UPDATE plan_nodes SET state='active', spawned_thread_id=? WHERE id=?",
-        (worker, node.id),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET state='active', spawned_thread_id=? WHERE id=?",
+            (worker, node.id),
+        )
     db.execute("UPDATE plans SET parent_plan_id=? WHERE id=?", (plan_id, worker_plan.id))
     db.commit()
     return node, worker_plan
@@ -146,7 +148,8 @@ def test_the_user_resumes_a_pause_an_agent_left(client, db):
 def test_a_finished_task_refuses_every_steering_action(client, db, state):
     plan = _plan(db)
     node = _task(db, plan.id, title="Done")
-    db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node.id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node.id))
     db.commit()
 
     for operation in ("pause_node", "close_node"):
@@ -207,10 +210,11 @@ def test_a_reused_worker_is_steered_only_from_the_task_showing_it(client, db):
     plan = _plan(db)
     older, worker = _delegated(db, plan.id)
     newer = _task(db, plan.id, title="Follow-up")
-    db.execute(
-        "UPDATE plan_nodes SET state='active', spawned_thread_id='child' WHERE id=?",
-        (newer.id,),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET state='active', spawned_thread_id='child' WHERE id=?",
+            (newer.id,),
+        )
     for node_id in (older.id, newer.id):
         service._event(
             db, node_id, "spawned_thread_attached", actor_id=None, provenance="test",

@@ -197,6 +197,26 @@ async def test_kpi_assigns_boundary_instants_to_the_right_local_window(isolated_
 
 
 @pytest.mark.asyncio
+async def test_kpi_says_whether_a_window_began_after_the_tokens_were_fully_recorded(isolated_db, monkeypatch):
+    measurement = _pin_now(monkeypatch)
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_scope(db)
+        _usage(db, "before-recording", "root", "2026-08-25T21:00:00.000000", parts=(100, 50, 20, 300), total=470)
+        db.commit()
+    finally:
+        db.close()
+
+    weeks = (await _response(measurement, "p1", grain="weeks"))["kpi"]
+    days = (await _response(measurement, "p1", grain="days"))["kpi"]
+    # The four weeks before 2026-09-07 began 2026-08-10, so their tokens are only partly recorded and their sum is not a base.
+    assert (weeks["current"]["tokens_recorded"], weeks["previous"]["tokens_recorded"]) == (True, False)
+    assert (days["current"]["tokens_recorded"], days["previous"]["tokens_recorded"]) == (True, True)
+
+
+@pytest.mark.asyncio
 async def test_kpi_on_the_periods_grain_compares_the_last_four_completed_weeks_with_the_four_before(isolated_db, monkeypatch):
     measurement = _pin_now(monkeypatch)
     from infra.database import get_db

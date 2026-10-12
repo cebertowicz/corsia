@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from collections.abc import Mapping
 
 import plans.errors as errors
 import plans.service as service
@@ -60,8 +61,14 @@ def place_hold(
     actor_id: str | None,
     provenance: str,
     db,
+    raised_in: Mapping[str, str] | None = None,
 ):
     """Append one cause and release its selected attempt; the caller reconciles.
+
+    ``raised_in`` names where an agent raised a user ask (``turn_id``,
+    ``tool_invocation_id``, ``provider_call_id``); it rides nested under
+    ``raised_in`` in the ``hold_placed`` payload, so no key can shadow the event's
+    own fields, and the chat shows the ask on the step that raised it.
 
     Returns:
         The task row as it was before the cause was placed.
@@ -108,6 +115,7 @@ def place_hold(
             "reason_key": reason_key,
             "owner_kind": owner_kind,
             "owner_id": owner_id,
+            **({"raised_in": dict(raised_in)} if raised_in else {}),
         },
     )
     service.touch_node(db, node_id, at=now)
@@ -161,9 +169,15 @@ def clear(
 
 def clear_write(
     node_id: str, hold_id: str, *, expected_kind: str, actor_id: str | None,
-    provenance: str, db,
-) -> None:
-    """Clear exactly one cause and record it; the caller reconciles, if needed."""
+    provenance: str, db, detail: dict | None = None,
+) -> tuple[str, str]:
+    """Clear exactly one cause and record it; the caller reconciles, if needed.
+
+    ``detail`` rides in the append-only clearance event under its own ``detail`` key,
+    for what the clearing decided (a review verdict); it can never shadow the event's fields.
+    Return the clearance event's id and timestamp so a caller can report that
+    exact durable event without rereading it.
+    """
     hold = db.execute(
         """SELECT * FROM plan_node_holds
            WHERE id=? AND node_id=? AND kind=? AND cleared_at IS NULL""",
@@ -171,15 +185,16 @@ def clear_write(
     ).fetchone()
     if hold is None:
         raise service.PlanError("plan hold is unavailable or already cleared")
+    payload: dict = {"hold_id": hold_id, "kind": expected_kind}
+    if detail is not None:
+        payload["detail"] = detail
     event_id = service._event(
         db,
         node_id,
         "hold_cleared",
         actor_id=actor_id,
         provenance=provenance,
-        payload={
-            "hold_id": hold_id, "kind": expected_kind,
-        },
+        payload=payload,
     )
     now = service._now()
     changed = db.execute(
@@ -191,6 +206,7 @@ def clear_write(
     if changed.rowcount != 1:
         raise service.PlanError("plan hold clearance conflict")
     service.touch_node(db, node_id, at=now)
+    return event_id, now
 
 
 def pause_hold(
@@ -251,6 +267,7 @@ def block_hold(
     actor_id: str | None,
     provenance: str,
     db,
+    raised_in: Mapping[str, str] | None = None,
 ):
     """Place a blocker hold with its accountable owner; the caller reconciles.
 
@@ -273,6 +290,7 @@ def block_hold(
         actor_id=actor_id,
         provenance=provenance,
         db=db,
+        raised_in=raised_in,
     )
 
 

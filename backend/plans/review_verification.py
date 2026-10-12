@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 import plans.service as service
-from plans import node_states
+from plans import node_states, open_descendants
 
 _ACCEPTED_SQL = ",".join(f"'{state}'" for state in sorted(service._ACCEPTED_STATES))
 
@@ -39,10 +39,26 @@ def _require_current_evidence(connection, node) -> None:
 def _require_children_settled(connection, node) -> None:
     """Refuse a verdict over unsettled child work.
 
-    The walk stops at a node out of the work, so a closed child's whole
-    subtree -- a failed task under it included -- is out, as ``work_ids``
-    rules for the rest of the plan.
+    Nothing beneath the node may be open or failed, as the node's stored counts
+    say (``plans.open_descendants``), so a verdict over settled history reads
+    one row. The walk stops at a node out of the work, so a closed child's whole
+    subtree -- a failed task under it included -- is out, as ``work_ids`` rules
+    for the rest of the plan.
     """
+    counts = open_descendants.counted(connection, node["id"])
+    if counts is None:
+        unsettled = _walk_unsettled(connection, node)
+    else:
+        open_below, failed_below = counts
+        unsettled = bool(failed_below) or bool(
+            open_descendants.named(connection, node["id"], 1, open_below=bool(open_below))
+        )
+    if unsettled:
+        raise service.PlanError("acceptance requires all child work to be settled")
+
+
+def _walk_unsettled(connection, node) -> bool:
+    """Whether a descendant in the work is not accepted, by walking the subtree."""
     descendant = connection.execute(
         f"""WITH RECURSIVE descendants(id,state) AS (
                SELECT n.id,n.state FROM plan_nodes n
@@ -57,8 +73,7 @@ def _require_children_settled(connection, node) -> None:
            LIMIT 1""",
         (node["id"],),
     ).fetchone()
-    if descendant is not None:
-        raise service.PlanError("acceptance requires all child work to be settled")
+    return descendant is not None
 
 
 def _settle_delegated_work(

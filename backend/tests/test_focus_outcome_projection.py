@@ -8,6 +8,7 @@ from infra import presence, presence_records, thread_updates
 from plans import operator_chat_state
 from tests.plan_close_next_helpers import HUMAN
 from tests.test_thread_updates import db, _message, _node, _plan_update  # noqa: F401 - fixture
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def state(db):
@@ -29,7 +30,8 @@ def test_passive_only_history_previews_without_a_dot_through_reload_and_manual_s
     node = _node(db, title="Original title")
     _plan_update(db, "outcome", node, kind=kind, at="2026-09-29T10:00:00")
     db.execute("UPDATE plan_nodes SET title='Renamed' WHERE id=?", (node,))
-    db.execute("DELETE FROM plan_nodes WHERE id=?", (node,))
+    with raw_plan_seed(db):
+        db.execute("DELETE FROM plan_nodes WHERE id=?", (node,))
     for _ in range(2):  # same canonical read used by nudge reload and initial load
         assert state(db)["latest_update"]["summary"] == preview
         assert state(db)["has_update"] is False
@@ -60,7 +62,8 @@ def test_new_passive_preview_preserves_older_unread_marked_until_active_visit_th
 
 def test_equal_timestamp_uses_independent_stable_id_order_for_display_and_attention(db):
     node = _node(db)
-    db.execute("UPDATE plan_nodes SET assignee='user', state='failed' WHERE id=?", (node,))  # only a user-owned failure is attention
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET assignee='user', state='failed' WHERE id=?", (node,))  # only a user-owned failure is attention
     _plan_update(db, "failed-first", node, kind="failed")
     _plan_update(db, "passive-last", node, kind="closed")
     display, attention = thread_updates.latest_by_thread_with_attention(db, ["owner"])
@@ -81,7 +84,8 @@ def test_blank_marked_preview_remains_empty_and_attention_eligible(db, content):
 
 def test_actual_dual_projection_is_one_bounded_indexed_set_read(db):
     node = _node(db)
-    db.execute("UPDATE plan_nodes SET assignee='user', state='failed' WHERE id=?", (node,))  # only a user-owned failure is attention
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET assignee='user', state='failed' WHERE id=?", (node,))  # only a user-owned failure is attention
     for i in range(300):
         _plan_update(db, f"event-{i}", node, kind="failed" if i % 3 == 0 else "done", at=f"2026-09-29T10:{i % 60:02d}:00", thread_id="owner" if i % 2 else "other")
     db.execute("ANALYZE")

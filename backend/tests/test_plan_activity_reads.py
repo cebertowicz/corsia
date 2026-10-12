@@ -11,6 +11,7 @@ import plans.service as service
 from plans import activity_facts, activity_projection, wait_causes
 from tests.test_plan_activity_index import _actor, _seed, _task, db  # noqa: F401
 from tests.test_plan_activity_subagents import _thread
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _plan_id(db, thread_id: str) -> str:
@@ -52,9 +53,10 @@ def test_only_shown_plans_and_their_open_delegates_are_read(db, monkeypatch):
 
 def test_a_closed_delegating_step_does_not_read_its_child_plan(db, monkeypatch):
     _seed(db)
-    db.execute(
-        "UPDATE plan_nodes SET state='closed' WHERE spawned_thread_id='child'",
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET state='closed' WHERE spawned_thread_id='child'",
+        )
     db.commit()
 
     read = _read_plan_ids(db, monkeypatch)
@@ -71,7 +73,8 @@ def _name_thread(db, plan_id: str, title: str, thread_id: str, *, at: str) -> st
     """A delegating step in `plan_id` that names `thread_id`, attached at `at`."""
     node = _task(plan_id, title, db=db, spawn_kind="claude-code")
     service.transition_node(node.id, "active", db=db)
-    db.execute("UPDATE plan_nodes SET spawned_thread_id=? WHERE id=?", (thread_id, node.id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET spawned_thread_id=? WHERE id=?", (thread_id, node.id))
     db.execute(
         """INSERT INTO plan_node_events
            (id,node_id,actor_id,provenance,event,payload_json,created_at)
@@ -103,10 +106,11 @@ def test_every_child_plan_the_delegation_facts_name_is_in_the_delegation_closure
         "other parent plan": _name_thread(db, parent, "Elsewhere", "elsewhere", at="2026-01-01"),
         "thread with no plan": _name_thread(db, parent, "Ghost", "ghost", at="2026-01-01"),
     }
-    db.execute("UPDATE plan_nodes SET archived_at='2026-03-01' WHERE id=?", (steps["archived step"],))
-    db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (steps["closed step"],))
-    db.execute("UPDATE plan_nodes SET state='pending' WHERE id=?", (steps["pending step"],))
-    db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (steps["review step"],))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='2026-03-01' WHERE id=?", (steps["archived step"],))
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (steps["closed step"],))
+        db.execute("UPDATE plan_nodes SET state='pending' WHERE id=?", (steps["pending step"],))
+        db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (steps["review step"],))
     db.commit()
     nodes = [dict(row) for row in db.execute("SELECT * FROM plan_nodes").fetchall()]
     node_plans = [(node, {"id": node["plan_id"]}) for node in nodes]

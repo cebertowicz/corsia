@@ -32,6 +32,15 @@ def test_periods_are_the_last_twelve_completed_local_mondays_with_four_against_f
     assert grain.describe()["latest"] == {"from": "2026-09-07", "to": "2026-10-04"}
 
 
+@pytest.mark.parametrize("kind", ["days", "weeks"])
+@pytest.mark.parametrize("zone", ["UTC", PACIFIC, "Asia/Kolkata"])
+def test_averaged_reads_the_lead_in_again_so_it_equals_the_grain_a_page_panel_resolves(kind, zone):
+    plain = resolve_grain(kind, zone, now=NOW)
+    averaged = resolve_grain(kind, zone, now=NOW, averaged=True)
+    assert plain.averaged() == averaged and averaged.unaveraged().averaged() == averaged
+    assert plain.averaged().served == plain.periods
+
+
 def test_the_viewer_zone_decides_the_day_not_utc():
     utc = resolve_grain("days", "UTC", now=NOW)
     assert utc.current == "2026-10-09" and utc.starts[-1] == "2026-10-09 00"

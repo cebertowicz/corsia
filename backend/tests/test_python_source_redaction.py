@@ -12,8 +12,11 @@ from host_access.credential_sanitizer import (
     credential_spans,
     sanitize_credential_text,
 )
-from host_access import python_source_redaction
-from host_access.python_source_redaction import sanitize_python_source
+from host_access import source_redaction as python_source_redaction
+
+
+def sanitize_python_source(content: str) -> str | None:
+    return python_source_redaction.sanitize_source(content, ".py")
 
 
 def _safe(source: str) -> str:
@@ -235,7 +238,7 @@ def _tokens_until_error(content: str) -> list[tokenize.TokenInfo]:
 def _kept_mask(content: str) -> bytearray:
     """Per-character mask of code that may stay visible: NAME/OP and string quotes."""
     shape = bytearray(len(content))
-    for start, end in credential_spans(content, shape_only=True):
+    for start, end in credential_spans(content, never_code=True):
         shape[start:end] = b"\x01" * (end - start)
     starts = [0]
     for line in content.split("\n"):
@@ -358,15 +361,15 @@ def test_adversarial_sources_meet_the_falsification_property(source, secrets):
     _assert_falsification_property(source, safe)
 
 
-def test_only_read_tool_constructs_the_safe_text_marker():
+def test_only_read_and_grep_construct_the_safe_text_marker():
     root = Path(__file__).parents[1]
-    constructors = [
+    constructors = sorted(
         path for path in root.rglob("*.py")
         if "tests" not in path.parts
         and path.name != "credential_sanitizer.py"
         and "CredentialSafeText(" in path.read_text(encoding="utf-8")
-    ]
-    assert constructors == [root / "tools" / "filesystem_rw.py"]
+    )
+    assert constructors == [root / "tools" / "filesystem_rw.py", root / "tools" / "grep_content.py"]
 
 
 def test_corpus_meets_the_falsification_property():

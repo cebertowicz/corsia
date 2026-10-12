@@ -157,6 +157,23 @@ def test_exit_torn_read_type_is_emitted_only_for_specific_missing_reads(tmp_path
             DeniedProcess(), session='session', socket_dir=tmp_path,
         )
 
+    # macOS returns an empty or denied executable path while a process exits, before it is a zombie.
+    class ExitingProcess:
+        def __init__(self, exe):
+            self._exe = exe
+
+        def exe(self):
+            if isinstance(self._exe, BaseException):
+                raise self._exe
+            return self._exe
+
+    for exiting in ('', psutil.AccessDenied()):
+        with pytest.raises(identity.BrowserExitTornRead):
+            identity.executable_fingerprint_for_process(ExitingProcess(exiting))
+    with pytest.raises(identity.BrowserIdentityError) as unreadable:
+        identity.executable_fingerprint_for_process(ExitingProcess(OSError('io')))
+    assert not isinstance(unreadable.value, identity.BrowserExitTornRead)
+
 
 async def test_acknowledged_close_retry_survives_torn_pre_observation(synthetic_browser, monkeypatch):
     fake = synthetic_browser
@@ -296,3 +313,26 @@ async def test_definite_failed_spawn_preserves_binding_and_allows_known_cleanup(
     await fake.owner.close_thread('thread')
     await fake.owner.shutdown()
     assert fake.owner.live_count() == 0
+
+
+async def test_empty_executable_read_after_close_ack_retries_to_closed(synthetic_browser, monkeypatch):
+    fake = synthetic_browser
+    owner = fake.owner
+    await owner.run('thread', ['snapshot'])
+    real_exe, real_close = psutil.Process.exe, owner._request_close
+    acked, torn = [], []
+
+    async def close(runtime):
+        await real_close(runtime)
+        acked.append(True)
+
+    def exe(self):
+        if acked and not torn and self.pid != psutil.Process().pid:
+            torn.append(self.pid)
+            return ''
+        return real_exe(self)
+
+    monkeypatch.setattr(owner, '_request_close', close)
+    monkeypatch.setattr(psutil.Process, 'exe', exe)
+    await owner.close_thread('thread')
+    assert torn and owner.live_count() == 0

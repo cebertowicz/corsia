@@ -80,6 +80,32 @@ describe('presence marks', () => {
 		expect(threads('.cm-presence-arrival')).toContain('agent-b');
 	});
 
+	describe('name label fade for a caret no typing lane draws', () => {
+		const cursorFor = (lastAtMs: number | undefined) => mount([
+			{ threadId: 'agent-a', name: 'Editor', color: '#f00', span: { from: 6, to: 10 }, lastAtMs },
+		]).querySelector<HTMLElement>('.cm-presence-cursor')!;
+
+		it('hides the label once the agent has been idle for 2s, keeping the caret', () => {
+			const cursor = cursorFor(Date.now() - 10_000);
+			expect(cursor.classList.contains('cm-presence-cursor-quiet')).toBe(true);
+			expect(cursor.querySelector('.cm-presence-cursor-label')).not.toBeNull();
+		});
+
+		it('keeps a fresh label up and fades it at the 2s mark with no timer', () => {
+			const cursor = cursorFor(Date.now() - 500);
+			expect(cursor.classList.contains('cm-presence-cursor-quiet')).toBe(false);
+			const delay = parseFloat(cursor.style.getPropertyValue('--presence-label-fade-in'));
+			expect(delay).toBeGreaterThan(1_000);
+			expect(delay).toBeLessThanOrEqual(1_500);
+		});
+
+		it('leaves a caret with no activity time as it was', () => {
+			const cursor = cursorFor(undefined);
+			expect(cursor.classList.contains('cm-presence-cursor-quiet')).toBe(false);
+			expect(cursor.style.getPropertyValue('--presence-label-fade-in')).toBe('');
+		});
+	});
+
 	describe('label clamp', () => {
 		/** Lays out the scroller (border box 0..500, client area 0..485 past a 15px scrollbar) and the label's right edge. */
 		function layOut(parent: HTMLElement, labelRight: number) {

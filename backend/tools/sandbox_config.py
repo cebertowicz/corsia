@@ -14,7 +14,6 @@ Allowlist composition:
 
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 from infra.config import WORKSPACE
@@ -24,6 +23,7 @@ from infra.project_repo_policy import (
     list_unsupported_pinned_repos,
 )
 from tools.repo_worktree_guidance import protected_checkout_worktree_guidance
+from tools.sandbox_ignored_files import is_ignored_untracked_file
 from tools.sandbox_git import verified_worktree_marker
 from tools.unix_socket_policy import thread_bind_roots
 
@@ -54,10 +54,14 @@ def _list_authoritative_repo_policies(
     )
 
 
-def _protected_repo_policies() -> list[RepoPolicy]:
+def _protected_repo_policies(
+    policies: list[RepoPolicy] | None = None,
+) -> list[RepoPolicy]:
     return [
         policy
-        for policy in _list_authoritative_repo_policies()
+        for policy in (
+            policies if policies is not None else _list_authoritative_repo_policies()
+        )
         if (
             policy.source_binding_valid
             and (policy.protect_base_checkout or policy.enforcement_error)
@@ -164,39 +168,16 @@ def list_repo_worktrees(repo_root: Path) -> list[Path]:
     if not parent.is_dir():
         return []
     worktrees: list[Path] = []
+    cache: dict = {}
     try:
         entries = parent.iterdir()
         for entry in entries:
-            if repo_worktree_root(entry, repo_root) == entry.resolve(strict=False):
+            if repo_worktree_root(entry, repo_root, cache=cache) == entry.resolve(strict=False):
                 worktrees.append(entry.resolve(strict=False))
     except OSError:
         return []
     return sorted(worktrees)
 
-
-
-def _is_ignored_untracked_file(path: Path, repo: Path) -> bool:
-    """Return Git's exact ignored-and-not-tracked classification for a file."""
-    if path.is_dir():
-        return False
-    try:
-        relative = path.relative_to(repo)
-    except ValueError:
-        return False
-    if not relative.parts or relative.parts[0] == ".git":
-        return False
-    try:
-        ignored = subprocess.run(
-            ["git", "check-ignore", "--quiet", "--", str(relative)],
-            cwd=str(repo), capture_output=True, text=True, timeout=5,
-        )
-        tracked = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "--", str(relative)],
-            cwd=str(repo), capture_output=True, text=True, timeout=5,
-        )
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-        return False
-    return ignored.returncode == 0 and tracked.returncode == 1
 
 
 def _repo_write_check(
@@ -244,7 +225,7 @@ def _repo_write_check(
         policies=policies,
     )
     if policy is not None and repo_worktree_root(path, policy.path) is None:
-        if _is_ignored_untracked_file(path, policy.path):
+        if is_ignored_untracked_file(path, policy.path):
             return None, policy.path
         return protected_checkout_worktree_guidance(policy), None
 
@@ -289,15 +270,24 @@ def _allowed_dirs_rw(
     ]
 
 
-def get_sandbox_add_dirs_rw(thread_id: str | None = None) -> list[Path]:
+def get_sandbox_add_dirs_rw(
+    thread_id: str | None = None,
+    *,
+    policies: list[RepoPolicy] | None = None,
+) -> list[Path]:
     """Safehouse ``--add-dirs``; the appended profile grants worktrees.
 
     A shell with an authenticated thread identity additionally receives only
     that thread's AF_UNIX root when it is usable; the shared parent is never
     writable. Ordinary filesystem tools retain their separate path gate.
+
+    ``policies`` is the caller's already-loaded authoritative snapshot; without
+    it the policies are read now.
     """
+    if policies is None:
+        policies = _list_authoritative_repo_policies()
     return list(dict.fromkeys((
-        *_allowed_dirs_rw(_list_authoritative_repo_policies(), worktrees=False),
+        *_allowed_dirs_rw(policies, worktrees=False),
         *thread_bind_roots(thread_id),
     )))
 
@@ -350,10 +340,10 @@ def get_allowed_dirs_rw(*, db=None, containing: Path | None = None) -> list[Path
     return _allowed_dirs_rw_containing(policies, target)
 
 
-def get_allowed_dirs_ro() -> list[Path]:
+def get_allowed_dirs_ro(*, policies: list[RepoPolicy] | None = None) -> list[Path]:
     return [
         *_STATIC_ALLOWED_RO,
-        *(policy.path for policy in _protected_repo_policies()),
+        *(policy.path for policy in _protected_repo_policies(policies)),
     ]
 
 

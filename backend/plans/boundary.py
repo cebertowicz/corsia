@@ -9,6 +9,7 @@ import infra.conductor as conductor
 import infra.config as config
 from infra.queries import user_in_project
 import plans.blocked_wait as blocked_wait
+import plans.boundary_actor as boundary_actor
 import plans.boundary_dispatch as boundary_dispatch
 import plans.boundary_fields as fields
 import plans.boundary_guard as boundary_guard
@@ -36,6 +37,11 @@ class PlanActor:
     project_id: str | None
     kind: str = "thread"
     turn_id: str | None = None
+    #: The ids the running tool call is known by: CORSIA's invocation id and the
+    #: provider's own call id. An assistant step lists its calls by one of them,
+    #: so a hold's origin can find the step that raised it.
+    tool_invocation_id: str | None = None
+    provider_call_id: str | None = None
 
     @property
     def audit_id(self) -> str:
@@ -157,20 +163,7 @@ def _required_mutation_id(value: str) -> str:
     return value.strip()
 
 
-def _revalidate_actor(db, actor: PlanActor) -> PlanActor:
-    """Reload a thread actor from threads inside the write transaction."""
-    if actor.kind != "thread":
-        return actor
-    if not actor.thread_id:
-        raise PermissionError("thread actor identity is missing")
-    row = db.execute(
-        "SELECT id, user_id, project_id FROM threads WHERE id=?", (actor.thread_id,)
-    ).fetchone()
-    if row is None or row["user_id"] != actor.user_id or row["project_id"] != actor.project_id:
-        raise PermissionError("thread actor identity is stale or unavailable")
-    return PlanActor(
-        row["id"], row["user_id"], row["project_id"], turn_id=actor.turn_id,
-    )
+_revalidate_actor = boundary_actor.revalidate_actor
 
 
 def _authorize_and_dispatch(

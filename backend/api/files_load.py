@@ -4,13 +4,19 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from api.files_revision import _path_allowed, _writable
+from api.files_revision import _writable
 from api.files_roots import scope_bases
 from doceditor.document_scope import MAX_TEXT_BYTES, revision
+from infra import config
 from infra.auth import owns_thread
 from infra.database import get_db
 from registry import service as registry_service
+from registry.file_types import image_media_type
+from registry.path_access import ReadRefused, checked_read
 from registry.doc_freshness import artifact_freshness
+
+#: Typed ``detail.code`` of the 415 a text open answers for an image file.
+IMAGE_FILE_CODE = "image_file"
 
 
 def _live_open_setup(p: Path, project_id: str | None, thread_id: str | None, db) -> None:
@@ -41,6 +47,21 @@ def _live_open_setup(p: Path, project_id: str | None, thread_id: str | None, db)
         raise OpenRefused("setup_failed", f"Document setup failed; open it again to retry ({error})") from error
 
 
+def checked_read_path(path: str, project_id: str | None, db) -> tuple[Path, list[Path]]:
+    """The read-scope gate (``checked_read``) for one project's roots, answered over HTTP.
+
+    404 for a missing path, 400 for one outside the scope or not a file.
+    """
+    bases = scope_bases(project_id, db)
+    try:
+        return checked_read(path, bases, db=db), bases
+    except ReadRefused as exc:
+        if exc.reason == "missing":
+            raise HTTPException(404, f"No such file: {exc}") from exc
+        detail = "Path is outside this scope's roots" if exc.reason == "outside" else "Not a file"
+        raise HTTPException(400, detail) from exc
+
+
 def read_document(path: str, user_id: str, project_id: str | None, thread_id: str | None,
                   *, live_open: bool = False) -> dict:
     """Validate one existing file, read its bytes, and resolve canonical identity."""
@@ -48,18 +69,13 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     try:
         if thread_id and not owns_thread(thread_id, user_id, db=db):
             raise HTTPException(404, "Thread not found")
-        bases = scope_bases(project_id, db)
-        try:
-            p = Path(path).expanduser().resolve(strict=True)
-        except OSError as exc:
-            raise HTTPException(404, f"No such file: {exc}") from exc
-        if not _path_allowed(p, bases, db=db):
-            raise HTTPException(400, "Path is outside this scope's roots")
+        p, bases = checked_read_path(path, project_id, db)
         writable = _writable(p, bases, db=db)
     finally:
         db.close()
-    if not p.is_file():
-        raise HTTPException(400, "Not a file")
+    if image_media_type(p):
+        # The viewer reads this code to open the file as an image instead; it is never opened as text.
+        raise HTTPException(415, {"code": IMAGE_FILE_CODE, "message": "This file is an image"})
     st = p.stat()
     if st.st_size > MAX_TEXT_BYTES:
         raise HTTPException(413, "File too large for the doc editor")
@@ -83,3 +99,21 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
             "freshness": freshness, "_notification": notification}
+
+
+def read_image_file(path: str, project_id: str | None) -> tuple[Path, str]:
+    """Validate one workspace image for raw serving: scope check, then type and size.
+
+    Read-only by design: serving bytes never registers the read or notifies.
+    """
+    db = get_db()
+    try:
+        p, _ = checked_read_path(path, project_id, db)
+    finally:
+        db.close()
+    media_type = image_media_type(p)
+    if media_type is None:
+        raise HTTPException(415, "Not an image file")
+    if p.stat().st_size > config.MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(413, "Image too large to display")
+    return p, media_type

@@ -81,7 +81,7 @@ def _unsettled_tasks(db, plan, thread_id: str) -> list:
     not open, but the plan still tracks them, so the add route must not fire
     while one exists.
     """
-    rows = node_order.ordered_cursor(db, plan["id"]).fetchall()
+    rows = [row for row, _path in node_order.open_nodes_with_paths(db, plan["id"])]
     parents = node_states.parent_ids(rows)
     return [
         row for row in rows

@@ -8,18 +8,19 @@ from typing import Any
 
 from loguru import logger
 
+from core.workspace_layout import uploads_root_for_path
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
-from registry import models, registration_writer
+from registry import models, registration_events, registration_writer
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
+from registry.file_types import extension_type, image_media_type
 from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
 from registry.identity_metadata import last_written_sha256, merge_identity_metadata, parse_metadata
 from registry.notifications import notify_changed
 from registry.observation_owner import require_observable_owner
 from registry.origin_telemetry import emit_committed_origin
+from registry.upload_registration import register_accepted_upload
 from tools.sandbox_config import get_allowed_dirs_rw
-
-_DOC_EXTS = {".md", ".txt", ".markdown", ".rst"}
 
 
 def classify(path: Path) -> str:
@@ -28,7 +29,7 @@ def classify(path: Path) -> str:
 
     if is_skill_file(path):
         return "skill"
-    return "document" if path.suffix.lower() in _DOC_EXTS else "code"
+    return extension_type(path)
 
 
 def is_tmp(path: Path) -> bool:
@@ -139,7 +140,9 @@ def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
     """Resolve an active file owner from a physical path.
 
     Workspace paths prefer their relocatable logical identity and retain the
-    absolute identity only as a compatibility fallback during cutover.
+    absolute identity only as a compatibility fallback during cutover. A
+    canonical path below a thread uploads root also resolves its active upload
+    identity so callers can open a registered upload from its local path.
     """
     identity = prepare_file_identity(abs_path, db=db)
     if identity is None:
@@ -155,7 +158,9 @@ def resolve_file_identity(abs_path: str, *, db=None) -> dict[str, Any] | None:
             )
             if artifact is not None:
                 return artifact
-        return None
+        if uploads_root_for_path(identity.canonical) is None:
+            return None
+        return registration_events.resolve_upload_path(identity.canonical, db=_db)
     finally:
         if not db:
             _db.close()
@@ -430,7 +435,7 @@ def register_upload(
         raise ValueError(f"upload path is not a file: {canonical}")
     row = models.register_artifact(
         integration="upload",
-        type="upload",
+        type="image" if image_media_type(canonical) is not None else "upload",
         external_id=file_id,
         parent_thread_id=thread_id,
         title=filename,
@@ -460,24 +465,8 @@ def register_uploads(
             fid = att.get("file_id") or att.get("url") or att.get("filename")
             if not fid:
                 continue
-            existing = models.resolve("upload", "upload", str(fid))
-            row = models.register_artifact(
-                integration="upload",
-                type="upload",
-                external_id=str(fid),
-                parent_thread_id=thread_id,
-                title=att.get("filename", "upload"),
-                description=att.get("filename"),
-                path=None if existing is not None else att.get("url"),
-                retention=(
-                    None if existing is not None else models.RETENTION_EPHEMERAL
-                ),
-                metadata={"mime": att.get("mime_type"), "size": att.get("size")},
-                causal_event_id=(
-                    f"accepted-send:{thread_id}:{source_input_id}:{fid}"
-                    if source_input_id
-                    else None
-                ),
+            row = register_accepted_upload(
+                thread_id, att, str(fid), source_input_id=source_input_id,
             )
             notify_changed(row or {
                 "integration": "upload",

@@ -10,7 +10,7 @@ from typing import Iterator
 
 __all__ = [
     "_current_thread_id", "_current_turn_identity", "_current_tool_invocation_id",
-    "_current_provider_call_id", "tool_invocation_context",
+    "_current_provider_call_id", "tool_invocation_context", "running_call_ids",
     "_browser_thread_last_activity", "_active_thread_models",
     "_active_warm_tasks",
 ]
@@ -60,6 +60,18 @@ def tool_invocation_context(
     finally:
         _current_provider_call_id.reset(call_handle)
         _current_tool_invocation_id.reset(reset_handle)
+
+
+def running_call_ids() -> dict[str, str]:
+    """The ids the executing tool call is known by, keyed ``tool_invocation_id`` and ``provider_call_id``.
+
+    Only the ids that are set appear, so the result spreads into a ``PlanActor``.
+    """
+    found = {
+        "tool_invocation_id": _current_tool_invocation_id.get(),
+        "provider_call_id": _current_provider_call_id.get(),
+    }
+    return {key: value for key, value in found.items() if isinstance(value, str) and value}
 
 
 _browser_thread_last_activity: dict[str, datetime] = {}

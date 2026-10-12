@@ -89,8 +89,18 @@ from plans.activity_projection import (
     read_project as read_activity_project,
     read_workspace as read_activity_workspace,
 )
-from plans.user_ask import cleared as ask_cleared
-from plans.node_states import blocked_user_task_sql, failure_asks_user_sql
+from plans.user_ask import (
+    ASKABLE_TYPES,
+    AskRelease,
+    ask_holds,
+    cleared as ask_cleared,
+    placed_ask_hold_sql,
+    raised_asks,
+    user_ask_hold_sql,
+)
+from plans.node_states import blocked_on_user_sql, failure_asks_user_sql, open_user_block_sql
+from plans.folded_reads import read_folded, read_path as read_folded_path
+from plans.operator_node_read import read_node as read_operator_node
 from plans.operator_chat_state import THREAD_STATE_LIMIT, read_thread_states
 from plans.operator_projection import (
     read_child as read_operator_child,
@@ -168,6 +178,7 @@ from plans.delegation_child_lifecycle import (
     on_child_thread_archived, on_child_thread_ended, silent_children,
 )
 from plans.delegation_turn_end import on_worker_turn_end
+from plans.delegation_reply import plan_is_empty as plan_is_empty
 from plans.delegation_needs import answer as answer_worker_needs
 from plans.hierarchy import _set_parent as set_parent_plan, derive_parent_plan_id, rehome
 from plans.upkeep_notice import is_plans_tool as is_plans_tool, notice_for as upkeep_notice_for
@@ -209,3 +220,7 @@ from plans.worker_retirement import (
     _suppress_open_steps as fail_open_worker_steps,
     close_open_steps as close_open_worker_steps,
 )
+from plans.aggregates_rebuild import rebuild as rebuild_plan_aggregates
+from plans.aggregates_recount import stored_mismatches as plan_aggregate_mismatches
+from plans.node_states import is_container_sql as container_sql
+from plans.writer_context import sanctioned_write as sanctioned_plan_write

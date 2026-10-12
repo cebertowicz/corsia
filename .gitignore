@@ -29,6 +29,7 @@ node_modules
 .venv/
 .check-pr-mypy-venv/
 .check-pr-mypy-venv.bootstrap.*/
+.check-pr-speed-gate/
 archive/
 models/
 .DS_Store

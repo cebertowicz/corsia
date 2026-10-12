@@ -17,6 +17,7 @@ import pytest
 
 from tests.test_shared_document_ownership import (
     _event_types,
+    _shell_write,
     _write,
     ownership_scope as ownership_scope,  # noqa: F401 - the fixture
 )
@@ -488,7 +489,7 @@ def test_conductor_shell_edit_is_reported_like_its_file_tool_edit(ownership_scop
     scope["conductor_helper"] = helper
     path, artifact_id = _shared_doc(scope, "conductor-shell.md")
     started = time.time_ns()
-    path.write_text("conductor shell edit\n", encoding="utf-8")
+    _shell_write(path, "conductor shell edit\n", started)
     notices = detect_shell_shared_writes(
         scope[actor], "project-alpha", "printf x > shared/documents/conductor-shell.md",
         started, scope["root"],

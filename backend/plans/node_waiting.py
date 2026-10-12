@@ -218,6 +218,20 @@ def _plan_paused(connection, plan_ids: list[str], rows_in: Callable, now: float)
 
 def own_waiting(connection, node_ids: list[str], now: datetime, rows_in: Callable) -> dict[str, int]:
     """Each node's own waiting seconds; absent nodes read 0."""
+    return {
+        node_id: int(sum(end - start for start, end in waited))
+        for node_id, waited in own_waiting_intervals(connection, node_ids, now, rows_in).items()
+    }
+
+
+def own_waiting_intervals(
+    connection, node_ids: list[str], now: datetime, rows_in: Callable,
+) -> dict[str, list[Interval]]:
+    """Each node's own merged waiting intervals (epoch seconds); the one builder.
+
+    ``own_waiting`` is their summed length; a roll-up carries the intervals
+    themselves so time that several steps waited through together counts once.
+    """
     clock = now.timestamp()
     facts = _read(connection, node_ids, rows_in)
     paused = _plan_paused(
@@ -230,7 +244,7 @@ def own_waiting(connection, node_ids: list[str], now: datetime, rows_in: Callabl
         if row["depends_on"] is not None
     } | {str(row["depends_on_node_id"]) for fact in facts.values() for row in fact["live"]})
     unmet = _prerequisite_unmet(connection, prerequisites, rows_in, clock)
-    result: dict[str, int] = {}
+    result: dict[str, list[Interval]] = {}
     for node_id, fact in facts.items():
         if "node" not in fact:
             continue
@@ -253,5 +267,5 @@ def own_waiting(connection, node_ids: list[str], now: datetime, rows_in: Callabl
             intersect(causes, _spans_where(spans, lambda state: state not in _TERMINAL_STATES)),
             user_time,
         )
-        result[node_id] = int(sum(end - start for start, end in waited))
+        result[node_id] = union(waited)
     return result

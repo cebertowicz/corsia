@@ -68,8 +68,11 @@
     "2026-09-30: backend lowered 228 -> 227 after #3142 extracted compact Activity",
     "facts and reducers; the pinned local mypy 2.3.0 gate reports 227.",
     "2026-10-07: backend lowered 223 -> 221 after shutdown-owner failures were",
-    "narrowed to BaseException; the pinned local mypy 2.3.0 gate reports 221."
+    "narrowed to BaseException; the pinned local mypy 2.3.0 gate reports 221.",
+    "2026-10-10: backend lowered 221 -> 217 after the streaming dispatchers",
+    "imported LLMResponse and ToolCallRequest for type checking; the pinned",
+    "local mypy 2.3.0 gate reports 217."
   ],
-  "backend": 221,
+  "backend": 216,
   "tools": 4
 }

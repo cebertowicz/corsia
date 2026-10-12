@@ -37,7 +37,7 @@ async def record_observation(server: dict[str, Any], *, retain_on_failure: bool 
     result: dict[str, Any] = {}
     try:
         result = await asyncio.wait_for(
-            get_settings({"server_id": server["id"], "api_key": server.get("api_key")}),
+            get_settings({"server_id": server["id"]}),
             READ_TIMEOUT_SECONDS,
         )
     except Exception:

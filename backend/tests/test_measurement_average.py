@@ -47,8 +47,11 @@ async def test_days_average_a_rate_pooled_over_seven_days_and_a_count_as_the_spa
     assert rate["2026-10-07"]["average"] == pytest.approx(3 / 20)
     assert count["2026-10-08"]["average"] == pytest.approx(30 / 7)
     assert count["2026-10-07"]["average"] == pytest.approx(20 / 7)
-    # The first drawn day averages across days before the range: its span 09-19..09-25 holds the 25 on 09-21.
-    assert "2026-09-24" not in rate and rate["2026-09-25"]["average"] == pytest.approx(5 / 25)
+    # A point is drawn only where its whole span lies inside the drawn range: 09-25 is the first drawn day, so
+    # no average precedes the first full span, and the 25 on 09-21, in the lead-in, is in no drawn average.
+    assert "2026-09-24" not in rate and rate["2026-09-25"]["average"] is None
+    assert [day for day in sorted(count) if count[day]["average"] is not None][0] == "2026-10-02"
+    assert count["2026-10-02"]["average"] == pytest.approx(8 / 7)
     # Under the series' minimum the average is withheld, as the window is, and never drawn as zero.
     assert rate["2026-10-03"]["average"] is None and count["2026-10-03"]["average"] == pytest.approx(8 / 7)
     # Today so far is not a completed period: it has no average and no span includes it.
@@ -121,8 +124,9 @@ def test_cost_rows_average_the_all_in_cost_per_hour_over_the_span(isolated_db, m
     assert all(row["period"] >= "2026-09-25" for row in body["series"])
     assert rows["2026-10-08"]["average"] == pytest.approx(3 * SONNET.input_per_million / 48)
     assert rows["2026-10-03"]["average"] is None, "12 rated outcomes are under the minimum"
-    # The first drawn day reaches back to 09-19: the calls on 09-19 and 09-25 over the 20 outcomes rated on 09-20.
-    assert rows["2026-09-25"]["average"] == pytest.approx(2 * SONNET.input_per_million / 40)
+    # The first drawn day averages over a span reaching into the lead-in, so no point is drawn there, and the
+    # spans inside the drawn range before 10-03 hold no rated hours.
+    assert all(row["average"] is None for row in body["series"] if row["period"] < "2026-10-03")
     assert body["latest"]["per_hour"] == pytest.approx(rows["2026-10-08"]["average"])
 
 

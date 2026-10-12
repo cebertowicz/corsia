@@ -96,7 +96,7 @@ async def registered_local_key(host: str, port: int) -> str | None:
     """The key already registered for this local oMLX, so a retry reuses it."""
     from infra.db_async import run_in_db
     from infra.database import get_db
-    from llm.network_discovery import get_server_metadata
+    from infra.key_store_servers import resolve_server
 
     def _lookup() -> str | None:
         row = get_db().execute(
@@ -105,7 +105,7 @@ async def registered_local_key(host: str, port: int) -> str | None:
         ).fetchone()
         if not row:
             return None
-        key = get_server_metadata(row["id"]).get("api_key")
+        key = resolve_server(row["id"])
         return str(key) if key else None
 
     return await run_in_db(_lookup)

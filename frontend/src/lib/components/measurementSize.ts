@@ -45,19 +45,17 @@ function weekAxis(period: MeasurementPeriod, points: BarPoint[]): string[] {
 /**
  * Each chart's drawn points, the dates they span, what one bar is and the line drawn over it. On Weeks every chart shares one axis,
  * the weeks of `weekAxis`: a week the series has no point for (its measure had not started) is drawn empty, and weeks read before
- * the axis only feed the averages. Days draw the series as served. The note names the line only when a moving-average point is drawn.
+ * the axis only feed the averages. Days draw the series as served.
  */
-export function grainChart(period: MeasurementPeriod | undefined, points: BarPoint[], averagePeriods: number | undefined): { unit: 'day' | 'week'; averageName: string; note: string; points: BarPoint[]; rangeText: string } {
+export function grainChart(period: MeasurementPeriod | undefined, points: BarPoint[], averagePeriods: number | undefined): { unit: 'day' | 'week'; averageName: string; points: BarPoint[]; rangeText: string } {
 	const unit = period?.grain === 'days' ? 'day' : 'week';
 	const averageName = averagePeriods ? `${averagePeriods}-${unit} moving average` : 'moving average';
 	const byStart = new Map(points.map((point) => [point.start, point]));
 	const drawn = period?.grain === 'weeks' && points.length
 		? weekAxis(period, points).map((start): BarPoint => byStart.get(start) ?? { start, value: null, n: 0, ma: null, empty: true })
 		: points;
-	const averaged = drawn.some((point) => point.ma !== null);
 	return {
 		unit, averageName, points: drawn,
-		note: averaged ? `Each bar is one ${unit}; the line is the ${averageName}.` : `Each bar is one ${unit}.`,
 		rangeText: period && drawn.length ? `${shortDate(drawn[0].start)} to ${shortDate(period.range.to)}` : '',
 	};
 }
@@ -66,7 +64,7 @@ export interface PeriodSize { period: string; value: number | null; size: SizeCo
 
 /**
  * Weeks from the first recorded week on. A week before it is not drawn; an unknown week after it stays unknown. The chart draws
- * these; the server pools its size windows over the same run (`size_window_periods`), so the headline never pools them again.
+ * these; the headline window is pooled by the server over the whole window the card names, comparable or not.
  */
 export function sizePeriods(rows: MeasurementRow[]): PeriodSize[] {
 	const all = rows.filter((row) => row.series === SIZE_SERIES && row.size)
@@ -102,8 +100,8 @@ export function changeText(cur: number | null, prev: number | null, nCur: number
 	return percentChange(cur, prev);
 }
 
-/** "-4% vs Sep 21 to Sep 27 (n 451)": a comparison against the previous window. A 'new' change has no previous figure to compare, so it prints no previous window and no previous n; with no previous window it prints the change alone. */
+/** "-4% vs Sep 21 to Sep 27 (n 451)": a comparison against the previous window, and "new vs Aug 10 to Sep 6 (n 450)" when the measure does not cover all of it; with no previous window it prints the change alone. */
 export function versusPrevious(change: string, previousText: string | null, previousN?: number): string {
-	if (change === 'new' || !previousText) return change;
+	if (!previousText) return change;
 	return `${change} vs ${previousText}${previousN === undefined ? '' : ` (n ${previousN.toLocaleString('en-US')})`}`;
 }

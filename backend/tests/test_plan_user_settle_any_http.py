@@ -19,6 +19,7 @@ from tests.test_plan_task_steering_http import (  # noqa: F401 - fixture
     _row_in_pane,
     client,
 )
+from tests.plan_writer_authorizer import raw_plan_seed
 
 DONE = {"mark_done": "accepted", "close_node": "closed"}
 
@@ -235,7 +236,8 @@ def test_a_nested_delegation_under_a_parent_settles_and_stops(client, db):
     plan = _plan(db)
     parent = _phase(db, plan.id, "Parent")
     node, worker_plan = _delegated(db, plan.id)
-    db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent.id, node.id))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET parent_id=? WHERE id=?", (parent.id, node.id))
     db.commit()
     step = _worker_step(db, worker_plan.id)
 

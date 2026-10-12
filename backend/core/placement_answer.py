@@ -195,13 +195,15 @@ def _check_loadable(
     would reject goes back to the fork instead of being reselected at every
     checkpoint.
     """
-    from core.placement_outcomes import planned_writes
+    from core.placement_outcomes import commit_plan
     from infra.skill_save_validation import invalid_skill_write
 
-    if destination.kind != "skill":
+    if destination.kind != "skill" or destination.path is None:
         return
-    writes = planned_writes(place, decision, destination, room)
-    refusal = invalid_skill_write({path: text.encode() for path, text in writes.items()})
+    planned = commit_plan(place, decision, destination, room)
+    if isinstance(planned, str):
+        return
+    refusal = invalid_skill_write({path: text.encode() for path, text in planned[0].items()})
     if refusal is not None:
         raise InvalidDecision(
             f"the skill would not load after this write ({'; '.join(refusal.errors)}). "

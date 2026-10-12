@@ -3,38 +3,33 @@
  * are new since the user last looked, when they fold, and the report that
  * tells the server the user has seen them.
  *
- * A folded row that settled after `seen_through` is new and held open
- * (`foldWave.heldRows`). Once the pane shows a plan loaded after it opened,
- * in a visible page with user input in the last `IDLE_MS`, the held rows sit
- * for `PAUSE_MS`; then the view advances its mark to that plan's `as_of`, so
- * they fold, and reports it. A hidden page, or an open pane nobody is at,
- * waits for the user. A row that finishes while the pane is open is new
- * against the advanced mark, so it gets the same pause, its own fold and its
- * own report.
+ * The server lists the folded rows that settled after the user's last look
+ * (`seen_through`); every listed folded row this view has not yet shown fold
+ * is new and held open (`foldMotion.heldIds`). Once the pane shows a plan
+ * loaded after it opened, in a visible page with user input in the last
+ * `IDLE_MS`, the held rows sit for `PAUSE_MS`; then the view releases them, so
+ * they fold, and reports the plan's `as_of` to the server. A hidden page, or
+ * an open pane nobody is at, waits for the user. A row that finishes while the
+ * pane is open is not released, so it gets the same pause, its own fold and
+ * its own report.
  */
 import { get } from 'svelte/store';
 import type { OperatorEnvelope } from '$lib/api/plans';
 import { recordThreadPlanSeen } from '$lib/api/plans';
 import { token } from '$lib/stores/auth';
 import { lastUserInputAt, onUserInput } from '$lib/userInput';
-import { PAUSE_MS, heldRows } from './foldWave';
-import type { PaneView } from './foldMotion.svelte';
+import { PAUSE_MS } from './foldWave';
+import { heldIds, type PaneView } from './foldMotion.svelte';
 
 /**
- * The mark this page last reported per thread. The next view floors the
- * server's mark with it, so reopening the pane before the refreshed read
- * lands does not replay what this page already showed.
+ * The rows this page has shown fold, per thread, until the server's mark says
+ * so too. The next view reads them, so reopening the pane before the refreshed
+ * read lands does not replay what this page already showed.
  */
-const reported = new Map<string, string>();
+const released = new Map<string, ReadonlySet<string>>();
 
 /** How long after the user's last input an open pane still counts as looked at. */
 export const IDLE_MS = 2 * 60_000;
-
-function later(a: string | null | undefined, b: string | null | undefined): string | null {
-	if (a == null) return b ?? null;
-	if (b == null) return a;
-	return Date.parse(b) > Date.parse(a) ? b : a;
-}
 
 function pageVisible(): boolean {
 	return typeof document === 'undefined' || document.visibilityState === 'visible';
@@ -50,8 +45,8 @@ export interface PaneViewInput {
 export function createPaneView(input: PaneViewInput) {
 	let threadId = $state(input.threadId());
 	let openedAt = $state(Date.now());
-	/** The mark this view has advanced to by folding; null before its first fold. */
-	let advanced = $state<string | null>(null);
+	/** The rows this view has folded, whether or not the server heard of it. */
+	let viewReleased = $state.raw<ReadonlySet<string>>(new Set());
 	let visible = $state(pageVisible());
 	$effect(() => {
 		const update = () => { visible = pageVisible(); };
@@ -80,33 +75,35 @@ export function createPaneView(input: PaneViewInput) {
 		if (next === threadId) return;
 		threadId = next;
 		openedAt = Date.now();
-		advanced = null;
+		viewReleased = new Set();
 	});
 
-	const seenThrough = $derived(later(later(input.payload()?.seen_through, reported.get(threadId)), advanced));
+	const view = $derived<PaneView>({ released: new Set([...(released.get(threadId) ?? []), ...viewReleased]) });
 	const loaded = $derived((input.lastFreshAt() ?? -Infinity) >= openedAt && input.payload() !== null);
 
 	/** The held rows while they may fold; a new arrival changes it and restarts the pause. */
 	const due = $derived.by(() => {
 		if (!loaded || !visible || !recent) return null;
-		const held = heldRows(input.payload()?.plans[0]?.nodes ?? [], seenThrough);
+		const held = heldIds(input.payload()?.plans[0]?.nodes ?? [], view);
 		return held.size === 0 ? null : [...held].sort().join(' ');
 	});
 
 	function fold(): void {
 		const payload = input.payload();
 		if (payload === null) return;
-		const view = threadId;
+		const thread = threadId;
 		const mark = payload.as_of;
-		advanced = mark;
-		const previous = reported.get(view);
-		reported.set(view, mark);
+		const shown = heldIds(payload.plans[0]?.nodes ?? [], view);
+		const previous = released.get(thread);
+		const now = new Set([...(previous ?? []), ...shown]);
+		viewReleased = new Set([...viewReleased, ...shown]);
+		released.set(thread, now);
 		const bearer = get(token);
 		if (!bearer) return;
-		void recordThreadPlanSeen(bearer, view, mark).then((landed) => {
+		void recordThreadPlanSeen(bearer, thread, mark).then((landed) => {
 			// A report that did not land leaves the server's mark for the next view.
-			if (landed || reported.get(view) !== mark) return;
-			if (previous) reported.set(view, previous); else reported.delete(view);
+			if (landed || released.get(thread) !== now) return;
+			if (previous) released.set(thread, previous); else released.delete(thread);
 		});
 	}
 
@@ -116,7 +113,6 @@ export function createPaneView(input: PaneViewInput) {
 		return () => clearTimeout(timer);
 	});
 
-	const view = $derived<PaneView>({ seenThrough });
 	return {
 		get view() { return view; },
 		/** The tree remounts per view so its motion state never carries over. */

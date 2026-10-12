@@ -6,6 +6,7 @@ import sqlite3
 import sys
 
 import pytest
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _BACKEND_DIR = os.path.dirname(os.path.dirname(__file__))
 if _BACKEND_DIR not in sys.path:
@@ -351,10 +352,11 @@ class TestDeleteWakesDelegatingParent:
             spawn_kind="claude-code", db=delete_db,
         )
         service.transition_node(node.id, "active", db=delete_db)
-        delete_db.execute(
-            "UPDATE plan_nodes SET spawned_thread_id='worker' WHERE id=?",
-            (node.id,),
-        )
+        with raw_plan_seed(delete_db):
+            delete_db.execute(
+                "UPDATE plan_nodes SET spawned_thread_id='worker' WHERE id=?",
+                (node.id,),
+            )
         delete_db.commit()
 
         auth_token = "".join(["t", "o", "k"])

@@ -14,9 +14,8 @@ MEASUREMENT_INDEXES: dict[str, str] = {
     "threads": """
     CREATE INDEX IF NOT EXISTS idx_measurement_thread_children
         ON threads(parent_thread_id, user_id) WHERE parent_thread_id IS NOT NULL""",
-    # Per thread, (created_at, id) is the active-time order, so a thread's
-    # latest pre-window message is one backward seek even among equal
-    # timestamps.
+    # Recorded by the v77 -> v78 migration. Measurement no longer reads it
+    # (attention is presence time); dropping it needs its own migration.
     "messages": """
     CREATE INDEX IF NOT EXISTS idx_measurement_human_messages_time
         ON messages(thread_id, created_at, id) WHERE role='user'""",

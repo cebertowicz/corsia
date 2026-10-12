@@ -17,6 +17,7 @@ from api.thread_focus_page import (
     read_authorized_focus_page,
     read_authorized_run_range,
 )
+from api.thread_cards import attach_result_cards
 from api.thread_paging import (
     CursorNotFound,
     load_tool_result,
@@ -99,18 +100,21 @@ async def get_messages(
         db = get_db()
         try:
             if from_id is not None and to_id is not None:
-                return read_authorized_run_range(
+                result = read_authorized_run_range(
                     db, thread_id, limit, from_id, to_id, before, user_id=user["id"],
                 )
-            if view == "focus":
-                return read_authorized_focus_page(
+            elif view == "focus":
+                result = read_authorized_focus_page(
                     db, thread_id, limit, before, user_id=user["id"],
                 )
-            # The ownership check shares the page read's snapshot, so a thread
-            # this user loses in between cannot be paginated from an older one.
-            return read_authorized_page_with_summaries(
-                db, thread_id, limit, before, user_id=user["id"],
-            )
+            else:
+                # The ownership check shares the page read's snapshot, so a thread
+                # this user loses in between cannot be paginated from an older one.
+                result = read_authorized_page_with_summaries(
+                    db, thread_id, limit, before, user_id=user["id"],
+                )
+            attach_result_cards(db, thread_id, user["id"], result)
+            return result
         finally:
             db.close()
 

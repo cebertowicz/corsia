@@ -181,8 +181,8 @@ def test_real_safehouse_forwards_only_bound_invocation(monkeypatch, tmp_path, cu
     monkeypatch.setenv("CORSIA_TOOL_INVOCATION_ID", "inherited-forgery")
     monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [])
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_rw", lambda: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id: [tmp_path])
-    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda: [])
+    monkeypatch.setattr(shell_guard, "get_sandbox_add_dirs_rw", lambda _thread_id, policies=None: [tmp_path])
+    monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     command = "printf '%s' \"${CORSIA_TOOL_INVOCATION_ID-unset}\""
     profile = tmp_path / "invocation-proof.sb"
     profile.write_text(shell_guard.execution_envelope_profile(

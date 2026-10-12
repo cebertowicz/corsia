@@ -8,6 +8,7 @@ import pytest
 from plans import decision_projection as owner
 from tests.test_plan_activity_index import db, _task
 import plans.service as service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _body():
@@ -62,7 +63,8 @@ def _cases():
 def test_actual_activity_adapter_uses_exact_owner_grammar(db, name, metadata):
     plan = service.ensure_plan("thread", "moving", db=db)
     review = _task(plan.id, "Review", db=db)
-    db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (review.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (review.id,))
     db.execute("""INSERT INTO artifact_identities
         (id,integration,type,external_id,state,metadata,created_at,updated_at)
         VALUES ('artifact','local','plan-decision','decision','active',?,'t','t')""", (metadata,))
@@ -89,7 +91,8 @@ def test_actual_activity_adapter_matches_queue_answerability(db, case):
     plan = service.ensure_plan("thread", "moving", db=db)
     source = _task(plan.id, "Source", db=db)
     review = _task(plan.id, "Review", db=db)
-    db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (review.id,))
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='review_requested' WHERE id=?", (review.id,))
     body = _body() | {"plan_id": plan.id, "node_id": review.id, "source_node_id": source.id,
                       "thread_id": "moving", "order_key": 0, "revision": 1}
     if case in owner.STATES:
@@ -121,13 +124,16 @@ def test_actual_activity_adapter_matches_queue_answerability(db, case):
         db.execute("UPDATE plans SET state='archived' WHERE id=?", (plan.id,))
     if case in {"source_closed", "source_archived"}:
         field, value = ("state", "closed") if case == "source_closed" else ("archived_at", "t")
-        db.execute(f"UPDATE plan_nodes SET {field}=? WHERE id=?", (value, source.id))
+        with raw_plan_seed(db):
+            db.execute(f"UPDATE plan_nodes SET {field}=? WHERE id=?", (value, source.id))
     if case in {"review_closed", "review_not_requested"}:
-        db.execute("UPDATE plan_nodes SET state=? WHERE id=?", ("closed" if case == "review_closed" else "active", review.id))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state=? WHERE id=?", ("closed" if case == "review_closed" else "active", review.id))
     if case == "source_retired_branch":
         parent = service.add_node(plan.id, kind="phase", title="Retired", acceptance_criteria="done", db=db)
-        db.execute("UPDATE plan_nodes SET parent_id=?,state='accepted' WHERE id=?", (parent.id, source.id))
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent.id,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET parent_id=?,state='accepted' WHERE id=?", (parent.id, source.id))
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (parent.id,))
     facts = owner.activity_facts([plan.id], db=db)
     assert {item["artifact_id"] for item in facts if item["answerable"]} == {
         item["artifact_id"] for item in owner.raised_decisions([plan.id], db=db)

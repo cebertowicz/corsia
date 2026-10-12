@@ -20,6 +20,7 @@ def application_review_record(review: ApplicationReview) -> dict[str, Any]:
         "reviewer_reported_model": review.identity.reported_model,
         "reviewer_harness": review.identity.harness,
         "reviewer_transport_model": review.identity.transport_model,
+        "reviewer_fallback": review.reviewer_fallback,
     }
 
 

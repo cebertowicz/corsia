@@ -171,7 +171,7 @@ def _send_back(
     sent_back = service._transition(
         connection, node_id, service.CLOSED, actor_id=actor_id, provenance=provenance,
         verification_result=None, verified_by=None, settles_worker=settles_worker,
-        payload={"reason": f"{SENT_BACK}: {feedback}"},
+        payload={"reason": f"{SENT_BACK}: {feedback}"}, sent_back=True,
     )
     archival.release_held(
         connection, service._node_row(connection, node_id),

@@ -8,6 +8,7 @@ from infra.schema import SCHEMA_SQL
 from plans import admission, review_evidence, service, watch_operations
 from plans.boundary import PlanActor
 from tests.plan_scene import _artifact
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 def _db() -> sqlite3.Connection:
@@ -215,10 +216,11 @@ def test_operator_projects_branch_progress_from_descendant_leaves():
             parent_id=phase.id,
             db=db,
         )
-        db.execute(
-            "UPDATE plan_nodes SET state='accepted' WHERE id=?",
-            (done.id,),
-        )
+        with raw_plan_seed(db):
+            db.execute(
+                "UPDATE plan_nodes SET state='accepted' WHERE id=?",
+                (done.id,),
+            )
         db.commit()
 
         payload = operator_projection.read_thread(
@@ -253,19 +255,24 @@ def test_a_container_is_dated_by_its_last_child_not_its_own_edits():
             plan.id, kind="task", title="Last",
             acceptance_criteria="Last is proven", parent_id=phase.id, db=db,
         )
-        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (first.id,))
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (last.id,))
-        # Events are append-only; these later ones are each node's latest.
-        for event_id, node_id, at in (
-            ("first-done", first.id, "2099-09-28T10:00:00+00:00"),
-            ("wave-retitled", phase.id, "2099-09-28T18:07:00+00:00"),
-            ("last-closed", last.id, "2099-09-29T13:06:00+00:00"),
-        ):
-            db.execute(
-                "INSERT INTO plan_node_events (id,node_id,provenance,event,created_at)"
-                " VALUES (?,?,'test','state_transition',?)",
-                (event_id, node_id, at),
-            )
+        # Events are append-only; these later ones are each node's latest. The seed
+        # rebuilds the stored aggregates (own_last_changed, folded_at) from them on exit.
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (first.id,))
+            db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (last.id,))
+            for event_id, node_id, at in (
+                ("first-done", first.id, "2099-09-28T10:00:00+00:00"),
+                ("wave-retitled", phase.id, "2099-09-28T18:07:00+00:00"),
+                ("last-closed", last.id, "2099-09-29T13:06:00+00:00"),
+            ):
+                db.execute(
+                    "INSERT INTO plan_node_events (id,node_id,provenance,event,created_at)"
+                    " VALUES (?,?,'test','state_transition',?)",
+                    (event_id, node_id, at),
+                )
+                db.execute(
+                    "UPDATE plan_nodes SET own_last_changed=? WHERE id=?", (at, node_id),
+                )
         db.commit()
 
         payload = operator_projection.read_thread(
@@ -274,7 +281,9 @@ def test_a_container_is_dated_by_its_last_child_not_its_own_edits():
         nodes = {node["id"]: node for node in payload["plans"][0]["nodes"]}
 
         assert nodes[phase.id]["last_transition_at"] == "2099-09-29T13:06:00+00:00"
-        assert nodes[first.id]["last_transition_at"] == "2099-09-28T10:00:00+00:00"
+        # The wave is finished, so its children sit behind its fold: dated through the
+        # wave, not listed.
+        assert first.id not in nodes and last.id not in nodes
     finally:
         db.close()
 
@@ -322,10 +331,14 @@ def test_operator_projection_1000_nodes_has_bounded_query_count():
         # (node rows, their events, live edges, watches, user holds, PR links)
         # and one per chunk of prerequisites, of which this plan has none, and
         # one per chunk of plan ids for whole-plan pauses (one plan: one read).
+        # The pane reads open work (#731 S2-2), so each fact is read for the listed
+        # nodes alone, by id, where it once read the whole plan: nineteen reads
+        # repeat per chunk of ids (measured 60, 98 and 136 statements at 300, 1000
+        # and 2000 nodes: 41 fixed, 19 per chunk).
         from plans import node_cost
 
         chunks = -(-1000 // node_cost._ID_CHUNK)
-        assert len(statements) <= 49 + (3 + 6) * chunks + 1
+        assert len(statements) <= 41 + 19 * chunks + 1
     finally:
         db.set_trace_callback(None)
         db.close()

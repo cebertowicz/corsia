@@ -7,6 +7,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 from fastapi import HTTPException
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 USER = {"id": "steve"}
@@ -85,15 +86,16 @@ def _seed_outcomes(db, thread_id: str, count: int = 762) -> None:
     plan_id = "plan-root" if thread_id == "root" else f"plan-{thread_id}"
     db.execute("INSERT INTO plans (id,owner_kind,owner_id,state,revision,created_at,updated_at) VALUES (?,'thread',?,'active',1,'t','t')", (plan_id, thread_id))
     nodes = [(f"node-{number}" if thread_id == "root" else f"{thread_id}-node-{number}", plan_id, number, f"node-{number}") for number in range(count)]
-    db.executemany(
-        "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
-        "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')", nodes,
-    )
-    db.executemany(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?,'test','accepted','active','accepted','2026-09-23T12:00:00Z')",
-        [(f"event-{number}" if thread_id == "root" else f"{thread_id}-event-{number}", f"node-{number}" if thread_id == "root" else f"{thread_id}-node-{number}") for number in range(count)],
-    )
+    with raw_plan_seed(db):
+        db.executemany(
+            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
+            "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')", nodes,
+        )
+        db.executemany(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?,'test','accepted','active','accepted','2026-09-23T12:00:00Z')",
+            [(f"event-{number}" if thread_id == "root" else f"{thread_id}-event-{number}", f"node-{number}" if thread_id == "root" else f"{thread_id}-node-{number}") for number in range(count)],
+        )
 
 
 def _seed_decision(db, index: int, answer: str | None, *, raised: str = "2026-09-15T12:00:00Z", thread_id: str = "root", recommendation: str | None = "B") -> None:
@@ -250,15 +252,16 @@ async def test_decision_uses_raised_period_for_asks_and_answered_period_for_alig
         _seed_thread(db, "root")
         _seed_outcomes(db, "root")
         prior_nodes = [(f"prior-{number}", "plan-root", 800 + number, f"prior-{number}") for number in range(20)]
-        db.executemany(
-            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
-            "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')", prior_nodes,
-        )
-        db.executemany(
-            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-            "VALUES (?,?,'test','accepted','active','accepted','2026-09-16T12:00:00Z')",
-            [(f"prior-event-{number}", f"prior-{number}") for number in range(20)],
-        )
+        with raw_plan_seed(db):
+            db.executemany(
+                "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) "
+                "VALUES (?, ?, NULL, ?, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')", prior_nodes,
+            )
+            db.executemany(
+                "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                "VALUES (?,?,'test','accepted','active','accepted','2026-09-16T12:00:00Z')",
+                [(f"prior-event-{number}", f"prior-{number}") for number in range(20)],
+            )
         for index, answer in enumerate(["B", "B", "B", "B", "A", "other", "other", "other", "other", "other"]):
             _seed_decision(db, index, answer)
         db.commit()
@@ -275,7 +278,7 @@ async def test_decision_uses_raised_period_for_asks_and_answered_period_for_alig
 
 
 @pytest.mark.asyncio
-async def test_active_time_counts_300_and_600_but_not_601_second_gaps(isolated_db):
+async def test_active_time_uses_the_union_of_presence_intervals(isolated_db):
     from api.measurement import measurement_series
     from infra.database import get_db
 
@@ -284,9 +287,9 @@ async def test_active_time_counts_300_and_600_but_not_601_second_gaps(isolated_d
         _seed_thread(db, "root")
         _seed_outcomes(db, "root")
         db.executemany(
-            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?, 'root', 'user', 'x', '{}', ?)",
-            [("m1", "2026-09-22T10:00:00Z"), ("m2", "2026-09-22T10:05:00Z"),
-             ("m3", "2026-09-22T10:15:00Z"), ("m4", "2026-09-22T10:25:01Z")],
+            "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) VALUES ('steve','chat','root',?,?,0,1,'hidden')",
+            [("2026-09-22T10:00:00Z", "2026-09-22T10:05:00Z"),
+             ("2026-09-22T10:04:00Z", "2026-09-22T10:15:00Z")],
         )
         db.commit()
     finally:
@@ -294,20 +297,20 @@ async def test_active_time_counts_300_and_600_but_not_601_second_gaps(isolated_d
 
     result = await measurement_series("active_hours_per_outcome", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     row = next(row for row in result["rows"] if row["n"] == 762)
-    assert row["value"] == pytest.approx((4 * 60 + 300 + 600) / 3600 / 762)
+    assert row["value"] == pytest.approx(15 / 60 / 762)
 
 
 def test_outcomes_per_active_hour_is_proxy_and_handles_zero_hours():
     from api.measurement import _row
 
-    row = _row("outcomes_per_active_hour", WEEK, {"outcomes": 40, "active_hours": 8}, False)
+    row = _row("outcomes_per_active_hour", WEEK, {"outcomes": 40, "active_hours": 8}, False, first_presence_period=WEEK)
     assert row["value"] == pytest.approx(5)
     assert row["proxy"] is True
-    assert _row("outcomes_per_active_hour", WEEK, {"outcomes": 40, "active_hours": 0}, False)["value"] is None
+    assert _row("outcomes_per_active_hour", WEEK, {"outcomes": 40, "active_hours": 0}, False, first_presence_period=WEEK)["value"] is None
 
 
 @pytest.mark.asyncio
-async def test_active_time_uses_the_single_pre_window_predecessor(isolated_db):
+async def test_active_time_does_not_count_messages_without_presence(isolated_db):
     from api.measurement import measurement_series
     from infra.database import get_db
 
@@ -324,7 +327,7 @@ async def test_active_time_uses_the_single_pre_window_predecessor(isolated_db):
         db.close()
 
     result = await measurement_series("active_hours_per_outcome", project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
-    assert next(row for row in result["rows"] if row["n"] == 762)["value"] == pytest.approx(360 / 3600 / 762)
+    assert not any(row["n"] == 762 for row in result["rows"])
 
 
 @pytest.mark.asyncio
@@ -488,9 +491,11 @@ async def test_models_does_not_show_turn_only_raw_selectors(isolated_db, monkeyp
 
     served = await measurement_models(project="all", agent="none", grain="weeks", timezone_name="UTC", user=USER)
     assert _named_rows(served) == []
-    # Unresolved aliases share Other; their failures are disclosed, provider limits are not failures.
-    (other,) = served["rows"]
-    assert other["failed_turns_per_100"] == pytest.approx(51.0)
+    # A model with no spend and under 14 tasks has no row of its own. The one that recorded token
+    # usage still pools into Other, so the pie's model is never missing from the table; turns alone
+    # add nothing. The unresolved alias failures are disclosed, and provider limits are not failures.
+    assert [(row["label"], row["tasks"]) for row in served["rows"]] == [("Other (1 more model)", 0)]
+    assert [share["model"] for share in served["token_shares"]] == ["claude-code/opus"]
     assert served["unmatched_failed_turns"] == 51
 
 
@@ -560,8 +565,9 @@ async def test_models_endpoint_compares_real_previous_window_tasks_and_cost(isol
         for period, accepted_at in [("previous", "2026-08-19T12:00:00Z"), ("latest", "2026-09-23T12:00:00Z")]:
             for index in range(14):
                 node = f"{period}-{index}"
-                db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,'t','t')", (node, node))
-                db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accepted-{node}", node, accepted_at))
+                with raw_plan_seed(db):
+                    db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,commitment_id,requirements_revision,revision,created_at,updated_at) VALUES (?, 'plan',NULL,1,'task','task','done','accepted',?,1,1,'t','t')", (node, node))
+                    db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) VALUES (?,?,'test','accepted','active','accepted',?)", (f"accepted-{node}", node, accepted_at))
                 db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,source,created_at,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) VALUES (?, 'root','claude-code/claude-opus-5-5',1000000,0,0,0,1000000,'external_harness:claude-code',?,'plan',?,'attempt',?,'execution')", (f"usage-{node}", accepted_at, node, node))
         db.commit()
     finally:
@@ -620,7 +626,8 @@ def test_prepared_outcomes_and_sargable_ranges_match_legacy_family_values(isolat
         # The oracle is the frozen legacy SQL, and only for the families it was written
         # against; the ``models`` family reads rows the legacy module never covered,
         # so its fixtures live in this file instead.
-        families = _ORACLE_FAMILIES & {definition.family for definition in REGISTRY.values() if definition.available}
+        # Presence-only attention intentionally supersedes the frozen message-gap and visit-sum oracle.
+        families = (_ORACLE_FAMILIES - {"active", "presence"}) & {definition.family for definition in REGISTRY.values() if definition.available}
         legacy = {family: query_legacy_family(db, family, _oracle_params(params)) for family in families}
 
         _prepare_outcome_periods(db, _grained(params))
@@ -636,9 +643,8 @@ def test_prepared_outcomes_and_sargable_ranges_match_legacy_family_values(isolat
         db.close()
 
 
-def test_pre_window_predecessor_across_a_thread_tree_matches_legacy(isolated_db):
-    """The latest human message before the window is picked across every scope
-    thread, grandchildren included, exactly as the prior single sorted query did."""
+def test_messages_without_presence_do_not_create_attention_across_a_thread_tree(isolated_db):
+    """Message history cannot manufacture attention after the presence cutover."""
     from api.measurement_queries import prepare_outcome_periods as _prepare_outcome_periods, query_family as _query_family
     from infra.database import get_db
     from tests.measurement_legacy_queries import query_legacy_family
@@ -670,15 +676,8 @@ def test_pre_window_predecessor_across_a_thread_tree_matches_legacy(isolated_db)
         db.commit()
         params = {"user_id": "steve", "scope_project": "all", "scope_agent": None,
                   "from": "2026-09-14", "to": "2026-09-14", "max_active_gap_seconds": 600}
-        legacy = query_legacy_family(db, "active", _oracle_params(params))
-
         _prepare_outcome_periods(db, _grained(params))
-        optimized = _family_in_range(db, "active", params)
-
-        # 2 human messages in the window, gaps 7 minutes (from the tied 23:58
-        # predecessor) and 4 minutes, both under 600s.
-        assert legacy == [{"period": "2026-09-14", "active_hours": pytest.approx((2 * 60 + 420 + 240) / 3600), "outcomes": 0}]
-        assert optimized == legacy
+        assert _family_in_range(db, "active", params) == []
     finally:
         db.close()
 
@@ -701,7 +700,7 @@ def test_range_bounds_match_legacy_for_space_separated_timestamps(isolated_db):
         db.commit()
         params = {"user_id": "steve", "scope_project": "all", "scope_agent": None,
                   "from": "2026-09-14", "to": "2026-09-28", "max_active_gap_seconds": 600}
-        families = ("active", "presence", "decisions", "tokens")
+        families = ("decisions", "tokens")
         legacy = {family: query_legacy_family(db, family, _oracle_params(params)) for family in families}
 
         _prepare_outcome_periods(db, _grained(params))
@@ -903,17 +902,18 @@ def _seed_plan(db, plan_id: str, thread_id: str) -> None:
 
 
 def _seed_task(db, plan_id: str, node_id: str, *, settled: str = _WEEK) -> None:
-    db.execute(
-        "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-        "commitment_id,requirements_revision,revision,created_at,updated_at) "
-        "VALUES (?, ?, NULL, 1, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')",
-        (node_id, plan_id, node_id),
-    )
-    db.execute(
-        "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-        "VALUES (?,?, 'test', 'accepted', 'active', 'accepted', ?)",
-        (f"event-{node_id}", node_id, settled),
-    )
+    with raw_plan_seed(db):
+        db.execute(
+            "INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
+            "commitment_id,requirements_revision,revision,created_at,updated_at) "
+            "VALUES (?, ?, NULL, 1, 'task', 'Measured task', 'done', 'accepted', ?, 1, 1, 't', 't')",
+            (node_id, plan_id, node_id),
+        )
+        db.execute(
+            "INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+            "VALUES (?,?, 'test', 'accepted', 'active', 'accepted', ?)",
+            (f"event-{node_id}", node_id, settled),
+        )
 
 
 def _seed_usage(db, row_id: str, *, total, prompt, completion, cache_creation, cache_read) -> None:
@@ -953,16 +953,18 @@ async def test_an_outcome_is_the_work_an_agent_was_asked_to_do_not_its_worker_th
         for number in range(3):
             _seed_task(db, "plan-owner", f"own-{number}")
         _seed_task(db, "plan-owner", "spawner")  # the node that spawned, not yet accepted
-        db.execute("UPDATE plan_nodes SET state='active' WHERE id='spawner'")
-        db.execute("UPDATE plan_nodes SET spawned_thread_id='by-column' WHERE id='spawner'")
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='active' WHERE id='spawner'")
+            db.execute("UPDATE plan_nodes SET spawned_thread_id='by-column' WHERE id='spawner'")
         _seed_thread(db, "by-column")
         db.execute("UPDATE threads SET spawned_by='owner' WHERE id='by-column'")
         _seed_plan(db, "plan-by-column", "by-column")
         for number in range(4):
             _seed_task(db, "plan-by-column", f"col-{number}")
-        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,"
-                   "state,commitment_id,requirements_revision,revision,created_at,updated_at,spawned_thread_id) "
-                   "VALUES ('spawner2','plan-owner',NULL,2,'task','Delegated','done','active','spawner2',1,1,'t','t','by-node')")
+        with raw_plan_seed(db):
+            db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,"
+                       "state,commitment_id,requirements_revision,revision,created_at,updated_at,spawned_thread_id) "
+                       "VALUES ('spawner2','plan-owner',NULL,2,'task','Delegated','done','active','spawner2',1,1,'t','t','by-node')")
         _seed_thread(db, "by-node")
         _seed_plan(db, "plan-by-node", "by-node")
         for number in range(5):
@@ -1279,9 +1281,10 @@ async def test_first_try_misses_only_a_rejection_or_a_failed_or_changed_attempt(
         )
         db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
                    "VALUES ('e-rej','rejected','test','review_rejected','active','active',?)", (_WEEK,))
-        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-                   "commitment_id,requirements_revision,revision,created_at,updated_at) "
-                   "VALUES ('gone-failed','plan-root',NULL,1,'task','Debt','done','failed','gone-failed',1,1,'t','t')")
+        with raw_plan_seed(db):
+            db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
+                       "commitment_id,requirements_revision,revision,created_at,updated_at) "
+                       "VALUES ('gone-failed','plan-root',NULL,1,'task','Debt','done','failed','gone-failed',1,1,'t','t')")
         db.execute("UPDATE plan_nodes SET follow_up_of='gone-failed' WHERE id='follow-up'")
         db.commit()
     finally:
@@ -1316,17 +1319,19 @@ async def test_first_try_misses_a_revision_of_a_sent_back_task(isolated_db):
         for name in ("sent-back", "revision", "handoff-revision"):
             _seed_task(db, "plan-root", name)
         # The send-back marks the node it rejects and closes it ('Sent back').
-        db.execute("UPDATE plan_nodes SET state='closed' WHERE id='sent-back'")
-        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-                   "VALUES ('e-sent-back','sent-back','test','review_rejected','active','active',?)", (_WEEK,))
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='closed', sent_back=1 WHERE id='sent-back'")
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                       "VALUES ('e-sent-back','sent-back','test','review_rejected','active','active',?)", (_WEEK,))
         db.execute("UPDATE plan_nodes SET follow_up_of='sent-back' WHERE id='revision'")
         # An accept-with-follow-up predecessor is not reworked: its revision is a first try.
-        db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
-                   "commitment_id,requirements_revision,revision,created_at,updated_at) "
-                   "VALUES ('handoff','plan-root',NULL,1,'task','Measured task','done','accepted_with_followup',"
-                   "'handoff',1,1,'t','t')")
-        db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
-                   "VALUES ('event-handoff','handoff','test','accepted','active','accepted_with_followup',?)", (_WEEK,))
+        with raw_plan_seed(db):
+            db.execute("INSERT INTO plan_nodes (id,plan_id,parent_id,order_key,kind,title,acceptance_criteria,state,"
+                       "commitment_id,requirements_revision,revision,created_at,updated_at) "
+                       "VALUES ('handoff','plan-root',NULL,1,'task','Measured task','done','accepted_with_followup',"
+                       "'handoff',1,1,'t','t')")
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
+                       "VALUES ('event-handoff','handoff','test','accepted','active','accepted_with_followup',?)", (_WEEK,))
         db.execute("UPDATE plan_nodes SET follow_up_of='handoff' WHERE id='handoff-revision'")
         db.commit()
     finally:
@@ -1388,13 +1393,40 @@ async def test_no_series_serves_a_period_before_its_instrument_existed(isolated_
         return (row["value"], row["n"])
 
     assert answer("outcomes", before)[0] == 24, "outcomes ran before 08-31, so its own start still serves it"
-    for metric in ("active_hours_per_outcome", "asks_per_outcome", "first_try_acceptance"):
+    for metric in ("asks_per_outcome", "first_try_acceptance"):
         assert (metric, before) not in served, f"{metric} serves no period before its instrument existed"
         assert answer(metric, after)[0] is not None, metric
-    assert ("time_on_platform_h", before) not in served
-    assert ("time_on_platform_h", after) not in served, (
-        "presence started 2026-09-29: the seeded 09-21 visit predates it, so that period is not served and is never a measured hour"
-    )
+    # Retained presence, not a hard-coded release date, defines the first observable attention period.
+    assert answer("active_hours_per_outcome", before)[0] == pytest.approx(1 / 24)
+    assert answer("time_on_platform_h", before)[0] == pytest.approx(1.0)
+    assert answer("time_on_platform_h", after)[0] == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_presence_coverage_starts_globally_and_keeps_later_empty_periods(isolated_db):
+    from api.measurement import measurement_index, series_payload
+    from core.measurement_scope import resolve_grain
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        _seed_thread(db, "root")
+        db.execute(
+            "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
+            "VALUES ('steve','thread','root','2025-08-01T12:00:00Z','2025-08-01T12:01:00Z',60,1,'hidden')"
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    grain = resolve_grain("weeks", "UTC", now=datetime(2027, 1, 4, tzinfo=timezone.utc), averaged=True)
+    result = await series_payload(["time_on_platform_h"], "all", "none", grain, USER)
+    rows = [row for row in result["rows"] if row["series"] == "time_on_platform_h"]
+    assert rows and rows[0]["period"] == grain.served[0]
+    assert all(row["value"] == 0 for row in rows), [(row["period"], row["value"]) for row in rows]
+    definitions = {item["id"]: item for item in (await measurement_index(project="all", agent="none", user=USER))["definitions"]}
+    assert definitions["active_hours_per_outcome"]["data_start"] == "2025-08-01"
+    assert definitions["time_on_platform_h"]["data_start"] == "2025-08-01"
 
 
 @pytest.mark.asyncio

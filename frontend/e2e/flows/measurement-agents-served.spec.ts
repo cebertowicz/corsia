@@ -40,18 +40,19 @@ function seedAgentsPopulation(): void {
 	if (!stateRoot || !python || path.basename(stateRoot) !== 'e2e-state') {
 		throw new Error('Agents served proof requires the disposable E2E Python and state root');
 	}
-	// One completed week, three accepted task nodes, exactly the shape the route's own
+	// One completed day, three accepted task nodes, exactly the shape the route's own
 	// query path reads: an enabled agent thread in a project, its plan, the settled nodes
-	// and the events that settled them. Dates are computed from the run's clock so the
-	// week is completed rather than in flight.
+	// and the events that settled them. The page defaults to Days, so the seed belongs in
+	// yesterday's completed period rather than an older weekly bucket.
 	execFileSync(python, ['-c', [
 		'import datetime, sqlite3, sys',
 		'connection = sqlite3.connect(sys.argv[1])',
+		'connection.row_factory = sqlite3.Row',
 		'user = connection.execute("SELECT id FROM users ORDER BY created_at LIMIT 1").fetchone()',
 		'assert user is not None, "the disposable install has no user to own the agent"',
 		'today = datetime.date.today()',
-		'monday = today - datetime.timedelta(days=today.weekday() + 21)',
-		'settled = f"{monday.isoformat()}T12:00:00Z"',
+		'completed_day = today - datetime.timedelta(days=1)',
+		'settled = f"{completed_day.isoformat()}T12:00:00Z"',
 		'agent, project = "e2e-measured-agent", "e2e-measured-project"',
 		'connection.execute("INSERT OR IGNORE INTO projects (id,name,created_at,updated_at) VALUES (?,?,?,?)", (project, project, settled, settled))',
 		'cols = "id,user_id,title,project_id,parent_thread_id,agent_enabled,agent_status,agent_responsibility,created_at,updated_at"',
@@ -63,9 +64,23 @@ function seedAgentsPopulation(): void {
 		'    node = f"{agent}-node-{index}"',
 		'    connection.execute(f"INSERT OR IGNORE INTO plan_nodes ({nodes}) VALUES (?,?,NULL,?,?,?,?,?,?,1,1,?,?,?)", (node, f"plan-{agent}", index, "task", "Measured task", "done", "accepted", f"commitment-{agent}", "standard", settled, settled))',
 		'    connection.execute(f"INSERT OR IGNORE INTO plan_node_events ({events}) VALUES (?,?,\'e2e\',\'accepted\',\'active\',\'accepted\',?)", (f"event-{node}", node, settled))',
+		'from plans.public import rebuild_plan_aggregates',
+		'rebuild_plan_aggregates(connection, f"plan-{agent}")',
 		'connection.commit()',
-		'print(f"seeded agent={agent} project={project} user={user[0]} week={monday}")',
-	].join('\n'), `${stateRoot}/corsia.db`], { stdio: ['ignore', 'inherit', 'inherit'] });
+		'print(f"seeded agent={agent} project={project} user={user[0]} day={completed_day}")',
+	].join('\n'), `${stateRoot}/corsia.db`], {
+		stdio: ['ignore', 'inherit', 'inherit'],
+		// The rebuild below imports the backend, so run it the way the other e2e seeders do.
+		cwd: path.resolve('..'),
+		env: {
+			...process.env,
+			PYTHONPATH: 'backend',
+			CORSIA_TEST_MODE: '1',
+			CORSIA_ANALYTICS_DISABLE: '1',
+			CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE,
+			CORSIA_STATE_DIR: stateRoot,
+		},
+	});
 }
 
 /** Stub only the trend panels so this surface is the Agents table on its own. */

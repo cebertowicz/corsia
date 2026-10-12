@@ -14,6 +14,7 @@ from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_VERSION
 from infra.thread_updates import delete_thread_updates
 from plans import admission_projection, holds, service
+from tests.plan_writer_authorizer import raw_plan_seed
 
 _ARCHIVED = "2026-09-20T10:00:00.000000+00:00"
 
@@ -57,13 +58,14 @@ def _legacy_db(path):
                 ("review", "system"), ("user", "user"), ("settled", "external"), ("archived", "external"),
             )
         }
-        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (ids["settled"],))
-        db.execute(
-            "UPDATE plan_nodes SET state='review_requested' WHERE id=?", (ids["review"],),
-        )
-        db.execute(
-            "UPDATE plan_nodes SET archived_at=? WHERE id=?", (_ARCHIVED, ids["archived"]),
-        )
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (ids["settled"],))
+            db.execute(
+                "UPDATE plan_nodes SET state='review_requested' WHERE id=?", (ids["review"],),
+            )
+            db.execute(
+                "UPDATE plan_nodes SET archived_at=? WHERE id=?", (_ARCHIVED, ids["archived"]),
+            )
         rewind_to_v88_policy(db)
 
         db.execute('ALTER TABLE project_vendor_accounts DROP COLUMN switch_on_limit')
@@ -97,7 +99,7 @@ def _blocked_payload(db, node_id: str) -> dict:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 103
+    assert SCHEMA_VERSION == 113
 
 
 def test_only_open_blockers_on_anyone_but_the_user_become_waits(tmp_path):
