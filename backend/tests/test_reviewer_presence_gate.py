@@ -74,7 +74,8 @@ def test_failed_presence_keeps_verdict_and_wake_and_stays_retryable(_reload_gate
 
     assert delivered.await_args_list[0].args[3]["verdict"] == "code_fail"
     set_error.assert_not_called()
-    terminal_error.assert_called_with("owner/repo", 42, "abc123def", "presence status not published", ANY)
+    terminal_error.assert_called_with("owner/repo", 42, "abc123def", ANY, ANY)
+    assert "presence status not published" in terminal_error.call_args.args[3]
     assert any(
         call.args[:2] == ("reviewer_gate", "presence_unpublished") for call in emit_event.call_args_list
     )
@@ -90,3 +91,17 @@ def test_override_skip_shows_presence_absent_with_reason(_reload_gate, _stub_pre
     _stub_presence_absent.assert_called_once_with("owner/repo", "abc123def", ANY)
     assert "qa/override-reviewer" in _stub_presence_absent.call_args.args[2]
     assert _reload_gate.reviewer_gate_state.get_reviewed_sha("owner/repo#42") == "abc123def"
+
+
+def test_failed_override_presence_is_loud_and_stays_retryable(_reload_gate, _stub_presence, _stub_presence_absent):
+    _stub_presence_absent.return_value = False
+    skipped = {"verdict": "skipped", "summary": "review skipped by override", "model_label": "override"}
+
+    _, _, terminal_error, emit_event = _run(_reload_gate, skipped, AsyncMock(return_value=True))
+
+    terminal_error.assert_called_with("owner/repo", 42, "abc123def", ANY, ANY)
+    assert "override skip" in terminal_error.call_args.args[3]
+    assert any(
+        call.args[:2] == ("reviewer_gate", "presence_unpublished") for call in emit_event.call_args_list
+    )
+    assert _reload_gate.reviewer_gate_state.get_reviewed_sha("owner/repo#42") is None
