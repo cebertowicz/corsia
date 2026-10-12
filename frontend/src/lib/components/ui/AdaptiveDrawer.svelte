@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { cubicOut } from 'svelte/easing';
 	import { onMount, tick } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
@@ -10,6 +9,7 @@
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { toastClearance } from '$lib/stores/toastClearance';
+	import { releaseSheetDrag, sheetFly } from '$lib/sheetMotion';
 
 	let {
 		ariaLabel,
@@ -32,7 +32,10 @@
 		onClosed = () => {},
 	}: {
 		ariaLabel: string;
-		/** Omit the chrome title when the content already names itself. */
+		/**
+		 * Optional chrome-level title. Omit it when the drawer's content already
+		 * carries its own titled header, so the two never say the same thing twice.
+		 */
 		heading?: string | null;
 		/** A short fact beside the title, such as a count; shown smaller in the accent colour. */
 		headingMeta?: string | null;
@@ -45,7 +48,11 @@
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
-		/** Keep a text field above the published visual viewport. */
+		/**
+		 * Sit on the visible part of the screen, above an on-screen keyboard, for a
+		 * drawer whose text field must stay in view while typing. It reads the
+		 * visual viewport the app already publishes as CSS variables.
+		 */
 		followKeyboard?: boolean;
 		/** Content may own the header, leaving the chrome with its grabber only. */
 		headless?: boolean;
@@ -77,11 +84,7 @@
 	let dragRaw = 0;
 	let stopToastClearance: (() => void) | undefined;
 
-	const flyParams = $derived(
-		$prefersReducedMotion
-			? { y: 0, duration: 0 }
-			: { y: 72, duration: 260, easing: cubicOut },
-	);
+	const flyParams = $derived(sheetFly($prefersReducedMotion));
 	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
 	// The token is read once on mount, never inside the derivation.
 	let tightMs = $state(120);
@@ -112,17 +115,12 @@
 
 	function finishDrag(event: PointerEvent): void {
 		if (!dragging || dragPointer !== event.pointerId) return;
-		const elapsed = Math.max(1, performance.now() - dragStartedAt);
-		const velocity = dragY / elapsed;
-		const threshold = Math.min(180, Math.max(96, (panel?.clientHeight ?? 480) * 0.24));
+		const release = releaseSheetDrag({ detent, released: event.type === 'pointerup', raw: dragRaw, elapsed: performance.now() - dragStartedAt, height: panel?.clientHeight ?? 480 });
 		dragging = false;
 		dragPointer = null;
-		if (detent === 'half' && event.type === 'pointerup' && (dragRaw <= -40 || (Math.abs(dragRaw) < 6 && elapsed < 350))) { onDetent?.('full'); return; }
-		if (dragY >= threshold || (dragY >= 64 && velocity > 0.75)) {
-			onClose();
-			return;
-		}
-		dragY = 0;
+		if (release === 'expand') onDetent?.('full');
+		else if (release === 'dismiss') onClose();
+		else dragY = 0;
 	}
 
 	function restingViewportBottomOccupancy(node: HTMLElement): number {

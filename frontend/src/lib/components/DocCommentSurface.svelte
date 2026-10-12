@@ -15,15 +15,22 @@
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
 	import { drawerFooterHeight, drawerKeys } from '$lib/docCommentDrawer';
+	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
 	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
-	/** Image comments keep their thumbnail, numbered cards, hover link, and selected-card scroll. */
+	/**
+	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
+	 * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
+	 */
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
-	/** Document image comments group below a thumbnail; a missing source has no thumbnail. */
+	/**
+	 * A document's images with comments on parts of them (DCOL-FR13.6): each image's comments sit together in the drawer
+	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
+	 */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
 	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null }: {
 		state: SurfaceState;
@@ -90,44 +97,14 @@
 	const openCount = $derived(comments.filter((comment) => !comment.resolved).length);
 	// Open counts threads that are open: the resolved card kept for an unsent reply says why it is still listed, and the document's chip agrees.
 	const headerCount = $derived(filter === 'open' ? `${openCount} open` : filter === 'resolved' ? `${comments.length - openCount} resolved` : `${comments.length} ${comments.length === 1 ? 'thread' : 'threads'}`);
-	let mobileDrawerOpen = $state(false);
-	let mobileCloseAction = $state<(() => void) | null>(null);
-	let closingMobileState = $state<SurfaceState>(null);
-	let closingMobileDraft = $state<{ text: string; body?: string; label?: string } | null>(null);
-	const renderedMobileState = $derived(closingMobileState ?? surfaceState);
-	const renderedMobileDraft = $derived(closingMobileDraft ?? draft);
-	$effect(() => {
-		if (surfaceState && sheetDrawer) {
-			closingMobileState = null;
-			closingMobileDraft = null;
-			mobileDrawerOpen = true;
-		}
+	const sheet = createCommentSheet({
+		state: () => surfaceState,
+		draft: () => draft,
+		sheetDrawer: () => sheetDrawer,
+		narrow: () => narrow,
+		onClose: () => onClose(),
+		onCancelDraft: () => (onCancelDraft ?? onClose)(),
 	});
-	function closeMobileDrawer(action: () => void = onClose): void {
-		mobileCloseAction = action;
-		mobileDrawerOpen = false;
-	}
-	function closeMobileSurface(): void {
-		if (sheetDrawer) closeMobileDrawer();
-		else onClose();
-	}
-	function cancelMobileDraft(): void {
-		const action = onCancelDraft ?? onClose;
-		if (!narrow) { action(); return; }
-		// Cancel commits state immediately, but the captured content owns the local outro.
-		closingMobileState = surfaceState;
-		closingMobileDraft = draft;
-		mobileCloseAction = null;
-		mobileDrawerOpen = false;
-		action();
-	}
-	function finishMobileClose(): void {
-		const action = mobileCloseAction;
-		mobileCloseAction = null;
-		closingMobileState = null;
-		closingMobileDraft = null;
-		action?.();
-	}
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
@@ -149,7 +126,7 @@
 		if (feedback.sendingGrace) return { before: `${count} · sending to `, owner, after: ` in ${feedback.graceMinutes} min` };
 		return { before: `${count} · ${feedback.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner, after: ' when you leave.' };
 	});
-	// Footer measurement is shared with the document canvas.	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
+	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
 		if (surfaceState?.kind !== 'thread' || typeof anchor !== 'function' || load?.state === 'loading') return;
 		if (!followed) onClose();
@@ -316,7 +293,7 @@
 {/snippet}
 
 {#snippet content()}
-	{#if renderedMobileState?.kind === 'draft' && renderedMobileDraft}<CommentComposer quote={renderedMobileDraft.text} label={renderedMobileDraft.label} body={renderedMobileDraft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={cancelMobileDraft} />
+	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
 	{:else}
 		{#if !readOnly && surfaceState?.kind !== 'thread'}
 			<div class="suggestion-status">
@@ -348,12 +325,12 @@
 	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
 {/snippet}
 
-{#if surfaceState || closingMobileState}
+{#if surfaceState || sheet.closing}
 	{#if surfaceState?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys={() => closeDrawer()}>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys={closeDrawer}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys={closeDrawer} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if narrow && renderedMobileState}<AdaptiveDrawer ariaLabel="Document comments" heading={renderedMobileState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard open={mobileDrawerOpen} onClose={closeMobileSurface} onClosed={finishMobileClose}>{@render content()}</AdaptiveDrawer>
+	{:else if narrow && sheet.state}<AdaptiveDrawer ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}>{@render content()}</AdaptiveDrawer>
 	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
