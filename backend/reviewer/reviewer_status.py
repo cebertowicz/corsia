@@ -208,6 +208,17 @@ def _skip_non_verdict_post(repo: str, sha: str, state: str, description: str) ->
     return False
 
 
+def has_existing_failure_or_error(repo: str, sha: str) -> bool:
+    """Return whether the reviewer context already shows a red non-verdict outcome.
+
+    Callers that cannot distinguish a reviewer terminal failure from an
+    already-reported reviewer failure use this to preserve the more specific
+    outcome and avoid offering an inapplicable retry.
+    """
+    standing = get_commit_status_for_context(repo, sha, STATUS_CHECK_CONTEXT)
+    return bool(standing and standing.get("state") in ("failure", "error"))
+
+
 def set_pending(repo: str, sha: str, description: str = "Review in progress") -> bool:
     """Set status to pending (review started or retrying).
 

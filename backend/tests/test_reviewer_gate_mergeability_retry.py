@@ -79,7 +79,9 @@ class TestMergeabilityRetry:
             gate_mod.github_reviewer_notifications, "notify_reviewer_terminal_error",
         ) as notify_error, patch(
             "reviewer.reviewer_status.set_error",
-        ) as set_error, patch.object(gate_mod, "_run_reviewer") as run_reviewer:
+        ) as set_error, patch(
+            "reviewer.reviewer_status.has_existing_failure_or_error", return_value=False,
+        ), patch.object(gate_mod, "_run_reviewer") as run_reviewer:
             gate_mod._evaluate_review_gate(
                 "owner/repo", "abc123def", 42, "webhook.github.check_suite_completed", None,
                 mergeability_retry_attempt=len(gate_mod.MERGEABILITY_RETRY_DELAYS_S),
