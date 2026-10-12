@@ -1,9 +1,9 @@
 """Pause contract rules 2 and 3 (#1971): what may start a paused agent's Turn.
 
-People reach a paused agent. A connected system's event, a worker's
-completion and a scheduled wake start no Turn: each ends as a cancelled row
-that says why, plus one line in the digest the agent reads with its next Turn.
-A schedule records no evidence the user asked for it yet (#2286).
+A person's own message, decision answer, or schedule the user asked for reaches
+an agent while paused. A connected-system event, peer message, worker completion
+and every other scheduled wake start no Turn: each ends as a cancelled row that
+says why, plus one line in the digest the agent reads with its next Turn.
 """
 
 from __future__ import annotations
@@ -116,6 +116,23 @@ def test_a_scheduled_wake_lands_in_the_digest(agent) -> None:
     assert "Arrived while paused: Nightly run" in _digest(agent.say("hello"))
 
 
+def test_a_user_asked_scheduled_wake_reaches_a_paused_agent(agent, main_db) -> None:
+    main_db.execute(
+        "INSERT INTO automation_schedules "
+        "(id,thread_id,scope_id,kind,spec,next_run_at,max_runs,state,created_by_actor,"
+        "asked_by_user,created_at,updated_at) VALUES "
+        "('nightly','main-1','scope','clock','2030-01-01T00:00:00+00:00',"
+        "'2030-01-01T00:00:00+00:00',1,'active','main-1',1,'t','t')"
+    )
+    main_db.commit()
+    agent.change("pause")
+    agent.queue("nightly-wake", metadata={
+        "event_type": "automation.scheduled_wake", "subject_id": "nightly",
+    })
+
+    assert _named(agent.start()) == ["nightly-wake"]
+
+
 @pytest.mark.parametrize("content", [
     "Subagent finished:\n\nTriage done: 4 issues closed.\nDetails follow.",
     "Triage done: 4 issues closed.\nDetails follow.",
@@ -143,15 +160,22 @@ def test_a_held_worker_completion_names_the_worker_and_its_result(
 
 @pytest.mark.parametrize(("role", "metadata"), [
     ("user", None),
-    ("user", {"sender_kind": "agent", "sender_thread_id": "peer"}),
     ("system", {"event_type": "plan.decision_answered", "origin": "plan"}),
     ("system", {"restart_registration_id": "restart-1"}),
-], ids=["user", "peer", "decision_answer", "restart"])
+], ids=["user", "decision_answer", "restart"])
 def test_people_reach_a_paused_agent(agent, role, metadata) -> None:
     agent.change("pause")
     agent.queue("reach", role=role, metadata=metadata)
 
     assert _named(agent.start()) == ["reach"]
+
+
+def test_a_peer_message_is_held_while_paused(agent) -> None:
+    agent.change("pause")
+    agent.queue("peer", role="user", metadata={"sender_kind": "agent"})
+
+    assert agent.start() is None
+    assert agent.ending("peer") == ("cancelled", "held_while_paused")
 
 
 def test_a_running_agent_starts_on_an_event(agent) -> None:

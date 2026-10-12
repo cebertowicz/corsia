@@ -64,7 +64,7 @@ def test_answer_input_reaches_the_paused_agent(db):
     ).fetchone()
     assert row["thread_id"] == "owner"
     assert row["delivery_state"] == "queued"
-    assert reaches_paused_agent(row)
+    assert reaches_paused_agent(row, db=db)
 
 
 def test_an_agent_still_cannot_request_review_on_a_paused_plan(db):

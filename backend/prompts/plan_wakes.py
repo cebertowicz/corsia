@@ -123,9 +123,12 @@ PAUSED_LINE = (
 )
 
 
-def paused_line(since: str) -> str:
+def paused_line(since: str, *, scheduled_wake: bool = False) -> str:
     """Return the line opening an input stamped with its plan's pause time."""
-    return PAUSED_LINE.format(since=since[:16].replace("T", " ") + " UTC") + "\n\n"
+    line = PAUSED_LINE.format(since=since[:16].replace("T", " ") + " UTC")
+    if scheduled_wake:
+        line = line[:-1] + " Do this schedule's task only, then stop.]"
+    return line + "\n\n"
 
 
 def ask_release_summary(

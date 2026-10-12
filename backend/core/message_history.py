@@ -60,7 +60,10 @@ def render_agent_envelope(
     if paused_since := (metadata or {}).get("plan_paused_since"):
         from prompts.plan_wakes import paused_line
 
-        lead = paused_line(str(paused_since))
+        lead = paused_line(
+            str(paused_since),
+            scheduled_wake=(metadata or {}).get("event_type") == "automation.scheduled_wake",
+        )
     if (metadata or {}).get(REPLY_VIA_POST_UPDATE_KEY) is True and not any(
         (metadata or {}).get(key) for key in NON_HUMAN_MARKERS
     ):
