@@ -296,6 +296,17 @@ describe("what was already there never opens", () => {
     expect(chips()).toBe(0);
   });
 
+  it("removes an open drawer synchronously when the dock is destroyed", async () => {
+    await mountDock();
+    await load();
+    await load(from("d1", 10));
+    expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(1);
+
+    unmount(component!);
+    component = null;
+    expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(0);
+  });
+
   it("a dock remount opens nothing raised while it was gone", async () => {
     await mountDock();
     await load();

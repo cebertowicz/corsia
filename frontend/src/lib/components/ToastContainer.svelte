@@ -1,9 +1,37 @@
 <script lang="ts">
 	import { toasts } from '$lib/stores/toast';
+	import { toastClearance } from '$lib/stores/toastClearance';
+
+	let toastHeight = $state(0);
+
+	function measureToastHeight(node: HTMLElement) {
+		const update = () => {
+			toastHeight = node.getBoundingClientRect().height;
+		};
+		if (typeof ResizeObserver === 'undefined') {
+			update();
+			return {};
+		}
+		const observer = new ResizeObserver(update);
+		observer.observe(node);
+		update();
+		return {
+			destroy() {
+				observer.disconnect();
+			},
+		};
+	}
 </script>
 
 {#if $toasts.length > 0}
-	<div class="toast-container" aria-live="polite" aria-atomic="false">
+	<div
+		class="toast-container"
+		aria-live="polite"
+		aria-atomic="false"
+		style:--toast-clearance="{$toastClearance}px"
+		style:--toast-height="{toastHeight}px"
+		use:measureToastHeight
+	>
 		{#each $toasts as toast (toast.id)}
 			<div
 				class="toast toast--{toast.type ?? 'info'}"
@@ -32,17 +60,22 @@
 
 <style>
 	.toast-container {
+		--toast-base-offset: var(--space-6);
 		position: fixed;
-		bottom: 24px;
+		bottom: min(
+			max(var(--toast-base-offset), calc(var(--toast-clearance) + var(--space-4))),
+			calc(100dvh - var(--toast-height) - var(--header-height) - var(--space-3) - env(safe-area-inset-top, 0px))
+		);
 		left: 50%;
 		transform: translateX(-50%);
 		width: max-content;
-		max-width: calc(100vw - 32px);
+		max-width: calc(100vw - var(--space-7));
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: var(--space-2);
 		z-index: 9999;
 		pointer-events: none;
+		transition: bottom var(--dur-drawer) var(--ease-ios-sheet);
 	}
 
 	.toast {
@@ -111,8 +144,12 @@
 	.toast-close:hover { opacity: 1; }
 	.toast-text { min-width: 0; flex: 1; }
 	@media (max-width: 600px) {
-		.toast-container { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+		.toast-container { --toast-base-offset: calc(var(--space-4) + env(safe-area-inset-bottom, 0px)); }
 		.toast-close { width: 44px; height: 44px; }
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.toast-container { transition: none; }
 	}
 
 	@keyframes toast-in {
