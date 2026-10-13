@@ -19,8 +19,8 @@ interface PlanTreeRevealOptions {
 }
 
 /**
- * What the person has revealed in a plan tree. Person-requested paging owns
- * block-slot motion; focus, fold waves, and live updates keep their own motion.
+ * What the person has revealed in a plan tree. Person-requested disclosure and
+ * paging own block-slot motion; focus, fold waves, and live updates keep their own motion.
  */
 export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranches, history }: PlanTreeRevealOptions) {
 	let revealed = $state<Record<string, number>>({});
@@ -92,6 +92,7 @@ export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranch
 		get userPaging() { return userPaging; },
 		get pendingFoldLevel() { return pendingFoldLevel; },
 		pageSize: FOLD_PAGE,
+		byRequest,
 		isScheduledOpen,
 		revealNode,
 		revealFolded,
