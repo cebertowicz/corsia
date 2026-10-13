@@ -7,6 +7,7 @@ import {
 	saveEvidenceScreenshot,
 	TEST_TOKEN,
 } from '../support/corsia';
+import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 import { syntheticPng } from '../support/syntheticImages';
 
 const FILLER = Array.from({ length: 34 }, (_, i) => `Filler paragraph ${i + 1} keeps this tab long enough to restore.\n`);
@@ -21,7 +22,8 @@ const query = () => new URLSearchParams({ token: TEST_TOKEN }).toString();
 const link = (page: Page) => page.locator('.cm-md-link-open', { hasText: 'the second document' });
 
 type VisiblePlace = { scrollTop: number; line: string; top: number | null };
-type ReturnFrame = VisiblePlace & { elapsedMs: number; scrollerVisible: boolean };
+/** `editor` is false while the tab still shows its loading state, before the document's text arrived. */
+type ReturnFrame = VisiblePlace & { elapsedMs: number; editor: boolean; scrollerVisible: boolean };
 
 async function visiblePlace(scroller: ReturnType<Page['locator']>): Promise<VisiblePlace> {
 	return scroller.evaluate((el) => {
@@ -40,10 +42,13 @@ async function visiblePlace(scroller: ReturnType<Page['locator']>): Promise<Visi
 }
 
 /**
- * Records every frame the browser paints after the tab's click event. Each sample is taken just after its frame's paint:
- * an animation-frame callback runs before the editor's own measure in that frame, so it reads state never painted.
+ * Records every frame the browser paints after the tab's click event, each as that frame paints it: read in the frame's
+ * rendering, after the editor's measure and the page's resize observers (see `installPaintedFrames`). A read in an
+ * animation-frame callback comes before the editor's measure, and one in a task after the frame can see a later
+ * answer from the server, so either can record a state no frame showed.
  */
 async function armReturnSampler(page: Page): Promise<void> {
+	await installPaintedFrames(page);
 	await page.evaluate(() => {
 		let result: Promise<ReturnFrame[]> | undefined;
 		(window as Window & { __tabReturnSamples?: () => Promise<ReturnFrame[]> }).__tabReturnSamples = () => {
@@ -55,12 +60,7 @@ async function armReturnSampler(page: Page): Promise<void> {
 			result = new Promise<ReturnFrame[]>((resolve) => {
 				const frames: ReturnFrame[] = [];
 				const startedAt = performance.now();
-				const afterPaint = (next: () => void) => requestAnimationFrame(() => {
-					const channel = new MessageChannel();
-					channel.port1.onmessage = () => next();
-					channel.port2.postMessage(null);
-				});
-				const sample = () => {
+				const measure = (): ReturnFrame => {
 					const scroller = document.querySelector<HTMLElement>('.cm-scroller');
 					const box = scroller?.getBoundingClientRect();
 					const style = scroller && getComputedStyle(scroller);
@@ -70,17 +70,23 @@ async function armReturnSampler(page: Page): Promise<void> {
 							return rect.bottom > box.top && rect.top < box.bottom;
 						})
 						: undefined;
-					frames.push({
+					return {
 						elapsedMs: performance.now() - startedAt,
 						scrollTop: scroller?.scrollTop ?? 0,
 						line: visibleLine?.textContent?.trim() ?? '',
 						top: visibleLine && box ? visibleLine.getBoundingClientRect().top - box.top : null,
+						editor: Boolean(scroller),
 						scrollerVisible: Boolean(box && style && style.visibility !== 'hidden' && style.display !== 'none'),
-					});
-					if (performance.now() - startedAt < 1_000) afterPaint(sample);
-					else resolve(frames);
+					};
 				};
-				afterPaint(sample);
+				// The window ends on the frame whose own reading reached it, so that frame is the last recorded.
+				const keep = (frame: ReturnFrame) => {
+					frames.push(frame);
+					if (frame.elapsedMs < 1_000) return true;
+					resolve(frames);
+					return false;
+				};
+				(window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame!(measure, keep);
 			});
 		};
 		document.addEventListener('click', arm, true);
@@ -100,15 +106,23 @@ const MAX_HIDDEN_FRAMES = 1;
 /** From its first visible frame the saved line stays within this many pixels of where it was. */
 const MAX_DRIFT_PX = 2;
 
-/** Frames that drew no document: the covered stretch while the place is restored, and any blank after it. */
-function hiddenFrames(frames: ReturnFrame[]): number {
-	return frames.filter((frame) => !frame.scrollerVisible).length;
+/** Frames that drew the document's editor covered while its place was put back. */
+function coveredFrames(frames: ReturnFrame[]): number {
+	return frames.filter((frame) => frame.editor && !frame.scrollerVisible).length;
+}
+
+/**
+ * Frames that showed the tab's loading state while the document's text and live session came from the server. How many
+ * depends on how fast the server answers, so they are reported, not bounded; they show no document, so no place.
+ */
+function loadingFrames(frames: ReturnFrame[]): number {
+	return frames.filter((frame) => !frame.editor).length;
 }
 
 function expectNoReturnPop(frames: ReturnFrame[], before: VisiblePlace): void {
 	if (before.top === null) throw new Error('saved document place has no visible line');
 	expect(frames.at(-1)?.elapsedMs).toBeGreaterThanOrEqual(1_000);
-	expect(hiddenFrames(frames), `hidden frames after activation: ${JSON.stringify(frames.slice(0, 4))}`).toBeLessThanOrEqual(MAX_HIDDEN_FRAMES);
+	expect(coveredFrames(frames), `covered frames after activation: ${JSON.stringify(frames.slice(0, 4))}`).toBeLessThanOrEqual(MAX_HIDDEN_FRAMES);
 	const firstVisible = frames.findIndex((frame) => frame.scrollerVisible);
 	expect(firstVisible).toBeGreaterThanOrEqual(0);
 	for (const frame of frames.slice(firstVisible)) {
@@ -194,7 +208,10 @@ for (const width of [1440, 393]) {
 				}
 
 				const frames = await returnSamples(page);
-				const report = { before, hiddenFrames: hiddenFrames(frames), maxHiddenFrames: MAX_HIDDEN_FRAMES, maxDriftPx: MAX_DRIFT_PX, frames };
+				const report = {
+					before, coveredFrames: coveredFrames(frames), loadingFrames: loadingFrames(frames),
+					maxHiddenFrames: MAX_HIDDEN_FRAMES, maxDriftPx: MAX_DRIFT_PX, frames,
+				};
 				fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}.json`), JSON.stringify(report));
 				expectNoReturnPop(frames, before);
 				await expect.poll(async () => {
@@ -240,6 +257,7 @@ type ImageFrame = {
 
 /** Like the tab-return sampler, for a document image: records every frame painted after the next click. */
 async function armImageSampler(page: Page, durationMs: number): Promise<void> {
+	await installPaintedFrames(page);
 	await page.evaluate((durationMs) => {
 		const target = window as Window & { __imageSamples?: Promise<ImageFrame[]> };
 		target.__imageSamples = undefined;
@@ -248,13 +266,8 @@ async function armImageSampler(page: Page, durationMs: number): Promise<void> {
 			target.__imageSamples = new Promise<ImageFrame[]>((resolve) => {
 				const frames: ImageFrame[] = [];
 				const startedAt = performance.now();
-				const afterPaint = (next: () => void) => requestAnimationFrame(() => {
-					const channel = new MessageChannel();
-					channel.port1.onmessage = () => next();
-					channel.port2.postMessage(null);
-				});
 				const name = (el: HTMLElement) => el.querySelector('[role="tab"]')?.textContent?.trim() ?? '';
-				const sample = () => {
+				const measure = (): ImageFrame => {
 					const scroller = document.querySelector<HTMLElement>('.cm-scroller');
 					const box = scroller?.getBoundingClientRect();
 					const style = scroller && getComputedStyle(scroller);
@@ -263,7 +276,7 @@ async function armImageSampler(page: Page, durationMs: number): Promise<void> {
 					const chat = document.querySelector<HTMLElement>('.chat-col')?.getBoundingClientRect();
 					const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
 					const tabs = [...document.querySelectorAll<HTMLElement>('.tab-wrap')];
-					frames.push({
+					return {
 						elapsedMs: performance.now() - startedAt,
 						scrollerVisible: Boolean(box && style && style.visibility !== 'hidden' && style.display !== 'none' && box.height > 0),
 						imageTop: widget && box ? widget.getBoundingClientRect().top - box.top : null,
@@ -274,11 +287,15 @@ async function armImageSampler(page: Page, durationMs: number): Promise<void> {
 						chatWidth: chat?.width ?? null,
 						markedTabs: tabs.filter((el) => !['rgba(0, 0, 0, 0)', 'transparent'].includes(getComputedStyle(el).backgroundColor)).map(name),
 						selectedTabs: tabs.filter((el) => el.querySelector('[aria-selected="true"]')).map(name),
-					});
-					if (performance.now() - startedAt < durationMs) afterPaint(sample);
-					else resolve(frames);
+					};
 				};
-				afterPaint(sample);
+				const keep = (frame: ImageFrame) => {
+					frames.push(frame);
+					if (frame.elapsedMs < durationMs) return true;
+					resolve(frames);
+					return false;
+				};
+				(window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame!(measure, keep);
 			});
 		};
 		document.addEventListener('click', arm, true);

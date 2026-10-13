@@ -4,6 +4,7 @@ import { expect, test, type APIRequestContext, type Page, type TestInfo } from '
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
 import { drag, sendFromDrawerByKeyboard, settled, shoot } from '../support/imageRegionComments';
+import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 
 // Comments on parts of an image inside a document (DCOL-FR13.3, 13.5, 13.6, 13.12): the viewer over the document,
 // the margin marker and drawer group back in it, and the one feedback batch both show and send.
@@ -211,25 +212,27 @@ async function expectMarkersBesideImages(page: Page, testInfo: TestInfo, name: s
 type Sample = [number, 'pending' | 'sending' | 'gone', number];
 /**
  * Reads, every frame until stopped, the document drawer footer's send state (Send now, sending, or gone) and where the
- * first comment card sits. Each read waits for the frame to be painted: the drawer eases its height from a resize
- * observer, which runs after a frame's animation callbacks, so a read inside one would see a size never painted.
+ * first comment card sits, as that frame paints them. The drawer eases its height from a resize observer, so each read
+ * comes after the frame's resize observers; a read in a later task could see the footer already removed by the send's
+ * answer, with the card at its final place for a frame never painted.
  */
 async function startSampling(page: Page) {
+	await installPaintedFrames(page);
 	await page.evaluate(() => {
 		const state = { seen: [] as Sample[], on: true };
 		(window as unknown as { __footer: typeof state }).__footer = state;
 		const start = performance.now();
-		const read = () => {
+		const measure = (): Sample => {
 			const footer = document.querySelector<HTMLElement>('[data-drawer-unsent]');
 			const card = document.querySelector('.canvas-comment-drawer .ct, .drawer-panel[role="dialog"] .ct');
 			const status = !footer ? 'gone' : footer.querySelector('.btn')?.classList.contains('loading') ? 'sending' : 'pending';
-			state.seen.push([Math.round(performance.now() - start), status, Math.round((card?.getBoundingClientRect().top ?? 0) * 10) / 10]);
+			return [Math.round(performance.now() - start), status, Math.round((card?.getBoundingClientRect().top ?? 0) * 10) / 10];
 		};
-		const tick = () => {
-			setTimeout(read, 0);
-			if (state.on) requestAnimationFrame(tick);
+		const keep = (sample: Sample) => {
+			state.seen.push(sample);
+			return state.on;
 		};
-		requestAnimationFrame(tick);
+		(window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame!(measure, keep);
 	});
 }
 const stopSampling = (page: Page) => page.evaluate(() => {
