@@ -27,6 +27,7 @@
 	import MobileScrollFab from './MobileScrollFab.svelte';
 	import AttentionDock from './attention/AttentionDock.svelte';
 	import ChatAttentionStack from './attention/ChatAttentionStack.svelte';
+	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import PlanDrawerControl from './plans/PlanDrawerControl.svelte';
 	import { isMobile } from '$lib/stores/viewport';
 	import { openPlanSubagentLeaf, openPlanDiscussionLeaf } from '$lib/planLeafReturn';
@@ -325,7 +326,7 @@
 	});
 </script>
 <div class="chat-shell">
-	<div class="chat-content">
+	<div class="chat-content" use:toastAnchorSurface>
 		<MessageList
 			bind:this={messageListRef}
 			bind:messagesEl
