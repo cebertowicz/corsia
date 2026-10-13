@@ -24,7 +24,9 @@ the later entry describes the current behavior.
 
 ### Agents and Plans
 
-- An agent can mark a step assigned to you Done once it is really finished, instead of leaving it as Won't do.
+- An agent can mark a step assigned to you Done once it is really finished, instead of leaving it as Won't do, and any question it raised about that step leaves your queue.
+- A task started because its prerequisite finished now reaches its agent with the task's handoff description.
+- Deeply nested plan rows stay aligned and readable, hover chips no longer stick after a tap on a touch screen, and finished rows and the plan drawer animate open and closed (instantly under reduced motion).
 - Next lists ready work before work that is waiting, and a plan row's second line stays on one line.
 - A worker that moves to another account after a usage limit no longer triggers a false cannot-run notice.
 - Every agent now brings approvals as a review on the document or image itself.
@@ -36,6 +38,10 @@ the later entry describes the current behavior.
 
 - Saving a rollover or account change in Providers settings no longer leaves the page's switches unusable.
 - When a provider refuses work, each account in your rollover order is tried at most once before waiting for the reset, and a reset no longer starts a second turn on a busy thread.
+
+### Measurement
+
+- Measurement's usage totals start rebuilding when CORSIA starts, so the first visit after an update is faster.
 
 ### Documentation
 
