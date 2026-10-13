@@ -67,7 +67,7 @@ def is_users_word(row) -> bool:
     """Whether one claimed input is the user's word under the pause contract."""
     metadata = _metadata(row)
     return (
-        row["role"] == "user" and not any(key in metadata for key in NON_HUMAN_MARKERS)
+        row["role"] == "user" and not any(metadata.get(key) for key in NON_HUMAN_MARKERS)
     ) or metadata.get("event_type") == "plan.decision_answered"
 
 
@@ -91,6 +91,23 @@ def _user_asked_schedule(db, schedule_id) -> bool:
     return row is not None and row["asked_by_user"] == 1
 
 
+def _user_schedule_wake(metadata: dict, db) -> bool:
+    """Whether an input is a scheduled wake from a schedule the user asked for."""
+    return (
+        metadata.get("event_type") == "automation.scheduled_wake"
+        and _user_asked_schedule(db, metadata.get("subject_id"))
+    )
+
+
+def user_schedule_wakes(db, rows) -> list[str]:
+    """The ids among claimed ``rows`` that are wakes from user-asked schedules.
+
+    A paused claim stamps them (``core.message_history.PAUSED_SCHEDULE_KEY``) so
+    the stop clause is decided once, when the wake is claimed, and replays as stored.
+    """
+    return [str(row["id"]) for row in rows if _user_schedule_wake(_metadata(row), db)]
+
+
 def reaches_paused_agent(row, *, db) -> bool:
     """Whether this queued input may start a paused agent's Turn.
 
@@ -103,7 +120,7 @@ def reaches_paused_agent(row, *, db) -> bool:
     if row["role"] == "user":
         return not metadata.get("completion")
     if metadata.get("event_type") == "automation.scheduled_wake":
-        return _user_asked_schedule(db, metadata.get("subject_id"))
+        return _user_schedule_wake(metadata, db)
     return (
         metadata.get("event_type") in _REACH_PAUSED_EVENTS
         or "restart_registration_id" in metadata

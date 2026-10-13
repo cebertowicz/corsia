@@ -18,6 +18,10 @@ from infra.delivery_states import TOOL_RESULT_QUARANTINED_UNBOUND
 #: before the stamp existed keeps rendering exactly as it was cached.
 REPLY_VIA_POST_UPDATE_KEY = "reply_via_post_update"
 
+#: Stamped at claim on a paused agent's scheduled wake from a schedule the user
+#: asked for; like the footer key, its stored presence decides the stop clause.
+PAUSED_SCHEDULE_KEY = "plan_paused_schedule"
+
 #: Metadata that marks an input as written by an agent, a parent's completion
 #: or a routed event: none of them is a human message. Admission stamps by
 #: this rule and the envelope renders by it, so the two cannot drift.
@@ -62,7 +66,7 @@ def render_agent_envelope(
 
         lead = paused_line(
             str(paused_since),
-            scheduled_wake=(metadata or {}).get("event_type") == "automation.scheduled_wake",
+            scheduled_wake=(metadata or {}).get(PAUSED_SCHEDULE_KEY) is True,
         )
     if (metadata or {}).get(REPLY_VIA_POST_UPDATE_KEY) is True and not any(
         (metadata or {}).get(key) for key in NON_HUMAN_MARKERS

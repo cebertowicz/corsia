@@ -67,8 +67,6 @@ export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranch
 				const loaded = levels().get(level)?.rows.length ?? 0;
 				if (loaded === 0) return;
 				byRequest(() => (revealed = { ...revealed, [level]: Math.min(target, loaded) }));
-			} catch {
-				// The history store normally converts a failed read to its retry state; this only protects an unexpected rejection.
 			} finally {
 				pendingFoldLevel = null;
 			}

@@ -133,6 +133,42 @@ def test_a_user_asked_scheduled_wake_reaches_a_paused_agent(agent, main_db) -> N
     assert _named(agent.start()) == ["nightly-wake"]
 
 
+def test_only_a_user_asked_wake_is_stamped_with_the_stop_clause_at_claim(agent, main_db) -> None:
+    import json
+
+    from core.message_history import PAUSED_SCHEDULE_KEY, render_agent_envelope
+
+    for schedule_id, asked in (("asked", 1), ("own", 0)):
+        main_db.execute(
+            "INSERT INTO automation_schedules "
+            "(id,thread_id,scope_id,kind,spec,next_run_at,max_runs,state,created_by_actor,"
+            "asked_by_user,created_at,updated_at) VALUES "
+            "(?,'main-1','scope','clock','2030-01-01T00:00:00+00:00',"
+            "'2030-01-01T00:00:00+00:00',1,'active','main-1',?,'t','t')",
+            (schedule_id, asked),
+        )
+    main_db.commit()
+    agent.change("pause")
+    agent.queue("asked-wake", metadata={"event_type": "automation.scheduled_wake",
+                                        "subject_id": "asked"})
+    agent.queue("own-wake", metadata={"event_type": "automation.scheduled_wake",
+                                      "subject_id": "own"})
+    agent.queue("hello", role="user")
+
+    assert set(_named(agent.start())) == {"asked-wake", "own-wake", "hello"}
+    stored = {
+        row[0]: json.loads(row[1])
+        for row in main_db.execute(
+            "SELECT id, metadata FROM messages WHERE id IN ('asked-wake','own-wake')"
+        )
+    }
+    assert stored["asked-wake"][PAUSED_SCHEDULE_KEY] is True
+    assert PAUSED_SCHEDULE_KEY not in stored["own-wake"]
+    stop = "Do this schedule's task only, then stop."
+    assert stop in render_agent_envelope("x", stored["asked-wake"]).managed_prefix
+    assert stop not in render_agent_envelope("x", stored["own-wake"]).managed_prefix
+
+
 @pytest.mark.parametrize("content", [
     "Subagent finished:\n\nTriage done: 4 issues closed.\nDetails follow.",
     "Triage done: 4 issues closed.\nDetails follow.",

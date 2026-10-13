@@ -8,10 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.message_history import render_agent_envelope
+from core.message_history import PAUSED_SCHEDULE_KEY, render_agent_envelope
 from infra import state
 from infra.database_migrations import migrate_to_current
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
+from prompts.plan_wakes import paused_line
 from tools import automations
 from plans.pause_authority import (
     is_users_word, reaches_paused_agent, turn_carries_users_word,
@@ -26,6 +27,7 @@ from plans.pause_authority import (
         ("user", {"sender_kind": "eval"}, False),
         ("user", {"completion": True}, False),
         ("user", {"routed_event": "x"}, False),
+        ("user", {"completion": False}, True),
         ("user", {"sender_kind": "system"}, False),
         ("system", {"event_type": "plan.decision_answered"}, True),
         ("system", {"event_type": "automation.scheduled_wake"}, False),
@@ -173,17 +175,29 @@ def test_paused_scheduled_wake_uses_the_existing_opening_with_a_stop_clause():
         {
             "plan_paused_since": "2030-01-01T00:00:00+00:00",
             "event_type": "automation.scheduled_wake",
+            PAUSED_SCHEDULE_KEY: True,
         },
     )
 
     assert "Do this schedule's task only, then stop." in rendered.managed_prefix
 
 
+def test_a_stored_wake_without_the_claim_stamp_replays_unchanged():
+    metadata = {
+        "plan_paused_since": "2030-01-01T00:00:00+00:00",
+        "event_type": "automation.scheduled_wake",
+    }
+
+    assert render_agent_envelope("scheduled task", metadata).managed_prefix == paused_line(
+        "2030-01-01T00:00:00+00:00",
+    )
+
+
 def test_migration_113_to_114_defaults_legacy_schedules_to_false():
     db = sqlite3.connect(":memory:")
-    legacy_schema = SCHEMA_SQL.replace(
-        "        asked_by_user INTEGER NOT NULL DEFAULT 0,\n", "",
-    )
+    column = ",\n        asked_by_user INTEGER NOT NULL DEFAULT 0\n"
+    assert column in SCHEMA_SQL
+    legacy_schema = SCHEMA_SQL.replace(column, "\n")
     db.executescript(legacy_schema)
     db.execute("PRAGMA user_version=113")
 
