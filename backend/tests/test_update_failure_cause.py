@@ -16,7 +16,8 @@ async def test_update_disk_refusal_persists_numbers_before_any_drain(isolated_db
     from infra.database import get_db
     from infra.database_migrations import BackupRoomError
 
-    monkeypatch.setattr(settings_restart, "_prepare_owned_release", AsyncMock())
+    prepare = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", prepare)
     monkeypatch.setattr(
         settings_restart,
         "_check_update_backup_room",
@@ -48,7 +49,44 @@ async def test_update_disk_refusal_persists_numbers_before_any_drain(isolated_db
         "failure_code": "disk_space",
         "failure_detail": '{"needed_bytes": 13, "free_bytes": 8}',
     }
+    prepare.assert_not_awaited()
     drain.assert_not_awaited()
+
+
+def test_update_precheck_credits_prunable_backups(tmp_path, monkeypatch):
+    """The preflight accepts room the migration will make by pruning stale backups."""
+    from api import update_preflight
+    from infra import database, database_migrations
+
+    source = tmp_path / "corsia.db"
+    source.write_bytes(b"database")
+    stale = tmp_path / "corsia.db.pre-migration-v1-20260101T000000Z.bak"
+    newest = tmp_path / "corsia.db.pre-migration-v1-20260201T000000Z.bak"
+    stale.write_bytes(b"stale")
+    newest.write_bytes(b"newest")
+    monkeypatch.setattr(database_migrations, "_BACKUP_FREE_FLOOR_BYTES", 0)
+    monkeypatch.setattr(database_migrations, "_BACKUP_MIN_FREE_RATIO", 1)
+    monkeypatch.setattr(
+        database_migrations.shutil, "disk_usage", lambda _path: type("Usage", (), {"free": 3})()
+    )
+
+    class Result:
+        def __init__(self, row):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def execute(self, sql):
+            return Result((0, "main", str(source)) if "database_list" in sql else (1,))
+
+    monkeypatch.setattr(database, "get_db", Connection)
+    update_preflight._check_update_backup_room()
+    stale.unlink()
+    with pytest.raises(database_migrations.BackupRoomError) as refused:
+        update_preflight._check_update_backup_room()
+    assert refused.value.free_bytes == 3
 
 
 @pytest.mark.asyncio

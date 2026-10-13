@@ -866,38 +866,41 @@ redeploy_sync_python_dependencies() {
     fi
 }
 
+UPDATE_PREPARE_FETCH_FAILED=41
+UPDATE_PREPARE_BUILD_FAILED=42
+
 # Pull, dependency-check, and stage a build from the serving checkout's CURRENT
 # branch. The caller holds the Update mutex for this whole function.
 prepare_redeploy_locked() {
     local checkout="$1" git_dir="$2" branch fe stage prepared backup absent
 
-    recover_stale_git_index_lock "$git_dir" || return 1
+    recover_stale_git_index_lock "$git_dir" || return "$UPDATE_PREPARE_FETCH_FAILED"
     branch="$(git -C "$checkout" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
     if [ -z "$branch" ]; then
         fail "Redeploy refused: serving checkout is in detached HEAD — no branch to pull"
-        return 1
+        return "$UPDATE_PREPARE_FETCH_FAILED"
     fi
     if [ -n "$(git -C "$checkout" status --porcelain 2>/dev/null)" ]; then
         fail "Redeploy refused: serving checkout has uncommitted changes (deployment surface must stay clean)"
-        return 1
+        return "$UPDATE_PREPARE_FETCH_FAILED"
     fi
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     if [ -e "$prepared" ]; then
         if [ ! -d "$stage" ]; then
             fail "Redeploy refused: prepared frontend ownership marker has no matching staged build at $stage"
-            return 1
+            return "$UPDATE_PREPARE_FETCH_FAILED"
         fi
         fail "Redeploy refused: a validated frontend update is already awaiting restart at $stage"
-        return 1
+        return "$UPDATE_PREPARE_FETCH_FAILED"
     fi
     echo "  Pulling --ff-only ($branch) in $checkout ..."
     if ! git -C "$checkout" pull --ff-only; then
         fail "Redeploy refused: git pull --ff-only failed (diverged / non-fast-forward / offline) — checkout left untouched"
-        return 1
+        return "$UPDATE_PREPARE_FETCH_FAILED"
     fi
-    redeploy_sync_python_dependencies "$checkout" || return 1
-    redeploy_build "$checkout" || return 1
+    redeploy_sync_python_dependencies "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
+    redeploy_build "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
     echo "  Pull + dependency check + build OK"
 }
 

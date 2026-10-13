@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 from loguru import logger
@@ -16,21 +15,20 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
 
     def contact_and_operation() -> tuple[dict | None, dict | None, str | None]:
         connection = get_db()
-        try:
-            operation = self_restart.operation_by_id(operation_id, db=connection)
-            if (
-                operation is None or operation.get("kind") != "update"
-                or operation.get("status") != "failed" or operation.get("conductor_told_at")
-            ):
-                return None, operation, None
-            contact, gap = workspace_conductor_contact(
-                str(operation.get("requester_user") or ""), connection
-            )
-            return contact, operation, gap
-        finally:
-            connection.close()
+        operation = self_restart.operation_by_id(operation_id, db=connection)
+        if (
+            operation is None or operation.get("kind") != "update"
+            or operation.get("status") != "failed" or operation.get("conductor_told_at")
+        ):
+            return None, operation, None
+        contact, gap = workspace_conductor_contact(
+            str(operation.get("requester_user") or ""), connection
+        )
+        return contact, operation, gap
 
-    contact, operation, gap = await asyncio.to_thread(contact_and_operation)
+    from infra.db_async import run_in_db
+
+    contact, operation, gap = await run_in_db(contact_and_operation)
     if contact is None:
         if operation is not None and gap:
             logger.warning("update failure conductor notice skipped: {}", gap)
@@ -54,6 +52,6 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
         delivery_id=f"update-failed:{operation_id}",
     )
     if sent:
-        await asyncio.to_thread(self_restart.mark_conductor_told, operation_id)
+        await run_in_db(self_restart.mark_conductor_told, operation_id)
     else:
         logger.warning("update failure conductor notice could not be delivered")

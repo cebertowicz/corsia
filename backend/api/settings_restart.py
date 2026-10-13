@@ -20,7 +20,8 @@ _RELEASE_FAILURE_NOTE = (
     "Restart control could not be released automatically; "
     "the active operation may still be holding ingress."
 )
-
+_PREPARE_FETCH_FAILED = 41
+_PREPARE_BUILD_FAILED = 42
 
 
 def _update_log_path() -> Path:
@@ -36,14 +37,6 @@ def _clean_update_output(value: str | bytes | None) -> str:
     if isinstance(value, bytes):
         value = value.decode(errors="replace")
     return re.sub(r"\x1b\[[0-9;]*m", "", value)
-
-
-def _preparation_failure_code(failure: BaseException) -> str:
-    """Classify the existing preparation failure without replacing its summary."""
-    detail = str(getattr(failure, "detail", failure)).lower()
-    if any(marker in detail for marker in ("build", "pip", "dependency")):
-        return "build_failed"
-    return "fetch_failed"
 
 
 def _failure_summary(failure: BaseException) -> str:
@@ -117,7 +110,12 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
         409,
         f"Update stopped before restart: {summary}. Full log: {log_path}",
     )
-    failure.update_log_path = log_path
+    setattr(
+        failure,
+        "update_failure_code",
+        {_PREPARE_FETCH_FAILED: "fetch_failed", _PREPARE_BUILD_FAILED: "build_failed"}.get(result.returncode),
+    )
+    setattr(failure, "update_log_path", log_path)
     raise failure
 
 
@@ -164,9 +162,6 @@ async def _acquire_settings_restart(
     if operation_id is None:
         raise HTTPException(409, "A restart is already in flight.")
     return operation_id
-
-
-# The backup-room check is imported with the other API dependencies above.
 
 
 async def _begin_settings_drain(operation_id: str, mode: str) -> None:
@@ -268,7 +263,7 @@ async def _prepare_owned_release(
         await _compensate_preparation_failure(
             operation_id,
             error,
-            failure_code=_preparation_failure_code(error),
+            failure_code=getattr(error, "update_failure_code", None),
             failure_detail=_failure_detail(error),
         )
         raise
@@ -348,9 +343,6 @@ async def prelaunch_settings_restart(
             raise
 
         if prepared:
-            await _prepare_owned_release(
-                operation_id, acquired_ids, corsia_script, restart_env
-            )
             try:
                 await _check_update_backup_room()
             except Exception as error:
@@ -373,6 +365,9 @@ async def prelaunch_settings_restart(
                          "free_bytes": error.free_bytes},
                     ) from error
                 raise
+            await _prepare_owned_release(
+                operation_id, acquired_ids, corsia_script, restart_env
+            )
             script_args = ["restart-prepared"]
 
         try:

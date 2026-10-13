@@ -792,38 +792,31 @@ def _database_bytes(source: Path) -> int:
     return total
 
 
-def require_backup_room(source: Path, from_version: int) -> tuple[int, int]:
-    """Refuse before copying when the copy would leave the host without room.
-
-    A backup that fills the filesystem takes down the host, every other service
-    on it, and the database it was copying. Requiring a reserve *after* the copy
-    is what stops a crash-restart loop: each attempt is a fresh uncontested
-    lock winner, so nothing else limits how many copies get written.
-
-    Refusing does block startup, and that is the honest outcome here rather
-    than a new failure mode: migrating without a backup is not safe, and the
-    alternative is filling the disk. The message names both numbers so the
-    condition can be cleared by freeing space anywhere.
-
-    Raises:
-        MigrationError: The filesystem cannot hold the copy and keep the
-            reserve. On success, returns the required and free byte counts.
-    """
+def _backup_room_state(source: Path) -> tuple[int, int, list[Path]]:
+    """Return the room threshold, physical free bytes, and safely prunable backups."""
     needed = _database_bytes(source)
     required = int(needed * _BACKUP_MIN_FREE_RATIO) + _BACKUP_FREE_FLOOR_BYTES
-    free = shutil.disk_usage(source.parent).free
-    if free < required:
+    return required, shutil.disk_usage(source.parent).free, _pre_migration_backups(source)[:-1]
+
+
+def backup_room(source: Path) -> tuple[int, int]:
+    """Return required and available backup bytes without changing the filesystem."""
+    required, free, stale = _backup_room_state(source)
+    return required, free + sum(path.stat().st_size for path in stale)
+
+
+def require_backup_room(source: Path, from_version: int) -> tuple[int, int]:
+    """Refuse when the backup and reserve cannot fit after stale-backup cleanup."""
+    required, available = backup_room(source)
+    if available < required:
         raise BackupRoomError(
             f"not enough free space for the pre-migration backup of schema "
-            f"v{from_version}: {free / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
-            f"required to copy a {needed / 1e9:.2f} GB database and keep a "
-            f"{_BACKUP_FREE_FLOOR_BYTES / 1e9:.2f} GB reserve. Free space, then "
-            f"start again; the database is unchanged. Superseded backups in "
-            f"{source.parent} are the usual place to reclaim it.",
+            f"v{from_version}: {available / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
+            f"required. Free space, then start again; the database is unchanged.",
             required,
-            free,
+            available,
         )
-    return required, free
+    return required, available
 
 
 def _pre_migration_backups(source: Path) -> list[Path]:
@@ -875,31 +868,27 @@ def _prune_backups(source: Path, keep_path: Path | None) -> None:
 
 
 def _ensure_backup_room(source: Path, from_version: int) -> None:
-    """Run the room check, first freeing superseded backups when it fails.
-
-    Deletes pre-migration backups oldest-first, never the newest, only while
-    the room check still fails, so an Update does not die on space that our own
-    stale backups hold. When room is still short with only the newest left, the
-    refusal is the room check's own.
-    """
-    try:
-        require_backup_room(source, from_version)
+    """Prune only the backups credited by :func:`backup_room` before copying."""
+    required, free, stale = _backup_room_state(source)
+    available = free + sum(path.stat().st_size for path in stale)
+    if available < required:
+        raise BackupRoomError(
+            f"not enough free space for the pre-migration backup of schema "
+            f"v{from_version}: {available / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
+            f"required. Free space, then start again; the database is unchanged.",
+            required,
+            available,
+        )
+    if free >= required:
         return
-    except MigrationError:
-        stale = _pre_migration_backups(source)[:-1]
-        if not stale:
-            raise
     removed: list[Path] = []
     reclaimed = 0
     for path in stale:
         reclaimed += path.stat().st_size
         path.unlink()
         removed.append(path)
-        try:
-            require_backup_room(source, from_version)
+        if shutil.disk_usage(source.parent).free >= required:
             break
-        except MigrationError:
-            continue
     log.info(
         "Pruned %d pre-migration backup(s), reclaimed %d bytes (making room for the backup)",
         len(removed), reclaimed,

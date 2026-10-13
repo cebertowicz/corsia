@@ -908,6 +908,49 @@ def test_prepare_current_release_returns_bounded_terminal_failure_with_full_log(
     assert "\x1b" not in exc.value.detail
 
 
+@pytest.mark.parametrize(
+    ("returncode", "failure_code"),
+    [(41, "fetch_failed"), (42, "build_failed"), (99, None)],
+)
+def test_prepare_current_release_records_only_known_stage_codes(
+    tmp_path: Path, returncode: int, failure_code: str | None,
+):
+    """Only the shell's explicit fetch/build statuses become durable codes."""
+    import subprocess
+
+    from fastapi import HTTPException
+
+    import api.settings_restart as settings_restart
+
+    completed = subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr="failed")
+    with (
+        patch("subprocess.run", return_value=completed),
+        patch("api.settings_restart._update_log_path", return_value=tmp_path / "update.log"),
+        pytest.raises(HTTPException) as raised,
+    ):
+        settings_restart._prepare_current_release(Path("/tmp/corsia"), {})
+
+    assert getattr(raised.value, "update_failure_code", None) == failure_code
+
+
+def test_prepare_current_release_timeout_has_no_stage_code(tmp_path: Path):
+    """A preparation timeout is a truthful unclassified failure."""
+    import subprocess
+
+    from fastapi import HTTPException
+
+    import api.settings_restart as settings_restart
+
+    with (
+        patch("subprocess.run", side_effect=subprocess.TimeoutExpired(["corsia"], 600)),
+        patch("api.settings_restart._update_log_path", return_value=tmp_path / "update.log"),
+        pytest.raises(HTTPException) as raised,
+    ):
+        settings_restart._prepare_current_release(Path("/tmp/corsia"), {})
+
+    assert getattr(raised.value, "update_failure_code", None) is None
+
+
 def _corsia_script_text() -> str:
     scripts_dir = Path(__file__).resolve().parents[2] / "scripts"
     return "\n".join(

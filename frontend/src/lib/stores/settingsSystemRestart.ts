@@ -85,6 +85,7 @@ type RestartObservationResult = {
 	result?: { ok: boolean; message?: string };
 	sawUnavailable: boolean;
 	drainEndedAt: number | null;
+	terminalMismatchAt: number | null;
 };
 
 function restartPhase(
@@ -112,23 +113,38 @@ async function observeSystemRestart(operationId: string, signal?: AbortSignal): 
 	return { version, restartRead };
 }
 
+function revisionMismatchMessage(
+	backendSha: string | null | undefined,
+	frontendSha: string | null | undefined,
+	checkoutSha: string | null | undefined,
+): string {
+	const mismatches = [
+		(!backendSha || backendSha === 'unknown') && 'backend',
+		(!frontendSha || frontendSha === 'unknown' || frontendSha !== backendSha) && 'frontend',
+		(checkoutSha && (checkoutSha === 'unknown' || checkoutSha !== backendSha)) && 'checkout',
+	].filter(Boolean).join(', ');
+	return `Update finished, but the running versions do not match (${mismatches}). CORSIA is still running. Inspect Details before retrying.`;
+}
+
 function classifyRestartObservation(
 	mode: 'restart' | 'update',
 	before: SystemVersionSnapshot | null,
 	observation: RestartObservation,
 	sawUnavailable: boolean,
 	drainEndedAt: number | null,
+	terminalMismatchAt: number | null,
 	inferStoppedReplacement = true,
 ): RestartObservationResult {
 	const { version, restartRead } = observation;
 	if (typeof restartRead === 'string') {
-		return { result: { ok: false, message: restartRead }, sawUnavailable, drainEndedAt };
+		return { result: { ok: false, message: restartRead }, sawUnavailable, drainEndedAt, terminalMismatchAt };
 	}
 	if (['failed', 'cancelled', 'superseded'].includes(restartRead?.status ?? '')) {
 		return {
 			result: { ok: false, message: restartFailureMessage(restartRead) },
 			sawUnavailable,
 			drainEndedAt,
+			terminalMismatchAt,
 		};
 	}
 
@@ -150,6 +166,7 @@ function classifyRestartObservation(
 	);
 	if (restartRead?.status === 'in_flight') {
 		drainEndedAt = null;
+		terminalMismatchAt = null;
 	} else if (!version) {
 		sawUnavailable = true;
 	} else if (restartRead) {
@@ -158,12 +175,27 @@ function classifyRestartObservation(
 
 	const phase = restartPhase(restartRead, Boolean(version), restarted, revisionsAgree);
 	if (restarted && revisionsAgree && restartRead?.status === 'complete') {
-		return { phase, result: { ok: true }, sawUnavailable, drainEndedAt };
+		return { phase, result: { ok: true }, sawUnavailable, drainEndedAt, terminalMismatchAt: null };
+	}
+	if (restarted && !revisionsAgree && restartRead?.status === 'complete') {
+		terminalMismatchAt ??= Date.now();
+		if (Date.now() - terminalMismatchAt >= 10_000) {
+			return {
+				phase,
+				result: { ok: false, message: revisionMismatchMessage(backendSha, frontendSha, checkoutSha) },
+				sawUnavailable,
+				drainEndedAt,
+				terminalMismatchAt,
+			};
+		}
+	} else {
+		terminalMismatchAt = null;
 	}
 	if (
 		inferStoppedReplacement
 		&& drainEndedAt !== null
 		&& !sawUnavailable
+		&& restartRead?.status !== 'complete'
 		&& Date.now() - drainEndedAt >= 2_000
 	) {
 		return {
@@ -176,9 +208,10 @@ function classifyRestartObservation(
 			},
 			sawUnavailable,
 			drainEndedAt,
+			terminalMismatchAt,
 		};
 	}
-	return { phase, sawUnavailable, drainEndedAt };
+	return { phase, sawUnavailable, drainEndedAt, terminalMismatchAt };
 }
 
 async function observeSystemRestartWithin(
@@ -235,11 +268,21 @@ export async function waitForSystemRestart(
 ): Promise<{ ok: boolean; message?: string }> {
 	let sawUnavailable = false;
 	let drainEndedAt: number | null = null;
+	let terminalMismatchAt: number | null = null;
 	while (true) {
-		const observation = await observeSystemRestart(operationId);
-		const outcome = classifyRestartObservation(mode, before, observation, sawUnavailable, drainEndedAt);
+		const observation = await observeSystemRestartWithin(operationId, 5_000);
+		if (observation === null) {
+			sawUnavailable = true;
+			onPhase?.('Restarting backend…');
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			continue;
+		}
+		const outcome = classifyRestartObservation(
+			mode, before, observation, sawUnavailable, drainEndedAt, terminalMismatchAt,
+		);
 		sawUnavailable = outcome.sawUnavailable;
 		drainEndedAt = outcome.drainEndedAt;
+		terminalMismatchAt = outcome.terminalMismatchAt;
 		if (outcome.phase) onPhase?.(outcome.phase);
 		if (outcome.result) {
 			if (outcome.result.ok) onPhase?.('Restart complete. Reloading…');
