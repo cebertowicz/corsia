@@ -1,11 +1,11 @@
 import {
 	answerReview, fetchReviewBar, ReviewRefusal,
-	type ReviewAnswer, type ReviewBarRead, type ReviewVerdict,
+	type FeedbackCounts, type ReviewAnswer, type ReviewBarRead, type ReviewVerdict,
 } from '$lib/api/reviewBar';
 
 export type ReviewBarPhase = 'ask' | 'noting' | 'sending' | 'answered' | 'stale';
 export type ReviewAnswerOutcome = 'sent' | 'ignored' | 'failed';
-export interface ReviewReceipt { verdict: ReviewVerdict; sent: number; at: Date }
+export interface ReviewReceipt { verdict: ReviewVerdict; sent: FeedbackCounts; at: Date }
 
 export const SEND_FAILED = "Couldn't send. Try again.";
 export const NOTE_NEEDED = 'Say what should change.';
@@ -79,7 +79,7 @@ export function createReviewBarState() {
 			if (!current(id, stamp)) return 'sent';
 			const counts = sent.feedback_counts;
 			settledAsk = read?.ask_raised_at ?? null;
-			receipt = { verdict: sent.verdict, sent: counts.comments + counts.suggestions + counts.edits, at: new Date() };
+			receipt = { verdict: sent.verdict, sent: counts, at: new Date() };
 			phase = 'answered';
 			return 'sent';
 		} catch (error) {

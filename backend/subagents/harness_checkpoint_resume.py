@@ -322,9 +322,9 @@ async def _prepare_initial_external_checkpoint(
             binary=context.binary, reasoning_effort=context.reasoning_effort, live=live,
         )
     else:
-        from core.checkpoint_warm_request import warm_capture_refused
+        from core.checkpoint_warm_request import refuse_no_live_handle
 
-        warm_capture_refused(thread_id, context.target.harness, "no_live_handle")
+        refuse_no_live_handle(thread_id, context, prepared)
     return await _prepare_external_checkpoint(
         checkpoint_id, context=context, live=live, identity=identity,
         warm_source=warm_source, required=required,

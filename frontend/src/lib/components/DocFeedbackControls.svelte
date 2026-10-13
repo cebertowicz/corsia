@@ -5,17 +5,19 @@
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	import { inlineSlot } from '$lib/slotMotion';
 
-	let { feedback, compact = false }: {
+	let { feedback, compact = false, withSend = true }: {
 		feedback: DocFeedback;
 		/** A narrow bar: the Send control alone, its full wording read out rather than shown. */
 		compact?: boolean;
+		/** False where Send lives elsewhere (the document's comments drawer): only what was not delivered, and Retry, show here. */
+		withSend?: boolean;
 	} = $props();
 	const shortLabel = $derived(feedback.sendingGrace ? 'Send now' : `Send ${feedback.pendingCount}`);
 </script>
 
 <!-- Send arrives and leaves in one slot, never popping in the row (motion.md); after a send that went it says Sent
      for a moment first. Leaving, the slot keeps what it last showed; a send not delivered swaps it for Retry at once. -->
-{#if feedback.pendingCount > 0 || feedback.sent > 0}
+{#if withSend && (feedback.pendingCount > 0 || feedback.sent > 0)}
 	<span class="sending-now" class:compact class:grace={!compact && feedback.sendingGrace} in:inlineSlot out:inlineSlot={{ instant: feedback.handedToRetry }}>
 		{#if feedback.pendingCount === 0}
 			<span class="sent">

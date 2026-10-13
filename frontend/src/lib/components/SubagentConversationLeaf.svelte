@@ -145,7 +145,7 @@
 		display: flex; min-width: 0; min-height: 0; height: 100%; position: relative;
 	}
 	.subagent-conversation :global(.messages) {
-		padding-top: var(--space-4);
+		--messages-lead: var(--space-4);
 	}
 	.leaf-state {
 		display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center;

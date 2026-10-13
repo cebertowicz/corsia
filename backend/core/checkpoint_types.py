@@ -281,6 +281,11 @@ class ProviderCheckpointRequest:
     # this caller would have built had no warm source existed. Its presence is
     # what allows one warm->cold path correction before any generation.
     same_model_cold: Callable[[], object] | None = None
+    # The instruction before the optional saved-entry review block was appended
+    # to ``instruction``; None when no block was attached. A warm fork whose
+    # window cannot hold the block still fits this instruction, and the review
+    # is never a reason to fail a checkpoint.
+    instruction_without_review: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,4 +308,12 @@ class WarmForkUnusable(ProviderCheckpointRejected):
     occupancy at invoke time, after admission already chose warm. Raising a
     distinct type lets the runtime correct that one path choice, which is not a
     retry -- nothing was generated and nothing was paid for.
+
+    ``reason`` is the lowercase token the refusal log line names: the same
+    exception type covers an over-window fork and an account/home mismatch, and
+    the two need different fixes.
     """
+
+    def __init__(self, *args: object, reason: str = "warm_fork_over_window") -> None:
+        super().__init__(*args)
+        self.reason = reason

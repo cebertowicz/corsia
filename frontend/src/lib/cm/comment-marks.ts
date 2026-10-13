@@ -68,7 +68,8 @@ export const commentMarks = [
 export const MAX_SCROLL_PASSES = 8;
 const STEADY_CHECKS = 2;
 
-export type ScrollOrigin = 'navigation' | 'comment-save';
+/** `quote-tap` leaves a quoted passage at the top of the canvas for the half-height comment sheet. */
+export type ScrollOrigin = 'navigation' | 'comment-save' | 'quote-tap';
 
 // The scrolling pane can clip an editor that grows to the full content height.
 const clipping = new Set(['auto', 'scroll', 'hidden', 'clip']);
@@ -90,7 +91,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const start = view.coordsAtPos(target);
 	const band = visibleBand(view);
 	if (origin === 'comment-save' && start && start.top >= band.top && start.bottom <= band.bottom) return;
-	const jump = () => view.dispatch({ effects: EditorView.scrollIntoView(target, { y: 'center' }) });
+	const jump = () => view.dispatch({ effects: EditorView.scrollIntoView(target, origin === 'quote-tap' ? { y: 'start', yMargin: 8 } : { y: 'center' }) });
 	const nextFrame = (run: () => void) => view.dom.ownerDocument.defaultView?.requestAnimationFrame(() => {
 		if (view.dom.isConnected) run();
 	});

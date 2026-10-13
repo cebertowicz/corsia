@@ -90,10 +90,10 @@
 		display: flex; align-items: center; flex-shrink: 0;
 		max-width: 200px; margin: 6px 0; border-radius: var(--radius-sm);
 		color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-medium);
-		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.tab-wrap:hover { background: var(--bg-hover); color: var(--text-secondary); }
-	.tab-wrap.active { background: var(--bg-active); color: var(--text-primary); }
+	/* Hover eases in; the active mark moves in the same frame as the content it labels, never fading behind it. */
+	.tab-wrap:hover { background: var(--bg-hover); color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
+	.tab-wrap.active { background: var(--bg-active); color: var(--text-primary); transition: none; }
 	.tab {
 		display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%;
 		padding: 0 2px 0 10px; background: none; border: none; cursor: pointer;

@@ -58,19 +58,17 @@
 		</svg>
 		<span class="countdown" aria-hidden="true">{remaining(lease, nowMs)}</span>
 	</button>
-	{#if open}
-		{#key lease.id}
-			<AdaptiveDrawer ariaLabel={`Host access — ${owner(lease)}`} onClose={onClose}>
-				<HostAccessActiveLeaseDrawer
-					{lease}
-					{nowMs}
-					{deciding}
-					{disabled}
-					onRevoke={onRevoke}
-				/>
-			</AdaptiveDrawer>
-		{/key}
-	{/if}
+	{#key lease.id}
+		<AdaptiveDrawer ariaLabel={`Host access — ${owner(lease)}`} {open} onClose={onClose}>
+			<HostAccessActiveLeaseDrawer
+				{lease}
+				{nowMs}
+				{deciding}
+				{disabled}
+				onRevoke={onRevoke}
+			/>
+		</AdaptiveDrawer>
+	{/key}
 </div>
 
 <style>

@@ -42,7 +42,7 @@
 	function show(trigger: HTMLElement) { anchor = trigger; open = true; }
 	function restoreFocus() {
 		// Capture the fallback before closing the last request removes this control's root.
-		const fallback = requestTrigger ?? root?.closest('.document-status-row')?.querySelector<HTMLButtonElement>('.comment-status');
+		const fallback = requestTrigger ?? root?.closest('.document-tools')?.querySelector<HTMLButtonElement>('.comment-status');
 		const trigger = anchor;
 		void tick().then(() => (trigger?.isConnected ? trigger : fallback)?.focus());
 	}

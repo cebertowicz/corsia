@@ -25,6 +25,7 @@ from history.source import (
     validate_source_rows,
 )
 from history.types import HistoryBoundary, PortableHistoryError
+from infra.context_preview_timing import record_rows_read
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ def _anchor(db, thread_id: str, start: HistoryBoundary):
         "AND delivery_state = 'delivered' AND seq = ?",
         (thread_id, start.seq),
     ).fetchone()
+    record_rows_read(int(row is not None))
     if row is None or str(row["id"]) != start.message_id:
         raise PortableHistoryError(
             "history boundary message does not match durable source"
@@ -80,6 +82,7 @@ def _segment_before(db, thread_id: str, start_seq: int, anchor: dict[str, Any]):
     )
     try:
         for source_row in cursor:
+            record_rows_read(1)
             row = validate_source_rows((source_row,), thread_id)[0]
             row_key = _segment_key(row)
             if row_key is not None and key is not None and (started or row_key != key):
@@ -104,6 +107,7 @@ def scoped_source(db, thread_id: str, start: HistoryBoundary) -> ScopedSource:
         "AND delivery_state = 'delivered' AND seq > ? ORDER BY seq",
         (thread_id, start.seq),
     ).fetchall()
+    record_rows_read(len(later))
     return ScopedSource(
         rows=validate_source_rows((*earlier, anchor_source, *later), thread_id),
         predecessor=predecessor,
@@ -164,6 +168,7 @@ def scan_before_scope(db, thread_id: str, source: ScopedSource) -> tuple[int, ..
         f"AND delivery_state = 'delivered' AND seq < ? AND {_RETENTION_STUB} ORDER BY seq)",
         (thread_id, before, *_STUB_MARKER),
     ).fetchone()[0]
+    record_rows_read(1)
     turn_ids = _scope_turn_ids(source.rows)
     if turn_ids:
         names_turn, turn_params = _names_scope_turn(turn_ids)
@@ -174,6 +179,7 @@ def scan_before_scope(db, thread_id: str, source: ScopedSource) -> tuple[int, ..
         )
         try:
             for source_row in cursor:
+                record_rows_read(1)
                 _reject_scope_turn(source_row, thread_id, turn_ids)
         finally:
             cursor.close()

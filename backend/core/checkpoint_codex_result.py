@@ -47,15 +47,16 @@ class CodexCheckpointCapture:
     def _failure(self, detail: str, *, truncated: bool) -> None:
         if self.terminal.done():
             return
-        if self.bodies or self.partial.strip() or truncated:
+        if self.bodies or self.partial.strip():
             self.diagnostic = CHECKPOINT_CONTEXT_TRUNCATED if truncated else detail
             self.terminal.set_result(None)
-        else:
-            self.terminal.set_exception(ProviderCheckpointRejected(detail))
+        else:  # No narrative: fail named, never as an empty success.
+            self.terminal.set_exception(ProviderCheckpointRejected(
+                f"{CHECKPOINT_CONTEXT_TRUNCATED}: {detail}" if truncated else detail))
 
     def truncate(self) -> None:
         """Finish capture through the existing degraded-completion outcome."""
-        self._failure(CHECKPOINT_CONTEXT_TRUNCATED, truncated=True)
+        self._failure("fork input outgrew its checkpoint window", truncated=True)
 
     async def on_event(self, event: dict[str, Any]) -> None:
         """Replace streamed copies at item completion; keep earlier fragments."""
