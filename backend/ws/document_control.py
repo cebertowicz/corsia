@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import logging
 
-from fastapi import HTTPException
+from fastapi import HTTPException, WebSocketDisconnect
 
 from api.files_load import read_document
 from doceditor.document_scope import MAX_TEXT_BYTES, UI_THREAD
@@ -43,10 +43,20 @@ def _encoded(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
+def _observe_send(task: asyncio.Task) -> None:
+    """Retrieve a broadcast write's outcome; a socket that closed first is expected."""
+    if task.cancelled() or (error := task.exception()) is None:
+        return
+    if isinstance(error, (WebSocketDisconnect, RuntimeError, ConnectionError)):
+        log.debug("Live-document frame not delivered to a closed socket: %s", error)
+    else:
+        log.warning("Live-document frame not delivered", exc_info=error)
+
+
 def _broadcast(artifact_id: str, frame: dict, *, exclude=None) -> None:
     for socket, subscriptions in tuple(_subscriptions.items()):
         if socket is not exclude and artifact_id in subscriptions:
-            send_to_client(socket, {"artifact_id": artifact_id, **frame})
+            send_to_client(socket, {"artifact_id": artifact_id, **frame}).add_done_callback(_observe_send)
 
 
 def _changed(artifact_id: str, entry: LiveEntry, update: bytes, sender, author: dict | None = None) -> None:
