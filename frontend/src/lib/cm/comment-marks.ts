@@ -1,5 +1,6 @@
 import { StateField, StateEffect } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
+import { scrollToWidget } from './widget-scroll';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -83,11 +84,16 @@ function visibleBand(view: EditorView) {
 		top = Math.max(top, rect.top);
 		bottom = Math.min(bottom, rect.bottom);
 	}
+	// A phone drawer overlays rather than clips the editor. Its current resting top is therefore part of the visible
+	// band: a jump must leave the target above it, not briefly behind it while the drawer settles.
+	const drawer = view.dom.ownerDocument.querySelector<HTMLElement>('[data-doc-comments-drawer]');
+	if (drawer) bottom = Math.min(bottom, drawer.getBoundingClientRect().top);
 	return { top, bottom };
 }
 
 export function scrollToRange(view: EditorView, from: number, _to: number, origin: ScrollOrigin = 'navigation') {
 	const target = Math.min(from, view.state.doc.length);
+	if (scrollToWidget(view, target, () => visibleBand(view), origin === 'quote-tap')) return;
 	const start = view.coordsAtPos(target);
 	const band = visibleBand(view);
 	if (origin === 'comment-save' && start && start.top >= band.top && start.bottom <= band.bottom) return;

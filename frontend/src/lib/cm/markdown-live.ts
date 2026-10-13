@@ -41,6 +41,7 @@ class TableWidget extends WidgetType {
 		// renderMarkdown applies the canonical DOMPurify policy before HTML reaches
 		// the document. Keep this widget on that single sanitized renderer.
 		el.innerHTML = renderMarkdown(this.src);
+		el.dataset.srcLength = String(this.src.length); // the source range the widget stands for, for `widget-comments.ts`
 		return el;
 	}
 	ignoreEvent() { return true; }

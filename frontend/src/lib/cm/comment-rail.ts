@@ -1,6 +1,7 @@
 import { EditorView, ViewPlugin, type BlockInfo, type ViewUpdate } from '@codemirror/view';
 import { commentRanges, type CommentRange } from './comment-marks';
 import { clusterMarkerLines, railWidth, type MarkerCluster } from './comment-clusters';
+import { tableRowAt } from './widget-blocks';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const GLYPH = 18;
@@ -130,15 +131,18 @@ class CommentRail {
 			const block = view.lineBlockAt(state.doc.lineAt(range.from).from);
 			// A rendered line is measured where it is drawn; the height map stands in for a line the viewport has not drawn.
 			const element = this.drawnLine(view, block);
-			const drawn = element?.getBoundingClientRect();
+			// A comment inside a rendered table sits at its row, not at the table's top.
+			const inRow = element ? tableRowAt(view, element, range.from) : null;
+			const drawn = inRow?.rect ?? element?.getBoundingClientRect();
+			const key = block.from + (inRow ? (inRow.index + 1) / 10000 : 0);
 			if (element) drawnLines.add(element);
-			const line = byLine.get(block.from) ?? {
+			const line = byLine.get(key) ?? {
 				top: drawn ? drawn.top - scroller.top + scrollDOM.scrollTop : block.top + origin,
 				ids: [], onFocus: range.onMarkerFocus, replyWaiting: false, row: Math.min(drawn?.height ?? block.height, view.defaultLineHeight),
 			};
 			line.ids.push(range.id);
 			line.replyWaiting ||= !!range.replyWaiting;
-			byLine.set(block.from, line);
+			byLine.set(key, line);
 		}
 		// A block widget that resizes (an image that loads) moves every line below it, commented or not.
 		for (const child of contentDOM.children) if (!child.classList.contains('cm-line')) drawnLines.add(child);

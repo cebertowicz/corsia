@@ -11,6 +11,7 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
+	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
@@ -20,7 +21,7 @@
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
-	import { canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentsInDocumentOrder, type CanvasScrollTarget } from '$lib/docCanvasComments';
+	import { canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
@@ -114,20 +115,15 @@
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
-	let scrollTarget = $state<CanvasScrollTarget | null>(null);
-	$effect(() => {
-		const fc = focusedComment;
-		if (!fc) { scrollTarget = null; return; }
-		untrack(() => {
-			scrollTarget = canvasFocusedCommentScrollTarget(scrollTarget, listedComments, editText, fc, commentUI.state?.kind === 'list');
-		});
+	const scroll = createCommentScrollTarget({
+		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
 	let docRoot = $state<HTMLElement>();
 	const commentUI = createCommentSurfaceState(() => docRoot?.querySelector<HTMLElement>('.cm-content')?.focus(), () => targetKey);
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
 	function setCommentScrollTarget(id: string, focus: boolean, origin: ScrollOrigin) {
-		scrollTarget = canvasCommentScrollTarget(listedComments, editText, id, focus, origin);
+		scroll.value = canvasCommentScrollTarget(listedComments, editText, id, focus, origin);
 	}
 	function focusComment(id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) {
 		if (!commentUI.focusComment(id, anchor, viaSuggestion)) return;
@@ -154,6 +150,7 @@
 		generation: () => liveGeneration, text: () => editText, isOpen: () => commentUI.state?.kind === 'draft',
 		ensureArtifactId: ensureEditorArtifactId, onFailure: commentRetryToast.remember,
 		onStart: commentUI.openDraft, onClose: commentUI.close,
+		isPlaced: (id) => highlights.some((range) => range.id === id),
 	});
 	async function submitComment(text: string) {
 		const id = await draftController.submit(text);
@@ -337,7 +334,7 @@
 			{/if}
 		{/snippet}
 	</DocViewerStatus>
-	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scrollTarget = { ...span, origin: 'navigation' }} />
+	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		{docState}
 		{loadError}
@@ -346,7 +343,7 @@
 		{highlights}
 		presence={presenceRanges}
 		pendingComment={draftController.pendingComment}
-		scrollTo={scrollTarget}
+		scrollTo={scroll.value}
 		onSave={flushNow}
 		onSelect={draftController.select}
 		onAnchorFocus={focusComment}
@@ -369,6 +366,7 @@
 		bounds={docRoot}
 		narrow={isPaneDrawer()}
 		comments={listedComments}
+		documentText={editText}
 		focusedId={shownFocus}
 		draft={draftController.draft}
 		draftReason={draftController.reason}

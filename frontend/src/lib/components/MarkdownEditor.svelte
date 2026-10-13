@@ -19,6 +19,8 @@
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
+	import { widgetComments } from '$lib/cm/widget-comments';
+	import { syntaxTree } from '@codemirror/language';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
@@ -60,7 +62,7 @@
 		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
 		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
-		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null } | null) => void;
+		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: string; above?: boolean } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit?: (mapPos: (pos: number) => number) => void;
@@ -97,7 +99,19 @@
 			from: r.from, to: r.to, text: v.state.sliceDoc(r.from, r.to),
 			top: coords?.top ?? 0, left: coords?.right ?? coords?.left ?? 0,
 			anchor: composerAnchor(v, r.from, r.to),
+			label: coversTable(v, r.from, r.to) ? 'The whole table' : undefined,
 		});
+	}
+
+	/** A keyboard selection steps over a table as one unit, so a range that holds a whole table comments on all of it. */
+	function coversTable(v: EditorView, from: number, to: number): boolean {
+		let covers = false;
+		syntaxTree(v.state).iterate({ from, to, enter: (node) => {
+			if (node.name !== 'Table') return;
+			covers ||= from <= v.state.doc.lineAt(node.from).from && to >= v.state.doc.lineAt(Math.min(node.to, v.state.doc.length)).to;
+			return false;
+		} });
+		return covers;
 	}
 
 	/**
@@ -200,6 +214,7 @@
 				pendingCommentMark,
 				suggestionMarks(() => ({ focus: (id) => onAnchorFocus?.(id, liveAnchor(id), true), hover: (id) => onSuggestionHover?.(id) })),
 				commentRail,
+				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: (id) => onAnchorFocus?.(id, liveAnchor(id)) }),
 				presenceMarks,
 				typedReveal,
 				EditorView.lineWrapping,

@@ -7,7 +7,7 @@ import { plainErrorText } from '$lib/plainError';
 import { submitDocumentComment } from '$lib/docViewerOperations';
 import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 
-export type ViewerSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null } | null;
+export type ViewerSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: string; above?: boolean } | null;
 type Context = {
 	scope: () => string;
 	draft: () => CommentDraft | null;
@@ -19,6 +19,8 @@ type Context = {
 	onFailure: (id: string) => void;
 	onStart: (anchor: CommentAnchor) => void;
 	onClose: () => void;
+	/** A posted widget comment keeps its pending mark until this exact placed mark is drawn. */
+	isPlaced: (id: string) => boolean;
 };
 const aborted = () => new DOMException('Comment draft closed', 'AbortError');
 /** What a failed post of a comment anchored in a live document says; an image's region comment there says the same. */
@@ -64,6 +66,8 @@ async function postLiveComment(draft: CommentDraft, text: string, context: Conte
 export function createViewerCommentDraft(context: Context) {
 	let pending = $state<ViewerSelection>(null);
 	let selected: CommentSelection | undefined;
+	let postPending = $state<CommentSelection | null>(null);
+	let postedId = $state<string | null>(null);
 	$effect(() => {
 		const session = context.session(), scope = context.scope();
 		untrack(() => {
@@ -84,14 +88,20 @@ export function createViewerCommentDraft(context: Context) {
 	}
 	// This document's draft, kept across a close (its body survives); the pending highlight shows only while its composer is open.
 	const scoped = $derived.by(() => { const draft = context.draft(); return draft?.scope === context.scope() ? draft : null; });
-	const pendingComment = $derived(context.isOpen() ? scoped?.selection ?? null : null);
-	function cancel(): void { discardCommentDraft(context.scope()); context.onClose(); }
+	// A live tap shows the widget's pending mark before Comment is pressed; selecting elsewhere clears it.
+	// Once the sheet opens, the scoped draft remains the sole owner of the captured range.
+	const pendingComment = $derived((pending ? selected : context.isOpen() ? scoped?.selection : postPending) ?? null);
+	$effect(() => {
+		const id = postedId;
+		if (id && context.isPlaced(id)) { postPending = null; postedId = null; }
+	});
+	function cancel(): void { postPending = null; postedId = null; discardCommentDraft(context.scope()); context.onClose(); }
 	function start(): void {
 		if (!pending) return;
 		cancelCommentCapture(context.scope());
 		const old = context.draft(), body = old?.scope === context.scope() ? (old.body ?? '') : '';
 		commentDraft.set({ from: pending.from, to: pending.to, text: pending.text, top: pending.top,
-			body, scope: context.scope(), selection: selected, identity: {}, sequence: 0 });
+			body, label: pending.label, scope: context.scope(), selection: selected, identity: {}, sequence: 0 });
 		const value = pending;
 		pending = null; selected = undefined;
 		context.onStart(value.anchor ?? new DOMRect(value.left, value.top, 0, 0));
@@ -107,6 +117,7 @@ export function createViewerCommentDraft(context: Context) {
 			if (!artifactId) throw new Error('Document artifact is unavailable.');
 			return addComment(artifactId, draft.from, draft.to, draft.text, text);
 		}, context.onFailure, draft.selection ? liveFailureMessage : undefined);
+		if (current() && draft.selection) { postPending = draft.selection; postedId = id; }
 		return current() ? id : null;
 	}
 	return { get pending() { return pending; }, get reason() { return reason; }, get draft() { return scoped; },

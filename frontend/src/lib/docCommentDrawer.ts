@@ -1,3 +1,6 @@
+import { get } from 'svelte/store';
+import { prefersReducedMotion } from '$lib/stores/viewport';
+
 /** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
 export function drawerFooterHeight(node: HTMLElement) {
 	const doc = node.closest<HTMLElement>('.doc');
@@ -77,4 +80,26 @@ export function presence(report: (shown: boolean) => void) {
 		if (mounted++ === 0) report(true);
 		return { destroy() { if (--mounted === 0) report(false); } };
 	};
+}
+
+/**
+ * At phone width the composer sheet must not cover what is being commented on. Scrolls the editor so the subject's bottom
+ * edge sits above the sheet's top, leaving the page and the editor's own measure alone when it already does.
+ */
+export function clearSubjectOfSheet(anchor: () => DOMRect | null, bounds: HTMLElement | null | undefined) {
+	const subject = anchor();
+	const panel = document.querySelector<HTMLElement>('.drawer-panel[aria-label="New comment"]');
+	const scroller = bounds?.querySelector<HTMLElement>('.cm-scroller');
+	if (!subject || !panel || !scroller) return;
+	const limit = panel.getBoundingClientRect().top - 8;
+	if (subject.bottom > limit) scroller.scrollTop += subject.bottom - limit;
+}
+
+/** Brings a card into view in the drawer's own list: smooth, or at once when asked or with reduced motion. */
+export function scrollListToCard(drawer: HTMLElement | undefined, id: string, instant: boolean) {
+	const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
+	const card = list?.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
+	if (!list || !card) return;
+	const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - 4;
+	list.scrollTo({ top: Math.max(0, top), behavior: instant || get(prefersReducedMotion) ? 'instant' : 'smooth' });
 }

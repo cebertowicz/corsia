@@ -16,6 +16,8 @@ const pending = Decoration.mark({ class: 'cm-comment-pending' });
  */
 export const pendingCommentMark = ViewPlugin.fromClass(class {
 	selection: CommentSelection | null = null;
+	/** The captured range as last read, for the marks drawn inside a table or diagram widget. */
+	range: { from: number; to: number } | null = null;
 	decorations: DecorationSet = Decoration.none;
 	update(update: ViewUpdate) {
 		let changed = update.docChanged;
@@ -27,6 +29,7 @@ export const pendingCommentMark = ViewPlugin.fromClass(class {
 		if (!changed) return;
 		const range = this.selection && selectionRange(this.selection);
 		const length = update.state.doc.length;
+		this.range = range && range.to <= length ? range : null;
 		this.decorations = range && range.to <= length ? RangeSet.of([pending.range(range.from, range.to)]) : Decoration.none;
 	}
 }, { decorations: (plugin) => plugin.decorations });
