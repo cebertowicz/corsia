@@ -6,6 +6,7 @@
 	import type { PreviewFrameSource } from '$lib/stores/livePreviewFeed';
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { openDocumentLink } from '$lib/linkTargetResolver';
+	import { menuPop } from '$lib/popoverMotion';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
@@ -32,8 +33,8 @@
 		imageBase = null,
 		onOpenImage,
 		saveError,
-		saveStatus,
 		pendingSel,
+		commentSheetOpen = false,
 		onStartComment,
 		tabInstanceId = null,
 		onDocumentPlace,
@@ -58,8 +59,9 @@
 		imageBase?: { path: string; projectId: string | null } | null;
 		onOpenImage?: (request: OpenImageRequest) => void;
 		saveError: string;
-		saveStatus: 'idle' | 'saving' | 'saved';
 		pendingSel: PendingSelection | null;
+		/** Routed from createCommentSheet; its closing scrim remains modal until the outro ends. */
+		commentSheetOpen?: boolean;
 		onStartComment: () => void;
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
@@ -97,13 +99,9 @@
 	{/if}
 </div>
 
-{#if saveStatus !== 'idle'}
-	<div class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</div>
-{/if}
-
-{#if pendingSel}
-	<button class="sel-comment" style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
-		onmousedown={(event) => event.preventDefault()} onclick={onStartComment}>
+{#if pendingSel && !commentSheetOpen}
+	<button class="sel-comment" out:menuPop style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
+		onmousedown={(event) => event.preventDefault()} onclick={() => { if (!commentSheetOpen) onStartComment(); }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 		Comment
 	</button>
