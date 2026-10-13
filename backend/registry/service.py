@@ -12,6 +12,7 @@ from core.workspace_layout import uploads_root_for_path
 from infra.database import TransactionOwnershipError, get_db, write_transaction
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 from registry import models, registration_events, registration_writer
+from registry.cc_session import notify_cc_session, persist_cc_session
 from registry.file_identity import FileIdentity, PreparedFileWrite, external_identity_for_path
 from registry.file_types import extension_type, image_media_type
 from registry.identity_bridge import OWNER_REGISTRATION_STATES, PANE_REGISTRATION_STATES
@@ -477,6 +478,7 @@ def register_uploads(
         logger.warning(f"registry register_uploads failed: {e}")
 
 
+
 def register_cc_session(
     thread_id: str | None, cc_session_id: str | None,
     *,
@@ -490,23 +492,13 @@ def register_cc_session(
 
     The durable write is loud; only its UI notification is best-effort.
     """
-    if not thread_id:
-        return None
-    from registry.cc_session import replace_cc_session
-
-    previous_id, row = replace_cc_session(
+    previous_id, row = persist_cc_session(
         thread_id, cc_session_id, title=title, cwd=cwd, invocation=invocation,
         checkpoint_generation_id=checkpoint_generation_id, expected_previous_id=expected_previous_id,
         verify_previous=verify_previous, db=db,
     )
-    if cc_session_id is not None and (db is None or not db.in_transaction):
-        try:
-            notify_changed(row or {
-                "integration": "claude-code", "type": "session",
-                "external_id": cc_session_id})
-        except Exception as error:
-            logger.warning(
-                f"registry register_cc_session notify failed for {thread_id}: {error}")
+    if db is None or not db.in_transaction:
+        notify_cc_session(thread_id, cc_session_id, row)
     return previous_id
 
 
