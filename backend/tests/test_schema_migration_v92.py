@@ -12,7 +12,7 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_v92_adds_nullable_json_deferred_move_idempotently():
-    assert SCHEMA_VERSION == 114
+    assert SCHEMA_VERSION == 113
     assert MIGRATIONS[91] is migrate_91_to_92
     with closing(sqlite3.connect(':memory:')) as db:
         db.execute('CREATE TABLE thread_vendor_accounts (thread_id TEXT, provider TEXT, account_id TEXT)')

@@ -29,42 +29,23 @@ def _schema(properties: dict, required: list[str]) -> dict:
     }
 
 
-def _schedule_projection(schedule) -> dict:
-    """Return the public schedule shape without internal pause provenance."""
-    projected = asdict(schedule)
-    del projected["asked_by_user"]
-    return projected
-
-
-def _operate(thread_id, actor_row, operation: str, params: dict, *, turn_id: str | None = None):
+def _operate(thread_id, actor_row, operation: str, params: dict):
     if operation == "schedule":
-        from plans.public import turn_carries_users_word
-
         scope_id = actor_row["project_id"] or "__workspace__"
-        asked_by_user = (
-            turn_carries_users_word(get_db(), turn_id)
-            if turn_id is not None
-            else False
-        )
-        schedule = schedules.create(
-            thread_id,
-            scope_id,
-            thread_id,
-            kind=params["kind"],
-            spec=params["spec"],
-            max_runs=params["max_runs"],
-            payload=params.get("payload"),
-            asked_by_user=asked_by_user,
-            now=datetime.now(timezone.utc).isoformat(),
-            db=None,
-        )
         return {
-            "schedule": _schedule_projection(schedule),
-            "notice": (
-                "Runs while your plan is paused: created in a Turn with the user's message."
-                if asked_by_user
-                else "Held while your plan is paused: not created in a Turn with the user's message."
-            ),
+            "schedule": asdict(
+                schedules.create(
+                    thread_id,
+                    scope_id,
+                    thread_id,
+                    kind=params["kind"],
+                    spec=params["spec"],
+                    max_runs=params["max_runs"],
+                    payload=params.get("payload"),
+                    now=datetime.now(timezone.utc).isoformat(),
+                    db=None,
+                )
+            )
         }
     if operation == "cancel":
         return {
@@ -77,7 +58,7 @@ def _operate(thread_id, actor_row, operation: str, params: dict, *, turn_id: str
         }
     return {
         "schedules": [
-            _schedule_projection(item)
+            asdict(item)
             for item in schedules.list_for_actor(
                 thread_id=thread_id,
                 actor_id=thread_id,
@@ -97,13 +78,9 @@ async def _execute(kwargs: dict[str, Any], operation: str) -> str:
         for key, value in kwargs.items()
         if not key.startswith("_")
     }
-    from infra import state
-
-    turn_identity = state._current_turn_identity.get(None)
-    turn_id = turn_identity.turn_id if turn_identity is not None else None
     try:
         result = await run_in_db(
-            partial(_operate, thread_id, actor_row, operation, params, turn_id=turn_id)
+            partial(_operate, thread_id, actor_row, operation, params)
         )
         return json.dumps(result, sort_keys=True)
     except ValueError as exc:

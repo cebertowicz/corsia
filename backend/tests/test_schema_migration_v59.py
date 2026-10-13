@@ -154,7 +154,7 @@ def _plan_state(db, plan_id: str) -> str:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 114
+    assert SCHEMA_VERSION == 113
 
 
 def test_only_the_agents_own_open_pauses_become_scheduled_tasks(tmp_path):

@@ -138,9 +138,7 @@ from plans.admission import (
 from plans.admission_attempts import latest_accepted_starts
 from plans.admission_origin import registration_origin
 from plans.models import PlanLivenessSignal
-from plans.pause_authority import (
-    set_aside_while_paused, thread_paused_since, turn_carries_users_word, user_schedule_wakes,
-)
+from plans.pause_authority import set_aside_while_paused, thread_paused_since
 from plans.projections import liveness_signal, open_delegated_node_ids
 from plans.plan_write import transaction as plan_transaction
 from plans.selection_validity import selection_valid
