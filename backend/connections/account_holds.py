@@ -15,6 +15,7 @@ ACCOUNT_HOLD_REASONS = (
     "codex_auth_projection_changed", "codex_auth_source_missing", PROJECT_POLICY_MISSING,
 )
 
+_UNREAD_HOLD = object()
 
 
 def _binding_hold(binding, *, missing: str | None, project: str | None, model: str, provider: str | None, db):
@@ -23,6 +24,27 @@ def _binding_hold(binding, *, missing: str | None, project: str | None, model: s
     return missing or account_reason(
         account, provider=binding["provider"], project_ids=[project], execution=True,
         model=model if binding["provider"] == provider else None, db=db)
+
+
+def _sync_thread_vendor_account_hold(thread_id: str, binding, reason: str | None, *, db,
+                                      stored=_UNREAD_HOLD) -> None:
+    """Make one durable hold row match its evaluator result, writing only on change."""
+    provider = str(binding["provider"])
+    if stored is _UNREAD_HOLD:
+        row = db.execute("SELECT account_id,reason FROM thread_vendor_account_holds "
+                         "WHERE thread_id=? AND provider=?", (thread_id, provider)).fetchone()
+        stored = None if row is None else (str(row["account_id"]), str(row["reason"]))
+    desired = None if reason is None else (str(binding["account_id"]), reason)
+    if stored == desired:
+        return
+    if desired is None:
+        db.execute("DELETE FROM thread_vendor_account_holds WHERE thread_id=? AND provider=?",
+                   (thread_id, provider))
+        return
+    db.execute("""INSERT INTO thread_vendor_account_holds(thread_id,provider,account_id,reason,updated_at)
+        VALUES (?,?,?,?,?) ON CONFLICT(thread_id,provider) DO UPDATE SET
+        account_id=excluded.account_id,reason=excluded.reason,updated_at=excluded.updated_at""",
+        (thread_id, provider, desired[0], desired[1], utc_now_iso()))
 
 
 def refresh_thread_holds(thread_id: str, *, wake: bool = True, db) -> None:
@@ -38,14 +60,7 @@ def refresh_thread_holds(thread_id: str, *, wake: bool = True, db) -> None:
     for binding in rows:
         reason = _binding_hold(binding, missing=missing, project=scope["project_id"], model=model,
                                provider=provider, db=db)
-        if reason:
-            db.execute("""INSERT INTO thread_vendor_account_holds(thread_id,provider,account_id,reason,updated_at)
-                VALUES (?,?,?,?,?) ON CONFLICT(thread_id,provider) DO UPDATE SET
-                account_id=excluded.account_id,reason=excluded.reason,updated_at=excluded.updated_at""",
-                (thread_id, binding["provider"], binding["account_id"], reason, utc_now_iso()))
-        else:
-            db.execute("DELETE FROM thread_vendor_account_holds WHERE thread_id=? AND provider=?",
-                       (thread_id, binding["provider"]))
+        _sync_thread_vendor_account_hold(thread_id, binding, reason, db=db)
     from infra.queued_input_settlement import refresh_account_input_holds
 
     refresh_account_input_holds(db, thread_id)
@@ -158,15 +173,7 @@ def _refresh_unqueued_holds(thread_id: str, facts: tuple[dict, dict, dict], *, d
         reason = _binding_hold(binding, missing=missing, project=thread["project_id"], model=model,
                                provider=provider, db=db)
         stored = holds.get((thread_id, binding["provider"]))
-        if reason:
-            if stored != (str(binding["account_id"]), reason):
-                db.execute("""INSERT INTO thread_vendor_account_holds(thread_id,provider,account_id,reason,updated_at)
-                    VALUES (?,?,?,?,?) ON CONFLICT(thread_id,provider) DO UPDATE SET
-                    account_id=excluded.account_id,reason=excluded.reason,updated_at=excluded.updated_at""",
-                    (thread_id, binding["provider"], binding["account_id"], reason, utc_now_iso()))
-        elif stored is not None:
-            db.execute("DELETE FROM thread_vendor_account_holds WHERE thread_id=? AND provider=?",
-                       (thread_id, binding["provider"]))
+        _sync_thread_vendor_account_hold(thread_id, binding, reason, stored=stored, db=db)
 
 
 def refresh_account_holds(account_id: str, *, wake: bool = True, db) -> None:
