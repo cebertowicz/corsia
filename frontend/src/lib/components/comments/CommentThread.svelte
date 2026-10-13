@@ -37,7 +37,7 @@
 	import ReplyField from './ReplyField.svelte';
 	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 
-	let { comment, focused = false, activeId = null, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable('') }: {
+	let { comment, focused = false, activeId = null, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
 		comment: CommentThreadData;
 		focused?: boolean;
 		/** The thread the list has focused now. When it moves to another thread, an empty reply field here closes. */
@@ -76,6 +76,9 @@
 		reopenReachesOwner?: boolean;
 		/** The reply being typed. The caller may own it, so it outlives a card that moves groups. */
 		replyText?: string;
+		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
+		replySelection?: [number, number] | null;
+		onReplySelection?: (selection: [number, number]) => void;
 	} = $props();
 
 	const me = $derived($userParticipant);
@@ -292,7 +295,7 @@
 			<div class="ct-agreed"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
 		{:else if !readOnly}
 			{#if replyOpen}
-				<ReplyField bind:this={replyField} bind:value={replyText} keepVisible={keepReplyVisible} onSend={postReply} />
+				<ReplyField bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />
 			{/if}
 		{/if}
 	</div>
