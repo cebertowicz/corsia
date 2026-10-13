@@ -27,14 +27,8 @@ def _settings_inventory() -> list[dict]:
     init_model_profiles()
     db = get_db()
     try:
-        from connections.models import connection_disabled
-
         facts = resolve_window_facts_for_rows(rows, db=db)
         overrides = saved_overrides_by_catalog_id(rows, db=db)
-        disabled_harnesses = {
-            harness for harness in ("claude-code", "codex")
-            if connection_disabled(harness, db=db)
-        }
     finally:
         db.close()
     from llm.model_status import harness_fields, versioned_name
@@ -45,7 +39,6 @@ def _settings_inventory() -> list[dict]:
         row["display_name"] = versioned_name(row, metadata)
         if row.get("harness") in ("claude-code", "codex"):
             row.update(harness_fields(str(row["harness"]), metadata))
-            row["provider_enabled"] = row["harness"] not in disabled_harnesses
         row["context_length"] = window.effective
         row["provider_context_length"] = window.discovered
         row["context_window_source"] = window.source

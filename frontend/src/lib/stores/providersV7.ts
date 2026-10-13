@@ -225,10 +225,10 @@ export function groupByHost(
 				name: h.name,
 				label: h.label,
 				type: 'harness',
-				statusDot: h.enabled ? (h.ready > 0 ? 'online' : 'idle') : 'disabled',
-				subline: h.enabled ? _harnessSubline(h.name, h.total) : `off · ${_harnessSubline(h.name, h.total)}`,
+				statusDot: h.ready > 0 ? 'online' : 'idle',
+				subline: _harnessSubline(h.name, h.total),
 				harnessModelCount: h.total,
-				raw: { name: h.name, label: h.label, type: 'harness', enabled: h.enabled } as ProviderEntry,
+				raw: { name: h.name, label: h.label, type: 'harness' } as ProviderEntry,
 			})),
 		});
 	}

@@ -104,10 +104,7 @@ def _resolve_non_native_target(
         "SELECT status FROM connections WHERE provider = ?", (harness,)
     ).fetchone()
     reason: str | None = None
-    if connection_row and connection_row["status"] == "disabled":
-        available = False
-        reason = "provider_disabled"
-    elif not connection_row or connection_row["status"] != "available":
+    if not connection_row or connection_row["status"] != "available":
         available = False
         reason = "connection_unavailable"
     elif not available:

@@ -36,7 +36,7 @@ def sync_legacy_fallback(
     if not any(row[1] == "harness" for row in db.execute("PRAGMA table_info(models)")):
         return
     envelope_exists = isinstance(config, dict) and CACHE_KEY in config
-    should_exist = status not in {"available", "disabled"} and not envelope_exists
+    should_exist = status != "available" and not envelope_exists
     if not should_exist:
         remove_legacy_fallback(provider, db=db)
         return

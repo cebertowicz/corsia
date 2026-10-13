@@ -41,7 +41,6 @@ from infra.db_async import run_in_db
 log = logging.getLogger(__name__)
 
 READY = "ready"
-DISABLED = "disabled"
 NOT_INSTALLED = "not_installed"
 NEEDS_AUTH = "needs_auth"
 UNVERIFIED = "unverified"
@@ -55,7 +54,6 @@ _STATUS_OF = {
 }
 _STATE_OF = {
     ConnectionStatus.AVAILABLE.value: READY,
-    ConnectionStatus.DISABLED.value: DISABLED,
     ConnectionStatus.NEEDS_AUTH.value: NEEDS_AUTH,
     ConnectionStatus.NOT_INSTALLED.value: NOT_INSTALLED,
     ConnectionStatus.UNVERIFIED.value: UNVERIFIED,
@@ -116,8 +114,6 @@ def row_state(row: dict[str, Any] | None) -> dict[str, Any]:
     """``state``, ``prior_state``, ``reason`` and ``checked_at`` for a row."""
     if row is None:
         return {"state": NOT_INSTALLED, "prior_state": None, "reason": None, "checked_at": None}
-    if row.get("status") == ConnectionStatus.DISABLED.value:
-        return {"state": DISABLED, "prior_state": None, "reason": None, "checked_at": None}
     check = (row.get("config") or {}).get(SOURCE_CHECK_KEY)
     if check and check.get("state"):
         return {key: check.get(key) for key in
@@ -176,9 +172,7 @@ async def check_harness_source(provider: str, *, rediscover: bool = False) -> No
             await run_in_db(_ensure_row, provider, cfg, binary)
         else:
             row = await run_in_db(get_connection, provider)
-            if row is None or row["status"] in {
-                ConnectionStatus.NOT_INSTALLED.value, ConnectionStatus.DISABLED.value,
-            }:
+            if row is None or row["status"] == ConnectionStatus.NOT_INSTALLED.value:
                 return
             if provider == "claude-code" and row["status"] == ConnectionStatus.AVAILABLE.value:
                 return

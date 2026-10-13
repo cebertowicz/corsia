@@ -1,6 +1,5 @@
 import {
 	blockedReason,
-	HARNESS_PROVIDER_DISABLED_HOLD,
 	NO_MODEL_SELECTED,
 	SELECTED_MODEL_UNAVAILABLE,
 	SET_ASIDE_COPY,
@@ -28,7 +27,6 @@ export type DeliveryPresentation = {
 		| 'Sending when ready…'
 		| 'Waiting for model'
 		| 'Choose a model to send'
-		| `${string} is turned off · Settings > Providers`
 		| 'Waiting for checkpoint'
 		| 'Delivery uncertain'
 		| 'Queued'
@@ -53,7 +51,6 @@ export type DeliveryPresentation = {
 const MODEL_HOLD_COPY: Readonly<Record<string, Pick<DeliveryPresentation, 'label' | 'title'>>> = Object.freeze({
 	[SELECTED_MODEL_UNAVAILABLE]: WAITING_FOR_MODEL,
 	[NO_MODEL_SELECTED]: WAITING_FOR_MODEL_CHOICE,
-	...HARNESS_PROVIDER_DISABLED_HOLD,
 });
 
 type DeliveryMessage = Pick<

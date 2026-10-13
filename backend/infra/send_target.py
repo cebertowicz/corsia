@@ -13,9 +13,6 @@ from llm.resolution import ExecutionTarget, ModelUnavailableError
 
 
 SELECTED_MODEL_UNAVAILABLE = "selected_model_unavailable"
-CLAUDE_CODE_PROVIDER_DISABLED = "claude_code_provider_disabled"
-CODEX_PROVIDER_DISABLED = "codex_provider_disabled"
-HARNESS_PROVIDER_DISABLED = {CLAUDE_CODE_PROVIDER_DISABLED, CODEX_PROVIDER_DISABLED}
 # The same FIFO-head hold, for a thread that has no model yet. Only the user
 # choosing one lifts it (``thread.model_row.select_first_model``), so no catalog wake looks for it.
 NO_MODEL_SELECTED = "no_model_selected"
@@ -111,7 +108,7 @@ def lifted_hold_ids(rows, model: str, *, db) -> frozenset[str]:
     held = frozenset(
         str(row["id"]) for row in rows
         if row["write_outcome"] == "proved_no_write"
-        and row["delivery_error"] in ({SELECTED_MODEL_UNAVAILABLE} | HARNESS_PROVIDER_DISABLED)
+        and row["delivery_error"] == SELECTED_MODEL_UNAVAILABLE
     )
     from connections.account_holds import ACCOUNT_HOLD_REASONS
 

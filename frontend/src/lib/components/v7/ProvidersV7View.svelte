@@ -16,7 +16,6 @@
 	import { loadModels } from '$lib/stores/models';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import { providerCardRequest, settingsAnchorRequest } from '$lib/stores/settingsNavigation';
-	import { setHarnessEnabled } from '$lib/stores/harnessProviders';
 	import HostSection from './HostSection.svelte';
 	import ProviderRow from './ProviderRow.svelte';
 	import ProviderModelsBody from './ProviderModelsBody.svelte';
@@ -55,9 +54,7 @@
 		toggleError = '';
 		const result: { ok: boolean; message?: string; error?: string } = p.server?.kind === 'external'
 			? await setNetworkServerEnabled(p.server.id, !enabled)
-			: p.type === 'harness'
-				? await setHarnessEnabled(p.name, !enabled)
-				: await updateProvider(p.name, { enabled: !enabled });
+			: await updateProvider(p.name, { enabled: !enabled });
 		if (!result.ok) {
 			const reason = result.message ?? result.error;
 			toggleError = `Could not turn ${p.label} ${enabled ? 'off' : 'on'}: ${reason ?? 'try again.'}`;

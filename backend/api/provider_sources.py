@@ -12,7 +12,6 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
-from pydantic import BaseModel
 
 from connections import harness_usage
 from connections.models import get_connection
@@ -32,8 +31,6 @@ _HARNESS_SOURCES = {
     "codex": ("Codex", APP_FIX, APP_FIX),
 }
 _inflight: asyncio.Task | None = None
-# Re-enable checks run after the response; hold them so they are not collected mid-run.
-_enable_checks: set[asyncio.Task] = set()
 _INCOMPLETE = "Model source checks could not be completed. Check again."
 
 
@@ -127,31 +124,6 @@ async def _recheck() -> None:
 @router.get("/sources")
 async def get_sources(_user: dict = Depends(require_user)) -> dict[str, Any]:
     return {"sources": await run_in_db(list_sources)}
-
-
-class EnabledBody(BaseModel):
-    enabled: bool
-
-
-@router.put("/harnesses/{provider}/enabled")
-async def set_harness_enabled(
-    provider: str, body: EnabledBody, _user: dict = Depends(require_user),
-) -> dict[str, Any]:
-    """Turn a configured harness off without discarding its queued work."""
-    if provider not in HARNESS_PROVIDERS:
-        raise HTTPException(404, f"Unknown harness provider: {provider}")
-    from connections.models import set_harness_enabled as set_enabled
-    from infra.state.ws import notify_models_changed
-
-    row = await run_in_db(set_enabled, provider, body.enabled)
-    if row is None:
-        raise HTTPException(404, f"Harness provider is not configured: {provider}")
-    notify_models_changed()
-    if body.enabled:
-        task = asyncio.create_task(check_harness_source(provider))
-        _enable_checks.add(task)
-        task.add_done_callback(_enable_checks.discard)
-    return {"ok": True, "provider": provider, "enabled": body.enabled}
 
 
 @router.post("/local/setup")

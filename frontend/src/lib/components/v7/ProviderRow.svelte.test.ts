@@ -97,14 +97,14 @@ describe('ProviderRow External switch', () => {
 describe('ProviderRow harness card', () => {
 	afterEach(() => { document.body.innerHTML = ''; });
 
-	it('shows the shared enabled switch beside settings and the account/model summary', () => {
+	it('shows settings and the account/model summary without an unimplemented enable switch', () => {
 		const provider = {
 			name: 'codex', label: 'Codex', type: 'harness' as const, statusDot: 'online' as const,
 			subline: '2 accounts · 3 models', raw: { name: 'codex', label: 'Codex', type: 'harness' } as ProviderEntry,
 		};
 		const c = mount(ProviderRow, { target: document.body, props: { provider } });
 		flushSync();
-		expect(document.querySelector('button.tg')?.getAttribute('aria-label')).toBe('Disable');
+		expect(document.querySelector('button.tg')).toBeNull();
 		expect(document.querySelector('button[aria-label="Settings"]')).not.toBeNull();
 		expect(document.querySelector('.meta')?.textContent).toBe('2 accounts · 3 models');
 		expect(document.querySelector('.name')?.textContent).toBe('Codex');
