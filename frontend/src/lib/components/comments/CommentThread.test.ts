@@ -34,6 +34,46 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right');
 	});
 
+	it('restores a reply selection across remounts and saves a click-placed caret', async () => {
+		const onReplySelection = vi.fn();
+		render(thread(), false, { showReply: true, replyText: 'draft text', replySelection: [2, 5], onReplySelection });
+		await vi.waitFor(() => expect(host.querySelector<HTMLTextAreaElement>('.ct-input')).not.toBeNull());
+		let input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
+		expect([input.selectionStart, input.selectionEnd]).toEqual([2, 5]);
+		input.setSelectionRange(7, 7);
+		input.dispatchEvent(new Event('pointerup', { bubbles: true }));
+		expect(onReplySelection).toHaveBeenLastCalledWith([7, 7]);
+		unmount(component!); component = null; host.remove();
+		render(thread(), false, { showReply: true, replyText: 'draft text', replySelection: [7, 7], onReplySelection });
+		await vi.waitFor(() => expect(host.querySelector<HTMLTextAreaElement>('.ct-input')).not.toBeNull());
+		input = host.querySelector<HTMLTextAreaElement>('.ct-input')!;
+		expect([input.selectionStart, input.selectionEnd]).toEqual([7, 7]);
+	});
+
+	it('clears the owned selection when a reply is sent', async () => {
+		const onReplySelection = vi.fn();
+		const { onReply } = render(thread(), false, { onReplySelection });
+		button('.ct-reply-open').click(); flushSync();
+		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+		type(input, 'ship it');
+		input.setSelectionRange(1, 4);
+		input.dispatchEvent(new Event('select', { bubbles: true }));
+		button('.ct-send').click();
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'ship it'));
+		await vi.waitFor(() => expect(onReplySelection).toHaveBeenLastCalledWith(null));
+	});
+
+	it('clears the owned selection when the draft is emptied by hand', () => {
+		const onReplySelection = vi.fn();
+		render(thread(), false, { onReplySelection });
+		button('.ct-reply-open').click(); flushSync();
+		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+		type(input, 'draft');
+		expect(onReplySelection).toHaveBeenLastCalledWith([5, 5]);
+		type(input, '');
+		expect(onReplySelection).toHaveBeenLastCalledWith(null);
+	});
+
 	it('reveals the reply field only after Reply is pressed', () => {
 		render(thread());
 		expect(host.querySelector('.ct-input')).toBeNull();

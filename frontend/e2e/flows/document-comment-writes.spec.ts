@@ -56,6 +56,8 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await resolved.getByRole('button', { name: 'Resolved · 2 messages' }).click();
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
 	await expect(comment).toBeVisible();
+	// The adaptive comments drawer is modal, so close it before returning to the document to move the anchor.
+	await page.getByRole('region', { name: 'Document comments', exact: true }).getByRole('button', { name: 'Close comments', exact: true }).click();
 
 	const editor = page.locator('.cm-content');
 	await editor.click();

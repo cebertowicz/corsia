@@ -3,14 +3,36 @@
 	import { autosize } from '$lib/actions/autosize';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
-	let { value = $bindable(''), keepVisible = false, onSend }: {
+	let { value = $bindable(''), selection = null, keepVisible = false, onSend, onSelection }: {
 		value?: string;
+		selection?: [number, number] | null;
 		keepVisible?: boolean;
 		onSend: () => void;
+		onSelection?: (selection: [number, number] | null) => void;
 	} = $props();
 
 	let input = $state<HTMLTextAreaElement>();
+	let appliedSelection: string | null = null;
 	export function focus() { input?.focus(); }
+
+	$effect(() => {
+		if (!input || !selection) return;
+		const next = selection.join(':');
+		if (next === appliedSelection) return;
+		input.setSelectionRange(...selection);
+		appliedSelection = next;
+	});
+
+	function saveSelection() {
+		if (!input) return;
+		if (!value) {
+			appliedSelection = null;
+			onSelection?.(null);
+			return;
+		}
+		appliedSelection = `${input.selectionStart}:${input.selectionEnd}`;
+		onSelection?.([input.selectionStart, input.selectionEnd]);
+	}
 
 	// As in the chat composer: Enter sends and Shift+Enter starts a new line; on a touch screen Enter is a new line, and
 	// Cmd or Ctrl+Enter sends everywhere.
@@ -23,7 +45,7 @@
 </script>
 
 <div class="ct-compose open">
-	<textarea class="ct-input" rows="1" placeholder="Reply…" aria-label="Reply" bind:this={input} use:keepInView={keepVisible} use:autosize={value} bind:value onkeydown={onKey} onclick={(e) => e.stopPropagation()}></textarea>
+	<textarea class="ct-input" rows="1" placeholder="Reply…" aria-label="Reply" bind:this={input} use:keepInView={keepVisible} use:autosize={value} bind:value oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 	{#if value.trim()}
 		<button class="ct-send" onclick={(e) => { e.stopPropagation(); onSend(); }} aria-label="Send reply" title="Reply">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>

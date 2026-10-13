@@ -14,7 +14,10 @@ for (const width of [1440, 393]) {
 		// A selection that ends just inside the right edge of a full-width visual line puts the
 		// button's natural position beyond the column. Backing off the wrap point keeps the end on
 		// that line, since the wrap point itself reports the next line's start.
-		await page.locator('.cm-line').filter({ hasText: 'word0 word1' }).click({ position: { x: 1, y: 2 } });
+		const firstLine = page.locator('.cm-line').filter({ hasText: 'word0 word1' });
+		// A comment marker owns the rail; begin in the line's reserved text inset, not its box's left edge.
+		const textInset = await firstLine.evaluate((line) => Number.parseFloat(getComputedStyle(line.parentElement!).paddingLeft));
+		await firstLine.click({ position: { x: textInset + 1, y: 2 } });
 		await page.keyboard.press('Home');
 		await page.keyboard.press('Shift+End');
 		for (let step = 0; step < 3; step += 1) await page.keyboard.press('Shift+ArrowLeft');

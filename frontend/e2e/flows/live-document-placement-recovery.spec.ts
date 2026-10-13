@@ -57,15 +57,52 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await openLiveDocument(writer, document);
 		await openLiveDocument(reader, document);
 		await expect(reader.locator('.cm-comment-anchor')).toHaveCount(2);
+		const editor = reader.locator('.cm-content');
+		// Seed the editor's retained selection without clicking the existing comment anchor, which opens the mobile drawer.
+		await editor.evaluate((content, marker) => {
+			const line = [...content.querySelectorAll<HTMLElement>('.cm-line')].find((candidate) => candidate.textContent?.includes(marker));
+			if (!line) throw new Error('retained comment line is not rendered');
+			const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+			const text = [...Array.from({ length: 20 }, () => walker.nextNode())].find((node): node is Text => node instanceof Text && node.data.includes('keep'));
+			if (!text) throw new Error('retained comment line has no selectable keep text node');
+			const start = text.data.indexOf('keep');
+			const range = document.createRange();
+			range.setStart(text, start);
+			range.setEnd(text, start + 4);
+			const selection = window.getSelection()!;
+			selection.removeAllRanges();
+			selection.addRange(range);
+			(content as HTMLElement).focus();
+		}, retained);
+		const editorSelection = () => reader.evaluate(() => {
+			const selected = window.getSelection();
+			return { text: selected?.toString(), anchor: selected?.anchorOffset, head: selected?.focusOffset,
+				line: selected?.anchorNode?.parentElement?.closest('.cm-line')?.textContent };
+		});
+		const selectedRange = await editorSelection();
+		expect(selectedRange.text).toBe('keep');
 		await reader.getByRole('button', { name: /^2 open threads\b/ }).click();
 		const comments = reader.getByRole('region', { name: 'Document comments', exact: true });
+		await expect(comments).toBeVisible();
 		const retainedCard = comments.locator('[data-comment-id]').filter({ hasText: `Keep ${stamp}` });
 		const retainedId = await retainedCard.getAttribute('data-comment-id');
 		expect(retainedId).toBeTruthy();
-		const reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
+		const openComments = async () => {
+			await reader.getByRole('button', { name: /open thread/ }).click();
+			await expect(comments).toBeVisible();
+		};
+		const closeComments = async () => {
+			await comments.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await expect(comments).toHaveCount(0);
+		};
+		let reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
 		await reply.fill(`draft ${stamp}`);
 		await expect(reply).toBeFocused();
-		await reply.evaluate(element => (element as HTMLInputElement).setSelectionRange(2, 5));
+		await reply.evaluate(element => {
+			const input = element as HTMLInputElement;
+			input.setSelectionRange(2, 5);
+			input.dispatchEvent(new Event('select', { bubbles: true }));
+		});
 		const replySelection = () => reply.evaluate(element => {
 			const input = element as HTMLInputElement;
 			return [input.selectionStart, input.selectionEnd];
@@ -77,45 +114,38 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await expect(reader.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
 		const reload = reader.getByRole('button', { name: 'Reload comment placements', exact: true });
 		await expect(reload).toBeVisible();
-		const editor = reader.locator('.cm-content');
-		await editor.locator('.cm-line').filter({ hasText: retained }).click();
-		await editor.press('Home');
-		for (let index = 0; index < 4; index += 1) await editor.press('Shift+ArrowRight');
-		const editorSelection = () => reader.evaluate(() => {
-			const selected = window.getSelection();
-			return { text: selected?.toString(), anchor: selected?.anchorOffset, head: selected?.focusOffset,
-				line: selected?.anchorNode?.parentElement?.closest('.cm-line')?.textContent };
-		});
-		const selectedRange = await editorSelection();
-		expect(selectedRange.text).toBe('keep');
 		await reply.focus();
 
 		// A real resolver answer with no range keeps orphan recovery available and announces the count.
+		await closeComments();
 		await reload.click();
 		await expect(reader.getByRole('status').filter({ hasText: "1 comment still couldn't be placed" })).toBeVisible();
-		await expect(reload).toBeVisible();
-		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
-		await expect(reply).toHaveValue(`draft ${stamp}`);
 		await expect(reload).toBeFocused();
+		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
+		await openComments();
+		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
+		await expect(reply).toHaveValue(`draft ${stamp}`);
+		await reply.focus();
 		expect(await replySelection()).toEqual([2, 5]);
 		// Refocusing observes the editor's retained range; input focus owns the DOM selection meanwhile.
 		await editor.focus();
 		await expect.poll(editorSelection).toEqual(selectedRange);
-		await reload.focus();
 
 		refuse.arm();
+		await closeComments();
 		await reload.click();
 		await expect.poll(refuse.refused, { timeout: 20_000 }).toBe(1);
 		await expect(reader.getByRole('status').filter({ hasText: "Couldn't reload comment placements" })).toBeVisible();
-		await expect(reload).toBeVisible();
-		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
-		await expect(reply).toHaveValue(`draft ${stamp}`);
 		await expect(reload).toBeFocused();
+		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
+		await openComments();
+		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
+		await expect(reply).toHaveValue(`draft ${stamp}`);
+		await reply.focus();
 		expect(await replySelection()).toEqual([2, 5]);
 		// Refocusing observes the editor's retained range; input focus owns the DOM selection meanwhile.
 		await editor.focus();
 		await expect.poll(editorSelection).toEqual(selectedRange);
-		await reload.focus();
 		await reader.screenshot({ path: testInfo.outputPath('comment-placement-refused-393.png') });
 	} finally {
 		await writerContext.close();
