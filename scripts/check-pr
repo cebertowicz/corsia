@@ -214,6 +214,11 @@ else
   green "docs drift: CI-equivalent citations and home-path scan passed"
   yellow "owner identity NOT scanned (owner-identity kinds: ${OWNER_IDENTITY_KINDS:-none}): $OWNER_IDENTITY_SKIP_REASON"
 fi
+# The same System tier checks docs-drift.yml runs after the drift scan.
+"$VENV_PY" scripts/check_system_closure.py || fail "System tier closure check failed — see output above"
+"$VENV_PY" scripts/generate_system_manifest.py --check \
+  || fail "System MANIFEST.json is stale — run: python scripts/generate_system_manifest.py"
+green "docs drift: System tier closure and manifest freshness passed"
 
 # The closing summary must never present a complete gate over a scan that did
 # not run (PS7). Whether a run may skip the scan is policy the caller sets --
