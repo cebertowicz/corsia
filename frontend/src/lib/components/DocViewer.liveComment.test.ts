@@ -217,6 +217,7 @@ it('keeps the draft and re-enables Comment without posting when a reservation re
 	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
 	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS);
 	await vi.waitFor(() => expect(submit.disabled).toBe(false));
+	expect(toasts.show).toHaveBeenCalledWith('Couldn’t attach your comment. Your draft is kept. Try again.', 'error');
 	expect(submit.textContent).toBe('Comment');
 	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
 	expect(get(commentDraft)?.body).toBe('Keep my body');

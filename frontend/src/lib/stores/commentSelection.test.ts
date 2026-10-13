@@ -168,7 +168,7 @@ it.each([
 it('rejects and releases an unanswered reservation when its deadline expires', async () => {
 	vi.useFakeTimers();
 	const value = opened(), request = captureComment(value.selection, 1, new AbortController().signal);
-	const refused = expect(request).rejects.toThrow('document changed');
+	const refused = expect(request).rejects.toThrow('Couldn’t attach your comment. Your draft is kept. Try again.');
 	await value.asked(1);
 	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS);
 	await refused;

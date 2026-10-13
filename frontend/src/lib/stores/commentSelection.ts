@@ -32,6 +32,7 @@ export const RESERVE_BUDGET_MS = 3000;
 export const CATCH_UP_MS = 50;
 const CHANGED = 'The document changed before your comment could be attached. Your draft is kept. Try again.';
 const OFFLINE = 'You’re offline. Your comment draft is kept. Try again when connected.';
+const UNANSWERED = 'Couldn’t attach your comment. Your draft is kept. Try again.';
 
 /**
  * One correlated capture owned by the existing draft. It asks the server to track the selection under the
@@ -72,7 +73,8 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 			if (session.connection !== 'connected') finish(undefined, new Error(OFFLINE));
 		});
 		if (done) { stopState(); return; }
-		deadline = setTimeout(() => finish(), RESERVE_BUDGET_MS);
+		// An ask still out means the server never answered; otherwise the budget ran out on a document that kept moving.
+		deadline = setTimeout(() => finish(undefined, sent ? new Error(UNANSWERED) : undefined), RESERVE_BUDGET_MS);
 		void ask();
 		function again(refused: boolean) {
 			sent = null;
