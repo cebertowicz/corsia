@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import BaseModel
 
 from connections import harness_usage
 from connections.models import get_connection
@@ -53,7 +54,8 @@ def _default_limit(provider: str) -> dict[str, Any] | None:
 
 def _harness_source(provider: str) -> dict[str, Any]:
     name, install, login = _HARNESS_SOURCES[provider]
-    view = row_state(get_connection(provider))
+    row = get_connection(provider)
+    view = row_state(row)
     fix = {"not_installed": install, "needs_auth": login,
            "unverified": CHECK_AGAIN}.get(view["state"])
     from connections.conductor_account import source_account_view
@@ -63,6 +65,7 @@ def _harness_source(provider: str) -> dict[str, Any]:
     accounts, lost_binding = source_account_view(provider)
     source = {
         "source": provider, "name": name, **view, "fix": fix,
+        "enabled": bool((row or {}).get("enabled", 1)),
         "accounts": accounts, "lost_binding": lost_binding,
     }
     if view["state"] == "not_installed":
@@ -124,6 +127,36 @@ async def _recheck() -> None:
 @router.get("/sources")
 async def get_sources(_user: dict = Depends(require_user)) -> dict[str, Any]:
     return {"sources": await run_in_db(list_sources)}
+
+
+class HarnessEnabledBody(BaseModel):
+    enabled: bool
+
+
+@router.put("/harnesses/{provider}/enabled")
+async def set_harness_enabled(
+    provider: str, body: HarnessEnabledBody, _user: dict = Depends(require_user),
+) -> dict[str, Any]:
+    """Persist a CLI harness switch without modifying observed source state."""
+    if provider not in HARNESS_PROVIDERS:
+        raise HTTPException(404, f"Unknown harness provider: {provider}")
+    from connections.models import set_harness_enabled as persist_harness_enabled
+    from infra.product_events import emit_product_event
+    from infra.state.ws import notify_models_changed
+
+    row = await run_in_db(persist_harness_enabled, provider, body.enabled)
+    if row is None:
+        raise HTTPException(404, f"Harness provider is not configured: {provider}")
+    emit_product_event(
+        "provider", "harness_enabled.changed",
+        properties={"provider": provider, "enabled": body.enabled},
+    )
+    notify_models_changed()
+    if body.enabled:
+        from ws.ingress import track_background_task
+
+        track_background_task(asyncio.create_task(check_harness_source(provider)))
+    return {"ok": True, "provider": provider, "enabled": body.enabled}
 
 
 @router.post("/local/setup")

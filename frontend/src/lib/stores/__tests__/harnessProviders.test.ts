@@ -15,10 +15,30 @@ const pickerRow = (over: Partial<Model> = {}): Model => ({
 });
 
 describe('harnessSummaries', () => {
-	it('counts available rows and drops a harness with none', () => {
+	it('keeps both harness cards while deriving each model total from its inventory', () => {
 		const catalog = [pickerRow(), pickerRow({ id: 'codex/gpt-6-sol', status: 'unavailable' })];
 		expect(harnessSummaries([row({ id: 'codex/gpt-5.6-sol' }), row({ id: 'codex/gpt-6-sol' })], catalog))
-			.toEqual([{ name: 'codex', label: 'Codex', total: 1, ready: 1 }]);
+			.toEqual([
+				{ name: 'claude-code', label: 'Claude Code', enabled: true, total: 0, ready: 0 },
+				{ name: 'codex', label: 'Codex', enabled: true, total: 1, ready: 1 },
+			]);
+	});
+
+	it('keeps an off harness card and its model controls from settings inventory', () => {
+		const settingsRows = [
+			row({ id: 'codex/one', provider_enabled: false }),
+			row({ id: 'codex/two', provider_enabled: false }),
+		];
+		const catalog = [
+			pickerRow({ id: 'codex/one', status: 'unavailable', status_reason: 'provider_disabled' }),
+			pickerRow({ id: 'codex/two', status: 'unavailable', status_reason: 'provider_disabled' }),
+		];
+
+		expect(harnessSummaries(settingsRows, catalog)).toContainEqual(
+			{ name: 'codex', label: 'Codex', enabled: false, total: 2, ready: 0 },
+		);
+		expect(harnessProviderModels(settingsRows, 'codex', catalog).map((model) => model.id))
+			.toEqual(['codex/one', 'codex/two']);
 	});
 });
 
@@ -91,7 +111,10 @@ describe('harnessProviderModels', () => {
 			pickerRow({ id: 'codex/limited', status: 'unavailable', status_reason: 'usage_limited', available: true }),
 		];
 		expect(harnessSummaries([row({}), row({ id: 'codex/limited' })], catalog))
-			.toEqual([{ name: 'codex', label: 'Codex', total: 2, ready: 1 }]);
+			.toEqual([
+				{ name: 'claude-code', label: 'Claude Code', enabled: true, total: 0, ready: 0 },
+				{ name: 'codex', label: 'Codex', enabled: true, total: 2, ready: 1 },
+			]);
 	});
 
 	it('shows the label over the discovered name and keeps both', () => {

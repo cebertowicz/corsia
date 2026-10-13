@@ -30,12 +30,11 @@ export interface HostProvider {
 	server?: NetworkServer;
 	/** The fetched CLI inventory total; account counts are derived from vendorAccounts. */
 	harnessModelCount?: number;
+	harnessEnabled?: boolean;
 }
-
-/** Whether a card's switch reads on. An External endpoint is switched on its own. */
 export function providerEnabled(p: HostProvider): boolean {
 	if (p.server?.kind === 'external') return p.server.status !== 'disabled';
-	return p.type === 'cloud' ? cloudProviderOn(p.raw) : p.raw.enabled !== false;
+	return p.type === 'harness' ? p.harnessEnabled !== false : p.type === 'cloud' ? cloudProviderOn(p.raw) : p.raw.enabled !== false;
 }
 
 export interface HostGroup {
@@ -47,15 +46,14 @@ export interface HostGroup {
 	providers: HostProvider[];
 }
 
-// Network/resources/inventory loading owns this snapshot. `hostGroups` below is the
-// canonical display owner and derives the account-sensitive harness card text from it.
+// Network/resources/inventory loading owns this snapshot; `hostGroups` derives account-sensitive harness card text from it.
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
 export const hostGroups = derived(
 	[hostGroupSnapshot, vendorAccounts],
 	([$snapshot, $accounts]) => $snapshot.map((group) => ({
 		...group,
 		providers: group.providers.map((provider) => provider.type === 'harness' && provider.harnessModelCount != null
-			? { ...provider, subline: _harnessSubline(provider.name, provider.harnessModelCount, $accounts) }
+			? { ...provider, subline: _harnessSubline(provider.name, provider.harnessModelCount, $accounts, provider.harnessEnabled) }
 			: provider),
 	})),
 );
@@ -80,9 +78,10 @@ function _modelCountLabel(count: number): string {
 	return `${count} model${count === 1 ? '' : 's'}`;
 }
 
-function _harnessSubline(name: string, modelCount: number, accounts = get(vendorAccounts)): string {
+function _harnessSubline(name: string, modelCount: number, accounts = get(vendorAccounts), enabled = true): string {
 	const accountCount = accounts.filter((account) => account.provider === name && account.state !== 'removed').length;
-	return accountCount > 0 ? `${accountCount} account${accountCount === 1 ? '' : 's'} · ${_modelCountLabel(modelCount)}` : _modelCountLabel(modelCount);
+	const count = accountCount > 0 ? `${accountCount} account${accountCount === 1 ? '' : 's'} · ${_modelCountLabel(modelCount)}` : _modelCountLabel(modelCount);
+	return enabled ? count : `off · ${count}`;
 }
 
 function _statusDotForServer(s: NetworkServer): HostProvider['statusDot'] {
@@ -225,9 +224,10 @@ export function groupByHost(
 				name: h.name,
 				label: h.label,
 				type: 'harness',
-				statusDot: h.ready > 0 ? 'online' : 'idle',
-				subline: _harnessSubline(h.name, h.total),
+				statusDot: !h.enabled ? 'disabled' : h.ready > 0 ? 'online' : 'idle',
+				subline: _harnessSubline(h.name, h.total, undefined, h.enabled),
 				harnessModelCount: h.total,
+				harnessEnabled: h.enabled,
 				raw: { name: h.name, label: h.label, type: 'harness' } as ProviderEntry,
 			})),
 		});
