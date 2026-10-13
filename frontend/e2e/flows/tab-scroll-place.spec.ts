@@ -213,7 +213,7 @@ for (const width of [1440, 393]) {
 					if (touch) await link(page).tap();
 					else await link(page).click();
 					await expect(page.getByText('Second filler paragraph 1 keeps this tab long enough to restore.', { exact: true })).toBeVisible();
-					await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+					await scroller.evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2); });
 					await expect.poll(async () => (await visiblePlace(scroller)).line.startsWith('Second filler')).toBe(true);
 					const secondBefore = await visiblePlace(scroller);
 					expect(secondBefore.scrollTop).toBeGreaterThan(0);
