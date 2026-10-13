@@ -326,11 +326,12 @@ def test_mark_f_at_the_claim_only_a_turned_off_binding_moves_and_a_signed_out_or
     accept_thread_input(CONDUCTOR, role="user", content="hello", intent="apply_now", message_id="queued", db=db)
     _lose(db, personal, how)
     # Only a project not permitting the account is a movable hold: the claim's prefix is offered to a move.
-    head = _claimable_prefix(db, CONDUCTOR, movable=True)
+    # The prefix is read inside the claim's writer transaction, as start_idle_turn reads it.
+    with write_transaction(db, scope="test_claim_prefix"):
+        head = _claimable_prefix(db, CONDUCTOR, movable=True)
 
     if how == "turned_off":
         assert head
-        db.commit()
         with write_transaction(db, scope="test_claim_rollover"):
             assert commit_rollover(plan_rollover(CONDUCTOR, eligible_rows=head[2], db=db), db=db) is not None
         assert chosen_account_id(CONDUCTOR, "codex", db=db) == work["id"]
@@ -366,14 +367,15 @@ def test_mark_f_after_the_pick_choosing_the_survivor_rebinds_and_the_held_input_
     _pick()
     accept_thread_input(CONDUCTOR, role="user", content="hello", intent="apply_now", message_id="queued", db=db)
     _lose(db, personal, how)
-    assert _claimable_prefix(db, CONDUCTOR) is None  # held on the lost account
-    db.commit()
+    with write_transaction(db, scope="test_claim_prefix"):
+        assert _claimable_prefix(db, CONDUCTOR) is None  # held on the lost account
 
     rebind_idle_account(CONDUCTOR, work["id"], user_id="user", db=db)
     db.commit()
 
     assert chosen_account_id(CONDUCTOR, "codex", db=db) == work["id"]
-    assert _claimable_prefix(db, CONDUCTOR) is not None
+    with write_transaction(db, scope="test_claim_prefix"):
+        assert _claimable_prefix(db, CONDUCTOR) is not None
 
 
 def test_mark_d_a_turned_off_account_is_refused_but_one_left_out_of_a_saved_order_is_bound(conductor):
