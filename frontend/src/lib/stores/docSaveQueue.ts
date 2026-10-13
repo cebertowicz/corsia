@@ -5,6 +5,8 @@ import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
 import { saveErrorMessage } from './docSaveError';
+import { clearDocSaveActivity, publishDocSaveActivity } from './docSaveActivity';
+export { docSaveActivities, idleDocSaveActivity } from './docSaveActivity';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 
 export type DocSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -68,19 +70,19 @@ export function existingDraft(target: TargetIdentity): DocSaveDraft | undefined 
 }
 
 /** Read-only queue facts for the per-draft save cue. */
-export function docSaveActivity(target: TargetIdentity): DocSaveActivity {
-	const key = draftKey(target);
-	return {
+function publishActivity(key: string): void {
+	publishDocSaveActivity(key, {
 		writeInFlight: inflight.has(key),
 		resaveQueued: needsResave.has(key),
 		awaitingReconnect: reconnectWaits.has(key),
 		confirmationOwed: confirmationsOwed.has(key),
-	};
+	});
 }
 
 /** The cue calls this only after it displays a confirmation owed by a reconnect. */
 export function confirmReconnectSave(key: string): void {
 	confirmationsOwed.delete(key);
+	publishActivity(key);
 }
 
 /** The draft's target, which carries any identity resolved since it was seeded. */
@@ -132,6 +134,7 @@ export function setDraftText(target: TargetIdentity, text: string): void {
 	});
 	// A live document re-saves only for its own unacknowledged transactions, read when the flush returns.
 	if (inflight.has(key) && !get(liveDocumentBindings)[key]) needsResave.set(key, true);
+	publishActivity(key);
 	const existingTimer = timers.get(key);
 	if (existingTimer) clearTimeout(existingTimer);
 	timers.set(key, setTimeout(() => { timers.delete(key); void runSave(key); }, SAVE_DEBOUNCE_MS));
@@ -147,14 +150,17 @@ function waitForLiveReconnect(key: string, live: LiveDocumentSession): void {
 		if (get(liveDocumentBindings)[key] !== live || !draft || draft.editText === draft.savedText || !live.writable) {
 			reconnectWaits.delete(key);
 			if (!draft || draft.editText === draft.savedText) confirmationsOwed.delete(key);
+			publishActivity(key);
 			stop();
 			return;
 		}
 		reconnectWaits.delete(key);
+		publishActivity(key);
 		stop();
 		void runSave(key);
 	});
 	reconnectWaits.set(key, stop);
+	publishActivity(key);
 }
 
 /**
@@ -189,6 +195,7 @@ async function runSave(key: string): Promise<boolean> {
 			// remaining difference is remote edits the server owns, so only unacked local work re-saves.
 			const clean = !live || live.durability.clean;
 			if (!clean) needsResave.set(key, true);
+			publishActivity(key);
 			const cur = getDraft(key);
 			if (cur) {
 				const savedText = live ? (clean ? cur.editText : cur.savedText) : textAtStart;
@@ -222,10 +229,12 @@ async function runSave(key: string): Promise<boolean> {
 		return true;
 	})();
 	inflight.set(key, p);
+	publishActivity(key);
 	const completed = await p;
 	inflight.delete(key);
 	const resave = needsResave.get(key);
 	needsResave.delete(key);
+	publishActivity(key);
 	return resave ? runSave(key) : completed;
 }
 
@@ -262,6 +271,7 @@ export function clearDraft(target: TargetIdentity): void {
 	reconnectWaits.get(key)?.();
 	reconnectWaits.delete(key);
 	confirmationsOwed.delete(key);
+	clearDocSaveActivity(key);
 	drafts.update((all) => {
 		if (!(key in all)) return all;
 		const next = { ...all };
