@@ -300,6 +300,20 @@ async def test_allowed_and_unknown_targets_launch_unchanged(isolated_db, launch,
 
 
 @pytest.mark.asyncio
+async def test_native_target_fold_launches_without_an_account(isolated_db, launch):
+    _seed("t1", "native/mock-model")
+    request, provider = _pair("t1", "c1", SONNET)
+    request = replace(request, source_harness="native", source_model="native/mock-model",
+                      writer_harness="native", writer_model="native/mock-model")
+    native = replace(provider.target, catalog_id="native/mock-model", harness="native", provider="mock")
+
+    record = await request_checkpoint(request, replace(provider, target=native))
+
+    assert record.id == "c1"
+    launch.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_an_active_fold_coalesces_before_the_gate(isolated_db, launch):
     _seed("t1", SONNET)
     first, first_provider = _pair("t1", "running", SONNET)

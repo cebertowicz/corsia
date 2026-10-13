@@ -24,10 +24,13 @@ async def refuse_limited_target(provider_request: ProviderCheckpointRequest) -> 
     A DB read only: it creates no row, arms nothing, and sits before any wait,
     so Stop never passes through it.
     """
+    from connections.vendor_accounts import VENDORS
     from infra.held_admission import limited_admission
 
     if provider_request.vendor_account_bound:
         account_id = provider_request.vendor_account_id
+    elif provider_request.target.harness not in VENDORS:
+        account_id = None
     else:
         account_id, _reason = await run_in_db(
             _target_turn_account, provider_request.thread_id,
