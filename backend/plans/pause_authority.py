@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 
-from core.message_history import NON_HUMAN_MARKERS
 from plans.errors import PlanRefusal
 from plans.scheduled_wait import pause_refusal
 
@@ -54,22 +53,6 @@ def _paused_plan(db, thread_id: str) -> tuple[str | None, str | None]:
 #: tool creates schedules and nothing records whether the user asked, so while
 #: paused it lands in the digest (#2286 records that provenance).
 _REACH_PAUSED_EVENTS = frozenset({"plan.decision_answered"})
-
-
-def _metadata(row) -> dict:
-    try:
-        metadata = json.loads(row["metadata"] or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return metadata if isinstance(metadata, dict) else {}
-
-
-def is_users_word(row) -> bool:
-    """Whether one claimed input is the user's word under the pause contract."""
-    metadata = _metadata(row)
-    return (
-        row["role"] == "user" and not any(metadata.get(key) for key in NON_HUMAN_MARKERS)
-    ) or metadata.get("event_type") == "plan.decision_answered"
 
 
 def reaches_paused_agent(row) -> bool:
