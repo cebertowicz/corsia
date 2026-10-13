@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EditorView } from '@codemirror/view';
 import { restoreDocumentPlace } from './documentImagePlace';
 
 const SRC = '/api/files/content?path=%2Fws%2Fa.png';
@@ -57,6 +58,18 @@ describe('restoreDocumentPlace', () => {
 		vi.spyOn(widget, 'getBoundingClientRect').mockImplementation(() => ({ top: 490 - scroller.scrollTop }) as DOMRect);
 		await restoreDocumentPlace(root, { ...image, top: 100 });
 		expect(scroller.scrollTop).toBe(390);
+	});
+
+	it('holds the first visible text line while CodeMirror re-measures after a tab returns', async () => {
+		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
+		const found = vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
+			coordsAtPos: () => ({ top: 490 - scroller.scrollTop }),
+		} as unknown as EditorView);
+
+		await restoreDocumentPlace(root, { from: 80, top: 100, scrollTop: 300 });
+
+		expect(scroller.scrollTop).toBe(390);
+		found.mockRestore();
 	});
 
 	it('keeps holding the image while the text goes on re-measuring, and lets go at the first touch of the user', async () => {

@@ -4,15 +4,17 @@
 	// container is the browser's own, so scrollbars, trackpad scrolling and keyboard scrolling pan it natively;
 	// zoom and touch panning are applied here, around the point under the pointer.
 	import './DocViewer.css';
-	import { flushSync, type Snippet } from 'svelte';
+	import { flushSync, tick, type Snippet } from 'svelte';
 	import { FAILED_IMAGE, imageFailureReason } from '$lib/imageFailure';
 	import {
 		clampScale, distance, fitScale, fractionOnImage, isActualSize, midpoint, percentLabel, scrollToHold,
 		stepScale, wheelFactor, type Point, type Size,
 	} from '$lib/imageZoom';
 	import { isMobile, prefersReducedMotion } from '$lib/stores/viewport';
+	import { observeImageViewportPlace, resetImageViewportPlace, restoreImageViewportPlace } from '$lib/imageViewportPlace';
+	import type { ImageViewportPlace } from '$lib/artifactTabs';
 
-	let { src, alt, docName = '', onBack, barActions, overlay, onLoaded, onFailed, onRetry }: {
+	let { src, alt, docName = '', onBack, barActions, overlay, place = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** The document this image belongs to; with `onBack` the bar offers a way back to it. */
@@ -22,6 +24,9 @@
 		barActions?: Snippet<[{ loaded: boolean }]>;
 		/** Drawn over the image in a frame of its exact size, so it follows zoom and scrolling as part of the image. */
 		overlay?: Snippet<[{ scale: number }]>;
+		/** The in-session image camera, including user-chosen free zoom or Fit. */
+		place?: ImageViewportPlace | null;
+		onPlace?: (place: ImageViewportPlace) => void;
 		onLoaded?: () => void;
 		onFailed?: () => void;
 		/** The host's own reload for a failed image; without it the same address is requested again. */
@@ -76,10 +81,20 @@
 		if (el) overflowing = el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
 	});
 
-	function onImageLoad() {
+	$effect(() => {
+		const el = viewportEl;
+		if (el && onPlace) return observeImageViewportPlace(el, onPlace, () => free);
+	});
+
+	async function onImageLoad() {
 		const el = imgEl;
 		if (!el) return;
 		natural = el.naturalWidth > 0 && el.naturalHeight > 0 ? { width: el.naturalWidth, height: el.naturalHeight } : UNSIZED;
+		await tick();
+		const saved = place;
+		if (saved) free = saved.scale ?? null;
+		await tick();
+		if (saved && viewportEl) restoreImageViewportPlace(viewportEl, saved);
 		if (onBack) viewportEl?.focus({ preventScroll: true });
 		onLoaded?.();
 	}
@@ -97,7 +112,7 @@
 	}
 
 	/** Sets the scale and scrolls so the image fraction `at` stays under the client point `pivot`. */
-	function place(next: number, at: Point, pivot: Point) {
+	function placeScale(next: number, at: Point, pivot: Point) {
 		const el = viewportEl;
 		const image = imgEl;
 		if (!el || !image) return;
@@ -107,6 +122,7 @@
 		const delta = scrollToHold(at, pivot, image.getBoundingClientRect());
 		el.scrollLeft += delta.x;
 		el.scrollTop += delta.y;
+		onPlace?.({ scrollLeft: el.scrollLeft, scrollTop: el.scrollTop, scale: free });
 	}
 	function center(): Point {
 		const box = viewportEl!.getBoundingClientRect();
@@ -114,7 +130,7 @@
 	}
 	function zoomTo(next: number, pivot: Point = center()) {
 		if (!imgEl) return;
-		place(next, fractionOnImage(pivot, imgEl.getBoundingClientRect()), pivot);
+		placeScale(next, fractionOnImage(pivot, imgEl.getBoundingClientRect()), pivot);
 	}
 	/** The shown image's live bounds, for an anchored card to avoid covering its tags. */
 	export function imageBounds(): DOMRect | null { return imgEl?.isConnected ? imgEl.getBoundingClientRect() : null; }
@@ -132,10 +148,7 @@
 	}
 	function toFit() {
 		free = null;
-		if (viewportEl) {
-			viewportEl.scrollLeft = 0;
-			viewportEl.scrollTop = 0;
-		}
+		resetImageViewportPlace(viewportEl, free, onPlace);
 	}
 	const zoomIn = () => zoomTo(stepScale(scale, 1, fit));
 	const zoomOut = () => zoomTo(stepScale(scale, -1, fit));
@@ -159,7 +172,7 @@
 		const gestureChange = (event: Event) => {
 			event.preventDefault();
 			const e = event as GestureEvent;
-			if (gesture && loaded) place(gesture.scale * e.scale, gesture.at, { x: e.clientX, y: e.clientY });
+			if (gesture && loaded) placeScale(gesture.scale * e.scale, gesture.at, { x: e.clientX, y: e.clientY });
 		};
 		const gestureEnd = (event: Event) => { event.preventDefault(); gesture = null; };
 		el.addEventListener('wheel', onWheel, { passive: false });
@@ -222,7 +235,7 @@
 		pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 		if (pinch && pointers.size >= 2) {
 			const [a, b] = [...pointers.values()];
-			place(pinch.scale * (distance(a, b) / pinch.distance), pinch.at, midpoint(a, b));
+			placeScale(pinch.scale * (distance(a, b) / pinch.distance), pinch.at, midpoint(a, b));
 		} else if (drag) {
 			const here = { x: event.clientX, y: event.clientY };
 			const dx = here.x - drag.last.x;

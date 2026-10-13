@@ -17,7 +17,7 @@
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
 	import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
 	import type { DocumentFreshness } from '$lib/docFreshness';
-	import { createCommentRetryToast, createThreadActions, markFreshnessVerified, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer } from '$lib/docViewerOperations';
+	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
@@ -55,6 +55,7 @@
 		stale = false,
 		onReload,
 		onOpenImage,
+		onDocumentPlace,
 		covered = false,
 	}: {
 		target: DocViewerTarget | null;
@@ -67,6 +68,7 @@
 		onReload?: () => void;
 		/** Opens an image of the document larger in the canvas, with its comments. */
 		onOpenImage?: (request: DocumentImageRequest) => void;
+		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 		/** The canvas shows an image viewer over this document; it keeps its state but answers no keys. */
 		covered?: boolean;
 	} = $props();
@@ -286,10 +288,6 @@
 
 	onDestroy(() => teardownDocumentViewer(target, flushNow, releaseDocEditor));
 
-	async function markCurrentDocumentVerified(): Promise<void> {
-		freshness = await markFreshnessVerified(loadedArtifactId, freshness);
-	}
-
 	function onKey(event: KeyboardEvent): void {
 		handleDocumentKey(event, {
 			covered, commentUI, draftController,
@@ -322,7 +320,7 @@
 		onOpenComments={commentUI.openList}
 		{freshness}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
-		onMarkVerified={markCurrentDocumentVerified}
+		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, freshness, (next) => freshness = next)}
 		liveSession={liveSession ?? null}
 		{openRefusal} {liveUnavailable}
 		tabText={editText}
@@ -358,6 +356,8 @@
 		readOnly={readonly || suggestionBusyId !== null}
 		imageBase={target}
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
+		tabInstanceId={target?.instanceId ?? null}
+		{onDocumentPlace}
 		{saveError}
 		{saveStatus}
 		pendingSel={draftController.pending}

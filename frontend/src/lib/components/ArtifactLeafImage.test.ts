@@ -25,7 +25,7 @@ vi.mock('$lib/stores/liveDocuments', async (importOriginal) => ({
 }));
 
 import ArtifactLeaf from './ArtifactLeaf.svelte';
-import { threadWorkspaces, openArtifactTab, applyTabRevisionCheck } from '$lib/stores/artifactWorkspace';
+import { threadWorkspaces, openArtifactTab, applyTabRevisionCheck, tabViewState } from '$lib/stores/artifactWorkspace';
 import { token } from '$lib/stores/auth';
 import { ImageFileError } from '$lib/docOpenRefusal';
 
@@ -240,5 +240,40 @@ describe('artifact leaf renderer choice', () => {
 
 		expect(host.querySelector('.image-viewer')).toBeNull();
 		expect(mocks.fetchContent).toHaveBeenCalled();
+	});
+
+	it('restores an image tab camera after remounting in this session', async () => {
+		openArtifactTab(THREAD, { artifactId: 'art-1', path: '/ws/camera.png', title: 'camera.png' });
+		await settle();
+		const first = host.querySelector<HTMLImageElement>('.image-viewer img')!;
+		Object.defineProperties(first, {
+			naturalWidth: { configurable: true, value: 1000 },
+			naturalHeight: { configurable: true, value: 500 },
+		});
+		first.dispatchEvent(new Event('load'));
+		await settle();
+		const firstViewport = host.querySelector<HTMLElement>('.image-viewer .viewport')!;
+		[...host.querySelectorAll<HTMLButtonElement>('.image-viewer button')].find((button) => button.textContent?.trim() === '100%')!.click();
+		firstViewport.scrollLeft = 123;
+		firstViewport.scrollTop = 77;
+		firstViewport.dispatchEvent(new Event('scroll'));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const instanceId = get(threadWorkspaces)[THREAD].tabs[0].instanceId;
+		expect(tabViewState(THREAD, instanceId)?.imagePlace).toEqual({ scrollLeft: 123, scrollTop: 77, scale: 1 });
+
+		unmount(component!);
+		component = mount(ArtifactLeaf, { target: host, props: { threadId: THREAD, mode: 'expanded' } });
+		await settle();
+		const restored = host.querySelector<HTMLImageElement>('.image-viewer img')!;
+		Object.defineProperties(restored, {
+			naturalWidth: { configurable: true, value: 1000 },
+			naturalHeight: { configurable: true, value: 500 },
+		});
+		restored.dispatchEvent(new Event('load'));
+		await settle();
+
+		expect(host.querySelector('.image-viewer .level')?.textContent).toBe('100%');
+		const restoredViewport = host.querySelector<HTMLElement>('.image-viewer .viewport')!;
+		expect([restoredViewport.scrollLeft, restoredViewport.scrollTop]).toEqual([123, 77]);
 	});
 });

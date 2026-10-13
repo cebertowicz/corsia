@@ -15,6 +15,7 @@ vi.mock('$lib/api/docFeedback', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/api/docFeedback')>()),
 	returnDocFeedback: vi.fn(async () => ({ undelivered_batches: [] })),
 	leaveDocFeedback: vi.fn(async () => ({ undelivered_batches: [] })),
+	sendDocFeedback: vi.fn(async () => ({ undelivered_batches: [] })),
 }));
 vi.mock('$lib/stores/liveDocuments', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/stores/liveDocuments')>()),
@@ -26,8 +27,9 @@ vi.mock('$lib/api/reviewBar', async (importOriginal) => ({
 }));
 
 import ArtifactLeaf from './ArtifactLeaf.svelte';
+import ArtifactLeafModeTestHost from './ArtifactLeafModeTestHost.test.svelte';
 import { backLayerDepth, resetBackLayers } from '$lib/historyBackLayer';
-import { threadWorkspaces, openArtifactTab } from '$lib/stores/artifactWorkspace';
+import { threadWorkspaces, openArtifactTab, tabViewState } from '$lib/stores/artifactWorkspace';
 import { closeDocumentImage, documentImageViewers, openDocumentImage, remapDocumentImage } from '$lib/stores/documentImageViewer';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 import { paneOpen } from '$lib/stores/paneOpen';
@@ -53,6 +55,29 @@ const image = (instanceId: string) => ({ instanceId, src: '/api/files/content?pa
 
 async function mountLeaf(mode: 'expanded' | 'rail' | 'compact' = 'expanded', props: Record<string, unknown> = {}) {
 	component = mount(ArtifactLeaf, { target: host, props: { threadId: THREAD, mode, ...props } });
+	await settle();
+}
+
+async function openImageFromDocument() {
+	const image = host.querySelector<HTMLImageElement>('.cm-md-image img')!;
+	Object.defineProperties(image, {
+		complete: { configurable: true, value: true },
+		naturalWidth: { configurable: true, value: 1000 },
+		naturalHeight: { configurable: true, value: 500 },
+	});
+	image.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, cancelable: true }));
+	image.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, cancelable: true }));
+	await settle();
+	return host.querySelector<HTMLElement>('.image-overlay')!;
+}
+
+async function loadOverlayImage() {
+	const image = host.querySelector<HTMLImageElement>('.image-overlay .pad img')!;
+	Object.defineProperties(image, {
+		naturalWidth: { configurable: true, value: 1000 },
+		naturalHeight: { configurable: true, value: 500 },
+	});
+	image.dispatchEvent(new Event('load'));
 	await settle();
 }
 
@@ -118,6 +143,60 @@ describe('an image of a document opened in the canvas', () => {
 		// A document's review bar is the document's: none shows over its image.
 		expect(overlay.querySelector('.review-bar')).toBeNull();
 		expect(host.querySelectorAll('.tab').length).toBe(1);
+	});
+
+	it('opens through ArtifactLeaf, restores its camera after a tab switch, then returns to the document place', async () => {
+		await mountLeaf();
+		const documentScroller = host.querySelector<HTMLElement>('.cm-scroller')!;
+		documentScroller.scrollTop = 160;
+		const overlay = await openImageFromDocument();
+		expect(overlay).not.toBeNull();
+		await loadOverlayImage();
+		[...overlay.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === '100%')!.click();
+		const viewport = overlay.querySelector<HTMLElement>('.viewport')!;
+		viewport.scrollLeft = 111;
+		viewport.scrollTop = 73;
+		viewport.dispatchEvent(new Event('scroll'));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const original = activeInstance();
+		expect(tabViewState(THREAD, original)?.documentImage?.place).toEqual({ scrollLeft: 111, scrollTop: 73, scale: 1 });
+
+		openArtifactTab(THREAD, { artifactId: 'art-two', path: '/ws/two.md', title: 'two.md' });
+		await settle();
+		expect(host.querySelector('.image-overlay')).toBeNull();
+		[...host.querySelectorAll<HTMLButtonElement>('.tab')].find((tab) => tab.textContent?.includes('notes.md'))!.click();
+		await settle();
+		expect(host.querySelector('.image-overlay')).not.toBeNull();
+		await loadOverlayImage();
+		expect(host.querySelector('.image-overlay .level')?.textContent).toBe('100%');
+		const restoredViewport = host.querySelector<HTMLElement>('.image-overlay .viewport')!;
+		expect([restoredViewport.scrollLeft, restoredViewport.scrollTop]).toEqual([111, 73]);
+
+		host.querySelector<HTMLButtonElement>('.image-overlay button.back')!.click();
+		await settle();
+		expect(host.querySelector('.image-overlay')).toBeNull();
+		expect(documentScroller.scrollTop).toBe(160);
+		expect(tabViewState(THREAD, original)?.documentImage).toBeUndefined();
+	});
+
+	it('clears an image opened through ArtifactLeaf when the pane collapses or its tab closes', async () => {
+		component = mount(ArtifactLeafModeTestHost, { target: host });
+		await settle();
+		await openImageFromDocument();
+		const modeHost = component as unknown as { setMode: (mode: 'expanded' | 'rail') => void };
+		modeHost.setMode('rail');
+		await settle();
+		modeHost.setMode('expanded');
+		await settle();
+		expect(host.querySelector('.image-overlay')).toBeNull();
+		expect(tabViewState(THREAD, activeInstance())?.documentImage).toBeUndefined();
+
+		await openImageFromDocument();
+		const closing = activeInstance();
+		host.querySelector<HTMLButtonElement>('[aria-label="Close notes.md"]')!.click();
+		await settle();
+		expect(get(documentImageViewers)[THREAD]).toBeUndefined();
+		expect(tabViewState(THREAD, closing)).toBeNull();
 	});
 
 	it('goes back to the same document from its Back button and from Escape', async () => {

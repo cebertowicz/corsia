@@ -1,5 +1,13 @@
 import { tick } from 'svelte';
+import { EditorView } from '@codemirror/view';
 import type { OpenDocumentImage } from '$lib/stores/documentImageViewer';
+
+/** A document position and its viewport distance, stable across CodeMirror re-measurement. */
+export interface TextDocumentPlace {
+	from: number;
+	top: number;
+	scrollTop: number;
+}
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
@@ -25,22 +33,45 @@ async function widthSettled(el: HTMLElement): Promise<void> {
 	}
 }
 
+/** Reads the first visible CodeMirror line as an anchor before its tab leaves the screen. */
+export function captureDocumentPlace(root: HTMLElement | undefined): TextDocumentPlace | null {
+	const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
+	if (!scroller) return null;
+	const view = EditorView.findFromDOM(scroller);
+	const bounds = scroller.getBoundingClientRect();
+	const position = view?.posAtCoords({ x: bounds.left + 1, y: bounds.top + 1 });
+	if (!view || position == null) return null;
+	const from = view.state.doc.lineAt(position).from;
+	const coords = view.coordsAtPos(from, 1);
+	if (!coords) return null;
+	return { from, top: coords.top - bounds.top, scrollTop: scroller.scrollTop };
+}
+
 /**
- * Puts a document back where it was when one of its images was opened: the scroll position it had, then the image
- * held at the distance below the top it had (where it was, not merely in view: nothing scrolls it into view). The width the document had changes with the workspace pane, so this
- * waits for the layout that follows the viewer closing to settle before it reads sizes, and then follows the image
- * rather than the scroll offset: the editor re-measures the text it left unrendered as the width returns, which
- * moves a saved offset onto different content.
- * The image is found by its markdown range, so an edit that moved it falls back to the scroll position alone.
+ * Puts a document back where it was after an image viewer closes or a tab returns. It starts at the saved scroll
+ * offset, then holds either the image or the first visible text line at its saved viewport distance while CodeMirror
+ * re-measures unrendered text after the layout settles. An image whose markdown moved falls back to the offset alone.
  */
-export async function restoreDocumentPlace(root: HTMLElement | undefined, image: OpenDocumentImage): Promise<void> {
+export async function restoreDocumentPlace(
+	root: HTMLElement | undefined,
+	place: OpenDocumentImage | TextDocumentPlace,
+): Promise<void> {
 	await tick();
 	if (root) await widthSettled(root);
 	const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
 	if (!root || !scroller) return;
-	scroller.scrollTop = image.scrollTop;
-	const find = () => [...root.querySelectorAll<HTMLElement>('.cm-md-image')]
-		.find((el) => el.dataset.from === String(image.from) && el.dataset.src === image.src);
+	scroller.scrollTop = place.scrollTop;
+	const image = 'src' in place ? place : null;
+	const view = image ? null : EditorView.findFromDOM(scroller);
+	const anchorTop = () => {
+		if (image) {
+			const widget = [...root.querySelectorAll<HTMLElement>('.cm-md-image')]
+				.find((el) => el.dataset.from === String(image.from) && el.dataset.src === image.src);
+			return widget ? widget.getBoundingClientRect().top - scroller.getBoundingClientRect().top : null;
+		}
+		const coords = view?.coordsAtPos(place.from, 1);
+		return coords ? coords.top - scroller.getBoundingClientRect().top : null;
+	};
 	let touched = false;
 	const onInput = () => { touched = true; };
 	for (const type of USER_INPUT) scroller.addEventListener(type, onInput, { capture: true, passive: true });
@@ -49,10 +80,10 @@ export async function restoreDocumentPlace(root: HTMLElement | undefined, image:
 		for (let frame = 0; frame < MAX_ANCHOR_FRAMES && held < ANCHOR_HOLD_FRAMES && !touched; frame++) {
 			await nextFrame();
 			if (touched) break;
-			const widget = find();
-			// The editor draws the image a frame after the scroll position lands, so a missing widget is waited for.
-			if (!widget) continue;
-			const drift = widget.getBoundingClientRect().top - scroller.getBoundingClientRect().top - image.top;
+			const currentTop = anchorTop();
+			// CodeMirror draws a newly visible line or image a frame after the offset lands.
+			if (currentTop === null) continue;
+			const drift = currentTop - place.top;
 			if (Math.abs(drift) < ANCHOR_TOLERANCE) held += 1;
 			else { held = 0; scroller.scrollTop += drift; }
 		}
