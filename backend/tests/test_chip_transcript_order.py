@@ -41,8 +41,9 @@ def test_runtime_notices_keep_their_history_position(deleg_db, kind):
     events = []
     broadcast = lambda thread, payload: events.append((thread, payload))
     if kind == 'spawn':
-        from subagents.cc_runtime_markers import post_subagent_marker
-        post_subagent_marker('chip-parent', 'child', 'Worker', broadcast, deleg_db)
+        from subagents.cc_runtime_markers import broadcast_subagent_marker, persist_subagent_marker
+        marker_id = persist_subagent_marker('chip-parent', 'child', 'Worker', deleg_db)
+        broadcast_subagent_marker('chip-parent', 'child', 'Worker', broadcast, marker_id, deleg_db)
     elif kind == 'boundary':
         from subagents.cc_event_simple import record_tool_boundary_violation
         record_tool_boundary_violation('chip-parent', broadcast, deleg_db,
