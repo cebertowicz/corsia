@@ -1,123 +1,86 @@
-import { confirmReconnectSave, type DocSaveActivity, type DocSaveDraft } from './docSaveQueue';
+import { fromStore, derived, writable } from 'svelte/store';
+import {
+	confirmReconnectSave, docSaveActivities, docSaveDrafts, idleDocSaveActivity,
+	type DocSaveActivity, type DocSaveDraft,
+} from './docSaveQueue';
 
 export type DocSaveIndicator = 'idle' | 'saving' | 'saved';
-
 export interface DocSaveCueSnapshot {
 	key: string | null;
 	draft: DocSaveDraft | undefined;
 	activity?: DocSaveActivity;
 }
-
 interface Episode {
 	startedAt: number;
 	suspendedAt: number | null;
-	showingSaving: boolean;
-	savingTimer: ReturnType<typeof setTimeout> | null;
-	savedTimer: ReturnType<typeof setTimeout> | null;
-	showingSaved: boolean;
+	showedSaving: boolean;
 	settled: boolean;
+	timer: ReturnType<typeof setTimeout> | null;
 }
 
 const EPISODE_NOTICE_MS = 400;
 const SAVED_NOTICE_MS = 1400;
-const inactiveActivity: DocSaveActivity = {
-	writeInFlight: false,
-	resaveQueued: false,
-	awaitingReconnect: false,
-	confirmationOwed: false,
-};
 
-/**
- * Turns queue facts into one cosmetic, per-draft writing episode. Queue state
- * remains authoritative: this module never starts a save or declares it durable.
- */
-export function docSaveGhost(snapshot: () => DocSaveCueSnapshot) {
-	let current = $state<DocSaveIndicator>('idle');
-	let visibleKey: string | null = null;
+/** One timer owner for every draft, independent of which viewer is mounted. */
+export function createDocSaveCues(confirm: (key: string) => void) {
 	const episodes = new Map<string, Episode>();
-
-	const stopSavingTimer = (episode: Episode) => {
-		if (episode.savingTimer) clearTimeout(episode.savingTimer);
-		episode.savingTimer = null;
+	const indicators = writable<Record<string, DocSaveIndicator>>({});
+	const show = (key: string, value: DocSaveIndicator) => {
+		indicators.update((all) => all[key] === value ? all : { ...all, [key]: value });
 	};
-	const stopSavedTimer = (episode: Episode) => {
-		if (episode.savedTimer) clearTimeout(episode.savedTimer);
-		episode.savedTimer = null;
+	const stop = (episode: Episode) => {
+		if (episode.timer !== null) clearTimeout(episode.timer);
+		episode.timer = null;
 	};
-	const updateVisible = (key: string, episode: Episode) => {
-		if (visibleKey === key) current = episode.showingSaved ? 'saved' : episode.showingSaving ? 'saving' : 'idle';
+	const forget = (key: string, episode: Episode) => {
+		stop(episode);
+		episodes.delete(key);
+		show(key, 'idle');
 	};
 	const scheduleSaving = (key: string, episode: Episode) => {
-		stopSavingTimer(episode);
-		const remaining = Math.max(0, EPISODE_NOTICE_MS - (Date.now() - episode.startedAt));
-		episode.savingTimer = setTimeout(() => {
-			episode.savingTimer = null;
-			episode.showingSaving = true;
-			updateVisible(key, episode);
-		}, remaining);
+		stop(episode);
+		episode.timer = setTimeout(() => {
+			episode.timer = null;
+			episode.showedSaving = true;
+			show(key, 'saving');
+		}, Math.max(0, EPISODE_NOTICE_MS - (Date.now() - episode.startedAt)));
 	};
-	const showSaved = (key: string, episode: Episode) => {
-		stopSavedTimer(episode);
-		episode.showingSaved = true;
-		updateVisible(key, episode);
-		episode.savedTimer = setTimeout(() => {
-			episode.savedTimer = null;
-			episode.showingSaved = false;
-			if (episode.settled) episodes.delete(key);
-			updateVisible(key, episode);
-		}, SAVED_NOTICE_MS);
-	};
-	const finishEpisode = (key: string, episode: Episode, confirmationOwed: boolean) => {
-		stopSavingTimer(episode);
-		const shouldConfirm = episode.showingSaving || confirmationOwed;
-		episode.showingSaving = false;
-		if (shouldConfirm) showSaved(key, episode);
-		else updateVisible(key, episode);
-		if (confirmationOwed) confirmReconnectSave(key);
+	const finish = (key: string, episode: Episode, owed: boolean) => {
+		stop(episode);
 		episode.settled = true;
+		if (!episode.showedSaving && !owed) {
+			forget(key, episode);
+			return;
+		}
+		show(key, 'saved');
+		episode.timer = setTimeout(() => forget(key, episode), SAVED_NOTICE_MS);
+		if (owed) confirm(key);
 	};
-	const resetEpisode = (key: string, episode: Episode) => {
-		stopSavingTimer(episode);
-		stopSavedTimer(episode);
-		episodes.delete(key);
-		if (visibleKey === key) current = 'idle';
-	};
-
-	$effect(() => {
-		const { key, draft, activity = inactiveActivity } = snapshot();
-		visibleKey = key;
-		if (!key || !draft) {
-			current = 'idle';
+	const update = ({ key, draft, activity = idleDocSaveActivity }: DocSaveCueSnapshot) => {
+		if (!key) return;
+		let episode = episodes.get(key);
+		if (!draft || draft.status === 'error') {
+			if (episode) forget(key, episode);
+			else show(key, 'idle');
 			return;
 		}
 		const clean = draft.editText === draft.savedText && !activity.writeInFlight && !activity.resaveQueued;
-		let episode = episodes.get(key);
-		if (draft.status === 'error') {
-			if (episode) resetEpisode(key, episode);
-			return;
+		if (episode?.settled) {
+			// A fresh edit dismisses the old badge; its save starts a fresh clock.
+			if (!clean) forget(key, episode);
+			else return;
+			episode = undefined;
 		}
-		if (activity.writeInFlight && (!episode || episode.settled)) {
-			if (episode) stopSavedTimer(episode);
-			episode = {
-				startedAt: Date.now(), suspendedAt: null, showingSaving: false,
-				savingTimer: null, savedTimer: null, showingSaved: false, settled: false,
-			};
+		if (!episode && (activity.writeInFlight || activity.confirmationOwed)) {
+			episode = { startedAt: Date.now(), suspendedAt: null, showedSaving: false, settled: false, timer: null };
 			episodes.set(key, episode);
 			scheduleSaving(key, episode);
 		}
-		if (!episode) {
-			current = 'idle';
-			return;
-		}
-		if (episode.settled) {
-			updateVisible(key, episode);
-			return;
-		}
+		if (!episode) return;
 		if (activity.awaitingReconnect) {
 			if (episode.suspendedAt === null) episode.suspendedAt = Date.now();
-			stopSavingTimer(episode);
-			episode.showingSaving = false;
-			updateVisible(key, episode);
+			stop(episode);
+			show(key, 'idle');
 			return;
 		}
 		if (episode.suspendedAt !== null) {
@@ -125,14 +88,45 @@ export function docSaveGhost(snapshot: () => DocSaveCueSnapshot) {
 			episode.suspendedAt = null;
 			scheduleSaving(key, episode);
 		}
-		if (clean) finishEpisode(key, episode, activity.confirmationOwed);
-		else updateVisible(key, episode);
+		if (clean) finish(key, episode, activity.confirmationOwed);
+	};
+	return {
+		store: { subscribe: indicators.subscribe },
+		update,
+		prune(keys: Set<string>) {
+			for (const [key, episode] of episodes) if (!keys.has(key)) forget(key, episode);
+			indicators.update((all) => Object.fromEntries(Object.entries(all).filter(([key]) => keys.has(key))));
+		},
+		destroy() { for (const episode of episodes.values()) stop(episode); episodes.clear(); },
+	};
+}
+
+const cues = createDocSaveCues(confirmReconnectSave);
+// Observe every draft, including inactive tabs. Closing the draft removes its clock.
+derived([docSaveDrafts, docSaveActivities], ([drafts, activities]) => ({ drafts, activities }))
+	.subscribe(({ drafts, activities }) => {
+		cues.prune(new Set(Object.keys(drafts)));
+		for (const [key, draft] of Object.entries(drafts)) cues.update({ key, draft, activity: activities[key] });
 	});
-	$effect(() => () => {
-		for (const episode of episodes.values()) {
-			stopSavingTimer(episode);
-			stopSavedTimer(episode);
-		}
+
+/** A tab switch never replays a confirmation that already happened offscreen. */
+export function docSaveGhost(key: () => string | null) {
+	const indicators = fromStore(cues.store);
+	let watched = $state<string | null>(null);
+	let showSaved = $state(false);
+	let previous: DocSaveIndicator = 'idle';
+	$effect(() => {
+		const now = key();
+		const value = now ? indicators.current[now] ?? 'idle' : 'idle';
+		showSaved = now === watched && value === 'saved' && (showSaved || previous !== 'saved');
+		watched = now;
+		previous = value;
 	});
-	return { get current(): DocSaveIndicator { return current; } };
+	return {
+		get current(): DocSaveIndicator {
+			const now = key();
+			const value = now ? indicators.current[now] ?? 'idle' : 'idle';
+			return value === 'saved' ? (now === watched && showSaved ? 'saved' : 'idle') : value;
+		},
+	};
 }

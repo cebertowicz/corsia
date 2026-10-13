@@ -1,5 +1,12 @@
 import { writable } from 'svelte/store';
-import type { DocSaveActivity } from './docSaveQueue';
+
+/** Read-only queue state used by the cosmetic save cue. */
+export interface DocSaveActivity {
+	writeInFlight: boolean;
+	resaveQueued: boolean;
+	awaitingReconnect: boolean;
+	confirmationOwed: boolean;
+}
 
 export const idleDocSaveActivity: DocSaveActivity = {
 	writeInFlight: false,
@@ -8,17 +15,34 @@ export const idleDocSaveActivity: DocSaveActivity = {
 	confirmationOwed: false,
 };
 
-export const docSaveActivities = writable<Record<string, DocSaveActivity>>({});
-
-export function publishDocSaveActivity(key: string, activity: DocSaveActivity): void {
-	docSaveActivities.update((all) => ({ ...all, [key]: activity }));
-}
-
-export function clearDocSaveActivity(key: string): void {
-	docSaveActivities.update((all) => {
-		if (!(key in all)) return all;
-		const next = { ...all };
-		delete next[key];
-		return next;
-	});
+/** The queue retains the maps and the only writer; consumers receive subscribe only. */
+export function createDocSaveActivityProjection(maps: {
+	inflight: ReadonlyMap<string, Promise<boolean>>;
+	needsResave: ReadonlyMap<string, boolean>;
+	reconnectWaits: ReadonlyMap<string, () => void>;
+	confirmationsOwed: ReadonlyMap<string, true>;
+}) {
+	const activity = writable<Record<string, DocSaveActivity>>({});
+	return {
+		store: { subscribe: activity.subscribe },
+		publish(key: string): void {
+			activity.update((all) => ({
+				...all,
+				[key]: {
+					writeInFlight: maps.inflight.has(key),
+					resaveQueued: maps.needsResave.has(key),
+					awaitingReconnect: maps.reconnectWaits.has(key),
+					confirmationOwed: maps.confirmationsOwed.has(key),
+				},
+			}));
+		},
+		clear(key: string): void {
+			activity.update((all) => {
+				if (!(key in all)) return all;
+				const next = { ...all };
+				delete next[key];
+				return next;
+			});
+		},
+	};
 }

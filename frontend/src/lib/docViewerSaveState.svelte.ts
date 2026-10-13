@@ -1,5 +1,5 @@
 import { fromStore } from 'svelte/store';
-import { docSaveActivities, docSaveDrafts, draftKey, idleDocSaveActivity } from '$lib/stores/docSaveQueue';
+import { docSaveDrafts, draftKey } from '$lib/stores/docSaveQueue';
 import { docSaveGhost } from '$lib/stores/docSaveGhost.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 
@@ -10,18 +10,13 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
  */
 export function createDocSaveState(target: () => DocViewerTarget | null) {
 	const drafts = fromStore(docSaveDrafts);
-	const activities = fromStore(docSaveActivities);
 	const draft = $derived.by(() => {
 		const current = target();
 		return current ? drafts.current[draftKey(current)] : undefined;
 	});
 	const ghost = docSaveGhost(() => {
 		const current = target();
-		return {
-			key: current ? draftKey(current) : null,
-			draft,
-			activity: current ? activities.current[draftKey(current)] ?? idleDocSaveActivity : undefined,
-		};
+		return current ? draftKey(current) : null;
 	});
 	return {
 		get draft() { return draft; },

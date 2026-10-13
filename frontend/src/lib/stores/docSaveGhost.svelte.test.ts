@@ -1,6 +1,6 @@
-import { flushSync } from 'svelte';
+import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { docSaveGhost, type DocSaveCueSnapshot } from './docSaveGhost.svelte';
+import { createDocSaveCues, type DocSaveCueSnapshot } from './docSaveGhost.svelte';
 import type { DocSaveActivity, DocSaveDraft, DocSaveStatus } from './docSaveQueue';
 
 const inactive: DocSaveActivity = {
@@ -26,14 +26,13 @@ function cue(key: string | null, state: DocSaveDraft | undefined, activity: Part
 }
 
 function mount(initial: DocSaveCueSnapshot) {
-	let snapshot = $state(initial);
-	let ghost!: ReturnType<typeof docSaveGhost>;
-	const teardown = $effect.root(() => { ghost = docSaveGhost(() => snapshot); });
-	flushSync();
+	const cues = createDocSaveCues(vi.fn());
+	let visibleKey = initial.key;
+	cues.update(initial);
 	return {
-		ghost,
-		set(next: DocSaveCueSnapshot) { snapshot = next; flushSync(); },
-		teardown,
+		ghost: { get current() { return visibleKey ? get(cues.store)[visibleKey] ?? 'idle' : 'idle'; } },
+		set(next: DocSaveCueSnapshot) { visibleKey = next.key; cues.update(next); },
+		teardown: cues.destroy,
 	};
 }
 

@@ -5,8 +5,8 @@ import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
 import { saveErrorMessage } from './docSaveError';
-import { clearDocSaveActivity, publishDocSaveActivity } from './docSaveActivity';
-export { docSaveActivities, idleDocSaveActivity } from './docSaveActivity';
+import { createDocSaveActivityProjection } from './docSaveActivity';
+export { idleDocSaveActivity, type DocSaveActivity } from './docSaveActivity';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 
 export type DocSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -19,14 +19,6 @@ export interface DocSaveDraft {
 	error: string;
 	/** Revision the server reported for this draft's last successful write. */
 	savedRevision: string | null;
-}
-
-/** Read-only queue state used by the cosmetic save cue. */
-export interface DocSaveActivity {
-	writeInFlight: boolean;
-	resaveQueued: boolean;
-	awaitingReconnect: boolean;
-	confirmationOwed: boolean;
 }
 
 type TargetIdentity = Pick<DocViewerTarget, 'instanceId'>;
@@ -53,6 +45,9 @@ const inflight = new Map<string, Promise<boolean>>();
 const needsResave = new Map<string, boolean>();
 const reconnectWaits = new Map<string, () => void>();
 const confirmationsOwed = new Map<string, true>();
+const activity = createDocSaveActivityProjection({ inflight, needsResave, reconnectWaits, confirmationsOwed });
+export const docSaveActivities = activity.store;
+const publishActivity = activity.publish;
 
 function getDraft(key: string): DocSaveDraft | undefined {
 	return get(drafts)[key];
@@ -67,16 +62,6 @@ function patchDraft(key: string, patch: Partial<DocSaveDraft>): void {
 
 export function existingDraft(target: TargetIdentity): DocSaveDraft | undefined {
 	return getDraft(draftKey(target));
-}
-
-/** Read-only queue facts for the per-draft save cue. */
-function publishActivity(key: string): void {
-	publishDocSaveActivity(key, {
-		writeInFlight: inflight.has(key),
-		resaveQueued: needsResave.has(key),
-		awaitingReconnect: reconnectWaits.has(key),
-		confirmationOwed: confirmationsOwed.has(key),
-	});
 }
 
 /** The cue calls this only after it displays a confirmation owed by a reconnect. */
@@ -271,7 +256,7 @@ export function clearDraft(target: TargetIdentity): void {
 	reconnectWaits.get(key)?.();
 	reconnectWaits.delete(key);
 	confirmationsOwed.delete(key);
-	clearDocSaveActivity(key);
+	activity.clear(key);
 	drafts.update((all) => {
 		if (!(key in all)) return all;
 		const next = { ...all };
