@@ -117,7 +117,6 @@
 	$effect(() => syncActiveDocumentEditor({ target, draft: currentDraft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
-	const headerCommentStatus = $derived(commentSurfaceStatus(listedComments));
 	let scrollTarget = $state<CanvasScrollTarget | null>(null);
 	$effect(() => {
 		const fc = focusedComment;
@@ -128,8 +127,7 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	const commentUI = createCommentSurfaceState(() => docRoot?.querySelector<HTMLElement>('.cm-content')?.focus(), () => targetKey);
-	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
-	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
+	const highlights = $derived(canvasCommentHighlights(listedComments, editText, commentUI.hovered ?? focusedComment, focusMarker, suggestionBusyId));
 	function setCommentScrollTarget(id: string, focus: boolean, origin: ScrollOrigin) {
 		scrollTarget = canvasCommentScrollTarget(listedComments, editText, id, focus, origin);
 	}
@@ -306,11 +304,12 @@
 		title={target?.name ?? 'Document'}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
+		{saveStatus}
 		bind:this={feedbackStatus}
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !openRefusal}
-		{...headerCommentStatus}
+		{...commentSurfaceStatus(listedComments)}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
@@ -360,8 +359,8 @@
 		tabInstanceId={target?.instanceId ?? null}
 		{onDocumentPlace}
 		{saveError}
-		{saveStatus}
 		pendingSel={draftController.pending}
+		commentSheetOpen={commentUI.sheetModalOpen}
 		onStartComment={draftController.start}
 	/>
 	<DocCommentSurface
@@ -370,7 +369,7 @@
 		bounds={docRoot}
 		narrow={isPaneDrawer()}
 		comments={listedComments}
-		focusedId={shownFocus}
+		focusedId={commentUI.hovered ?? focusedComment}
 		draft={draftController.draft}
 		draftReason={draftController.reason}
 		onDraftBody={(body) => setCommentBody(body, targetKey)}
@@ -392,6 +391,7 @@
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
+		onSheetModalChange={(open) => commentUI.sheetModalOpen = open}
 		images={images.groups}
 		{covered}
 	/>

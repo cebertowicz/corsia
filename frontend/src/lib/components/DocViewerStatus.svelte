@@ -17,6 +17,7 @@
 		reviewBar,
 		commentsOpen = false,
 		commentsLoading = false,
+		saveStatus = 'idle',
 		ready,
 		stale,
 		readonly,
@@ -48,6 +49,7 @@
 		reviewBar?: import('svelte').Snippet;
 		commentsOpen?: boolean;
 		commentsLoading?: boolean;
+		saveStatus?: 'idle' | 'saving' | 'saved';
 		ready: boolean;
 		stale: boolean;
 		readonly: boolean;
@@ -161,6 +163,7 @@
 		{#if presence}{@render presence()}{/if}
 		<span class="document-tools">
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
+			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
 			<CommentsPill class="doc-tool comment-status" bind:element={commentStatus} count={commentCount} {unsent} unplaced={orphanedCount}
 				loading={commentsLoading} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}

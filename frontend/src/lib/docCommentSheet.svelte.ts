@@ -28,7 +28,7 @@ export function createCommentSheet(props: {
 	let shownDraft: SheetDraft = null;
 	// The list is a sheet by the canvas-width rule; a card or the composer only on a narrow canvas.
 	const drawnAsSheet = (state: CommentSurfaceState) => !!state && (state.kind === 'list' ? props.sheetDrawer() : props.narrow());
-	$effect(() => {
+	$effect.pre(() => {
 		if (props.state() && props.sheetDrawer()) {
 			closingMobileState = null;
 			closingMobileDraft = null;
@@ -73,6 +73,8 @@ export function createCommentSheet(props: {
 	return {
 		/** The drawer's `open`: false from a close until the next opening. */
 		get open() { return mobileDrawerOpen; },
+		/** The modal is visible until its outro finishes, including the scrim. */
+		get modalOpen() { return mobileDrawerOpen || closingMobileState !== null; },
 		/** What the sheet shows: the closing content through its outro, otherwise the surface's own state and draft. */
 		get state() { return renderedMobileState; },
 		get draft() { return renderedMobileDraft; },

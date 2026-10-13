@@ -32,7 +32,7 @@
 	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
 	 */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, covered = false, onDrawerShown }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, covered = false, onDrawerShown, onSheetModalChange }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -71,6 +71,8 @@
 		covered?: boolean;
 		/** Whether the comment list's drawer is on screen, in either form: true from its mount until its outro has ended. */
 		onDrawerShown?: (shown: boolean) => void;
+		/** The sheet controller's modal presence, including its closing scrim. */
+		onSheetModalChange?: (open: boolean) => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
@@ -111,6 +113,8 @@
 		onClose: () => onClose(),
 		onCancelDraft: () => (onCancelDraft ?? onClose)(),
 	});
+	// The sheet owns this lifecycle; the viewer only consumes its signal to avoid showing another control through its scrim.
+	$effect(() => onSheetModalChange?.(sheet.modalOpen));
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
