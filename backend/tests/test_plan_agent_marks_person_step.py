@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from plans import closure, node_settlement, operator_projection, service
+from plans import closure, folded_reads, node_settlement, operator_projection, service
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import (
     HUMAN,
@@ -238,6 +238,22 @@ def test_the_row_says_which_agent_marked_it(db):
     nodes = _pane(db)
     assert nodes[keys.id]["status_reason"] == "Marked by Infrastructure"
     assert nodes[mine.id]["status_reason"] != "Marked by Infrastructure"
+
+
+def test_a_folded_row_says_which_agent_marked_it(db):
+    plan = owner_plan(db)
+    db.execute("UPDATE threads SET title='Infrastructure' WHERE id='owner'")
+    db.commit()
+    keys = task(db, plan.id, "Set the key", assignee="user")
+    task(db, plan.id, "Still open")
+
+    _mark(db, plan.id, keys.id)
+
+    page = folded_reads.read_folded(plan.id, actor=HUMAN, db=db)
+    items = {item["id"]: item for item in page["items"]}
+    assert items[keys.id]["status_reason"] == "Marked by Infrastructure"
+    path = folded_reads.read_path(plan.id, keys.id, actor=HUMAN, db=db)
+    assert path["node"]["status_reason"] == "Marked by Infrastructure"
 
 
 def test_a_row_the_user_marked_carries_no_marker(db):

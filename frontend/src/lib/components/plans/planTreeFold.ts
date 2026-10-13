@@ -60,6 +60,11 @@ export function isFinished(node: OperatorNode): boolean {
 	return TERMINAL_TONES.has(node.display.tone_key);
 }
 
+/** A terminal node stays visibly open while an ancestor is blocked. */
+export function isVisibleFinished(node: OperatorNode, openBlocked: ReadonlySet<string>): boolean {
+	return isFinished(node) && !openBlocked.has(node.id);
+}
+
 /**
  * Ids of terminal nodes that keep their plan-order place because a
  * descendant is still open: a finished parent whose subtree still holds open

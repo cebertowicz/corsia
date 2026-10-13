@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { OperatorArtifactLink, OperatorNode, UserActionHandler } from '$lib/api/plans';
 	import { buildPlanTreeView, childPlanView, indexPlanNodes } from './planTreeFilter';
-	import { isFinished, levelOf } from './planTreeFold';
+	import { isVisibleFinished, levelOf } from './planTreeFold';
 	import { buildFoldLevels, foldRemaining, type FoldedWork } from './planFoldLevels';
 	import { createFoldHistory } from './foldHistory.svelte';
 	import { formatMoment, minuteClock } from '$lib/time';
@@ -138,12 +138,9 @@
 		return rowControls.focusRow(nodeId);
 	}
 
-	// The controller owns person-requested page motion; keep these names local so the tree's transition wiring stays explicit.
-	const userPaging = $derived(reveal.userPaging);
+	// The controller owns person-requested disclosure and page motion; keep this gate local so transition wiring stays explicit.
+	const userDisclosure = $derived(reveal.userDisclosure);
 	const pendingFoldLevel = $derived(reveal.pendingFoldLevel);
-	function isFinishedNode(node: OperatorNode): boolean {
-		return isFinished(node) && !index.openBlocked.has(node.id);
-	}
 
 	// The fold wave (`foldMotion`): rows that fold or sink since the last render glide as one wave.
 	let treeElement = $state<HTMLElement | null>(null);
@@ -174,7 +171,7 @@
 		nodes: () => shownNodes,
 		items: () => items,
 		element: () => treeElement,
-		isFinished: isFinishedNode,
+		isFinished: (node) => isVisibleFinished(node, index.openBlocked),
 		keyOf: (node) => ({ id: `${scope}${node.id}`, level: `${scope}${levelOf(node, index.byId)}` }),
 	});
 
@@ -185,7 +182,7 @@
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="tree-row" role="listitem"
-			in:blockSlot|global={{ off: !userPaging }} out:blockSlot|global={{ off: !userPaging }}
+			in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }}
 			class:details-open={detailsExpanded(node.id)}
 			class:has-menu={!!onUserAction && node.user_actions.length > 0}
 			{...taskMenu.rowHandlers(node)}
@@ -206,7 +203,7 @@
 				aria-controls={rowControls.detailsId(node.id)}
 				aria-haspopup={onUserAction && node.user_actions.length > 0 ? 'menu' : undefined}
 				title="{detailsExpanded(node.id) ? 'Hide' : 'Show'} details"
-				onclick={() => toggleDetails(node.id)}
+				onclick={() => reveal.byRequest(() => toggleDetails(node.id))}
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}
@@ -216,16 +213,18 @@
 			<PlanRowActions
 				{node} {ask} isBranch={branchParents.has(node.id)} branchExpanded={isBranchExpanded(node.id)} detailsOpen={detailsExpanded(node.id)}
 				controls={rowControls.controlledRowIds(node.id)} childExpanded={isChildExpanded(node.id)}
-				onToggleBranch={() => toggleBranch(node.id)} {onOpenArtifact} {onOpenLegacyDiscussion}
+				onToggleBranch={() => reveal.byRequest(() => toggleBranch(node.id))} {onOpenArtifact} {onOpenLegacyDiscussion}
 				onToggleChild={() => onToggleChild(node.id)}
 				onOpenChild={() => onOpenChild(node.id, node.child!.thread_id, node.title)}
 			/>
 		</div>
 		{#if detailsExpanded(node.id)}
-			<PlanRowDetails
-				{node} id={rowControls.detailsId(node.id)} planId={folded?.planId ?? ''} fromHistory={historyIds.has(node.id)}
-				indent={indentAt(depthOffset + node.depth + nest)}
-			/>
+			<div class="details-slot" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }}>
+				<PlanRowDetails
+					{node} id={rowControls.detailsId(node.id)} planId={folded?.planId ?? ''} fromHistory={historyIds.has(node.id)}
+					indent={indentAt(depthOffset + node.depth + nest)}
+				/>
+			</div>
 		{/if}
 		{#if node.child?.available && isChildExpanded(node.id)}
 			{@const child = childRowState(node.id)}
@@ -347,6 +346,10 @@
 		padding: 6px 8px 6px calc(4px + var(--indent)); border-radius: var(--radius-xs);
 		width: 100%;
 	}
+	/* The fold face keeps its whole width, so the actions sit beside the
+	   outcome counts when they fit and wrap below them only when they don't. */
+	.fold-row { flex-wrap: wrap; }
+	.fold-row .row-body { flex: 0 1 auto; }
 	/* A long-press opens the task menu, so it must not also select text or raise the iOS callout. */
 	@media (pointer: coarse) {
 		.tree-row.has-menu { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
@@ -384,15 +387,12 @@
 		position: absolute; width: 1px; height: 1px; overflow: hidden;
 		clip: rect(0 0 0 0); white-space: nowrap;
 	}
+	/* Keep the details section's margins inside its measured motion slot. */
+	.details-slot { display: flow-root; }
 	.child-row { color: var(--text-secondary); }
 	/* A notice with a retry is prose, not a plan row: it may wrap. */
 	.child-error { flex-wrap: wrap; color: var(--red-text); justify-content: space-between; }
 	.child-stale { flex-wrap: wrap; color: var(--amber); justify-content: space-between; }
-	@media (max-width: 620px) {
-		.tree-row, .drill-row { --plan-row-action-height: 44px; }
-		.drill-row { min-height: 44px; }
-		/* The details target is the whole row body, so it carries the touch
-		   minimum rather than a small label needing an invisible hit extension. */
-		button.row-body { min-height: 44px; }
-	}
+	/* The details target is the whole row body, so it carries the touch minimum. */
+	@media (max-width: 620px) { .tree-row, .drill-row { --plan-row-action-height: 44px; } .drill-row, button.row-body { min-height: 44px; } }
 </style>
