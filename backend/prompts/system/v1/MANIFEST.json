@@ -7,10 +7,10 @@
       "sha256": "38ff342f6bc8ea0db369b0ed061e7670a7e9d861f01f02b66e65c28a64b83081"
     },
     {
-      "bytes": 5943,
+      "bytes": 5976,
       "kind": "context",
       "path": "context/20-CONTEXT-WORK-STATE.md",
-      "sha256": "3d5133f3f5a5a9abf553be3e7707a548254dbcc2f31a6edf874c5ad5e534915e"
+      "sha256": "50b0c0fa5940932fb712b27fac93e5d94380d31b2e4848ab61c3139f76909376"
     },
     {
       "bytes": 3478,
@@ -43,11 +43,11 @@
       "sha256": "e1e3eb13deff650b55ae30558962fcf57eef9ad2d227241c00751c2b9c0d26a0"
     },
     {
-      "bytes": 3269,
+      "bytes": 3245,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "6c620f0e212175046191a0d0cd2c12f9a07821a1d6f0831c09075b51c13a4827"
+      "sha256": "4594c28b73bf38650fc3e131db7df95adcb948de29ac291ef29e688184806a19"
     },
     {
       "bytes": 1712,

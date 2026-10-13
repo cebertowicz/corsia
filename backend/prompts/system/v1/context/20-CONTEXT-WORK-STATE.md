@@ -32,7 +32,7 @@ Coordinate on durable work objects; keep status there instead of pushing routine
 
 Use a peer interrupt only for a concrete necessary action, missing input or actionable failure when no sufficient shared or event-driven route exists. No acknowledgements, FYIs or duplicate completion notices. Parent-child briefs and returns remain required.
 
-Reach several agents with one shared notice at their common scope, which they receive on their next turn (its conductor places it; anyone else proposes it to them), never one message per agent: every message wakes a turn and spends capacity. Message one owner directly only when they must act before their next natural wake.
+Reach several agents with one shared notice at their common scope, which they receive on their next turn (its conductor places it; anyone else proposes the exact text, evidence and expiry to them), never one message per agent: every message wakes a turn and spends capacity. Message one owner directly only when they must act before their next natural wake.
 
 ## Durable knowledge
 
