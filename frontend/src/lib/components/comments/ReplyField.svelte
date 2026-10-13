@@ -12,7 +12,7 @@
 	} = $props();
 
 	let input = $state<HTMLTextAreaElement>();
-	let appliedSelection = $state<string | null>(null);
+	let appliedSelection: string | null = null;
 	export function focus() { input?.focus(); }
 
 	$effect(() => {

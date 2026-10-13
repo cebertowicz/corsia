@@ -63,6 +63,17 @@ describe('CommentThread', () => {
 		await vi.waitFor(() => expect(onReplySelection).toHaveBeenLastCalledWith(null));
 	});
 
+	it('clears the owned selection when the draft is emptied by hand', () => {
+		const onReplySelection = vi.fn();
+		render(thread(), false, { onReplySelection });
+		button('.ct-reply-open').click(); flushSync();
+		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+		type(input, 'draft');
+		expect(onReplySelection).toHaveBeenLastCalledWith([5, 5]);
+		type(input, '');
+		expect(onReplySelection).toHaveBeenLastCalledWith(null);
+	});
+
 	it('reveals the reply field only after Reply is pressed', () => {
 		render(thread());
 		expect(host.querySelector('.ct-input')).toBeNull();

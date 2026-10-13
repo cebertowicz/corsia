@@ -140,7 +140,7 @@
 		if (readOnly || !t || replyPosting) return;
 		replyPosting = true;
 		try {
-				await onReply?.(comment.id, t);
+			await onReply?.(comment.id, t);
 			replyText = ''; onReplySelection?.(null); showReplies = true;
 		} finally {
 			replyPosting = false;
