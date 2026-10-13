@@ -113,9 +113,9 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		await page.keyboard.press('ControlOrMeta+S');
 		await expect.poll(async () => {
 			const savedResponse = await request.get(
-			`/api/files/content?token=${fixture.token}&path=${encodeURIComponent(fixture.docPath)}&thread_id=${fixture.sessionId}`,
-		);
-		expect(savedResponse.ok()).toBeTruthy();
+				`/api/files/content?token=${fixture.token}&path=${encodeURIComponent(fixture.docPath)}&thread_id=${fixture.sessionId}`,
+			);
+			expect(savedResponse.ok()).toBeTruthy();
 			return (await savedResponse.json()).text;
 		}).toContain('- [x] checked\n- [ ]');
 		await expectQuietSave(page);

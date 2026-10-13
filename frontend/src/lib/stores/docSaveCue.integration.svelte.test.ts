@@ -141,8 +141,9 @@ it('real queue: error ends without Saved; editing and retry start a fresh clock'
 it('real queue: tab switches keep each draft clock and do not replay an offscreen save', async () => {
 	const slow = deferred(); mocks.write.mockReturnValueOnce(slow.promise);
 	seedDraft(other, 'base'); setDraftText(target, 'changed'); await advance(900);
-	current = other; flushSync(); await advance(200); expect(state.status).toBe('idle');
-	current = target; flushSync(); expect(state.status).toBe('saving');
+	current = other; flushSync(); await advance(100); expect(state.status).toBe('idle');
+	current = target; flushSync(); expect(state.status).toBe('idle');
+	await advance(100); expect(state.status).toBe('saving');
 	current = other; flushSync(); await settle(slow);
 	current = target; flushSync(); expect(state.status).toBe('idle');
 });

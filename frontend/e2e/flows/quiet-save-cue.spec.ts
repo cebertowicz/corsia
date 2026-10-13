@@ -1,9 +1,21 @@
-import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
 import { cueSamples, expectQuietSave, observeSaveCue, routeDocumentSaves } from '../support/docSaveCue';
 import { openLiveDocument, seedLiveDocument, serverText, typeAtDocumentEnd } from '../support/liveDocument';
 
-// Preserve full-screen motion evidence for review, including successful runs.
-test.use({ video: 'on' });
+// Playwright's standard video option is worker-scoped. This fixture sets the
+// recording dimensions before each context opens, preserving native-size frames.
+const test = base.extend({
+	context: async ({ browser, baseURL }, use, info) => {
+		const width = info.title.includes('393') ? 393 : 1440;
+		const size = { width, height: width === 393 ? 852 : 960 };
+		const context = await browser.newContext({ baseURL, viewport: size,
+			recordVideo: { dir: info.outputPath('recordings'), size } });
+		await use(context);
+		const videos = context.pages().map(page => page.video()).filter(video => video !== null);
+		await context.close();
+		for (const video of videos) await info.attach('video', { path: await video.path(), contentType: 'video/webm' });
+	},
+});
 
 async function evidence(page: Page, info: TestInfo, name: string) {
 	await info.attach(`${name}-frames`, { body: JSON.stringify(await cueSamples(page), null, 2), contentType: 'application/json' });
@@ -15,7 +27,8 @@ async function assertStamp(page: Page) {
 	}
 }
 
-for (const width of [1440, 393]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [1440, 393]) for (const theme of ['light', 'dark'] as const) test.describe(`${width} ${theme}`, () => {
+	// Both journeys use the context's native recording dimensions.
 	test(`quiet save slow typing ${width} ${theme}`, async ({ page, request, context }, info) => {
 		await page.setViewportSize({ width, height: width === 1440 ? 960 : 852 });
 		await page.addInitScript(value => localStorage.setItem('corsia_theme', value), theme);
@@ -75,7 +88,7 @@ for (const width of [1440, 393]) for (const theme of ['light', 'dark'] as const)
 		expect(frames.some(frame => frame.cue === '✓ Saved' && frame.visible)).toBe(true);
 		await evidence(page, info, `reconnect-${width}-${theme}`);
 	});
-}
+});
 
 test('quiet save narrow Reload precedence 393 component layout', async ({ page, request }, info) => {
 	await page.setViewportSize({ width: 393, height: 852 });
