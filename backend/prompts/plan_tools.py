@@ -26,9 +26,9 @@ CLOSE_NEXT_DESCRIPTION = (
 
 #: Appended to the plan mutation tool's description after ``CLOSE_NEXT_DESCRIPTION``.
 USER_TASKS_DESCRIPTION = (
-    "Only when their hands, presence or missing credential: try it (host lease too) "
-    "first; assignee='user' step, how-to and 'Already tried:' in description; decisions "
-    "are for choices. You may still close or settle them."
+    "assignee='user' only for their hands, presence or missing credential, after trying "
+    "yourself (host lease too); description: how-to, then 'Already tried:'. Decisions are "
+    "for choices. You may close or settle user tasks."
 )
 
 #: The next steps after a thread cannot mutate another agent's plan.
