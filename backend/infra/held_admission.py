@@ -10,9 +10,10 @@ from infra.thread_input_types import HeldAdmission
 
 
 def limited_admission(
-    thread_id: str, model: str, *, db: sqlite3.Connection | None = None,
+    thread_id: str, model: str, *, account_id: str | None = None,
+    db: sqlite3.Connection | None = None,
 ) -> HeldAdmission | None:
-    """Return the hold a canonically limited connection gives this model.
+    """Return the hold the selected or explicitly resolved account gives this model.
 
     The one predicate for "limited": admission, the checkpoint fold gate and
     delegation status all read it, so they cannot disagree. It only reads.
@@ -23,7 +24,9 @@ def limited_admission(
         from infra.vendor_turn_binding import model_vendor
 
         provider = model_vendor(model, db=connection)
-        identity = chosen_account_id(thread_id, provider, db=connection) if provider else None
+        identity = account_id if account_id is not None else (
+            chosen_account_id(thread_id, provider, db=connection) if provider else None
+        )
         availability = connection_availability(model, account_id=identity, db=connection)
     finally:
         if db is None:
