@@ -7,10 +7,10 @@ for (const width of [1440, 393]) {
 		const stamp = `clamp-${Date.now().toString(36)}`;
 		const words = Array.from({ length: 60 }, (_, index) => `word${index}`).join(' ');
 		const body = `# Clamp ${stamp}\n\n${words}\n`;
-		const document = await seedLiveDocument(request, stamp, body);
+		const seeded = await seedLiveDocument(request, stamp, body);
 		// An existing comment opens the comments pane beside the document.
-		await createComment(request, document, 'word50', `Existing ${stamp}`);
-		await openLiveDocument(page, document, `# Clamp ${stamp}`);
+		await createComment(request, seeded, 'word50', `Existing ${stamp}`);
+		await openLiveDocument(page, seeded, `# Clamp ${stamp}`);
 		const editor = page.locator('.cm-content');
 		await editor.click();
 		await page.keyboard.press('End');
