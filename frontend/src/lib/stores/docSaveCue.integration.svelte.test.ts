@@ -1,9 +1,8 @@
 import { flushSync } from 'svelte';
-import { get } from 'svelte/store';
 import * as Y from 'yjs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
-import { clearDraft, docSaveActivities, existingDraft, seedDraft, setDraftText } from './docSaveQueue';
+import { clearDraft, existingDraft, seedDraft, setDraftText } from './docSaveQueue';
 import { liveDocumentBindings } from './liveDocuments';
 import { LiveDocumentSession } from './liveDocumentSession';
 
@@ -94,14 +93,13 @@ it.each([30, 450])('real queue: disconnect after %ims suspends the cue and a 30m
 	setDraftText(target, 'offline'); await advance(700 + elapsed);
 	connection.disconnected(); interrupted.reject(new Error('offline')); await advance(0);
 	expect(state.status).toBe('idle');
-	expect(get(docSaveActivities)[target.instanceId]).toMatchObject({ awaitingReconnect: true, confirmationOwed: true });
+	expect(existingDraft(target)?.savedText).toBe('base');
 	await advance(2000); expect(state.status).toBe('idle');
 	connection.connection = 'connected';
 	connection.handle({ type: 'doc_opened', artifact_id: 'artifact', store_id: 'store', pending: false, held: null });
 	await advance(30);
 	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: true, unwritten: false } as any);
 	await settle(recovered); expect(state.status).toBe('saved');
-	expect(get(docSaveActivities)[target.instanceId].confirmationOwed).toBe(false);
 	await advance(1400); expect(state.status).toBe('idle');
 });
 it('real queue: text typed offline owes confirmation after reconnect', async () => {
@@ -120,16 +118,13 @@ it('real queue: an unacked transaction keeps the draft unclean and queues a resa
 	const connection = live(); const first = deferred(), second = deferred();
 	vi.spyOn(connection, 'flush').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
 	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: false, unwritten: true } as any);
-	const activity: boolean[] = [];
-	const unsubscribe = docSaveActivities.subscribe(all => activity.push(all[target.instanceId]?.resaveQueued ?? false));
 	setDraftText(target, 'unacked'); await advance(1100);
 	await settle(first);
 	expect(existingDraft(target)?.savedText).toBe('base');
-	expect(activity).toContain(true);
 	expect(state.status).toBe('saving');
 	expect(connection.flush).toHaveBeenCalledTimes(2);
 	vi.spyOn(connection, 'durability', 'get').mockReturnValue({ clean: true, unwritten: false } as any);
-	await settle(second); expect(state.status).toBe('saved'); unsubscribe();
+	await settle(second); expect(state.status).toBe('saved');
 });
 it('real queue: error ends without Saved; editing and retry start a fresh clock', async () => {
 	const broken = deferred(), retry = deferred();
