@@ -247,7 +247,7 @@ describe('groupByHost', () => {
 		const counts = [0, 1, 2];
 		const expected = ['0 models', '1 model', '2 models'];
 		const harnesses = groupByHost([], [], null, counts.map(total => ({
-			name: `harness-${total}`, label: `Harness ${total}`, total, ready: total,
+			name: `harness-${total}`, label: `Harness ${total}`, enabled: true, total, ready: total,
 		})));
 		const cloud = groupByHost(counts.map(count => p({
 			name: `cloud-${count}`, label: `Cloud ${count}`, type: 'cloud', has_key: true,
@@ -296,8 +296,8 @@ describe('groupByHost', () => {
 			account('codex', 'default'), account('codex', 'work'), account('claude-code', 'default'),
 		]);
 		const groups = groupByHost([], [], null, [
-			{ name: 'codex', label: 'Codex', total: 3, ready: 3 },
-			{ name: 'claude-code', label: 'Claude Code', total: 1, ready: 1 },
+			{ name: 'codex', label: 'Codex', enabled: true, total: 3, ready: 3 },
+			{ name: 'claude-code', label: 'Claude Code', enabled: true, total: 1, ready: 1 },
 		]);
 
 		expect(groups[0].providers.map(provider => provider.subline)).toEqual([

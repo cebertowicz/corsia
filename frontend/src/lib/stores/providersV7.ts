@@ -77,9 +77,7 @@ async function fetchHostResources(): Promise<HostResources | null> {
 /** The one rule for a cloud provider being on: it has a key and its switch is not off. */
 export const cloudProviderOn = (p: ProviderEntry) => !!p.has_key && p.enabled !== false;
 
-function _modelCountLabel(count: number): string {
-	return `${count} model${count === 1 ? '' : 's'}`;
-}
+const _modelCountLabel = (count: number) => `${count} model${count === 1 ? '' : 's'}`;
 
 function _harnessSubline(name: string, modelCount: number, accounts = get(vendorAccounts), enabled = true): string {
 	const accountCount = accounts.filter((account) => account.provider === name && account.state !== 'removed').length;
