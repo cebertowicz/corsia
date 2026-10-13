@@ -138,7 +138,8 @@ for (const width of [1440, 393]) {
 	const touch = width <= 768;
 	const height = touch ? 852 : 900;
 	test.describe(`@flow:tab-scroll-place @surface:documents tab place survives at ${width}px`, () => {
-		test(`returns to the same document line and scroll offset at ${width}px`, async ({ browser, request }, testInfo) => {
+		for (const scheme of ['light', 'dark'] as const) {
+			test(`returns to the same document line and scroll offset at ${width}px (${scheme})`, async ({ browser, request }, testInfo) => {
 			test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
 			const context = await browser.newContext({
 				baseURL: testInfo.project.use.baseURL,
@@ -147,7 +148,8 @@ for (const width of [1440, 393]) {
 				recordVideo: { dir: testInfo.outputPath('video'), size: { width, height } },
 			});
 			const page = await context.newPage();
-			const sessionTitle = `tab-scroll-place-${width}-${Date.now()}`;
+			await page.emulateMedia({ colorScheme: scheme });
+			const sessionTitle = `tab-scroll-place-${width}-${scheme}-${Date.now()}`;
 			const sessionId = await createSession(request, sessionTitle);
 
 			const tree = await (await request.get(`/api/files/tree?${query()}`)).json();
@@ -230,6 +232,7 @@ for (const width of [1440, 393]) {
 				await context.close();
 			}
 		});
+		}
 	});
 }
 
