@@ -194,7 +194,7 @@
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
 	<div class="document-status-row document-notices">
 		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
-		{#if orphanedCount && placementReloadVisible}{#if !placementAnnouncement}<span class="orphan-note">{unplacedPhrase}</span>{/if}<span class="orphan-reload"><Button size="sm" variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={placementReloadUnavailable || placementReloading} describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</Button></span>{/if}
+		{#if orphanedCount && placementReloadVisible}{#if !placementAnnouncement}<span class="orphan-note">{unplacedPhrase}</span>{/if}<span class="orphan-reload"><Button variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={placementReloadUnavailable || placementReloading} describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</Button></span>{/if}
 	</div>
 {/if}
 </header>

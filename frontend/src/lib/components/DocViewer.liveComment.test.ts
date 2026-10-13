@@ -10,6 +10,7 @@ import { encodeUpdate, textDigest } from '$lib/stores/documentWire';
 import { startLiveDocuments } from '$lib/stores/liveDocuments';
 import { clearDraft } from '$lib/stores/docSaveQueue';
 import { commentDraft, discardCommentDraft } from '$lib/stores/commentDraft';
+import { RESERVE_BUDGET_MS } from '$lib/stores/commentSelection';
 import { toasts } from '$lib/stores/toast';
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), fetchComments: vi.fn(), postComment: vi.fn() }));
 vi.mock('$lib/api/docs', async original => ({ ...await original<typeof import('$lib/api/docs')>(), ...api }));
@@ -40,6 +41,7 @@ beforeEach(() => {
 		author: 'you', author_kind: 'user', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, acked: false, replies: [] }));
 });
 afterEach(async () => {
+	vi.useRealTimers();
 	if (component) await unmount(component); component = undefined;
 	emit('doc_ack', { type: 'doc_ack', artifact_id: 'artifact', store_id: 'store', message_ids: wire.frames.flatMap(frame => frame.message_id ? [frame.message_id] : []) });
 	for (const frame of wire.frames.filter(frame => frame.type === 'doc_flush')) emit('doc_saved', {
@@ -159,6 +161,39 @@ it('cancels the positions wait on outside close and ignores its late reply', asy
 	expect(api.postComment).not.toHaveBeenCalled();
 	expect(released()).toEqual([expect.objectContaining({ client_id: ask.reserve.client_id })]);
 	expect(get(commentDraft)?.body).toBe('Keep my body');
+});
+it.each([
+	['a store mismatch', { kind: 'store_mismatch', store_id: 'other' }],
+	['a document-not-open error', { kind: 'not_open' }],
+	['a frame-handler refusal', { kind: 'refused', store_id: 'store', message: 'refused for test' }],
+])('keeps the draft and re-enables Comment without posting when a reservation reports %s', async (_name, fields) => {
+	await open(); await select(); await compose();
+	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
+	submit.click();
+	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
+	emit('doc_error', { type: 'doc_error', artifact_id: 'artifact', request_id: ask.request_id, ...fields });
+	await vi.waitFor(() => expect(submit.disabled).toBe(false));
+	expect(submit.textContent).toBe('Comment');
+	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
+	expect(get(commentDraft)?.body).toBe('Keep my body');
+	expect(api.postComment).not.toHaveBeenCalled();
+	expect(released()).toEqual([expect.objectContaining({ client_id: ask.reserve.client_id })]);
+});
+it('keeps the draft and re-enables Comment without posting when a reservation reply times out', async () => {
+	await open(); await select(); await compose();
+	vi.useFakeTimers();
+	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
+	submit.click();
+	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
+	const ask = wire.frames.findLast(frame => frame.type === 'doc_positions')!;
+	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS);
+	await vi.waitFor(() => expect(submit.disabled).toBe(false));
+	expect(submit.textContent).toBe('Comment');
+	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('Keep my body');
+	expect(get(commentDraft)?.body).toBe('Keep my body');
+	expect(api.postComment).not.toHaveBeenCalled();
+	expect(released()).toEqual([expect.objectContaining({ client_id: ask.reserve.client_id })]);
 });
 it('unmount cancels its capture, discards its scoped draft and ignores late answers', async () => {
 	await open(); await select(); await compose();

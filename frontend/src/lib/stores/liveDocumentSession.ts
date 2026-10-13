@@ -12,7 +12,7 @@ import { FAILURE_KINDS, failureKind, publicFailureMessage, LiveOperationError,
 
 const SERVER = Symbol('server-document-update');
 type Send = (frame: Record<string, unknown>) => boolean;
-type Request = { resolve: (frame: DocumentFrame) => void; reject: (error: Error) => void };
+type Request = { resolve: (frame: DocumentFrame) => void; reject: (error: Error) => void; reservation?: boolean };
 
 export class LiveDocumentSession {
 	readonly doc: Y.Doc;
@@ -185,8 +185,11 @@ export class LiveDocumentSession {
 	}
 
 	handle(frame: DocumentFrame): void {
-		if (frame.artifact_id !== this.artifactId && !this.requests.has(frame.request_id ?? '')) return;
-		if (frame.store_id && frame.store_id !== this.storeId) return;
+		const requestId = frame.request_id ?? '';
+		const reservationError = frame.type === 'doc_error' && this.requests.get(requestId)?.reservation === true;
+		if (frame.artifact_id !== this.artifactId && !this.requests.has(requestId) && !reservationError) return;
+		if (frame.store_id && frame.store_id !== this.storeId && !reservationError) return;
+		if (reservationError || frame.type === 'doc_positions') this.requests.delete(requestId);
 		if (frame.kind === 'publication_failed' || frame.kind === 'setup_failed') frame = { ...frame, message: publicFailureMessage(frame.kind, frame.message) };
 		if (Array.isArray(frame.blocking)) frame = { ...frame, blocking: frame.blocking.map(row => ({ ...row,
 			message: publicFailureMessage(row.kind, row.message) })) };
@@ -209,7 +212,7 @@ export class LiveDocumentSession {
 			for (const id of frame.message_ids ?? []) this.updates.delete(id);
 			if (this.durability.clean) { this.storeError = ''; this.updates.clear(); }
 		} else if (frame.type === 'doc_saved') this.saved(frame);
-		else if (frame.type === 'doc_error') this.refused(frame);
+		else if (frame.type === 'doc_error' && !reservationError) this.refused(frame);
 		for (const listener of this.frameListeners) listener(frame);
 		this.changed();
 	}
@@ -255,18 +258,18 @@ export class LiveDocumentSession {
 		});
 	}
 
-	/**
-	 * Ask for comment positions (4.2). Consumers match artifact, store, request id and sequence
-	 * on replies, and the request id on refusals. Null when disconnected: reconnect asks again.
-	 */
+	/** Ask for comment positions (4.2); reservation ids also admit only their correlated refusals. */
 	requestPositions(seq: number, reload = false, reserve?: PositionReservation): string | null {
 		if (this.connection !== 'connected') return null;
 		const id = crypto.randomUUID();
-		if (this.send({ type: 'doc_positions', artifact_id: this.artifactId, store_id: this.storeId, request_id: id, seq, reload,
-			...(reserve ? { reserve } : {}) })) return id;
-		this.disconnected();
-		return null;
+		if (!this.send({ type: 'doc_positions', artifact_id: this.artifactId, store_id: this.storeId, request_id: id, seq, reload,
+			...(reserve ? { reserve } : {}) })) { this.disconnected(); return null; }
+		if (reserve) this.requests.set(id, { reservation: true, resolve: () => {}, reject: () => {} });
+		return id;
 	}
+
+	/** Forget a reservation request whose caller no longer awaits a reply. */
+	cancelReservationRequest(id: string | null): void { if (id) this.requests.delete(id); }
 
 	/** Give back a range a capture reserved but no comment will use; the server ignores an id it no longer holds. */
 	releaseReservation(clientId: string): void {

@@ -6,7 +6,7 @@ import { captureComment, selectComment, RESERVE_BUDGET_MS, SELECTION_LOST } from
 import { encodeUpdate, type DocumentFrame } from './documentWire';
 
 const documents: Y.Doc[] = [], sessions: LiveDocumentSession[] = [];
-afterEach(() => { sessions.splice(0).forEach(session => session.destroy()); documents.splice(0).forEach(doc => doc.destroy()); vi.restoreAllMocks(); });
+afterEach(() => { sessions.splice(0).forEach(session => session.destroy()); documents.splice(0).forEach(doc => doc.destroy()); vi.useRealTimers(); vi.restoreAllMocks(); });
 function opened() {
 	const server = new Y.Doc(); server.clientID = 1; server.getText('text').insert(0, 'alpha beta gamma');
 	const doc = new Y.Doc(), sent: Record<string, unknown>[] = [];
@@ -118,13 +118,50 @@ it('gives the range back when the server refuses the request or the capture is a
 	const value = opened(), abort = new AbortController();
 	const refused = expect(captureComment(value.selection, 1, new AbortController().signal)).rejects.toThrow('refused for test');
 	await value.asked(1);
-	value.session.handle({ type: 'doc_error', artifact_id: 'artifact', store_id: 'store', request_id: String(value.asks()[0].request_id), message: 'refused for test' });
+	value.session.handle({ type: 'doc_error', kind: 'refused', artifact_id: 'artifact', store_id: 'store', request_id: String(value.asks()[0].request_id), message: 'refused for test' });
 	await refused;
 	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
 	const cancelled = expect(captureComment(value.selection, 1, abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
 	await value.asked(2); abort.abort(); await cancelled;
 	expect(value.released()).toHaveLength(2);
 	expect(value.released()[1]).toMatchObject({ client_id: value.reserve(1).client_id });
+});
+it('rejects and releases when the server reports a reservation store mismatch', async () => {
+	const value = opened(), request = captureComment(value.selection, 1, new AbortController().signal);
+	await value.asked(1);
+	const ask = value.asks()[0];
+	value.session.handle({ type: 'doc_error', kind: 'store_mismatch', artifact_id: 'artifact', store_id: 'other', request_id: String(ask.request_id) });
+	await expect(request).rejects.toThrow('document changed');
+	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
+});
+it('rejects and releases when the server reports the document is not open', async () => {
+	const value = opened(), request = captureComment(value.selection, 1, new AbortController().signal);
+	await value.asked(1);
+	const ask = value.asks()[0];
+	value.session.handle({ type: 'doc_error', kind: 'not_open', artifact_id: 'artifact', request_id: String(ask.request_id) });
+	await expect(request).rejects.toThrow('document changed');
+	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
+});
+it.each([
+	['refused', 'refused for test', 'refused for test'],
+	['store_refused', 'store refused for test', 'store refused for test'],
+	['internal', 'internal detail', 'document changed'],
+])('rejects and releases when the frame handler reports %s', async (kind, message, expected) => {
+	const value = opened(), request = captureComment(value.selection, 1, new AbortController().signal);
+	await value.asked(1);
+	const ask = value.asks()[0];
+	value.session.handle({ type: 'doc_error', kind, artifact_id: 'artifact', store_id: 'store', request_id: String(ask.request_id), message });
+	await expect(request).rejects.toThrow(expected);
+	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
+});
+it('rejects and releases an unanswered reservation when its deadline expires', async () => {
+	vi.useFakeTimers();
+	const value = opened(), request = captureComment(value.selection, 1, new AbortController().signal);
+	const refused = expect(request).rejects.toThrow('document changed');
+	await value.asked(1);
+	await vi.advanceTimersByTimeAsync(RESERVE_BUDGET_MS);
+	await refused;
+	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
 });
 it.each(['remote', 'ack'] as const)('hashes again when %s moved the document during hashing and reserves the new state', async kind => {
 	const value = opened(), original = crypto.subtle.digest.bind(crypto.subtle);
