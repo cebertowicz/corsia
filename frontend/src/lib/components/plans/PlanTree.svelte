@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { OperatorArtifactLink, OperatorNode, UserActionHandler } from '$lib/api/plans';
 	import { buildPlanTreeView, childPlanView, indexPlanNodes } from './planTreeFilter';
-	import { levelOf } from './planTreeFold';
+	import { isVisibleFinished, levelOf } from './planTreeFold';
 	import { buildFoldLevels, foldRemaining, type FoldedWork } from './planFoldLevels';
 	import { createFoldHistory } from './foldHistory.svelte';
 	import { formatMoment, minuteClock } from '$lib/time';
@@ -9,7 +9,6 @@
 	import { createFocusKeeper } from './focusKeeper.svelte';
 	import { indentVar } from './planIndent';
 	import { createPlanTreeLayout } from './planTreeLayout.svelte';
-	import { isVisibleFinished } from './planTreeNodeState.svelte';
 	import { createPlanTreeRows } from './planTreeRows.svelte';
 	import { blockSlot } from '$lib/slotMotion';
 	import PlanRowFace from './PlanRowFace.svelte';
@@ -140,7 +139,7 @@
 	}
 
 	// The controller owns person-requested disclosure and page motion; keep this gate local so transition wiring stays explicit.
-	const userPaging = $derived(reveal.userPaging);
+	const userDisclosure = $derived(reveal.userDisclosure);
 	const pendingFoldLevel = $derived(reveal.pendingFoldLevel);
 
 	// The fold wave (`foldMotion`): rows that fold or sink since the last render glide as one wave.
@@ -183,7 +182,7 @@
 		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="tree-row" role="listitem"
-			in:blockSlot|global={{ off: !userPaging }} out:blockSlot|global={{ off: !userPaging }}
+			in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }}
 			class:details-open={detailsExpanded(node.id)}
 			class:has-menu={!!onUserAction && node.user_actions.length > 0}
 			{...taskMenu.rowHandlers(node)}
@@ -220,7 +219,7 @@
 			/>
 		</div>
 		{#if detailsExpanded(node.id)}
-			<div class="details-slot" in:blockSlot|global={{ off: !userPaging }} out:blockSlot|global={{ off: !userPaging }}>
+			<div class="details-slot" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }}>
 				<PlanRowDetails
 					{node} id={rowControls.detailsId(node.id)} planId={folded?.planId ?? ''} fromHistory={historyIds.has(node.id)}
 					indent={indentAt(depthOffset + node.depth + nest)}

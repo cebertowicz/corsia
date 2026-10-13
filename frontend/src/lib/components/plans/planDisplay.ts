@@ -106,7 +106,7 @@ export function nodeDisplayLabel(node: OperatorNode, _isNext = false): string {
 		: 'Unavailable';
 }
 
-/** A row’s secondary copy: its server cause, failed-work attempt, or requested user input. */
+/** Tones of a row that has settled, which say when it settled. */
 const SETTLED_TONES: ReadonlySet<StateTone> = new Set(['complete', 'closed', 'failed']);
 
 /** When a settled row settled, in local time; null for open work. */
@@ -174,6 +174,7 @@ function openReason(node: OperatorNode, now: Date, view?: ScheduledView): string
 /** Scheduled-row time: `clock` keeps a far-date clock; `reason` leaves its cluster line to name the moment. */
 export type ScheduledView = 'clock' | 'reason';
 
+/** A row’s secondary copy: its server cause, failed-work attempt, or requested user input. */
 export function nodeSubline(node: OperatorNode, now: Date = new Date(), view?: ScheduledView): string | null {
 	const { lead, moment } = nodeSublineParts(node, now, view);
 	return lead && moment ? `${lead} · ${moment}` : lead ?? moment;

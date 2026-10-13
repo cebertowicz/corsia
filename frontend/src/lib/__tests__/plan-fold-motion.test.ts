@@ -225,8 +225,8 @@ describe('PlanTree fold rows', () => {
 	});
 
 	it('hands the person-initiated changes to blockSlot and leaves the fold wave alone', () => {
-		expect(treeSource).toMatch(/in:blockSlot\|global=\{\{ off: !userPaging \}\}/);
-		expect(treeSource).toMatch(/out:blockSlot\|global=\{\{ off: !userPaging \}\}/);
+		expect(treeSource).toMatch(/in:blockSlot\|global=\{\{ off: !userDisclosure \}\}/);
+		expect(treeSource).toMatch(/out:blockSlot\|global=\{\{ off: !userDisclosure \}\}/);
 	});
 });
 

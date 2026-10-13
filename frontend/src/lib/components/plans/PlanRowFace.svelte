@@ -28,7 +28,7 @@
 	// A task the agent set aside until a date wears the snooze clock; other waits keep the dot.
 	const scheduled = $derived(state === 'waiting' && isScheduledTask(node));
 	const label = $derived(nodeDisplayLabel(node, isNext));
-	// A narrow row cuts the reason first; when a settled row settled stays whole.
+	// A narrow row cuts the reason first; a settled row's time stays whole.
 	const subline = $derived(nodeSublineParts(node, $minuteClock, scheduledView));
 	// AS14: running work reads its current step on the row itself.
 	const liveNow = $derived(planLiveStep(threads, $turnStates, $activeToolsByThread));

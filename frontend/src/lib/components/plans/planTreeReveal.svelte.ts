@@ -25,14 +25,14 @@ interface PlanTreeRevealOptions {
 export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranches, history }: PlanTreeRevealOptions) {
 	let revealed = $state<Record<string, number>>({});
 	let scheduledOpen = $state<Record<string, boolean>>({});
-	let userPaging = $state(false);
+	let userDisclosure = $state(false);
 	let pendingFoldLevel = $state<string | null>(null);
 
 	function byRequest(change: () => void): void {
-		userPaging = true;
+		userDisclosure = true;
 		change();
 		// Held past the frame that renders the change: rows read it as they enter and leave.
-		void tick().then(() => requestAnimationFrame(() => requestAnimationFrame(() => (userPaging = false))));
+		void tick().then(() => requestAnimationFrame(() => requestAnimationFrame(() => (userDisclosure = false))));
 	}
 
 	function isScheduledOpen(level: string): boolean {
@@ -89,7 +89,7 @@ export function createPlanTreeReveal({ maxDepth, byId, levels, items, openBranch
 
 	return {
 		get revealed() { return revealed; },
-		get userPaging() { return userPaging; },
+		get userDisclosure() { return userDisclosure; },
 		get pendingFoldLevel() { return pendingFoldLevel; },
 		pageSize: FOLD_PAGE,
 		byRequest,
