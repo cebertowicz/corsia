@@ -145,6 +145,7 @@ function expectNoReturnPop(frames: ReturnFrame[], before: VisiblePlace): void {
 		expect(frame.line, sample).toBe(before.line);
 		expect(frame.top, sample).not.toBeNull();
 		expect(Math.abs(frame.top! - before.top), sample).toBeLessThanOrEqual(MAX_DRIFT_PX);
+		expect(Math.abs(frame.scrollTop - before.scrollTop), sample).toBeLessThanOrEqual(MAX_DRIFT_PX);
 	}
 }
 
@@ -203,7 +204,8 @@ for (const width of [1440, 393]) {
 					await page.getByText(sessionTitle).first().click();
 					const scroller = page.locator('.cm-scroller');
 					await expect(scroller).toBeVisible();
-					await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+					await scroller.evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 3); });
+					await expect.poll(async () => (await visiblePlace(scroller)).line.startsWith('Filler')).toBe(true);
 					await expect(link(page)).toBeInViewport();
 					const before = await visiblePlace(scroller);
 					expect(before.scrollTop).toBeGreaterThan(0);
@@ -244,6 +246,7 @@ for (const width of [1440, 393]) {
 					expect(after.line).toBe(before.line);
 					expect(after.top).not.toBeNull();
 					expect(Math.abs(after.top! - before.top!)).toBeLessThanOrEqual(MAX_DRIFT_PX);
+					expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(MAX_DRIFT_PX);
 					await armReturnSampler(page);
 					await selectTab(page, 'SECOND.md', touch);
 					await selectTab(page, 'INDEX.md', touch);
@@ -257,6 +260,7 @@ for (const width of [1440, 393]) {
 					}).toBe(true);
 					const secondAfterRace = await visiblePlace(scroller);
 					expect(secondAfterRace.line).toBe(secondBefore.line);
+					expect(Math.abs(secondAfterRace.scrollTop - secondBefore.scrollTop)).toBeLessThanOrEqual(MAX_DRIFT_PX);
 					fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}-${scheme}.json`), JSON.stringify({
 						indexBefore: before,
 						secondBefore,
