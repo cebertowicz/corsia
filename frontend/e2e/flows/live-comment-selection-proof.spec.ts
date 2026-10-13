@@ -7,7 +7,7 @@ import {
 	type CommentWire,
 } from '../support/liveCommentProof';
 
-const layouts = [[1440, 960, 'chromium-desktop'], [393, 852, 'chromium-mobile']] as const;
+const layouts = [[1280, 960, 'chromium-desktop'], [393, 852, 'chromium-mobile']] as const;
 const refusalText = 'The document changed before your comment could be attached. Your draft is kept. Try again.';
 
 async function prepare(context: BrowserContext, theme: 'light' | 'dark'): Promise<CommentWire> {
