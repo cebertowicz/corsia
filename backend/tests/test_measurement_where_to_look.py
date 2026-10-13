@@ -277,3 +277,35 @@ async def test_the_served_route_ranks_a_seeded_scope(isolated_db, monkeypatch):
     scoped = await measurement_where_to_look(
         project="p1", agent="worse", grain="weeks", timezone_name="UTC", user={"id": "steve"})
     assert all(row["subject"]["id"] == "worse" for row in (*scoped["worse"], *scoped["improved"]))
+
+
+@pytest.mark.asyncio
+async def test_the_daily_all_work_read_an_agent_consumes_keeps_its_fields(isolated_db, monkeypatch):
+    """The ``attention-watch`` skill's own query: every project's agents, the Days grain, these fields."""
+    from api.measurement_where_to_look import measurement_where_to_look
+
+    _freeze(monkeypatch, POST_BREAK)
+
+    def seed(db):
+        # Monday Nov 16 in UTC: the latest 7 completed days are Nov 9-15, the previous Nov 2-8.
+        for project, agent in (("p1", "one"), ("p2", "two")):
+            _seed_project(db, project)
+            _seed_agent(db, agent, project_id=project)
+            _seed_period(db, agent, "2026-11-03", 30, not_first_try=3)
+            _seed_period(db, agent, "2026-11-12", 30, not_first_try=12)
+
+    _seeded(seed)
+    result = await measurement_where_to_look(
+        project="all", agent="none", grain="days", timezone_name="UTC", user={"id": "steve"})
+    agents = [row for row in result["worse"] if row["subject"]["kind"] == "agent"]
+    assert sorted(row["subject"]["id"] for row in agents) == ["one", "two"]
+    for row in result["worse"]:
+        assert {"subject", "label", "format", "previous", "latest", "n", "action", "worse"} <= set(row)
+        assert set(row["subject"]) == {"kind", "id", "name"} and row["subject"]["kind"] in {"agent", "model", "scope"}
+        assert row["worse"] is True and row["action"] in ACTIONS_BY_MEASURE.values()
+        assert row["format"] in {"hours", "minutes", "ratio", "percent", "dollars"}
+    first = next(row for row in agents if row["subject"]["id"] == "one")
+    # ``percent`` is a fraction: 27 of 30 then 18 of 30 first try.
+    assert (first["format"], first["previous"], first["latest"], first["n"]) == ("percent", 0.9, 0.6, 30)
+    assert result["period"]["latest"] == {"from": "2026-11-09", "to": "2026-11-15"}
+    assert result["period"]["previous"] == {"from": "2026-11-02", "to": "2026-11-08"}
