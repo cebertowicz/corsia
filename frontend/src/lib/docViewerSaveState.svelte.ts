@@ -14,7 +14,10 @@ export function createDocSaveState(target: () => DocViewerTarget | null) {
 		const current = target();
 		return current ? drafts.current[draftKey(current)] : undefined;
 	});
-	const ghost = docSaveGhost(() => draft?.status);
+	const ghost = docSaveGhost(() => draft?.status, () => {
+		const current = target();
+		return current ? draftKey(current) : null;
+	});
 	return {
 		get draft() { return draft; },
 		get error() { return draft?.status === 'error' ? draft.error : ''; },

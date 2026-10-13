@@ -96,6 +96,19 @@ it('ends the close gate after one flush round trip while another session keeps e
 	expect(onClose).toHaveBeenCalledOnce();
 	expect(onBringIntoView).not.toHaveBeenCalled();
 });
+it('writes nothing for a tab with no local edit: remote text alone rebaselines the draft without a flush', async () => {
+	vi.useFakeTimers();
+	try {
+		setup();
+		expect(await flushDraft(target)).toBe(true);
+		remote(' from an agent');
+		await vi.advanceTimersByTimeAsync(700);
+		expect(await flushDraft(target)).toBe(true);
+		expect(flushes()).toEqual([]);
+		expect(calls.write).not.toHaveBeenCalled();
+		expect(existingDraft(target)).toMatchObject({ editText: 'base from an agent', savedText: 'base from an agent', status: 'idle' });
+	} finally { vi.useRealTimers(); }
+});
 it('re-saves while the tab holds an unacknowledged local transaction, and ends once it is clean', async () => {
 	setup(); edit();
 	const deletion = frames.filter(frame => frame.type === 'doc_update');

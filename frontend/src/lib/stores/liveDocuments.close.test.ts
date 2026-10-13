@@ -6,7 +6,7 @@ import { emit } from '$lib/ws/events';
 import { encodeUpdate, textDigest } from './documentWire';
 import { liveDocumentBindings, openLiveDocument, startLiveDocuments } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
-import { closeTabWithSaveGate, seedDraft } from './docSaveQueue';
+import { closeTabWithSaveGate, seedDraft, setDraftText } from './docSaveQueue';
 import { closeArtifactTab, openArtifactTab, resolveArtifactTab, setActiveTab, threadWorkspaces } from './artifactWorkspace';
 
 const copies = vi.hoisted(() => ({ destroy: vi.fn(async () => {}), clearData: vi.fn(async () => {}) }));
@@ -43,6 +43,12 @@ async function openTab(thread = THREAD, path?: string) {
 	return { tab, target, session };
 }
 
+/** A local edit the close gate has to write. */
+function edit({ target, session }: { target: Parameters<typeof setDraftText>[0]; session: LiveDocumentSession }) {
+	session.text.insert(0, 'local ');
+	setDraftText(target, session.text.toString());
+}
+
 /** Answers the close gate's one flush: the lane acks what it received, then the flush lands. */
 async function answerFlush() {
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_flush')).toBe(true));
@@ -65,7 +71,9 @@ afterEach(() => {
 describe('closing a document tab closes its live binding', () => {
 	it('sends the close sync, then doc_close, never waits on their ack, and keeps the device copy', async () => {
 		connectionState.set('connected'); stop = startLiveDocuments();
-		const { tab, target } = await openTab();
+		const opened = await openTab();
+		const { tab, target } = opened;
+		edit(opened);
 		const onClose = vi.fn();
 		const closing = closeTabWithSaveGate(target, { onClose, onBringIntoView: vi.fn() });
 		await answerFlush();
@@ -77,6 +85,16 @@ describe('closing a document tab closes its live binding', () => {
 		expect(copies.clearData).not.toHaveBeenCalled();
 	});
 
+	it('closes a tab with no unwritten edit without a flush: the close sync and doc_close go at once', async () => {
+		connectionState.set('connected'); stop = startLiveDocuments();
+		const { tab, target } = await openTab();
+		const closing = closeTabWithSaveGate(target, { onClose: vi.fn(), onBringIntoView: vi.fn() });
+		expect(await closing).toEqual({ closed: true });
+		expect(wire.frames.filter(frame => frame.type === 'doc_flush')).toEqual([]);
+		expect(wire.frames.slice(-2).map(frame => frame.type)).toEqual(['doc_sync', 'doc_close']);
+		expect(get(liveDocumentBindings)[tab.instanceId]).toBeUndefined();
+	});
+
 	it('keeps a second tab bound when the first closes, keeps bindings across tab switches, and the last close reaches the server', async () => {
 		connectionState.set('connected'); stop = startLiveDocuments();
 		const first = await openTab(THREAD);
@@ -85,6 +103,7 @@ describe('closing a document tab closes its live binding', () => {
 		openArtifactTab(THREAD, { path: '/documents/notes.md', title: 'notes.md' });
 		setActiveTab(THREAD, first.tab.instanceId);
 		expect(Object.keys(get(liveDocumentBindings)).sort()).toEqual([first.tab.instanceId, second.tab.instanceId].sort());
+		edit(first);
 		const closing = closeTabWithSaveGate(first.target, { onClose: vi.fn(), onBringIntoView: vi.fn() });
 		await answerFlush();
 		expect(await closing).toEqual({ closed: true });

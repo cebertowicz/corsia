@@ -165,6 +165,12 @@ async function runSave(key: string): Promise<boolean> {
 	const draft = getDraft(key);
 	const live = get(liveDocumentBindings)[key];
 	if (!draft || (live ? !live.writable : draft.editText === draft.savedText)) return true;
+	// A live tab writes only its own transactions; with none unwritten there is nothing to save, and any
+	// remaining difference is remote edits the server already owns, so the draft rebaselines on them.
+	if (live && !live.durability.unwritten) {
+		if (draft.status === 'dirty') patchDraft(key, { savedText: draft.editText, status: 'idle' });
+		return true;
+	}
 	const textAtStart = draft.editText;
 	patchDraft(key, { status: 'saving' });
 	const p = (async () => {
@@ -234,7 +240,7 @@ export async function flushDraft(target: TargetIdentity): Promise<boolean> {
 		if (draft.status === 'error') return false;
 		// Live: clean (an ack names a message after its latest local transaction) and one flush returned.
 		const live = get(liveDocumentBindings)[key];
-		if (live ? live.durability.clean || !live.writable : draft.editText === draft.savedText) return true;
+		if (live ? live.durability.clean || !live.writable || !live.durability.unwritten : draft.editText === draft.savedText) return true;
 	}
 }
 
