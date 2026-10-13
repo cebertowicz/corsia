@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from app_shutdown_idle_timers import fold_idle_checkpoint_shutdown, remaining_idle_timers
 from app_shutdown_join import join_cleanup_owner, count_shutdown_owner
 from app_shutdown_owned_tasks import shutdown_owned_tasks as _shutdown_owned_tasks
+from app_shutdown_refreshes import shutdown_refresh_owners
 from app_startup_runtime import (
     _start_runtime_services, _startup_harness_discovery as _startup_harness_discovery,
     configure_sqlite_fetch_switch_interval, stop_runtime_logs,
@@ -139,6 +140,7 @@ async def lifespan(app: FastAPI):
     startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None]
     body_cancel: asyncio.CancelledError | None = None
     try:
+        from api.usage_rollup import schedule_refresh as schedule_usage_rollup_refresh
         from automation import restart_startup
         from doceditor.live_runtime import start_documents
         from infra.settings import get_mcp_servers
@@ -154,6 +156,7 @@ async def lifespan(app: FastAPI):
         recovered, wakes = await restart_startup.run_startup_reconcile(logger)
         await _start_runtime_services()
         await start_documents()
+        schedule_usage_rollup_refresh()
         startup_tasks[4] = asyncio.create_task(
             restart_startup.run_startup_drive(
                 startup_tasks[3], recovered, wakes, logger,
@@ -183,19 +186,6 @@ async def _run_cleanup_owner(name: str, awaitable, logger):
     elif failure is not None:
         logger.warning(f"shutdown: {name} failed: {failure}")
     return failure, pending_cancel
-
-
-async def _shutdown_refreshes(logger):
-    """Join exact harness catalog refresh tasks."""
-    try:
-        from connections.harness_models import shutdown_refresh_tasks
-
-        return await _run_cleanup_owner(
-            "harness refresh cleanup", shutdown_refresh_tasks(), logger,
-        )
-    except Exception as exc:
-        logger.warning(f"shutdown: harness refresh cleanup failed: {exc}")
-        return exc, None
 
 
 async def _shutdown_checkpoints(logger):
@@ -339,7 +329,9 @@ async def _shutdown_runtime_services(
     )
     pending_cancel = pending_cancel or checkpoint_cancel
 
-    refresh_failure, refresh_cancel = await _shutdown_refreshes(_log_shutdown)
+    (rollup_failure, refresh_failure), refresh_cancel = await shutdown_refresh_owners(
+        _log_shutdown, _run_cleanup_owner,
+    )
     pending_cancel = pending_cancel or refresh_cancel
 
     native_cancel = await shutdown_native_turns(_log_shutdown)
@@ -387,7 +379,7 @@ async def _shutdown_runtime_services(
         },
         (
             checkpoint_failure, checkpoint_count_failure, host_access_count_failure,
-            process_count_failure, refresh_failure, harness_failure,
+            process_count_failure, rollup_failure, refresh_failure, harness_failure,
             process_failure, host_access_failure, mcp_failure, handoff_failure,
         ),
         process_failure=process_failure,
