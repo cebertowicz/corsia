@@ -279,6 +279,12 @@ describe('account rows while a turn is running', () => {
 	});
 });
 
+describe('account row selected fill', () => {
+	it('keeps the current row fill under hover, as the model row does', () => {
+		expect(rowSource).toMatch(/picker:hover:not\(:disabled\):not\(\.marked\)/);
+	});
+});
+
 describe('account label separator', () => {
 	it('sets the middle dot off from the name and the email with the mockup spacing', () => {
 		expect(rowSource).toMatch(/\.picker-label \.sep \{[^}]*padding: 0 3px/);

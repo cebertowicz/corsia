@@ -80,7 +80,7 @@ def read_batch(db, *, owner_thread_ids: tuple[str, ...]) -> list[dict[str, Any]]
         chunk = node_ids[offset:offset + 500]
         if not chunk:
             continue
-        reasons.update(closure.close_reasons(db, [
+        reasons.update(closure.settled_reasons(db, [
             {"id": node_id, "state": states_by_id[node_id]} for node_id in chunk
         ]))
         marks = ",".join("?" for _ in chunk)

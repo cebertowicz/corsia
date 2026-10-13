@@ -291,9 +291,9 @@ def _result(stdout: bytes, *, truncated: bool = False) -> ProviderCheckpointResu
                 terminal = record.get("result")
                 diagnostic = str(terminal) if terminal is not None else "result error"
                 truncated = truncated or is_provider_context_limit(record)
-    body = "\n".join(bodies)
-    if not body.strip() and not truncated:
-        raise ProviderCheckpointRejected("Claude Code checkpoint produced no body")
+    if not (body := "\n".join(bodies)).strip():  # Fail named, never as an empty success.
+        detail = f"{CHECKPOINT_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}" if truncated else None
+        raise ProviderCheckpointRejected(detail or "Claude Code checkpoint produced no body")
     measured = from_anthropic(usage)
     if measured is None and calls:
         measured = sum(calls.values(), TokenUsage())

@@ -5,6 +5,7 @@
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
 	import DocReviewControls from './DocReviewControls.svelte';
+	import CommentsPill from './comments/CommentsPill.svelte';
 	import { Button, StatePill } from '$lib/components/ui';
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import type { CommentFeedback } from '$lib/api/docs';
@@ -84,10 +85,6 @@
 	let commentStatus = $state<HTMLButtonElement>();
 	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
-	// Threads name the pill; messages name the unsent delivery state.
-	const commentLabel = $derived(`${commentCount} open thread${commentCount === 1 ? '' : 's'}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
-	const uid = $props.id();
-	const unplacedId = `unplaced-${uid}`;
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
 	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
@@ -164,14 +161,8 @@
 		{#if presence}{@render presence()}{/if}
 		<span class="document-tools">
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
-			<button type="button" class="doc-tool comment-status" bind:this={commentStatus} aria-expanded={commentsOpen} disabled={!ready || commentsLoading}
-				aria-label={commentsLoading ? 'Loading comments' : commentLabel}
-				aria-describedby={orphanedCount ? unplacedId : undefined}
-				title={commentsLoading ? 'Comments are loading' : orphanedCount ? unplacedPhrase : undefined} onclick={(event) => onOpenComments(event.currentTarget)}>
-				<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if orphanedCount}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
-				<span class="count">{commentsLoading ? '…' : commentCount}</span>{#if !commentsLoading}<span class="count-unit">{commentCount === 1 ? 'thread' : 'threads'}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}
-				{#if orphanedCount}<span id={unplacedId} class="sr-only">{unplacedPhrase}</span>{/if}
-			</button>
+			<CommentsPill class="doc-tool comment-status" bind:element={commentStatus} count={commentCount} {unsent} unplaced={orphanedCount}
+				loading={commentsLoading} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
 		</span>
 	</div>
@@ -226,9 +217,6 @@
 	.document-status-row :global(.doc-tool.warn) { background: var(--amber-bg); color: var(--amber-text); }
 	.document-status-row :global(.doc-tool.warn:hover:not(:disabled)) { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-text); }
 	.document-status-row :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
-	.tool-icon { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
-	.icon-anchor { position: relative; display: inline-flex; }
-	.unplaced-dot { position: absolute; top: -3px; right: -4px; width: 7px; height: 7px; border-radius: var(--radius-circle); background: var(--amber); box-shadow: 0 0 0 2px var(--bg-primary); }
 	.document-metadata { color: var(--text-secondary); font-size: var(--text-footnote); }
 	.metadata-owner { flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.verification-action { margin-left: -10px; }
@@ -254,8 +242,6 @@
 	.document-identity { justify-content: flex-end; }
 	.identity-details { display: none; }
 	.document-tools { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
-	.count-unit { color: var(--text-tertiary); }
-	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
 	/* The same action as the feedback row's Retry: the shared secondary button at its size. */
 	.orphan-reload { display: inline-flex; flex: none; }
 	.orphan-note { align-self: center; color: var(--text-secondary); font-size: var(--text-footnote); }
@@ -273,7 +259,6 @@
 	.document-header :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
 	@container doc-canvas (max-width: 600px) {
 		.identity-details:has(.identity-age) { display: flex; }
-		.count-unit { display: none; }
 		.document-title { display: none; }
 		.document-header :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
 	}

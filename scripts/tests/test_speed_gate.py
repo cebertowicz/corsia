@@ -288,15 +288,17 @@ def test_a_tolerated_byte_difference_is_listed_and_never_fails(tmp_path, monkeyp
     assert "NONDETERMINISTIC" not in printed and not (tmp_path / "summary.md").exists()
 
 
-def test_enforcing_also_fails_when_a_route_improved_so_the_baseline_cannot_go_stale(tmp_path, capsys):
+def test_enforcing_output_and_summary_name_routes_and_the_rebaseline_command(tmp_path, capsys):
     base = tmp_path / "baseline.json"
-    base.write_text(json.dumps(baseline_for({"/a": cost(1_000_000)})))
+    base.write_text(json.dumps(baseline_for({"/grew": cost(100_000), "/fell": cost(1_000_000)})))
     current = tmp_path / "current.json"
-    current.write_text(json.dumps(result({"/a": cost(100_000)})))
-    args = ["compare", "--current", str(current), "--baseline", str(base)]
-    assert cli.main(args) == 0
-    assert cli.main(args + ["--enforce"]) == cli.EXIT_WOULD_FAIL
-    assert "update-baseline" in capsys.readouterr().err
+    current.write_text(json.dumps(result({"/grew": cost(400_000), "/fell": cost(100_000)})))
+    summary = tmp_path / "summary.md"
+    args = ["compare", "--current", str(current), "--baseline", str(base), "--summary", str(summary), "--enforce"]
+    assert cli.main(args) == cli.EXIT_WOULD_FAIL
+    for text in (capsys.readouterr().out, summary.read_text()):
+        assert "`/grew`" in text and "`/fell`" in text
+        assert report.UPDATE_BASELINE_COMMAND in text
 
 
 def test_report_only_compare_names_the_routes_that_would_fail_or_should_drop_and_exits_zero(tmp_path, capsys):

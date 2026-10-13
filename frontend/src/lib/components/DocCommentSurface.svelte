@@ -14,6 +14,8 @@
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
+	import { clickedOpener, drawerFooterHeight, drawerKeys, footerFocusHome, openerFocus, presence } from '$lib/docCommentDrawer';
+	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
 	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -30,7 +32,7 @@
 	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
 	 */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, covered = false, onDrawerShown }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -65,8 +67,13 @@
 		images?: DocImageComments | null;
 		/** The open document's batch: while it holds messages not sent yet the drawer ends in their Send now footer. */
 		feedback?: DocFeedback | null;
+		/** An image opened from the document covers it, the drawer with it: the drawer stays open beneath, and gets its focus back after. */
+		covered?: boolean;
+		/** Whether the comment list's drawer is on screen, in either form: true from its mount until its outro has ended. */
+		onDrawerShown?: (shown: boolean) => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
+	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
 	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
 	const onItsImage = (comment: DocComment) => !comment.orphaned && comment.from != null;
 	function movePinInDocument(id: string) {
@@ -95,14 +102,24 @@
 	const openCount = $derived(comments.filter((comment) => !comment.resolved).length);
 	// Open counts threads that are open: the resolved card kept for an unsent reply says why it is still listed, and the document's chip agrees.
 	const headerCount = $derived(filter === 'open' ? `${openCount} open` : filter === 'resolved' ? `${comments.length - openCount} resolved` : `${comments.length} ${comments.length === 1 ? 'thread' : 'threads'}`);
+	const sheet = createCommentSheet({
+		state: () => surfaceState,
+		draft: () => draft,
+		sheetDrawer: () => sheetDrawer,
+		narrow: () => narrow,
+		onClose: () => onClose(),
+		onCancelDraft: () => (onCancelDraft ?? onClose)(),
+	});
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
 	const picks = $derived(image?.picks ?? 0);
 	let navigationNotice = $state('');
 	const byNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
+	// What is shown follows `sheet.state`: the surface's own state, or the one a closing sheet still shows through its outro.
 	const displayed = $derived.by(() => {
-		if (surfaceState?.kind === 'thread') return comments.filter((comment) => comment.id === surfaceState.id);
+		const showing = sheet.state;
+		if (showing?.kind === 'thread') return comments.filter((comment) => comment.id === showing.id);
 		const shown = comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved || held.kept(comment) || held.leaving.has(comment.id)));
 		// An image's comments read in number order, like its tags.
 		return image ? [...shown].sort(byNumber) : shown;
@@ -116,15 +133,6 @@
 		if (feedback.sendingGrace) return { before: `${count} · sending to `, owner, after: ` in ${feedback.graceMinutes} min` };
 		return { before: `${count} · ${feedback.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner, after: ' when you leave.' };
 	});
-	/** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
-	function drawerFooterHeight(node: HTMLElement) {
-		const doc = node.closest<HTMLElement>('.doc');
-		const update = () => doc?.style.setProperty('--doc-drawer-footer-height', `${node.getBoundingClientRect().height}px`);
-		update();
-		const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
-		observer?.observe(node);
-		return { destroy() { observer?.disconnect(); doc?.style.removeProperty('--doc-drawer-footer-height'); } };
-	}
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
 		if (surfaceState?.kind !== 'thread' || typeof anchor !== 'function' || load?.state === 'loading') return;
@@ -179,7 +187,7 @@
 	/**
 	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with
 	 * reduced motion it crossfades instead. A document's side drawer (a canvas wide enough for a column) appears and leaves
-	 * at once; its sheet form moves through AdaptiveDrawer's mountMotion.
+	 * at once; its sheet form uses AdaptiveDrawer's open/onClosed lifecycle.
 	 */
 	function drawerMotion(_node: Element, { leaving }: { leaving: boolean }) {
 		if (!isImage) return { duration: 0 };
@@ -189,6 +197,14 @@
 		return { duration: leaving ? token('--dur-drawer') * pace : 0 };
 	}
 	function closeDrawer() { onClose(); restoreFocus(); }
+	/** The card or thumbnail last clicked in the drawer: what an image covering the document was opened from. */
+	let opener: Element | null = null;
+	// Covered by the image a card opened, the drawer keeps its scroll; uncovered, that card has focus again.
+	$effect.pre(() => {
+		if (!covered) return;
+		const back = openerFocus(opener, document.activeElement);
+		return () => void tick().then(() => back?.isConnected && back.focus({ preventScroll: true }));
+	});
 	function navigate(id: string) {
 		filterOpen = false;
 		const comment = comments.find((item) => item.id === id);
@@ -197,16 +213,6 @@
 		if (useHalf) detent = 'half';
 		if (useHalf) onFocus(id, 'top');
 		else onFocus(id);
-	}
-	function onDrawerKey(event: KeyboardEvent) {
-		if (event.key !== 'Escape') return;
-		event.preventDefault();
-		event.stopPropagation();
-		closeDrawer();
-	}
-	function drawerKeys(element: HTMLElement) {
-		element.addEventListener('keydown', onDrawerKey);
-		return { destroy() { element.removeEventListener('keydown', onDrawerKey); } };
 	}
 	const authorsWithOpenSuggestions = $derived.by(() => Object.entries(
 		comments.filter((comment) => !comment.resolved && !comment.orphaned && comment.replacement !== null && comment.replacement !== undefined)
@@ -302,9 +308,9 @@
 {/snippet}
 
 {#snippet content()}
-	{#if surfaceState?.kind === 'draft' && draft}<CommentComposer quote={draft.text} label={draft.label} body={draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={onCancelDraft ?? onClose} />
+	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
 	{:else}
-		{#if !readOnly && surfaceState?.kind !== 'thread'}
+		{#if !readOnly && sheet.state?.kind !== 'thread'}
 			<div class="suggestion-status">
 				{#each authorsWithOpenSuggestions as [author, suggestions] (author)}
 					<button type="button" aria-busy={outcome.acceptAllShownBusy === author} disabled={acceptAllBusy !== null} onclick={() => acceptAllFrom(author, suggestions[0].id)}>{outcome.acceptAllShownBusy === author ? 'Accepting…' : `Accept all from ${author}`}</button>
@@ -313,12 +319,12 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList bind:replyDrafts leavingIds={held.leaving} reduced={$prefersReducedMotion} comments={displayed} documentOrder={surfaceState?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && surfaceState?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && surfaceState?.kind === 'list'} {onViewed} onFocus={surfaceState?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList bind:replyDrafts leavingIds={held.leaving} reduced={$prefersReducedMotion} comments={displayed} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} {onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 
 {#snippet listBody()}
-	<div class="drawer-heading"><h2>Comments <span>{headerCount}</span></h2><div class="drawer-tools"><div class="filter-menu">
+	<div class="drawer-heading"><h2 tabindex="-1" data-drawer-focus-home>Comments <span>{headerCount}</span></h2><div class="drawer-tools"><div class="filter-menu">
 		<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
 		{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments" in:menuPop={{ origin: 'top right' }} out:menuPop={{ origin: 'top right' }}>{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
 	</div><IconButton ariaLabel="Close comments" variant="ghost" size="sm" onclick={closeDrawer}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>
@@ -331,16 +337,16 @@
 		{#if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : filter === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 		</div>{/key}</div>
 	</div>
-	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
+	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight use:footerFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')}><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
 {/snippet}
 
-{#if surfaceState}
-	{#if surfaceState.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer ariaLabel="Document comments" mountMotion headless fill opaque modal={false} {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {onClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys>{@render listBody()}</section></AdaptiveDrawer>
-	{:else if surfaceState.kind === 'list'}
-		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:drawerKeys in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if narrow}<AdaptiveDrawer ariaLabel="Document comments" heading={surfaceState.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {onClose}>{@render content()}</AdaptiveDrawer>
-	{:else}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+{#if surfaceState || sheet.closing}
+	{#if sheet.state?.kind === 'list' && sheetDrawer}
+		<AdaptiveDrawer ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
+	{:else if surfaceState?.kind === 'list'}
+		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
+	{:else if narrow && sheet.state}<AdaptiveDrawer ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={sheet.finishClose}>{@render content()}</AdaptiveDrawer>
+	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>
@@ -349,6 +355,9 @@
 	@container doc-canvas (min-width: 900px) { .canvas-comment-drawer { border-top: 0; border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); } }
 	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 0 var(--space-1) 4px; }
 	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-secondary); }
+	/* Where focus rests when Send now's footer takes it away: not a control, so Enter there does nothing. */
+	.drawer-heading h2:focus { outline: none; }
+	.drawer-heading h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
 	.drawer-heading h2 span { color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; margin-left: 2px; }
 	/* The compact menu keeps the filter choices out of the thread list. */
 	.drawer-tools { display: inline-flex; align-items: center; gap: var(--space-1); }

@@ -4,8 +4,10 @@ The operator projection offers the user Mark done and Won't do on every open
 row, whoever it is assigned to (``plans.user_settle``). Mark done accepts it in
 one write whose lifecycle events all read as the user's, and Won't do closes
 it with a reason; the user's archive stays the separate operation that removes
-a task. The agent tool shares the Mark done name but never gains this override:
-a user-assigned row stays the user's, and every ordinary stop still binds.
+a task. The agent tool shares the Mark done name but never gains this override: the
+plan owner settles a user step that is really done, with evidence and as
+itself (``tests/test_plan_agent_marks_person_step``), and every stop the user
+owns still binds it.
 
 Answering is what finishes a question, so the decision lane still owns the
 review node a raised decision created: Mark done is refused there, and Won't do
@@ -30,10 +32,10 @@ from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - f
 
 
 def _mark_done(db, plan_id: str, node_id: str, *, actor=HUMAN) -> dict:
-    return plan_update(
-        db, plan_id, "mark_done",
-        {"node_id": node_id, "expected_revision": revision(db, node_id)}, actor=actor,
-    )
+    params = {"node_id": node_id, "expected_revision": revision(db, node_id)}
+    if actor.kind != "user":
+        params["evidence"] = "The user said it is done; a check agreed"
+    return plan_update(db, plan_id, "mark_done", params, actor=actor)
 
 
 def _transitions(db, node_id: str) -> list[tuple[str, str, str]]:
@@ -77,13 +79,14 @@ def test_a_task_awaiting_the_users_review_is_accepted_directly(db):
     assert _transitions(db, user_task.id)[-1] == ("review_requested", "accepted", HUMAN.audit_id)
 
 
-def test_an_agent_cannot_mark_the_users_task_done(db):
+def test_the_owner_agent_marks_the_users_task_done_with_evidence(db):
     plan = owner_plan(db)
     user_task = task(db, plan.id, "User sign-off", assignee="user")
 
-    with pytest.raises(PermissionError):
-        _mark_done(db, plan.id, user_task.id, actor=OWNER)
-    assert row(db, user_task.id)["state"] == "pending"
+    result = _mark_done(db, plan.id, user_task.id, actor=OWNER)
+
+    assert result["node"]["state"] == "accepted"
+    assert _transitions(db, user_task.id)[-1] == ("review_requested", "accepted", OWNER.audit_id)
 
 
 def test_the_user_marks_done_a_task_an_agent_owns(db):

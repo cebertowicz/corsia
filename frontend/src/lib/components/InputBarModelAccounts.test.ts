@@ -131,6 +131,11 @@ describe('model picker account rows', () => {
 		expect(rows.map((row) => row.querySelector('.figures')?.textContent?.trim())).toEqual(['wk 29% left', 'wk 29% left']);
 		expect(rows.map((row) => row.querySelector('.mark') !== null)).toEqual([false, false]);
 		expect(rows.map((row) => (row as HTMLButtonElement).getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+		// The header and the list read one value: the account the header names carries the model rows' check.
+		const marked = rows.filter((row) => row.classList.contains('marked'));
+		expect(marked).toHaveLength(1);
+		expect(host.querySelector('.picker-account-header .account-name')?.textContent).toBe(marked[0].querySelector('.name')?.textContent);
+		expect(rows.map((row) => row.querySelector('.check-glyph')?.getAttribute('aria-label') ?? null)).toEqual(['Current', null]);
 	});
 
 	it('reads the accounts and the thread\'s project policy when the picker opens', () => {
@@ -161,7 +166,7 @@ describe('model picker account rows', () => {
 		expect(accountRows()).toHaveLength(2);
 	});
 
-	it('keeps the selected rollover account in the header, while showing every ordered row without a marked fill', () => {
+	it('keeps the selected rollover account in the header, and marks that same account current in the ordered list', () => {
 		open();
 		expect(host.querySelectorAll('.account-usage-row .order')).toHaveLength(0);
 		unmount(component!);
@@ -171,7 +176,8 @@ describe('model picker account rows', () => {
 		open();
 		expect(host.querySelector('.picker-account-header')?.textContent).toContain('Auto · Work');
 		expect(accountRows().map((row) => [row.querySelector('.name')?.textContent, row.querySelector('.order')?.textContent])).toEqual([['Work', '1'], ['Personal', '2']]);
-		expect(accountRows().map((row) => row.classList.contains('marked'))).toEqual([false, false]);
+		expect(accountRows().map((row) => row.classList.contains('marked'))).toEqual([true, false]);
+		expect(accountRows().map((row) => row.querySelector('.check-glyph') !== null)).toEqual([true, false]);
 	});
 
 	it('opens the existing scope Subscriptions settings from the rollover footer and closes the picker', () => {
@@ -217,7 +223,8 @@ describe('model picker account rows', () => {
 		expect(host.querySelectorAll('.account-usage-row .order')).toHaveLength(0);
 		await settle();
 		expect(accountRows().map((row) => [row.querySelector('.name')?.textContent, row.querySelector('.order')?.textContent])).toEqual([['Work', '1'], ['Personal', '2']]);
-		expect(accountRows().map((row) => row.classList.contains('marked'))).toEqual([false, false]);
+		expect(accountRows().map((row) => row.classList.contains('marked'))).toEqual([true, false]);
+		expect(accountRows().map((row) => row.querySelector('.check-glyph') !== null)).toEqual([true, false]);
 	});
 
 	it('sends exactly one pin carrying only the account when a row is chosen', async () => {

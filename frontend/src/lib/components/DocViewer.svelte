@@ -392,6 +392,7 @@
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
 		images={images.groups}
+		{covered}
 	/>
 </div>
 

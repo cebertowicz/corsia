@@ -28,6 +28,9 @@ _SUMMARY_BUCKETS = (
 _projection_lock_wait_recorder: ContextVar[Callable[[float], None] | None] = ContextVar(
     "projection_lock_wait_recorder", default=None,
 )
+_rows_read_counter: ContextVar[list[int] | None] = ContextVar(
+    "rows_read_counter", default=None,
+)
 
 
 def record_projection_lock_wait(wait_seconds: float) -> None:
@@ -35,6 +38,13 @@ def record_projection_lock_wait(wait_seconds: float) -> None:
     recorder = _projection_lock_wait_recorder.get()
     if recorder is not None:
         recorder(wait_seconds)
+
+
+def record_rows_read(count: int) -> None:
+    """Count database rows a timed stage fetched into Python, if one is running."""
+    counter = _rows_read_counter.get()
+    if counter is not None:
+        counter[0] += count
 
 
 def timed(timing: "ContextPreviewTiming | None", name: str, fn: Callable[..., Any], *args, **kwargs):
@@ -100,16 +110,29 @@ class ContextPreviewTiming:
     _summary: ClassVar[ContextPreviewSummary] = ContextPreviewSummary()
 
     def measure(self, name: str, fn: Callable[..., Any], *args, **kwargs):
-        """Run one synchronous stage in its actual executing thread."""
+        """Run one synchronous stage in its actual executing thread.
+
+        A stage whose reads call ``record_rows_read`` also reports how many rows
+        it fetched; an enclosing stage counts its nested stages' rows too.
+        """
+        outer = _rows_read_counter.get()
+        counter = [0]
+        token = _rows_read_counter.set(counter)
         wall_started = time.perf_counter()
         cpu_started = time.thread_time()
         try:
             return fn(*args, **kwargs)
         finally:
-            self.stages[name] = {
+            stage = {
                 "wall_ms": round((time.perf_counter() - wall_started) * 1_000, 3),
                 "cpu_ms": round((time.thread_time() - cpu_started) * 1_000, 3),
             }
+            _rows_read_counter.reset(token)
+            if counter[0]:
+                stage["rows_read"] = counter[0]
+                if outer is not None:
+                    outer[0] += counter[0]
+            self.stages[name] = stage
 
     def wrap(
         self, name: str, fn: Callable[..., Any], *, submitted_at: float | None = None,

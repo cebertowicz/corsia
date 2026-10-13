@@ -154,6 +154,16 @@ describe('a settled row says when it settled', () => {
 		expect(nodeSubline(closed, NOW)).toBe(`Won’t do: Not needed after all · today at ${clock(at(0, 8, 40))}`);
 		expect(settledMoment(operatorNode({ id: 'open', last_transition_at: at(0, 8).toISOString() }), NOW)).toBeNull();
 	});
+
+	it('says who marked a step done, and reads as before without a reason', () => {
+		const marked = done(at(0, 15, 40), { status_reason: 'Marked by Infrastructure' });
+		expect(nodeSubline(marked, NOW)).toBe(`Done · Marked by Infrastructure · today at ${clock(at(0, 15, 40))}`);
+		const followUp = done(at(0, 15, 40), { state: 'accepted_with_followup', status_reason: 'Marked by Infrastructure' });
+		expect(nodeSubline(followUp, NOW)).toBe(
+			`Done · follow-up created · Marked by Infrastructure · today at ${clock(at(0, 15, 40))}`,
+		);
+		expect(nodeSubline(done(at(0, 15, 40)), NOW)).toBe(`Done · today at ${clock(at(0, 15, 40))}`);
+	});
 });
 
 describe('the shared day clock', () => {

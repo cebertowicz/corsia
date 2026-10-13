@@ -115,9 +115,9 @@ def _armed(db, node_id: str) -> list[sqlite3.Row]:
 
 
 def _close_reason(db, node_id: str) -> str:
-    from plans.closure import close_reasons
+    from plans.closure import settled_reasons
 
-    return close_reasons(db, [_node(db, node_id)])[node_id]
+    return settled_reasons(db, [_node(db, node_id)])[node_id]
 
 
 def _review_nodes(db) -> list[str]:

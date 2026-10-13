@@ -76,6 +76,7 @@ LABEL_REVIEW_PARALLEL = "qa/review-parallel"
 LABEL_OVERRIDE = "qa/override-reviewer"
 
 STATUS_CHECK_CONTEXT = "qa/llm-reviewer"
+STATUS_PRESENCE_CONTEXT = "qa/llm-reviewer-present"
 
 RETRY_BACKOFF_MINUTES = (1, 2, 4, 8, 16)
 MAX_RETRIES = len(RETRY_BACKOFF_MINUTES)

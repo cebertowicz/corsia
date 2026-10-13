@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,6 +18,7 @@ import ImageLightboxTestHost from './ImageLightboxTestHost.test.svelte';
 
 // The image is 1000 x 500 in a 548 x 400 viewport: Fit is 0.5 (500 of room over 1000).
 const NATURAL = { width: 1000, height: 500 };
+const imageLightboxSource = readFileSync('src/lib/components/ImageLightbox.svelte', 'utf8');
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 let realRO: typeof ResizeObserver;
@@ -82,6 +84,16 @@ describe('ImageLightbox', () => {
 		await loaded({ onBack: () => {}, docName: 'walkthrough.md' });
 		expect(button('Back to walkthrough.md')).toBeDefined();
 		for (const name of ['Fit', '100%', 'Zoom out', 'Zoom in']) expect(button(name), name).toBeDefined();
+	});
+
+	it('keeps the canvas ring keyboard-only', async () => {
+		await loaded();
+		const canvas = host.querySelector<HTMLElement>('.viewport')!;
+		expect(document.activeElement).not.toBe(canvas);
+		expect(imageLightboxSource).toMatch(/\.viewport:focus-visible[^}]*outline/);
+		expect(imageLightboxSource).not.toMatch(/\.viewport\s*\{[^}]*outline/);
+		canvas.focus();
+		expect(document.activeElement).toBe(canvas);
 	});
 
 	it('zooms to 100% and steps in and out, and Fit returns to the fitted size', async () => {

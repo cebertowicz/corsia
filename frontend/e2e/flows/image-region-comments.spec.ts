@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 import {
-	at, commentButton, composer, drag, frame, isolatedDb, newRevision, openThread, overlap, pill, postComment, rest, seedImage, sheet,
-	shoot, showImage, tag, tagNumbers, touchDrag, viewer,
+	at, commentButton, composer, drag, drawer, frame, isolatedDb, newRevision, openThread, overlap, pill, postComment, rest, seedImage,
+	sendFromDrawerByKeyboard, sheet, shoot, showImage, tag, tagNumbers, touchDrag, viewer,
 } from '../support/imageRegionComments';
 
 /** The card is wholly on screen and on top at each corner, so no ancestor clips or covers it. */
@@ -27,7 +27,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 		const seeded = await seedImage(page, request, 'region-1440');
 		try {
 			await openThread(page, seeded.sessionTitle, 1440);
-			await expect(pill(page)).toHaveAttribute('aria-label', '0 comments');
+			await expect(pill(page)).toHaveAttribute('aria-label', '0 open threads');
 			await expect(commentButton(page)).toBeVisible();
 			await shoot(page, testInfo, '1440-01-open', true);
 
@@ -111,7 +111,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await shoot(page, testInfo, '1440-08-number-not-reused', true);
 
 			// The viewer sits directly above this drawer, so its thumbnail would repeat the image and hide the first card.
-			await expect(pill(page)).toHaveAttribute('aria-label', '3 comments');
+			await expect(pill(page)).toHaveAttribute('aria-label', /^2 open threads(, |$)/);
 			await pill(page).click();
 			const drawer = page.locator('.canvas-comment-drawer');
 			await expect(drawer).toBeVisible();
@@ -222,7 +222,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await page.getByRole('button', { name: 'Toggle panel' }).click();
 			await expect.poll(async () => (await viewer(page).boundingBox())!.width).toBeGreaterThan(800);
-			await expect(pill(page)).toHaveAttribute('aria-label', '0 comments');
+			await expect(pill(page)).toHaveAttribute('aria-label', '0 open threads');
 			// The fit settles after the canvas widens; draw on the settled image.
 			let last = 0;
 			await expect.poll(async () => { const w = (await frame(page)).width; const settled = w === last; last = w; return settled; }).toBe(true);
@@ -239,6 +239,12 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			// The drawer's sliding track clips the layout; the card is fixed-position and escapes that clip.
 			await expectUnclipped(page, card);
 			await shoot(page, testInfo, '1440-14-wide-card-beside-box', true);
+
+			// R2: Send now in the drawer's footer, from the keyboard, leaves focus in the drawer; Escape then closes only it.
+			await page.keyboard.press('Escape');
+			await pill(page).click();
+			await expect(drawer(page)).toBeVisible();
+			await sendFromDrawerByKeyboard(page, testInfo, viewer(page), '1440-15-drawer-sent-focus');
 		} finally {
 			fs.rmSync(seeded.imagePath, { force: true });
 		}
@@ -292,6 +298,16 @@ test.describe('@flow:image-region-comments @surface:documents comments on parts 
 			// The sheet leaves the picked tag in view.
 			expect(overlap((await tag(page, 1).boundingBox())!, (await sheet(page).boundingBox())!)).toBe(false);
 			await shoot(page, testInfo, '393-05-tag-opens-sheet', true);
+
+			// R2: Send now in the drawer sheet's footer, from the keyboard, leaves focus in the sheet; Escape then closes only it.
+			// (Sending delivers to the thread's owner, so only against the isolated mock state.)
+			if (process.env.CORSIA_E2E_MOCK === '1') {
+				await page.keyboard.press('Escape');
+				await expect(sheet(page)).toHaveCount(0);
+				await pill(page).tap();
+				await expect(sheet(page)).toBeVisible();
+				await sendFromDrawerByKeyboard(page, testInfo, viewer(page), '393-06-drawer-sent-focus');
+			}
 		} finally {
 			fs.rmSync(seeded.imagePath, { force: true });
 		}

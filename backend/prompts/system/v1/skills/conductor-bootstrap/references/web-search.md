@@ -43,7 +43,7 @@ Anything else: `Tell me what's on your screen and I'll help.`
 
 | Then | Say | Record |
 |---|---|---|
-| The person says it's in, or any later wake | Run one `web_search` for `CORSIA`. Results, or none: `Web search works.` | Close their task (`Key set`); task `Connect web search` done |
+| The person says it's in, or any later wake | Run one `web_search` for `CORSIA`. Results, or none: `Web search works.` | `mark_done` their task with evidence in plain words (what they said, what you checked); task `Connect web search` done |
 | `Web search: key refused.` | `Brave didn't accept that key. Copy it again from API Keys and save it in Settings › Keys; Check tells you right away.` | Replace their task with `Add a key Brave accepts`; close the old one (`Key refused`) |
 | `Web search failed: [reason class]` | `Web search didn't work just now: [reason, never the key]. Your key is saved; I'll try again next time I'm working.` Once per reason | Note `I'll try again (told you: [reason class])`; later wakes re-check silently |
 | No key found | `I don't see it in Settings › Keys yet. Paste it under Web search and press Save.` | Their task stays open |

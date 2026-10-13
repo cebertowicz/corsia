@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { fromStore, get, writable } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({
@@ -90,7 +90,7 @@ describe('DocCommentSurface suggestions', () => {
 		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-1');
 	});
 
-	it('ends the drawer in a Send now footer only while messages are not sent', () => {
+	it('ends the drawer in a Send now footer only while messages are not sent', async () => {
 		// The open document's one batch: the footer reads it and Send now is its own Send.
 		const feedback = new DocFeedback();
 		const send = vi.fn(async () => {});
@@ -117,9 +117,45 @@ describe('DocCommentSurface suggestions', () => {
 		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('1 message not sent yet · sending to the owner in 4 min');
 		expect(footer()!.querySelector('button')!.disabled).toBe(true);
 
-		feedback.sending = false;
+		// Sending from the keyboard: the footer leaves with focus in it, which lands on the drawer's heading, not the page.
+		feedback.sending = false; flushSync();
+		footer()!.querySelector('button')!.focus();
 		feedback.pendingCount = 0; flushSync();
 		expect(footer()).toBeNull();
+		await Promise.resolve();
+		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
+	});
+
+	it('keeps the drawer while an image opened from a card covers it, then gives that card focus back', async () => {
+		const covering = writable(false);
+		const live = fromStore(covering);
+		render({ state: { kind: 'list' }, comments: [suggestion, secondSuggestion], get covered() { return live.current; } });
+		await tick();
+		const card = host.querySelector<HTMLElement>('[data-comment-id="comment-2"]')!;
+		const control = card.querySelector<HTMLButtonElement>('button:not(:disabled)')!;
+		// A click on the card's text focuses nothing; what it opened from is still known.
+		card.click();
+		covering.set(true); flushSync();
+		expect(host.querySelector('[data-doc-comments-drawer]')).not.toBeNull();
+		// The image over the document held focus, and it went to the page as the image closed.
+		(document.activeElement as HTMLElement | null)?.blur();
+		expect(document.activeElement).toBe(document.body);
+		covering.set(false); flushSync();
+		await tick();
+		expect(document.activeElement).toBe(control);
+	});
+
+	it('leaves focus alone when the drawer is uncovered and nothing in it opened the image', async () => {
+		const covering = writable(false);
+		const live = fromStore(covering);
+		render({ state: { kind: 'list' }, comments: [suggestion], get covered() { return live.current; } });
+		// The drawer puts focus on its filter as it opens; the image was opened from outside it, which took focus.
+		await tick();
+		(document.activeElement as HTMLElement | null)?.blur();
+		covering.set(true); flushSync();
+		covering.set(false); flushSync();
+		await tick();
+		expect(document.activeElement).toBe(document.body);
 	});
 
 	it('closes a card that follows its text only once that comment is deleted', () => {
@@ -139,6 +175,14 @@ describe('DocCommentSurface suggestions', () => {
 	it('keeps a document text-comment sheet above the keyboard on narrow screens', () => {
 		render({ narrow: true, state: { kind: 'thread', id: suggestion.id } });
 		expect(document.body.querySelector('.drawer-backdrop')?.classList.contains('follow-keyboard')).toBe(true);
+	});
+
+	it('removes its narrow drawer synchronously when its caller is destroyed', () => {
+		render({ narrow: true, state: { kind: 'thread', id: suggestion.id } });
+		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(1);
+		unmount(component!);
+		component = null;
+		expect(document.body.querySelectorAll('[data-adaptive-drawer]')).toHaveLength(0);
 	});
 
 	describe('a card that follows its text when the comment stops having a place in it', () => {
@@ -260,6 +304,31 @@ describe('DocCommentSurface suggestions', () => {
 			expect(restoreFocus).toHaveBeenCalledOnce();
 			expect(documentEscape).not.toHaveBeenCalled();
 		} finally { window.removeEventListener('keydown', documentEscape); }
+	});
+
+	it('keeps the comments sheet on screen through its outro however the surface closes, then removes it once', async () => {
+		const state = writable<{ kind: 'list' } | null>(null);
+		const live = fromStore(state);
+		const onClose = vi.fn(() => state.set(null));
+		render({ get state() { return live.current; }, narrow: true, comments: [{ ...suggestion, replacement: null }], onClose });
+		const sheets = () => document.body.querySelectorAll('[data-adaptive-drawer] [data-doc-comments-drawer]');
+		const close = {
+			header: () => document.body.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click(),
+			// The image viewer's Escape, in the capture phase, clears the state without going through the sheet.
+			outside: () => state.set(null),
+		};
+		for (const [path, run] of Object.entries(close)) {
+			onClose.mockClear();
+			state.set({ kind: 'list' }); flushSync();
+			expect(sheets(), path).toHaveLength(1);
+			run(); flushSync();
+			// Still mounted, rows and all, while the drawer plays its outro.
+			expect(sheets(), path).toHaveLength(1);
+			expect(document.body.querySelector('[data-doc-comments-drawer] [data-comment-id="comment-1"]'), path).not.toBeNull();
+			await vi.waitFor(() => expect(sheets(), path).toHaveLength(0));
+			// The outro's end does not close the surface a second time.
+			expect(onClose, path).toHaveBeenCalledTimes(path === 'header' ? 1 : 0);
+		}
 	});
 
 	it('flushes, applies, re-seeds and reloads after accept', async () => {

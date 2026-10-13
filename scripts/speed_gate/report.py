@@ -5,6 +5,8 @@ from __future__ import annotations
 from . import ratchet
 
 TOP_ROUTES = 15
+UPDATE_BASELINE_COMMAND = ('python -m speed_gate.cli update-baseline --current <measurement> '
+                           '--baseline quality/speed-gate-baseline.json --reason "<why the cost moved>"')
 
 
 def _table(header: list[str], rows: list[list[str]]) -> list[str]:
@@ -39,6 +41,10 @@ def render(current: dict, verdict: ratchet.Verdict, baseline: dict, *, report_on
         lines += _table(["Route", "Metric", "Before", "After"],
                         [[f"`{item.route}`", item.metric, _cell(item.before), _cell(item.after)] for item in improved])
         lines += [""]
+    if not report_only and (failing or improved):
+        lines += ["### Required action", "",
+                  "Fix a regression, or re-record the changed cost in this PR with a reason:", "",
+                  f"`{UPDATE_BASELINE_COMMAND}`", ""]
     removed = [item for item in verdict.findings if item.kind == "removed"]
     if removed:
         lines += ["### Routes no longer in the application (drop them from the baseline)", ""]

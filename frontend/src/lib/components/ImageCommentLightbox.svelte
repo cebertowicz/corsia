@@ -18,6 +18,7 @@
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
 	import { commentLoads, docComments, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
 	import { isPaneDrawer } from '$lib/stores/paneOpen';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
@@ -56,6 +57,8 @@
 	let layer = $state<ReturnType<typeof ImageRegionLayer>>();
 	const all = $derived(artifactId ? $docComments[artifactId] ?? [] : []);
 	const comments = $derived(inDocument ? commentsAtImage(all, inDocument.occurrence) : all);
+	// The pill counts open threads, as the document's does: resolved ones are in the drawer's other filters.
+	const openThreads = $derived(comments.filter((comment) => !comment.resolved).length);
 	const accent = $derived($projects.find((project) => project.id === projectId)?.accent_color ?? null);
 	const colorOf = (comment: DocComment) => regionColor(comment, projectId, accent);
 	const canComment = $derived(!readOnly && !!artifactId);
@@ -122,6 +125,12 @@
 
 	// The drawer opens by growing its grid track, so the image above or beside it moves with it rather than jumping.
 	const drawerOpen = $derived(image.ui.state?.kind === 'list');
+	/**
+	 * Under reduced motion nothing glides: the drawer crossfades, in a sheet or beside the image, and the image holds its
+	 * place until the drawer has gone, then moves once. So the track stays open while the drawer is still on screen.
+	 */
+	let drawerShown = $state(false);
+	const trackOpen = $derived(drawerOpen || ($prefersReducedMotion && drawerShown));
 	const DRAWER_GAP = 8;
 	let drawerSize = $state(0);
 	/**
@@ -149,7 +158,7 @@
 <svelte:window onkeydowncapture={image.onKeydownCapture} />
 
 <div class="image-comments">
-<div class="layout" class:drawer-open={drawerOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
+<div class="layout" class:drawer-open={trackOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
 	<div class="viewer-cell">
 		<ImageLightbox bind:this={lightbox} {src} {alt} {docName} {onBack} onLoaded={imageLoaded} {onFailed} {onRetry}>
 			{#snippet barActions({ loaded })}
@@ -159,16 +168,17 @@
 						ready={loaded}
 						moving={!!image.moving}
 						savingMove={image.moveSaving}
-						count={comments.length}
+						count={openThreads}
+						unsent={feedback?.pendingCount ?? 0}
 						loading={$commentLoads[artifactId]?.state === 'loading'}
 						listOpen={image.ui.state?.kind === 'list'}
 						readOnly={!canComment}
 						onToggle={toggleBoxMode}
 						onOpenList={image.ui.openList}
 					/>
-					<!-- The bar is narrow at any window size (a canvas panel beside the chat): Send is short here, read out in full. -->
-					{#if feedback}
-						<DocFeedbackControls {feedback} compact />
+					<!-- The bar is narrow at any window size (a canvas panel beside the chat): it keeps the batch's Retry and undelivered status; Send lives in the drawer footer (RSR-5), as in the document row. -->
+					{#if feedback && !inDocument}
+						<DocFeedbackControls {feedback} compact withSend={false} />
 					{/if}
 				{/if}
 			{/snippet}
@@ -197,6 +207,7 @@
 		</ImageLightbox>
 	</div>
 	{#if artifactId}
+		<!-- The drawer lists this one image's comments while the image itself is on screen above or beside it, so it has no thumbnail group header repeating the image. -->
 		<DocCommentSurface
 			state={image.ui.state}
 			anchor={image.ui.anchor}
@@ -220,6 +231,8 @@
 			target={null}
 			{artifactId}
 			readOnly={!canComment}
+			feedback={inDocument ? null : feedback}
+			onDrawerShown={(shown) => drawerShown = shown}
 			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>
 	{/if}
@@ -247,6 +260,7 @@
 		.layout.drawer-open { grid-template-columns: minmax(0, 1fr) 328px; grid-template-rows: minmax(0, 1fr); }
 		.layout :global(.canvas-comment-drawer) { align-self: stretch; justify-self: start; width: 320px; height: auto; margin: 0 0 0 8px; }
 	}
+	/* Reduced motion skips the slide: the track opens at once, and closes at once when the drawer has gone (trackOpen). */
 	@media (prefers-reduced-motion: reduce) { .layout { transition: none; } }
 	.viewer-cell { grid-area: viewer; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 </style>
