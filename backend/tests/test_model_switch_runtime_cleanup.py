@@ -10,16 +10,19 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_codex_captured_owner_already_gone_is_a_success(monkeypatch, caplog) -> None:
-    """The captured source cannot run again when no Codex handle remains."""
+    """An exited Codex process still needs its durable provider thread retired."""
     from subagents import codex_retirement, codex_runtime
 
+    retired = Mock(return_value=True)
     monkeypatch.setattr(codex_runtime, "current_handle_fingerprint", lambda _thread_id: None)
+    monkeypatch.setattr(codex_runtime, "_retire_registered_thread_artifacts", retired)
     caplog.set_level(logging.INFO, logger=codex_retirement.__name__)
 
     assert await codex_runtime.retire_if_current(
         "thread-1", expected_owner=object(), operation_id="switch-1",
     ) is True
     assert "branch=owner_gone thread_id=thread-1 operation_id=switch-1" in caplog.text
+    retired.assert_called_once()
 
 
 @pytest.mark.asyncio

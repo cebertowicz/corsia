@@ -28,6 +28,8 @@ async def retire_if_current(
                     "model switch source runtime branch=owner_gone thread_id=%s operation_id=%s",
                     thread_id, operation_id or "unknown",
                 )
+            # No live handle, but the durable provider thread must not resume.
+            await codex_runtime._retire_locked(thread_id, db=db, broadcast=broadcast)
             return True
         if expected_owner is None or current_owner != expected_owner:
             log.warning(
