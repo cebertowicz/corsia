@@ -81,8 +81,10 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 
 		await fixture.editor.click({ position: { x: 80, y: 8 } });
 		await active.click();
-		await expect(active).toBeChecked();
-		await expect(page.locator('.cm-md-task-done')).toBeVisible();
+		// The label names the next action, so the toggled box is found by its incomplete label.
+		await expect(page.getByRole('checkbox', { name: 'Mark task incomplete: active' })).toBeChecked();
+		// Both the toggled task and the seeded done task are struck through.
+		await expect(page.locator('.cm-md-task-done')).toHaveCount(2);
 		await expect.poll(() => fixture.editor.evaluate((el) => document.activeElement === el)).toBe(true);
 		await expect(page.getByRole('button', { name: 'Comment' })).toHaveCount(0);
 		await page.keyboard.type(' continued');
@@ -93,6 +95,12 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		await expect(page.getByRole('checkbox', { name: 'Mark task complete: typed item' })).toBeVisible();
 
 		await replaceEditor(page, fixture.editor, '- [x] checked');
+		await expect(page.getByRole('checkbox', { name: 'Mark task incomplete: checked' })).toBeChecked();
+		// Desktop Chrome emulates Linux, so CodeMirror maps Mod to Control in this flow.
+		await page.keyboard.press('Control+Enter');
+		await expect(page.getByRole('checkbox', { name: 'Mark task complete: checked' })).not.toBeChecked();
+		await page.keyboard.press('Control+Enter');
+		await expect(page.getByRole('checkbox', { name: 'Mark task incomplete: checked' })).toBeChecked();
 		await page.keyboard.press('End');
 		await page.keyboard.press('Enter');
 		const tasks = page.getByRole('checkbox');
@@ -117,7 +125,7 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		await expect(reloadedTasks.nth(1)).toHaveAccessibleName('Mark task complete: task');
 
 		await reloadedEditor.click({ position: { x: 85, y: 8 } });
-		await page.keyboard.press('ControlOrMeta+Enter');
+		await page.keyboard.press('Control+Enter');
 		await expect(page.getByRole('checkbox', { name: 'Mark task complete: checked' })).not.toBeChecked();
 	});
 
@@ -127,7 +135,7 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		await openChecklist(page, request, '- [ ] mobile item\n');
 		const checkbox = page.getByRole('checkbox', { name: 'Mark task complete: mobile item' });
 		await checkbox.tap();
-		await expect(checkbox).toBeChecked();
+		await expect(page.getByRole('checkbox', { name: 'Mark task incomplete: mobile item' })).toBeChecked();
 	});
 
 	// The artifact leaf does not expose a separately seedable writable=false document
