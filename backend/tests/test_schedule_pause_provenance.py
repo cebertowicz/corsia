@@ -58,9 +58,8 @@ def test_scheduled_wake_without_its_provenance_is_held():
     row = {
         "thread_id": "owner",
         "role": "system",
-        "metadata": json.dumps({"event_type": "automation.scheduled_wake"}),
-        "continuation_condition": json.dumps({
-            "kind": "automation_clock", "subject_id": "missing",
+        "metadata": json.dumps({
+            "event_type": "automation.scheduled_wake", "subject_id": "missing",
         }),
     }
 
@@ -87,9 +86,8 @@ def test_scheduled_wake_reaches_a_paused_agent_only_when_the_user_asked(asked_by
     row = {
         "thread_id": "owner",
         "role": "system",
-        "metadata": json.dumps({"event_type": "automation.scheduled_wake"}),
-        "continuation_condition": json.dumps({
-            "kind": "automation_clock", "subject_id": "schedule",
+        "metadata": json.dumps({
+            "event_type": "automation.scheduled_wake", "subject_id": "schedule",
         }),
     }
 
@@ -181,8 +179,7 @@ def test_paused_scheduled_wake_uses_the_existing_opening_with_a_stop_clause():
         },
     )
 
-    assert "The user asked for this schedule: in this Turn do its task only" in rendered.managed_prefix
-    assert "the user's own message here asks" not in rendered.managed_prefix
+    assert "Do this schedule's task only, then stop." in rendered.managed_prefix
 
 
 def test_a_stored_wake_without_the_claim_stamp_replays_unchanged():
