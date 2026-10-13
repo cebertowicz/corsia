@@ -262,6 +262,7 @@ async def system_restart_self(
         auth.head_sha,
         auth.branch,
         reason,
+        kind="restart",
     )
     if rid is None:
         existing = await run_in_db(sr.in_flight_request)
@@ -304,6 +305,23 @@ async def system_restart_self(
     return _self_restart_response(auth, redeploy)
 
 
+def _update_operation_status(operation: dict) -> dict:
+    """Project durable Update truth without changing prior status fields."""
+    return {
+        "operation_id": str(operation["id"]),
+        "status": operation["status"],
+        "phase": operation.get("phase"),
+        "target_version": operation.get("target_version"),
+        "drain_total": operation.get("drain_total"),
+        "failure_code": operation.get("failure_code"),
+        "failure_detail": operation.get("failure_detail"),
+        "conductor_told_at": operation.get("conductor_told_at"),
+        "error": operation.get("error"),
+        "requested_at": operation.get("requested_at"),
+        "settled_at": operation.get("settled_at"),
+    }
+
+
 @router.get("/system/update-status")
 async def system_update_status(
     refresh: bool = False, user: dict = Depends(require_user)
@@ -314,10 +332,16 @@ async def system_update_status(
     remote is contacted. ``available: null`` means the check could not be
     completed — the UI must not present that as up to date.
     """
+    from automation import self_restart
+    from infra.db_async import run_in_db
     from infra.update_status import update_status
 
     status = await asyncio.to_thread(update_status, refresh)
-    return status.to_dict()
+    result = status.to_dict()
+    operation = await run_in_db(self_restart.latest_update_operation)
+    if operation is not None:
+        result["operation"] = _update_operation_status(operation)
+    return result
 
 
 @router.get("/system/host-resources")

@@ -614,8 +614,10 @@ def test_a_backup_that_would_not_fit_refuses_before_copying(
 
     message = str(refusal.value)
     assert "not enough free space" in message
-    # Both numbers, so the condition can be cleared without guesswork.
+    # Both numbers and recovery targets, so the condition can be cleared without guesswork.
     assert "GB free" in message and "GB required" in message
+    assert "GB database" in message
+    assert f"Superseded backups in {tmp_path}" in message
     assert _backups(tmp_path) == []
     assert _digest(path) == before
     conn = sqlite3.connect(path)

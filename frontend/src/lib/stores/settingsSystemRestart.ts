@@ -51,6 +51,8 @@ export interface SystemRestartStatus {
 	status: 'in_flight' | 'complete' | 'failed' | 'cancelled' | 'superseded';
 	phase?: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming' | null;
 	error?: string | null;
+	failure_code?: 'disk_space' | 'fetch_failed' | 'build_failed' | 'launch_failed' | 'drain_cancelled' | null;
+	failure_detail?: string | null;
 }
 
 type RestartStatusRead = SystemRestartStatus | string | null;
@@ -71,9 +73,7 @@ export async function readSystemRestartStatus(operationId: string, signal?: Abor
 	}
 }
 
-// Cover the 60s drain cap, bounded launchd handoff, and 60s readiness bound.
-const SYSTEM_RESTART_TIMEOUT_MS = 4 * 60_000;
-const FINAL_RESTART_OBSERVATION_TIMEOUT_MS = 5_000;
+// Restart observation remains active until the durable operation settles.
 
 type RestartObservation = {
 	version: SystemVersionSnapshot | null;
@@ -85,6 +85,7 @@ type RestartObservationResult = {
 	result?: { ok: boolean; message?: string };
 	sawUnavailable: boolean;
 	drainEndedAt: number | null;
+	terminalMismatchAt: number | null;
 };
 
 function restartPhase(
@@ -112,23 +113,38 @@ async function observeSystemRestart(operationId: string, signal?: AbortSignal): 
 	return { version, restartRead };
 }
 
+function revisionMismatchMessage(
+	backendSha: string | null | undefined,
+	frontendSha: string | null | undefined,
+	checkoutSha: string | null | undefined,
+): string {
+	const mismatches = [
+		(!backendSha || backendSha === 'unknown') && 'backend',
+		(!frontendSha || frontendSha === 'unknown' || frontendSha !== backendSha) && 'frontend',
+		(checkoutSha && (checkoutSha === 'unknown' || checkoutSha !== backendSha)) && 'checkout',
+	].filter(Boolean).join(', ');
+	return `Update finished, but the running versions do not match (${mismatches}). CORSIA is still running. Inspect Details before retrying.`;
+}
+
 function classifyRestartObservation(
 	mode: 'restart' | 'update',
 	before: SystemVersionSnapshot | null,
 	observation: RestartObservation,
 	sawUnavailable: boolean,
 	drainEndedAt: number | null,
+	terminalMismatchAt: number | null,
 	inferStoppedReplacement = true,
 ): RestartObservationResult {
 	const { version, restartRead } = observation;
 	if (typeof restartRead === 'string') {
-		return { result: { ok: false, message: restartRead }, sawUnavailable, drainEndedAt };
+		return { result: { ok: false, message: restartRead }, sawUnavailable, drainEndedAt, terminalMismatchAt };
 	}
 	if (['failed', 'cancelled', 'superseded'].includes(restartRead?.status ?? '')) {
 		return {
-			result: { ok: false, message: restartRead?.error ?? 'Restart operation ended before a replacement was verified.' },
+			result: { ok: false, message: restartFailureMessage(restartRead) },
 			sawUnavailable,
 			drainEndedAt,
+			terminalMismatchAt,
 		};
 	}
 
@@ -150,6 +166,7 @@ function classifyRestartObservation(
 	);
 	if (restartRead?.status === 'in_flight') {
 		drainEndedAt = null;
+		terminalMismatchAt = null;
 	} else if (!version) {
 		sawUnavailable = true;
 	} else if (restartRead) {
@@ -158,12 +175,27 @@ function classifyRestartObservation(
 
 	const phase = restartPhase(restartRead, Boolean(version), restarted, revisionsAgree);
 	if (restarted && revisionsAgree && restartRead?.status === 'complete') {
-		return { phase, result: { ok: true }, sawUnavailable, drainEndedAt };
+		return { phase, result: { ok: true }, sawUnavailable, drainEndedAt, terminalMismatchAt: null };
+	}
+	if (restarted && !revisionsAgree && restartRead?.status === 'complete') {
+		terminalMismatchAt ??= Date.now();
+		if (Date.now() - terminalMismatchAt >= 10_000) {
+			return {
+				phase,
+				result: { ok: false, message: revisionMismatchMessage(backendSha, frontendSha, checkoutSha) },
+				sawUnavailable,
+				drainEndedAt,
+				terminalMismatchAt,
+			};
+		}
+	} else {
+		terminalMismatchAt = null;
 	}
 	if (
 		inferStoppedReplacement
 		&& drainEndedAt !== null
 		&& !sawUnavailable
+		&& restartRead?.status !== 'complete'
 		&& Date.now() - drainEndedAt >= 2_000
 	) {
 		return {
@@ -176,9 +208,10 @@ function classifyRestartObservation(
 			},
 			sawUnavailable,
 			drainEndedAt,
+			terminalMismatchAt,
 		};
 	}
-	return { phase, sawUnavailable, drainEndedAt };
+	return { phase, sawUnavailable, drainEndedAt, terminalMismatchAt };
 }
 
 async function observeSystemRestartWithin(
@@ -203,10 +236,28 @@ async function observeSystemRestartWithin(
 	}
 }
 
-function completionUnverifiedMessage(mode: 'restart' | 'update'): string {
-	return mode === 'update'
-		? "Couldn't verify update completion. Inspect the restart log before retrying."
-		: "Couldn't verify restart completion. Inspect the restart log before retrying.";
+function restartFailureMessage(status: SystemRestartStatus | null | undefined): string {
+	if (status?.failure_code === 'disk_space') {
+		try {
+			const detail = JSON.parse(status.failure_detail ?? '{}');
+			const needed = Math.round(Number(detail.needed_bytes) / 1e9);
+			const free = Math.round(Number(detail.free_bytes) / 1e9);
+			if (Number.isFinite(needed) && Number.isFinite(free)) {
+				return `Needs ${needed} GB free; this Mac has ${free} GB.`;
+			}
+		} catch {
+			// The durable summary remains the safe fallback for malformed legacy detail.
+		}
+	}
+	const messages: Record<string, string> = {
+		fetch_failed: 'Could not download the update. CORSIA is still running.',
+		build_failed: 'Could not build the update. CORSIA is still running.',
+		launch_failed: 'Could not start the restart. CORSIA is still running.',
+		drain_cancelled: 'Update cancelled before restart.',
+	};
+	return (status?.failure_code && messages[status.failure_code])
+		?? status?.error
+		?? 'Restart operation ended before a replacement was verified.';
 }
 
 export async function waitForSystemRestart(
@@ -214,17 +265,24 @@ export async function waitForSystemRestart(
 	before: SystemVersionSnapshot | null,
 	operationId: string,
 	onPhase?: (message: string) => void,
-	timeoutMs = SYSTEM_RESTART_TIMEOUT_MS,
 ): Promise<{ ok: boolean; message?: string }> {
-	const deadline = Date.now() + timeoutMs;
 	let sawUnavailable = false;
 	let drainEndedAt: number | null = null;
-	while (Date.now() < deadline) {
-		const observation = await observeSystemRestartWithin(operationId, deadline - Date.now());
-		if (!observation || Date.now() >= deadline) break;
-		const outcome = classifyRestartObservation(mode, before, observation, sawUnavailable, drainEndedAt);
+	let terminalMismatchAt: number | null = null;
+	while (true) {
+		const observation = await observeSystemRestartWithin(operationId, 5_000);
+		if (observation === null) {
+			sawUnavailable = true;
+			onPhase?.('Restarting backend…');
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			continue;
+		}
+		const outcome = classifyRestartObservation(
+			mode, before, observation, sawUnavailable, drainEndedAt, terminalMismatchAt,
+		);
 		sawUnavailable = outcome.sawUnavailable;
 		drainEndedAt = outcome.drainEndedAt;
+		terminalMismatchAt = outcome.terminalMismatchAt;
 		if (outcome.phase) onPhase?.(outcome.phase);
 		if (outcome.result) {
 			if (outcome.result.ok) onPhase?.('Restart complete. Reloading…');
@@ -232,17 +290,4 @@ export async function waitForSystemRestart(
 		}
 		await new Promise((resolve) => setTimeout(resolve, 500));
 	}
-
-	onPhase?.(mode === 'update' ? 'Checking update result…' : 'Checking restart result…');
-	const finalObservation = await observeSystemRestartWithin(operationId, FINAL_RESTART_OBSERVATION_TIMEOUT_MS);
-	if (finalObservation) {
-		// At the deadline, only explicit failure or strict completion can settle the fresh observation.
-		const outcome = classifyRestartObservation(mode, before, finalObservation, sawUnavailable, drainEndedAt, false);
-		if (outcome.phase) onPhase?.(outcome.phase);
-		if (outcome.result) {
-			if (outcome.result.ok) onPhase?.('Restart complete. Reloading…');
-			return outcome.result;
-		}
-	}
-	return { ok: false, message: completionUnverifiedMessage(mode) };
 }
