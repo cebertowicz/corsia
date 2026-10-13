@@ -62,7 +62,8 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await expect(reload).toBeVisible();
 			const reloadBox = await reload.boundingBox();
 			expect(reloadBox).not.toBeNull();
-			expect(reloadBox!.height).toBeGreaterThanOrEqual(width <= 768 ? 44 : 32);
+			// Desktop is the shared secondary sm Button's 28px (as the feedback row's Retry); narrow screens widen its hit area to 44.
+			expect(reloadBox!.height).toBeGreaterThanOrEqual(width <= 768 ? 44 : 28);
 			expect(reloadBox!.x).toBeGreaterThanOrEqual(0);
 			expect(reloadBox!.x + reloadBox!.width).toBeLessThanOrEqual(width);
 			await reader.screenshot({ path: testInfo.outputPath(`comment-reload-before-${width}.png`) });

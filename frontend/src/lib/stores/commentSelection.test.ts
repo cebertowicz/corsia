@@ -142,6 +142,17 @@ it('rejects and releases when the server reports the document is not open', asyn
 	await expect(request).rejects.toThrow('document changed');
 	expect(value.released()).toEqual([expect.objectContaining({ client_id: value.reserve(0).client_id })]);
 });
+it('is not settled by a refusal without a request id delivered before its own ask, such as an earlier release', async () => {
+	const value = opened(), settled = vi.fn(), request = captureComment(value.selection, 1, new AbortController().signal).then(settled, settled);
+	value.session.handle({ type: 'doc_error', kind: 'not_open', artifact_id: 'artifact', request_id: null } as unknown as DocumentFrame);
+	await value.asked(1);
+	await Promise.resolve();
+	expect(settled).not.toHaveBeenCalled();
+	value.answer();
+	await request;
+	expect(settled).toHaveBeenCalledWith(expect.objectContaining({ quote: 'beta' }));
+	expect(value.released()).toEqual([]);
+});
 it.each([
 	['refused', 'refused for test', 'refused for test'],
 	['store_refused', 'store refused for test', 'store refused for test'],

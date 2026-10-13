@@ -59,7 +59,8 @@ export function captureComment(selection: CommentSelection, seq: number, signal:
 		if (signal.aborted) { abort(); return; }
 		signal.addEventListener('abort', abort, { once: true });
 		stopFrame = session.onFrame(frame => {
-			if (frame.request_id !== requestId) return;
+			// No ask is out yet while hashing: a refusal without an id (an earlier capture's release) is not ours.
+			if (requestId === null || frame.request_id !== requestId) return;
 			if (frame.type === 'doc_error') {
 				finish(undefined, new Error((frame.kind === 'refused' || frame.kind === 'store_refused') && frame.message ? frame.message : CHANGED));
 				return;
