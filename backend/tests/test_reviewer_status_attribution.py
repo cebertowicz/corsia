@@ -53,6 +53,55 @@ def test_every_reviewer_status_write_has_instance_and_write_stamp(
         assert len(payload["description"]) <= 140
 
 
+@patch("reviewer.gh_api.subprocess.run")
+def test_presence_status_uses_its_own_context_after_a_verdict(mock_run: MagicMock):
+    """Presence is a second success context, distinct from the verdict."""
+    from reviewer import reviewer_status
+    from reviewer.reviewer_categories import STATUS_PRESENCE_CONTEXT
+
+    mock_run.return_value = _proc()
+
+    assert reviewer_status.set_presence("owner/repo", "a" * 40)
+
+    payload = _posted_payloads(mock_run)[0]
+    assert payload["state"] == "success"
+    assert payload["context"] == STATUS_PRESENCE_CONTEXT
+    assert payload["description"].startswith("reviewer verdict published at this head")
+
+
+@patch("reviewer.gh_api.subprocess.run")
+def test_failed_presence_post_reports_error_on_presence_only(mock_run: MagicMock):
+    """A failed marker is visible on its own context and never on the verdict."""
+    from reviewer import reviewer_status
+    from reviewer.reviewer_categories import STATUS_PRESENCE_CONTEXT
+
+    failed = _proc()
+    failed.returncode = 1
+    mock_run.side_effect = [failed, _proc()]
+
+    assert not reviewer_status.set_presence("owner/repo", "a" * 40)
+
+    payloads = _posted_payloads(mock_run)
+    assert [p["state"] for p in payloads] == ["success", "error"]
+    assert {p["context"] for p in payloads} == {STATUS_PRESENCE_CONTEXT}
+
+
+@patch("reviewer.gh_api.subprocess.run")
+def test_presence_absent_posts_failure_with_reason_on_presence_only(mock_run: MagicMock):
+    """An override skip says on the presence context that no review ran."""
+    from reviewer import reviewer_status
+    from reviewer.reviewer_categories import STATUS_PRESENCE_CONTEXT
+
+    mock_run.return_value = _proc()
+
+    assert reviewer_status.set_presence_absent("owner/repo", "a" * 40, "no review ran: override")
+
+    payload = _posted_payloads(mock_run)[0]
+    assert payload["state"] == "failure"
+    assert payload["context"] == STATUS_PRESENCE_CONTEXT
+    assert payload["description"].startswith("no review ran: override")
+
+
 @patch("reviewer.gh_helpers._run_gh")
 def test_unattributed_success_is_returned_as_success_and_logged(
     mock_run: MagicMock, caplog,

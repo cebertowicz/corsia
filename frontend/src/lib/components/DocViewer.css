@@ -1,8 +1,10 @@
 :root { --doc-visual-viewport-height: 100dvh; --doc-visual-viewport-offset: 0px; }
-.doc { --doc-canvas-top: 0px; position: relative; box-sizing: border-box; width: 100%; height: 100%; max-height: calc(var(--doc-visual-viewport-height, 100dvh) + var(--doc-visual-viewport-offset, 0px) - var(--doc-canvas-top, 0px) - 8px); min-height: 0; max-width: 1100px; margin: 0 auto; display: grid; grid-template-areas: 'header' 'editor'; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 4px 0 8px; text-align: left; }
+.doc { --doc-canvas-top: 0px; --doc-drawer-footer-height: 0px; position: relative; box-sizing: border-box; width: 100%; height: 100%; max-height: calc(var(--doc-visual-viewport-height, 100dvh) + var(--doc-visual-viewport-offset, 0px) - var(--doc-canvas-top, 0px) - 8px); min-height: 0; max-width: 1100px; margin: 0 auto; display: grid; grid-template-areas: 'header' 'editor'; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 4px 0 8px; text-align: left; }
 /* A touch pointer at phone width keeps one 24px (the fine rail's) text inset on both sides instead of the 44px marker rail on the left only; the marker's hit box stays railWidth() and reaches into the text's edge. The editor, header and review bar read this; ArtifactLeaf's page gutter shares the condition. */
 @media (any-pointer: coarse) and (max-width: 600px) { .doc { --doc-phone-inset: 24px; } }
-.doc:has(.canvas-comment-drawer) { grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, min(36%, 260px)); }
+/* A pending-feedback footer reports its own height. The list keeps its existing capped height; only the pinned footer is added below it. */
+.doc:has(.canvas-comment-drawer) { --doc-drawer-height: min(36%, 260px); grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, var(--doc-drawer-height)); }
+.doc:has(.canvas-comment-drawer .drawer-unsent) { --doc-drawer-height: calc(min(36%, 260px) + var(--doc-drawer-footer-height, 0px)); }
 @container doc-canvas (min-width: 900px) { .doc:has(.canvas-comment-drawer) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); } }
 /* CodeMirror owns scrolling; this grid cell clips without a second scroll container. */
 .doc-main { grid-area: editor; flex: 1; min-width: 0; min-height: 0; overflow: clip; overscroll-behavior: contain; }

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,6 +18,7 @@ import ImageLightboxTestHost from './ImageLightboxTestHost.test.svelte';
 
 // The image is 1000 x 500 in a 548 x 400 viewport: Fit is 0.5 (500 of room over 1000).
 const NATURAL = { width: 1000, height: 500 };
+const imageLightboxSource = readFileSync('src/lib/components/ImageLightbox.svelte', 'utf8');
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 let realRO: typeof ResizeObserver;
@@ -25,7 +27,7 @@ const sizes = { width: 548, height: 400 };
 function define(name: string, get: () => number) {
 	Object.defineProperty(HTMLElement.prototype, name, { configurable: true, get });
 }
-const settle = async () => { for (let i = 0; i < 4; i++) { await Promise.resolve(); flushSync(); } };
+const settle = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); flushSync(); } };
 
 function render(props: Record<string, unknown> = {}) {
 	component = mount(ImageLightbox, { target: host, props: { src: '/api/files/content?path=%2Fws%2Fa.png', alt: 'Mock screen', ...props } });
@@ -70,6 +72,20 @@ describe('ImageLightbox', () => {
 		expect(host.querySelector('.level')!.textContent).toBe('50%');
 	});
 
+	it('keeps a saved camera hidden until its scale and offsets are both restored', async () => {
+		const img = render({ place: { scale: 1, scrollLeft: 123, scrollTop: 45 } });
+		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: NATURAL.width });
+		Object.defineProperty(img, 'naturalHeight', { configurable: true, value: NATURAL.height });
+		img.dispatchEvent(new Event('load'));
+		flushSync();
+		expect(host.querySelector('.viewport')!.classList).toContain('pending');
+		await settle();
+		const viewportEl = host.querySelector<HTMLElement>('.viewport')!;
+		expect(viewportEl.classList).not.toContain('pending');
+		expect(width(img)).toBe(1000);
+		expect([viewportEl.scrollLeft, viewportEl.scrollTop]).toEqual([123, 45]);
+	});
+
 	it('never enlarges an image that fits at its own size', async () => {
 		sizes.width = 4000; sizes.height = 4000;
 		const img = await loaded();
@@ -82,6 +98,16 @@ describe('ImageLightbox', () => {
 		await loaded({ onBack: () => {}, docName: 'walkthrough.md' });
 		expect(button('Back to walkthrough.md')).toBeDefined();
 		for (const name of ['Fit', '100%', 'Zoom out', 'Zoom in']) expect(button(name), name).toBeDefined();
+	});
+
+	it('keeps the canvas ring keyboard-only', async () => {
+		await loaded();
+		const canvas = host.querySelector<HTMLElement>('.viewport')!;
+		expect(document.activeElement).not.toBe(canvas);
+		expect(imageLightboxSource).toMatch(/\.viewport:focus-visible[^}]*outline/);
+		expect(imageLightboxSource).not.toMatch(/\.viewport\s*\{[^}]*outline/);
+		canvas.focus();
+		expect(document.activeElement).toBe(canvas);
 	});
 
 	it('zooms to 100% and steps in and out, and Fit returns to the fitted size', async () => {

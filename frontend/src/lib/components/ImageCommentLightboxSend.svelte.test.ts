@@ -92,6 +92,12 @@ function documentStatus() {
 	return { target, component };
 }
 const sendIn = (element: ParentNode) => [...element.querySelectorAll<HTMLButtonElement>('button')].find((button) => /^Send/.test(button.textContent?.trim() ?? '')) ?? null;
+/** The comments drawer's pinned footer, where an unsent batch is named and sent (RSR-5). */
+const footerIn = (element: ParentNode) => element.querySelector<HTMLElement>('[data-drawer-unsent]');
+async function openDrawer(target: HTMLElement) {
+	target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!.click();
+	await settle();
+}
 
 beforeEach(() => {
 	realRO = globalThis.ResizeObserver;
@@ -125,7 +131,7 @@ afterEach(() => {
 });
 
 describe('Send in the image viewer (DCOL-FR13.12)', () => {
-	it('closes the same batch the document’s Send closes, and going Back is not leaving it', async () => {
+	it('keeps send controls in the document review surface, and going Back is not leaving it', async () => {
 		const doc = documentStatus();
 		doc.component.sync('art-doc', pending(2));
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(2) });
@@ -136,16 +142,9 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(),
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
-		const send = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(send.getAttribute('aria-label')).toBe('Send 2 comments to Design');
-		send.click();
-		await settle();
-
-		expect(mocks.send).toHaveBeenCalledOnce();
-		expect(mocks.send).toHaveBeenCalledWith('art-doc');
-		// The document's row shows the batch closed too: one batch, not a copy.
-		expect(sendIn(doc.target)).toBeNull();
-		expect(sendIn(shown.target)).toBeNull();
+		// The in-document lightbox has no review controls; the document bar remains the one place to send.
+		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
+		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 2 comments to Design');
 
 		doc.component.sync('art-doc', pending(1));
 		flushSync();
@@ -172,41 +171,76 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		await settle();
 		shown.target.querySelector<HTMLButtonElement>('button.submit')!.click();
 		await settle();
-		// The bar is narrow at any window size: Send is short there and read out in full; the document row spells it out.
-		const inBar = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(inBar.textContent!.trim()).toBe('Send 1');
-		expect(inBar.getAttribute('aria-label')).toBe('Send 1 comment to Design');
+		// The document’s review surface owns the pending batch; the in-document lightbox has no duplicate control.
+		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
 		expect(sendIn(doc.target)!.textContent!.trim()).toBe('Send 1 comment to Design');
 	});
 
-	it('keeps an image artifact’s own batch, sent to its owner from the bar', async () => {
+	it('keeps an image artifact’s own batch, sent to its owner from the drawer footer, never the bar', async () => {
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1) });
 		const shown = await imageTab();
-		const send = sendIn(shown.target.querySelector('.bar')!)!;
-		expect(send.textContent!.trim()).toBe('Send 1');
-		expect(send.getAttribute('aria-label')).toBe('Send 1 comment to Design');
+		expect(sendIn(shown.target.querySelector('.bar')!), 'the bar has no Send (RSR-5)').toBeNull();
+		await openDrawer(shown.target);
+		const footer = footerIn(shown.target)!;
+		expect(footer.querySelector('[role="status"]')!.textContent).toBe('1 message not sent yet · it goes to Design when you leave.');
+		const send = [...footer.querySelectorAll('button')].find((button) => button.textContent!.trim() === 'Send now')!;
 		send.click();
 		await settle();
+		expect(mocks.send).toHaveBeenCalledOnce();
 		expect(mocks.send).toHaveBeenCalledWith('art-img');
+		// One batch: the footer and the bar's status read the same batch, so nothing is left to send in either.
+		expect(footerIn(shown.target)).toBeNull();
 		expect(sendIn(shown.target)).toBeNull();
+	});
+
+	it('marks the pill while the image artifact\'s own batch has messages not sent yet, with the drawer closed', async () => {
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), { ...onImage('done', 2), resolved: true }], feedback: pending(3) });
+		const shown = await imageTab();
+		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
+		expect(pill.getAttribute('aria-expanded')).toBe('false');
+		expect(pill.getAttribute('aria-label')).toBe('1 open thread, 3 messages not sent yet');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('thread');
+		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
+	});
+
+	it('marks the in-document lightbox\'s pill from the document\'s batch, counting this image\'s open threads', async () => {
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), onImage('there', 2), { ...onImage('done', 3), resolved: true }], feedback: pending(2) });
+		const doc = documentStatus();
+		doc.component.sync('art-doc', pending(2));
+		const shown = await viewer({
+			src: SRC, alt: 'Mock', artifactId: 'art-doc',
+			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
+		});
+		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
+		expect(pill.getAttribute('aria-label')).toBe('2 open threads, 2 messages not sent yet');
+		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
+		doc.component.sync('art-doc', pending(0));
+		flushSync();
+		expect(pill.getAttribute('aria-label')).toBe('2 open threads');
+		expect(pill.querySelector('.unsent-dot')).toBeNull();
 	});
 
 	it('shows nothing to send until comments are pending', async () => {
 		const shown = await imageTab();
+		await openDrawer(shown.target);
 		expect(sendIn(shown.target)).toBeNull();
+		expect(footerIn(shown.target)).toBeNull();
 	});
 
 	it('reloading an image artifact is not leaving it: its batch stays pending', async () => {
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(1) });
 		const shown = await imageTab();
-		expect(sendIn(shown.target.querySelector('.bar')!)!.textContent!.trim()).toBe('Send 1');
+		await openDrawer(shown.target);
+		expect(footerIn(shown.target)!.textContent).toContain('1 message not sent yet');
 
 		mocks.fetchRevision.mockResolvedValue({ exists: true, path: '/ws/shot.png', revision: 'r-2', media_type: 'image/png', artifact_id: 'art-img' });
 		shown.component.reload();
 		await drawn(shown.target);
 
 		expect(mocks.leave).not.toHaveBeenCalled();
-		expect(sendIn(shown.target.querySelector('.bar')!)!.textContent!.trim()).toBe('Send 1');
+		// The reload redraws the viewer with its drawer closed; reopened, it still names the pending batch.
+		await openDrawer(shown.target);
+		expect(footerIn(shown.target)!.textContent).toContain('1 message not sent yet');
 		// Closing the tab is leaving it.
 		unmount(shown.component as unknown as Record<string, unknown>);
 		mounted = mounted.filter((component) => component !== (shown.component as unknown));
@@ -214,7 +248,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(mocks.leave).toHaveBeenCalledWith('art-img');
 	});
 
-	it('on a phone, a short Send that reads out in full beside Back, Fit, Comment and the count', async () => {
+	it('on a phone, keeps the in-document lightbox bar free of review controls', async () => {
 		(isMobile as Writable<boolean>).set(true);
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(2) });
 		const doc = documentStatus();
@@ -224,9 +258,10 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const bar = shown.target.querySelector('.bar')!;
-		const send = sendIn(bar)!;
-		expect(send.textContent!.trim()).toBe('Send 2');
-		expect(send.getAttribute('aria-label')).toBe('Send 2 comments to Design');
+		expect(sendIn(bar)).toBeNull();
+		// The document's own drawer is the one place to send, so the viewer's drawer has no footer either.
+		await openDrawer(shown.target);
+		expect(footerIn(shown.target)).toBeNull();
 		expect(bar.querySelector('[data-image-comment]')).not.toBeNull();
 		expect(bar.querySelector('[data-image-comments-pill]')).not.toBeNull();
 		expect([...bar.querySelectorAll('button')].map((button) => button.textContent!.trim())).toEqual(expect.arrayContaining(['Back', 'Fit']));

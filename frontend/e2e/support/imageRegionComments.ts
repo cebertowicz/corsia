@@ -147,6 +147,30 @@ export async function shoot(page: Page, testInfo: TestInfo, name: string, both =
 	await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 	await saveEvidenceScreenshot(page, testInfo, `${name}-dark`, { fullPage: false });
 }
+/**
+ * Waits until the layout has settled, for two frames in a row: no finite animation or transition is running anywhere in
+ * the page, and the comments sheet, where it sits uncovered over the document's column, has that column's left and right
+ * edges. A screenshot fast-forwards running CSS transitions to their end, but not what script places from them (the sheet
+ * following its column, a card placed beside its tag), so a frame taken earlier shows those where they were mid-slide.
+ */
+export async function settled(page: Page) {
+	await expect.poll(() => page.evaluate(() => new Promise<string>((resolve) => {
+		const check = () => {
+			const running = document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity);
+			if (running.length) return `${running.length} running`;
+			const sheet = document.querySelector('[data-adaptive-drawer].within:not(.covered)')?.getBoundingClientRect();
+			const column = document.querySelector('.cm-editor')?.closest('.leaf-body')?.getBoundingClientRect();
+			if (sheet && column && (Math.abs(sheet.left - column.left) >= 1 || Math.abs(sheet.right - column.right) >= 1)) {
+				return `sheet ${sheet.left}-${sheet.right}, column ${column.left}-${column.right}`;
+			}
+			return 'settled';
+		};
+		requestAnimationFrame(() => {
+			const first = check();
+			requestAnimationFrame(() => { const second = check(); resolve(first === 'settled' ? second : first); });
+		});
+	})), 'the layout has settled').toBe('settled');
+}
 /** A plain frame that never fast-forwards a running transition. */
 export async function still(page: Page, testInfo: TestInfo, name: string, clip?: Box) {
 	await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: false, animations: 'allow', ...(clip ? { clip } : {}) });
@@ -166,12 +190,16 @@ async function clipOf(page: Page, around: Locator): Promise<Box> {
  * Animation.setPlaybackRate), so the frames land inside it, and each frame reads `probe` (the changed
  * element's own property), so an unrelated animation elsewhere cannot pass for this one. Frames go to
  * `<name>-fNN.png`, the probe readings to `<name>.json`.
+ * The animation clock stands still while a frame is read and taken, and `probe` is read again after the frame:
+ * a reading that changed while the frame was taken goes to `<name>.after.json`, so a reading never silently
+ * describes a different frame from its picture.
  */
 export async function record(page: Page, testInfo: TestInfo, name: string, around: Locator, trigger: () => Promise<unknown>,
 	probe: () => Promise<string | number>, { rate = 0.1, frames = 10, every = 120 } = {}): Promise<Array<string | number>> {
 	const clip = await clipOf(page, around);
 	const cdp = await page.context().newCDPSession(page);
 	const values: Array<string | number> = [];
+	const moved: Array<{ frame: number; before: string | number; after: string | number }> = [];
 	try {
 		await cdp.send('Animation.enable');
 		await cdp.send('Animation.setPlaybackRate', { playbackRate: rate });
@@ -181,8 +209,13 @@ export async function record(page: Page, testInfo: TestInfo, name: string, aroun
 		// A trigger that detaches its own CDP session (touchDrag) puts the clock back to 1, so set it again.
 		await cdp.send('Animation.setPlaybackRate', { playbackRate: rate });
 		for (let index = 1; index <= frames; index++) {
-			values.push(await probe());
+			await cdp.send('Animation.setPlaybackRate', { playbackRate: 0 });
+			const reading = await probe();
+			values.push(reading);
 			await still(page, testInfo, `${name}-f${String(index).padStart(2, '0')}`, clip);
+			const after = await probe();
+			if (after !== reading) moved.push({ frame: index, before: reading, after });
+			await cdp.send('Animation.setPlaybackRate', { playbackRate: rate });
 			await page.waitForTimeout(every);
 		}
 	} finally {
@@ -190,6 +223,7 @@ export async function record(page: Page, testInfo: TestInfo, name: string, aroun
 		await cdp.detach();
 	}
 	fs.writeFileSync(testInfo.outputPath(`${name}.json`), JSON.stringify(values));
+	if (moved.length) fs.writeFileSync(testInfo.outputPath(`${name}.after.json`), JSON.stringify(moved));
 	return values;
 }
 
@@ -262,4 +296,27 @@ export async function postComment(page: Page, text: string) {
 /** Replaces the image with a new revision, so every pin placed before reads stale. */
 export function newRevision(seeded: Seeded) {
 	fs.writeFileSync(seeded.imagePath, syntheticPng(NATURAL.width, NATURAL.height + 2));
+}
+
+/**
+ * Sends the open comments drawer's batch with Send now from the keyboard (R2: focus unchanged). Once the footer has gone,
+ * focus rests on the drawer's heading with its ring, still inside the drawer, and Escape then closes only the drawer:
+ * `remains`, on the canvas under it, stays. `name` shoots that rest in both themes. Returns the send request.
+ */
+export async function sendFromDrawerByKeyboard(page: Page, testInfo: TestInfo, remains: Locator, name?: string) {
+	const footer = page.locator('[data-doc-comments-drawer] [data-drawer-unsent]');
+	await footer.getByRole('button', { name: 'Send now', exact: true }).focus();
+	const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().includes('/api/doc-feedback/send'));
+	await page.keyboard.press('Enter');
+	const request = await sent;
+	await expect(footer).toHaveCount(0);
+	const home = page.locator('[data-doc-comments-drawer] [data-drawer-focus-home]');
+	await expect(home).toBeFocused();
+	expect(await home.evaluate((el) => el.matches(':focus-visible')), 'the heading shows its focus ring').toBe(true);
+	if (name) await shoot(page, testInfo, name, true);
+	await expect(home).toBeFocused();
+	await page.keyboard.press('Escape');
+	await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
+	await expect(remains).toBeVisible();
+	return request;
 }

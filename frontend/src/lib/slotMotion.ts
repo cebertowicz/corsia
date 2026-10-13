@@ -48,3 +48,47 @@ export function inlineSlot(node: HTMLElement, params: { instant?: boolean } | un
 	);
 	return { duration: total };
 }
+
+// A block that arrives in or leaves a column of blocks (a row of a list): motion.md's "a row arrives or leaves", on its
+// own axis. Arriving, its height grows from nothing where it lands as it fades in; leaving, the fade overlaps the
+// close so the rows below follow rather than jump. Under reduced motion, only the --dur-tight crossfade remains and
+// layout snaps beneath it. `off` plays nothing, for changes the person did not cause (a fold wave and its ghosts own
+// those). Use it as `in:blockSlot={…} out:blockSlot={…}`, never `transition:`.
+export interface BlockSlotParams { off?: boolean }
+
+/** Collapsed to nothing: no height, spacing or border, so the block takes no room. */
+const CLOSED = {
+	height: '0px', minHeight: '0px', paddingTop: '0px', paddingBottom: '0px',
+	marginTop: '0px', marginBottom: '0px', borderTopWidth: '0px', borderBottomWidth: '0px', gridTemplateRows: '0fr', opacity: 0,
+};
+
+export function blockSlot(node: HTMLElement, params: BlockSlotParams | undefined, { direction }: { direction: 'in' | 'out' | 'both' }) {
+	if (direction === 'both') throw new Error('blockSlot runs one way: use in:blockSlot out:blockSlot, not transition:');
+	if (params?.off || typeof node.animate !== 'function') return { duration: 0 };
+	const entering = direction === 'in';
+	const fade = ms('--dur-tight');
+	const grow = ms('--dur-standard');
+	if (!fade || !grow) return { duration: 0 };
+	const snap = token('--ease-snap') || 'ease-out';
+	const entrance = token('--ease-entrance') || 'ease-out';
+	// The block's own box, measured at rest, so it grows to exactly the room it will take.
+	const open = { height: `${node.getBoundingClientRect().height}px`, gridTemplateRows: '1fr', opacity: 1, boxSizing: 'border-box' };
+	const closed = { ...CLOSED, boxSizing: 'border-box' };
+	if (get(prefersReducedMotion)) {
+		node.animate([{ opacity: entering ? 0 : 1 }, { opacity: entering ? 1 : 0 }], { duration: fade, easing: snap, fill: entering ? 'none' : 'forwards' });
+		return { duration: fade };
+	}
+	node.style.overflow = 'hidden';
+	if (entering) {
+		const animation = node.animate([closed, open], { duration: grow, easing: entrance });
+		void animation.finished.then(() => node.style.removeProperty('overflow'), () => {});
+		return { duration: grow };
+	}
+	// motion.md exit timing: calc(var(--dur-standard) * 0.7), with fade and close concurrent.
+	const exit = grow * 0.7;
+	node.animate(
+		[open, { ...closed, opacity: 0 }],
+		{ duration: exit, easing: snap, fill: 'forwards' },
+	);
+	return { duration: exit };
+}

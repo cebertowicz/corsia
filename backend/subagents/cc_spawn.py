@@ -9,6 +9,7 @@ import uuid
 import subagents.cc_trust as cc_trust
 from core.turn_core import BOOT_EPOCH
 from infra.database import get_db
+from infra.db_async import run_in_db
 from infra.thread_driver import InputAdmission, admit_input
 from infra.time import utc_now_iso
 from llm.resolution import ExecutionTarget
@@ -22,10 +23,19 @@ from subagents.cc_runtime_lifecycle import (
     handle_process_exit,
     settle_and_finalize_retired_live,
 )
-from subagents.cc_runtime_markers import post_subagent_marker
+from subagents.cc_runtime_markers import (
+    broadcast_subagent_marker,
+    persist_subagent_marker,
+)
 from subagents.cc_runtime_quiescence import cleanup_ephemeral_live
 from subagents.cc_runtime_state import Broadcast, _LIVE
-from subagents.cc_spawn_prepare import CCSpawnRequest, PreparedCCSpawn, prepare_spawn
+from subagents.cc_spawn_prepare import (
+    CCSpawnRequest,
+    PreparedCCSpawn,
+    _notify_cc_session,
+    _persist_cc_session,
+    prepare_spawn,
+)
 from subagents.cc_stream import CCStreamSession
 
 log = logging.getLogger("subagents.cc_runtime")
@@ -85,7 +95,6 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
     request = prepared.request
     live = prepared.live
     _validate_working_dir(prepared.working_dir, request.project_id)
-    from registry.service import register_cc_session
     from subagents.harness_tool_bridge import configure_cc_tool_bridge
 
     mcp_config = configure_cc_tool_bridge(
@@ -116,23 +125,33 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
         corsia_thread_id=prepared.child_id,
     )
     live.session = session
-    register_cc_session(
+    session_row = await run_in_db(
+        _persist_cc_session,
         prepared.child_id,
         prepared.child_id,
         title=prepared.name,
         cwd=prepared.working_dir,
         invocation=session.invocation(),
     )
+    _notify_cc_session(prepared.child_id, prepared.child_id, row=session_row)
     lock = _LIVE.lock(prepared.child_id)
     async with lock:
         _LIVE.publish(prepared.child_id, live, held=lock)
         await session.start()
-        admission = _admit_initial_task(prepared)
-        post_subagent_marker(
+        admission = await run_in_db(_admit_initial_task, prepared)
+        marker_id = await run_in_db(
+            persist_subagent_marker,
+            request.parent_thread_id,
+            prepared.child_id,
+            prepared.name,
+            None,
+        )
+        broadcast_subagent_marker(
             request.parent_thread_id,
             prepared.child_id,
             prepared.name,
             prepared.bcast,
+            marker_id,
             None,
         )
     await _deliver_initial_task(prepared, admission)

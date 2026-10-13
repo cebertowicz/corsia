@@ -168,4 +168,60 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			}
 		}
 	});
+
+	test('keeps two account toggles usable after each policy save', async ({ page }, testInfo) => {
+		test.setTimeout(120_000);
+		let policy = policyFor('W1');
+		let saves = 0;
+		await page.route('**/api/vendor-accounts**', async (route) => {
+			if (route.request().method() === 'GET') await route.fulfill({ json: { accounts: vendorAccounts() } });
+			else await route.continue();
+		});
+		await page.route('**/api/provider-policy**', async (route) => {
+			const request = route.request();
+			const pathname = new URL(request.url()).pathname;
+			if (request.method() === 'GET' && pathname === '/api/provider-policy') {
+				await route.fulfill({ json: policy });
+				return;
+			}
+			if (request.method() === 'PUT') {
+				const body = request.postDataJSON() as { disabled: string[] };
+				const provider = policy.providers.find((item) => pathname.endsWith(item.provider_key));
+				if (!provider) throw new Error(`Unknown provider policy path: ${pathname}`);
+				const saved = {
+					...provider,
+					disabled: body.disabled,
+					revision: provider.revision + 1,
+					units: provider.units.map((unit) => ({ ...unit, enabled: !body.disabled.includes(unit.id) })),
+				};
+				policy = { ...policy, providers: policy.providers.map((item) => item.provider_key === saved.provider_key ? saved : item) };
+				saves += 1;
+				await route.fulfill({ json: saved });
+				return;
+			}
+			await route.continue();
+		});
+
+		for (const [surface, width, height, colorScheme] of surfacesFor(testInfo.project.name)) {
+			policy = policyFor('W1');
+			saves = 0;
+			await page.setViewportSize({ width, height });
+			await page.emulateMedia({ colorScheme });
+			await loginByUrl(page, { waitForComposer: false });
+			await openActivity(page);
+			await page.getByRole('button', { name: 'Workspace settings' }).click();
+			const region = page.getByRole('region', { name: 'Workspace providers' });
+			const first = region.getByRole('button', { name: 'Personal Max', exact: true });
+			const second = region.getByRole('button', { name: 'Acme (Team)', exact: true });
+			await expect(first).toBeEnabled();
+			await expect(second).toBeEnabled();
+			await first.click();
+			await expect.poll(() => saves).toBe(1);
+			await expect(second).toBeEnabled();
+			await second.click();
+			await expect.poll(() => saves).toBe(2);
+			await expect(second).toBeEnabled();
+			await page.screenshot({ path: testInfo.outputPath(`post-second-toggle-${surface}.png`), animations: 'disabled', scale: 'css' });
+		}
+	});
 });

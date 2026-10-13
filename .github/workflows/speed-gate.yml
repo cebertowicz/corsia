@@ -76,23 +76,21 @@ jobs:
       - name: Measure every read route
         if: steps.scope.outputs.measure == 'true'
         # Three independent runs must agree exactly on steps and statements (bytes too, except the routes with a
-        # committed tolerance). A gate whose own counts move is a defect; phase 1 reports it (warning and job
-        # summary) and stays green.
+        # committed tolerance). A gate whose own counts move is a defect and fails this job.
         run: |
           PYTHONPATH=scripts .venv/bin/python -m speed_gate.cli measure \
             --backend backend --out "$RUNNER_TEMP/speed-gate.json" --repeats 3 \
-            --summary "$GITHUB_STEP_SUMMARY"
+            --summary "$GITHUB_STEP_SUMMARY" --enforce
 
-      - name: Compare with the baseline (report-only)
+      - name: Compare with the baseline (enforcing)
         if: steps.scope.outputs.measure == 'true'
-        # Phase 1 reports and never blocks: a regression prints "would fail" and the job stays green.
-        # A SQLite version that differs from the baseline's is not a verdict: while report-only it emits a
-        # warning and a "REBASELINE NEEDED" block in the job summary and stays green; with --enforce it exits 2.
+        # A regression or unrecorded improvement fails with an exact rebaseline command in the terminal and job
+        # summary. A SQLite version mismatch is not a verdict and exits 2, requiring a compatible rebaseline.
         run: |
           PYTHONPATH=scripts .venv/bin/python -m speed_gate.cli compare \
             --current "$RUNNER_TEMP/speed-gate.json" \
             --baseline quality/speed-gate-baseline.json \
-            --summary "$GITHUB_STEP_SUMMARY"
+            --summary "$GITHUB_STEP_SUMMARY" --enforce
 
       - name: Keep the measurement
         if: always() && steps.scope.outputs.measure == 'true'

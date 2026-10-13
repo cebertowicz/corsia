@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { replyField, showAllThreads } from '../support/commentDrawer';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
 import { expectContrast, GRAPHIC, TEXT } from '../support/contrast';
@@ -15,8 +16,9 @@ async function openSuggestionFlow(page: Page, request: APIRequestContext) {
 	const [loose, fine, stale] = seeded.ids;
 	await expect(seeded.editor).toContainText('The first line is loose.');
 	const openComments = async () => {
-		await page.getByRole('button', { name: '3 comments', exact: true }).click();
+		await page.getByRole('button', { name: /^3 open threads\b/ }).click();
 		await expect(seeded.drawer).toBeVisible();
+		await showAllThreads(seeded.drawer);
 	};
 	return { ...seeded, fine, loose, openComments, stale, text };
 }
@@ -64,7 +66,7 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	// A suggestion takes a reply like any comment. The drawer stayed open and scrolled down to the refused
 	// card, so the reader scrolls back up to the first card to reply.
 	await row(loose).scrollIntoViewIfNeeded();
-	await row(loose).getByPlaceholder('Reply…').fill('Why tighter?');
+	await (await replyField(row(loose))).fill('Why tighter?');
 	await row(loose).getByRole('button', { name: 'Send reply' }).click();
 	await expect(row(loose)).toContainText('Why tighter?');
 	const replyComposer = row(loose).getByPlaceholder('Reply…');

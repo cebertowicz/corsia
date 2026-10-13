@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
+from loguru import logger
 
 
 _CLOSE = object()
@@ -150,7 +151,6 @@ async def test_handler_failure_releases_the_next_frame(monkeypatch) -> None:
 
     socket = _Socket()
     second_started = asyncio.Event()
-    logged: list[tuple[str, tuple[object, ...]]] = []
 
     async def handle_message(
         _ws, _user, _user_id, data, *, admission_complete=None,
@@ -166,11 +166,6 @@ async def test_handler_failure_releases_the_next_frame(monkeypatch) -> None:
     )
     monkeypatch.setattr(ws_mod, "_cleanup_ws", lambda *_args: None)
     monkeypatch.setattr(ws_mod, "_handle_message", handle_message)
-    monkeypatch.setattr(
-        ws_mod.logger,
-        "error",
-        lambda message, *args: logged.append((message, args)),
-    )
 
     endpoint = asyncio.create_task(ws_mod.websocket_endpoint(socket))
     try:
@@ -178,11 +173,39 @@ async def test_handler_failure_releases_the_next_frame(monkeypatch) -> None:
             await socket.inbound.put(_message(input_id, f"{input_id}-thread"))
 
         await asyncio.wait_for(second_started.wait(), timeout=0.1)
-        assert logged
-        assert str(logged[0][1][0]) == "admission failed"
     finally:
         endpoint.cancel()
         await asyncio.gather(endpoint, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_track_background_task_logs_named_failure_with_traceback() -> None:
+    from ws.ingress import background_tasks, track_background_task
+
+    records = []
+
+    async def named_background_failure() -> None:
+        raise RuntimeError("background failure")
+
+    sink = logger.add(lambda message: records.append(message.record), level="ERROR")
+    task = asyncio.create_task(
+        named_background_failure(), name="named-background-task",
+    )
+    try:
+        track_background_task(task)
+        (error,) = await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
+    finally:
+        logger.remove(sink)
+
+    assert isinstance(error, RuntimeError)
+    assert task not in background_tasks
+    assert len(records) == 1
+    record = records[0]
+    assert record["level"].name == "ERROR"
+    assert "named-background-task" in record["message"]
+    assert named_background_failure.__qualname__ in record["message"]
+    assert record["exception"].value is error
 
 
 @pytest.mark.asyncio

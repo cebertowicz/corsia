@@ -26,6 +26,7 @@ vi.mock('$lib/stores/liveDocuments', async (importOriginal) => ({
 
 import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { threadWorkspaces, openArtifactTab, applyTabRevisionCheck } from '$lib/stores/artifactWorkspace';
+import { tabViewState } from '$lib/stores/tabViewState';
 import { token } from '$lib/stores/auth';
 import { ImageFileError } from '$lib/docOpenRefusal';
 
@@ -61,7 +62,7 @@ beforeEach(() => {
 		exists: true, path: null, revision: 'r-image', media_type: 'image/png', writable: false, artifact_id: 'art-1',
 	});
 	mocks.fetchReviewBar.mockReset().mockResolvedValue({
-		ask_raised: true, ask_reason: 'Is this the right diagram?', ask_raised_at: '2026-10-10T10:00:00',
+		ask_raised: true, hold_ids: ['h1'], ask_reason: 'Is this the right diagram?', ask_raised_at: '2026-10-10T10:00:00',
 		asker: { id: 'a1', name: 'Docs agent' }, other_askers: [], other_asks: [], other_request_count: 0,
 		round_feedback_count: 0, round_feedback_counts: { comments: 0, suggestions: 0, edits: 0 },
 	});
@@ -97,7 +98,10 @@ describe('artifact leaf renderer choice', () => {
 		await vi.waitFor(() => expect(host.querySelector('.image-viewer .review-bar')).toBeTruthy());
 
 		expect(mocks.fetchReviewBar).toHaveBeenCalledWith('art-1');
-		expect(host.querySelector('.image-viewer')!.firstElementChild!.classList.contains('review-bar')).toBe(true);
+		// The bar lives in its height-holding slot, which comes first: above the image.
+		const first = host.querySelector('.image-viewer')!.firstElementChild!;
+		expect(first.classList.contains('rb-slot')).toBe(true);
+		expect(first.querySelector(':scope > .review-bar')).toBeTruthy();
 		expect(host.textContent).toContain('Is this the right diagram?');
 	});
 
@@ -237,5 +241,40 @@ describe('artifact leaf renderer choice', () => {
 
 		expect(host.querySelector('.image-viewer')).toBeNull();
 		expect(mocks.fetchContent).toHaveBeenCalled();
+	});
+
+	it('restores an image tab camera after remounting in this session', async () => {
+		openArtifactTab(THREAD, { artifactId: 'art-1', path: '/ws/camera.png', title: 'camera.png' });
+		await settle();
+		const first = host.querySelector<HTMLImageElement>('.image-viewer img')!;
+		Object.defineProperties(first, {
+			naturalWidth: { configurable: true, value: 1000 },
+			naturalHeight: { configurable: true, value: 500 },
+		});
+		first.dispatchEvent(new Event('load'));
+		await settle();
+		const firstViewport = host.querySelector<HTMLElement>('.image-viewer .viewport')!;
+		[...host.querySelectorAll<HTMLButtonElement>('.image-viewer button')].find((button) => button.textContent?.trim() === '100%')!.click();
+		firstViewport.scrollLeft = 123;
+		firstViewport.scrollTop = 77;
+		firstViewport.dispatchEvent(new Event('scroll'));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		const instanceId = get(threadWorkspaces)[THREAD].tabs[0].instanceId;
+		expect(tabViewState(THREAD, instanceId)?.imagePlace).toEqual({ scrollLeft: 123, scrollTop: 77, scale: 1 });
+
+		unmount(component!);
+		component = mount(ArtifactLeaf, { target: host, props: { threadId: THREAD, mode: 'expanded' } });
+		await settle();
+		const restored = host.querySelector<HTMLImageElement>('.image-viewer img')!;
+		Object.defineProperties(restored, {
+			naturalWidth: { configurable: true, value: 1000 },
+			naturalHeight: { configurable: true, value: 500 },
+		});
+		restored.dispatchEvent(new Event('load'));
+		await settle();
+
+		expect(host.querySelector('.image-viewer .level')?.textContent).toBe('100%');
+		const restoredViewport = host.querySelector<HTMLElement>('.image-viewer .viewport')!;
+		expect([restoredViewport.scrollLeft, restoredViewport.scrollTop]).toEqual([123, 77]);
 	});
 });

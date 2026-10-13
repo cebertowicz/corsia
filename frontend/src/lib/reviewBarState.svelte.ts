@@ -1,10 +1,11 @@
 import {
 	answerReview, fetchReviewBar, ReviewRefusal,
-	type ReviewBarRead, type ReviewVerdict,
+	type FeedbackCounts, type ReviewAnswer, type ReviewBarRead, type ReviewVerdict,
 } from '$lib/api/reviewBar';
 
 export type ReviewBarPhase = 'ask' | 'noting' | 'sending' | 'answered' | 'stale';
-export interface ReviewReceipt { verdict: ReviewVerdict; sent: number; at: Date }
+export type ReviewAnswerOutcome = 'sent' | 'ignored' | 'failed';
+export interface ReviewReceipt { verdict: ReviewVerdict; sent: FeedbackCounts; at: Date }
 
 export const SEND_FAILED = "Couldn't send. Try again.";
 export const NOTE_NEEDED = 'Say what should change.';
@@ -59,23 +60,30 @@ export function createReviewBarState() {
 	function cancelNote() { if (phase === 'noting') { note = ''; failure = ''; phase = 'ask'; } }
 
 	/** Send the verdict; `from` is where a failed send returns to, with the note kept. */
-	async function answer(verdict: ReviewVerdict) {
+	async function answer(
+		verdict: ReviewVerdict,
+		onSendStarted?: () => void,
+		onSendConfirmed?: (answer: ReviewAnswer) => void,
+	): Promise<ReviewAnswerOutcome> {
 		const id = artifactId, stamp = generation;
-		if (!id || (phase !== 'ask' && phase !== 'noting')) return false;
-		if (verdict === 'changes_requested' && noteRequired() && !note.trim()) { failure = NOTE_NEEDED; return false; }
+		if (!id || (phase !== 'ask' && phase !== 'noting')) return 'ignored';
+		if (verdict === 'changes_requested' && noteRequired() && !note.trim()) { failure = NOTE_NEEDED; return 'ignored'; }
 		const from = phase;
 		sendingFrom = from;
 		phase = 'sending'; failure = '';
+		onSendStarted?.();
 		try {
 			const sent = await answerReview(id, verdict, verdict === 'changes_requested' ? note : '');
-			if (!current(id, stamp)) return false;
+			// The hold-keyed card overlay must receive the canonical server response even if this bar moved on.
+			onSendConfirmed?.(sent);
+			if (!current(id, stamp)) return 'sent';
 			const counts = sent.feedback_counts;
 			settledAsk = read?.ask_raised_at ?? null;
-			receipt = { verdict: sent.verdict, sent: counts.comments + counts.suggestions + counts.edits, at: new Date() };
+			receipt = { verdict: sent.verdict, sent: counts, at: new Date() };
 			phase = 'answered';
-			return true;
+			return 'sent';
 		} catch (error) {
-			if (!current(id, stamp)) return false;
+			if (!current(id, stamp)) return 'failed';
 			if (error instanceof ReviewRefusal && error.code === 'ask_stale') {
 				settledAsk = read?.ask_raised_at ?? null;
 				phase = 'stale';
@@ -85,7 +93,7 @@ export function createReviewBarState() {
 			} else {
 				phase = from; failure = SEND_FAILED;
 			}
-			return false;
+			return 'failed';
 		}
 	}
 	return {

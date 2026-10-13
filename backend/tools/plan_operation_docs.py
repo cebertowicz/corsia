@@ -18,7 +18,11 @@ from typing import Iterable
 _OPERATION_NOTES = {
     # One first choice for each neighboring settlement state. Active accept
     # remains runtime-compatible, but the published vocabulary never recommends it.
-    "mark_done": "active self-completion; accepts as Done without another reviewer",
+    "mark_done": (
+        "active self-completion, or a user step once really done (evidence in "
+        "plain words, they read it; never an approval); accepts as "
+        "Done without another reviewer"
+    ),
     "request_review": "active handoff; leaves work awaiting another reviewer",
     "accept": "review_requested; verified complete",
     "accept_with_follow_up": (

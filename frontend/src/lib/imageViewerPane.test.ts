@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { paneCollapsed } from '$lib/stores/paneCollapsed';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { paneCollapsed, paneSnapping } from '$lib/stores/paneCollapsed';
 import { paneOpen } from '$lib/stores/paneOpen';
 import { WIDE_ENOUGH_LEAF, widenForImageViewer } from './imageViewerPane';
 
@@ -74,5 +74,32 @@ describe('widenForImageViewer', () => {
 		paneCollapsed.set(true);
 		release();
 		expect(get(paneCollapsed)).toBe(true);
+	});
+
+	it('eases the pane unless told to snap, each way, and lifts a snap once the next frames are laid out', () => {
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+		const nextFrame = () => { for (const callback of frames.splice(0)) callback(0); };
+		try {
+			const eased = widenForImageViewer(420);
+			expect(get(paneSnapping)).toBe(false);
+			eased({ instant: true });
+			expect([get(paneCollapsed), get(paneSnapping)]).toEqual([false, true]);
+			nextFrame();
+			expect(get(paneSnapping)).toBe(true);
+			nextFrame();
+			expect(get(paneSnapping)).toBe(false);
+
+			const snapped = widenForImageViewer(420, { instant: true });
+			expect([get(paneCollapsed), get(paneSnapping)]).toEqual([true, true]);
+			// Back right after a snapped return still eases, and the pending lift leaves it so.
+			snapped();
+			expect([get(paneCollapsed), get(paneSnapping)]).toEqual([false, false]);
+			nextFrame();
+			nextFrame();
+			expect(get(paneSnapping)).toBe(false);
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

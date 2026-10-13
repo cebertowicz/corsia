@@ -109,7 +109,10 @@
 		width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8;
 		stroke-linecap: round; stroke-linejoin: round;
 	}
-	.spawn-chip:hover, .child-open:hover { color: var(--text-primary); background: var(--bg-hover); }
+	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
+	@media (hover: hover) {
+		.spawn-chip:hover, .child-open:hover { color: var(--text-primary); background: var(--bg-hover); }
+	}
 	.spawn-chip:focus-visible, .child-open:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 	@keyframes child-pulse { 50% { opacity: 0.38; transform: scale(0.82); } }
 	@media (prefers-reduced-motion: reduce) {

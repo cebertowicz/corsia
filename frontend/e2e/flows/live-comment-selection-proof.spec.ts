@@ -215,6 +215,8 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			await expect(submitButton(reader)).toBeEnabled();
 			expect(creates).toEqual([]);
 			await reader.locator('.composer').getByRole('button', { name: 'Cancel', exact: true }).click();
+			// On a narrow canvas the cancelled composer remains visible for its drawer outro.
+			await expect(reader.getByPlaceholder('Comment…')).toHaveCount(0);
 			await beginComment(reader, quote);
 			await expect(reader.getByPlaceholder('Comment…')).toHaveValue('');
 			await reader.getByPlaceholder('Comment…').fill(body);

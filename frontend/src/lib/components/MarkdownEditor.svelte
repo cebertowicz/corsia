@@ -10,6 +10,7 @@
 	import { docTheme, docHighlight } from '$lib/cm/theme';
 	import { markdownLivePreview } from '$lib/cm/markdown-live';
 	import { imageContext, imageOpener, type OpenImageRequest } from '$lib/cm/markdown-image';
+	import { linkOpener } from '$lib/cm/markdown-link';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
@@ -22,6 +23,7 @@
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
+	import { captureDocumentPlace, type TextDocumentPlace } from '$lib/documentImagePlace';
 
 	let {
 		value = $bindable(''),
@@ -31,6 +33,7 @@
 		readOnly = false,
 		imageBase = null,
 		onOpenImage,
+		onOpenLink,
 		onSave,
 		onSelect,
 		onAnchorFocus,
@@ -40,7 +43,9 @@
 		highlights = [],
 		presence = [],
 		pendingComment = null,
-		scrollTo = null
+		scrollTo = null,
+		tabInstanceId = null,
+		onDocumentPlace
 	}: {
 		value?: string;
 		liveText?: Y.Text | null;
@@ -52,6 +57,8 @@
 		imageBase?: { path: string; projectId: string | null } | null;
 		/** Opens a drawn image larger in the canvas; without it an image is only selected. */
 		onOpenImage?: (request: OpenImageRequest) => void;
+		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
+		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
 		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
@@ -62,6 +69,9 @@
 		presence?: PresenceRange[];
 		pendingComment?: CommentSelection | null;
 		scrollTo?: { from: number; to: number; focus?: boolean; origin: ScrollOrigin } | null;
+		/** The mounted tab identity keeps a delayed scroll sample from landing on the next tab. */
+		tabInstanceId?: string | null;
+		onDocumentPlace?: (instanceId: string, place: TextDocumentPlace) => void;
 	} = $props();
 
 	// Read at each remote update, so a dropped connection stops typing without a reconfigure.
@@ -184,6 +194,7 @@
 				markdownLivePreview,
 				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '' }),
 				...(onOpenImage ? [imageOpener.of((request) => onOpenImage?.(request))] : []),
+				...(onOpenLink ? [linkOpener.of((href) => onOpenLink?.(href))] : []),
 				markdownTasks,
 				commentMarks,
 				pendingCommentMark,
@@ -224,6 +235,27 @@
 	$effect(() => {
 		const source = previews;
 		if (view && source) return attachPreviewFeed(view, source);
+	});
+
+	// A scroll can fire while a tab switch replaces this editor's content. The scheduled sample retains the source
+	// tab key and is discarded if that key changed, so an incoming tab's 0 never overwrites the place it left.
+	$effect(() => {
+		const current = view;
+		const instanceId = tabInstanceId;
+		if (!current || !instanceId) return;
+		let frame = 0;
+		const capture = () => {
+			frame = 0;
+			if (tabInstanceId !== instanceId) return;
+			const place = captureDocumentPlace(current.dom);
+			if (place) onDocumentPlace?.(instanceId, place);
+		};
+		const onScroll = () => { if (!frame) frame = requestAnimationFrame(capture); };
+		current.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
+		return () => {
+			current.scrollDOM.removeEventListener('scroll', onScroll);
+			if (frame) cancelAnimationFrame(frame);
+		};
 	});
 
 	$effect(() => {

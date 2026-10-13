@@ -4,7 +4,7 @@
 	import type { UpdateCard } from '$lib/api/threadUpdates';
 	import { focusPlanNode } from '$lib/planNodeFocus';
 	import { emitProductEvent } from '$lib/product_events';
-	import MessageArtifactCards from './MessageArtifactCards.svelte';
+	import AttachmentRow from './AttachmentRow.svelte';
 	import OutcomeTime from './OutcomeTime.svelte';
 
 	const OUTCOMES: Record<UpdateCard['kind'], string> = {
@@ -31,21 +31,25 @@
 	}
 </script>
 
-<div class="update-card {card.kind}" class:with-ask={ask} data-update-id={card.id}>
-	{#if opens}
-		<button type="button" class="title" onclick={openPlanNode}>{title}</button>
-	{:else}
-		<span class="title">{title}</span>
-	{/if}
-	<span class="sep" aria-hidden="true">·</span>
-	<span class="outcome">{outcome}</span>
-	<OutcomeTime value={card.created_at} />
-	{#if earlier > 0}
-		<span class="earlier">{earlier} earlier</span>
-	{/if}
-</div>
 {#if ask}
-	<div class="update-ask"><MessageArtifactCards cards={[ask]} threadId={card.thread_id} /></div>
+	<!-- One fact, one row: an ask's blocked update and its artifact are the same hold (C4a), so the row is the artifact. -->
+	<div class="update-card {card.kind} merged" data-update-id={card.id}>
+		<div class="update-ask"><AttachmentRow card={ask} threadId={card.thread_id} task={title} time={card.created_at} /></div>
+	</div>
+{:else}
+	<div class="update-card {card.kind}" data-update-id={card.id}>
+		{#if opens}
+			<button type="button" class="title" onclick={openPlanNode}>{title}</button>
+		{:else}
+			<span class="title">{title}</span>
+		{/if}
+		<span class="sep" aria-hidden="true">·</span>
+		<span class="outcome">{outcome}</span>
+		<OutcomeTime value={card.created_at} />
+		{#if earlier > 0}
+			<span class="earlier">{earlier} earlier</span>
+		{/if}
+	</div>
 {/if}
 
 <style>
@@ -62,8 +66,9 @@
 		font-size: var(--text-footnote);
 		color: var(--text-secondary);
 	}
-	.update-card.with-ask { margin-bottom: 0; }
-	.update-ask { max-width: 760px; margin: 0 auto 12px; }
+	/* The merged row is flat: no box of its own, the artifact row inside it carries the look. */
+	.update-card.merged { display: block; padding: 0; border: 0; background: transparent; }
+	.update-card.merged .update-ask { max-width: 480px; }
 	.title {
 		min-width: 0;
 		overflow: hidden;

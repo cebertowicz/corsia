@@ -145,7 +145,7 @@ async function openDocument(page: Page, info: TestInfo, { comments = true, orpha
 	await expect(page.locator('.cm-content')).toContainText(tall ? 'Last qmlast line.' : 'Margin heading qmhead');
 	const expectedCount = (comments ? ANCHORS.length : 0) + (orphan ? 1 : 0);
 	if (expectedCount) {
-		await expect(page.getByRole('button', { name: `${expectedCount} comment${expectedCount === 1 ? '' : 's'}`, exact: true })).toBeEnabled();
+		await expect(page.getByRole('button', { name: new RegExp(`^${expectedCount} open thread${expectedCount === 1 ? '' : 's'}\\b`) })).toBeEnabled();
 	}
 	await settle(page);
 	return { threadId, title, ids, byId, artifactId };
@@ -194,7 +194,9 @@ async function reveal(page: Page, index: number) {
 		const now = marker.getBoundingClientRect();
 		const point = (x: number, y: number) => {
 			const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>('.cm-comment-marker');
-			return { x, y, hit: hit?.dataset.commentIds ?? null };
+			// A marker under a bottom sheet is covered by design: only the sheet's own surface may cover one.
+			const covered = !hit && !!document.elementFromPoint(x, y)?.closest('.canvas-comment-drawer.sheet');
+			return { x, y, hit: hit?.dataset.commentIds ?? null, covered };
 		};
 		const cx = now.left + now.width / 2, cy = now.top + now.height / 2;
 		return {
@@ -253,8 +255,11 @@ const historyLayer = (page: Page) => page.evaluate(() => (history.state as { bac
 
 async function closeSurface(page: Page, layerBefore?: number | null) {
 	await page.keyboard.press('Escape');
-	if (await page.locator('[data-doc-comments-drawer]').count()) {
-		await page.getByRole('button', { name: 'Done', exact: true }).click();
+	// The drawer leaves through its outro: it is gone shortly after Escape closes it, and only a drawer still showing then needs its close button.
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	await drawer.waitFor({ state: 'detached', timeout: 1500 }).catch(() => undefined);
+	if (await drawer.count()) {
+		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 	}
 	await expect.poll(() => surfaceOpen(page).then((s) => s.cards.length + (s.drawer ? 1 : 0))).toBe(0);
 	// A phone's sheet pushes a history entry and pops it asynchronously; the next open waits for that pop, as a user's next tap would.
@@ -499,17 +504,23 @@ test.describe('@flow:doc-margin-marker', () => {
 
 		// The drawer narrows the canvas: markers re-seat and stay clustered the same way.
 		const before = (await markers(page)).map((marker) => keysOf(opened, marker));
-		await page.getByRole('button', { name: `${ANCHORS.length} comments`, exact: true }).click();
+		await page.getByRole('button', { name: new RegExp(`^${ANCHORS.length} open threads\\b`) }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
 		await settle(page);
 		const withDrawer = await markers(page);
 		expect(withDrawer.map((marker) => keysOf(opened, marker)), 'the drawer does not change the clusters').toEqual(before);
+		// A canvas too narrow for a side column gets the drawer as a bottom sheet over its lower part (this viewport is as tall as the
+		// whole document, so it cannot scroll a covered marker clear): a marker is reachable or covered by that sheet, nothing else.
+		let reachable = 0;
 		for (let index = 0; index < withDrawer.length; index += 1) {
 			const seen = await reveal(page, index);
-			expect.soft(seen.points[0].hit, `drawer open: marker ${index} is reachable`).toBe(seen.ids);
+			const centre = seen.points[0];
+			if (centre.hit === seen.ids) reachable += 1;
+			else expect.soft(centre.covered, `drawer open: marker ${index} is reachable or covered by the sheet only`).toBe(true);
 			expect.soft(seen.rect.left + seen.rect.width, `drawer open: marker ${index} stays in the rail`).toBeLessThanOrEqual(seen.content.left + rail + 0.5);
 		}
-		await page.getByRole('button', { name: 'Done', exact: true }).click();
+		expect(reachable, 'with the drawer open the markers above it are still reachable').toBeGreaterThan(0);
+		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 
 		// Scroll and zoom each get a canvas of their own at that size from the start, as a reload would give, rather than

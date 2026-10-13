@@ -123,11 +123,6 @@ export function createFoldHistory(input: FoldHistoryInput) {
 		loadMore,
 		loadUntil,
 		openPath,
-		/** Try a failed page again. */
-		retry(level: string): Promise<void> {
-			if (at(level).status === 'error') put(level, { ...at(level), status: 'idle' });
-			return loadMore(level);
-		},
 		rootParent: input.rootParent,
 	};
 }

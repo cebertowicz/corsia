@@ -24,14 +24,21 @@ def setup(tmp_path, monkeypatch):
     return _tool_db(path, monkeypatch)
 
 
-@pytest.mark.parametrize("checkpoint_id", [None, "cp-1"])
-def test_adding_a_next_action_is_refused_with_a_pointer_to_the_plan(setup, checkpoint_id) -> None:
-    result = setup._run(
-        "thread-1", "add", {"field": "next_actions", "body": _lesson("run the suite")}, checkpoint_id,
-    )
+def test_adding_a_next_action_in_a_turn_is_refused_with_a_pointer_to_the_plan(setup) -> None:
+    result = setup._run("thread-1", "add", {"field": "next_actions", "body": _lesson("run the suite")})
 
     assert result.startswith("Error: next_actions takes no new entries")
     assert "plan_update" in result
+
+
+def test_adding_a_next_action_in_a_checkpoint_points_at_the_narrative_not_the_plan(setup) -> None:
+    result = setup._run(
+        "thread-1", "add", {"field": "next_actions", "body": _lesson("run the suite")}, "cp-1",
+    )
+
+    assert result.startswith("Error: next_actions takes no new entries")
+    assert "narrative" in result
+    assert "plan_update" not in result
 
 
 def test_other_fields_still_take_an_add(setup) -> None:

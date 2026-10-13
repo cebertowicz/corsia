@@ -11,13 +11,12 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
-	import { createDocViewerImages } from '$lib/docViewerImages';
-	import type { DocumentImageRequest } from '$lib/stores/documentImageViewer';
+	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
 	import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
 	import type { DocumentFreshness } from '$lib/docFreshness';
-	import { createCommentRetryToast, createThreadActions, markFreshnessVerified, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer } from '$lib/docViewerOperations';
+	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
@@ -55,6 +54,7 @@
 		stale = false,
 		onReload,
 		onOpenImage,
+		onDocumentPlace,
 		covered = false,
 	}: {
 		target: DocViewerTarget | null;
@@ -67,6 +67,7 @@
 		onReload?: () => void;
 		/** Opens an image of the document larger in the canvas, with its comments. */
 		onOpenImage?: (request: DocumentImageRequest) => void;
+		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 		/** The canvas shows an image viewer over this document; it keeps its state but answers no keys. */
 		covered?: boolean;
 	} = $props();
@@ -116,7 +117,7 @@
 	$effect(() => syncActiveDocumentEditor({ target, draft: currentDraft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
-	const { orphanedCount, placementReloading, placementReloadError } = $derived(commentSurfaceStatus(listedComments));
+	const headerCommentStatus = $derived(commentSurfaceStatus(listedComments));
 	let scrollTarget = $state<CanvasScrollTarget | null>(null);
 	$effect(() => {
 		const fc = focusedComment;
@@ -146,9 +147,11 @@
 		onOpenImage: () => onOpenImage, root: () => docRoot, comments: () => listedComments, artifactId: () => loadedArtifactId,
 		target: () => target, readOnly: () => readonly, text: () => editText, session: () => liveSession, accent: () => accent,
 		feedback: () => feedbackStatus?.feedback(), showInText: focusInText });
-	function focusInText(id: string) { setCommentScrollTarget(id, commentUI.state?.kind === 'list', 'navigation'); focusedDocComment.set(id); }
+	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
+	export function imageComments() { return images.comments(); }
+	function focusInText(id: string, placement?: 'top') { setCommentScrollTarget(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
-	function focusFromCard(id: string) { images.openOr([id], { id }, () => focusInText(id)); }
+	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
 
 	const draftController = createViewerCommentDraft({
 		scope: () => targetKey, draft: () => $commentDraft, session: () => liveSession,
@@ -286,10 +289,6 @@
 
 	onDestroy(() => teardownDocumentViewer(target, flushNow, releaseDocEditor));
 
-	async function markCurrentDocumentVerified(): Promise<void> {
-		freshness = await markFreshnessVerified(loadedArtifactId, freshness);
-	}
-
 	function onKey(event: KeyboardEvent): void {
 		handleDocumentKey(event, {
 			covered, commentUI, draftController,
@@ -311,28 +310,25 @@
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !openRefusal}
-		commentCount={listedComments.length}
-		{orphanedCount}
+		{...headerCommentStatus}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
 		{onReload}
 		onReloadPlacements={loadedArtifactId ? () => reloadPlacements(loadedArtifactId!) : undefined}
-		{placementReloading}
-		{placementReloadError}
 		{liveConnection}
 		onOpenComments={commentUI.openList}
 		{freshness}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
-		onMarkVerified={markCurrentDocumentVerified}
+		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, freshness, (next) => freshness = next)}
 		liveSession={liveSession ?? null}
 		{openRefusal} {liveUnavailable}
 		tabText={editText}
 		onReopen={() => reloadNonce += 1}
 		onRead={() => reloadNonce += 1}
 	>
-		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
+		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
 		{#snippet presence()}
 			{#if target && loadedArtifactId}
 				<DocPresenceStatus {target} artifactId={loadedArtifactId} {docState} root={docRoot}
@@ -361,6 +357,8 @@
 		readOnly={readonly || suggestionBusyId !== null}
 		imageBase={target}
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
+		tabInstanceId={target?.instanceId ?? null}
+		{onDocumentPlace}
 		{saveError}
 		{saveStatus}
 		pendingSel={draftController.pending}
@@ -382,6 +380,7 @@
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
+		feedback={feedbackStatus?.feedback()}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
@@ -394,6 +393,7 @@
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
 		images={images.groups}
+		{covered}
 	/>
 </div>
 

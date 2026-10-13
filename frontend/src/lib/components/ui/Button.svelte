@@ -11,6 +11,9 @@
 		title?: string;
 		/** Extra help a screen reader reads after the name (`aria-description`). */
 		description?: string;
+		/** Looks and reads as unavailable but stays focusable, so a screen reader can reach the reason (`aria-describedby`). */
+		ariaDisabled?: boolean;
+		describedby?: string;
 		/** The rendered button, for a caller that moves focus. */
 		el?: HTMLButtonElement;
 		onclick?: (e: MouseEvent) => void;
@@ -20,7 +23,7 @@
 	let {
 		variant = 'secondary', size = 'md', type = 'button',
 		disabled = false, loading = false,
-		ariaLabel, title, description, el = $bindable(),
+		ariaLabel, title, description, ariaDisabled = false, describedby, el = $bindable(),
 		onclick, children,
 	}: Props = $props();
 
@@ -34,6 +37,8 @@
 	disabled={isDisabled}
 	aria-label={ariaLabel}
 	{...(description ? { 'aria-description': description } : {})}
+	aria-disabled={ariaDisabled ? 'true' : undefined}
+	aria-describedby={describedby}
 	bind:this={el}
 	{title}
 	{onclick}
@@ -58,6 +63,7 @@
 	}
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 	.btn.loading { cursor: wait; }
+	.btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
 	@media (max-width: 768px) {
 		.btn::after { content: ''; position: absolute; border-radius: inherit; }
 		.btn.md::after { inset: -6px; }

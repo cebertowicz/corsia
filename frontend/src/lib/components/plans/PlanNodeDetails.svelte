@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { OperatorNode } from '$lib/api/plans';
 	import { localDayClock } from '$lib/time';
+	import { indentVar } from './planIndent';
 	import { localizeInstants, nodeDisplayLabel } from './planDisplay';
 	import {
 		artifactCount, dollarLine, initiativeLine, isFinished, nextMove, ownDiffers, tokenLine,
@@ -10,11 +11,12 @@
 	let {
 		node,
 		id,
-		depth = node.depth,
+		indent = indentVar(node.depth, 0, 0),
 	}: {
 		node: OperatorNode;
 		id: string;
-		depth?: number;
+		/** The row's indent as a CSS length, so details sit directly under it (`planIndent`). */
+		indent?: string;
 	} = $props();
 
 	// One fact per line (shared/planning/plans-node-details-design-2026-09-24.md,
@@ -54,7 +56,7 @@
 	<span class="word {tone}">{label}</span>{#if reason}<span class="reason">{' · '}{localizeInstants(reason, $localDayClock)}</span>{/if}
 {/snippet}
 
-<section {id} class="node-details" style={`--depth:${depth}`} aria-label={node.title + ' details'}>
+<section {id} class="node-details" style={`--indent:${indent}`} aria-label={node.title + ' details'}>
 	<p class="status"><span class="prefix">Status:</span> {@render statusLine()}</p>
 	{#if causes.length}
 		<div class="causes">
@@ -102,7 +104,7 @@
 <style>
 	.node-details {
 		display: flex; flex-direction: column; gap: var(--space-1);
-		margin: 0 var(--space-2) var(--space-2) calc(34px + var(--depth) * 22px);
+		margin: 0 var(--space-2) var(--space-2) calc(34px + var(--indent));
 		padding: var(--space-1) var(--space-2); border-left: 2px solid var(--border);
 		color: var(--text-secondary); font-size: var(--text-caption);
 	}
@@ -119,6 +121,7 @@
 	.word.human-review { color: var(--amber); }
 	/* Lifecycle actions stay in the row menu; details are read-only facts. */
 	@media (max-width: 620px) {
-		.node-details { margin-left: calc(18px + var(--depth) * 12px); }
+		/* Match the title's icon and gap on touch as well as desktop. */
+		.node-details { margin-left: calc(34px + var(--indent)); }
 	}
 </style>

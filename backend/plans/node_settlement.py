@@ -113,9 +113,21 @@ def lane_refusing(
     return lane
 
 
+#: What an agent's ``mark_done`` on a decision node also learns: the user's
+#: answer settles it, and approving something the agent produced is an artifact
+#: ask, not a decision (System 40-HUMAN-AGENT-INTERFACE). The open decision
+#: holds its task, so the ask can follow only once the decision is invalidated.
+_APPROVAL_NOTE = (
+    "; the user's answer settles it. To have the user review or approve "
+    "something you produced instead, invalidate this decision, then block "
+    "the task on them with ask_artifact_id"
+)
+
+
 def refusal_message(lane: str, operation: str) -> str:
     """Return the refusal text, for a caller that reports rather than raises."""
-    return _REFUSALS[lane].format(operation=operation)
+    note = _APPROVAL_NOTE if operation == "mark_done" else ""
+    return _REFUSALS[lane].format(operation=operation) + note
 
 
 def refuse(lane: str, operation: str) -> NoReturn:

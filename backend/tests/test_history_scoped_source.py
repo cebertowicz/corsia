@@ -462,3 +462,62 @@ def test_scan_before_scope_without_a_prior_stub_is_empty():
     scoped = scoped_source(history.db, THREAD, boundary)
 
     assert scan_before_scope(history.db, THREAD, scoped) == ()
+
+
+def _tail_rows(covered_turns: int) -> tuple[int, int]:
+    """Rows a tail render after ``covered_turns`` Turns hands to Python, counted twice."""
+    from history.projection import render_checkpoint_tail
+    from infra.context_preview_timing import ContextPreviewTiming
+
+    history = _History()
+    _tool_turns(history, covered_turns)
+    boundary = _legal_boundaries(history.db)[-1]
+    _tool_turns(history, 2)
+    counted = _RowsToPython(history.db)
+    timing = ContextPreviewTiming(thread_id=THREAD)
+    timing.measure(
+        "tail_render", render_checkpoint_tail, THREAD, db=counted, start_exclusive=boundary,
+    )
+    return counted.rows, timing.stages["tail_render"]["rows_read"]
+
+
+def test_tail_render_rows_do_not_grow_with_covered_turns():
+    short, long = _tail_rows(3), _tail_rows(60)
+
+    assert short == long
+    assert short[1] == short[0]
+
+
+def test_turn_owners_resolves_more_turns_than_one_query_binds():
+    from history.projection import render_portable_history
+    from history.source import _TURN_ID_CHUNK
+
+    history = _History()
+    _tool_turns(history, _TURN_ID_CHUNK * 2 + 1)
+
+    rendered = render_portable_history(THREAD, db=history.db)
+    assert len(rendered.turns) == _TURN_ID_CHUNK * 2 + 1
+
+
+@pytest.mark.parametrize(
+    ("damage", "message"),
+    (
+        ("DELETE FROM active_turns WHERE id = 't2'", "message names missing Turn 't2'"),
+        ("UPDATE active_turns SET thread_id = 'other' WHERE id = 't2'",
+         "message names missing Turn 't2'"),
+        ("UPDATE active_turns SET status = 'paused' WHERE id = 't2'",
+         "Turn 't2' has unsupported status 'paused'"),
+    ),
+)
+def test_turn_owner_errors_are_unchanged_from_seq0_and_after_a_boundary(damage, message):
+    from history.projection import render_portable_history
+    from history.types import PortableHistoryError
+
+    history = _History()
+    _tool_turns(history, 3)
+    boundary = HistoryBoundary(THREAD, EPOCH, 5, "m5")
+    history.db.execute(damage)
+
+    for start in (None, boundary):
+        with pytest.raises(PortableHistoryError, match=re.escape(message)):
+            render_portable_history(THREAD, db=history.db, start_exclusive=start)

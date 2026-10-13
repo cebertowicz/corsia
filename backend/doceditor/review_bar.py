@@ -131,6 +131,7 @@ def round_state(db, artifact_id: str) -> dict:
             other_asks.append({"name": others[-1], "reason": ask["reason"]})
     return {
         "ask_raised": newest is not None,
+        "hold_ids": [str(ask["hold_id"]) for ask in asks],
         "ask_reason": newest["reason"] if newest else None,
         "ask_raised_at": newest["raised_at"] if newest else None,
         "asker": (

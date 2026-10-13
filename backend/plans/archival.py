@@ -223,7 +223,9 @@ def _require_no_children(connection, node_id: str) -> None:
         raise service.PlanError(_naming(_CHILDREN_REFUSED, children))
 
 
-def _require_no_open_children(connection, node_id: str) -> None:
+def _require_no_open_children(
+    connection, node_id: str, refusal: str = _OPEN_CHILDREN_REFUSED,
+) -> None:
     """Refuse to close a node over a descendant that is still open work.
 
     The count stored on the node says whether anything beneath it is open, so a
@@ -239,7 +241,7 @@ def _require_no_open_children(connection, node_id: str) -> None:
     else:
         children = _walk_open_children(connection, node_id)
     if children:
-        raise service.PlanError(_naming(_OPEN_CHILDREN_REFUSED, children))
+        raise service.PlanError(_naming(refusal, children))
 
 
 def _walk_open_children(connection, node_id: str) -> list[str]:

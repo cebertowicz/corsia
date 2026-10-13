@@ -315,22 +315,25 @@ def _open_rows(db, closed, plan, executor: str, holder) -> Listing:
 
     The count and the rows come from one ordered list that already excludes the
     closed task and the slot holder, so ``k of N`` describes the list it labels.
-    An executor with nothing in its slot and nothing ready gets the idle
-    listing instead (``plans.close_next_idle``).
+    Ready tasks lead it, so one ranked below waits is still named. An executor
+    with nothing in its slot and nothing ready gets the idle listing instead
+    (``plans.close_next_idle``).
     """
     everything = node_order.open_tasks(db, plan, executor)
+    projections = admission.project_many([(row, plan) for row in everything], db=db)
     if holder is None:
         now = datetime.fromisoformat(service._now())
-        idle = close_next_idle.idle_listing(db, plan, everything, now)
+        idle = close_next_idle.idle_listing(plan, everything, projections, now)
         if idle is not None:
             return _idle_rows(idle)
     # A wake composes this block with no closed task to leave out.
     excluded = set() if closed is None else {str(closed["id"])}
     if holder is not None:
         excluded.add(str(holder["node_id"]))
-    tasks = [row for row in everything if str(row["id"]) not in excluded]
+    tasks = close_next_idle.ready_first(
+        [row for row in everything if str(row["id"]) not in excluded], projections,
+    )
     shown = tasks[:NEXT_OPEN_TASK_LIMIT]
-    projections = admission.project_many([(row, plan) for row in shown], db=db)
     rows = [
         _task_row(
             row["id"], row["revision"], row["state"], row["title"],

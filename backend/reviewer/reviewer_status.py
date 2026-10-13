@@ -1,7 +1,12 @@
 """Publish GHA commit status checks for the LLM reviewer.
 
-Uses ``gh api`` to set commit statuses on the PR's head SHA. The status
-context is ``qa/llm-reviewer``.
+Uses ``gh api`` to set commit statuses on the PR's head SHA. The verdict
+context is ``qa/llm-reviewer``. A second context, ``qa/llm-reviewer-present``,
+posts ``success`` only where the gate marks that SHA reviewed after a genuine
+verdict is published and its owner wake did not fail, so a required check can
+demand that a review ran without making a block unwaivable. An override skip
+posts ``failure`` there with the reason, since no review ran. The context
+carries no outcome: the verdict context alone says pass or block.
 
 States:
 - ``pending``: Review in progress (or retrying after rate limit).
@@ -45,7 +50,10 @@ from reviewer.gh_helpers import (
     STATUS_WRITE_STAMP,
     get_commit_status_for_context,
 )
-from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT
+from reviewer.reviewer_categories import (
+    STATUS_CHECK_CONTEXT,
+    STATUS_PRESENCE_CONTEXT,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +97,7 @@ def set_status(
     state: str,
     description: str,
     target_url: str | None = None,
+    context: str = STATUS_CHECK_CONTEXT,
 ) -> bool:
     """Set a commit status check via the GitHub API.
 
@@ -98,6 +107,7 @@ def set_status(
         state: One of ``pending``, ``success``, ``failure``, ``error``.
         description: Short description (max 140 chars per GitHub API).
         target_url: Optional URL for the "Details" link on the status.
+        context: Commit-status context; defaults to the reviewer verdict context.
 
     Returns:
         True if the status was set successfully.
@@ -113,7 +123,7 @@ def set_status(
     body: dict[str, Any] = {
         "state": state,
         "description": description,
-        "context": STATUS_CHECK_CONTEXT,
+        "context": context,
     }
     if target_url:
         body["target_url"] = target_url
@@ -229,6 +239,32 @@ def set_success(repo: str, sha: str, description: str) -> bool:
     140-char form GitHub stores.
     """
     return set_status(repo, sha, "success", description)
+
+
+def set_presence(repo: str, sha: str) -> bool:
+    """Mark that a genuine reviewer verdict is published at this SHA.
+
+    Called only after the owner wake did not fail: delivered, or no owner
+    thread is registered for the PR.
+
+    A failed marker posts ``error`` on the presence context, best effort, so
+    the miss is visible without replacing the verdict already published.
+    """
+    if set_status(
+        repo, sha, "success", "reviewer verdict published at this head",
+        context=STATUS_PRESENCE_CONTEXT,
+    ):
+        return True
+    set_status(
+        repo, sha, "error", "verdict published; presence marker post failed",
+        context=STATUS_PRESENCE_CONTEXT,
+    )
+    return False
+
+
+def set_presence_absent(repo: str, sha: str, reason: str) -> bool:
+    """Show on the presence context that no review ran at this SHA, and why."""
+    return set_status(repo, sha, "failure", reason, context=STATUS_PRESENCE_CONTEXT)
 
 
 def set_failure(repo: str, sha: str, description: str, *, verdict: bool = False) -> bool:

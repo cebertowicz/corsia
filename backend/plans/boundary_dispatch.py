@@ -11,6 +11,7 @@ import plans.boundary_edges as boundary_edges
 import plans.boundary_fields as fields
 import plans.lifecycle as lifecycle
 import plans.user_settle as user_settle
+import plans.user_step_settle as user_step_settle
 import plans.mutations as mutations
 import plans.pause_authority as pause_authority
 import plans.rejection as rejection
@@ -184,6 +185,8 @@ def _mark_done(params: dict[str, Any], actor, common: dict, db) -> dict:
     node_id = params["node_id"]
     node = service._node_row(db, node_id)
     state = node["state"]
+    if node["assignee"] == "user":
+        return user_step_settle.mark_done(params, actor, common, db)
     if state == "pending":
         holder = admission.selection_conflict(db, node)
         if holder is not None:
