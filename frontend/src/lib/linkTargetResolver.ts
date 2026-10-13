@@ -6,6 +6,7 @@ import { openSubagentRequest } from '$lib/stores/subagents';
 import { activeThreadId } from '$lib/stores/threads';
 import { emitProductEvent } from '$lib/product_events';
 import { toasts } from '$lib/stores/toast';
+import { documentLinkTarget } from '$lib/cm/markdown-link';
 import { uiScope } from '$lib/stores/uiScope';
 import { SETTINGS_SECTIONS, requestSettingsSection, type SettingsSection } from '$lib/stores/settingsNavigation';
 
@@ -210,6 +211,11 @@ function defaultDeps(): LinkResolverDeps {
 		// The page serves this request through its one thread selector (source `link`).
 		openThread: (threadId) => openSubagentRequest.set(threadId),
 	};
+}
+
+/** Opens a link written in a document: a relative target resolves from that document's folder, not the workspace root. */
+export function openDocumentLink(href: string, docPath: string | null) {
+	return resolveLinkTarget(documentLinkTarget(docPath, href), defaultDeps());
 }
 
 function preservesNativeLinkBehavior(event: MouseEvent, anchor: HTMLAnchorElement, href: string): boolean {

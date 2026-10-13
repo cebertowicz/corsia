@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { expectContrast, TEXT } from '../support/contrast';
+import { openUnsentFooter, visibleHeaderSends } from '../support/docFeedbackFooter';
 import { demoteAgent } from '../support/sharedLiveDocument';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -52,7 +53,7 @@ async function openDocument(page: Page, doc: DocumentFixture, splitWidth = 500) 
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.locator('.thread-item').filter({ hasText: doc.title }).click();
 	await expect(page.locator('.cm-content')).toContainText('Paragraph 1:');
-	await expect(page.locator('.document-status-row').getByRole('button', { name: 'Request review', exact: true })).toBeVisible();
+	await expect(page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true })).toBeVisible();
 }
 async function requestReview(request: APIRequestContext, doc: DocumentFixture, reviewer: string) {
 	const response = await request.post('/api/doc-reviews', { headers: auth(), data: {
@@ -115,6 +116,7 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 		const editor = root.querySelector('.doc-main')!.getBoundingClientRect();
 		const canvas = root.getBoundingClientRect();
 		const row = root.querySelector('.document-status-row')!;
+		const tools = root.querySelector('.document-tools')!;
 		const retry = row.querySelector<HTMLButtonElement>('.undelivered > .btn');
 		const retryInset = retry ? getComputedStyle(retry, '::after').inset : null;
 		const geometry = (element: Element) => {
@@ -135,7 +137,7 @@ async function captureLayout(page: Page, info: TestInfo, label: string) {
 			root: geometry(root), header: geometry(root.querySelector('.document-header')!),
 			row: geometry(row), retryInset, descendants: [...row.querySelectorAll('*')].map(geometry),
 			headerDescendants: [...root.querySelector('.document-header')!.querySelectorAll('*')].map(geometry),
-			controls: [...row.querySelectorAll('button')].map((button) => {
+			controls: [...tools.querySelectorAll('button'), ...row.querySelectorAll('button')].map((button) => {
 				const rect = button.getBoundingClientRect();
 				return { name: button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, height: rect.height };
 			}),
@@ -177,7 +179,7 @@ for (const fixture of composedFixtures) for (const theme of ['light', 'dark'] as
 		const agents = await reviewers(request, stamp);
 		await openDocument(page, doc, splitWidth);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-		const trigger = page.locator('.document-status-row').getByRole('button', { name: 'Request review', exact: true });
+		const trigger = page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true });
 		await trigger.click();
 		const surface = await reviewSurface(page);
 		expect(surface.narrow, `${viewport} document content width ${surface.contentWidth}`).toBe(expectedNarrow);
@@ -228,7 +230,7 @@ test('@flow:document-review-requests generated metadata does not interrupt an op
 	const doc = await seedDocument(request, `review-${stamp}`);
 	const agents = await reviewers(request, stamp);
 	await openDocument(page, doc, 820);
-	const trigger = page.locator('.document-status-row').getByRole('button', { name: 'Request review', exact: true });
+	const trigger = page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true });
 	await trigger.click();
 	const search = page.getByRole('combobox', { name: 'Add reviewers' });
 	await search.fill(agents[0].name); await search.press('Home'); await search.press('Enter');
@@ -264,7 +266,7 @@ test('@flow:document-review-requests request, list, cancel and settlement withou
 	// Exercise summary → cancel where the Workspace pane overlays a compact artifact canvas.
 	if (!mobile) await page.setViewportSize({ width: 1280, height: 1000 });
 	await openDocument(page, doc, mobile ? 500 : 820);
-	const trigger = page.locator('.document-status-row').getByRole('button', { name: 'Request review', exact: true });
+	const trigger = page.locator('.document-tools').getByRole('button', { name: 'Request review', exact: true });
 	await trigger.click();
 	const surface = await reviewSurface(page);
 	await expect(surface.panel).toBeVisible();
@@ -373,8 +375,14 @@ for (const count of [0, 1, 10]) for (const state of ['pending', 'grace', 'undeli
 		await openDocument(page, doc);
 		await captureLayout(page, info, `reviews-${count}-${state}-${mobile ? 'phone' : 'desktop-narrow'}`);
 		await expect(page.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
-		if (state === 'pending') await expect(page.getByRole('button', { name: /^Send 1 comment/ })).toBeVisible();
-		if (state === 'grace') await expect(page.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
+		if (state !== 'undelivered') {
+			// Send now and the countdown are in the comments drawer's footer; the header shows neither.
+			expect(await visibleHeaderSends(page), 'no Send shows in the header').toEqual([]);
+			const footer = await openUnsentFooter(page);
+			await expect(footer.getByRole('status')).toContainText(state === 'grace' ? '1 message not sent yet · sending to ' : '1 message not sent yet · it goes to ');
+			await expect(footer.getByRole('button', { name: 'Send now', exact: true })).toBeVisible();
+			await page.getByRole('region', { name: 'Document comments' }).getByRole('button', { name: 'Close comments', exact: true }).click();
+		}
 		if (state === 'undelivered') await expect(page.locator('.undelivered').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 		await expect(page.locator('.reviewer-group')).toHaveCount(count ? 1 : 0);
 		if (state === 'undelivered') await expectContrast(page, info, `reviews-${count}-retry-${mobile ? 'phone' : 'desktop-narrow'}`, {

@@ -59,12 +59,43 @@ describe('DocViewerStatus freshness metadata', () => {
 		const header = host.querySelector('header');
 		expect(header?.textContent).toContain('Review document');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
-		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 comments');
+		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 open threads');
 		const details = header?.querySelector<HTMLButtonElement>('[aria-label="Document details"]');
 		expect(details?.getAttribute('aria-expanded')).toBe('false');
 		details!.click();
 		flushSync();
 		expect(details?.getAttribute('aria-expanded')).toBe('true');
+	});
+
+	it('marks unsent feedback on the open-thread pill without restoring Send to the header', () => {
+		render(value(), undefined, { commentCount: 2 });
+		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', grace_closes_at: '2026-10-11T22:32:00Z', undelivered_batches: [] });
+		flushSync();
+		const pill = host.querySelector('.comment-status');
+		expect(pill?.getAttribute('aria-label')).toBe('2 open threads, 3 messages not sent yet');
+		expect(pill?.querySelector('.unsent-dot')).toBeTruthy();
+		expect(host.textContent).not.toContain('Send 3 comments');
+		// Send and its countdown live in the comments drawer's footer: none of it is in the header, not even clipped.
+		expect(host.querySelector('.sending-now')).toBeNull();
+		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim())).not.toContain('Send now');
+		expect(host.textContent).not.toContain('Sending to');
+	});
+
+	it('counts open threads on the pill with their unit, and no dot once nothing waits to be sent', () => {
+		render(value(), undefined, { commentCount: 1 });
+		const pill = host.querySelector('.comment-status')!;
+		expect(pill.querySelector('.count')!.textContent).toBe('1');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('thread');
+		expect(pill.getAttribute('aria-label')).toBe('1 open thread');
+		expect(pill.querySelector('.unsent-dot')).toBeNull();
+		component!.sync('artifact-1', { open_count: 1, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] });
+		flushSync();
+		expect(pill.getAttribute('aria-label')).toBe('1 open thread, 1 message not sent yet');
+		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
+		component!.sync('artifact-1', { open_count: 0, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] });
+		flushSync();
+		expect(pill.getAttribute('aria-label')).toBe('1 open thread');
+		expect(pill.querySelector('.unsent-dot')).toBeNull();
 	});
 
 	it('closes metadata on scoped Escape, restores its toggle, and preserves it from other header controls', () => {
@@ -114,11 +145,14 @@ describe('DocViewerStatus freshness metadata', () => {
 		const live = { artifactId: 'artifact', subscribe: () => () => {} } as any;
 		render(value(), undefined, { liveSession: live, orphanedCount: 1, onReloadPlacements: reload, placementReloading: false });
 		const control = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
+		// At rest the button says what it is for; the after state's announcement replaces that sentence.
+		expect(host.querySelector('.orphan-note')?.textContent).toBe("1 comment couldn't be placed");
 		control.click(); expect(reload).toHaveBeenCalledOnce();
 		component!.$set({ placementReloading: true }); flushSync();
 		component!.$set({ placementReloading: false, placementReloadError: true }); flushSync();
 		expect(host.querySelector('[role="status"]')?.textContent).toBe("Couldn't reload comment placements");
 		expect(host.querySelector('[role="status"]')?.classList.contains('sr-only')).toBe(false);
+		expect(host.querySelector('.orphan-note')).toBeNull();
 		expect(host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')?.disabled).toBe(false);
 	});
 

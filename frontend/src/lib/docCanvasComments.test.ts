@@ -157,9 +157,13 @@ describe('inline suggestions in the highlight ranges', () => {
 
 describe('comment surface status', () => {
 	it('counts orphaned cards and reports the placement reload state', () => {
-		expect(commentSurfaceStatus([])).toEqual({ orphanedCount: 0, placementReloading: false, placementReloadError: false });
+		expect(commentSurfaceStatus([])).toEqual({ commentCount: 0, orphanedCount: 0, placementReloading: false, placementReloadError: false });
 		expect(commentSurfaceStatus([
 			comment('a', 0, 'x', { orphaned: true }), comment('b', 0, 'x', { placementReloading: true }), comment('c', 0, 'x', { placementReloadError: true }),
-		])).toEqual({ orphanedCount: 1, placementReloading: true, placementReloadError: true });
+		])).toEqual({ commentCount: 3, orphanedCount: 1, placementReloading: true, placementReloadError: true });
+	});
+
+	it('counts only open threads for the header pill', () => {
+		expect(commentSurfaceStatus([comment('a', 0, 'x'), comment('b', 0, 'x', { resolved: true }), comment('c', 0, 'x', { resolved: true, orphaned: true })]).commentCount).toBe(1);
 	});
 });

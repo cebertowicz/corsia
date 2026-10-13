@@ -126,3 +126,16 @@ export function relLabel(iso: string): string {
 	const days = Math.round(h / 24);
 	return days < 30 ? `${days}d ago` : `${Math.round(days / 30)}mo ago`;
 }
+
+/** The time as a touch screen's meta row shows it: "now", "5m", "3h", then the date ("Oct 9"). Without an ISO time it shortens the long label. */
+export function compactRelLabel(iso: string | null | undefined, label = ''): string {
+	const t = iso ? parseUTC(iso).getTime() : Number.NaN;
+	if (Number.isNaN(t)) return label === 'just now' ? 'now' : label.replace(/ ago$/, '');
+	const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+	if (m < 1) return 'now';
+	if (m < 60) return `${m}m`;
+	if (m < 60 * 24) return `${Math.round(m / 60)}h`;
+	const d = new Date(t);
+	const sameYear = d.getFullYear() === new Date().getFullYear();
+	return d.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+}

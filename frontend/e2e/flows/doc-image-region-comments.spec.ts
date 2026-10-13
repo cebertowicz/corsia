@@ -3,7 +3,8 @@ import path from 'node:path';
 import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
-import { drag, shoot } from '../support/imageRegionComments';
+import { drag, sendFromDrawerByKeyboard, settled, shoot } from '../support/imageRegionComments';
+import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 
 // Comments on parts of an image inside a document (DCOL-FR13.3, 13.5, 13.6, 13.12): the viewer over the document,
 // the margin marker and drawer group back in it, and the one feedback batch both show and send.
@@ -56,9 +57,65 @@ const marker = (page: Page) => page.locator('.cm-comment-marker').first();
 const drawer = (page: Page) => page.locator('.canvas-comment-drawer, .drawer-panel[role="dialog"]');
 const tag = (page: Page, number: number) => overlay(page).locator(`[data-region-tag="${number}"]:not([inert])`);
 const viewerSend = (page: Page) => bar(page).getByRole('button', { name: /^Send/ });
-const docSend = (page: Page) => page.locator('.document-status-row').getByRole('button', { name: /^Send/ });
-const docComments = (page: Page) => page.locator('.document-status-row .comment-status');
+const docComments = (page: Page) => page.locator('.document-header .comment-status');
+/** The document's pending batch, as its header pill names it; its Send now is in the comments drawer's footer. */
+const unsentName = (count: number) => new RegExp(`, ${count} messages? not sent yet$`);
 const drawerThumb = (page: Page) => drawer(page).locator('[data-region-thumb]').first();
+/** The document drawer's footer: the one place an in-document image's batch is sent from (RSR-10); the viewer has no Send. */
+const footer = (page: Page) => drawer(page).locator('[data-drawer-unsent]');
+const footerSend = (page: Page) => footer(page).getByRole('button', { name: 'Send now', exact: true });
+/** The document's own delivery row: what was sent, or not delivered with Retry. */
+const docDelivery = (page: Page) => page.locator('.document-header .feedback-controls');
+/** Back from the viewer to the document, then its comments drawer opened from the header pill. */
+async function backToDocumentDrawer(page: Page) {
+	await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
+	await expect(overlay(page)).toHaveCount(0);
+	await docComments(page).click();
+	await expect(footer(page)).toBeVisible();
+}
+/** The document's comments drawer closed with its own Close button. */
+async function closeDocumentDrawer(page: Page) {
+	await drawer(page).getByRole('button', { name: 'Close comments', exact: true }).click();
+	await expect(drawer(page)).toHaveCount(0);
+}
+/** The document drawer's list, which keeps its own scroll. */
+const drawerList = (page: Page) => page.locator('[data-doc-comments-drawer] .drawer-comments');
+/**
+ * J3 from the drawer: a card opens the viewer at its tag, over the document and the drawer, which stays open beneath
+ * it out of sight, with no scrim over the viewer, so a tap on Back reaches Back. Back, or Escape, returns to the
+ * document with the drawer where it was and that card focused. `name` shoots the viewer, then the document after.
+ */
+async function cardOpensViewerAndReturns(page: Page, testInfo: TestInfo, text: string, how: 'back' | 'escape', name: string) {
+	const card = drawer(page).locator('.ct').filter({ hasText: text });
+	await card.scrollIntoViewIfNeeded();
+	const scrolled = await drawerList(page).evaluate((list) => list.scrollTop);
+	await card.click();
+	await expect(overlay(page)).toBeVisible();
+	await expect(overlay(page).locator('[data-region-tag][aria-pressed="true"]:not([inert])')).toHaveCount(1);
+	await expect(page.locator('[data-doc-comments-drawer]')).toBeHidden();
+	// The viewer fits its image as the panes slide; its card is placed beside the tag once they stop.
+	await settled(page);
+	await shoot(page, testInfo, `${name}-viewer`, true);
+	// Escape first closes the comment's own card in the viewer; on a phone its sheet pops its history entry afterwards.
+	const layer = () => page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
+	const open = await layer();
+	await page.keyboard.press('Escape');
+	if ((page.viewportSize()?.width ?? 1440) <= 768 && open !== null) await expect.poll(layer).not.toBe(open);
+	const back = bar(page).getByRole('button', { name: 'Back to walkthrough.md' });
+	const box = (await back.boundingBox())!;
+	const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label') ?? null, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+	expect(hit, 'a tap on Back reaches Back').toBe('Back to walkthrough.md');
+	if (how === 'back') await back.click();
+	else await page.keyboard.press('Escape');
+	await expect(overlay(page)).toHaveCount(0);
+	await expect(card).toBeVisible();
+	await expect.poll(() => card.evaluate((el) => el.contains(document.activeElement)), 'that card has focus').toBe(true);
+	expect(await drawerList(page).evaluate((list) => list.scrollTop), 'the drawer list is where it was').toBe(scrolled);
+	// The shell slides its panes back as the viewer leaves, and a sheet follows the document column frame by frame;
+	// the frame is taken once the slide has ended and the sheet is back over that column.
+	await settled(page);
+	await shoot(page, testInfo, `${name}-back`, true);
+}
 const surface = (page: Page) => overlay(page).locator('[data-image-regions]');
 
 async function openDocument(page: Page, seeded: Seeded, width: number) {
@@ -151,51 +208,50 @@ async function expectMarkersBesideImages(page: Page, testInfo: TestInfo, name: s
 		await saveEvidenceScreenshot(page, testInfo, `${name}-${scheme}`, { fullPage: false });
 	}
 }
-/** One frame: ms since sampling began, the count pill's left edge, and the Send slot's width and opacity (null: no slot). */
-type Sample = [number, number, number | null, number | null];
-/** The slot's own motion as it started: its first and last keyframes and its duration at the page's real speed. */
-type SlotMotion = { from: { maxWidth: string; opacity: number }; to: { maxWidth: string; opacity: number }; duration: number };
+/** One painted frame: ms since sampling began, the drawer footer's send state, and the first comment card's top. */
+type Sample = [number, 'pending' | 'sending' | 'gone', number];
 /**
- * Reads, every frame until stopped, where the bar's count pill sits and the Send slot's size and opacity, and each motion
- * the slot runs that opens or closes its space (Svelte's own timing animations carry no keyframes, so they are skipped).
+ * Reads, every frame until stopped, the document drawer footer's send state (Send now, sending, or gone) and where the
+ * first comment card sits, as that frame paints them. The drawer eases its height from a resize observer, so each read
+ * comes after the frame's resize observers; a read in a later task could see the footer already removed by the send's
+ * answer, with the card at its final place for a frame never painted.
  */
 async function startSampling(page: Page) {
+	await installPaintedFrames(page);
 	await page.evaluate(() => {
-		const state = { seen: [] as Sample[], motions: [] as SlotMotion[], on: true };
-		const known = new WeakSet<Animation>();
-		(window as unknown as { __slot: typeof state }).__slot = state;
+		const state = { seen: [] as Sample[], on: true };
+		(window as unknown as { __footer: typeof state }).__footer = state;
 		const start = performance.now();
-		const frame = (keyframe: ComputedKeyframe) => ({ maxWidth: String(keyframe.maxWidth), opacity: Number(keyframe.opacity) });
-		const tick = () => {
-			const pill = document.querySelector('.image-overlay .bar [data-image-comments-pill]');
-			const slot = document.querySelector<HTMLElement>('.image-overlay .bar .sending-now');
-			for (const animation of slot?.getAnimations() ?? []) {
-				const effect = animation.effect as KeyframeEffect | null;
-				const keyframes = effect?.getKeyframes() ?? [];
-				if (known.has(animation) || !keyframes.some((keyframe) => 'maxWidth' in keyframe)) continue;
-				known.add(animation);
-				state.motions.push({ from: frame(keyframes[0]), to: frame(keyframes.at(-1)!), duration: Number(effect!.getTiming().duration) });
-			}
-			const round = (value: number) => Math.round(value * 10) / 10;
-			state.seen.push([Math.round(performance.now() - start), round(pill?.getBoundingClientRect().left ?? 0),
-				slot ? round(slot.getBoundingClientRect().width) : null, slot ? Number(getComputedStyle(slot).opacity) : null]);
-			if (state.on) requestAnimationFrame(tick);
+		const measure = (): Sample => {
+			const footer = document.querySelector<HTMLElement>('[data-drawer-unsent]');
+			const card = document.querySelector('.canvas-comment-drawer .ct, .drawer-panel[role="dialog"] .ct');
+			const status = !footer ? 'gone' : footer.querySelector('.btn')?.classList.contains('loading') ? 'sending' : 'pending';
+			return [Math.round(performance.now() - start), status, Math.round((card?.getBoundingClientRect().top ?? 0) * 10) / 10];
 		};
-		requestAnimationFrame(tick);
+		const keep = (sample: Sample) => {
+			state.seen.push(sample);
+			return state.on;
+		};
+		(window as Window & { __eachPaintedFrame?: EachPaintedFrame }).__eachPaintedFrame!(measure, keep);
 	});
 }
 const stopSampling = (page: Page) => page.evaluate(() => {
-	const state = (window as unknown as { __slot: { seen: Sample[]; motions: SlotMotion[]; on: boolean } }).__slot;
+	const state = (window as unknown as { __footer: { seen: Sample[]; on: boolean } }).__footer;
 	state.on = false;
-	return { seen: state.seen, motions: state.motions };
+	return state.seen;
 });
-/** The pill moved from where it was to where it ends through in-between places, never more than half the way in a frame. */
+/** The footer went from Send now, through sending, to gone, in that order. */
+function expectSendStates(seen: Sample[], what: string) {
+	const states = seen.map(([, state]) => state).filter((state, index, all) => index === 0 || state !== all[index - 1]);
+	expect(states, `${what}: footer states`).toEqual(['pending', 'sending', 'gone']);
+}
+/** The card moved with the drawer from where it was to where it ends through in-between places, never more than half the way in a frame. */
 function expectGlide(seen: Sample[], what: string) {
-	const xs = seen.map(([, x]) => x);
-	const total = Math.abs(xs[xs.length - 1] - xs[0]);
-	expect(total, `${what}: the pill moved`).toBeGreaterThan(8);
-	expect(new Set(xs).size, `${what}: in-between places ${JSON.stringify(xs)}`).toBeGreaterThanOrEqual(4);
-	const jump = Math.max(...xs.slice(1).map((x, index) => Math.abs(x - xs[index])));
+	const tops = seen.map(([, , top]) => top);
+	const total = Math.abs(tops[tops.length - 1] - tops[0]);
+	expect(total, `${what}: the drawer's height changed`).toBeGreaterThan(8);
+	expect(new Set(tops).size, `${what}: in-between places ${JSON.stringify(tops)}`).toBeGreaterThanOrEqual(4);
+	const jump = Math.max(...tops.slice(1).map((top, index) => Math.abs(top - tops[index])));
 	expect(jump, `${what}: largest move in one frame of ${total}`).toBeLessThanOrEqual(total / 2);
 }
 const mockOnly = (testInfo: TestInfo) => {
@@ -204,7 +260,7 @@ const mockOnly = (testInfo: TestInfo) => {
 };
 
 test.describe('@flow:image-region-comments @surface:documents comments on images inside a document', () => {
-	test('comment on part of a document image, send from the viewer, and find it again in the document (1440)', async ({ page, request }, testInfo) => {
+	test('comment on part of a document image, find it again in the document, and send from its drawer (1440)', async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width: 1440, height: 900 });
@@ -219,17 +275,17 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, 'doc-1440-02-viewer-open', true);
 		await commentOnRegion(page, 'The header crowds the logo');
 		await expect(tag(page, 1)).toBeVisible();
-		// FR13.12: the viewer shows the document's pending-send status and Send, short in the bar and read out in full.
-		await expect(viewerSend(page)).toHaveText(/^\s*Send 1\s*$/);
-		await expect(viewerSend(page)).toHaveAttribute('aria-label', /^Send 1 comment to /);
+		// RSR-10: the viewer over a document has no Send; its pill marks the document's unsent message.
+		await expect(viewerSend(page)).toHaveCount(0);
+		await expect(bar(page).locator('[data-image-comments-pill]')).toHaveAttribute('aria-label', unsentName(1));
 		await page.keyboard.press('Escape');
 		await expectBarFits(page);
-		await shoot(page, testInfo, 'doc-1440-03-viewer-pending-send', true);
+		await shoot(page, testInfo, 'doc-1440-03-viewer-pending', true);
 
 		// Back is not leaving: the document's own row shows the same pending comment, and the image its margin marker.
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(docSend(page)).toHaveText(/^\s*Send 1 comment to /);
+		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(1));
 		await expect(marker(page)).toBeVisible();
 		await expectMarkersBesideImages(page, testInfo, 'doc-1440-04-document-marker-pending');
 
@@ -248,28 +304,23 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		const card = page.locator('.canvas-comment-drawer .ct').filter({ hasText: 'The header crowds the logo' });
 		await expect(card).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
+		await expect(drawer(page).locator('[data-drawer-unsent]')).toContainText('1 message not sent yet');
 		await shoot(page, testInfo, 'doc-1440-06-drawer-image-group', true);
-		await card.click();
-		await expect(overlay(page)).toBeVisible();
-		await expect(tag(page, 1)).toHaveAttribute('aria-pressed', 'true');
-		await page.keyboard.press('Escape');
+		await cardOpensViewerAndReturns(page, testInfo, 'The header crowds the logo', 'back', 'doc-1440-06b-drawer-card');
 
-		// Send in the viewer closes the document's batch: nothing is left to send in either place.
-		const sent = page.waitForRequest((req) => req.method() === 'POST' && req.url().includes(`/api/doc-feedback/send`));
-		await viewerSend(page).click();
-		const body = (await sent).postDataJSON() as { artifact_id?: string } | null;
+		// Send now in the drawer's footer closes the document's batch, and nothing is left to send in either place.
+		await expect(footerSend(page)).toBeInViewport({ ratio: 1 });
+		const sent = await sendFromDrawerByKeyboard(page, testInfo, docImage(page), 'doc-1440-06c-drawer-sent-focus');
+		const body = sent.postDataJSON() as { artifact_id?: string } | null;
 		if (body?.artifact_id) expect(body.artifact_id).toBe(seeded.artifactId);
-		// It says Sent for a moment, then goes.
-		await expect(bar(page).locator('.sent')).toHaveText(/^\s*Sent\s*$/);
-		await saveEvidenceScreenshot(page, testInfo, 'doc-1440-07-viewer-sent-confirmed-dark', { fullPage: false });
-		await expect(bar(page).locator('.sending-now')).toHaveCount(0);
-		await shoot(page, testInfo, 'doc-1440-07-viewer-sent', true);
-		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
-		await expect(docSend(page)).toHaveCount(0);
+		// Back in the document, its row says what was sent.
+		await expect(docDelivery(page)).toContainText(/1 comment sent/);
+		await saveEvidenceScreenshot(page, testInfo, 'doc-1440-07-drawer-sent-confirmed-dark', { fullPage: false });
+		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
 		await shoot(page, testInfo, 'doc-1440-08-document-sent', true);
 	});
 
-	test('on a phone the viewer bar keeps Back, Fit, Comment and the count, and adds Send only while pending (393)', async ({ page, request }, testInfo) => {
+	test('on a phone the viewer bar keeps Back, Fit, Comment and the count, and the batch is sent from the document drawer (393)', async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width: 393, height: 852 });
@@ -286,8 +337,9 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, 'doc-393-02-viewer-open', true);
 
 		await commentOnRegion(page, 'Tap target too small');
-		await expect(viewerSend(page)).toHaveText(/^\s*Send 1\s*$/);
-		await expect(viewerSend(page)).toHaveAttribute('aria-label', /^\s*Send 1 comment to /);
+		// RSR-10: no Send in the viewer while a message is pending; the pill marks it.
+		await expect(viewerSend(page)).toHaveCount(0);
+		await expect(bar(page).locator('[data-image-comments-pill]')).toHaveAttribute('aria-label', unsentName(1));
 		await page.keyboard.press('Escape');
 		// Every bar control keeps a 44 px target and the bar stays one row inside the screen.
 		for (const control of await bar(page).locator('button').all()) {
@@ -295,15 +347,24 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 			expect((await control.boundingBox())!.height, await control.innerText()).toBeGreaterThanOrEqual(44);
 		}
 		await expectBarFits(page);
-		await shoot(page, testInfo, 'doc-393-03-viewer-pending-send', true);
+		await shoot(page, testInfo, 'doc-393-03-viewer-pending', true);
 
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
-		await expect(docSend(page)).toHaveText(/^\s*Send 1 comment to /);
+		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(1));
 		await expectMarkersBesideImages(page, testInfo, 'doc-393-04-document-marker-pending');
 		await docComments(page).click();
 		await expect(page.locator('.drawer-panel[role="dialog"], .canvas-comment-drawer').getByText('Tap target too small')).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
+		await expect(drawer(page).locator('[data-drawer-unsent]')).toContainText('1 message not sent yet');
 		await shoot(page, testInfo, 'doc-393-05-drawer-image-group', true);
+		await cardOpensViewerAndReturns(page, testInfo, 'Tap target too small', 'escape', 'doc-393-05b-drawer-card');
+
+		// Send now in the footer, whole inside the screen, sends the batch; the footer goes. (Its 44 px target under a
+		// coarse pointer is doc-send-on-close's phone case.)
+		await expect(footerSend(page)).toBeInViewport({ ratio: 1 });
+		await sendFromDrawerByKeyboard(page, testInfo, docImage(page), 'doc-393-05c-drawer-sent-focus');
+		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
+		await shoot(page, testInfo, 'doc-393-06-document-sent', true);
 	});
 
 	for (const width of [1440, 393]) test(`many comments on two images: tags in the viewer, a marker per image, a drawer group per image (${width})`, async ({ page, request }, testInfo) => {
@@ -336,7 +397,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await expect(overlay(page)).toHaveCount(0);
 		// A marker beside each image, and the document's row counting all six.
 		await expect(page.locator('.cm-comment-marker')).toHaveCount(2);
-		await expect(docSend(page)).toHaveText(/^\s*Send 6 comments to /);
+		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(6));
 		await expectMarkersBesideImages(page, testInfo, `doc-${width}-many-02-document-two-markers`);
 
 		// The drawer: one group per image, each under one thumbnail, comments in number order; scrolled to the second.
@@ -346,10 +407,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, `doc-${width}-many-03-drawer-two-groups`, true);
 		await thumbs.nth(1).scrollIntoViewIfNeeded();
 		await expect(drawer(page).getByText('Save should be primary')).toBeVisible();
+		// The frame is named "scrolled": the list has actually moved, with the first group's thumbnail above the fold.
+		await expect.poll(() => drawer(page).locator('.drawer-comments').evaluate((list) => list.scrollTop), 'the drawer list scrolled').toBeGreaterThan(0);
 		await shoot(page, testInfo, `doc-${width}-many-04-drawer-scrolled`, true);
+		// From the scrolled drawer a card opens its image, and the way back (Escape here, Back in the single-image journey) finds the drawer where it was.
+		await cardOpensViewerAndReturns(page, testInfo, 'Save should be primary', width > 768 ? 'escape' : 'back', `doc-${width}-many-05-scrolled-card`);
 	});
 
-	for (const width of [1440, 393]) test(`the viewer bar shows the sending countdown, and a batch not delivered with Retry (${width})`, async ({ page, request }, testInfo) => {
+	for (const width of [1440, 393]) test(`the document drawer's footer shows the sending countdown, and a batch not delivered with Retry (${width})`, async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(180_000);
 		await page.setViewportSize({ width, height: width > 768 ? 900 : 852 });
@@ -369,25 +434,34 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await openImage(page);
 		await commentOnRegion(page, 'The header crowds the logo');
 		await page.keyboard.press('Escape');
-		await expect(viewerSend(page)).toHaveText(/^\s*Send now\s*$/);
-		await expect(viewerSend(page)).toHaveAttribute('aria-label', /^Sending to .+ in \d+ min\. Send now$/);
+		// RSR-10: the viewer shows no countdown and no Send; the document's drawer footer does.
+		await expect(viewerSend(page)).toHaveCount(0);
+		await expect(bar(page).locator('.sending-now')).toHaveCount(0);
 		await expectBarFits(page);
-		await shoot(page, testInfo, `doc-${width}-09-viewer-sending-grace`, true);
+		await backToDocumentDrawer(page);
+		await expect(footer(page)).toContainText(/1 message not sent yet · sending to .+ in \d+ min/);
+		await expect(footerSend(page)).toBeInViewport({ ratio: 1 });
+		await shoot(page, testInfo, `doc-${width}-09-drawer-sending-grace`, true);
 
 		inject.grace = undefined;
 		inject.undelivered = [{ id: 'batch-1', item_count: 1, undelivered_reason: 'owner_unavailable', attempts: 1 }];
 		await page.route('**/api/doc-feedback/send', (route) => route.fulfill({ json: { woken: [], undelivered_batches: inject.undelivered } }));
-		await viewerSend(page).click();
-		const retry = bar(page).getByRole('button', { name: /Retry/ });
+		await footerSend(page).click();
+		// Not delivered: the document's own row offers Retry and claims nothing was sent.
+		await closeDocumentDrawer(page);
+		const retry = docDelivery(page).getByRole('button', { name: /Retry/ });
 		await expect(retry).toBeVisible();
-		await expect(bar(page).locator('.sent')).toHaveCount(0);
-		await expectBarFits(page);
+		await expect(docDelivery(page)).not.toContainText(/comments? sent/);
+		await expect(retry).toBeInViewport({ ratio: 1 });
 		if (width <= 768) expect((await retry.boundingBox())!.height, 'Retry keeps a 44 px target').toBeGreaterThanOrEqual(44);
-		await shoot(page, testInfo, `doc-${width}-10-viewer-undelivered-retry`, true);
+		// The viewer over the document still offers no Retry of its own.
+		await openImage(page);
+		await expect(bar(page).getByRole('button', { name: /Retry/ })).toHaveCount(0);
+		await shoot(page, testInfo, `doc-${width}-10-document-undelivered-retry`, true);
 	});
 
 	for (const [label, width, reduced] of [['1440', 1440, false], ['393', 393, false], ['1440-reduced-motion', 1440, true]] as const) {
-		test(`Send grows into the viewer bar, says Sent, then leaves with nothing jumping (recorded, ${label})`, async ({ browser, request }, testInfo) => {
+		test(`Send now in the document drawer's footer: sending, sent, then the footer leaves with nothing jumping (recorded, ${label})`, async ({ browser, request }, testInfo) => {
 			mockOnly(testInfo);
 			test.setTimeout(180_000);
 			const size = { width, height: width > 768 ? 900 : 852 };
@@ -396,50 +470,38 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 				reducedMotion: reduced ? 'reduce' : 'no-preference', recordVideo: { dir: testInfo.outputPath('video'), size },
 			});
 			const page = await context.newPage();
-			// The page's animations run ten times slower, from before each trigger to the end, so the recording and the
-			// per-frame samples resolve the motion; each motion's own keyframes and duration are read at real speed.
+			// The page's animations run ten times slower from before the send to the end, so the recording and the per-frame
+			// samples resolve any motion; the send itself is held for a moment so its sending state is on screen.
 			const cdp = await context.newCDPSession(page);
 			const slow = async () => { await cdp.send('Animation.enable'); await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.1 }); };
 			try {
 				const seeded = await seedDocument(page, request, `doc-send-motion-${label}`, null);
 				await openDocument(page, seeded, width);
 				await openImage(page);
-				await expect(bar(page).locator('.sending-now')).toHaveCount(0);
+				await commentOnRegion(page, 'The header crowds the logo');
+				await putSheetAway(page);
+				if (width > 768) await page.keyboard.press('Escape');
+				// RSR-10: nothing to send from the viewer; the document drawer's footer is where it goes.
+				await expect(viewerSend(page)).toHaveCount(0);
+				await backToDocumentDrawer(page);
+				await expect(footerSend(page)).toBeVisible();
+				await page.route('**/api/doc-feedback/send', async (route) => { await new Promise((resolve) => setTimeout(resolve, 800)); await route.fallback(); });
 				await slow();
 				await startSampling(page);
-				await commentOnRegion(page, 'The header crowds the logo');
-				await expect(viewerSend(page)).toBeVisible();
-				await page.waitForTimeout(3000);
-				const arrival = await stopSampling(page);
-				await putSheetAway(page);
-
-				// Send turns into Sent where it stands; the leave is measured from Sent on.
-				await viewerSend(page).click();
-				await expect(bar(page).locator('.sent')).toBeVisible();
-				await startSampling(page);
-				await expect(bar(page).locator('.sending-now')).toHaveCount(0, { timeout: 15_000 });
+				await footerSend(page).click();
+				await expect(footer(page)).toHaveCount(0, { timeout: 15_000 });
+				// Sent: the document's own row says so once the footer has gone.
+				await expect(docDelivery(page)).toContainText(/1 comment sent/);
 				await page.waitForTimeout(300);
-				const departure = await stopSampling(page);
-				fs.writeFileSync(testInfo.outputPath('samples.json'), JSON.stringify({ playbackRate: 0.1, arrival, departure }));
+				const seen = await stopSampling(page);
+				fs.writeFileSync(testInfo.outputPath('samples.json'), JSON.stringify({ playbackRate: 0.1, seen }));
 
-				if (reduced) {
-					// Reduced motion keeps only the fade: no space opens or closes, and Send passes through partial opacity.
-					const fading = (seen: Sample[]) => seen.some(([, , , opacity]) => opacity !== null && opacity > 0.05 && opacity < 0.95);
-					expect(arrival.motions, 'arrival opens no space').toEqual([]);
-					expect(departure.motions, 'departure closes no space').toEqual([]);
-					expect(fading(arrival.seen), `arrival fades ${JSON.stringify(arrival.seen)}`).toBe(true);
-					expect(fading(departure.seen), `departure fades ${JSON.stringify(departure.seen)}`).toBe(true);
-				} else {
-					// At real speed: Send grows in from nothing as it fades in; Sent fades, then its space closes.
-					expect(arrival.motions).toHaveLength(1);
-					expect(arrival.motions[0]).toMatchObject({ from: { maxWidth: '0px', opacity: 0 }, to: { opacity: 1 }, duration: 220 });
-					expect(arrival.motions[0].to.maxWidth).not.toBe('0px');
-					expect(departure.motions).toHaveLength(1);
-					expect(departure.motions[0]).toMatchObject({ from: { opacity: 1 }, to: { maxWidth: '0px', opacity: 0 }, duration: 340 });
-					expect(departure.motions[0].from.maxWidth).not.toBe('0px');
-					expectGlide(arrival.seen, 'arrival');
-					expectGlide(departure.seen, 'departure');
-				}
+				expectSendStates(seen, label);
+				// The drawer gives back the footer's height as it leaves: eased with motion, a single cut under reduced
+				// motion (which crossfades, nothing slides). The frames before the footer left are only the sending state.
+				const leaving = seen.slice(seen.findIndex(([, state]) => state === 'gone') - 1);
+				if (reduced) expect(new Set(leaving.map(([, , top]) => top)).size, `one cut ${JSON.stringify(leaving)}`).toBeLessThanOrEqual(2);
+				else expectGlide(leaving, label);
 			} finally {
 				await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 }).catch(() => {});
 				const video = page.video();

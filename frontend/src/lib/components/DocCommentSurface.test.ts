@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { fromStore, get, writable } from 'svelte/store';
 
 const mocks = vi.hoisted(() => ({
@@ -12,6 +12,7 @@ vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: mocks.flushDraft, seedD
 vi.mock('$lib/stores/docComments', () => ({ loadComments: mocks.loadComments }));
 
 import DocCommentSurface from './DocCommentSurface.svelte';
+import { DocFeedback } from '$lib/docFeedback.svelte';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 
@@ -56,10 +57,105 @@ describe('DocCommentSurface suggestions', () => {
 		const quote = drawer!.querySelector<HTMLButtonElement>('[data-comment-jump]');
 		quote!.click();
 		expect(onFocus).toHaveBeenCalledWith(suggestion.id);
+		drawer!.querySelector<HTMLButtonElement>('[data-drawer-filter]')!.click(); flushSync();
 		const resolved = [...drawer!.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Resolved');
 		resolved!.click(); flushSync();
 		expect(drawer!.querySelectorAll('[data-comment-id]')).toHaveLength(1);
 		expect(drawer!.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
+	});
+
+	it('opens on Open and switches filters from the named menu', () => {
+		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] });
+		const drawer = host.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
+		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+		const menu = drawer.querySelector<HTMLButtonElement>('[data-drawer-filter]')!;
+		expect(menu.textContent?.trim()).toBe('Filter');
+		expect(menu.querySelector('svg')).not.toBeNull();
+		menu.click(); flushSync();
+		const resolved = [...drawer.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((button) => button.textContent === 'Resolved')!;
+		resolved.click(); flushSync();
+		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 resolved');
+		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
+	});
+
+	it('offers the open comments when the resolved filter has none', () => {
+		render({ state: { kind: 'list' }, comments: [suggestion] });
+		const drawer = host.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
+		drawer.querySelector<HTMLButtonElement>('[data-drawer-filter]')!.click(); flushSync();
+		[...drawer.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((button) => button.textContent === 'Resolved')!.click(); flushSync();
+		const showOpen = [...drawer.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Show open · 1')!;
+		expect(showOpen).not.toBeNull();
+		showOpen.click(); flushSync();
+		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-1');
+	});
+
+	it('ends the drawer in a Send now footer only while messages are not sent', async () => {
+		// The open document's one batch: the footer reads it and Send now is its own Send.
+		const feedback = new DocFeedback();
+		const send = vi.fn(async () => {});
+		feedback.send = send;
+		feedback.pendingCount = 2;
+		feedback.feedback = { open_count: 2, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] };
+		render({ state: { kind: 'list' }, comments: [suggestion], feedback });
+		const footer = () => host.querySelector<HTMLElement>('[data-doc-comments-drawer] > [data-drawer-unsent]');
+		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('2 messages not sent yet · they go to Style when you leave.');
+		const owner = footer()!.querySelector<HTMLElement>('.drawer-footer-owner')!;
+		expect(owner.textContent).toBe('Style');
+		expect(owner.title).toBe('Style');
+		const button = footer()!.querySelector<HTMLButtonElement>('button')!;
+		expect(button.textContent?.trim()).toBe('Send now');
+		button.click();
+		expect(send).toHaveBeenCalledOnce();
+		// The drawer's last child, after the scrolling list, so the list scrolls and the footer stays.
+		expect(host.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer());
+
+		feedback.countdownNow = Date.parse('2026-10-11T22:00:00Z');
+		feedback.feedback = { open_count: 1, owner_label: null, grace_closes_at: '2026-10-11T22:04:00Z', undelivered_batches: [] };
+		feedback.pendingCount = 1;
+		feedback.sending = true; flushSync();
+		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('1 message not sent yet · sending to the owner in 4 min');
+		expect(footer()!.querySelector('button')!.disabled).toBe(true);
+
+		// Sending from the keyboard: the footer leaves with focus in it, which lands on the drawer's heading, not the page.
+		feedback.sending = false; flushSync();
+		footer()!.querySelector('button')!.focus();
+		feedback.pendingCount = 0; flushSync();
+		expect(footer()).toBeNull();
+		await Promise.resolve();
+		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
+	});
+
+	it('keeps the drawer while an image opened from a card covers it, then gives that card focus back', async () => {
+		const covering = writable(false);
+		const live = fromStore(covering);
+		render({ state: { kind: 'list' }, comments: [suggestion, secondSuggestion], get covered() { return live.current; } });
+		await tick();
+		const card = host.querySelector<HTMLElement>('[data-comment-id="comment-2"]')!;
+		const control = card.querySelector<HTMLButtonElement>('button:not(:disabled)')!;
+		// A click on the card's text focuses nothing; what it opened from is still known.
+		card.click();
+		covering.set(true); flushSync();
+		expect(host.querySelector('[data-doc-comments-drawer]')).not.toBeNull();
+		// The image over the document held focus, and it went to the page as the image closed.
+		(document.activeElement as HTMLElement | null)?.blur();
+		expect(document.activeElement).toBe(document.body);
+		covering.set(false); flushSync();
+		await tick();
+		expect(document.activeElement).toBe(control);
+	});
+
+	it('leaves focus alone when the drawer is uncovered and nothing in it opened the image', async () => {
+		const covering = writable(false);
+		const live = fromStore(covering);
+		render({ state: { kind: 'list' }, comments: [suggestion], get covered() { return live.current; } });
+		// The drawer puts focus on its filter as it opens; the image was opened from outside it, which took focus.
+		await tick();
+		(document.activeElement as HTMLElement | null)?.blur();
+		covering.set(true); flushSync();
+		covering.set(false); flushSync();
+		await tick();
+		expect(document.activeElement).toBe(document.body);
 	});
 
 	it('closes a card that follows its text only once that comment is deleted', () => {
@@ -131,6 +227,7 @@ describe('DocCommentSurface suggestions', () => {
 			const { set, onClose } = renderFollowing({ ...suggestion, replacement: null });
 			await vi.waitFor(() => expect(popover().style.left).toBe('548px'));
 			const before = placed();
+			host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click(); flushSync();
 			const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 			input.value = 'A half-written reply';
 			input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -167,15 +264,33 @@ describe('DocCommentSurface suggestions', () => {
 
 	it('keeps loading and error states truthful and delegates Retry', () => {
 		const onRetry = vi.fn();
-		render({ state: { kind: 'list' }, comments: [], load: { state: 'error', error: 'Offline' }, onRetry });
-		expect(host.textContent).toContain("Couldn't load comments. Offline");
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		render({ state: { kind: 'list' }, comments: [], load: { state: 'error', error: 'Failed to fetch' }, onRetry });
+		// It says what to do; the raw transport error goes to the log.
+		expect(host.textContent).toContain("Couldn't load comments. Check the connection and retry.");
+		expect(host.textContent).not.toContain('Failed to fetch');
+		expect(warn).toHaveBeenCalledWith('Could not load comments', 'Failed to fetch');
+		warn.mockRestore();
 		expect(host.textContent).not.toContain('No comments yet.');
 		[...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Retry')!.click();
 		expect(onRetry).toHaveBeenCalledOnce();
 	});
-	it('does not turn a reply input click into text navigation', () => {
+	it('opens Reply for the selected card in a narrow canvas drawer', async () => {
+		const original = HTMLElement.prototype.scrollIntoView;
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		try {
+			render({ state: { kind: 'list' }, narrow: true, focusedId: suggestion.id, comments: [{ ...suggestion, replacement: null }] });
+			await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('.ct-input')).not.toBeNull());
+			expect(document.activeElement?.classList.contains('ct-input')).not.toBe(true);
+		} finally {
+			Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: original });
+		}
+	});
+	it('focuses Reply without turning input clicks into text navigation', async () => {
 		const onFocus = vi.fn();
 		render({ state: { kind: 'list' }, comments: [{ ...suggestion, replacement: null }], onFocus });
+		host.querySelector<HTMLButtonElement>('.ct-reply-open')!.click();
+		await vi.waitFor(() => expect(document.activeElement?.classList.contains('ct-input')).toBe(true));
 		host.querySelector<HTMLInputElement>('.ct-input')!.click();
 		expect(onFocus).not.toHaveBeenCalled();
 	});
@@ -189,6 +304,31 @@ describe('DocCommentSurface suggestions', () => {
 			expect(restoreFocus).toHaveBeenCalledOnce();
 			expect(documentEscape).not.toHaveBeenCalled();
 		} finally { window.removeEventListener('keydown', documentEscape); }
+	});
+
+	it('keeps the comments sheet on screen through its outro however the surface closes, then removes it once', async () => {
+		const state = writable<{ kind: 'list' } | null>(null);
+		const live = fromStore(state);
+		const onClose = vi.fn(() => state.set(null));
+		render({ get state() { return live.current; }, narrow: true, comments: [{ ...suggestion, replacement: null }], onClose });
+		const sheets = () => document.body.querySelectorAll('[data-adaptive-drawer] [data-doc-comments-drawer]');
+		const close = {
+			header: () => document.body.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click(),
+			// The image viewer's Escape, in the capture phase, clears the state without going through the sheet.
+			outside: () => state.set(null),
+		};
+		for (const [path, run] of Object.entries(close)) {
+			onClose.mockClear();
+			state.set({ kind: 'list' }); flushSync();
+			expect(sheets(), path).toHaveLength(1);
+			run(); flushSync();
+			// Still mounted, rows and all, while the drawer plays its outro.
+			expect(sheets(), path).toHaveLength(1);
+			expect(document.body.querySelector('[data-doc-comments-drawer] [data-comment-id="comment-1"]'), path).not.toBeNull();
+			await vi.waitFor(() => expect(sheets(), path).toHaveLength(0));
+			// The outro's end does not close the surface a second time.
+			expect(onClose, path).toHaveBeenCalledTimes(path === 'header' ? 1 : 0);
+		}
 	});
 
 	it('flushes, applies, re-seeds and reloads after accept', async () => {
@@ -447,5 +587,64 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		expect(groups.onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'b' }), { id: 'b', move: true });
 		host.querySelector<HTMLButtonElement>('[data-comment-id="a"] .ct-num')!.click();
 		expect(onFocus).toHaveBeenCalledWith('a');
+	});
+
+	it('keeps a thread being replied to in the Open list when someone else resolves it, until the reply is cleared', async () => {
+		const plain = { ...suggestion, replacement: undefined, acked: false };
+		const comments = writable([plain, { ...plain, id: 'comment-2', anchor: 'other text' }]);
+		const state = fromStore(comments);
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		render({ state: { kind: 'list' }, get comments() { return state.current; } });
+		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.reply')!.click();
+		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
+		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+		expect(host.querySelector('.drawer-heading')?.textContent).toContain('2 open');
+		// A resolved thread also reads as agreed; the kept card must still show the reply being typed, not "Agreed".
+		const eased: Array<[Element, number]> = [];
+		const animate = vi.spyOn(Element.prototype, 'animate').mockImplementation(function (this: Element, keyframes: Keyframe[] | PropertyIndexedKeyframes | null) {
+			eased.push([this, Array.isArray(keyframes) ? keyframes.length : 0]);
+			return { cancel() {}, finish() {}, addEventListener() {}, removeEventListener() {}, currentTime: 0, playState: 'finished', finished: Promise.resolve() } as unknown as Animation;
+		});
+		comments.set([{ ...plain, resolved: true, acked: true }, { ...plain, id: 'comment-2', anchor: 'other text' }]); flushSync();
+		const card = host.querySelector<HTMLElement>('[data-comment-id="comment-1"]')!;
+		expect(card).not.toBeNull();
+		expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('half a reply');
+		// The header counts threads that are open, as the document's chip does: the kept card says it is resolved and is not counted.
+		expect(host.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+		// It no longer offers what a resolved thread cannot do, says what Send does, and offers Re-open.
+		// The note enters, and Agree and Resolve leave, by easing (clip and fade) rather than in one frame.
+		const easedNodes = eased.map(([node]) => node);
+		expect(easedNodes).toContain(card.querySelector('[data-resolved-note]')!.parentElement);
+		expect(easedNodes).toContain(card.querySelector('[aria-label="Resolve"]'));
+		expect(easedNodes).toContain(card.querySelector('.ct-act.ack'));
+		animate.mockRestore();
+		expect(card.querySelector('.ct-agreed')).toBeNull();
+		expect(card.querySelector('[data-resolved-note]')?.textContent).toContain('Send adds your reply; the thread stays resolved.');
+		expect(card.querySelector('[data-resolved-note] .reopen')?.textContent).toBe('Re-open');
+		const cleared = card.querySelector<HTMLTextAreaElement>('textarea')!;
+		cleared.value = ''; cleared.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+		// It eases out (still mounted, as the card, while it does) and is removed once the ease is done.
+		expect(host.querySelector('[data-comment-id="comment-1"]')).not.toBeNull();
+		expect(host.querySelector('[data-comment-id="comment-1"] [data-resolved-note]')).not.toBeNull();
+		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"]')).toBeNull());
+		expect(host.querySelector('[data-comment-id="comment-2"]')).not.toBeNull();
+		expect(host.querySelector('.drawer-heading')?.textContent).toContain('1 open');
+	});
+
+	it('Re-open on the kept card reopens the thread and keeps the reply', async () => {
+		const plain = { ...suggestion, replacement: undefined };
+		const comments = writable([plain]);
+		const state = fromStore(comments);
+		const onResolve = vi.fn();
+		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+		render({ state: { kind: 'list' }, get comments() { return state.current; }, onResolve });
+		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.reply')!.click();
+		await vi.waitFor(() => expect(host.querySelector('[data-comment-id="comment-1"] textarea')).not.toBeNull());
+		const field = host.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
+		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
+		comments.set([{ ...plain, resolved: true }]); flushSync();
+		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] [data-resolved-note] .reopen')!.click();
+		expect(onResolve).toHaveBeenCalledWith('comment-1', false);
 	});
 });

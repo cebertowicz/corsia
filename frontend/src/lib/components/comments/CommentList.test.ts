@@ -17,6 +17,7 @@ it('holds document order through focus changes inside a card and updates after l
 	flushSync();
 	component.$set({ comments: [b, a] }); flushSync();
 	expect(ids()).toEqual(['a', 'b']);
+	host.querySelector<HTMLButtonElement>('[data-comment-id="a"] .ct-reply-open')!.click(); flushSync();
 	host.querySelector<HTMLInputElement>('[data-comment-id="a"] .ct-input')!.focus(); flushSync();
 	expect(ids()).toEqual(['a', 'b']);
 	const outside = document.createElement('button'); host.appendChild(outside); outside.focus(); flushSync();
