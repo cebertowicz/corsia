@@ -100,6 +100,8 @@ it('writes nothing for a tab with no local edit: remote text alone rebaselines t
 	vi.useFakeTimers();
 	try {
 		setup();
+		// Opening syncs the tab's state; the lane's ack of that sync makes an unedited tab clean.
+		session.sync(); ack(frames);
 		expect(await flushDraft(target)).toBe(true);
 		remote(' from an agent');
 		await vi.advanceTimersByTimeAsync(700);
@@ -123,6 +125,23 @@ it('re-saves while the tab holds an unacknowledged local transaction, and ends o
 	expect(await within(closing)).toBe(true);
 	expect(flushes()).toHaveLength(2);
 	expect(existingDraft(target)).toMatchObject({ status: 'saved' });
+});
+it('keeps re-saving when a flush lands before the lane acks the edit, and closes only once the ack arrives', async () => {
+	setup(); session.sync(); ack(frames); edit();
+	const onClose = vi.fn();
+	const closing = closeTabWithSaveGate(target, { onClose, onBringIntoView: vi.fn() });
+	await vi.waitFor(() => expect(flushes()).toHaveLength(1));
+	// The flush lands, but no ack names the edit (for example, its sync was refused on a full backlog).
+	session.handle({ type: 'doc_saved', artifact_id: 'artifact', store_id: 'store', request_id: flushes()[0].request_id,
+		server_saved: true, digest: await textDigest(''), pending: false, held: null });
+	await vi.waitFor(() => expect(flushes()).toHaveLength(2));
+	expect(existingDraft(target)).toMatchObject({ editText: '', savedText: 'base', status: 'saving' });
+	expect(await within(closing)).toBe('still open');
+	expect(onClose).not.toHaveBeenCalled();
+	await complete();
+	expect(await within(closing)).toEqual({ closed: true });
+	expect(onClose).toHaveBeenCalledOnce();
+	expect(flushes()).toHaveLength(2);
 });
 
 it('retries an offline local edit through the queue after the live session reopens', async () => {

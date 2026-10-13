@@ -67,6 +67,10 @@ async function serverOpen(artifact: string) {
 	emit('doc_opened', { type: 'doc_opened', live: true, writable: true, artifact_id: artifact, store_id: `store-${artifact}`,
 		request_id: request.request_id, update: encodeUpdate(Y.encodeStateAsUpdate(server)), vector: encodeUpdate(Y.encodeStateVector(server)), pending: false, held: null });
 	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toBe(texts[artifact]));
+	// The lane commits the open's sync and acks it, as it acks every message it receives.
+	const synced = wire.frames.filter(frame => frame.type === 'doc_sync' && frame.artifact_id === artifact);
+	expect(synced.length).toBeGreaterThan(0);
+	emit('doc_ack', { type: 'doc_ack', artifact_id: artifact, store_id: `store-${artifact}`, message_ids: synced.map(frame => frame.message_id) });
 }
 
 describe('a return to a document tab with no edit', () => {

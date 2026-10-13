@@ -87,7 +87,11 @@ describe('closing a document tab closes its live binding', () => {
 
 	it('closes a tab with no unwritten edit without a flush: the close sync and doc_close go at once', async () => {
 		connectionState.set('connected'); stop = startLiveDocuments();
-		const { tab, target } = await openTab();
+		const { tab, target, session } = await openTab();
+		// The lane commits the open's sync and acks it, as it acks every message it receives.
+		emit('doc_ack', { type: 'doc_ack', artifact_id: 'artifact', store_id: 'store',
+			message_ids: wire.frames.flatMap(frame => frame.type === 'doc_sync' ? [frame.message_id] : []) });
+		await vi.waitFor(() => expect(session.durability.clean).toBe(true));
 		const closing = closeTabWithSaveGate(target, { onClose: vi.fn(), onBringIntoView: vi.fn() });
 		expect(await closing).toEqual({ closed: true });
 		expect(wire.frames.filter(frame => frame.type === 'doc_flush')).toEqual([]);
