@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Protocol
 
+from loguru import logger
+
 from automation.continuation import admission, execution, state, triggers
 from automation.continuation.sources.feedback_batches import FeedbackBatchSource
 from automation.continuation.sources.harvest import HarvestSource
@@ -72,10 +74,18 @@ def _prepare(now: str, sources: list[TriggerSource], db) -> list[str]:
     Returns the threads those writes gave a plan wake, for the sweep to drive.
     """
     woken: list[str] = []
+    shared_db = db if db is not None else get_db()
     for source in sources:
         prepare = getattr(source, "prepare", None)
         if callable(prepare):
-            woken.extend(prepare(now, db=db) or ())
+            try:
+                woken.extend(prepare(now, db=db) or ())
+            except Exception:
+                logger.exception(
+                    "continuation {} source prepare failed", source.kind,
+                )
+                if shared_db.in_transaction:
+                    shared_db.rollback()
     return woken
 
 
@@ -87,11 +97,16 @@ def _collect(
 ):
     """Derive source requests before atomically enqueueing their triggers."""
     read_db = db if db is not None else get_db()
-    requests = [
-        (request, source)
-        for source in sources
-        for request in source.due(now, db=read_db)
-    ]
+    requests = []
+    for source in sources:
+        try:
+            requests.extend(
+                (request, source) for request in source.due(now, db=read_db)
+            )
+        except Exception:
+            logger.exception("continuation {} source due failed", source.kind)
+            if read_db.in_transaction:
+                read_db.rollback()
     rows = []
     with write_transaction(db, scope="continuation_collect") as connection:
         for request, source in requests:

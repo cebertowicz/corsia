@@ -5,6 +5,7 @@ from contextlib import closing
 from datetime import datetime, timedelta
 import asyncio
 import sqlite3
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -34,6 +35,25 @@ class TransactionProbeSource(Source):
     def due(self, now, *, db):
         self.transaction_states.append(db.in_transaction)
         return super().due(now, db=db)
+
+
+class RaisingPrepareSource:
+    kind = "raising_prepare"
+
+    def prepare(self, _now, *, db):
+        db.execute("INSERT INTO continuation_markers VALUES ('failed prepare')")
+        raise RuntimeError("prepare failed")
+
+    def due(self, _now, *, db):
+        return []
+
+
+class RaisingDueSource:
+    kind = "raising_due"
+
+    def due(self, _now, *, db):
+        db.execute("INSERT INTO continuation_markers VALUES ('failed due')")
+        raise RuntimeError("due failed")
 
 
 class FailCommit:
@@ -169,6 +189,54 @@ async def test_sweep_commits_claim_before_delivery_and_source_with_outcome(conti
     assert stored(continuation_db) == ([("settled",)], [("delivered", 1)])
     assert not db.in_transaction
     writer_available(continuation_db)
+
+
+@pytest.mark.asyncio
+async def test_sweep_skips_raising_prepare_source_and_runs_later_source(
+    continuation_db, monkeypatch,
+):
+    db = database.get_db()
+    logger = MagicMock()
+    monkeypatch.setattr(runner, "logger", logger)
+
+    result = await runner.sweep(
+        NOW,
+        db=db,
+        sources=[RaisingPrepareSource(), Source()],
+        is_idle=lambda _thread: True,
+        deliver=AsyncMock(return_value=True),
+    )
+
+    assert result["woken"] == ["owner"]
+    assert stored(continuation_db) == ([("settled",)], [("delivered", 1)])
+    assert not db.in_transaction
+    logger.exception.assert_called_once_with(
+        "continuation {} source prepare failed", "raising_prepare",
+    )
+
+
+@pytest.mark.asyncio
+async def test_sweep_skips_raising_due_source_and_runs_later_source(
+    continuation_db, monkeypatch,
+):
+    db = database.get_db()
+    logger = MagicMock()
+    monkeypatch.setattr(runner, "logger", logger)
+
+    result = await runner.sweep(
+        NOW,
+        db=db,
+        sources=[RaisingDueSource(), Source()],
+        is_idle=lambda _thread: True,
+        deliver=AsyncMock(return_value=True),
+    )
+
+    assert result["woken"] == ["owner"]
+    assert stored(continuation_db) == ([("settled",)], [("delivered", 1)])
+    assert not db.in_transaction
+    logger.exception.assert_called_once_with(
+        "continuation {} source due failed", "raising_due",
+    )
 
 
 @pytest.mark.asyncio
