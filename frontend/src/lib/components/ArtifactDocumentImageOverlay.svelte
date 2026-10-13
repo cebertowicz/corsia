@@ -3,10 +3,13 @@
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
-	import type { OpenDocumentImage } from '$lib/stores/documentImageViewer';
+	import type { DocumentImageComments } from '$lib/docViewerImages';
+	import type { TabDocumentImage } from '$lib/stores/tabViewState';
 
-	let { image, target, place = null, onBack, onPlace }: {
-		image: OpenDocumentImage;
+	let { image, comments, target, place = null, onBack, onPlace }: {
+		image: TabDocumentImage;
+		/** From the document under the image as it is now; none when it cannot hold comments. */
+		comments?: DocumentImageComments;
 		target: DocViewerTarget;
 		place?: ImageViewportPlace | null;
 		onBack: () => void;
@@ -15,10 +18,10 @@
 </script>
 
 <div class="image-overlay">
-	{#if image.comments}
-		{@const comments = image.comments}
-		<!-- Keyed on the image, so opening another one starts its comments afresh. -->
-		{#key `${image.src}\u0000${image.focus?.id ?? ''}`}
+	<!-- Keyed on the tab and the image, so opening another one starts its comments afresh, and another tab's (even
+	     of the same image) starts at that tab's own camera. -->
+	{#key `${target.instanceId}\u0000${image.src}\u0000${image.focus?.id ?? ''}`}
+		{#if comments}
 			<ImageCommentLightbox
 				src={image.src}
 				alt={image.alt}
@@ -37,10 +40,10 @@
 				{place}
 				{onPlace}
 			/>
-		{/key}
-	{:else}
-		<ImageLightbox src={image.src} alt={image.alt} docName={target.name} {onBack} {place} {onPlace} />
-	{/if}
+		{:else}
+			<ImageLightbox src={image.src} alt={image.alt} docName={target.name} {onBack} {place} {onPlace} />
+		{/if}
+	{/key}
 </div>
 
 <style>

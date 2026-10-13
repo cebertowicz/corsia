@@ -11,8 +11,7 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
-	import { createDocViewerImages } from '$lib/docViewerImages';
-	import type { DocumentImageRequest } from '$lib/stores/documentImageViewer';
+	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
 	import { docOpenRefusal, ImageFileError, type DocOpenRefusal } from '$lib/docOpenRefusal';
@@ -148,6 +147,8 @@
 		onOpenImage: () => onOpenImage, root: () => docRoot, comments: () => listedComments, artifactId: () => loadedArtifactId,
 		target: () => target, readOnly: () => readonly, text: () => editText, session: () => liveSession, accent: () => accent,
 		feedback: () => feedbackStatus?.feedback(), showInText: focusInText });
+	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
+	export function imageComments() { return images.comments(); }
 	function focusInText(id: string, placement?: 'top') { setCommentScrollTarget(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); focusedDocComment.set(id); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }

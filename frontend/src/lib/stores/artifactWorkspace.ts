@@ -1,16 +1,15 @@
 import { writable, get } from 'svelte/store';
 import {
 	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, openTab,
-	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus, type ImageViewportPlace,
+	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus,
 	type OpenArtifactInput, openLegacyDiscussionTab, type OpenLegacyDiscussionInput,
 	openSubagentTab, type OpenSubagentInput, type RevisionCheck, type TabLoadSignal,
 	type ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
-import type { TextDocumentPlace } from '$lib/documentImagePlace';
-import type { OpenDocumentImage } from '$lib/stores/documentImageViewer';
 import { clearDraft, existingDraft } from '$lib/stores/docSaveQueue';
 import { closeLiveDocument } from '$lib/stores/liveDocuments';
 import { token } from '$lib/stores/auth';
+import { clearTabViewState } from '$lib/stores/tabViewState';
 
 export {
 	emptyWorkspace, tabKey, getActiveTab, isTabChanged, hasChangedTab,
@@ -21,65 +20,6 @@ export type {
 } from '$lib/artifactTabs';
 
 const STORAGE_KEY = 'corsia:artifactWorkspace:v1';
-
-export type TabViewState = {
-	documentPlace?: TextDocumentPlace;
-	imagePlace?: ImageViewportPlace;
-	documentImage?: { request: OpenDocumentImage; place?: ImageViewportPlace };
-};
-
-// Tab camera/place is intentionally outside the serialized workspace: it is per tab instance and dies on close/reload.
-const tabViewStates = new Map<string, TabViewState>();
-
-function tabViewKey(threadId: string, instanceId: string): string {
-	return `${threadId}\u0000${instanceId}`;
-}
-
-export function tabViewState(threadId: string, instanceId: string): TabViewState | null {
-	return tabViewStates.get(tabViewKey(threadId, instanceId)) ?? null;
-}
-
-export function recordTabDocumentPlace(threadId: string, instanceId: string, place: TextDocumentPlace): void {
-	const key = tabViewKey(threadId, instanceId);
-	tabViewStates.set(key, { ...tabViewStates.get(key), documentPlace: { ...place } });
-}
-
-export function recordTabImagePlace(threadId: string, instanceId: string, place: ImageViewportPlace): void {
-	const key = tabViewKey(threadId, instanceId);
-	tabViewStates.set(key, { ...tabViewStates.get(key), imagePlace: { ...place } });
-}
-
-export function saveTabDocumentImage(threadId: string, image: OpenDocumentImage): void {
-	const key = tabViewKey(threadId, image.instanceId);
-	const current = tabViewStates.get(key);
-	tabViewStates.set(key, {
-		...current,
-		documentImage: { request: image, place: current?.documentImage?.place },
-	});
-}
-
-export function recordTabDocumentImagePlace(threadId: string, instanceId: string, place: ImageViewportPlace): void {
-	const key = tabViewKey(threadId, instanceId);
-	const current = tabViewStates.get(key);
-	if (!current?.documentImage) return;
-	tabViewStates.set(key, {
-		...current,
-		documentImage: { ...current.documentImage, place: { ...place } },
-	});
-}
-
-export function clearTabDocumentImage(threadId: string, instanceId: string): void {
-	const key = tabViewKey(threadId, instanceId);
-	const current = tabViewStates.get(key);
-	if (!current?.documentImage) return;
-	const { documentImage: _image, ...rest } = current;
-	if (Object.keys(rest).length) tabViewStates.set(key, rest);
-	else tabViewStates.delete(key);
-}
-
-function clearTabViewState(threadId: string, instanceId: string): void {
-	tabViewStates.delete(tabViewKey(threadId, instanceId));
-}
 
 interface PersistedShape {
 	threads: Record<string, ThreadArtifactWorkspace>;

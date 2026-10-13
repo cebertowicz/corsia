@@ -1,6 +1,6 @@
 import { tick } from 'svelte';
 import { EditorView } from '@codemirror/view';
-import type { OpenDocumentImage } from '$lib/stores/documentImageViewer';
+import type { OpenImageRequest } from '$lib/cm/markdown-image';
 
 /** A document position and its viewport distance, stable across CodeMirror re-measurement. */
 export interface TextDocumentPlace {
@@ -63,7 +63,7 @@ export function captureDocumentPlace(root: HTMLElement | undefined): TextDocumen
  */
 export async function restoreDocumentPlace(
 	root: HTMLElement | undefined,
-	place: OpenDocumentImage | TextDocumentPlace,
+	place: OpenImageRequest | TextDocumentPlace,
 	options: RestoreDocumentPlaceOptions = {},
 ): Promise<void> {
 	await tick();

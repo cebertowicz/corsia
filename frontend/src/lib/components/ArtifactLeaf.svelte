@@ -10,9 +10,7 @@
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { pushBackLayer } from '$lib/historyBackLayer';
-	import {
-		closeDocumentImage, documentImageViewers, openDocumentImage, type DocumentImageRequest,
-	} from '$lib/stores/documentImageViewer';
+	import type { DocumentImageRequest } from '$lib/docViewerImages';
 	import { widenForImageViewer } from '$lib/imageViewerPane';
 	import { restoreDocumentPlace, type RestoreDocumentPlaceOptions, type TextDocumentPlace } from '$lib/documentImagePlace';
 	import { uiScope } from '$lib/stores/uiScope';
@@ -21,9 +19,11 @@
 	import {
 		threadWorkspaces, emptyWorkspace, getActiveTab, isTabChanged, type ArtifactTab,
 		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved,
-		tabViewState, recordTabDocumentPlace, recordTabImagePlace, saveTabDocumentImage,
-		recordTabDocumentImagePlace, clearTabDocumentImage,
 	} from '$lib/stores/artifactWorkspace';
+	import {
+		tabViewState, tabDocumentImage, recordTabDocumentPlace, recordTabImagePlace, openTabDocumentImage,
+		recordTabDocumentImageCamera, clearTabDocumentImage,
+	} from '$lib/stores/tabViewState';
 	import {
 		abandonArtifactOpen, beginArtifactOpen, failArtifactOpen, markArtifactRendered,
 	} from '$lib/openTimingRuntime';
@@ -83,47 +83,28 @@
 		});
 	}
 
-	// An image of the open document shown larger. The document stays mounted beneath it, so closing the viewer
-	// returns to the same live document; the viewer belongs to the tab it was opened from.
-	const shownImage = $derived(threadId && target ? ($documentImageViewers[threadId] ?? null) : null);
-	const savedImage = $derived(threadId && target ? tabViewState(threadId, target.instanceId)?.documentImage ?? null : null);
-	const displayedImage = $derived(shownImage ?? savedImage?.request ?? null);
-	const imageOpen = $derived(displayedImage !== null && displayedImage.instanceId === target?.instanceId);
+	// An image of the open document shown larger. Its tab's view state is the one record of it and its camera, so a
+	// tab switch keeps it with its tab. The document stays mounted beneath it, so closing it returns to the same live
+	// document; its comments are taken from that document each time it shows, never kept with the image.
+	const shownImage = $derived(threadId && target ? tabDocumentImage(threadId, target.instanceId) : null);
+	const imageOpen = $derived(shownImage !== null && mode !== 'rail');
+	const imageComments = $derived(imageOpen && viewer ? viewer.imageComments() : undefined);
 	function openImage(request: DocumentImageRequest) {
-		if (!threadId || !target) return;
-		const image = { ...request, instanceId: target.instanceId };
-		saveTabDocumentImage(threadId, image);
-		openDocumentImage(threadId, image);
+		if (threadId && target) openTabDocumentImage(threadId, target.instanceId, request);
 	}
 	function closeImage() {
-		const tid = threadId;
-		const image = displayedImage;
-		if (!tid || !image) return;
+		const image = shownImage;
+		if (!threadId || !target || !image) return;
 		restoringDocument = null;
-		clearTabDocumentImage(tid, image.instanceId);
-		closeDocumentImage(tid);
+		clearTabDocumentImage(threadId, target.instanceId);
 		restoreDocument(image);
 	}
-	// A tab switch hides the global overlay but keeps its tab-owned request and camera. Collapsing remains a close.
+	// Collapsing the pane to its rail closes the image; a tab switch, or leaving for chat, keeps it with its tab.
 	$effect(() => {
-		const tid = threadId;
-		const current = tid ? $documentImageViewers[tid] : null;
-		const saved = target && tid ? tabViewState(tid, target.instanceId)?.documentImage : null;
-		if (!tid) return;
-		if (current && (!imageOpen || mode === 'rail')) {
-			if (mode === 'rail' && current.instanceId === target?.instanceId) clearTabDocumentImage(tid, current.instanceId);
-			closeDocumentImage(tid);
-			return;
-		}
-		if (!current && target && mode !== 'rail' && saved) openDocumentImage(tid, saved.request);
+		const tid = threadId, instanceId = activeTab?.instanceId;
+		if (mode === 'rail' && tid && instanceId) untrack(() => clearTabDocumentImage(tid, instanceId));
 	});
-	$effect(() => {
-		const tid = threadId;
-		return () => {
-			documentRestore?.abort();
-			if (tid) closeDocumentImage(tid);
-		};
-	});
+	$effect(() => () => documentRestore?.abort());
 	$effect(() => {
 		if (!imageOpen || mode !== 'expanded') return;
 		return widenForImageViewer(untrack(() => leafEl?.getBoundingClientRect().width ?? 0));
@@ -197,8 +178,8 @@
 	function recordImagePlace(instanceId: string, place: ImageViewportPlace) {
 		if (threadId) recordTabImagePlace(threadId, instanceId, place);
 	}
-	function recordDocumentImagePlace(instanceId: string, place: ImageViewportPlace) {
-		if (threadId) recordTabDocumentImagePlace(threadId, instanceId, place);
+	function recordDocumentImageCamera(instanceId: string, camera: ImageViewportPlace) {
+		if (threadId) recordTabDocumentImageCamera(threadId, instanceId, camera);
 	}
 	function onSignal(signal: TabLoadSignal) {
 		if (signal.renderer) {
@@ -324,13 +305,15 @@
 						covered={imageOpen}
 					/>
 				</div>
-				{#if imageOpen && displayedImage}
+				<!-- Shown once the document under it is bound, so its comments come from that document from the first frame. -->
+				{#if imageOpen && shownImage && viewer}
 					<ArtifactDocumentImageOverlay
-						image={displayedImage}
+						image={shownImage}
+						comments={imageComments}
 						{target}
-						place={activeViewState?.documentImage?.place ?? null}
+						place={shownImage.camera ?? null}
 						onBack={closeImage}
-						onPlace={(place) => recordDocumentImagePlace(displayedImage.instanceId, place)}
+						onPlace={(camera) => recordDocumentImageCamera(target.instanceId, camera)}
 					/>
 				{/if}
 			{/if}

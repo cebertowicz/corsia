@@ -25,7 +25,8 @@ vi.mock('$lib/stores/liveDocuments', async (importOriginal) => ({
 }));
 
 import ArtifactLeaf from './ArtifactLeaf.svelte';
-import { threadWorkspaces, openArtifactTab, applyTabRevisionCheck, tabViewState } from '$lib/stores/artifactWorkspace';
+import { threadWorkspaces, openArtifactTab, applyTabRevisionCheck } from '$lib/stores/artifactWorkspace';
+import { tabViewState } from '$lib/stores/tabViewState';
 import { token } from '$lib/stores/auth';
 import { ImageFileError } from '$lib/docOpenRefusal';
 
