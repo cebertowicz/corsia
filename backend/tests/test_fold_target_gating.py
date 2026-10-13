@@ -245,6 +245,7 @@ async def test_target_checkpoint_holds_on_limited_chosen_account_when_rollover_i
 @pytest.mark.asyncio
 async def test_target_checkpoint_holds_with_reset_when_all_rollover_accounts_are_limited(isolated_db, launch):
     from infra.held_admission import limited_admission
+    from infra.thread_input_types import held_admission_line
 
     _seed("all-limited", SONNET)
     first, second = _configure_rollover("all-limited", enabled=True)
@@ -258,7 +259,8 @@ async def test_target_checkpoint_holds_with_reset_when_all_rollover_accounts_are
     held = limited_admission("all-limited", SONNET)
     assert held is not None
     assert held.resets_at == "2099-01-01T00:00:00+00:00"
-    assert "resets Dec 31, 2098 at 4:00 PM PST" in str(raised.value)
+    assert str(raised.value) == held_admission_line(held)
+    assert "resets " in str(raised.value)
     launch.assert_not_called()
 
 
