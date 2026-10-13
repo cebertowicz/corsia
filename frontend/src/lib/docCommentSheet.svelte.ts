@@ -28,7 +28,7 @@ export function createCommentSheet(props: {
 	let shownDraft: SheetDraft = null;
 	// The list is a sheet by the canvas-width rule; a card or the composer only on a narrow canvas.
 	const drawnAsSheet = (state: CommentSurfaceState) => !!state && (state.kind === 'list' ? props.sheetDrawer() : props.narrow());
-	$effect.pre(() => {
+	$effect(() => {
 		if (props.state() && props.sheetDrawer()) {
 			closingMobileState = null;
 			closingMobileDraft = null;

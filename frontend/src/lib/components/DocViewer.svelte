@@ -28,10 +28,10 @@
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
-		docSaveDrafts, draftKey, effectiveDraftTarget, existingDraft, seedDraft,
+		effectiveDraftTarget, existingDraft, seedDraft,
 		enrichDraftTarget, setDraftText, flushDraft,
 	} from '$lib/stores/docSaveQueue';
-	import { docSaveGhost } from '$lib/stores/docSaveGhost.svelte';
+	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
@@ -85,11 +85,7 @@
 	let suggestionBusyId = $state<string | null>(null);
 	let feedbackStatus = $state<DocViewerStatus>();
 
-	// Reactive save state for the currently loaded target, sourced from the
-	// per-tab-instance save queue — never a single shared "current doc" flag.
-	const currentDraftKey = $derived(target ? draftKey(target) : null);
-	const currentDraft = $derived(currentDraftKey ? $docSaveDrafts[currentDraftKey] : undefined);
-	const saveError = $derived(currentDraft?.status === 'error' ? currentDraft.error : '');
+	const save = createDocSaveState(() => target);
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
@@ -105,8 +101,6 @@
 		});
 	});
 
-	const saveGhost = docSaveGhost(() => currentDraft?.status);
-	const saveStatus = $derived(saveGhost.current);
 	const commentRetryToast = createCommentRetryToast(toasts);
 
 	let presenceRanges = $state<PresenceRange[]>([]);
@@ -114,9 +108,10 @@
 
 	// The comments pane derives orphaning from the text currently on screen (and a refused accept)
 	// so a comment never remains highlighted after an in-editor edit changes it.
-	$effect(() => syncActiveDocumentEditor({ target, draft: currentDraft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
+	$effect(() => syncActiveDocumentEditor({ target, draft: save.draft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
+	const headerCommentStatus = $derived(commentSurfaceStatus(listedComments));
 	let scrollTarget = $state<CanvasScrollTarget | null>(null);
 	$effect(() => {
 		const fc = focusedComment;
@@ -127,7 +122,8 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	const commentUI = createCommentSurfaceState(() => docRoot?.querySelector<HTMLElement>('.cm-content')?.focus(), () => targetKey);
-	const highlights = $derived(canvasCommentHighlights(listedComments, editText, commentUI.hovered ?? focusedComment, focusMarker, suggestionBusyId));
+	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
+	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
 	function setCommentScrollTarget(id: string, focus: boolean, origin: ScrollOrigin) {
 		scrollTarget = canvasCommentScrollTarget(listedComments, editText, id, focus, origin);
 	}
@@ -200,7 +196,7 @@
 		reloadDocumentFeedback(content.artifactId, seq, () => loadSeq, feedbackStatus);
 	}
 	$effect(() => {
-		if (!legacyAwaitingSave || !currentDraft || currentDraft.status !== 'saved') return;
+		if (!legacyAwaitingSave || !save.draft || save.draft.status !== 'saved') return;
 		legacyAwaitingSave = false;
 		reloadNonce += 1;
 	});
@@ -304,12 +300,12 @@
 		title={target?.name ?? 'Document'}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
-		{saveStatus}
+		saveStatus={save.status}
 		bind:this={feedbackStatus}
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !openRefusal}
-		{...commentSurfaceStatus(listedComments)}
+		{...headerCommentStatus}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
@@ -358,7 +354,7 @@
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
 		tabInstanceId={target?.instanceId ?? null}
 		{onDocumentPlace}
-		{saveError}
+		saveError={save.error}
 		pendingSel={draftController.pending}
 		commentSheetOpen={commentUI.sheetModalOpen}
 		onStartComment={draftController.start}
@@ -369,7 +365,7 @@
 		bounds={docRoot}
 		narrow={isPaneDrawer()}
 		comments={listedComments}
-		focusedId={commentUI.hovered ?? focusedComment}
+		focusedId={shownFocus}
 		draft={draftController.draft}
 		draftReason={draftController.reason}
 		onDraftBody={(body) => setCommentBody(body, targetKey)}
