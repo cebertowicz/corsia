@@ -1,16 +1,28 @@
+<h1 align="center">C.O.R.S.I.A.<br/><sub>Community-Orchestrated Recursive Self-Improving Agents</sub></h1>
+
+<h3 align="center">Agents that own your problems and improve themselves,<br/>measured on their results and your attention.</h3>
+
+<p align="center">Each owner sets KPIs for its problem, and CORSIA counts every minute it takes from you. The owner learns from both, to get better results for less of your time.</p>
+
 <p align="center">
-  <img src="desktop/dist-shell/corsia-mark.svg" width="96" alt="CORSIA mark">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-kpis-dark.png">
+    <img alt="CORSIA measurement: hours of work per hour of your attention, first-try rate, cost per hour of delivered work, your minutes per outcome and tokens" src="docs/measurement-kpis-light.png">
+  </picture>
 </p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-trend-dark.png">
+    <img width="49%" alt="Daily cost per hour of delivered work falling over two weeks" src="docs/measurement-trend-light.png">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-models-dark.png">
+    <img width="49%" alt="Cost per task and first-try rate for each model, by task size" src="docs/measurement-models-light.png">
+  </picture>
+</p>
+<p align="center"><sub>Measured on the install that builds CORSIA, October 2 to 8.</sub></p>
 
-<h1 align="center">CORSIA</h1>
-
-<p align="center"><strong>Community-Orchestrated Recursive Self-Improving Agents</strong></p>
-
-<h3 align="center">AI agents that need less of your attention,<br/>and prove they're doing a better job.</h3>
-
-<p align="center">CORSIA measures the time each agent takes from you. Every agent's default goals are to bring that down and to improve its results over time.</p>
-
-<p align="center">Self-hosted on your Apple Silicon Mac, on the Claude Code and Codex subscriptions, APIs and local models you already use.</p>
+<p align="center"><strong>CORSIA improves itself the same way.</strong> Its own agents build and maintain it: <a href="#built-by-its-own-agents">962 pull requests in 30 days</a>, under one maintainer.</p>
 
 <p align="center">
   <img alt="macOS only" src="https://img.shields.io/badge/platform-macOS_only-000000?logo=apple&logoColor=white">
@@ -31,17 +43,13 @@
   <a href="#questions">Questions</a>
 </p>
 
-![CORSIA Activity view: owner agents in a project, each with its current work and the steps left in its plan](docs/activity.png)
-
 ## How it works
 
 Most agents do what you ask and remember more each time. A CORSIA agent answers for a result instead: it is measured on it, checked by an agent other than itself where it matters, and keeps a lesson only while the lesson earns its place.
 
-**Pick a problem and let an agent own it.** That agent is its **owner**, and it answers for a measurable outcome: your time, for an assistant that takes email, scheduling and follow-ups off your week; bugs that reach users; new users who quit during setup. It sets the KPIs for its area and owns them (being added), on top of the two goals every owner starts with: less of your time, better results. It carries work from decision to verified result, hands bounded steps to **temporary workers**, and messages other owners directly. Each deliverable has one accountable owner.
+**Pick a problem and let an agent own it.** That agent is its **owner**, and it answers for a measurable outcome: your time, for an assistant that takes email, scheduling and follow-ups off your week; bugs that reach users; new users who quit during setup. It sets the KPIs for its problem and answers for them, on top of the two goals every owner starts with: less of your time, better results. Recording those KPIs beside CORSIA's own measures is being added. It carries work from decision to verified result, hands bounded steps to **temporary workers**, and messages other owners directly. Each deliverable has one accountable owner.
 
-Anything measured can be gamed, by agents as much as by people. So every owner is measured on the cost of its own shortcuts: rework and your corrections, taken from the work itself rather than from its own grading. When an outcome matters too much for its owner to be the only check, a separate agent owns the check. That is when you need a **project**: owners whose areas check or pull against each other, such as a builder that wants to ship and a reviewer that owns what slips through. The project's **coordination model** says how they work together: who owns what, how work moves, what "done" means and when you are asked.
-
-A **conductor** sets this up with you and keeps improving it. Every install starts with one, and each project gets its own. [A default coordination model](docs/coordination-models/corsia-default/) ships with CORSIA.
+Anything measured can be gamed, by agents as much as by people. So every owner is measured on the cost of its own shortcuts: rework and your corrections, taken from the work itself rather than from its own grading. When an outcome matters too much for its owner to be the only check, a separate agent owns the check. That is one reason for a **project**: owners whose areas check or pull against each other, such as a builder that wants to ship and a reviewer that owns what slips through. The project's **coordination model** says how they work together: who owns what, how work moves, what "done" means and when you are asked. [A default one](docs/coordination-models/corsia-default/) ships with CORSIA.
 
 ```mermaid
 flowchart TD
@@ -57,6 +65,19 @@ flowchart TD
     G -->|loaded every turn| O
 ```
 
+### Scopes
+
+Owners answer for outcomes; **conductors** answer for the way of working: who owns what, the context and skills each owner gets, and the coordination model. Every agent receives the workspace's context and its own project's on every turn, and never another project's.
+
+| Scope | Holds | Kept by |
+|---|---|---|
+| **Workspace** | Rules for everything you run, such as which models agents may use, and owners that don't need a project | The **workspace conductor**, which every install starts with |
+| **Project** | One body of work: its purpose, rules, reference documents, skills, coordination model and owners | Its own **project conductor**, created with the project |
+| **Owner** | Its responsibility, authority, plan and lessons | The owner; changes to its scope go through the conductor |
+| **Worker** | One bounded step and its brief, under its owner's authority | The owner that sent it |
+
+Start a project when work needs context of its own, such as a codebase, a client or a rulebook that other owners shouldn't load, or owners that check each other.
+
 ## How you know it's working
 
 Asking for less of your attention is only safe with proof that the work is getting better. Fewer of your minutes with worse results is a worse team, not a better one. So CORSIA measures both sides for every owner, the same way in every project, with no setup. The same numbers show whether a new model helped or quietly got worse; the same check for a new skill or rule is being added.
@@ -67,16 +88,6 @@ Asking for less of your attention is only safe with proof that the work is getti
 - **Each owner on its own KPIs** (being added). Every owner keeps KPIs for the area it owns, such as bugs that reach users, for an owner of release quality, or hours of your week spent on email and meetings, for an assistant. Owners record those outcomes as they happen, and any project can send its own OpenTelemetry events, so an area's health sits beside the built-in measures.
 - **Lessons expire unless they earn their place.** Most agent memory only grows. When a CORSIA owner learns from a correction or a failure, it writes a short trial: the evidence, when the lesson applies and when it doesn't, and a review date. The trial loads until that date. Then the owner keeps, revises or retires it, with a report of which turns received and read each version. Being added: a comparison of tasks that received the lesson with similar tasks that didn't, so the review sees whether it helped, not only who saw it (the dashed line above). A retired lesson stops loading and keeps its history. Your own instructions are never trials and never expire.
 - **The conductor acts on what moved.** It revises the coordination model, context and skills from what the measurements show, and recommends a new owner when an area outgrows the one that has it. Each change is versioned with its reason. Being added: the trends mark when guidance changed, so a shift in the numbers lines up with its cause.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-headline-dark.png">
-  <img alt="CORSIA measurement dashboard: hours of work per hour of your attention, first-try rate, cost per hour of delivered work, your minutes per outcome and tokens" src="docs/measurement-headline-light.png">
-</picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/measurement-cost-dark.png">
-  <img alt="Daily cost per hour of delivered work falling over two weeks, with cost, first-try rate and token share by model" src="docs/measurement-cost-light.png">
-</picture>
 
 ## What it asks of you
 
@@ -90,7 +101,11 @@ Decisions and results, not transcripts. Every agent you add is another stream to
 
 ![A user requests a review from three AI agents, who join the document and edit, comment and suggest changes live alongside the user](docs/live-review.gif)
 
-<p align="center"><img src="docs/phone-plan.png" width="300" alt="An owner's structured plan on the phone app: a parent step with its status, working and waiting time and tokens, and child steps that are working, awaiting review, or waiting on a dependency"></p>
+<p align="center">
+  <img src="docs/activity.png" width="71%" alt="CORSIA Activity view: owner agents in a project, each with its current work and the steps left in its plan">
+  <img src="docs/phone-plan.png" width="25%" alt="An owner's structured plan on the phone app: a parent step with its status, working and waiting time and tokens, and child steps that are working, awaiting review, or waiting on a dependency">
+</p>
+<p align="center"><sub>Every owner and its plan, on your Mac and on your phone.</sub></p>
 
 CORSIA is for people willing to let agents make mistakes and learn from them, **not** for anyone who wants to approve every step.
 
@@ -226,13 +241,7 @@ All three patches passed, and CORSIA's loop used the fewest model calls: 42% few
 <details>
 <summary><strong>How do I give agents instructions?</strong></summary>
 
-<br/>Write each instruction once, at the level it applies to. Every agent receives the levels that cover it on every turn, in any harness. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
-
-| Level | Put here | How |
-|---|---|---|
-| Workspace | Rules for everything, such as which models may be used | **Workspace settings → Create new context file** |
-| Project | The project's purpose, rules and reference material | **Project settings → Create new context file** |
-| Owner | Its responsibilities, authority and notes | The owner keeps this file current; scope changes go through the conductor |
+<br/>Write each instruction once, at the [scope](#scopes) it applies to: **Workspace settings → Create new context file** for everything, **Project settings → Create new context file** for one project. Each owner keeps its own file current. Every harness receives the same files. You rarely write them yourself: on the install that builds CORSIA, the team maintains almost all of its own context files.
 
 **Skills** are procedures an agent loads when its task matches. Add one as `skills/<name>/SKILL.md` at any level.
 
@@ -263,7 +272,7 @@ Every turn shows what the agent loaded, by source and size. A context file in th
 
 **Ownership and plans**
 - [x] Owner agents with their own notes, authority, success measures and plans
-- [x] A workspace conductor, plus optional project conductors
+- [x] A workspace conductor, and a conductor for each project
 - [x] Temporary workers for bounded steps, checked by the owner that sent them
 - [x] Owners that message each other directly
 - [x] Acceptance criteria and evidence on every step; dependencies, deadlines and decisions with a recommendation
