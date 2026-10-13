@@ -460,6 +460,15 @@ def test_usage_verdict_handles_vendor_windows(report, expected):
     assert usage_verdict(report)["verdict"] == expected
 
 
+def test_usage_verdict_distinguishes_unavailable_malformed_and_absent_reports():
+    unavailable = usage_verdict(_report({}, available=False))
+    malformed = usage_verdict({"rate_limits_available": True, "rate_limits": None})
+    absent = usage_verdict(None)
+    assert unavailable["error"] == "Claude Code reports plan usage unavailable for this account"
+    assert malformed["error"] == "Claude Code returned malformed plan usage"
+    assert absent["error"] == "Claude Code returned no usage report"
+
+
 def test_usage_verdict_keeps_latest_reset_when_known():
     verdict = usage_verdict(_report({"five_hour": {"utilization": 100, "resets_at": 42}}))
     assert verdict["resets_at"] == "1970-01-01T00:00:42+00:00"
@@ -1062,13 +1071,15 @@ async def test_a_new_login_during_the_prior_logins_read_is_read_when_it_ends(mon
 
     logins, release, prior_running = iter(["prior-login", "new-login"]), asyncio.Event(), asyncio.Event()
     read_for = []
-    monkeypatch.setattr(checks, "_capture", lambda provider, account_id: (next(logins), True))
-    async def read(provider, receipt):
+    monkeypatch.setattr(checks, "_capture", lambda provider, account_id: SimpleNamespace(receipt=next(logins), is_default=True))
+    monkeypatch.setattr(checks, "_binary_for", lambda _provider: asyncio.sleep(0, result="/synthetic/claude"))
+    async def read(_binary, receipt, *, context=None):
+        assert context is None
         read_for.append(receipt)
         if receipt == "prior-login":
             prior_running.set()
             await release.wait()
-    monkeypatch.setattr(checks, "_check_added", read)
+    monkeypatch.setattr(checks, "_check_claude", read)
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
     submitted = []
     monkeypatch.setattr(app_loop, "submit", lambda coro: submitted.append(asyncio.ensure_future(coro)))
