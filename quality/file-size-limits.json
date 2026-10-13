@@ -39,7 +39,7 @@
     "backend/reviewer/on_pr_review.py": 463,
     "backend/subagents/child_thread.py": 637,
     "backend/subagents/codex_app_server.py": 929,
-    "backend/subagents/codex_runtime.py": 2364,
+    "backend/subagents/codex_runtime.py": 2343,
     "backend/subagents/codex_runtime_events.py": 718,
     "backend/tools/delegation.py": 507,
     "backend/tools/filesystem_effects.py": 659,

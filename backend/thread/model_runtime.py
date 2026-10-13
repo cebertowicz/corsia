@@ -89,6 +89,7 @@ async def _transition_claude_runtime(
     expected_context_usage_floor: int | float | None,
     preserve_thread: bool,
     broadcast,
+    operation_id: str | None,
 ) -> bool:
     if not preserve_thread or getattr(
         destination_target, "harness", None,
@@ -97,6 +98,7 @@ async def _transition_claude_runtime(
             thread_id,
             expected_owner=expected_owner,
             broadcast=broadcast,
+            operation_id=operation_id,
         )
     transitioned = await runtime.retarget_if_current(
         thread_id,
@@ -108,13 +110,14 @@ async def _transition_claude_runtime(
     if transitioned:
         return True
     log.warning(
-        "Claude Code model retarget refused for %s; retiring exact owner",
-        thread_id,
+        "Claude Code model retarget refused for thread_id=%s operation_id=%s; retiring exact owner",
+        thread_id, operation_id or "unknown",
     )
     return await runtime.retire_if_current(
         thread_id,
         expected_owner=expected_owner,
         broadcast=broadcast,
+        operation_id=operation_id,
     )
 
 
@@ -127,6 +130,7 @@ async def _transition_codex_runtime(
     runtime_context_epoch: int,
     preserve_thread: bool,
     broadcast,
+    operation_id: str | None,
 ) -> bool:
     if not preserve_thread or getattr(
         destination_target, "harness", None,
@@ -135,6 +139,7 @@ async def _transition_codex_runtime(
             thread_id,
             expected_owner=expected_owner,
             broadcast=broadcast,
+            operation_id=operation_id,
         )
     transitioned = await runtime.retarget_if_current(
         thread_id,
@@ -145,13 +150,14 @@ async def _transition_codex_runtime(
     if transitioned:
         return True
     log.warning(
-        "Codex model retarget refused for %s; retiring exact owner",
-        thread_id,
+        "Codex model retarget refused for thread_id=%s operation_id=%s; retiring exact owner",
+        thread_id, operation_id or "unknown",
     )
     return await runtime.retire_if_current(
         thread_id,
         expected_owner=expected_owner,
         broadcast=broadcast,
+        operation_id=operation_id,
     )
 
 
@@ -166,6 +172,7 @@ async def _transition_source_runtime(
     expected_context_usage_floor: int | float | None,
     preserve_claude_thread: bool,
     preserve_codex_thread: bool,
+    operation_id: str | None,
 ) -> bool:
     from infra import state
     from subagents import cc_runtime, codex_runtime
@@ -181,6 +188,7 @@ async def _transition_source_runtime(
             expected_context_usage_floor=expected_context_usage_floor,
             preserve_thread=preserve_claude_thread,
             broadcast=broadcast,
+            operation_id=operation_id,
         )
     if source_harness == "codex":
         return await _transition_codex_runtime(
@@ -191,6 +199,7 @@ async def _transition_source_runtime(
             runtime_context_epoch=source_runtime_context_epoch,
             preserve_thread=preserve_codex_thread,
             broadcast=broadcast,
+            operation_id=operation_id,
         )
     return True
 
@@ -244,6 +253,7 @@ async def post_model_switch_effects(
     expected_context_usage_floor: int | float | None = None,
     preserve_claude_thread: bool = False,
     preserve_codex_thread: bool = False,
+    operation_id: str | None = None,
     breadcrumb: dict | None = None,
     committed_at: str | None = None,
 ) -> None:
@@ -258,11 +268,8 @@ async def post_model_switch_effects(
         expected_context_usage_floor=expected_context_usage_floor,
         preserve_claude_thread=preserve_claude_thread,
         preserve_codex_thread=preserve_codex_thread,
+        operation_id=operation_id,
     )
-    if not transitioned:
-        raise RuntimeError(
-            "model switch source runtime owner changed or could not be transitioned"
-        )
     _broadcast_model_selection(
         thread_id,
         new_model=new_model,
@@ -277,6 +284,14 @@ async def post_model_switch_effects(
         properties={"model_id": new_model},
     )
     await _broadcast_model_switch_breadcrumb(thread_id, breadcrumb)
+    if not transitioned:
+        log.warning(
+            "model switch committed but source runtime transition failed thread_id=%s operation_id=%s source_harness=%s",
+            thread_id, operation_id or "unknown", source_harness or "unknown",
+        )
+        raise RuntimeError(
+            "model switch source runtime owner changed or could not be transitioned"
+        )
 
 
 async def apply_switch_transition(transition) -> None:
@@ -304,6 +319,7 @@ async def apply_switch_transition(transition) -> None:
         source_harness=source_harness,
         source_runtime_owner=owner,
         destination_target=destination,
+        operation_id=transition.operation_id,
         preserve_claude_thread=(
             source_harness == destination.harness == "claude-code"
         ),
