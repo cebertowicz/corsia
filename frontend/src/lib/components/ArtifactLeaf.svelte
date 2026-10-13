@@ -89,12 +89,17 @@
 	const shownImage = $derived(threadId && target ? tabDocumentImage(threadId, target.instanceId) : null);
 	const imageOpen = $derived(shownImage !== null && mode !== 'rail');
 	const imageComments = $derived(imageOpen && viewer ? viewer.imageComments() : undefined);
+	// Opening an image from its document eases the canvas wider and Back eases it back. Any other change (a tab switch,
+	// or a return to a tab whose image is open) puts the canvas at its width at once, in the frame the tab turns active.
+	let easeCanvas = false;
 	function openImage(request: DocumentImageRequest) {
+		easeCanvas = true;
 		if (threadId && target) openTabDocumentImage(threadId, target.instanceId, request);
 	}
 	function closeImage() {
 		const image = shownImage;
 		if (!threadId || !target || !image) return;
+		easeCanvas = true;
 		restoringDocument = null;
 		clearTabDocumentImage(threadId, target.instanceId);
 		restoreDocument(image);
@@ -107,7 +112,9 @@
 	$effect(() => () => documentRestore?.abort());
 	$effect(() => {
 		if (!imageOpen || mode !== 'expanded') return;
-		return widenForImageViewer(untrack(() => leafEl?.getBoundingClientRect().width ?? 0));
+		const release = widenForImageViewer(untrack(() => leafEl?.getBoundingClientRect().width ?? 0), { instant: !easeCanvas });
+		easeCanvas = false;
+		return () => { release({ instant: !easeCanvas }); easeCanvas = false; };
 	});
 	// Back (a phone's or the browser's) closes the viewer before it leaves the document.
 	$effect(() => {

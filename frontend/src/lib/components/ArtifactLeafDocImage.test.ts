@@ -38,7 +38,7 @@ import {
 	clearTabDocumentImage, openTabDocumentImage, remapTabDocumentImage, tabDocumentImage, tabViewState,
 } from '$lib/stores/tabViewState';
 import { EditorView } from '@codemirror/view';
-import { paneCollapsed } from '$lib/stores/paneCollapsed';
+import { paneCollapsed, paneSnapping } from '$lib/stores/paneCollapsed';
 import { paneOpen } from '$lib/stores/paneOpen';
 import { token } from '$lib/stores/auth';
 import { ImageFileError } from '$lib/docOpenRefusal';
@@ -339,6 +339,24 @@ describe('an image of a document opened in the canvas', () => {
 		unmount(component!);
 		component = null;
 		expect(get(paneCollapsed)).toBe(false);
+	});
+
+	it('eases the pane for opening an image and for Back, and snaps it for a tab switch and a return', async () => {
+		await mountLeaf();
+		const changes: string[] = [];
+		const stop = paneCollapsed.subscribe((collapsed) => changes.push(`${collapsed ? 'collapse' : 'expand'} ${get(paneSnapping) ? 'snap' : 'ease'}`));
+		changes.length = 0;
+
+		await openImageFromDocument();
+		openArtifactTab(THREAD, { artifactId: 'art-two', path: '/ws/two.md', title: 'two.md' });
+		await settle();
+		notesTab().click();
+		await settle();
+		host.querySelector<HTMLButtonElement>('.image-overlay button.back')!.click();
+		await settle();
+		stop();
+
+		expect(changes).toEqual(['collapse ease', 'expand snap', 'collapse snap', 'expand ease']);
 	});
 
 	it('leaves the pane alone for a leaf already wide, at drawer widths, and when it is already collapsed', async () => {

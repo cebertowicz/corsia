@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { paneOpen, paneDragging } from '$lib/stores/paneOpen';
-	import { paneCollapsed } from '$lib/stores/paneCollapsed';
+	import { paneCollapsed, paneSnapping } from '$lib/stores/paneCollapsed';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { PANE_DRAWER_WIDTH, shouldOverlayPane } from '$lib/artifactSplitLayout';
 
@@ -50,6 +50,7 @@
 	class:open={$paneOpen}
 	class:dragging={$paneDragging}
 	class:collapsed={$paneCollapsed}
+	class:snap={$paneSnapping}
 	class:overlay
 	style={`--pane-width: ${PANE_DRAWER_WIDTH}px`}
 >
@@ -71,6 +72,7 @@
 		transition: width var(--dur-spring) var(--ease-material),
 		            padding var(--dur-spring) var(--ease-material);
 	}
+	.pane.snap { transition: none; }
 	.pane-top {
 		position: sticky; top: 0; z-index: 3; flex-shrink: 0;
 		display: flex; align-items: center; justify-content: space-between;

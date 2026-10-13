@@ -22,7 +22,22 @@ beforeEach(() => {
 afterEach(() => {
 	root.remove();
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
+
+/** An editor whose measure pass reads and writes in a microtask, and whose layout is the page's own. */
+function editor(scroller: HTMLElement, extra: Record<string, unknown> = {}) {
+	return vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
+		state: { doc: { length: 1000 } },
+		viewport: { from: 0, to: 0 },
+		get documentTop() { return -scroller.scrollTop; },
+		lineBlockAt: () => ({ top: 0 }),
+		requestMeasure: ({ read, write }: { read: () => number; write: (top: number) => void }) => {
+			queueMicrotask(() => write(read()));
+		},
+		...extra,
+	} as unknown as EditorView);
+}
 
 describe('restoreDocumentPlace', () => {
 	it('puts the scroll position back and never scrolls the image into view over it', async () => {
@@ -62,14 +77,11 @@ describe('restoreDocumentPlace', () => {
 
 	it('holds the first visible text line while CodeMirror re-measures after a tab returns', async () => {
 		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
-		const found = vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
-			coordsAtPos: () => ({ top: 490 - scroller.scrollTop }),
-		} as unknown as EditorView);
+		editor(scroller, { coordsAtPos: () => ({ top: 490 - scroller.scrollTop }) });
 
 		await restoreDocumentPlace(root, { from: 80, top: 100, scrollTop: 300 });
 
 		expect(scroller.scrollTop).toBe(390);
-		found.mockRestore();
 	});
 
 	it('keeps holding the image while the text goes on re-measuring, and lets go at the first touch of the user', async () => {
@@ -88,19 +100,49 @@ describe('restoreDocumentPlace', () => {
 		expect(scroller.scrollTop).toBe(324);
 	});
 
-	it('sets the scroll position only once the width has stopped changing', async () => {
-		let width = 900;
-		const sizes = vi.spyOn(root, 'getBoundingClientRect').mockImplementation(() => ({ width }) as DOMRect);
+	it('holds the image in place on every painted frame of Back while the pane eases, even when a rewrap lands after the animation frame', async () => {
 		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
-		const pending = restoreDocumentPlace(root, image);
-		for (let step = 0; step < 6; step++) {
+		const widget = root.querySelector<HTMLElement>('[data-from="40"]')!;
+		editor(scroller);
+		// The canvas narrows by 90 px a frame for six frames; the rewrap that follows each step, laid out after the
+		// frame's animation callbacks, pushes the image 30 px further down.
+		let width = 900;
+		let rewrap = 0;
+		vi.spyOn(root, 'getBoundingClientRect').mockImplementation(() => ({ width }) as DOMRect);
+		vi.spyOn(widget, 'getBoundingClientRect').mockImplementation(() => ({ top: 124 + rewrap - (scroller.scrollTop - 300) }) as DOMRect);
+		let observed: (() => void) | null = null;
+		vi.stubGlobal('ResizeObserver', class {
+			constructor(callback: () => void) { observed = callback; }
+			observe() {}
+			disconnect() { observed = null; }
+		});
+		let queued: FrameRequestCallback[] = [];
+		const painted: number[] = [];
+		let frame = 0;
+		const runFrame = async () => {
+			const callbacks = queued;
+			queued = [];
+			const easing = frame++ < 6;
+			if (easing) width -= 90;
+			for (const callback of callbacks) callback(0);
 			await new Promise((resolve) => setTimeout(resolve, 0));
-			width -= 90;
-			expect(scroller.scrollTop).toBe(0);
-		}
-		await pending;
-		expect(scroller.scrollTop).toBe(300);
-		sizes.mockRestore();
+			// Layout, then resize observations, then paint.
+			if (easing) rewrap += 30;
+			if (easing || frame === 1) (observed as (() => void) | null)?.();
+			painted.push(widget.getBoundingClientRect().top);
+			if (queued.length) setTimeout(runFrame, 0);
+		};
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+			if (!queued.length) setTimeout(runFrame, 0);
+			queued.push(callback);
+			return 0;
+		});
+
+		await restoreDocumentPlace(root, { ...image, top: 100 });
+
+		expect(painted.length).toBeGreaterThan(6);
+		expect(painted.filter((top) => top !== 100)).toEqual([]);
+		expect(scroller.scrollTop).toBe(504);
 	});
 
 	it('applies a tab return place without waiting for the pane width to settle', async () => {
@@ -121,6 +163,7 @@ describe('restoreDocumentPlace', () => {
 		const readAt: number[] = [];
 		const found = vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
 			state: { doc: { length: 1000 } },
+			viewport: { from: 0, to: 0 },
 			get documentTop() { return -scroller.scrollTop; },
 			// The editor estimates the undrawn text above the line 90 px shorter than it measures once drawn.
 			lineBlockAt: () => ({ top: 400 }),
@@ -137,8 +180,9 @@ describe('restoreDocumentPlace', () => {
 			onPlaced: () => placedAt.push(scroller.scrollTop),
 		});
 		// The saved offset was never used: the estimate moved the line near its place, the drawn line corrected it, and
-		// the tab was revealed from inside that measure.
-		expect(readAt).toEqual([0, 300, 390]);
+		// the tab was revealed from inside that measure. Every later pass found it held there.
+		expect(readAt.slice(0, 3)).toEqual([0, 300, 390]);
+		expect(new Set(readAt.slice(3))).toEqual(new Set([390]));
 		expect(placedAt).toEqual([390]);
 		expect(scroller.scrollTop).toBe(390);
 		found.mockRestore();

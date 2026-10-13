@@ -7,6 +7,7 @@ import {
 	saveEvidenceScreenshot,
 	TEST_TOKEN,
 } from '../support/corsia';
+import { syntheticPng } from '../support/syntheticImages';
 
 const FILLER = Array.from({ length: 34 }, (_, i) => `Filler paragraph ${i + 1} keeps this tab long enough to restore.\n`);
 const INDEX = [
@@ -208,6 +209,247 @@ for (const width of [1440, 393]) {
 				fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}.json`), JSON.stringify({ ...report, after }));
 				await saveEvidenceScreenshot(page, testInfo, `tab-scroll-place-${width}-after`, { fullPage: false });
 			} finally {
+				fs.rmSync(dir, { recursive: true, force: true });
+				await context.close();
+			}
+		});
+	});
+}
+
+const wrapped = (tag: string, count: number) => Array.from({ length: count }, (_, i) =>
+	`${tag} paragraph ${i + 1}: enough words to wrap across a line or two of the document column as the canvas narrows.\n`).join('\n');
+const WALKTHROUGH = ['# Walkthrough', '', wrapped('Walkthrough', 14), '![Mock screen](shots/screen.png)', '', wrapped('After image', 30)].join('\n');
+/** Where the image is held below the scroller's top before it is opened. */
+const IMAGE_PLACE_PX = 90;
+/** Back is sampled for longer than the canvas takes to ease back to its width. */
+const BACK_SAMPLE_MS = 1_200;
+
+type ImageFrame = {
+	elapsedMs: number;
+	scrollerVisible: boolean;
+	imageTop: number | null;
+	overlay: boolean;
+	overlayImage: boolean;
+	leafWidth: number | null;
+	chatLeft: number | null;
+	chatWidth: number | null;
+	/** Tabs drawn with a background: the active mark alone, with the pointer resting on the active tab. */
+	markedTabs: string[];
+	selectedTabs: string[];
+};
+
+/** Like the tab-return sampler, for a document image: records every frame painted after the next click. */
+async function armImageSampler(page: Page, durationMs: number): Promise<void> {
+	await page.evaluate((durationMs) => {
+		const target = window as Window & { __imageSamples?: Promise<ImageFrame[]> };
+		target.__imageSamples = undefined;
+		const arm = () => {
+			document.removeEventListener('click', arm, true);
+			target.__imageSamples = new Promise<ImageFrame[]>((resolve) => {
+				const frames: ImageFrame[] = [];
+				const startedAt = performance.now();
+				const afterPaint = (next: () => void) => requestAnimationFrame(() => {
+					const channel = new MessageChannel();
+					channel.port1.onmessage = () => next();
+					channel.port2.postMessage(null);
+				});
+				const name = (el: HTMLElement) => el.querySelector('[role="tab"]')?.textContent?.trim() ?? '';
+				const sample = () => {
+					const scroller = document.querySelector<HTMLElement>('.cm-scroller');
+					const box = scroller?.getBoundingClientRect();
+					const style = scroller && getComputedStyle(scroller);
+					const widget = scroller?.querySelector<HTMLElement>('.cm-md-image');
+					const overlay = document.querySelector<HTMLElement>('.image-overlay');
+					const chat = document.querySelector<HTMLElement>('.chat-col')?.getBoundingClientRect();
+					const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
+					const tabs = [...document.querySelectorAll<HTMLElement>('.tab-wrap')];
+					frames.push({
+						elapsedMs: performance.now() - startedAt,
+						scrollerVisible: Boolean(box && style && style.visibility !== 'hidden' && style.display !== 'none' && box.height > 0),
+						imageTop: widget && box ? widget.getBoundingClientRect().top - box.top : null,
+						overlay: Boolean(overlay),
+						overlayImage: Boolean(overlay?.querySelector('img')),
+						leafWidth: leaf?.width ?? null,
+						chatLeft: chat?.left ?? null,
+						chatWidth: chat?.width ?? null,
+						markedTabs: tabs.filter((el) => !['rgba(0, 0, 0, 0)', 'transparent'].includes(getComputedStyle(el).backgroundColor)).map(name),
+						selectedTabs: tabs.filter((el) => el.querySelector('[aria-selected="true"]')).map(name),
+					});
+					if (performance.now() - startedAt < durationMs) afterPaint(sample);
+					else resolve(frames);
+				};
+				afterPaint(sample);
+			});
+		};
+		document.addEventListener('click', arm, true);
+	}, durationMs);
+}
+
+async function imageSamples(page: Page): Promise<ImageFrame[]> {
+	return page.evaluate(() => {
+		const samples = (window as Window & { __imageSamples?: Promise<ImageFrame[]> }).__imageSamples;
+		if (!samples) throw new Error('image sampler did not start');
+		return samples;
+	});
+}
+
+/** Back shows the document with its image where it was on every frame, through the whole width transition. */
+function expectBackInPlace(frames: ImageFrame[], savedTop: number): void {
+	expect(frames.at(-1)?.elapsedMs).toBeGreaterThanOrEqual(BACK_SAMPLE_MS);
+	expect(frames.filter((frame) => !frame.scrollerVisible).length, `hidden frames: ${JSON.stringify(frames.slice(0, 4))}`).toBeLessThanOrEqual(MAX_HIDDEN_FRAMES);
+	const firstVisible = frames.findIndex((frame) => frame.scrollerVisible && !frame.overlay);
+	expect(firstVisible).toBeGreaterThanOrEqual(0);
+	for (const frame of frames.slice(firstVisible)) {
+		const sample = `at ${Math.round(frame.elapsedMs)}ms: ${JSON.stringify(frame)}`;
+		expect(frame.overlay, sample).toBe(false);
+		expect(frame.imageTop, sample).not.toBeNull();
+		expect(Math.abs(frame.imageTop! - savedTop), sample).toBeLessThanOrEqual(MAX_DRIFT_PX);
+	}
+	// The samples outlast the canvas easing back: its width held over the last frames.
+	const widths = frames.slice(-5).map((frame) => frame.leafWidth);
+	expect(new Set(widths).size, `canvas width still moving: ${JSON.stringify(widths)}`).toBe(1);
+}
+
+/**
+ * A return to a tab whose image is open shows the image from the first frame, at the canvas width the image had, with
+ * that tab marked active, and the chat column beside it never moves.
+ */
+function expectImageReturn(frames: ImageFrame[], wideLeaf: number, touch: boolean): void {
+	expect(frames.length).toBeGreaterThan(0);
+	const first = frames[0];
+	for (const frame of frames) {
+		const sample = `at ${Math.round(frame.elapsedMs)}ms: ${JSON.stringify(frame)}`;
+		expect(frame.overlay && frame.overlayImage, sample).toBe(true);
+		// A phone shows the canvas alone, with its tabs in a sheet.
+		if (touch) continue;
+		expect(frame.leafWidth, sample).toBe(wideLeaf);
+		expect(frame.selectedTabs, sample).toEqual(['walkthrough.md']);
+		expect(frame.markedTabs, sample).toEqual(['walkthrough.md']);
+		expect([frame.chatLeft, frame.chatWidth], sample).toEqual([first.chatLeft, first.chatWidth]);
+	}
+}
+
+for (const width of [1440, 393]) {
+	const touch = width <= 768;
+	const height = touch ? 852 : 900;
+	test.describe(`@flow:tab-scroll-place @surface:documents document image place survives at ${width}px`, () => {
+		test(`keeps the document in place on Back from its image and on a return with the image open at ${width}px`, async ({ browser, request }, testInfo) => {
+			test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+			const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height }, hasTouch: touch });
+			const page = await context.newPage();
+			const sessionTitle = `tab-image-place-${width}-${Date.now()}`;
+			const sessionId = await createSession(request, sessionTitle);
+			const tree = await (await request.get(`/api/files/tree?${query()}`)).json();
+			const roots: Array<{ kind: string; path: string }> = tree.roots ?? [];
+			const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
+			expect(workspaceRoot).toEqual(expect.any(String));
+			const dir = path.join(workspaceRoot, sessionTitle);
+			fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
+			fs.writeFileSync(path.join(dir, 'walkthrough.md'), WALKTHROUGH);
+			fs.writeFileSync(path.join(dir, 'OTHER.md'), ['# Other', '', wrapped('Other', 6)].join('\n'));
+			fs.writeFileSync(path.join(dir, 'shots/screen.png'), syntheticPng(1600, 1000));
+			const report: Record<string, unknown> = {};
+
+			try {
+				const tabs = [];
+				for (const title of ['walkthrough.md', 'OTHER.md']) {
+					const registered = await request.post(`/api/files/register?${query()}`, { data: { path: path.join(dir, title), thread_id: sessionId } });
+					expect(registered.ok(), `register failed: ${registered.status()}`).toBeTruthy();
+					tabs.push({
+						instanceId: `tab-${title}`, artifactId: (await registered.json()).artifact.id, path: path.join(dir, title), title,
+						loadedRevision: null, latestRevision: null, status: 'loading',
+					});
+				}
+				await page.addInitScript(({ threadId, tabs }) => {
+					// Seeded once: a reload keeps what the person did since.
+					if (sessionStorage.getItem('tab-image-place-seeded')) return;
+					sessionStorage.setItem('tab-image-place-seeded', '1');
+					localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
+						threads: { [threadId]: { tabs, activeTabId: 'tab-walkthrough.md', visible: true, activeSurface: 'artifact' } },
+						splitWidth: null,
+					}));
+				}, { threadId: sessionId, tabs });
+
+				await loginByUrl(page);
+				if (touch) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+				await page.getByText(sessionTitle).first().click();
+				const scroller = page.locator('.cm-scroller').first();
+				await expect(page.locator('.cm-content').first()).toContainText('Walkthrough paragraph 1');
+				const docImage = page.locator('.cm-md-image img').first();
+				await expect.poll(async () => {
+					if (await docImage.count()) return true;
+					await scroller.evaluate((el) => { el.scrollTop += 250; });
+					return false;
+				}).toBe(true);
+				await expect.poll(() => docImage.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1600);
+				const imageTop = () => page.locator('.cm-md-image').first().evaluate((el) =>
+					el.getBoundingClientRect().top - el.closest('.cm-scroller')!.getBoundingClientRect().top);
+				await page.locator('.cm-md-image').first().evaluate((el, place) => {
+					const owner = el.closest<HTMLElement>('.cm-scroller')!;
+					owner.scrollTop += el.getBoundingClientRect().top - owner.getBoundingClientRect().top - place;
+				}, IMAGE_PLACE_PX);
+				const back = page.getByRole('button', { name: 'Back to walkthrough.md' });
+				const leafWidth = () => page.locator('.leaf-col').evaluate((el) => el.getBoundingClientRect().width);
+				/** Opens the image once the editor has finished measuring around it; Back owes the place it had then. */
+				const openImage = async () => {
+					let last = Number.NaN;
+					await expect.poll(async () => {
+						const now = await imageTop();
+						const settled = now === last;
+						last = now;
+						return settled;
+					}, { intervals: [250] }).toBe(true);
+					if (touch) await docImage.tap();
+					else await docImage.click();
+					await expect(back).toBeVisible();
+					// The canvas has finished easing wider.
+					let lastWidth = -1;
+					await expect.poll(async () => {
+						const now = await leafWidth();
+						const settled = now === lastWidth;
+						lastWidth = now;
+						return settled;
+					}).toBe(true);
+					return last;
+				};
+
+				const savedTop = await openImage();
+				report.savedTop = savedTop;
+				const wideLeaf = await leafWidth();
+				report.wideLeaf = wideLeaf;
+				await armImageSampler(page, BACK_SAMPLE_MS);
+				await back.click();
+				const backFrames = await imageSamples(page);
+				report.back = backFrames;
+				expectBackInPlace(backFrames, savedTop);
+
+				const reopenedTop = await openImage();
+				report.reopenedTop = reopenedTop;
+				const tabsSheet = () => page.getByRole('dialog', { name: 'Open side panel items' });
+				if (touch) {
+					await page.getByRole('button', { name: /^Tabs \(2\)/ }).click();
+					await tabsSheet().getByRole('button', { name: 'OTHER.md', exact: true }).click();
+				} else await page.getByRole('tab', { name: 'OTHER.md', exact: true }).click();
+				await expect(page.locator('.cm-content').first()).toContainText('Other paragraph 1');
+				if (touch) {
+					await page.getByRole('button', { name: /^Tabs \(2\)/ }).click();
+					await armImageSampler(page, 1_000);
+					await tabsSheet().getByRole('button', { name: 'walkthrough.md', exact: true }).click();
+				} else {
+					await armImageSampler(page, 1_000);
+					await page.getByRole('tab', { name: 'walkthrough.md', exact: true }).click();
+				}
+				const returnFrames = await imageSamples(page);
+				report.return = returnFrames;
+				expectImageReturn(returnFrames, wideLeaf, touch);
+
+				await armImageSampler(page, BACK_SAMPLE_MS);
+				await back.click();
+				const backAfterReturn = await imageSamples(page);
+				report.backAfterReturn = backAfterReturn;
+				expectBackInPlace(backAfterReturn, reopenedTop);
+			} finally {
+				fs.writeFileSync(testInfo.outputPath(`tab-image-place-${width}.json`), JSON.stringify(report));
 				fs.rmSync(dir, { recursive: true, force: true });
 				await context.close();
 			}
