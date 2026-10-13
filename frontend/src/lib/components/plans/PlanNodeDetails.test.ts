@@ -69,4 +69,19 @@ describe('selected child account details', () => {
 		expect(status.querySelector('.reason')).toBeNull();
 		expect(status.textContent).not.toContain(' · ');
 	});
+
+	it('renders a person step’s instructions with code copy and the steps it releases', () => {
+		render(operatorNode({
+			assignee: 'user',
+			description: 'Run this command.\n\n```sh\ncorsia verify\n```',
+			waiting_on: ['Publish the release', 'Notify the team'],
+		}));
+
+		expect(host.querySelector('.person-instructions')?.textContent).toContain('Run this command.');
+		expect(host.querySelector('.person-instructions code')?.textContent).toBe('corsia verify');
+		expect(host.querySelector('.person-instructions .copy-btn')?.getAttribute('aria-label')).toBe('Copy code');
+		expect(host.querySelector('.waiting-on')?.textContent).toBe(
+			'Waiting on this: Publish the release, Notify the team',
+		);
+	});
 });
