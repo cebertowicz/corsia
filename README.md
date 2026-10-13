@@ -158,7 +158,7 @@ The installer adds any missing prerequisites, builds the environment and opens C
 
 1. Choose where your work lives and create a local account.
 2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
-3. Describe your work, or start with the ready-made Assistant for Gmail, Google Calendar, Drive and Docs. CORSIA, your assistant, shows each setup step in its plan as it sets up your first agent with you.
+3. Describe your work, or start with the ready-made Assistant for Gmail, Google Calendar, Drive and Docs. CORSIA shows each setup step in its plan as it sets up your first agent with you.
 
 Updates arrive through **Settings → Update**, which waits for running turns to finish and keeps the old build serving if the new one fails.
 
