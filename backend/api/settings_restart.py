@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import subprocess
 import uuid
@@ -12,6 +13,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from api.restart_shell import spawn_restart_lifecycle
+from api.update_preflight import check_update_backup_room as _check_update_backup_room
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
 _RELEASE_FAILURE_NOTE = (
@@ -34,6 +36,23 @@ def _clean_update_output(value: str | bytes | None) -> str:
     if isinstance(value, bytes):
         value = value.decode(errors="replace")
     return re.sub(r"\x1b\[[0-9;]*m", "", value)
+
+
+def _preparation_failure_code(failure: BaseException) -> str:
+    """Classify the existing preparation failure without replacing its summary."""
+    detail = str(getattr(failure, "detail", failure)).lower()
+    if any(marker in detail for marker in ("build", "pip", "dependency")):
+        return "build_failed"
+    return "fetch_failed"
+
+
+def _failure_summary(failure: BaseException) -> str:
+    return str(getattr(failure, "detail", failure))[:500]
+
+
+def _failure_detail(failure: BaseException) -> str | None:
+    log_path = getattr(failure, "update_log_path", None)
+    return json.dumps({"log_path": str(log_path)}) if log_path else None
 
 
 def _terminal_update_summary(
@@ -94,10 +113,12 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
         return
 
     summary = _terminal_update_summary(stdout, stderr)
-    raise HTTPException(
+    failure = HTTPException(
         409,
         f"Update stopped before restart: {summary}. Full log: {log_path}",
     )
+    failure.update_log_path = log_path
+    raise failure
 
 
 def _discard_prepared_release(
@@ -132,6 +153,8 @@ async def _acquire_settings_restart(
             None,
             None,
             mode,
+            kind="update" if mode == "update" else "restart",
+            trigger="manual" if mode == "update" else None,
         )
         if operation_id is not None:
             acquired_ids.append(operation_id)
@@ -141,6 +164,9 @@ async def _acquire_settings_restart(
     if operation_id is None:
         raise HTTPException(409, "A restart is already in flight.")
     return operation_id
+
+
+# The backup-room check is imported with the other API dependencies above.
 
 
 async def _begin_settings_drain(operation_id: str, mode: str) -> None:
@@ -183,6 +209,9 @@ async def _compensate_cancelled_acquire(
 async def _compensate_preparation_failure(
     operation_id: str,
     failure: BaseException,
+    *,
+    failure_code: str | None = None,
+    failure_detail: str | None = None,
 ) -> None:
     """Release the exact reservation without replacing its preparation failure."""
     from automation.restart import abort_restart_control
@@ -190,7 +219,9 @@ async def _compensate_preparation_failure(
     try:
         released = await abort_restart_control(
             operation_id,
-            error="settings restart preparation failed",
+            error=_failure_summary(failure),
+            failure_code=failure_code,
+            failure_detail=failure_detail,
         )
     except asyncio.CancelledError:
         failure.add_note("Restart preparation compensation was interrupted.")
@@ -234,7 +265,12 @@ async def _prepare_owned_release(
         await _compensate_cancelled_acquire(acquired_ids, error)
         raise
     except BaseException as error:
-        await _compensate_preparation_failure(operation_id, error)
+        await _compensate_preparation_failure(
+            operation_id,
+            error,
+            failure_code=_preparation_failure_code(error),
+            failure_detail=_failure_detail(error),
+        )
         raise
 
 
@@ -249,8 +285,9 @@ async def _launch_settings_restart(
     caller_token: str | None = None,
 ) -> object:
     """Launch the detached lifecycle process or compensate its failed handoff."""
+    log_path = restart_log_path("restart.log")
     try:
-        with restart_log_path("restart.log").open("w") as log_fh:
+        with log_path.open("w") as log_fh:
             return spawn_restart_lifecycle(
                 corsia_script,
                 script_args,
@@ -267,6 +304,8 @@ async def _launch_settings_restart(
             released = await abort_restart_control(
                 operation_id,
                 error="settings restart launch failed",
+                failure_code="launch_failed",
+                failure_detail=json.dumps({"log_path": str(log_path)}),
             )
         except Exception:
             release_failed = True
@@ -312,6 +351,28 @@ async def prelaunch_settings_restart(
             await _prepare_owned_release(
                 operation_id, acquired_ids, corsia_script, restart_env
             )
+            try:
+                await _check_update_backup_room()
+            except Exception as error:
+                from infra.database_migrations import BackupRoomError
+
+                if isinstance(error, BackupRoomError):
+                    detail = json.dumps({
+                        "needed_bytes": error.needed_bytes,
+                        "free_bytes": error.free_bytes,
+                    })
+                    await _compensate_preparation_failure(
+                        operation_id,
+                        error,
+                        failure_code="disk_space",
+                        failure_detail=detail,
+                    )
+                    raise HTTPException(
+                        409,
+                        {"code": "disk_space", "needed_bytes": error.needed_bytes,
+                         "free_bytes": error.free_bytes},
+                    ) from error
+                raise
             script_args = ["restart-prepared"]
 
         try:

@@ -311,7 +311,7 @@ class TestRestartInstanceIsolation:
         ) == [{
             "status": "failed",
             "phase": None,
-            "error": "settings restart preparation failed",
+            "error": "pip check failed",
         }]
 
     def test_update_launch_failure_aborts_operation_and_retains_stage(self, isolated_db):

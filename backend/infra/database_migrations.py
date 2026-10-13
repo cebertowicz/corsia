@@ -169,6 +169,7 @@ from infra.migration_109_to_110_agent_use_restriction import migrate_109_to_110
 from infra.migration_110_to_111_token_plan_by_host import migrate_110_to_111
 from infra.migration_111_to_112_image_regions import migrate_111_to_112
 from infra.migration_112_to_113_retype_upload_images import migrate_112_to_113
+from infra.migration_113_to_114_update_operations import migrate_113_to_114
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -235,6 +236,15 @@ MigrationStep = Callable[[sqlite3.Connection], None]
 
 class MigrationError(RuntimeError):
     """A migration refused or failed; the database is unchanged."""
+
+
+class BackupRoomError(MigrationError):
+    """The backup reserve cannot fit, carrying the exact byte counts."""
+
+    def __init__(self, message: str, needed_bytes: int, free_bytes: int):
+        super().__init__(message)
+        self.needed_bytes = needed_bytes
+        self.free_bytes = free_bytes
 
 
 @dataclass(frozen=True)
@@ -757,6 +767,7 @@ MIGRATIONS[109] = migrate_109_to_110
 MIGRATIONS[110] = migrate_110_to_111
 MIGRATIONS[111] = migrate_111_to_112
 MIGRATIONS[112] = migrate_112_to_113
+MIGRATIONS[113] = migrate_113_to_114
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -781,7 +792,7 @@ def _database_bytes(source: Path) -> int:
     return total
 
 
-def _require_backup_room(source: Path, from_version: int) -> None:
+def require_backup_room(source: Path, from_version: int) -> tuple[int, int]:
     """Refuse before copying when the copy would leave the host without room.
 
     A backup that fills the filesystem takes down the host, every other service
@@ -796,20 +807,23 @@ def _require_backup_room(source: Path, from_version: int) -> None:
 
     Raises:
         MigrationError: The filesystem cannot hold the copy and keep the
-            reserve.
+            reserve. On success, returns the required and free byte counts.
     """
     needed = _database_bytes(source)
     required = int(needed * _BACKUP_MIN_FREE_RATIO) + _BACKUP_FREE_FLOOR_BYTES
     free = shutil.disk_usage(source.parent).free
     if free < required:
-        raise MigrationError(
+        raise BackupRoomError(
             f"not enough free space for the pre-migration backup of schema "
             f"v{from_version}: {free / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
             f"required to copy a {needed / 1e9:.2f} GB database and keep a "
             f"{_BACKUP_FREE_FLOOR_BYTES / 1e9:.2f} GB reserve. Free space, then "
             f"start again; the database is unchanged. Superseded backups in "
-            f"{source.parent} are the usual place to reclaim it."
+            f"{source.parent} are the usual place to reclaim it.",
+            required,
+            free,
         )
+    return required, free
 
 
 def _pre_migration_backups(source: Path) -> list[Path]:
@@ -869,7 +883,7 @@ def _ensure_backup_room(source: Path, from_version: int) -> None:
     refusal is the room check's own.
     """
     try:
-        _require_backup_room(source, from_version)
+        require_backup_room(source, from_version)
         return
     except MigrationError:
         stale = _pre_migration_backups(source)[:-1]
@@ -882,7 +896,7 @@ def _ensure_backup_room(source: Path, from_version: int) -> None:
         path.unlink()
         removed.append(path)
         try:
-            _require_backup_room(source, from_version)
+            require_backup_room(source, from_version)
             break
         except MigrationError:
             continue
@@ -890,7 +904,7 @@ def _ensure_backup_room(source: Path, from_version: int) -> None:
         "Pruned %d pre-migration backup(s), reclaimed %d bytes (making room for the backup)",
         len(removed), reclaimed,
     )
-    _require_backup_room(source, from_version)
+    require_backup_room(source, from_version)
 
 
 def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
