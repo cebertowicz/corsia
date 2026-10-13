@@ -96,7 +96,7 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 
 		await replaceEditor(page, fixture.editor, '- [x] checked');
 		await expect(page.getByRole('checkbox', { name: 'Mark task incomplete: checked' })).toBeChecked();
-		// Desktop Chrome emulates Linux, so CodeMirror maps Mod to Control in this flow.
+		// The Desktop Chrome device reports a non-Mac platform even on a Mac host, so CodeMirror maps Mod to Control.
 		await page.keyboard.press('Control+Enter');
 		await expect(page.getByRole('checkbox', { name: 'Mark task complete: checked' })).not.toBeChecked();
 		await page.keyboard.press('Control+Enter');
