@@ -2,27 +2,32 @@
 
 from __future__ import annotations
 
+from loguru import logger
+
 from infra.database import write_transaction
 from registry import models
+from registry.notifications import notify_changed
 
 
 class CCRegistrationChanged(RuntimeError):
     """The CC identity changed after launch preparation."""
 
 
-def replace_cc_session(
-    thread_id: str,
+def persist_cc_session(
+    thread_id: str | None,
     cc_session_id: str | None,
     *,
-    title: str | None,
-    cwd: str | None,
-    invocation: object | None,
-    checkpoint_generation_id: str | None,
-    expected_previous_id: str | None,
-    verify_previous: bool,
+    title: str | None = None,
+    cwd: str | None = None,
+    invocation: object | None = None,
+    checkpoint_generation_id: str | None = None,
+    expected_previous_id: str | None = None,
+    verify_previous: bool = False,
     db=None,
 ) -> tuple[str | None, dict | None]:
-    """Replace the active identity transactionally and return prior/current rows."""
+    """Atomically replace a thread's current CC continuity artifact."""
+    if not thread_id:
+        return None, None
     row = None
     with write_transaction(db, scope="replace_cc_session") as connection:
         current = models.find_for_thread(
@@ -56,3 +61,18 @@ def replace_cc_session(
                     db=connection,
                 )
     return previous_id, row
+
+
+def notify_cc_session(
+    thread_id: str | None, cc_session_id: str | None, row: dict | None,
+) -> None:
+    """Best-effort notify the UI of a persisted Claude Code session."""
+    if not thread_id or cc_session_id is None:
+        return
+    try:
+        notify_changed(row or {
+            "integration": "claude-code", "type": "session",
+            "external_id": cc_session_id})
+    except Exception as error:
+        logger.warning(
+            f"registry cc session notify failed for {thread_id}: {error}")

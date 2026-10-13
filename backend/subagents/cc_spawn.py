@@ -13,6 +13,7 @@ from infra.db_async import run_in_db
 from infra.thread_driver import InputAdmission, admit_input
 from infra.time import utc_now_iso
 from llm.resolution import ExecutionTarget
+from registry.cc_session import notify_cc_session, persist_cc_session
 from subagents.cc_accept import require_owned_accept_db
 from subagents.cc_runtime_events import _make_on_event
 from subagents.cc_runtime_helpers import (
@@ -29,13 +30,7 @@ from subagents.cc_runtime_markers import (
 )
 from subagents.cc_runtime_quiescence import cleanup_ephemeral_live
 from subagents.cc_runtime_state import Broadcast, _LIVE
-from subagents.cc_spawn_prepare import (
-    CCSpawnRequest,
-    PreparedCCSpawn,
-    _notify_cc_session,
-    _persist_cc_session,
-    prepare_spawn,
-)
+from subagents.cc_spawn_prepare import CCSpawnRequest, PreparedCCSpawn, prepare_spawn
 from subagents.cc_stream import CCStreamSession
 
 log = logging.getLogger("subagents.cc_runtime")
@@ -125,15 +120,15 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
         corsia_thread_id=prepared.child_id,
     )
     live.session = session
-    session_row = await run_in_db(
-        _persist_cc_session,
+    _previous_id, session_row = await run_in_db(
+        persist_cc_session,
         prepared.child_id,
         prepared.child_id,
         title=prepared.name,
         cwd=prepared.working_dir,
         invocation=session.invocation(),
     )
-    _notify_cc_session(prepared.child_id, prepared.child_id, row=session_row)
+    notify_cc_session(prepared.child_id, prepared.child_id, session_row)
     lock = _LIVE.lock(prepared.child_id)
     async with lock:
         _LIVE.publish(prepared.child_id, live, held=lock)
