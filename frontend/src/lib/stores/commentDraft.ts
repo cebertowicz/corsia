@@ -7,6 +7,8 @@ export interface CommentDraft {
 	to: number;
 	text: string;
 	top: number;
+	/** What the comment is on when the quote is not the name for it: a whole table cell, several cells, a whole table or diagram. */
+	label?: string;
 	body?: string;
 	scope?: string;
 	selection?: CommentSelection;

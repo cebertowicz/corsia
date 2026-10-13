@@ -15,25 +15,28 @@
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
-	import { clickedOpener, drawerFooterHeight, drawerKeys, footerFocusHome, openerFocus, presence } from '$lib/docCommentDrawer';
+	import { clearSubjectOfSheet, clickedOpener, drawerFooterHeight, drawerKeys, footerFocusHome, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
 	import { imageAlt, imageGroupKey } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
+	import { documentState, tableCommentLabel } from '$lib/cm/widget-cells';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
 	/** Image comments (DCOL-FR13.6): the thumbnail heads the list; tags and cards share number, colour, hover and selected-scroll state. */
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	/** A document's image comments (DCOL-FR13.6): grouped under each thumbnail, with cards carrying tag number and colour; `src` is null when the image has no file. */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, documentText = '', focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = { orphanedCount: 0 }, covered = false, onDrawerShown, onSheetModalChange }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
 		bounds?: HTMLElement | null;
 		narrow: boolean;
 		comments: DocComment[];
+		/** Current markdown, used only to derive a table comment's label from its ordinary source offsets. */
+		documentText?: string;
 		focusedId: string | null;
 		/** `label` names what a non-text comment is on, in place of the quote. */
 		draft: { text: string; body?: string; label?: string } | null;
@@ -72,6 +75,9 @@
 		onSheetModalChange?: (open: boolean) => void;
 	} = $props();
 	const asDoc = (comment: unknown) => comment as DocComment;
+	// Parsed once per text, and only for a document that has a pipe to be a table with.
+	const labelState = $derived(documentText.includes('|') ? documentState(documentText) : null);
+	const cellLabel = (comment: DocComment) => comment.orphaned || !labelState ? null : tableCommentLabel(labelState, comment.from, comment.to, comment.anchor);
 	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
 	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
 	const onItsImage = (comment: DocComment) => !comment.orphaned && comment.from != null;
@@ -112,6 +118,11 @@
 	});
 	// The sheet owns this lifecycle; the viewer only consumes its signal to avoid showing another control through its scrim.
 	$effect(() => onSheetModalChange?.(sheet.modalOpen));
+	// The same anchor that positions a desktop composer identifies the source rows or diagram to keep above the sheet.
+	$effect(() => {
+		if (!sheetDrawer || surfaceState?.kind !== 'draft' || typeof anchor !== 'function') return;
+		void tick().then(() => clearSubjectOfSheet(anchor, bounds));
+	});
 	// A boolean, so effects that branch on it do not re-run each time the image props object is rebuilt (every hover).
 	const isImage = $derived(!!image);
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
@@ -128,13 +139,7 @@
 	});
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// Leaving the document sends the batch (DocFeedback.leave); in its grace period it says when it goes instead.
-	const unsentText = $derived.by(() => {
-		if (!feedback?.pendingCount) return null;
-		const count = `${feedback.pendingCount} message${feedback.pendingCount === 1 ? '' : 's'} not sent yet`;
-		const owner = feedback.ownerName ?? 'the owner';
-		if (feedback.sendingGrace) return { before: `${count} · sending to `, owner, after: ` in ${feedback.graceMinutes} min` };
-		return { before: `${count} · ${feedback.pendingCount === 1 ? 'it goes' : 'they go'} to `, owner, after: ' when you leave.' };
-	});
+	const unsentText = $derived(feedback?.unsent ?? null);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.
 	$effect(() => {
 		if (surfaceState?.kind !== 'thread' || typeof anchor !== 'function' || load?.state === 'loading') return;
@@ -163,14 +168,6 @@
 			drawer?.querySelector<HTMLElement>('[data-drawer-filter]')?.focus();
 		});
 	});
-	/** Bring a card into view in the drawer's own list: smooth, or at once when asked or with reduced motion. */
-	function scrollToCard(id: string, instant: boolean) {
-		const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
-		const card = list?.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
-		if (!list || !card) return;
-		const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - 4;
-		list.scrollTo({ top: Math.max(0, top), behavior: instant || get(prefersReducedMotion) ? 'instant' : 'smooth' });
-	}
 	// An image's selected comment, picked on the image or there when the drawer opens, is scrolled to and marked in it.
 	// The drawer opens already at its card, so only the drawer moves; a pick while it is open glides the list.
 	// The drawer says what to do; the raw transport error stays in the log.
@@ -184,7 +181,7 @@
 		const opening = shown && !listShown;
 		listShown = shown;
 		if (!shown || !id) return;
-		void tick().then(() => scrollToCard(id, opening));
+		void tick().then(() => scrollListToCard(drawer, id, opening));
 	});
 	/**
 	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with
@@ -320,7 +317,7 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList bind:replyDrafts bind:replySelections leavingIds={held.leaving} reduced={$prefersReducedMotion} comments={displayed} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} {onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList bind:replyDrafts bind:replySelections leavingIds={held.leaving} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} {onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 {#snippet listBody()}

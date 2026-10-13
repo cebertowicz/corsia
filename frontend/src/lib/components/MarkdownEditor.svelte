@@ -19,6 +19,8 @@
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
+	import { widgetComments } from '$lib/cm/widget-comments';
+	import { tableCommentLabel } from '$lib/cm/widget-cells';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
@@ -60,7 +62,7 @@
 		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
 		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
-		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null } | null) => void;
+		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: string; above?: boolean } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit?: (mapPos: (pos: number) => number) => void;
@@ -92,11 +94,12 @@
 		if (!onSelect) return;
 		const r = v.state.selection.main;
 		if (r.empty) { onSelect(null); return; }
-		const coords = v.coordsAtPos(r.to);
+		const coords = v.coordsAtPos(r.to), text = v.state.sliceDoc(r.from, r.to);
 		onSelect({
-			from: r.from, to: r.to, text: v.state.sliceDoc(r.from, r.to),
+			from: r.from, to: r.to, text,
 			top: coords?.top ?? 0, left: coords?.right ?? coords?.left ?? 0,
 			anchor: composerAnchor(v, r.from, r.to),
+			label: tableCommentLabel(v.state, r.from, r.to, text) ?? undefined,
 		});
 	}
 
@@ -200,6 +203,7 @@
 				pendingCommentMark,
 				suggestionMarks(() => ({ focus: (id) => onAnchorFocus?.(id, liveAnchor(id), true), hover: (id) => onSuggestionHover?.(id) })),
 				commentRail,
+				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: (id) => onAnchorFocus?.(id, liveAnchor(id)) }),
 				presenceMarks,
 				typedReveal,
 				EditorView.lineWrapping,

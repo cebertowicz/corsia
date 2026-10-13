@@ -6,6 +6,7 @@ import { renderMarkdown } from '$lib/markdown';
 import { mountMermaid, type MermaidMount } from '$lib/mermaid';
 import { markdownImages, openSelectedImageOnEnter, renderableImage, selectImageOnClick } from './markdown-image';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
+import { tableSource } from './widget-blocks';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -41,6 +42,7 @@ class TableWidget extends WidgetType {
 		// renderMarkdown applies the canonical DOMPurify policy before HTML reaches
 		// the document. Keep this widget on that single sanitized renderer.
 		el.innerHTML = renderMarkdown(this.src);
+		el.dataset.srcLength = String(this.src.length); // the source range the widget stands for, for `widget-comments.ts`
 		return el;
 	}
 	ignoreEvent() { return true; }
@@ -196,8 +198,7 @@ function buildTableDecorations(state: EditorState): DecorationSet {
 	syntaxTree(state).iterate({
 		enter: (node) => {
 			if (node.name !== 'Table') return;
-			const from = doc.lineAt(node.from).from;
-			const to = doc.lineAt(Math.min(node.to, doc.length)).to;
+			const { from, to } = tableSource(doc, node);
 			const src = doc.sliceString(from, to);
 			decos.push(Decoration.replace({ widget: new TableWidget(src), block: true }).range(from, to));
 			return false;
