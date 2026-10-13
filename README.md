@@ -71,7 +71,7 @@ Agents answer for outcomes. **CORSIA**, the assistant every install starts with,
 
 | Scope | Holds | Kept by |
 |---|---|---|
-| **Workspace** | Rules for everything you run, such as which models agents may use, and agents that don't need a project | **CORSIA**, your assistant. It sets up and configures the platform; watching your attention across every agent is being added |
+| **Workspace** | Rules for everything you run, such as which models agents may use, and agents that don't need a project | **CORSIA**, your assistant. It sets up and configures the platform, and watches your attention across every agent |
 | **Project** | One body of work: its purpose, rules, reference documents, skills, coordination model and agents | Its **conductor**, created with the project |
 | **Agent** | Its problem, authority, plan and lessons | The agent itself; changes to its scope go through the conductor |
 | **Worker** | One bounded step and its brief, under its agent's authority | The agent that sent it |
