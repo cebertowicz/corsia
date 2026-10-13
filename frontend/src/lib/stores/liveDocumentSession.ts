@@ -12,7 +12,7 @@ import { DocumentFailureLedger } from './documentFailureLedger';
 
 const SERVER = Symbol('server-document-update');
 type Send = (frame: Record<string, unknown>) => boolean;
-type Request = { resolve: (frame: DocumentFrame) => void; reject: (error: Error) => void; reservation?: boolean };
+type Request = { resolve: (frame: DocumentFrame) => void; reject: (error: Error) => void; reservation?: boolean; landed?: () => void };
 
 export class LiveDocumentSession {
 	readonly doc: Y.Doc;
@@ -203,6 +203,7 @@ export class LiveDocumentSession {
 		} else {
 			this.fileError = '';
 			this.operationErrorKind = undefined;
+			request?.landed?.();
 			request?.resolve(frame);
 		}
 	}
@@ -221,13 +222,13 @@ export class LiveDocumentSession {
 		} else if ((frame.kind === 'store_refused' && frame.failure_generation === undefined) || this.updates.has(frame.request_id ?? '')) this.storeError = reason;
 	}
 
-	private request(type: string, fields: Record<string, unknown> = {}): Promise<DocumentFrame> {
+	private request(type: string, fields: Record<string, unknown> = {}, landed?: () => void): Promise<DocumentFrame> {
 		if (!this.writable) return Promise.reject(new Error('This document is read-only'));
 		if (this.connection !== 'connected') return Promise.reject(new Error('Disconnected; keep your device copy'));
 		this.sync();
 		const id = crypto.randomUUID();
 		return new Promise((resolve, reject) => {
-			this.requests.set(id, { resolve, reject });
+			this.requests.set(id, { resolve, reject, landed });
 			if (!this.send({ type, artifact_id: this.artifactId, store_id: this.storeId, request_id: id, ...fields })) {
 				this.disconnected();
 			}
@@ -261,7 +262,10 @@ export class LiveDocumentSession {
 		if (this.connection === 'connected') this.send({ type: 'doc_release', artifact_id: this.artifactId, store_id: this.storeId, client_id: clientId });
 	}
 
-	flush(): Promise<DocumentFrame> { return this.request('doc_flush'); }
+	flush(): Promise<DocumentFrame> {
+		const generation = this.durability.snapshot().localGeneration;
+		return this.request('doc_flush', {}, () => this.durability.written(generation));
+	}
 	retry(): Promise<DocumentFrame> { this.retryStore(); return this.request('doc_flush', { retry: true }); }
 	replace(text: string): Promise<DocumentFrame> { return this.request('doc_replace', { text }); }
 	choose(choice: 'corsia' | 'file'): Promise<DocumentFrame> { return this.request('doc_choice', { choice }); }
