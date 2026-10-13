@@ -124,9 +124,10 @@ describe('restoreDocumentPlace', () => {
 			get documentTop() { return -scroller.scrollTop; },
 			// The editor estimates the undrawn text above the line 90 px shorter than it measures once drawn.
 			lineBlockAt: () => ({ top: 400 }),
-			coordsAtPos: () => ({ top: 490 - scroller.scrollTop }),
-			// The editor's measure pass runs before the next frame is painted.
-			requestMeasure: ({ read, write }: { read: () => number | null; write: (top: number | null) => void }) => {
+			// The line has no coordinates until the editor has drawn it, near where it is scrolled to.
+			coordsAtPos: () => (scroller.scrollTop < 200 ? null : { top: 490 - scroller.scrollTop }),
+			// Within one measure pass, a request made while writing is read and written again before the frame paints.
+			requestMeasure: ({ read, write }: { read: () => number; write: (top: number) => void }) => {
 				queueMicrotask(() => { readAt.push(scroller.scrollTop); write(read()); });
 			},
 		} as unknown as EditorView);
@@ -135,9 +136,9 @@ describe('restoreDocumentPlace', () => {
 			mode: 'tab-return',
 			onPlaced: () => placedAt.push(scroller.scrollTop),
 		});
-		// The saved offset was never used: the estimate put the line near its place, the measure corrected it, and the
-		// tab was revealed from inside that measure.
-		expect(readAt).toEqual([300]);
+		// The saved offset was never used: the estimate moved the line near its place, the drawn line corrected it, and
+		// the tab was revealed from inside that measure.
+		expect(readAt).toEqual([0, 300, 390]);
 		expect(placedAt).toEqual([390]);
 		expect(scroller.scrollTop).toBe(390);
 		found.mockRestore();

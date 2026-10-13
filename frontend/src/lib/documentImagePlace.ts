@@ -29,6 +29,11 @@ const MAX_ANCHOR_FRAMES = 150;
 const USER_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 /** Closer than this, in pixels, the image is where it was. */
 const ANCHOR_TOLERANCE = 1;
+/**
+ * Moves a returning tab makes inside one measure pass: each drawn stretch of text corrects the height estimate of the
+ * text above it, so the line settles over three or so moves. The editor restarts its pass at most five times per frame.
+ */
+const MEASURED_MOVES = 4;
 
 /** Resolves once the element's width has held for a few frames: the workspace pane eases back to its width. */
 async function widthSettled(el: HTMLElement): Promise<void> {
@@ -46,21 +51,32 @@ async function widthSettled(el: HTMLElement): Promise<void> {
  * Lays a returning tab's saved line at its saved distance inside the editor's own measure pass, so the frame that
  * reveals the tab is the first one painted and already shows the line in place. The offset alone is not enough: the
  * editor estimates the height of text it has not drawn, so the saved offset lands on a different line until it measures.
+ * Each move is made from what the editor has just measured, never from a freshly mounted editor's default estimates,
+ * and is measured again within the same pass.
  */
 function placeInMeasure(view: EditorView, scroller: HTMLElement, place: TextDocumentPlace): Promise<void> {
 	const from = Math.min(place.from, view.state.doc.length);
 	return new Promise((resolve) => {
-		scroller.scrollTop += view.documentTop + view.lineBlockAt(from).top - scroller.getBoundingClientRect().top - place.top;
-		view.requestMeasure({
+		let moves = 0;
+		const measure = () => view.requestMeasure({
 			read: () => {
 				const coords = view.coordsAtPos(from, 1);
-				return coords ? coords.top - scroller.getBoundingClientRect().top : null;
+				const box = scroller.getBoundingClientRect();
+				// Text the editor has not drawn has no coordinates; its height estimated from the drawn text stands in.
+				return coords ? coords.top - box.top : view.documentTop + view.lineBlockAt(from).top - box.top;
 			},
 			write: (top) => {
-				if (top !== null) scroller.scrollTop += top - place.top;
-				resolve();
+				const drift = top - place.top;
+				if (Math.abs(drift) < ANCHOR_TOLERANCE || moves++ >= MEASURED_MOVES) {
+					resolve();
+					return;
+				}
+				scroller.scrollTop += drift;
+				// The editor draws the text scrolled to and runs this again before the frame is painted.
+				measure();
 			},
 		});
+		measure();
 		// An editor torn down before it measures never answers; the tab still shows.
 		void nextFrame().then(nextFrame).then(() => resolve());
 	});
