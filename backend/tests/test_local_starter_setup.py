@@ -97,7 +97,7 @@ def test_unreported_omlx_window_is_unavailable_missing_context_window():
         "supports_vision": False, "supports_tools": True,
         "metadata_json": "{}", "available": True,
     }
-    entry = _status_entry(row, lambda _p: True, {"srv": "online"}, lambda _s: {"starter"})
+    entry = _status_entry(row, lambda _p: True, {"srv": "online"}, lambda _s: {"starter"}, {})
 
     assert entry["status"] == "unavailable"
     assert entry["status_reason"] == "missing_context_window"

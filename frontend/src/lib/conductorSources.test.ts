@@ -23,6 +23,10 @@ describe('anyReady', () => {
 		expect(anyReady([claude])).toBe(true);
 	});
 
+	it('is false for a ready account when its harness is turned off', () => {
+		expect(anyReady([source('codex', 'Codex', 'ready', { enabled: false, accounts: [account('ready')] })])).toBe(false);
+	});
+
 	it('is false when every account is limited, signed out, unchecked or has no usable model', () => {
 		for (const state of ['limited', 'signed_out', 'unchecked', 'no_usable_model'] as const) {
 			expect(anyReady([source('claude-code', 'Claude Code', 'ready', { accounts: [account(state)] })])).toBe(false);

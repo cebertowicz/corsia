@@ -29,6 +29,12 @@ def _settings_inventory() -> list[dict]:
     try:
         facts = resolve_window_facts_for_rows(rows, db=db)
         overrides = saved_overrides_by_catalog_id(rows, db=db)
+        harness_enabled = {
+            row["provider"]: bool(row["enabled"])
+            for row in db.execute(
+                "SELECT provider, enabled FROM connections WHERE provider IN ('claude-code', 'codex')"
+            ).fetchall()
+        }
     finally:
         db.close()
     from llm.model_status import harness_fields, versioned_name
@@ -39,6 +45,7 @@ def _settings_inventory() -> list[dict]:
         row["display_name"] = versioned_name(row, metadata)
         if row.get("harness") in ("claude-code", "codex"):
             row.update(harness_fields(str(row["harness"]), metadata))
+            row["provider_enabled"] = harness_enabled.get(str(row["harness"]), True)
         row["context_length"] = window.effective
         row["provider_context_length"] = window.discovered
         row["context_window_source"] = window.source

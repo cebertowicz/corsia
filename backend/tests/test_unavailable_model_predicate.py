@@ -188,6 +188,36 @@ async def test_connection_unavailable_fails_visibly_and_is_not_held(
 
 
 @pytest.mark.asyncio
+async def test_provider_disabled_harness_is_held_until_catalog_recovery(
+    isolated_db, monkeypatch,
+) -> None:
+    from infra.database import get_db
+    import infra.thread_execution as execution
+    from connections.models import set_harness_enabled
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO models (id,harness,provider,provider_model_id,"
+            "litellm_model,display_name,backend,enabled,available,"
+            "context_window,created_at,updated_at) "
+            "VALUES ('codex/test','codex','codex','test',"
+            "'codex/test','Test','codex',1,1,32768,'t0','t0')"
+        )
+        db.execute("UPDATE connections SET status='available', enabled=0 WHERE provider='codex'")
+        db.commit()
+    finally:
+        db.close()
+    set_harness_enabled("codex", False)
+    batch = admit_held_candidate("t", "codex/test", "m1")
+
+    await execution.drive_claimed_batch(batch)
+
+    assert message_row("m1")[0] == "queued"
+    assert message_row("m1")[2] == "codex_provider_disabled"
+
+
+@pytest.mark.asyncio
 async def test_unavailable_catalog_row_is_still_held(isolated_db, monkeypatch) -> None:
     await hold_head(monkeypatch, "t", "omlx@srv/m", "m1")
 

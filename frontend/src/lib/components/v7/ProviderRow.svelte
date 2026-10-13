@@ -27,9 +27,6 @@
 	}: Props = $props();
 
 	const enabled = $derived(providerEnabled(provider));
-	// Harness cards have account settings, but the provider-wide enable hold is not
-	// implemented yet. Keep its switch hidden until that state has a real owner.
-	const configurable = $derived(provider.type !== 'harness');
 	const discoveryWarning = $derived.by(() => {
 		const discovery = provider.server?.metadata?.discovery;
 		if (provider.server?.kind !== 'external' || !discovery) return '';
@@ -51,7 +48,7 @@
 	class:has-loaded={hasLoaded}
 	style="--accent: {accentVar}"
 >
-	<div class="pr-head" class:configurable>
+	<div class="pr-head configurable">
 		<button
 			type="button"
 			class="pr-expand"
@@ -75,15 +72,13 @@
 			</svg>
 		</button>
 
-		{#if configurable}
-			<button
-				type="button"
-				class="tg"
-				class:on={enabled}
-				aria-label={enabled ? 'Disable' : 'Enable'}
-				onclick={() => onToggleEnable?.()}
-			></button>
-		{/if}
+		<button
+			type="button"
+			class="tg"
+			class:on={enabled}
+			aria-label={enabled ? 'Disable' : 'Enable'}
+			onclick={() => onToggleEnable?.()}
+		></button>
 	</div>
 
 	{#if discoveryWarning}

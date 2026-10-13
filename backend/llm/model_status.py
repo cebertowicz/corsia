@@ -53,10 +53,22 @@ def _required_harness_capabilities(harness: str) -> dict:
     return capabilities
 
 
-def _harness_connection_available(provider: str) -> bool:
-    from connections.models import connection_available
+def _harness_connection_facts() -> dict[str, tuple[bool, bool]]:
+    """Read each CLI harness's observed status and independent switch once."""
+    from infra.database import get_db
 
-    return connection_available(provider)
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT provider, status, enabled FROM connections "
+            "WHERE provider IN ('claude-code', 'codex')"
+        ).fetchall()
+    finally:
+        db.close()
+    return {
+        row["provider"]: (row["status"] == "available", bool(row["enabled"]))
+        for row in rows
+    }
 
 
 def _harness_discovery_envelope(provider: str) -> dict | None:
@@ -208,12 +220,15 @@ def _harness_status(
     meta: dict,
     context_window: int | None,
     connected: bool,
+    enabled: bool,
 ) -> tuple[str, str | None]:
     """Account-independent status and reason for a Claude Code or Codex row.
 
     Whether an account can run the model, usage included, is decided per
     account by ``llm.account_catalog.account_model_status``.
     """
+    if not enabled:
+        return "unavailable", "provider_disabled"
     if not connected:
         return "unavailable", "connection_unavailable"
     if not row.get("available"):
@@ -294,12 +309,16 @@ def harness_base_row(model: str, *, db) -> dict | None:
         "ORDER BY id=? DESC, enabled DESC, id LIMIT 1", (model, model, model)).fetchone()
     if row is None:
         return None
-    from connections.models import connection_available
     from llm.context_window import resolve_window_for_row
 
     row = dict(row)
+    connection = db.execute(
+        "SELECT status, enabled FROM connections WHERE provider=?", (row["harness"],)
+    ).fetchone()
+    connected = bool(connection) and connection["status"] == "available"
+    enabled = connection is None or bool(connection["enabled"])
     status, reason = _harness_status(row["harness"], row, json.loads(row.get("metadata_json") or "{}"),
-                                     resolve_window_for_row(row, db=db), connection_available(row["harness"], db=db))
+                                     resolve_window_for_row(row, db=db), connected, enabled)
     return {"litellm_model": row["litellm_model"], "status": status, "status_reason": reason}
 
 
@@ -310,15 +329,16 @@ def catalog_base_rows() -> list[dict]:
     cloud_active = _cloud_providers_active()
     server_status = _network_server_status()
     loaded_ids_fn = _loaded_model_ids_fn()
+    harness_facts = _harness_connection_facts()
     rows: list[dict] = []
     for row in model_catalog.get_model_status_catalog_rows():
-        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn)
+        entry = _status_entry(row, cloud_active, server_status, loaded_ids_fn, harness_facts)
         if entry is not None:
             rows.append(entry)
     return rows
 
 
-def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn) -> dict | None:
+def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn, harness_facts) -> dict | None:
     """One catalog row's public entry; ``None`` for an inactive cloud provider."""
     from llm.context_window import resolve_window_for_row
 
@@ -332,8 +352,11 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn) -> dict
         meta = {}
 
     if harness in ("claude-code", "codex"):
-        status, status_reason = _harness_status(harness, row, meta, context_window,
-                                                _harness_connection_available(harness))
+        # No connection row is a missing setup, never the person's off switch.
+        connected, enabled = harness_facts.get(harness, (False, True))
+        status, status_reason = _harness_status(
+            harness, row, meta, context_window, connected, enabled,
+        )
     elif backend == "api":
         if provider not in cloud_active:
             return None

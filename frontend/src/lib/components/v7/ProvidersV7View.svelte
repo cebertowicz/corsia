@@ -14,6 +14,7 @@
 	import { loadNetworkServers, setNetworkServerEnabled } from '$lib/stores/networkServers';
 	import { Message } from '$lib/components/ui';
 	import { loadModels } from '$lib/stores/models';
+	import { setHarnessEnabled } from '$lib/stores/harnessProviders';
 	import { loadVendorAccounts, vendorAccounts } from '$lib/stores/vendorAccounts';
 	import { providerCardRequest, settingsAnchorRequest } from '$lib/stores/settingsNavigation';
 	import HostSection from './HostSection.svelte';
@@ -52,9 +53,11 @@
 	async function handleToggleEnable(p: HostProvider) {
 		const enabled = providerEnabled(p);
 		toggleError = '';
-		const result: { ok: boolean; message?: string; error?: string } = p.server?.kind === 'external'
-			? await setNetworkServerEnabled(p.server.id, !enabled)
-			: await updateProvider(p.name, { enabled: !enabled });
+		const result: { ok: boolean; message?: string; error?: string } = p.type === 'harness'
+			? await setHarnessEnabled(p.name, !enabled)
+			: p.server?.kind === 'external'
+				? await setNetworkServerEnabled(p.server.id, !enabled)
+				: await updateProvider(p.name, { enabled: !enabled });
 		if (!result.ok) {
 			const reason = result.message ?? result.error;
 			toggleError = `Could not turn ${p.label} ${enabled ? 'off' : 'on'}: ${reason ?? 'try again.'}`;

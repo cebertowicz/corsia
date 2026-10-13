@@ -1,5 +1,6 @@
 import {
 	blockedReason,
+	HARNESS_PROVIDER_DISABLED_HOLD,
 	NO_MODEL_SELECTED,
 	SELECTED_MODEL_UNAVAILABLE,
 	SET_ASIDE_COPY,
@@ -26,6 +27,8 @@ export type DeliveryPresentation = {
 	label:
 		| 'Sending when ready…'
 		| 'Waiting for model'
+		| 'Claude Code is turned off · Settings > Providers'
+		| 'Codex is turned off · Settings > Providers'
 		| 'Choose a model to send'
 		| 'Waiting for checkpoint'
 		| 'Delivery uncertain'
@@ -50,6 +53,7 @@ export type DeliveryPresentation = {
 /** Model holds by cause; the copy is the same for every provider. */
 const MODEL_HOLD_COPY: Readonly<Record<string, Pick<DeliveryPresentation, 'label' | 'title'>>> = Object.freeze({
 	[SELECTED_MODEL_UNAVAILABLE]: WAITING_FOR_MODEL,
+	...HARNESS_PROVIDER_DISABLED_HOLD,
 	[NO_MODEL_SELECTED]: WAITING_FOR_MODEL_CHOICE,
 });
 
