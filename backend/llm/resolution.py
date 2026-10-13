@@ -101,15 +101,12 @@ def _resolve_non_native_target(
 ) -> tuple[bool, str | None, str, str | None]:
     """Resolve a harness-backed row's availability and transport identity."""
     connection_row = connection.execute(
-        "SELECT status, enabled FROM connections WHERE provider = ?", (harness,)
+        "SELECT status FROM connections WHERE provider = ?", (harness,)
     ).fetchone()
     reason: str | None = None
     if not connection_row or connection_row["status"] != "available":
         available = False
         reason = "connection_unavailable"
-    elif not bool(connection_row["enabled"]):
-        available = False
-        reason = "provider_disabled"
     elif not available:
         reason = (
             metadata.get("availability_reason")

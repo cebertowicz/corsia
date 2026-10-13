@@ -41,8 +41,6 @@ export interface ModelSource {
 	/** A failed local setup's reason, kept until the next attempt. */
 	setup_error?: string;
 	accounts?: SourceAccount[];
-	/** The person's independent enable choice for a CLI harness. */
-	enabled?: boolean;
 	/** The conductor's bound account when it can no longer run here: removed, or turned off for the project. */
 	lost_binding?: { label: string; reason: 'removed' | 'turned_off' } | null;
 }
@@ -59,7 +57,7 @@ export function isHarness(source: ModelSource): boolean {
 
 /** Whether a source can run a model right now (not limited, signed out or unchecked). */
 export function sourceIsReady(source: ModelSource): boolean {
-	if (isHarness(source) && source.accounts) return source.enabled !== false && source.accounts.some((account) => account.state === 'ready');
+	if (isHarness(source) && source.accounts) return source.accounts.some((account) => account.state === 'ready');
 	return source.state === 'ready' && !source.limited;
 }
 

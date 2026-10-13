@@ -20,14 +20,10 @@ export function isDiscoveredHarnessModel(row: { available?: unknown }): boolean 
 	return Boolean(row.available);
 }
 
-/**
- * The catalog rows the picker can group; stale blocked-row suppression is group-local.
- * A harness the person switched off leaves the picker, except the thread's own model.
- */
+/** The catalog rows the picker can group; stale blocked-row suppression is group-local. */
 export function pickerCatalogModels(all: Model[], current?: string | null): Model[] {
 	return all.filter((model) => {
 		if (!isPickerMember(model, current)) return false;
-		if (model.status_reason === 'provider_disabled' && !modelMatchesId(model, current)) return false;
 		if (isHarnessModel(model) && !isDiscoveredHarnessModel(model) && !modelMatchesId(model, current)) return false;
 		const turn = modelAvailability(model);
 		return turn.status === 'ready' || (turn.status === 'unavailable' && Boolean(turn.status_reason));
@@ -67,10 +63,9 @@ export function settingsHarnessModelIds(
 		.filter((id) => settingsIds.has(id));
 	const visible = new Set(pickerIds);
 	for (const row of settingsRows) {
-		if (!isSettingsHarness(row, harness) || !isDiscoveredHarnessModel(row)) continue;
+		if (!isSettingsHarness(row, harness) || row.enabled !== 0 || !isDiscoveredHarnessModel(row)) continue;
 		if (row.source === 'reference' || settingsRowIsAlias(row) || typeof row.id !== 'string') continue;
-		// A switched-off harness offers nothing to the picker; its discovered rows keep its card.
-		if (row.enabled === 0 || row.provider_enabled === false) visible.add(row.id);
+		visible.add(row.id);
 	}
 	return [...pickerIds, ...settingsRows
 		.filter((row) => typeof row.id === 'string' && visible.has(row.id) && !pickerIds.includes(row.id))

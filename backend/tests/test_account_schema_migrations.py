@@ -107,15 +107,8 @@ def populated_policy(db):
 
 
 def unrelated_rows(db):
-    columns = {
-        "projects": "*",
-        # The enable switch is an intentional additive connection-schema change;
-        # this policy migration test protects the pre-existing connection facts.
-        "connections": "id,type,provider,config,status,scope,created_at,updated_at",
-        "vendor_accounts": "*",
-    }
-    return {table: [tuple(row) for row in db.execute(f"SELECT {columns[table]} FROM {table}")]
-            for table in columns}
+    return {table: [tuple(row) for row in db.execute(f'SELECT * FROM {table}')]
+            for table in ('projects', 'connections', 'vendor_accounts')}
 
 
 _CANONICAL_DEV78_PATH = Path(__file__).parent / "fixtures" / "canonical_dev78.sql"
@@ -882,7 +875,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_81_to_82_vendor_policy import migrate_81_to_82
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
 
-    assert SCHEMA_VERSION == 114
+    assert SCHEMA_VERSION == 113
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
     assert max(MIGRATIONS) == SCHEMA_VERSION - 1

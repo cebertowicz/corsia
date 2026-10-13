@@ -18,8 +18,6 @@ def codex_connection(db=None) -> dict:
             raise CodexConnectionUnavailable(
                 f"Codex connection is not available: {reason}"
             )
-        if not bool(conn.get("enabled", 1)):
-            raise CodexConnectionUnavailable("Codex connection is not available: provider_disabled")
         return conn
     finally:
         if not db:

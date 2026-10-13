@@ -27,11 +27,7 @@ def account_model_status(account: dict, row: dict, *, project_ids: list, db, mov
     model = row["litellm_model"]
     provider = account["provider"]
     usage = project_for_model(stored_usage(provider=provider, account_id=account["id"], db=db), model=model, provider=provider)
-    # The person's off switch outranks every account fact: it is off on every account.
-    if row.get("status_reason") == "provider_disabled":
-        return {"status": "unavailable", "status_reason": "provider_disabled", "usage": usage}
-    # A harness that is not set up is unavailable on every account.
-    if account["source_home"] is None or row.get("status_reason") in ("connection_unavailable", "provider_disabled"):
+    if account["source_home"] is None or row.get("status_reason") == "connection_unavailable":
         status, reason = row["status"], row.get("status_reason")
     else:
         own = discovery_view(account)["discovery"].get("models", {}).get(model, {})

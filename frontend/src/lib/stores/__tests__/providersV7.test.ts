@@ -224,8 +224,8 @@ describe('groupByHost', () => {
 
 	it('adds an Agent CLIs section with one card per harness that has models', () => {
 		const groups = groupByHost([], [], null, [
-			{ name: 'claude-code', label: 'Claude Code', enabled: true, total: 3, ready: 2 },
-			{ name: 'codex', label: 'Codex', enabled: true, total: 2, ready: 0 },
+			{ name: 'claude-code', label: 'Claude Code', total: 3, ready: 2 },
+			{ name: 'codex', label: 'Codex', total: 2, ready: 0 },
 		]);
 		expect(groups).toHaveLength(1);
 		expect(groups[0].name).toBe('Agent CLIs');
@@ -235,19 +235,11 @@ describe('groupByHost', () => {
 		expect(codex.statusDot).toBe('idle');
 	});
 
-	it('shows a switched-off Agent CLI card as off, with its switch off', () => {
-		const [card] = groupByHost([], [], null, [
-			{ name: 'codex', label: 'Codex', enabled: false, total: 2, ready: 0 },
-		])[0].providers;
-		expect(card).toMatchObject({ statusDot: 'disabled', subline: 'off · 2 models', harnessEnabled: false });
-		expect(providerEnabled(card)).toBe(false);
-	});
-
 	it('uses singular model counts on harness and cloud cards', () => {
 		const counts = [0, 1, 2];
 		const expected = ['0 models', '1 model', '2 models'];
 		const harnesses = groupByHost([], [], null, counts.map(total => ({
-			name: `harness-${total}`, label: `Harness ${total}`, enabled: true, total, ready: total,
+			name: `harness-${total}`, label: `Harness ${total}`, total, ready: total,
 		})));
 		const cloud = groupByHost(counts.map(count => p({
 			name: `cloud-${count}`, label: `Cloud ${count}`, type: 'cloud', has_key: true,
@@ -296,8 +288,8 @@ describe('groupByHost', () => {
 			account('codex', 'default'), account('codex', 'work'), account('claude-code', 'default'),
 		]);
 		const groups = groupByHost([], [], null, [
-			{ name: 'codex', label: 'Codex', enabled: true, total: 3, ready: 3 },
-			{ name: 'claude-code', label: 'Claude Code', enabled: true, total: 1, ready: 1 },
+			{ name: 'codex', label: 'Codex', total: 3, ready: 3 },
+			{ name: 'claude-code', label: 'Claude Code', total: 1, ready: 1 },
 		]);
 
 		expect(groups[0].providers.map(provider => provider.subline)).toEqual([

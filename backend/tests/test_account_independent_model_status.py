@@ -228,32 +228,6 @@ def test_a_runs_on_entry_carries_the_whole_decision(accounts):  # noqa: F811
     assert "usage_check" not in usable
 
 
-def test_a_harness_turned_off_is_off_on_every_account(accounts):  # noqa: F811
-    """An added account's own discovery never makes a switched-off harness's model runnable,
-    and the off switch outranks a signed-out account, so Settings shows no generic warning."""
-    from connections.models import set_harness_enabled
-    from connections.vendor_accounts import set_account_state
-    from llm.model_status import get_model_status_rows
-
-    db, legacy, second, third = accounts
-    _ready(db, second)
-    set_account_state(third["id"], "signed_out", expected_revision=third["revision"], db=db)
-    db.execute("UPDATE models SET context_window=200000 WHERE id='codex/test'")
-    db.commit()
-    on = _by_account({item["id"]: item for item in get_model_status_rows()}["codex/test"])
-    assert on[third["id"]]["status_reason"] == "account_signed_out"
-    set_harness_enabled("codex", False, db=db)
-    db.commit()
-
-    row = {item["id"]: item for item in get_model_status_rows()}["codex/test"]
-    entries = _by_account(row)
-
-    assert (row["status"], row["status_reason"]) == ("unavailable", "provider_disabled")
-    for account in (legacy, second, third):
-        entry = entries[account["id"]]
-        assert (entry["status"], entry["status_reason"]) == ("unavailable", "provider_disabled")
-
-
 def test_a_limited_entry_reports_the_recheck_the_picker_shows(accounts, monkeypatch):  # noqa: F811
     from llm.model_status import get_model_status_rows
 

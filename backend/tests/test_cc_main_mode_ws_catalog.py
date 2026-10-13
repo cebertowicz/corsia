@@ -103,17 +103,6 @@ class TestCCAttachments:
         assert row["content"] == "look at this"
 
 
-
-def _connected(monkeypatch, predicate):
-    """Report each CLI harness as signed in per ``predicate``, switched on."""
-    import llm.model_status as model_status
-
-    monkeypatch.setattr(
-        model_status, "_harness_connection_facts",
-        lambda: {p: (predicate(p), True) for p in ("claude-code", "codex")},
-    )
-
-
 class TestModelsCatalog:
     @pytest.fixture(autouse=True)
     def _discovered_harness_catalog(self, monkeypatch):
@@ -156,9 +145,11 @@ class TestModelsCatalog:
     @pytest.mark.asyncio
     async def test_cc_models_listed_when_connection_available(self, monkeypatch):
         import api.models as am
+        import connections.models as cm
         from llm import catalog as model_catalog
 
-        _connected(monkeypatch, lambda provider: provider == "claude-code")
+        monkeypatch.setattr(cm, "connection_available",
+                            lambda provider, db=None: provider == "claude-code")
         out = await am.list_models()
         cc = [m for m in out["models"] if m["provider"] == "claude-code"]
         assert [m["id"] for m in cc] == [
@@ -171,9 +162,11 @@ class TestModelsCatalog:
         # AC-P1a-2: a configured-but-unavailable harness renders as a present,
         # disabled row with an honest reason — never filtered out.
         import api.models as am
+        import connections.models as cm
         from llm import catalog as model_catalog
 
-        _connected(monkeypatch, lambda provider: False)
+        monkeypatch.setattr(cm, "connection_available",
+                            lambda provider, db=None: False)
         out = await am.list_models()
         cc = [m for m in out["models"] if m["provider"] == "claude-code"]
         assert [row["id"] for row in cc] == [
@@ -185,9 +178,11 @@ class TestModelsCatalog:
     @pytest.mark.asyncio
     async def test_codex_models_listed_when_connection_available(self, monkeypatch):
         import api.models as am
+        import connections.models as cm
         from llm import catalog as model_catalog
 
-        _connected(monkeypatch, lambda provider: provider == "codex")
+        monkeypatch.setattr(cm, "connection_available",
+                            lambda provider, db=None: provider == "codex")
         out = await am.list_models()
         codex = [m for m in out["models"] if m["provider"] == "codex"]
         assert [m["id"] for m in codex] == ["codex/gpt-5-codex"]
@@ -197,9 +192,11 @@ class TestModelsCatalog:
     async def test_codex_row_unavailable_not_dropped_without_connection(self, monkeypatch):
         # AC-P1a-2: unavailable Codex harness renders present+disabled, not dropped.
         import api.models as am
+        import connections.models as cm
         from llm import catalog as model_catalog
 
-        _connected(monkeypatch, lambda provider: False)
+        monkeypatch.setattr(cm, "connection_available",
+                            lambda provider, db=None: False)
         out = await am.list_models()
         codex = [m for m in out["models"] if m["provider"] == "codex"]
         assert len(codex) == 1
@@ -253,9 +250,11 @@ class TestModelsCatalog:
     @pytest.mark.asyncio
     async def test_cc_models_expose_effort_levels_reasoning_config(self, monkeypatch):
         import api.models as am
+        import connections.models as cm
         from llm import catalog as model_catalog
 
-        _connected(monkeypatch, lambda provider: provider == "claude-code")
+        monkeypatch.setattr(cm, "connection_available",
+                            lambda provider, db=None: provider == "claude-code")
         out = await am.list_models()
         cc = [m for m in out["models"] if m["provider"] == "claude-code"]
         assert cc, "expected CC models"
@@ -271,9 +270,11 @@ class TestModelsCatalog:
     @pytest.mark.asyncio
     async def test_codex_models_expose_effort_levels_reasoning_config(self, monkeypatch):
         import api.models as am
+        import connections.models as cm
         from llm import catalog as model_catalog
 
-        _connected(monkeypatch, lambda provider: provider == "codex")
+        monkeypatch.setattr(cm, "connection_available",
+                            lambda provider, db=None: provider == "codex")
         out = await am.list_models()
         codex = [m for m in out["models"] if m["provider"] == "codex"]
         assert codex, "expected Codex models"
