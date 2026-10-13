@@ -72,15 +72,13 @@
 			</svg>
 		</button>
 
-
-			<button
-				type="button"
-				class="tg"
-				class:on={enabled}
-				aria-label={enabled ? 'Disable' : 'Enable'}
-				onclick={() => onToggleEnable?.()}
-			></button>
-
+		<button
+			type="button"
+			class="tg"
+			class:on={enabled}
+			aria-label={enabled ? 'Disable' : 'Enable'}
+			onclick={() => onToggleEnable?.()}
+		></button>
 	</div>
 
 	{#if discoveryWarning}

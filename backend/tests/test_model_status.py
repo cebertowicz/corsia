@@ -199,6 +199,22 @@ class TestGetModelStatusRows:
         assert row["status"] == "unavailable"
         assert row["status_reason"] == "provider_disabled"
 
+    def test_harness_without_connection_row_is_not_reported_as_turned_off(self, status_env, monkeypatch):
+        from llm import model_status as ms
+        from llm.model_status import get_model_status_rows
+        monkeypatch.setattr(ms, "_harness_connection_facts", lambda: {})
+        status_env.set_rows([_catalog_row(
+            id="codex/spark-probe", harness="codex", backend="codex",
+            provider="codex", provider_model_id="spark-probe", display_name="Spark",
+            litellm_model="codex/spark-probe", context_window=128000,
+            metadata_json='{"discovered_capabilities": {}, "discovery_order": 0}',
+        )])
+
+        row = get_model_status_rows()[0]
+
+        assert row["status"] == "unavailable"
+        assert row["status_reason"] == "connection_unavailable"
+
     def test_user_alias_overrides_display_name_in_switcher(self, status_env):
         # A user-set alias replaces the discovered display_name in the picker.
         from llm.model_status import get_model_status_rows

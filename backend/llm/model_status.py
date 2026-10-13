@@ -316,7 +316,7 @@ def harness_base_row(model: str, *, db) -> dict | None:
         "SELECT status, enabled FROM connections WHERE provider=?", (row["harness"],)
     ).fetchone()
     connected = bool(connection) and connection["status"] == "available"
-    enabled = bool(connection) and bool(connection["enabled"])
+    enabled = connection is None or bool(connection["enabled"])
     status, reason = _harness_status(row["harness"], row, json.loads(row.get("metadata_json") or "{}"),
                                      resolve_window_for_row(row, db=db), connected, enabled)
     return {"litellm_model": row["litellm_model"], "status": status, "status_reason": reason}
@@ -352,7 +352,8 @@ def _status_entry(row: dict, cloud_active, server_status, loaded_ids_fn, harness
         meta = {}
 
     if harness in ("claude-code", "codex"):
-        connected, enabled = harness_facts.get(harness, (False, False))
+        # No connection row is a missing setup, never the person's off switch.
+        connected, enabled = harness_facts.get(harness, (False, True))
         status, status_reason = _harness_status(
             harness, row, meta, context_window, connected, enabled,
         )

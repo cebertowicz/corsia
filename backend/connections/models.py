@@ -178,15 +178,6 @@ def set_harness_enabled(provider: str, enabled: bool, db=None) -> dict[str, Any]
         return _row_to_dict(row) if row else None
 
 
-def harness_enabled(provider: str, db=None) -> bool:
-    """Whether a CLI harness remains enabled by the person's provider setting."""
-    _db = db or get_db()
-    row = _db.execute("SELECT enabled FROM connections WHERE provider=?", (provider,)).fetchone()
-    if not db:
-        _db.close()
-    return bool(row) and bool(row["enabled"])
-
-
 def connection_available(provider: str, db=None) -> bool:
     """True iff a connection row exists for ``provider`` with status 'available'.
 
