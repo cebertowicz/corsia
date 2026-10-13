@@ -6,6 +6,8 @@
 	import type { PreviewFrameSource } from '$lib/stores/livePreviewFeed';
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { openDocumentLink } from '$lib/linkTargetResolver';
+	import { get } from 'svelte/store';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
@@ -77,6 +79,12 @@
 		if (!bounds) return wanted;
 		return Math.max(bounds.left + EDGE, Math.min(wanted, bounds.right - EDGE - buttonWidth));
 	});
+	/** The bubble fades out as the comment sheet's intro starts, at 70% of its `selpop` entrance (`--dur-tight`); reduced motion cuts. It takes no tap while it leaves. */
+	function bubbleOut() {
+		if (get(prefersReducedMotion)) return { duration: 0 };
+		const tight = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 0;
+		return { duration: tight * 0.7, css: (t: number) => `opacity: ${t}; pointer-events: none` };
+	}
 </script>
 
 <div class="doc-main" bind:this={column}>
@@ -99,7 +107,7 @@
 </div>
 
 {#if pendingSel && !commentSheetOpen}
-	<button class="sel-comment" style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
+	<button class="sel-comment" out:bubbleOut style="top:{pendingSel.top}px; left:{buttonLeft}px" bind:offsetWidth={buttonWidth}
 		onmousedown={(event) => event.preventDefault()} onclick={onStartComment}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
 		Comment
