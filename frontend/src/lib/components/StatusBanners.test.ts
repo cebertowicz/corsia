@@ -8,6 +8,7 @@ import {
 	securityAlert,
 } from '$lib/stores/connection';
 import { token } from '$lib/stores/auth';
+import { resetUpdateStoreForTests, updateStatus } from '$lib/update/store';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -17,6 +18,7 @@ beforeEach(() => {
 	drainStatus.set(null);
 	securityAlert.set(null);
 	token.set(null);
+	resetUpdateStoreForTests();
 	host = document.createElement('div');
 	document.body.appendChild(host);
 });
@@ -29,6 +31,7 @@ afterEach(() => {
 	drainStatus.set(null);
 	securityAlert.set(null);
 	token.set(null);
+	resetUpdateStoreForTests();
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });
@@ -71,6 +74,28 @@ describe('StatusBanners', () => {
 		expect(host.textContent).toContain('1 more active turn');
 		expect(host.textContent).toContain('1 owned process group');
 		expect(host.textContent).toContain('2 browser commands');
+	});
+
+	it('suppresses the generic banner only while an update owns the drain', () => {
+		drainStatus.set({
+			active: true, reason: 'update', activeProcesses: 1, activeTurns: 0,
+			hostAccessSupervisors: 0, ownedProcessGroups: 0, browserCommands: 0,
+			turnAdmissions: 0, countdown: null, blockingTurns: [],
+		});
+		updateStatus.set({
+			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
+			available: true, checked_at: 1, error: null,
+			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining' },
+		});
+		component = mount(StatusBanners, { target: host });
+		flushSync();
+		expect(host.querySelector('.drain-banner')).toBeNull();
+
+		updateStatus.update((status) => ({
+			...status!, operation: { operation_id: 'restart-1', kind: 'restart', status: 'in_flight', phase: 'draining' },
+		}));
+		flushSync();
+		expect(host.querySelector('.drain-banner')).not.toBeNull();
 	});
 
 	it('refreshes the exact drain blocker while restart is pending', async () => {

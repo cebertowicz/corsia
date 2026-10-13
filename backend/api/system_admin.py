@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 
@@ -307,19 +308,9 @@ async def system_restart_self(
 
 def _update_operation_status(operation: dict) -> dict:
     """Project durable Update truth without changing prior status fields."""
-    return {
-        "operation_id": str(operation["id"]),
-        "status": operation["status"],
-        "phase": operation.get("phase"),
-        "target_version": operation.get("target_version"),
-        "drain_total": operation.get("drain_total"),
-        "failure_code": operation.get("failure_code"),
-        "failure_detail": operation.get("failure_detail"),
-        "conductor_told_at": operation.get("conductor_told_at"),
-        "error": operation.get("error"),
-        "requested_at": operation.get("requested_at"),
-        "settled_at": operation.get("settled_at"),
-    }
+    from infra.update_operation import project_update_operation
+
+    return project_update_operation(operation)
 
 
 @router.get("/system/update-status")
@@ -333,11 +324,15 @@ async def system_update_status(
     completed — the UI must not present that as up to date.
     """
     from automation import self_restart
+    from infra import drain
     from infra.db_async import run_in_db
     from infra.update_status import update_status
 
     status = await asyncio.to_thread(update_status, refresh)
     result = status.to_dict()
+    result["drain_cap_seconds"] = drain.DRAIN_HARD_CAP
+    result["usual_seconds"] = await run_in_db(self_restart.usual_update_seconds)
+    result["server_time"] = datetime.now(timezone.utc).isoformat()
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:
         result["operation"] = _update_operation_status(operation)

@@ -37,7 +37,7 @@
 	function fitParam(toast: Toast): string | null {
 		const pinned = toast.pinned;
 		if (!pinned) return null;
-		return `${toast.message}|${pinned.time ?? ''}|${toast.action?.label ?? ''}`;
+		return `${toast.message}|${pinned.detail ?? ''}|${pinned.time ?? ''}|${toast.action?.label ?? ''}`;
 	}
 
 	function pinnedFit(node: HTMLElement, param: string | null) {
@@ -83,10 +83,11 @@
 				{:else if type === 'info' && pinned}
 					<svg class="toast-icon toast-icon--update" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8 12l4-4 4 4"/></svg>
 				{:else if type === 'error'}
-					<svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12.5"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+					<svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
 				{/if}
-				<span class="toast-line">
+				<span class="toast-line" class:toast-line--detail={Boolean(pinned?.detail)}>
 					<span class="toast-text" role={pinned && type !== 'error' ? 'status' : undefined}>{toast.message}</span>
+					{#if pinned?.detail}<span class="toast-detail">{pinned.detail}</span>{/if}
 					{#if pinned?.time}
 						<span class="toast-time" aria-hidden="true">{pinned.time}</span>
 					{/if}
@@ -193,6 +194,9 @@
 		flex: 1;
 	}
 
+	.toast-detail { display: block; color: var(--text-secondary); font-weight: 400; }
+	.toast--error .toast-text { color: var(--red-text); font-weight: var(--fw-semibold); }
+	.toast--error .toast-action { color: var(--red-text); }
 	.toast-time {
 		color: var(--text-tertiary);
 		font-weight: 400;

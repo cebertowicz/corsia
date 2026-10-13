@@ -12,7 +12,7 @@ describe('registerHomeLifecycle polling', () => {
 		vi.useRealTimers();
 	});
 
-	it('keeps one periodic timer across reconnects while refreshing every connection', () => {
+	it('reads update state on reconnect while leaving operation polling to the update store', () => {
 		const listeners = new Map<string, (data: any) => void>();
 		const loadThreads = vi.fn();
 		const loadModels = vi.fn();
@@ -55,7 +55,7 @@ describe('registerHomeLifecycle polling', () => {
 		vi.advanceTimersByTime(30_000);
 
 		expect(loadSettings).toHaveBeenCalledTimes(3);
-		expect(loadUpdateStatus).toHaveBeenCalledTimes(3);
+		expect(loadUpdateStatus).toHaveBeenCalledTimes(2);
 		expect(pollSystem).toHaveBeenCalledTimes(3);
 		expect(loadThreads).toHaveBeenCalledTimes(2);
 		expect(loadModels).toHaveBeenCalledTimes(2);

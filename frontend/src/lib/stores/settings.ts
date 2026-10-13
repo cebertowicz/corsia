@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
 import { applyFeaturePatch, confirmsFeaturePatch, enqueueFeaturePatch, type FeatureSettings, type SettingsPatch, SettingsSnapshotGate } from './settingsFeaturePatch';
+export { loadUpdateStatus, updateStatus, type UpdateStatus } from '$lib/update/store';
 
 export interface CoreSettings {
 	host_access_reviewer_model?: string | null;
@@ -100,45 +101,6 @@ async function submitSettingsPatch(patch: SettingsPatch): Promise<{ ok: boolean;
 	}
 }
 
-export interface UpdateStatus {
-	branch: string | null;
-	current_sha: string | null;
-	remote_sha: string | null;
-	commits_behind: number | null;
-	available: boolean | null;
-	checked_at: number | null;
-	error: string | null;
-}
-
-export const updateStatus = writable<UpdateStatus | null>(null);
-
-/** Refresh the cached update status. `refresh` forces a new remote probe. */
-export async function loadUpdateStatus(refresh = false): Promise<void> {
-	const t = get(token);
-	if (!t) return;
-	try {
-		const res = await fetch(
-			`${BASE}/api/system/update-status?refresh=${refresh ? 'true' : 'false'}`,
-			{ headers: { Authorization: `Bearer ${t}` } },
-		);
-		if (!res.ok) throw new Error(`Update check returned ${res.status}`);
-		updateStatus.set(await res.json());
-	} catch (e) {
-		// A failed check must not leave a confident stale answer on screen. The
-		// endpoint never claims "up to date" without evidence, and neither does
-		// the client: drop to unknown, keeping the last known context so the
-		// System card can still say what was checked and why it failed.
-		updateStatus.update((prev) => ({
-			branch: prev?.branch ?? null,
-			current_sha: prev?.current_sha ?? null,
-			remote_sha: prev?.remote_sha ?? null,
-			commits_behind: null,
-			available: null,
-			checked_at: prev?.checked_at ?? null,
-			error: e instanceof Error ? e.message : 'Update check failed.',
-		}));
-	}
-}
 
 export async function loadModelProfile(modelId: string): Promise<ModelProfile | null> {
 	try {

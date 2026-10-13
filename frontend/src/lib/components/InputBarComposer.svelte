@@ -3,6 +3,8 @@
 	import QueuedInputStack from './QueuedInputStack.svelte';
 	import type { Attachment, SheetView } from './inputBarHelpers';
 	import { toastClearanceSurface } from '$lib/stores/toastClearance';
+	import { updateOperation, updateUnreachable } from '$lib/update/store';
+	import { holdsNewWork, isInFlight } from '$lib/update/model';
 
 	let {
 		inputEl = $bindable<HTMLDivElement | undefined>(),
@@ -57,6 +59,13 @@
 	} = $props();
 
 	let failedPreviewIds = $state<string[]>([]);
+	const updateRestarting = $derived(
+		isInFlight($updateOperation) && ($updateUnreachable || $updateOperation?.phase === 'restarting'),
+	);
+	const updateDraining = $derived(holdsNewWork($updateOperation));
+	const composerPlaceholder = $derived(
+		updateRestarting ? 'You can send again when CORSIA is back' : updateDraining ? 'Sends after the update' : 'Message CORSIA...',
+	);
 
 	function previewFailed(attachment: Attachment): boolean {
 		return failedPreviewIds.includes(attachment.file_id);
@@ -110,12 +119,13 @@
 		<div
 			class="composer"
 			bind:this={inputEl}
-			contenteditable="plaintext-only"
+			contenteditable={updateRestarting ? 'false' : 'plaintext-only'}
 			role="textbox"
 			aria-multiline="true"
 			aria-label="Message CORSIA"
-			tabindex="0"
-			data-placeholder="Message CORSIA..."
+			aria-disabled={updateRestarting}
+			tabindex={updateRestarting ? -1 : 0}
+			data-placeholder={composerPlaceholder}
 			enterkeyhint="enter"
 			inputmode="text"
 			autocapitalize="sentences"
@@ -139,7 +149,7 @@
 			{inputText}
 			pendingAttachmentCount={pendingAttachments.length}
 			{hasMessageToSend}
-			{canSendToModel}
+			canSendToModel={canSendToModel && !updateRestarting}
 			{queueUntilSwitch}
 			{onAttachFile}
 			{onAttachCamera}

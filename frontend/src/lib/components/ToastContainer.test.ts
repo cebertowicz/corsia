@@ -263,6 +263,12 @@ describe('ToastContainer fit', () => {
 		expect(toast.dataset.fit).toBe('full');
 	});
 
+	it('renders a pinned failure detail as a second line', () => {
+		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: 'Needs 12 GB more free space' });
+		mountContainer();
+		expect(host.querySelector('.toast-detail')?.textContent).toBe('Needs 12 GB more free space');
+	});
+
 	it('never measures an ordinary toast', async () => {
 		overflowsAt = () => true;
 		toasts.show('A long ordinary toast');

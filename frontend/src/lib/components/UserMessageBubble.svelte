@@ -13,6 +13,8 @@
 		isQueuedInputOwnedByActiveTurn,
 	} from '$lib/messageDelivery';
 	import { limitHeldThreadId } from '$lib/stores/overageSetting';
+	import { updateOperation } from '$lib/update/store';
+	import { holdsNewWork } from '$lib/update/model';
 	import AgentMessageAttribution from './AgentMessageAttribution.svelte';
 	import UserBubbleAttachments from './UserBubbleAttachments.svelte';
 
@@ -55,7 +57,10 @@
 	const timestampPending = $derived(
 		deliveryState === 'queued' || deliveryState === 'sending',
 	);
-	const deliveryLabel = $derived(delivery?.label ?? null);
+	const queuedForUpdate = $derived(
+		deliveryState === 'queued' && messageThreadId === $activeThreadId && holdsNewWork($updateOperation),
+	);
+	const deliveryLabel = $derived(queuedForUpdate ? 'Sends after the update' : delivery?.label ?? null);
 	// Delivery status derives from the canonical projection.
 	const deliveryTitle = $derived(delivery?.title ?? null);
 	const deliveryFailed = $derived(delivery?.failed === true);

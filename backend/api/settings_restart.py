@@ -143,6 +143,7 @@ async def _acquire_settings_restart(
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
     from infra.db_async import run_in_db
+    from infra.update_status import cached_target_version
 
     def _try_acquire() -> str | None:
         operation_id = self_restart.try_acquire(
@@ -153,6 +154,7 @@ async def _acquire_settings_restart(
             mode,
             kind="update" if mode == "update" else "restart",
             trigger="manual" if mode == "update" else None,
+            target_version=cached_target_version() if mode == "update" else None,
         )
         if operation_id is not None:
             acquired_ids.append(operation_id)
