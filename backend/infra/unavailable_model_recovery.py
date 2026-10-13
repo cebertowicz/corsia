@@ -9,6 +9,9 @@ from loguru import logger
 
 from infra.db_async import run_in_db
 from infra.send_target import (
+    CLAUDE_CODE_PROVIDER_DISABLED,
+    CODEX_PROVIDER_DISABLED,
+    HARNESS_PROVIDER_DISABLED,
     SELECTED_MODEL_UNAVAILABLE,
     TargetUnavailable,
     classify_target_admission,
@@ -30,7 +33,7 @@ def _retained_head_kind_sql(thread: str) -> str:
 
     causes = ','.join("'" + cause + "'" for cause in ACCOUNT_HOLD_REASONS)
     return f"""(SELECT CASE
-         WHEN held.delivery_error='{SELECTED_MODEL_UNAVAILABLE}' THEN 'model'
+         WHEN held.delivery_error IN ('{SELECTED_MODEL_UNAVAILABLE}', {','.join(repr(reason) for reason in HARNESS_PROVIDER_DISABLED)}) THEN 'model'
          WHEN held.delivery_error IN ({causes}) THEN 'account' END
       FROM messages AS held JOIN threads AS ht ON ht.id=held.thread_id
        WHERE held.thread_id={thread} AND held.delivery_state='queued'
@@ -79,9 +82,12 @@ async def hold_unavailable_model_input(
     from infra.send_broadcast import broadcast_claimed_batch
     from infra.send_types import InboxQueuedInput, InputReceipt
 
-    await run_in_db(
-        release_batch_before_write, batch, hold_error=SELECTED_MODEL_UNAVAILABLE,
-    )
+    hold_error = (
+        CLAUDE_CODE_PROVIDER_DISABLED if target.harness == "claude-code"
+        else CODEX_PROVIDER_DISABLED if target.harness == "codex"
+        else SELECTED_MODEL_UNAVAILABLE
+    ) if target.availability_reason == "provider_disabled" else SELECTED_MODEL_UNAVAILABLE
+    await run_in_db(release_batch_before_write, batch, hold_error=hold_error)
     await settle_turn_terminal(batch.turn_id, "error", SELECTED_MODEL_UNAVAILABLE)
     try:
         await broadcast_claimed_batch(batch)

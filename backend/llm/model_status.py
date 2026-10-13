@@ -208,12 +208,17 @@ def _harness_status(
     meta: dict,
     context_window: int | None,
     connected: bool,
+    db=None,
 ) -> tuple[str, str | None]:
     """Account-independent status and reason for a Claude Code or Codex row.
 
     Whether an account can run the model, usage included, is decided per
     account by ``llm.account_catalog.account_model_status``.
     """
+    from connections.models import connection_disabled
+
+    if connection_disabled(harness, db=db):
+        return "unavailable", "provider_disabled"
     if not connected:
         return "unavailable", "connection_unavailable"
     if not row.get("available"):
@@ -299,7 +304,7 @@ def harness_base_row(model: str, *, db) -> dict | None:
 
     row = dict(row)
     status, reason = _harness_status(row["harness"], row, json.loads(row.get("metadata_json") or "{}"),
-                                     resolve_window_for_row(row, db=db), connection_available(row["harness"], db=db))
+                                     resolve_window_for_row(row, db=db), connection_available(row["harness"], db=db), db=db)
     return {"litellm_model": row["litellm_model"], "status": status, "status_reason": reason}
 
 

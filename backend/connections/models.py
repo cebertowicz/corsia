@@ -33,6 +33,7 @@ class ConnectionStatus(str, Enum):
     """
 
     AVAILABLE = "available"
+    DISABLED = "disabled"
     NOT_INSTALLED = "not_installed"
     NEEDS_AUTH = "needs_auth"
     UNVERIFIED = "unverified"
@@ -160,6 +161,44 @@ def set_connection_status(
         return _row_to_dict(row) if row else None
 
 
+def set_harness_enabled(provider: str, enabled: bool, db=None) -> dict[str, Any] | None:
+    """Set the one provider-wide on/off state for a CLI harness.
+
+    A disabled connection remains configured but is unavailable to catalog,
+    dispatch, and admission. Re-enabling restores the last source-check verdict
+    when one exists, so a signed-out harness cannot become available merely
+    because its switch was turned back on.
+    """
+    if provider not in VENDORS:
+        raise ValueError(f"{provider!r} is not a harness provider")
+    if not enabled:
+        return set_connection_status(provider, ConnectionStatus.DISABLED, db=db)
+
+    row = get_connection(provider, db=db)
+    if row is None:
+        return None
+    check = (row.get("config") or {}).get(SOURCE_CHECK_KEY)
+    if check and check.get("state"):
+        # Keep source-state's existing state-to-status policy canonical.
+        from connections.source_state import resolve_check
+
+        status, _ = resolve_check(row, check["state"], None)
+    else:
+        status = ConnectionStatus.AVAILABLE
+    return set_connection_status(provider, status, db=db)
+
+
+def connection_disabled(provider: str, db=None) -> bool:
+    """Whether an operator explicitly turned this provider off."""
+    _db = db or get_db()
+    row = _db.execute(
+        "SELECT status FROM connections WHERE provider = ?", (provider,)
+    ).fetchone()
+    if not db:
+        _db.close()
+    return bool(row) and row["status"] == ConnectionStatus.DISABLED.value
+
+
 def connection_available(provider: str, db=None) -> bool:
     """True iff a connection row exists for ``provider`` with status 'available'.
 
@@ -185,12 +224,13 @@ def record_source_check(
     ``check`` is ``{state, prior_state, reason, checked_at}``; it lives in the
     row's config beside the discovery envelope, so no column is added. The
     status goes through ``set_connection_status``, the one writer of the
-    sign-in transition. Returns the updated row, or None if the provider has
-    no row.
+    sign-in transition. An explicit disabled state belongs to the person's
+    switch, so a check may update its receipt but cannot turn it back on.
+    Returns the updated row, or None if the provider has no row.
     """
     with write_transaction(db, scope="record_source_check") as _db:
         row = _db.execute(
-            "SELECT config FROM connections WHERE provider = ?", (provider,)
+            "SELECT status, config FROM connections WHERE provider = ?", (provider,)
         ).fetchone()
         if row is None:
             return None
@@ -200,4 +240,11 @@ def record_source_check(
             "UPDATE connections SET config = ? WHERE provider = ?",
             (json.dumps(config), provider),
         )
-        return set_connection_status(provider, status, db=_db, schedule_usage_check=schedule_usage_check)
+        effective_status = (
+            ConnectionStatus.DISABLED
+            if row["status"] == ConnectionStatus.DISABLED.value
+            else status
+        )
+        return set_connection_status(
+            provider, effective_status, db=_db, schedule_usage_check=schedule_usage_check,
+        )

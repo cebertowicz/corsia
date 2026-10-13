@@ -16,6 +16,7 @@ import type { ModelState, ProviderModel } from './providerModels';
 export interface HarnessSummary {
 	name: string;
 	label: string;
+	enabled: boolean;
 	total: number;
 	/** Rows the chat picker can offer now: public catalog status `ready`, the picker's own rule. */
 	ready: number;
@@ -36,7 +37,8 @@ export function harnessSummaries(settingsRows: CatalogRow[], catalog: Model[]): 
 	const catalogById = new Map(catalog.map((model) => [model.id, model]));
 	return HARNESSES.map(({ name, label }) => {
 		const ids = settingsHarnessModelIds(settingsRows, name, catalog);
-		return { name, label, total: ids.length, ready: ids.filter((id) => catalogById.get(id)?.status === 'ready').length };
+		const enabled = settingsRows.some((row) => row.harness === name && row.provider_enabled !== false);
+		return { name, label, enabled, total: ids.length, ready: ids.filter((id) => catalogById.get(id)?.status === 'ready').length };
 	}).filter((summary) => summary.total > 0);
 }
 
@@ -76,6 +78,23 @@ export function harnessProviderModels(
 export async function harnessModels(harness: string): Promise<ProviderModel[]> {
 	const [settingsRows, catalog] = await Promise.all([fetchCatalogInventory(), readWorkspaceModels()]);
 	return harnessProviderModels(settingsRows, harness, catalog);
+}
+
+/** Save the name the picker shows for a model; an empty label restores the discovered one. */
+export async function setHarnessEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; message?: string }> {
+	try {
+		const query = new URLSearchParams({ token: t() });
+		const res = await fetch(`/api/providers/harnesses/${encodeURIComponent(name)}/enabled?${query}`, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ enabled }),
+		});
+		if (res.ok) return { ok: true };
+		const data = await res.json().catch(() => null);
+		return { ok: false, message: plainErrorText(data?.detail, 'Could not save this provider. Try again.') };
+	} catch {
+		return { ok: false, message: SERVER_UNREACHABLE };
+	}
 }
 
 /** Save the name the picker shows for a model; an empty label restores the discovered one. */

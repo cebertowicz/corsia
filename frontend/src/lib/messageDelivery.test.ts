@@ -44,6 +44,18 @@ describe('deliveryPresentation', () => {
 			failed: false,
 		});
 	});
+	it('names a disabled harness and its recovery surface on a held input', () => {
+		const held = {
+			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,
+			active_turn_id: null, delivery_error: 'claude_code_provider_disabled', metadata: {},
+		};
+		expect(deliveryPresentation(held)).toEqual({
+			label: 'Claude Code is turned off · Settings > Providers',
+			title: 'Your message is saved and will send when Claude Code is turned back on.',
+			pending: true,
+			failed: false,
+		});
+	});
 	it('asks for a model when the thread has none, with the same pending treatment', () => {
 		const held = {
 			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,

@@ -93,7 +93,14 @@ def get_model_status_catalog_rows() -> list[dict]:
         """
         SELECT * FROM models
         WHERE (harness = 'native' AND enabled = 1 AND available = 1)
-           OR (harness IN ('claude-code', 'codex') AND enabled = 1)
+           OR (
+                harness IN ('claude-code', 'codex') AND enabled = 1
+                AND NOT EXISTS (
+                    SELECT 1 FROM connections
+                    WHERE connections.provider = models.harness
+                      AND connections.status = 'disabled'
+                )
+              )
         ORDER BY
           CASE harness
             WHEN 'native' THEN 0

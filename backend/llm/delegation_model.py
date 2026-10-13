@@ -157,6 +157,16 @@ def eligible_delegation_model(
             f"({resolution_error}); choose a ready selector: {alternatives}."
         )
     canonical_id = str(canonical["id"])
+    harness = str(original.get("harness") or "")
+    if harness in {"claude-code", "codex"}:
+        from connections.models import connection_disabled
+
+        if connection_disabled(harness):
+            label = "Claude Code" if harness == "claude-code" else "Codex"
+            return None, (
+                f"{label} is turned off in Settings > Providers. Turn it on before "
+                "spawning a subagent on one of its models."
+            )
     if not bool(original.get("enabled")):
         return None, (
             f"model {requested!r} resolves to {canonical_id!r} but is hidden and "
