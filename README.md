@@ -20,7 +20,7 @@
     <img width="49%" alt="Cost per task and first-try rate for each model, by task size" src="docs/measurement-models-light.png">
   </picture>
 </p>
-<p align="center"><sub>Measured on the install that builds CORSIA, October 2 to 8.</sub></p>
+<p align="center"><sub>Measured on the install that builds CORSIA, September 25 to October 8.</sub></p>
 
 <p align="center"><strong>CORSIA improves itself the same way.</strong> Its own agents build and maintain it: <a href="#built-by-its-own-agents">962 pull requests in 30 days</a>, under one maintainer.</p>
 
