@@ -13,8 +13,9 @@ import { syntheticPng } from '../support/syntheticImages';
 const FILLER = Array.from({ length: 34 }, (_, i) => `Filler paragraph ${i + 1} keeps this tab long enough to restore.\n`);
 const INDEX = [
 	'# Index', '',
-	...FILLER,
+	...FILLER.slice(0, 18),
 	'Open [the second document](./SECOND.md) from this saved place.', '',
+	...FILLER.slice(18),
 ].join('\n');
 const SECOND = [
 	'# Second document', '',
@@ -204,7 +205,7 @@ for (const width of [1440, 393]) {
 					await page.getByText(sessionTitle).first().click();
 					const scroller = page.locator('.cm-scroller');
 					await expect(scroller).toBeVisible();
-					await scroller.evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 3); });
+					await scroller.evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2); });
 					await expect.poll(async () => (await visiblePlace(scroller)).line.startsWith('Filler')).toBe(true);
 					await expect(link(page)).toBeInViewport();
 					const before = await visiblePlace(scroller);
