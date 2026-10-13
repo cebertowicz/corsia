@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from infra.packed_rows import fetch_all
-from plans import artifact_links, hierarchy, node_order, node_waits, projections, service, tree_rows
+from plans import artifact_links, hierarchy, node_order, node_states, node_waits, projections, service, tree_rows
 from plans.models import PlanState
 
 
@@ -110,6 +110,37 @@ def _links_by_node(connection, plan_id: str) -> dict:
     return indexed
 
 
+_DEPENDENT_CHUNK = 400
+
+
+def _dependent_titles(connection, plan_id: str, rows) -> dict[str, list[str]]:
+    """Return this plan's still-open work released by each listed user step.
+
+    A dependency can cross plan boundaries, but the pane must not disclose a
+    different plan's titles. Only the listed user steps are looked up, by the
+    dependency target index; CROSS JOIN keeps SQLite from driving the join
+    from the plan's nodes, so the cost follows the rows shown rather than the
+    plan's settled history.
+    """
+    steps = list(dict.fromkeys(str(row["id"]) for row in rows if row["assignee"] == "user"))
+    indexed: dict[str, list[str]] = {}
+    for start in range(0, len(steps), _DEPENDENT_CHUNK):
+        chunk = steps[start:start + _DEPENDENT_CHUNK]
+        found = fetch_all(
+            connection,
+            f"""SELECT e.depends_on_node_id AS prerequisite_id,d.title
+                FROM plan_node_dependencies e
+                CROSS JOIN plan_nodes d ON d.id=e.node_id
+                WHERE e.depends_on_node_id IN ({",".join("?" for _ in chunk)})
+                  AND d.plan_id=? AND {node_states.open_sql('d')}
+                ORDER BY d.order_key,d.id""",
+            (*chunk, plan_id),
+        )
+        for row in found:
+            indexed.setdefault(str(row["prerequisite_id"]), []).append(str(row["title"]))
+    return indexed
+
+
 def _child_plan(
     connection, row, child_depth: int | None, memo: dict[str, PlanState],
     child_plans: dict, child_nodes: dict,
@@ -135,7 +166,7 @@ def _child_plan(
 
 
 def _node_rollup(
-    connection, row, path, completed, links, waits, child_depth, memo,
+    connection, row, path, completed, links, waits, dependent_titles, child_depth, memo,
     child_plans, child_nodes,
 ) -> dict:
     """Project one node at its tree position, with completion, links and child plan."""
@@ -149,6 +180,7 @@ def _node_rollup(
         "completed_event_id": completion["id"] if completion else None,
         "completed_at": completion["created_at"] if completion else None,
         "artifact_links": links.get(row["id"], []),
+        "dependent_titles": dependent_titles.get(str(row["id"]), []),
         "child_plan": _child_plan(
             connection, row, child_depth, memo, child_plans, child_nodes,
         ),
@@ -168,11 +200,12 @@ def _rollup_plan(
         (row, path) for row, path in listed
         if str(row["id"]) not in rounds and rounds.isdisjoint(path)
     ]
+    dependent_titles = _dependent_titles(connection, plan_row["id"], (row for row, _path in rows))
     waits = node_waits.project(connection, [row for row, _path in rows])
     ordered: list[dict] = []
     for row, path in rows:
         node = _node_rollup(
-            connection, row, path, completed, links, waits, child_depth, memo,
+            connection, row, path, completed, links, waits, dependent_titles, child_depth, memo,
             child_plans, child_nodes,
         )
         if node["follow_up_of"] in sent_back and node["state"] in ("pending", "active"):
