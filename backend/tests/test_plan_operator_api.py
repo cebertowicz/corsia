@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from infra.schema import SCHEMA_SQL
 import plans.artifact_links as artifact_links
 import plans.decisions as decisions
+import plans.dependencies as dependencies
 import plans.mutations as mutations
 import plans.rollup as rollup
 import plans.service as service
@@ -709,9 +710,13 @@ def test_operator_node_carries_its_assignee(db):
     plan = service.ensure_plan("thread", "parent", db=db)
     mine = _task(plan.id, "Mine", db=db, assignee="user")
     agent = _task(plan.id, "Agent's", db=db)
+    dependent = _task(plan.id, "Ship it", db=db)
+    dependencies.add_dependency(dependent.id, mine.id, db=db)
 
     payload = _projection().read_thread("parent", actor=_actor(), db=db)
     nodes = {node["id"]: node for node in payload["plans"][0]["nodes"]}
 
     assert nodes[mine.id]["assignee"] == "user"
+    assert nodes[mine.id]["waiting_on"] == ["Ship it"]
     assert nodes[agent.id]["assignee"] is None
+    assert nodes[agent.id]["waiting_on"] == []

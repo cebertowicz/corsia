@@ -66,7 +66,7 @@ const EMPTY_AMOUNT: OperatorCostAmount = {
 export function foldedNode(item: FoldedItem, depth: number, parentId: string | null): OperatorNode {
 	return {
 		id: item.id, parent_id: parentId, depth, kind: item.kind, title: item.title,
-		description: null, acceptance_criteria: '', state: item.state,
+		description: null, waiting_on: [], acceptance_criteria: '', state: item.state,
 		unmet_dependencies: [], held_by: null, assignee: null,
 		revision: 0, requirements_revision: 0, commitment_id: '',
 		updated_at: item.folded_at, last_transition_at: item.folded_at, folded: true, requires_user_action: false,
