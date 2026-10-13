@@ -141,6 +141,7 @@ test('renders approved M1–M8 model-first picker states with live-shaped compon
 	await show('M7-open', M7, true, async () => {
 		await expect(page.locator('section[aria-label="Claude Code"] .account-usage-row')).toHaveCount(3);
 	});
+	// Six-account recovery rendering is isolated below so existing M1–M8 evidence retains its own contract.
 	// Every vendor collapses alike: a rollover Claude account with a long label beside all-limited Codex.
 	const longClaude = account('claude-primary', 'FOMRRT1 · Friends of Montclair Railroad Trail', 'claude-code', usage(1, 60));
 	const codexLimitedA = account('codex-pro', 'person@example.test', 'codex', limited());
@@ -162,4 +163,29 @@ test('renders approved M1–M8 model-first picker states with live-shaped compon
 	const signedOut = base([], [codexA, codexB]);
 	signedOut.rows = [...models('claude-code', [claudeA], [entry(claudeA, true, { status: 'unavailable', status_reason: 'connection_unavailable' })]), ...models('codex', [codexA, codexB]), ...external(), ...local()];
 	await show('M8', signedOut);
+});
+
+test('renders six anonymous account recovery states in the actual picker', async ({ page }) => {
+	test.setTimeout(90_000);
+	let fixture = { rows: [] as unknown[], accounts: [] as unknown[] };
+	await routePicker(page, () => fixture);
+	const failedKnown = account('claude-known', 'Known reset — unusually long anonymous account label', 'claude-code', { ...limited(), check: { outcome: 'failed', error: 'usage unavailable' } });
+	const failedUnknown = account('claude-unknown', 'No reset — unusually long anonymous account label', 'claude-code', { ...limited(), resets_at: null, check: { outcome: 'failed', error: 'usage unavailable' } });
+	const checking = account('claude-checking', 'Checking account', 'claude-code', { ...limited(), checking: true });
+	const fresh = account('claude-fresh', 'Fresh allowed account', 'claude-code', usage(12, 62));
+	const freshCodex = account('codex-fresh', 'Fresh Codex account', 'codex', usage(28, 51));
+	const extraCodex = account('codex-extra', 'Extra Codex account', 'codex', usage(67, 79));
+	fixture = {
+		rows: [...models('claude-code', [failedKnown, failedUnknown, checking, fresh]), ...models('codex', [freshCodex, extraCodex]), ...external(), ...local()],
+		accounts: [failedKnown, failedUnknown, checking, fresh, freshCodex, extraCodex],
+	};
+	await openPicker(page);
+	const claude = page.locator('section[aria-label="Claude Code"]');
+	await claude.locator('button.picker-account-title').click();
+	await expect(claude.locator('.account-usage-row')).toHaveCount(4);
+	await expect(claude).toContainText('Known reset — unusually long anonymous account label');
+	await expect(claude).toContainText('No reset — unusually long anonymous account label');
+	await expect(claude).toContainText('limited · checking');
+	await expect(claude).toContainText("couldn't verify");
+	await capture(page, 'M604-six-accounts');
 });
