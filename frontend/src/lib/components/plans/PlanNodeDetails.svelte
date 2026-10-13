@@ -127,7 +127,13 @@
 	ul { padding-left: var(--space-3); }
 	.causes > .prefix { display: block; }
 	.evidence-note { margin-left: var(--space-3); }
-	.person-instructions { color: var(--text-primary); font-size: var(--text-body); }
+	.person-instructions { color: var(--text-primary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.person-instructions :global(p) { margin-bottom: var(--space-1); }
+	.person-instructions :global(.code-block) { margin: var(--space-1) 0; }
+	/* Person steps need a touch-visible Copy affordance; chat keeps its hover behavior. */
+	.person-instructions :global(.copy-btn) { opacity: 1; }
+	/* Keep the command below the always-visible top-right Copy control. */
+	.person-instructions :global(.code-block pre) { padding-top: 34px; }
 	/* The line wraps only between its segments, so "3 follow-ups" and "5h 20m" never split. */
 	.segment { white-space: nowrap; }
 	.prefix, .note { color: var(--text-tertiary); }
