@@ -185,7 +185,7 @@ async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     """Create the durable child and its pre-start runtime context."""
     _check_live_cap()
     from connections.models import connection_available
-    from registry.service import notify_cc_session, persist_cc_session
+    from registry.cc_session import notify_cc_session, persist_cc_session
 
     if not connection_available("claude-code", db=db):
         raise ValueError("Claude Code connection is not available")

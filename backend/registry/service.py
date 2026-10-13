@@ -478,7 +478,6 @@ def register_uploads(
         logger.warning(f"registry register_uploads failed: {e}")
 
 
-
 def register_cc_session(
     thread_id: str | None, cc_session_id: str | None,
     *,

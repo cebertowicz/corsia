@@ -75,4 +75,4 @@ def notify_cc_session(
             "external_id": cc_session_id})
     except Exception as error:
         logger.warning(
-            f"registry register_cc_session notify failed for {thread_id}: {error}")
+            f"registry cc session notify failed for {thread_id}: {error}")

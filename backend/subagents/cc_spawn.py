@@ -13,7 +13,7 @@ from infra.db_async import run_in_db
 from infra.thread_driver import InputAdmission, admit_input
 from infra.time import utc_now_iso
 from llm.resolution import ExecutionTarget
-from registry.service import notify_cc_session, persist_cc_session
+from registry.cc_session import notify_cc_session, persist_cc_session
 from subagents.cc_accept import require_owned_accept_db
 from subagents.cc_runtime_events import _make_on_event
 from subagents.cc_runtime_helpers import (
