@@ -111,11 +111,20 @@ describe('PlanTree — a level\'s folded history', () => {
 		expect(String(fetcher.mock.calls[1][0])).toContain('cursor=c1');
 	});
 
-	it('says it is loading while a page is on its way', async () => {
+	it('keeps a cold page pending on Show while a request is on its way', async () => {
 		vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
 		mountTree(root(3, 3));
 		await press('Show 3');
-		expect(host.querySelector('[role="status"]')?.textContent).toBe('Loading…');
+		expect(host.querySelector('button[aria-busy="true"]')?.textContent).toContain('Show 3');
+		expect(host.querySelector('[role="status"]')).toBeNull();
+	});
+
+	it('re-enables Show when a cold history request rejects unexpectedly', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection dropped')));
+		mountTree(root(3, 3));
+		await press('Show 3');
+		expect(host.querySelector('button[aria-busy="true"]')).toBeNull();
+		expect([...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Show 3')?.disabled).toBe(false);
 	});
 
 	it('says it could not load, and Retry reads the same page again', async () => {

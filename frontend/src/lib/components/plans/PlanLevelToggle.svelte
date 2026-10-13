@@ -5,7 +5,7 @@
 	between "Show N" and "Collapse".
 -->
 <script lang="ts">
-	let { shown, total, page = total, noun, single = false, controls, onShow, onCollapse }: {
+	let { shown, total, page = total, noun, single = false, pending = false, controls, onShow, onCollapse }: {
 		/** How many of the gathered rows are open now. */
 		shown: number;
 		total: number;
@@ -14,6 +14,8 @@
 		/** What the rows are called in the accessible name ("finished steps"). */
 		noun: string;
 		single?: boolean;
+		/** A cold history page is loading: keep that state on the Show control, not as a line in the tree. The spinner matches the shared primitive (`$lib/components/ui/Button.svelte:41`). */
+		pending?: boolean;
 		/** Space-separated ids of the rows open now, for `aria-controls`. */
 		controls?: string;
 		onShow: () => void;
@@ -30,15 +32,15 @@
 	{#if single}
 		<button
 			class="details-toggle" type="button" aria-expanded={expanded} aria-controls={owned}
-			aria-label={expanded ? `Collapse ${noun}` : `Show ${total} ${noun}`}
+			aria-label={expanded ? `Collapse ${noun}` : `Show ${total} ${noun}`} aria-busy={pending || undefined} disabled={pending}
 			onclick={expanded ? onCollapse : onShow}
-		>{expanded ? 'Collapse' : `Show ${total}`}</button>
+		>{#if pending}<span class="spinner" aria-hidden="true"></span>{/if}{expanded ? 'Collapse' : `Show ${total}`}</button>
 	{:else}
 		{#if remaining > 0}
 			<button
 				class="details-toggle" type="button" aria-expanded={expanded} aria-controls={owned}
-				aria-label={`Show ${step} of ${remaining} ${noun}`} onclick={onShow}
-			>{expanded ? `Show ${step} more` : `Show ${step}`}</button>
+				aria-label={`Show ${step} of ${remaining} ${noun}`} aria-busy={pending || undefined} disabled={pending} onclick={onShow}
+			>{#if pending}<span class="spinner" aria-hidden="true"></span>{/if}{expanded ? `Show ${step} more` : `Show ${step}`}</button>
 		{/if}
 		{#if expanded}
 			<button class="details-toggle" type="button" aria-expanded="true" aria-controls={owned} onclick={onCollapse}>Collapse</button>
@@ -48,14 +50,14 @@
 
 <style>
 	.row-actions { display: inline-flex; flex: none; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: var(--space-2); margin-left: auto; }
-	.details-toggle {
-		flex: none; min-height: 28px; padding: var(--space-1) var(--space-2);
-		border: 0; border-radius: var(--radius-xs); background: transparent;
-		color: var(--text-tertiary); font: inherit; font-size: var(--text-caption); cursor: pointer;
-	}
-	.details-toggle:hover { color: var(--text-primary); background: var(--bg-hover); }
+	.details-toggle { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; min-height: 28px; padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-tertiary); font: inherit; font-size: var(--text-caption); cursor: pointer; }
+	.details-toggle:disabled { cursor: wait; }
+	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
+	@media (hover: hover) { .details-toggle:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); } }
 	.details-toggle:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
-	@media (max-width: 620px) {
-		.details-toggle { min-height: 44px; }
-	}
+	/* Same geometry and token-driven spin as the shared Button primitive above. */
+	.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: var(--radius-circle); animation: spin var(--dur-hero-plus) linear infinite; }
+	@keyframes spin { to { transform: rotate(360deg); } }
+	@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+	@media (max-width: 620px) { .details-toggle { min-height: 44px; } }
 </style>
