@@ -99,6 +99,66 @@ def test_declared_levels_become_an_effort_picker():
     }
 
 
+_GENERIC_OMLX_070_LEVELS = ["low", "medium", "high", "xhigh", "max"]
+_STARTER = "Ternary-Bonsai-2-27B-mlx-2bit"
+
+
+def test_omlx_custom_marker_is_captured_from_discovery():
+    canonical = _parse_omlx_status(
+        _Response({"models": [{"id": _STARTER, "reasoning_effort_custom": True}]})
+    )
+    assert canonical[_STARTER]["reasoning_effort_custom"] is True
+
+
+def test_profile_uses_its_template_vocabulary_when_omlx_reports_generic_levels():
+    shape = reasoning_shape_from_discovery(
+        {
+            "id": _STARTER,
+            "reasoning_effort_options": _GENERIC_OMLX_070_LEVELS,
+            "reasoning_effort_default": "low",
+            "reasoning_effort_custom": True,
+            "configured_reasoning_effort": "medium",
+        }
+    )
+    assert shape == {
+        "type": "effort_levels",
+        "values": ["low", "medium", "xhigh"],
+        "default": "medium",
+    }
+
+
+def test_non_profile_keeps_omlx_generic_levels():
+    shape = reasoning_shape_from_discovery(
+        {
+            "id": "someone-elses-qwen",
+            "reasoning_effort_options": _GENERIC_OMLX_070_LEVELS,
+            "reasoning_effort_default": "low",
+            "reasoning_effort_custom": True,
+        }
+    )
+    assert shape == {
+        "type": "effort_levels",
+        "values": _GENERIC_OMLX_070_LEVELS,
+        "default": "low",
+    }
+
+
+def test_template_derived_server_levels_override_a_profile_declaration():
+    shape = reasoning_shape_from_discovery(
+        {
+            "id": _STARTER,
+            "reasoning_effort_options": ["low", "medium"],
+            "reasoning_effort_default": "low",
+            "reasoning_effort_custom": False,
+        }
+    )
+    assert shape == {
+        "type": "effort_levels",
+        "values": ["low", "medium"],
+        "default": "low",
+    }
+
+
 def test_picker_opens_on_the_servers_configured_level():
     """A new conversation starts from what the server is actually set to."""
     shape = reasoning_shape_from_discovery(

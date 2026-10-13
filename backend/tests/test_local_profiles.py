@@ -72,9 +72,12 @@ def test_profiles_are_one_ordered_list_with_the_default_first():
     for profile in local_profiles.PROFILES:
         assert len(profile.sized_at_revision) == 40 and profile.repository.count("/") == 1
         assert profile.model == profile.repository.split("/")[1]
+        assert profile.reasoning_effort_levels == ["low", "medium", "xhigh"]
+        assert local_profiles.reasoning_effort_levels_for(profile.model) == ["low", "medium", "xhigh"]
         assert profile.model_settings["chat_template_kwargs"] == {"reasoning_effort": "medium"}
     assert all(p.model_settings["mtp_enabled"] is True for p in local_profiles.PROFILES[1:])
     assert "mtp_enabled" not in local_profiles.DEFAULT_PROFILE.model_settings
+    assert local_profiles.reasoning_effort_levels_for("unmanaged-local-model") is None
 
 
 def test_omlx_global_settings_are_stored_once():

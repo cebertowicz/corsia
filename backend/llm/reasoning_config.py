@@ -8,11 +8,12 @@ snapshot (``llm.hosted_catalog.cloud_models``) — they used to be hardcoded fam
 tables here and in ``anthropic_thinking.py`` (the "lists that must stay in sync"
 smell, PROVIDER-STRATEGY-MANAGED-VS-EXTERNAL.md §8 #4).
 
-Local (oMLX) reasoning shapes are **discovered from the server**, which reads
-each model's chat template and reports what that template actually accepts.
-They are built in ``reasoning_shape_from_discovery`` and stored on the catalog
-row, so adding a model needs no code here. This replaced a model-name matcher,
-which could only ever be as accurate as a model's filename.
+Local (oMLX) reasoning shapes are discovered from the server and stored on
+the catalog row. oMLX 0.7.0 reports a generic effort list for non-K2 models,
+not a list derived from each chat template. For a bundled local profile,
+``reasoning_shape_from_discovery`` replaces that known generic report with the
+profile's pinned-template vocabulary; a server that marks its list template-
+derived remains authoritative.
 """
 
 from __future__ import annotations
@@ -22,12 +23,39 @@ import sqlite3
 from typing import Any
 
 
+_OMLX_070_GENERIC_REASONING_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
+def _profile_levels_for_generic_server_report(model: dict[str, Any]) -> list[str] | None:
+    """Return a bundled profile's levels when oMLX did not derive its list.
+
+    oMLX 0.7.0 marks its fixed non-K2 list as custom. Older compatible payloads
+    omit that marker while reporting the same fixed vocabulary. A false marker
+    is an explicit claim that the server derived the list, so it wins.
+    """
+    from llm.local_profiles import reasoning_effort_levels_for
+
+    profile_levels = reasoning_effort_levels_for(str(model.get("id") or ""))
+    if profile_levels is None or model.get("reasoning_effort_custom") is False:
+        return None
+    if model.get("reasoning_effort_custom") is True:
+        return profile_levels
+    reported = model.get("reasoning_effort_options")
+    if isinstance(reported, list) and tuple(reported) == _OMLX_070_GENERIC_REASONING_LEVELS:
+        return profile_levels
+    return None
+
+
 def reasoning_shape_from_discovery(model: dict[str, Any]) -> dict[str, Any] | None:
-    """Build a reasoning descriptor from what an oMLX server reported.
+    """Build a reasoning descriptor from an oMLX discovery row.
+
+    A bundled profile corrects oMLX 0.7.0's known generic list with its pinned
+    chat-template vocabulary unless the server explicitly reports that its list
+    is template-derived.
 
     Three outcomes, in order:
 
-    * discrete levels the template validates → an ``effort_levels`` picker,
+    * discrete levels the template validates or a bundled profile declares → an ``effort_levels`` picker,
       opening on whatever level the server is currently configured to use;
     * a thinking toggle but no levels → a ``boolean`` control, opening on the
       server's current setting;
@@ -38,7 +66,7 @@ def reasoning_shape_from_discovery(model: dict[str, Any]) -> dict[str, Any] | No
     the same as "this model has none" — both yield None here, but the absent
     case must never be recorded as a positive claim about the model.
     """
-    levels = model.get("reasoning_effort_options")
+    levels = _profile_levels_for_generic_server_report(model) or model.get("reasoning_effort_options")
     if levels:
         configured = model.get("configured_reasoning_effort")
         declared = model.get("reasoning_effort_default")
@@ -69,7 +97,7 @@ def reasoning_config_for(
     if the model doesn't support extended thinking.
 
     Resolution order: the shape stored on the catalog row wins — for oMLX that
-    is what the server reported at discovery; then cloud shapes come from the
+    is the discovery row after any bundled-profile correction; then cloud shapes come from the
     hosted-catalog snapshot. A non-reasoning model, or one whose server is too
     old to report its capability, legitimately resolves to None.
 

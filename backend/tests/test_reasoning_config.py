@@ -221,11 +221,11 @@ def test_effective_effort_keeps_a_level_the_model_accepts(monkeypatch):
     assert rc.effective_reasoning_effort(" XHIGH ", "qwen38") == "xhigh"
 
 
-def test_effective_effort_resolves_a_stale_level_to_what_the_picker_shows(monkeypatch):
-    """A thread that ran DeepSeek at 'high' and now uses Qwen 3.8 gets Qwen's default."""
+def test_effective_effort_resolves_a_saved_high_to_the_starter_picker_default(monkeypatch):
+    """A starter thread saved before the profile vocabulary was known uses its default."""
     from llm import reasoning_config as rc
     monkeypatch.setattr(rc, "reasoning_config_for_model", lambda m: _QWEN38)
-    assert rc.effective_reasoning_effort("high", "qwen38") == "xhigh"
+    assert rc.effective_reasoning_effort("high", "Ternary-Bonsai-2-27B-mlx-2bit") == "xhigh"
 
 
 def test_effective_effort_leaves_off_auto_and_unset_alone(monkeypatch):

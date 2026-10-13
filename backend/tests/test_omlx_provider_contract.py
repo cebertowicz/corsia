@@ -173,14 +173,14 @@ def test_level_in_the_reported_vocabulary_is_forwarded():
     assert omlx.wire_reasoning_effort(" XHIGH ", _LEVELS) == "xhigh"
 
 
-def test_level_outside_the_reported_vocabulary_is_refused_not_remapped():
+@pytest.mark.parametrize("effort", ["high", "max"])
+def test_level_outside_the_reported_vocabulary_is_refused_not_remapped(effort):
     """oMLX would quietly substitute the model's default; that must surface."""
-    import pytest
     from llm.providers.omlx_thinking import UnsupportedReasoningEffortError
 
     with pytest.raises(UnsupportedReasoningEffortError) as excinfo:
-        omlx.wire_reasoning_effort("high", _LEVELS)
-    assert excinfo.value.effort == "high"
+        omlx.wire_reasoning_effort(effort, _LEVELS)
+    assert excinfo.value.effort == effort
     assert excinfo.value.values == ["xhigh", "medium", "low"]
     assert "xhigh, medium, low" in str(excinfo.value)
 

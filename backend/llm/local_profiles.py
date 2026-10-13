@@ -30,6 +30,7 @@ class LocalProfile:
     min_ram_gib: int
     model: str
     repository: str
+    reasoning_effort_levels: list[str]
     sized_at_revision: str
     download_size_bytes: int
     resident_weight_bytes: int
@@ -42,7 +43,8 @@ class LocalProfile:
 _TOP_KEYS = {"omlx_global_settings", "model_settings", "profiles"}
 _PROFILE_TYPES: dict[str, type | tuple[type, ...]] = {
     "id": str, "display_name": str, "min_ram_gib": int, "model": str, "repository": str,
-    "sized_at_revision": str, "download_size_bytes": int, "resident_weight_bytes": int,
+    "reasoning_effort_levels": list, "sized_at_revision": str, "download_size_bytes": int,
+    "resident_weight_bytes": int,
     "kv_mb_per_token": (int, float), "kv_layer_note": str, "min_context": int, "model_settings": dict,
 }
 # Values that may be empty or zero: the first band starts at 0 GiB and a profile
@@ -59,6 +61,9 @@ def _profile(raw: object, shared: dict, name: str) -> LocalProfile:
             not value and key not in _MAY_BE_EMPTY
         ):
             raise RuntimeError(f"Local profile {raw.get('id')!r} in {name}: invalid value for {key}")
+    levels = raw["reasoning_effort_levels"]
+    if not all(isinstance(level, str) and level for level in levels):
+        raise RuntimeError(f"Local profile {raw.get('id')!r} in {name}: invalid reasoning effort levels")
     return LocalProfile(**{**raw, "model_settings": {**shared, **raw["model_settings"]}})
 
 
@@ -92,6 +97,12 @@ DEFAULT_PROFILE = PROFILES[0]
 def profile_by_id(profile_id: str) -> LocalProfile | None:
     """The profile with this id, else None."""
     return next((p for p in PROFILES if p.id == profile_id), None)
+
+
+def reasoning_effort_levels_for(model: str) -> list[str] | None:
+    """Pinned template levels for a configured local profile, if it has one."""
+    profile = next((p for p in PROFILES if p.model == model), None)
+    return list(profile.reasoning_effort_levels) if profile else None
 
 
 def setup_command(profile_id: str | None) -> str:

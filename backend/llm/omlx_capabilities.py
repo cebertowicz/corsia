@@ -1,8 +1,10 @@
 """Reasoning capability as an oMLX server reports it.
 
-oMLX reads each model's chat template at discovery and reports what that
-template actually accepts. Reading those fields off its payloads is a distinct
-concern from the catalog plumbing that stores them, so it lives here.
+oMLX reports reasoning-related fields at discovery. In 0.7.0 its non-K2
+``reasoning_effort_options`` is a fixed generic list rather than a list read
+from each chat template; ``reasoning_effort_custom`` identifies that report.
+Reading these fields off payloads is distinct from the catalog plumbing that
+stores them, so it lives here.
 
 A field the server omits means "this server cannot say", which is never the
 same as it saying the model has no such capability. Absent stays absent.
@@ -14,12 +16,13 @@ from __future__ import annotations
 
 from typing import Any
 
-# Capability the server derives from the model's own chat template.
+# Capability-related fields reported by the server.
 REPORTED_FIELDS = (
     "thinking_default",
     "preserve_thinking_default",
     "reasoning_effort_options",
     "reasoning_effort_default",
+    "reasoning_effort_custom",
 )
 
 
