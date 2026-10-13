@@ -11,13 +11,14 @@
 	import PlanChildControls from './PlanChildControls.svelte';
 
 	let {
-		node, isBranch, branchExpanded, controls, ask, childExpanded,
+		node, isBranch, branchExpanded, detailsOpen = false, controls, ask, childExpanded,
 		onToggleBranch, onOpenArtifact, onOpenLegacyDiscussion, onToggleChild, onOpenChild,
 	}: {
 		node: OperatorNode;
 		/** Whether the row has something to disclose (children or a fold row). */
 		isBranch: boolean;
 		branchExpanded: boolean;
+		detailsOpen?: boolean;
 		/** Ids of the rows the expander controls, while it is open. */
 		controls: string | undefined;
 		ask: OperatorArtifactLink | undefined;
@@ -30,7 +31,7 @@
 	} = $props();
 </script>
 
-<span class="row-actions">
+<span class="row-actions" class:details-open={detailsOpen}>
 {#if isBranch}
 	<button
 		class="branch-toggle"
@@ -68,6 +69,11 @@
 
 <style>
 	.row-actions { display: inline-flex; flex: none; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: var(--space-2); margin-left: auto; }
+	/* Keep visual furniture centered on a disclosed title's first line while its full 28/44px control remains tappable. */
+	.row-actions.details-open {
+		align-self: flex-start;
+		transform: translateY(calc((var(--plan-row-line-height) - var(--plan-row-action-height)) * 0.5));
+	}
 	.branch-chevron {
 		display: inline-flex; width: 20px; height: 20px; flex: none;
 		align-items: center; justify-content: center; color: var(--text-tertiary);
@@ -88,7 +94,10 @@
 		color: var(--text-tertiary); padding: var(--space-1) var(--space-2);
 		font: inherit; font-size: var(--text-caption); cursor: pointer;
 	}
-	.branch-toggle:hover, .discussion-archive:hover { color: var(--text-primary); background: var(--bg-hover); }
+	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
+	@media (hover: hover) {
+		.branch-toggle:hover, .discussion-archive:hover { color: var(--text-primary); background: var(--bg-hover); }
+	}
 	.branch-toggle:focus-visible, .discussion-archive:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 	@media (max-width: 620px) {
 		.branch-toggle, .discussion-archive { min-height: 44px; }

@@ -533,4 +533,24 @@ describe('PlanTree user task controls', () => {
 			.toBe('Next: You');
 		expect(host.querySelector('.user-actions')).toBeNull();
 	});
+
+	it('passes the exact row indent to details at deep nested levels', async () => {
+		const nodes = Array.from({ length: 9 }, (_, depth) => node({
+			id: `depth-${depth}`,
+			parent_id: depth === 0 ? null : `depth-${depth - 1}`,
+			depth,
+			kind: depth === 8 ? 'task' : 'phase',
+			title: `Depth ${depth}`,
+		}));
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, maxDepth: 9, expandBranchesByDefault: true }) });
+		flushSync();
+
+		for (const depth of [1, 3, 8]) {
+			const row = document.getElementById(`plan-row-depth-${depth}`)!;
+			(row.querySelector('.row-body') as HTMLButtonElement).click();
+			await settle();
+			const details = document.getElementById(`plan-node-details-depth-${depth}`)!;
+			expect(details.style.getPropertyValue('--indent')).toBe(row.style.getPropertyValue('--indent'));
+		}
+	});
 });

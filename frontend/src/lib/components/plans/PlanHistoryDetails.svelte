@@ -6,11 +6,13 @@
 	import { createHistoryNode } from './historyNode.svelte';
 	import PlanNodeDetails from './PlanNodeDetails.svelte';
 
-	let { node, planId, id }: {
+	let { node, planId, id, indent }: {
 		/** The history row as the tree draws it. */
 		node: OperatorNode;
 		planId: string;
 		id: string;
+		/** The row's indent as a CSS length (`planIndent`). */
+		indent: string;
 	} = $props();
 
 	const loaded = createHistoryNode({ planId: () => planId, nodeId: () => node.id });
@@ -20,25 +22,25 @@
 </script>
 
 {#if state.status === 'ready'}
-	<PlanNodeDetails node={state.node} {id} depth={node.depth} />
+	<PlanNodeDetails node={state.node} {id} {indent} />
 {:else if state.status === 'error'}
-	<section {id} class="history-details" style={`--depth:${node.depth}`} role="alert" aria-label={node.title + ' details'}>
+	<section {id} class="history-details" style={`--indent:${indent}`} role="alert" aria-label={node.title + ' details'}>
 		<span>Couldn’t load these details.</span>
 		<Button variant="ghost" size="sm" onclick={() => void loaded.load()}>Retry</Button>
 	</section>
 {:else}
-	<section {id} class="history-details" style={`--depth:${node.depth}`} role="status" aria-label={node.title + ' details'}>Loading…</section>
+	<section {id} class="history-details" style={`--indent:${indent}`} role="status" aria-label={node.title + ' details'}>Loading…</section>
 {/if}
 
 <style>
 	.history-details {
 		display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2);
-		margin: 0 var(--space-2) var(--space-2) calc(34px + var(--depth) * 22px);
+		margin: 0 var(--space-2) var(--space-2) calc(34px + var(--indent));
 		padding: var(--space-1) var(--space-2); border-left: 2px solid var(--border);
 		color: var(--text-secondary); font-size: var(--text-caption);
 	}
 	.history-details[role='alert'] { color: var(--red-text); }
 	@media (max-width: 620px) {
-		.history-details { margin-left: calc(18px + var(--depth) * 12px); }
+		.history-details { margin-left: calc(18px + var(--indent)); }
 	}
 </style>
