@@ -69,7 +69,8 @@ export function settingsHarnessModelIds(
 	for (const row of settingsRows) {
 		if (!isSettingsHarness(row, harness) || !isDiscoveredHarnessModel(row)) continue;
 		if (row.source === 'reference' || settingsRowIsAlias(row) || typeof row.id !== 'string') continue;
-		if (pickerIds.length === 0 || row.enabled === 0) visible.add(row.id);
+		// A switched-off harness offers nothing to the picker; its discovered rows keep its card.
+		if (row.enabled === 0 || row.provider_enabled === false) visible.add(row.id);
 	}
 	return [...pickerIds, ...settingsRows
 		.filter((row) => typeof row.id === 'string' && visible.has(row.id) && !pickerIds.includes(row.id))

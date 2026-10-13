@@ -57,7 +57,7 @@ export function harnessSummaries(settingsRows: CatalogRow[], catalog: Model[]): 
 		const ids = settingsHarnessModelIds(settingsRows, name, catalog);
 		const enabled = settingsRows.find((row) => row.harness === name || row.provider === name)?.provider_enabled !== false;
 		return { name, label, enabled, total: ids.length, ready: ids.filter((id) => catalogById.get(id)?.status === 'ready').length };
-	});
+	}).filter((summary) => summary.total > 0);
 }
 
 export function harnessProviderModels(

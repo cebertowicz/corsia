@@ -32,6 +32,8 @@ export interface HostProvider {
 	harnessModelCount?: number;
 	harnessEnabled?: boolean;
 }
+
+/** Whether a card's switch reads on. An External endpoint is switched on its own. */
 export function providerEnabled(p: HostProvider): boolean {
 	if (p.server?.kind === 'external') return p.server.status !== 'disabled';
 	return p.type === 'harness' ? p.harnessEnabled !== false : p.type === 'cloud' ? cloudProviderOn(p.raw) : p.raw.enabled !== false;
@@ -46,7 +48,8 @@ export interface HostGroup {
 	providers: HostProvider[];
 }
 
-// Network/resources/inventory loading owns this snapshot; `hostGroups` derives account-sensitive harness card text from it.
+// Network/resources/inventory loading owns this snapshot. `hostGroups` below is the
+// canonical display owner and derives the account-sensitive harness card text from it.
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
 export const hostGroups = derived(
 	[hostGroupSnapshot, vendorAccounts],

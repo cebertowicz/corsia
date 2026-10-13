@@ -29,13 +29,10 @@ describe('pickerCatalogModels', () => {
 });
 
 describe('harnessSummaries', () => {
-	it('keeps both harness cards while deriving each model total from its inventory', () => {
+	it('counts available rows and drops a harness with none', () => {
 		const catalog = [pickerRow(), pickerRow({ id: 'codex/gpt-6-sol', status: 'unavailable' })];
 		expect(harnessSummaries([row({ id: 'codex/gpt-5.6-sol' }), row({ id: 'codex/gpt-6-sol' })], catalog))
-			.toEqual([
-				{ name: 'claude-code', label: 'Claude Code', enabled: true, total: 0, ready: 0 },
-				{ name: 'codex', label: 'Codex', enabled: true, total: 1, ready: 1 },
-			]);
+			.toEqual([{ name: 'codex', label: 'Codex', enabled: true, total: 1, ready: 1 }]);
 	});
 
 	it('keeps an off harness card and its model controls from settings inventory', () => {
@@ -125,10 +122,7 @@ describe('harnessProviderModels', () => {
 			pickerRow({ id: 'codex/limited', status: 'unavailable', status_reason: 'usage_limited', available: true }),
 		];
 		expect(harnessSummaries([row({}), row({ id: 'codex/limited' })], catalog))
-			.toEqual([
-				{ name: 'claude-code', label: 'Claude Code', enabled: true, total: 0, ready: 0 },
-				{ name: 'codex', label: 'Codex', enabled: true, total: 2, ready: 1 },
-			]);
+			.toEqual([{ name: 'codex', label: 'Codex', enabled: true, total: 2, ready: 1 }]);
 	});
 
 	it('shows the label over the discovered name and keeps both', () => {

@@ -224,8 +224,8 @@ describe('groupByHost', () => {
 
 	it('adds an Agent CLIs section with one card per harness that has models', () => {
 		const groups = groupByHost([], [], null, [
-			{ name: 'claude-code', label: 'Claude Code', total: 3, ready: 2 },
-			{ name: 'codex', label: 'Codex', total: 2, ready: 0 },
+			{ name: 'claude-code', label: 'Claude Code', enabled: true, total: 3, ready: 2 },
+			{ name: 'codex', label: 'Codex', enabled: true, total: 2, ready: 0 },
 		]);
 		expect(groups).toHaveLength(1);
 		expect(groups[0].name).toBe('Agent CLIs');
@@ -233,6 +233,14 @@ describe('groupByHost', () => {
 		expect(claude).toMatchObject({ name: 'claude-code', type: 'harness', statusDot: 'online', subline: '3 models' });
 		expect(claude.raw.type).toBe('harness');
 		expect(codex.statusDot).toBe('idle');
+	});
+
+	it('shows a switched-off Agent CLI card as off, with its switch off', () => {
+		const [card] = groupByHost([], [], null, [
+			{ name: 'codex', label: 'Codex', enabled: false, total: 2, ready: 0 },
+		])[0].providers;
+		expect(card).toMatchObject({ statusDot: 'disabled', subline: 'off · 2 models', harnessEnabled: false });
+		expect(providerEnabled(card)).toBe(false);
 	});
 
 	it('uses singular model counts on harness and cloud cards', () => {
