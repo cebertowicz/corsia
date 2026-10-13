@@ -710,7 +710,7 @@ async def _spawn_turn(
 ) -> TurnIdentity | None:
     _require_owned_accept_db(db)
     binary = _spawn_binary(binary, db)
-    payload = _resolve_spawn_payload(
+    payload = await run_in_db(_resolve_spawn_payload,
         thread_id=thread_id, text=text,
         current_input_message_id=current_input_message_id, codex_thread_id=codex_thread_id,
         catalog_model_id=catalog_model_id,
@@ -718,7 +718,7 @@ async def _spawn_turn(
         prepared_context=prepared_context,
         working_dir=working_dir,
         project_id=project_id,
-        db=db,
+        db=None,
     )
     return await _spawn_app_server_turn(
         thread_id, payload.provider_text,
