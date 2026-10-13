@@ -1,10 +1,10 @@
 """Usage-only recovery checks for CLI harness accounts.
 
 The model picker triggers these checks only when it opens. Each account is
-checked in its own home: the Default account through a usage-only read with no
-catalog discovery or model turn, an added account through its own account
-refresh (which reads its models and usage together). Each account has one
-in-memory check at a time and no more than one start per five minutes.
+checked through its own usage-only control read, with no catalog discovery or
+model turn. Added Claude accounts use their captured source home; Codex retains
+its account-bound app-server path. Each account has one in-memory check at a
+time and no more than one start per five minutes.
 """
 
 from __future__ import annotations
@@ -103,38 +103,31 @@ def _schedule(provider: str, account_id: str) -> None:
 
 
 def _capture(provider: str, account_id: str, *, db=None):
-    """The account's current login and whether it has its own home."""
-    from connections.account_receipts import account_receipt
-    from connections.vendor_accounts import get_account
-    from infra.database import get_db
+    """Capture the current account context once before a bounded usage read."""
+    from connections.account_discovery_types import capture_discovery_context
 
-    connection = db or get_db()
-    try:
-        account = get_account(account_id, db=connection)
-        return account_receipt(account), account['source_home'] is not None
-    finally:
-        if db is None:
-            connection.close()
+    return capture_discovery_context(provider, account_id=account_id, db=db)
 
 
 async def _check(provider: str, account_id: str) -> None:
     receipt = None
     try:
-        receipt, added = await run_in_db(_capture, provider, account_id)
-        if receipt is None:
+        context = await run_in_db(_capture, provider, account_id)
+        if context is None or context.receipt is None:
             return  # No current login to read for: the next sign-in schedules its own check.
-        if added:
+        receipt = context.receipt
+        if not context.is_default and provider != "claude-code":
             await _check_added(provider, receipt)
             return
         binary = await _binary_for(provider)
         if binary is None:
             await _check_failed(provider, receipt, "Harness connection is unavailable")
         elif provider == "claude-code":
-            await _check_claude(binary, receipt)
+            await _check_claude(binary, receipt, context=None if context.is_default else context)
         else:
             await _check_codex(binary, receipt)
     except Exception as exc:
-        log.warning("%s usage recheck failed: %s", provider, exc)
+        log.warning("%s usage recheck failed for account %s: %s", provider, account_id, exc)
         await _check_failed(provider, receipt, f"{provider} usage read failed: {exc}")
     finally:
         _CHECKS.pop(account_id, None)
@@ -190,7 +183,7 @@ async def _check_codex(binary: str, receipt) -> None:
         await session.close(timeout=10.0)
 
 
-async def _check_claude(binary: str, receipt) -> None:
+async def _check_claude(binary: str, receipt, *, context=None) -> None:
     from connections import claude_usage
     from connections.claude_discovery import _control_responses, run_claude_control
 
@@ -200,7 +193,10 @@ async def _check_claude(binary: str, receipt) -> None:
         {"type": "control_request", "request_id": "corsia-usage-end",
          "request": {"subtype": "end_session", "reason": "usage_check_complete"}},
     ]
-    stdout = await run_claude_control(binary, frames, operation="get_usage")
+    stdout = await run_claude_control(
+        binary, frames, operation="get_usage",
+        **({'context': context} if context is not None else {}),
+    )
     response = _control_responses(stdout).get("corsia-usage")
     report = response.get("response") if response and response.get("subtype") == "success" else None
     await run_in_db(claude_usage.apply_usage_response, report, receipt=receipt)
