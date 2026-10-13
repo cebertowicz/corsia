@@ -1,41 +1,138 @@
-import type { DocSaveStatus } from './docSaveQueue';
+import { confirmReconnectSave, type DocSaveActivity, type DocSaveDraft } from './docSaveQueue';
 
 export type DocSaveIndicator = 'idle' | 'saving' | 'saved';
 
+export interface DocSaveCueSnapshot {
+	key: string | null;
+	draft: DocSaveDraft | undefined;
+	activity?: DocSaveActivity;
+}
+
+interface Episode {
+	startedAt: number;
+	suspendedAt: number | null;
+	showingSaving: boolean;
+	savingTimer: ReturnType<typeof setTimeout> | null;
+	savedTimer: ReturnType<typeof setTimeout> | null;
+	showingSaved: boolean;
+	settled: boolean;
+}
+
+const EPISODE_NOTICE_MS = 400;
+const SAVED_NOTICE_MS = 1400;
+const inactiveActivity: DocSaveActivity = {
+	writeInFlight: false,
+	resaveQueued: false,
+	awaitingReconnect: false,
+	confirmationOwed: false,
+};
+
 /**
- * The "✓ Saved" ghost badge is a transient cosmetic — the store's status
- * stays 'saved' until the next edit, so the 1400ms auto-hide lives here.
- * It shows only when the watched draft turns 'saved' while watched: a switch
- * to another draft, or the first look at one, finds a save that already
- * happened and stays quiet.
- * Call during component init; the effect is torn down with the component.
+ * Turns queue facts into one cosmetic, per-draft writing episode. Queue state
+ * remains authoritative: this module never starts a save or declares it durable.
  */
-export function docSaveGhost(status: () => DocSaveStatus | undefined, key: () => string | null) {
-	let showSavedGhost = $state(false);
-	let savedGhostTimer: ReturnType<typeof setTimeout> | null = null;
-	let watched: { key: string | null; status: DocSaveStatus | undefined } | null = null;
-	const stopTimer = () => {
-		if (savedGhostTimer) { clearTimeout(savedGhostTimer); savedGhostTimer = null; }
+export function docSaveGhost(snapshot: () => DocSaveCueSnapshot) {
+	let current = $state<DocSaveIndicator>('idle');
+	let visibleKey: string | null = null;
+	const episodes = new Map<string, Episode>();
+
+	const stopSavingTimer = (episode: Episode) => {
+		if (episode.savingTimer) clearTimeout(episode.savingTimer);
+		episode.savingTimer = null;
 	};
+	const stopSavedTimer = (episode: Episode) => {
+		if (episode.savedTimer) clearTimeout(episode.savedTimer);
+		episode.savedTimer = null;
+	};
+	const updateVisible = (key: string, episode: Episode) => {
+		if (visibleKey === key) current = episode.showingSaved ? 'saved' : episode.showingSaving ? 'saving' : 'idle';
+	};
+	const scheduleSaving = (key: string, episode: Episode) => {
+		stopSavingTimer(episode);
+		const remaining = Math.max(0, EPISODE_NOTICE_MS - (Date.now() - episode.startedAt));
+		episode.savingTimer = setTimeout(() => {
+			episode.savingTimer = null;
+			episode.showingSaving = true;
+			updateVisible(key, episode);
+		}, remaining);
+	};
+	const showSaved = (key: string, episode: Episode) => {
+		stopSavedTimer(episode);
+		episode.showingSaved = true;
+		updateVisible(key, episode);
+		episode.savedTimer = setTimeout(() => {
+			episode.savedTimer = null;
+			episode.showingSaved = false;
+			if (episode.settled) episodes.delete(key);
+			updateVisible(key, episode);
+		}, SAVED_NOTICE_MS);
+	};
+	const finishEpisode = (key: string, episode: Episode, confirmationOwed: boolean) => {
+		stopSavingTimer(episode);
+		const shouldConfirm = episode.showingSaving || confirmationOwed;
+		episode.showingSaving = false;
+		if (shouldConfirm) showSaved(key, episode);
+		else updateVisible(key, episode);
+		if (confirmationOwed) confirmReconnectSave(key);
+		episode.settled = true;
+	};
+	const resetEpisode = (key: string, episode: Episode) => {
+		stopSavingTimer(episode);
+		stopSavedTimer(episode);
+		episodes.delete(key);
+		if (visibleKey === key) current = 'idle';
+	};
+
 	$effect(() => {
-		const now = { key: key(), status: status() };
-		const sameDraft = watched !== null && watched.key === now.key;
-		const turnedSaved = now.status === 'saved' && sameDraft && watched!.status !== 'saved';
-		watched = now;
-		if (turnedSaved) {
-			stopTimer();
-			showSavedGhost = true;
-			savedGhostTimer = setTimeout(() => { savedGhostTimer = null; showSavedGhost = false; }, 1400);
-		} else if (now.status !== 'saved' || !sameDraft) {
-			// A re-read of the same saved draft keeps the badge and its timer.
-			stopTimer();
-			showSavedGhost = false;
+		const { key, draft, activity = inactiveActivity } = snapshot();
+		visibleKey = key;
+		if (!key || !draft) {
+			current = 'idle';
+			return;
+		}
+		const clean = draft.editText === draft.savedText && !activity.writeInFlight && !activity.resaveQueued;
+		let episode = episodes.get(key);
+		if (draft.status === 'error') {
+			if (episode) resetEpisode(key, episode);
+			return;
+		}
+		if (activity.writeInFlight && (!episode || episode.settled)) {
+			if (episode) stopSavedTimer(episode);
+			episode = {
+				startedAt: Date.now(), suspendedAt: null, showingSaving: false,
+				savingTimer: null, savedTimer: null, showingSaved: false, settled: false,
+			};
+			episodes.set(key, episode);
+			scheduleSaving(key, episode);
+		}
+		if (!episode) {
+			current = 'idle';
+			return;
+		}
+		if (episode.settled) {
+			updateVisible(key, episode);
+			return;
+		}
+		if (activity.awaitingReconnect) {
+			if (episode.suspendedAt === null) episode.suspendedAt = Date.now();
+			stopSavingTimer(episode);
+			episode.showingSaving = false;
+			updateVisible(key, episode);
+			return;
+		}
+		if (episode.suspendedAt !== null) {
+			episode.startedAt += Date.now() - episode.suspendedAt;
+			episode.suspendedAt = null;
+			scheduleSaving(key, episode);
+		}
+		if (clean) finishEpisode(key, episode, activity.confirmationOwed);
+		else updateVisible(key, episode);
+	});
+	$effect(() => () => {
+		for (const episode of episodes.values()) {
+			stopSavingTimer(episode);
+			stopSavedTimer(episode);
 		}
 	});
-	$effect(() => stopTimer);
-	return {
-		get current(): DocSaveIndicator {
-			return status() === 'saving' ? 'saving' : showSavedGhost ? 'saved' : 'idle';
-		},
-	};
+	return { get current(): DocSaveIndicator { return current; } };
 }

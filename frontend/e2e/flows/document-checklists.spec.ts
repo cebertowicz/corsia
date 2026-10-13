@@ -109,7 +109,8 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		await expect(fixture.editor).not.toContainText('[ ]');
 
 		await page.keyboard.press('ControlOrMeta+S');
-		await expect(page.getByText('✓ Saved')).toBeVisible();
+		await expect(page.getByText('✓ Saved')).not.toBeVisible();
+		await page.waitForTimeout(800);
 		const savedResponse = await request.get(
 			`/api/files/content?token=${fixture.token}&path=${encodeURIComponent(fixture.docPath)}&thread_id=${fixture.sessionId}`,
 		);

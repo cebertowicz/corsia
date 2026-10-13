@@ -66,7 +66,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await page.keyboard.type('Prefix ');
 	await expect(editor).toContainText('Prefix Before Anchor sentence.');
 	await page.keyboard.press('ControlOrMeta+S');
-	await expect(page.getByText('✓ Saved')).toBeVisible();
+	await expect(page.getByText('✓ Saved')).not.toBeVisible();
 	await expect.poll(async () => {
 		const response = await request.get(commentUrl);
 		expect(response.ok()).toBeTruthy();

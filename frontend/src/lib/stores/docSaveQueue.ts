@@ -4,7 +4,7 @@ import { closeLiveDocument, liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
 import { flushPositions } from '$lib/stores/docComments';
 import { toasts } from '$lib/stores/toast';
-import { LiveOperationError } from './documentFailures';
+import { saveErrorMessage } from './docSaveError';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 
 export type DocSaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -17,6 +17,14 @@ export interface DocSaveDraft {
 	error: string;
 	/** Revision the server reported for this draft's last successful write. */
 	savedRevision: string | null;
+}
+
+/** Read-only queue state used by the cosmetic save cue. */
+export interface DocSaveActivity {
+	writeInFlight: boolean;
+	resaveQueued: boolean;
+	awaitingReconnect: boolean;
+	confirmationOwed: boolean;
 }
 
 type TargetIdentity = Pick<DocViewerTarget, 'instanceId'>;
@@ -42,6 +50,7 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const inflight = new Map<string, Promise<boolean>>();
 const needsResave = new Map<string, boolean>();
 const reconnectWaits = new Map<string, () => void>();
+const confirmationsOwed = new Map<string, true>();
 
 function getDraft(key: string): DocSaveDraft | undefined {
 	return get(drafts)[key];
@@ -56,6 +65,22 @@ function patchDraft(key: string, patch: Partial<DocSaveDraft>): void {
 
 export function existingDraft(target: TargetIdentity): DocSaveDraft | undefined {
 	return getDraft(draftKey(target));
+}
+
+/** Read-only queue facts for the per-draft save cue. */
+export function docSaveActivity(target: TargetIdentity): DocSaveActivity {
+	const key = draftKey(target);
+	return {
+		writeInFlight: inflight.has(key),
+		resaveQueued: needsResave.has(key),
+		awaitingReconnect: reconnectWaits.has(key),
+		confirmationOwed: confirmationsOwed.has(key),
+	};
+}
+
+/** The cue calls this only after it displays a confirmation owed by a reconnect. */
+export function confirmReconnectSave(key: string): void {
+	confirmationsOwed.delete(key);
 }
 
 /** The draft's target, which carries any identity resolved since it was seeded. */
@@ -114,11 +139,14 @@ export function setDraftText(target: TargetIdentity, text: string): void {
 
 function waitForLiveReconnect(key: string, live: LiveDocumentSession): void {
 	if (reconnectWaits.has(key)) return;
+	const draft = getDraft(key);
+	if (draft && draft.editText !== draft.savedText) confirmationsOwed.set(key, true);
 	const stop = live.onFrame((frame) => {
 		if (frame.type !== 'doc_opened') return;
 		const draft = getDraft(key);
 		if (get(liveDocumentBindings)[key] !== live || !draft || draft.editText === draft.savedText || !live.writable) {
 			reconnectWaits.delete(key);
+			if (!draft || draft.editText === draft.savedText) confirmationsOwed.delete(key);
 			stop();
 			return;
 		}
@@ -127,28 +155,6 @@ function waitForLiveReconnect(key: string, live: LiveDocumentSession): void {
 		void runSave(key);
 	});
 	reconnectWaits.set(key, stop);
-}
-
-function saveErrorMessage(error: unknown): string {
-	if (error instanceof LiveOperationError && (error.kind === 'publication_failed' || error.kind === 'setup_failed')) return error.message;
-	const raw = error instanceof Error ? error.message : String(error);
-	const body = raw.replace(/^\d+\s+/, '');
-	try {
-		const parsed = JSON.parse(body);
-		const detail = parsed?.detail;
-		if (detail && typeof detail === 'object') {
-			if (typeof detail.line === 'string') return detail.line;
-			const message = typeof detail.message === 'string' ? detail.message : "Couldn't save the document";
-			const errors = Array.isArray(detail.errors)
-				? detail.errors.filter((item: unknown): item is string => typeof item === 'string')
-				: [];
-			return errors.length ? `${message}: ${errors.join('; ')}` : message;
-		}
-		if (typeof detail === 'string') return detail;
-	} catch {
-		// Use the local-edits-safe fallback below for non-JSON failures.
-	}
-	return "Couldn't save the document — edits are still local";
 }
 
 /**
@@ -255,6 +261,7 @@ export function clearDraft(target: TargetIdentity): void {
 	needsResave.delete(key);
 	reconnectWaits.get(key)?.();
 	reconnectWaits.delete(key);
+	confirmationsOwed.delete(key);
 	drafts.update((all) => {
 		if (!(key in all)) return all;
 		const next = { ...all };
