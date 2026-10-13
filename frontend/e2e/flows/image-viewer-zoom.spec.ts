@@ -147,7 +147,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await overlay.getByRole('button', { name: 'Zoom out' }).click();
 			await expect(level(page)).toHaveText('100%');
 
-			// With image comments present, a plain desktop drag draws a comment; Space-drag pans, and the region still carries scrollbars.
+			// Pan by Space-drag (a bare drag draws a box), and by the scrollbars the region carries; the image is larger than the viewport.
 			const region = page.locator('.image-overlay .viewport');
 			const scrollable = await region.evaluate((el) => ({ x: el.scrollWidth > el.clientWidth, y: el.scrollHeight > el.clientHeight }));
 			expect(scrollable).toEqual({ x: true, y: true });
@@ -159,6 +159,8 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await page.mouse.move(spot.x - 120, spot.y - 80, { steps: 6 });
 			await page.mouse.up();
 			await page.keyboard.up('Space');
+			// Space only pans: the zoom button that still has focus is not pressed by it.
+			await expect(level(page)).toHaveText('100%');
 			const panned = await region.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
 			expect(panned.left - panFrom.left).toBeGreaterThan(100);
 			expect(panned.top - panFrom.top).toBeGreaterThan(60);
@@ -311,7 +313,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 		}
 	});
 
-	test('phone: document actions, Back and Fit, one finger pan, two-finger pinch, and Back return (393)', async ({ page, request }, testInfo) => {
+	test('phone: Back, comment controls and Fit, one finger pans, two pinch, and Back returns to the document (393)', async ({ page, request }, testInfo) => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
 		await page.setViewportSize({ width: 393, height: 852 });
 		const seeded = await seedDocument(page, request, 'viewer-zoom-393');
