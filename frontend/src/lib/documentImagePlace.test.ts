@@ -102,4 +102,17 @@ describe('restoreDocumentPlace', () => {
 		expect(scroller.scrollTop).toBe(300);
 		sizes.mockRestore();
 	});
+
+	it('applies a tab return place without waiting for the pane width to settle', async () => {
+		let width = 900;
+		vi.spyOn(root, 'getBoundingClientRect').mockImplementation(() => ({ width }) as DOMRect);
+		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
+		const placed = vi.fn();
+		const pending = restoreDocumentPlace(root, image, { mode: 'tab-return', onPlaced: placed });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		width -= 90;
+		expect(scroller.scrollTop).toBe(300);
+		expect(placed).toHaveBeenCalledOnce();
+		await pending;
+	});
 });

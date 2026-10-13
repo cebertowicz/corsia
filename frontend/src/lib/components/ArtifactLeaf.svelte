@@ -72,11 +72,14 @@
 	let imageViewer = $state<ImageViewer | undefined>(undefined);
 	let leafEl = $state<HTMLElement | undefined>(undefined);
 	let leafBodyEl = $state<HTMLElement | undefined>(undefined);
+	let restoringDocument = $state<string | null>(null);
 
 	// An image of the open document shown larger. The document stays mounted beneath it, so closing the viewer
 	// returns to the same live document; the viewer belongs to the tab it was opened from.
 	const shownImage = $derived(threadId && target ? ($documentImageViewers[threadId] ?? null) : null);
-	const imageOpen = $derived(shownImage !== null && shownImage.instanceId === target?.instanceId);
+	const savedImage = $derived(threadId && target ? tabViewState(threadId, target.instanceId)?.documentImage ?? null : null);
+	const displayedImage = $derived(shownImage ?? savedImage?.request ?? null);
+	const imageOpen = $derived(displayedImage !== null && displayedImage.instanceId === target?.instanceId);
 	function openImage(request: DocumentImageRequest) {
 		if (!threadId || !target) return;
 		const image = { ...request, instanceId: target.instanceId };
@@ -85,7 +88,7 @@
 	}
 	function closeImage() {
 		const tid = threadId;
-		const image = shownImage;
+		const image = displayedImage;
 		if (!tid || !image) return;
 		clearTabDocumentImage(tid, image.instanceId);
 		closeDocumentImage(tid);
@@ -197,7 +200,15 @@
 			const place = threadId && activeTab?.instanceId === signal.instanceId
 				? tabViewState(threadId, signal.instanceId)?.documentPlace
 				: null;
-			if (place) void restoreDocumentPlace(leafBodyEl, place);
+			if (place) {
+				restoringDocument = signal.instanceId;
+				void restoreDocumentPlace(leafBodyEl, place, {
+					mode: 'tab-return',
+					onPlaced: () => {
+						if (restoringDocument === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
+					},
+				});
+			}
 		} else if (signal.status === 'error' || signal.status === 'unavailable') {
 			failArtifactOpen(signal.instanceId);
 		}
@@ -286,7 +297,7 @@
 			{:else if target}
 				<!-- DocViewer owns Escape precedence (comment draft, then selection),
 				     so handing it onClose keeps that order intact in compact. -->
-				<div class="doc-host" class:covered={imageOpen} inert={imageOpen}>
+				<div class="doc-host" class:covered={imageOpen || restoringDocument === target.instanceId} inert={imageOpen || restoringDocument === target.instanceId}>
 					<DocViewer
 						bind:this={viewer}
 						{target}
@@ -300,13 +311,13 @@
 						covered={imageOpen}
 					/>
 				</div>
-				{#if imageOpen && shownImage}
+				{#if imageOpen && displayedImage}
 					<ArtifactDocumentImageOverlay
-						image={shownImage}
+						image={displayedImage}
 						{target}
 						place={activeViewState?.documentImage?.place ?? null}
 						onBack={closeImage}
-						onPlace={(place) => recordDocumentImagePlace(shownImage.instanceId, place)}
+						onPlace={(place) => recordDocumentImagePlace(displayedImage.instanceId, place)}
 					/>
 				{/if}
 			{/if}

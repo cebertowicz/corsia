@@ -9,6 +9,13 @@ export interface TextDocumentPlace {
 	scrollTop: number;
 }
 
+export interface RestoreDocumentPlaceOptions {
+	/** A tab return applies its saved place before visibility; an image Back still waits for the pane width. */
+	mode?: 'back' | 'tab-return';
+	/** Called immediately after the initial offset is set, while canonical anchor correction continues. */
+	onPlaced?: () => void;
+}
+
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 const STABLE_FRAMES = 3;
@@ -55,12 +62,16 @@ export function captureDocumentPlace(root: HTMLElement | undefined): TextDocumen
 export async function restoreDocumentPlace(
 	root: HTMLElement | undefined,
 	place: OpenDocumentImage | TextDocumentPlace,
+	options: RestoreDocumentPlaceOptions = {},
 ): Promise<void> {
 	await tick();
-	if (root) await widthSettled(root);
+	if (root && options.mode !== 'tab-return') await widthSettled(root);
 	const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
 	if (!root || !scroller) return;
 	scroller.scrollTop = place.scrollTop;
+	// CodeMirror draws the newly visible line on the next frame; reveal a returning tab after that draw, not after the full anchor hold.
+	if (options.onPlaced) await nextFrame();
+	options.onPlaced?.();
 	const image = 'src' in place ? place : null;
 	const view = image ? null : EditorView.findFromDOM(scroller);
 	const anchorTop = () => {

@@ -40,11 +40,10 @@
 	let viewportEl = $state<HTMLDivElement>();
 	let imgEl = $state<HTMLImageElement>();
 	let viewportSize = $state<Size>({ width: 0, height: 0 });
-	let natural = $state<Size | null>(null);
+	let natural = $state<(Size & { restored?: true }) | null>(null);
 	let failure = $state<string | null>(null);
 	let attempt = $state(0);
-	/** null is Fit, which follows the viewport as it resizes; a number is the user's own zoom. */
-	let free = $state<number | null>(null);
+	let free = $state<number | null>(null); // null is Fit and follows the viewport as it resizes.
 
 	const fit = $derived(natural ? fitScale(natural, viewportSize) : 1);
 	const scale = $derived(free === null ? fit : clampScale(free, fit));
@@ -95,6 +94,7 @@
 		if (saved) free = saved.scale ?? null;
 		await tick();
 		if (saved && viewportEl) restoreImageViewportPlace(viewportEl, saved);
+		natural = { width: el.naturalWidth || UNSIZED.width, height: el.naturalHeight || UNSIZED.height, restored: true };
 		if (onBack) viewportEl?.focus({ preventScroll: true });
 		onLoaded?.();
 	}
@@ -319,7 +319,7 @@
 			class="viewport"
 			class:pannable={overflowing}
 			class:panning
-			class:pending={natural === null}
+			class:pending={natural === null || !natural.restored}
 			bind:this={viewportEl}
 			role="region"
 			aria-label={alt ? `Image: ${alt}` : 'Image'}

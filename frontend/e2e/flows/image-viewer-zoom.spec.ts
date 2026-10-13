@@ -147,16 +147,18 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await overlay.getByRole('button', { name: 'Zoom out' }).click();
 			await expect(level(page)).toHaveText('100%');
 
-			// Pan by drag, and by the scrollbars the region carries; the image is larger than the viewport.
+			// With image comments present, a plain desktop drag draws a comment; Space-drag pans, and the region still carries scrollbars.
 			const region = page.locator('.image-overlay .viewport');
 			const scrollable = await region.evaluate((el) => ({ x: el.scrollWidth > el.clientWidth, y: el.scrollHeight > el.clientHeight }));
 			expect(scrollable).toEqual({ x: true, y: true });
 			const spot = { x: viewport.x + viewport.width / 2, y: viewport.y + viewport.height / 2 };
 			const panFrom = await region.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
+			await page.keyboard.down('Space');
 			await page.mouse.move(spot.x, spot.y);
 			await page.mouse.down();
 			await page.mouse.move(spot.x - 120, spot.y - 80, { steps: 6 });
 			await page.mouse.up();
+			await page.keyboard.up('Space');
 			const panned = await region.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
 			expect(panned.left - panFrom.left).toBeGreaterThan(100);
 			expect(panned.top - panFrom.top).toBeGreaterThan(60);
@@ -232,12 +234,14 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await page.keyboard.press('Enter');
 			await expect(overlay.locator('.frame img')).toBeVisible();
 
-			// Every other way out restores the pane too: switching threads, then coming back, shows the document.
+			// Switching threads hides the global overlay but preserves this tab's image camera; Back still restores the document pane.
 			await page.getByText(/viewer-other-/).first().click();
 			await expect(overlay).toHaveCount(0);
 			await page.getByText(seeded.sessionTitle).first().click();
-			await expect(await revealImage(page)).toBeVisible();
+			await expect(overlay.locator('.frame img')).toBeVisible();
+			await overlay.getByRole('button', { name: 'Back to walkthrough.md' }).click();
 			await expect(overlay).toHaveCount(0);
+			await expect(await revealImage(page)).toBeVisible();
 			await expect.poll(() => leafWidth(page)).toBeCloseTo(widthBefore, 0);
 		} finally {
 			fs.rmSync(seeded.dir, { recursive: true, force: true });
@@ -307,7 +311,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 		}
 	});
 
-	test('phone: Back and Fit only, one finger pans, two pinch, and Back returns to the document (393)', async ({ page, request }, testInfo) => {
+	test('phone: document actions, Back and Fit, one finger pan, two-finger pinch, and Back return (393)', async ({ page, request }, testInfo) => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
 		await page.setViewportSize({ width: 393, height: 852 });
 		const seeded = await seedDocument(page, request, 'viewer-zoom-393');
@@ -324,7 +328,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			const overlay = page.locator('.image-overlay');
 			await expect(overlay.locator('.frame img')).toBeVisible();
 			const labels = await overlay.locator('.bar button').evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim()));
-			expect(labels).toEqual(['Back to walkthrough.md', 'Fit']);
+			expect(labels).toEqual(['Back to walkthrough.md', 'Comment', '0 open threads', 'Fit']);
 			await expect(overlay.locator('.back-text')).toHaveText('Back');
 			await expect(overlay.getByRole('button', { name: 'Fit' })).toHaveAttribute('aria-pressed', 'true');
 			expect((await page.locator('.image-overlay .bar button').first().boundingBox())!.height).toBeGreaterThanOrEqual(44);
