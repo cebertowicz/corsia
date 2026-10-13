@@ -75,6 +75,25 @@ describe('toast anchor', () => {
 		expect(get(anchor)).toEqual({ x: 720, width: 1440 });
 	});
 
+	it('re-measures when an ancestor that slides the column settles, not for unrelated nodes', () => {
+		const anchor = createToastAnchorStore();
+		const ancestor = document.createElement('div');
+		const node = column({ left: 280, right: 1440 });
+		ancestor.append(node);
+		document.body.append(ancestor);
+		const stranger = document.createElement('div');
+		document.body.append(stranger);
+		anchor.register(node);
+
+		vi.mocked(node.getBoundingClientRect).mockImplementation(
+			() => ({ left: 300, right: 1440, width: 1140 }) as DOMRect,
+		);
+		stranger.dispatchEvent(new Event('transitionend', { bubbles: true }));
+		expect(get(anchor)).toEqual({ x: 860, width: 1160 });
+		ancestor.dispatchEvent(new Event('transitionend', { bubbles: true }));
+		expect(get(anchor)).toEqual({ x: 870, width: 1140 });
+	});
+
 	it('clamps a column that is partly off screen to the viewport', () => {
 		const anchor = createToastAnchorStore();
 		anchor.register(column({ left: 300, right: 1740 }));

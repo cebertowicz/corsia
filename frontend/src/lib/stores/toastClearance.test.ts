@@ -131,5 +131,12 @@ describe('toast clearance band', () => {
 		action.destroy();
 		expect(get(toastClearance)).toBe(0);
 	});
-});
 
+	it('measures from the occupant\'s content edge, so its own top padding stays clear', () => {
+		const node = band([640]);
+		(node.firstElementChild as HTMLElement).style.paddingTop = '8px';
+		const action = toastClearanceBand(node);
+		expect(get(toastClearance)).toBe(152);
+		action.destroy();
+	});
+});

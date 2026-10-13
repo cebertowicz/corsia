@@ -153,16 +153,19 @@ describe('ToastContainer pinned slot', () => {
 		expect(toast.querySelector('.toast-close')?.getAttribute('aria-label')).toBe('Dismiss');
 	});
 
-	it('gives success a leading icon and info none', () => {
+	it('leads every pinned state with a glyph, and an ordinary info toast with none', async () => {
 		toasts.pin('update', { type: 'success', message: 'Updated' });
 		mountContainer();
 		expect(host.querySelector('.toast--success svg.toast-icon')).toBeTruthy();
 
 		toasts.pin('update', { type: 'info', message: 'An update is ready' });
-		return tick().then(() => {
-			expect(host.querySelectorAll('.toast')).toHaveLength(1);
-			expect(host.querySelector('.toast--info .toast-icon')).toBeNull();
-		});
+		await tick();
+		expect(host.querySelectorAll('.toast')).toHaveLength(1);
+		expect(host.querySelector('.toast--pinned.toast--info svg.toast-icon--update')).toBeTruthy();
+
+		toasts.show('Saved');
+		await tick();
+		expect(host.querySelector('.toast:not(.toast--pinned) .toast-icon')).toBeNull();
 	});
 
 	it('renders the one ordinary toast above the pinned one, replacing in place', async () => {

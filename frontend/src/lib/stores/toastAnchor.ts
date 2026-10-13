@@ -42,19 +42,25 @@ export function createToastAnchorStore() {
 			surface.anchor = measureAnchor(node);
 			publish();
 		};
+		// An ancestor that slides or resizes the column (a drawer or pane) moves
+		// it without resizing it, which the observer cannot see; re-measure as
+		// each such transition settles.
 		const onTransitionEnd = (event: Event) => {
-			if (event.target === node) update();
+			const target = event.target;
+			if (target instanceof Node && (target === node || target.contains(node))) update();
 		};
 		const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
 		observer?.observe(node);
 		window.addEventListener('resize', update);
-		node.addEventListener('transitionend', onTransitionEnd);
+		document.addEventListener('transitionend', onTransitionEnd, true);
+		document.addEventListener('transitioncancel', onTransitionEnd, true);
 		update();
 
 		return () => {
 			observer?.disconnect();
 			window.removeEventListener('resize', update);
-			node.removeEventListener('transitionend', onTransitionEnd);
+			document.removeEventListener('transitionend', onTransitionEnd, true);
+			document.removeEventListener('transitioncancel', onTransitionEnd, true);
 			surfaces.splice(surfaces.indexOf(surface), 1);
 			publish();
 		};

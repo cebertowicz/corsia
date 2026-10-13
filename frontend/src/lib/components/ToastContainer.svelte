@@ -3,8 +3,17 @@
 	import { toastAnchor } from '$lib/stores/toastAnchor';
 	import { toastClearance } from '$lib/stores/toastClearance';
 	import { toastFit } from '$lib/stores/toastFit';
+	import { flip } from 'svelte/animate';
+	import { cubicOut } from 'svelte/easing';
 
 	let toastHeight = $state(0);
+
+	/** The upper toast glides into the freed place when the one below it goes. */
+	function flipParams() {
+		const reduced =
+			typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+		return { duration: reduced ? 0 : 200, easing: cubicOut };
+	}
 
 	function measureToastHeight(node: HTMLElement) {
 		const update = () => {
@@ -55,6 +64,7 @@
 				class="toast toast--{type}{pinned ? ' toast--pinned' : ''}"
 				role={pinned ? (type === 'error' ? 'alert' : undefined) : 'status'}
 				data-fit="full"
+				animate:flip={flipParams()}
 				use:pinnedFit={fitParam(toast)}
 				onmouseenter={() => toasts.pause(toast.id, 'pointer')}
 				onmouseleave={() => toasts.resume(toast.id, 'pointer')}
@@ -70,6 +80,8 @@
 					<span class="toast-icon toast-spinner" aria-hidden="true"></span>
 				{:else if type === 'success'}
 					<svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="8 12.5 11 15.5 16 9"/></svg>
+				{:else if type === 'info' && pinned}
+					<svg class="toast-icon toast-icon--update" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8 12l4-4 4 4"/></svg>
 				{:else if type === 'error'}
 					<svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12.5"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
 				{/if}
@@ -115,7 +127,11 @@
 		gap: var(--space-2);
 		z-index: 9999;
 		pointer-events: none;
-		transition: bottom var(--dur-drawer) var(--ease-ios-sheet);
+		/* The stack follows its column as a pane opens or closes, on the
+		   drawer's own timing, instead of snapping when the column settles. */
+		transition:
+			bottom var(--dur-drawer) var(--ease-ios-sheet),
+			left var(--dur-drawer) var(--ease-ios-sheet);
 	}
 
 	.toast {
@@ -158,6 +174,10 @@
 		flex-shrink: 0;
 	}
 
+	.toast-icon--update {
+		color: var(--violet-text, var(--violet));
+	}
+
 	.toast-spinner {
 		width: 14px;
 		height: 14px;
@@ -187,7 +207,7 @@
 	   measuring (hence `:global`): the whole line on one row, then without the
 	   time, then the step text wrapped. */
 	.toast--pinned {
-		gap: 14px;
+		gap: var(--space-2);
 	}
 	.toast--pinned .toast-line {
 		flex: 0 0 auto;
@@ -242,15 +262,16 @@
 	@media (max-width: 600px) {
 		.toast-container {
 			--toast-base-offset: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
-			/* The pinned line spans the column; ordinary toasts keep their own width. */
-			width: calc(var(--toast-column) - var(--space-5) * 2);
+			/* The pinned line spans the column, sharing the composer's edges;
+			   ordinary toasts keep their own width. */
+			width: calc(var(--toast-column) - var(--space-3) * 2);
 			max-width: none;
 		}
 		.toast--pinned {
 			align-self: stretch;
+			max-width: none;
 			/* The 44px close button is the trailing edge; the line keeps its room. */
 			padding-right: 0;
-			gap: var(--space-1);
 		}
 		.toast-action { min-height: 44px; }
 		.toast-close { width: 44px; height: 44px; }
