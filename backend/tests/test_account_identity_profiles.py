@@ -570,7 +570,7 @@ def test_ordered_policy_api_and_thread_ownership(client_refuses_unsigned_api, ac
     assert response.json()["disabled"] == [legacy["id"]]
     payload = client_refuses_unsigned_api.get("/api/provider-policy?project_id=destination-project").json()
     saved = next(item for item in payload["providers"] if item["provider_key"] == "codex")
-    assert {key: saved[key] for key in ("provider_key", "capabilities", "rollover", "order", "disabled", "revision", "scope")} == response.json()
+    assert saved == response.json()
     assert client_refuses_unsigned_api.put(route, json=body).status_code == 409
     assert client_refuses_unsigned_api.get("/api/projects/missing/vendor-accounts/codex").status_code == 404
     assert client_refuses_unsigned_api.put("/api/provider-policy/codex?project_id=missing", json=body).status_code == 409
@@ -578,6 +578,33 @@ def test_ordered_policy_api_and_thread_ownership(client_refuses_unsigned_api, ac
     db.execute("UPDATE threads SET user_id='someone-else' WHERE id='destination'")
     db.commit()
     assert client_refuses_unsigned_api.get("/api/threads/destination/vendor-account").status_code == 404
+
+
+def test_policy_put_returns_the_matching_get_provider_entry_in_workspace_and_project_scopes(
+        client, accounts):
+    _db, legacy, second, third = accounts
+    workspace_body = {
+        "rollover": True, "order": [third["id"], second["id"]], "disabled": [legacy["id"]],
+        "expected_revision": 0,
+    }
+    workspace_response = client.put("/api/provider-policy/codex", json=workspace_body)
+    assert workspace_response.status_code == 200
+    workspace_entry = next(provider for provider in client.get("/api/provider-policy").json()["providers"]
+                           if provider["provider_key"] == "codex")
+    assert workspace_response.json()["units"] == workspace_entry["units"]
+    assert workspace_response.json() == workspace_entry
+
+    project_body = {
+        "rollover": False, "order": [second["id"], third["id"]], "disabled": [legacy["id"]],
+        "expected_revision": workspace_response.json()["revision"],
+    }
+    project_response = client.put("/api/provider-policy/codex?project_id=destination-project", json=project_body)
+    assert project_response.status_code == 200
+    project_payload = client.get("/api/provider-policy?project_id=destination-project").json()
+    assert project_payload["use_workspace"] is False
+    project_entry = next(provider for provider in project_payload["providers"] if provider["provider_key"] == "codex")
+    assert project_response.json()["units"] == project_entry["units"]
+    assert project_response.json() == project_entry
 
 
 def test_person_account_pin_ignores_the_runtime_epoch_holds_a_busy_choice_and_keeps_vendor_refusals(
