@@ -18,7 +18,13 @@ describe('harnessSummaries', () => {
 	it('counts available rows and drops a harness with none', () => {
 		const catalog = [pickerRow(), pickerRow({ id: 'codex/gpt-6-sol', status: 'unavailable' })];
 		expect(harnessSummaries([row({ id: 'codex/gpt-5.6-sol' }), row({ id: 'codex/gpt-6-sol' })], catalog))
-			.toEqual([{ name: 'codex', label: 'Codex', total: 1, ready: 1 }]);
+			.toEqual([{ name: 'codex', label: 'Codex', enabled: true, total: 1, ready: 1 }]);
+	});
+
+	it('keeps a turned-off harness listed as off so it can be turned back on', () => {
+		const catalog = [pickerRow({ status: 'unavailable', status_reason: 'provider_disabled' })];
+		expect(harnessSummaries([row({ provider_enabled: false })], catalog))
+			.toEqual([{ name: 'codex', label: 'Codex', enabled: false, total: 1, ready: 0 }]);
 	});
 });
 
@@ -91,7 +97,7 @@ describe('harnessProviderModels', () => {
 			pickerRow({ id: 'codex/limited', status: 'unavailable', status_reason: 'usage_limited', available: true }),
 		];
 		expect(harnessSummaries([row({}), row({ id: 'codex/limited' })], catalog))
-			.toEqual([{ name: 'codex', label: 'Codex', total: 2, ready: 1 }]);
+			.toEqual([{ name: 'codex', label: 'Codex', enabled: true, total: 2, ready: 1 }]);
 	});
 
 	it('shows the label over the discovered name and keeps both', () => {

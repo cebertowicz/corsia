@@ -80,7 +80,7 @@ export async function harnessModels(harness: string): Promise<ProviderModel[]> {
 	return harnessProviderModels(settingsRows, harness, catalog);
 }
 
-/** Save the name the picker shows for a model; an empty label restores the discovered one. */
+/** Turn an agent CLI provider on or off, as every other provider's switch does. */
 export async function setHarnessEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; message?: string }> {
 	try {
 		const query = new URLSearchParams({ token: t() });
