@@ -316,6 +316,7 @@ class TestSpawn:
         import subagents.cc_runtime as rt
         from infra import database
         from infra import thread_execution
+        from infra.db_loop_guard import LOOP_WRITE_STRICT_ENV
 
         _seed_parent(child_db)
         child_db.execute(
@@ -348,6 +349,7 @@ class TestSpawn:
             assert marker is not None
             marker_visibility.append(message["type"])
 
+        monkeypatch.setenv(LOOP_WRITE_STRICT_ENV, "1")
         child_id = await rt.spawn(
             "parent", "list the files", binary=fake_claude,
             target=cc_target("sonnet"),
@@ -403,6 +405,9 @@ class TestSpawn:
         assert first_frame.count("[AGENT-SEND") == 1
         assert first_frame.count("[To reply, call delegate_send(thread_id=") == 1
 
+        # This test guards the spawn path; retirement has independent durable
+        # completion work outside that scope.
+        monkeypatch.delenv(LOOP_WRITE_STRICT_ENV)
         assert rt.is_live(child_id)
         stopped = await rt.retire(
             child_id, broadcast=lambda sid, m: casts.append((sid, m)),
