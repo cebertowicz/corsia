@@ -10,6 +10,7 @@
 	import { docTheme, docHighlight } from '$lib/cm/theme';
 	import { markdownLivePreview } from '$lib/cm/markdown-live';
 	import { imageContext, imageOpener, type OpenImageRequest } from '$lib/cm/markdown-image';
+	import { linkOpener } from '$lib/cm/markdown-link';
 	import { token } from '$lib/stores/auth';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
@@ -31,6 +32,7 @@
 		readOnly = false,
 		imageBase = null,
 		onOpenImage,
+		onOpenLink,
 		onSave,
 		onSelect,
 		onAnchorFocus,
@@ -52,6 +54,8 @@
 		imageBase?: { path: string; projectId: string | null } | null;
 		/** Opens a drawn image larger in the canvas; without it an image is only selected. */
 		onOpenImage?: (request: OpenImageRequest) => void;
+		/** Follows a link written in this document, given its target as written; without it a link is only styled. */
+		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
 		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null } | null) => void;
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
@@ -184,6 +188,7 @@
 				markdownLivePreview,
 				imageContext.of(() => imageBase && { docPath: imageBase.path, projectId: imageBase.projectId, token: get(token) ?? '' }),
 				...(onOpenImage ? [imageOpener.of((request) => onOpenImage?.(request))] : []),
+				...(onOpenLink ? [linkOpener.of((href) => onOpenLink?.(href))] : []),
 				markdownTasks,
 				commentMarks,
 				pendingCommentMark,

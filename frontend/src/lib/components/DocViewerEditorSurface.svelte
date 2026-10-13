@@ -5,6 +5,7 @@
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import type { PreviewFrameSource } from '$lib/stores/livePreviewFeed';
 	import type { OpenImageRequest } from '$lib/cm/markdown-image';
+	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
@@ -84,7 +85,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} />
+			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}
