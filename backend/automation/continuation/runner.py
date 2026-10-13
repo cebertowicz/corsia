@@ -98,7 +98,7 @@ def _collect(
 ):
     """Derive source requests before atomically enqueueing their triggers."""
     read_db = db if db is not None else get_db()
-    requests = []
+    requests: list[tuple[triggers.TriggerRequest, TriggerSource]] = []
     for source in sources:
         was_clean = not read_db.in_transaction
         try:
