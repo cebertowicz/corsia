@@ -12,15 +12,17 @@
 	import { holdDocFeedback } from '$lib/docFeedback.svelte';
 	import { token } from '$lib/stores/auth';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
-	import type { TabLoadSignal } from '$lib/artifactTabs';
+	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
 
-	let { target, onSignal, stale = false, onReload }: {
+	let { target, onSignal, stale = false, onReload, place = null, onPlace }: {
 		target: DocViewerTarget;
 		/** Reports load progress against the tab instance that started it. */
 		onSignal?: (signal: TabLoadSignal) => void;
 		/** A newer revision exists than the one on screen. */
 		stale?: boolean;
 		onReload?: () => void;
+		place?: ImageViewportPlace | null;
+		onPlace?: (place: ImageViewportPlace) => void;
 	} = $props();
 
 	type ImageState = 'loading' | 'ready' | 'error';
@@ -115,7 +117,7 @@
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
+		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 

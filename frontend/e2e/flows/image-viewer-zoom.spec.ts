@@ -153,8 +153,8 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			expect(scrollable).toEqual({ x: true, y: true });
 			const spot = { x: viewport.x + viewport.width / 2, y: viewport.y + viewport.height / 2 };
 			const panFrom = await region.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
-			await page.mouse.move(spot.x, spot.y);
 			await page.keyboard.down('Space');
+			await page.mouse.move(spot.x, spot.y);
 			await page.mouse.down();
 			await page.mouse.move(spot.x - 120, spot.y - 80, { steps: 6 });
 			await page.mouse.up();
@@ -236,12 +236,14 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await page.keyboard.press('Enter');
 			await expect(overlay.locator('.frame img')).toBeVisible();
 
-			// Every other way out restores the pane too: switching threads, then coming back, shows the document.
+			// Switching threads hides the global overlay but preserves this tab's image camera; Back still restores the document pane.
 			await page.getByText(/viewer-other-/).first().click();
 			await expect(overlay).toHaveCount(0);
 			await page.getByText(seeded.sessionTitle).first().click();
-			await expect(await revealImage(page)).toBeVisible();
+			await expect(overlay.locator('.frame img')).toBeVisible();
+			await overlay.getByRole('button', { name: 'Back to walkthrough.md' }).click();
 			await expect(overlay).toHaveCount(0);
+			await expect(await revealImage(page)).toBeVisible();
 			await expect.poll(() => leafWidth(page)).toBeCloseTo(widthBefore, 0);
 		} finally {
 			fs.rmSync(seeded.dir, { recursive: true, force: true });

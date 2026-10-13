@@ -1,5 +1,12 @@
 export type ArtifactTabStatus = 'ready' | 'loading' | 'error' | 'unavailable' | 'readonly';
 
+/** In-session camera position for an image viewport; null scale keeps it fitted to the viewport. */
+export interface ImageViewportPlace {
+	scrollLeft: number;
+	scrollTop: number;
+	scale: number | null;
+}
+
 export interface ArtifactTab {
 	/** The artifact leaf hosts documents, child conversations, and bounded legacy discussion archives. */
 	kind: 'document' | 'subagent' | 'legacy-discussion';

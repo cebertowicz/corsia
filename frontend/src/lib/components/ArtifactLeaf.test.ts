@@ -83,7 +83,7 @@ import { setWs } from '$lib/ws/state';
 import { connectionState } from '$lib/stores/connection';
 import { LIVE_OPEN_WAIT_MS, startLiveDocuments } from '$lib/stores/liveDocuments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { closeDocumentImage, documentImageViewers } from '$lib/stores/documentImageViewer';
+import { tabDocumentImage } from '$lib/stores/tabViewState';
 import { EditorView } from '@codemirror/view';
 
 let host: HTMLElement;
@@ -883,8 +883,9 @@ describe('ArtifactLeaf comment focus from the text', () => {
 			return found!;
 		});
 		marker.click();
-		await vi.waitFor(() => expect(get(documentImageViewers)[THREAD]).toMatchObject({ ...IMG, focus: { id: 'pin' }, comments: { artifactId: 'art-pin' } }));
+		const tab = get(threadWorkspaces)[THREAD].activeTabId!;
+		await vi.waitFor(() => expect(tabDocumentImage(THREAD, tab)).toMatchObject({ ...IMG, focus: { id: 'pin' } }));
+		await vi.waitFor(() => expect(host.querySelector('.image-overlay [data-image-comment]')).not.toBeNull());
 		expect(host.querySelector('.popover')).toBeNull();
-		closeDocumentImage(THREAD);
 	});
 });

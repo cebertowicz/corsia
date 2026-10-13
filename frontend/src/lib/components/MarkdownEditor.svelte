@@ -23,6 +23,7 @@
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
+	import { captureDocumentPlace, type TextDocumentPlace } from '$lib/documentImagePlace';
 
 	let {
 		value = $bindable(''),
@@ -42,7 +43,9 @@
 		highlights = [],
 		presence = [],
 		pendingComment = null,
-		scrollTo = null
+		scrollTo = null,
+		tabInstanceId = null,
+		onDocumentPlace
 	}: {
 		value?: string;
 		liveText?: Y.Text | null;
@@ -66,6 +69,9 @@
 		presence?: PresenceRange[];
 		pendingComment?: CommentSelection | null;
 		scrollTo?: { from: number; to: number; focus?: boolean; origin: ScrollOrigin } | null;
+		/** The mounted tab identity keeps a delayed scroll sample from landing on the next tab. */
+		tabInstanceId?: string | null;
+		onDocumentPlace?: (instanceId: string, place: TextDocumentPlace) => void;
 	} = $props();
 
 	// Read at each remote update, so a dropped connection stops typing without a reconfigure.
@@ -229,6 +235,27 @@
 	$effect(() => {
 		const source = previews;
 		if (view && source) return attachPreviewFeed(view, source);
+	});
+
+	// A scroll can fire while a tab switch replaces this editor's content. The scheduled sample retains the source
+	// tab key and is discarded if that key changed, so an incoming tab's 0 never overwrites the place it left.
+	$effect(() => {
+		const current = view;
+		const instanceId = tabInstanceId;
+		if (!current || !instanceId) return;
+		let frame = 0;
+		const capture = () => {
+			frame = 0;
+			if (tabInstanceId !== instanceId) return;
+			const place = captureDocumentPlace(current.dom);
+			if (place) onDocumentPlace?.(instanceId, place);
+		};
+		const onScroll = () => { if (!frame) frame = requestAnimationFrame(capture); };
+		current.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
+		return () => {
+			current.scrollDOM.removeEventListener('scroll', onScroll);
+			if (frame) cancelAnimationFrame(frame);
+		};
 	});
 
 	$effect(() => {

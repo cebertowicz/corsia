@@ -17,6 +17,11 @@ interface BackLayer {
 	onPop: () => boolean;
 	/** True once this layer has a corresponding browser-history entry. */
 	pushed: boolean;
+	/**
+	 * Dismissed while a layer above it was still open. Its history entry sits under that layer's, so it stays on the
+	 * stack until that layer goes, and the two entries are unwound together.
+	 */
+	left?: boolean;
 }
 
 let layers: BackLayer[] = [];
@@ -24,8 +29,12 @@ let nextId = 1;
 let listening = false;
 
 interface PendingCleanup {
-	/** The state a direct dismissal's history.back() is expected to land on. */
-	expectedLowerLayerId: number | null;
+	/**
+	 * The states the direct dismissals' history.back() calls are expected to land on, in order. Two top layers can be
+	 * dismissed in one flush (a sheet's pick closes the sheet and the layer beneath it), and each traversal arrives on
+	 * its own.
+	 */
+	expectedLowerLayerIds: Array<number | null>;
 	expires: ReturnType<typeof setTimeout>;
 }
 
@@ -50,10 +59,27 @@ function flushDeferredLayers(): void {
 	}
 }
 
+/**
+ * Drops the dismissed layers now at the top of the stack and traverses back past their history entries, plus
+ * `entries` more, in one step.
+ */
+function unwindLeftLayers(entries: number): void {
+	while (layers.at(-1)?.left) {
+		layers = layers.slice(0, -1);
+		entries += 1;
+	}
+	if (!entries) return;
+	const lowerPushed = [...layers].reverse().find((candidate) => candidate.pushed);
+	expectCleanup(lowerPushed?.id ?? null);
+	if (entries === 1) history.back();
+	else history.go(-entries);
+}
+
 function expectCleanup(expectedLowerLayerId: number | null): void {
+	const earlier = pendingCleanup?.expectedLowerLayerIds ?? [];
 	clearPendingCleanup();
 	const pending: PendingCleanup = {
-		expectedLowerLayerId,
+		expectedLowerLayerIds: [...earlier, expectedLowerLayerId],
 		expires: setTimeout(() => {
 			if (pendingCleanup !== pending) return;
 			pendingCleanup = null;
@@ -71,21 +97,18 @@ function historyLayerId(state: unknown): number | null {
 
 function handlePopState(event: PopStateEvent): void {
 	if (pendingCleanup) {
-		const expected = pendingCleanup.expectedLowerLayerId;
+		const [expected, ...later] = pendingCleanup.expectedLowerLayerIds;
 		// A lower live layer gives the cleanup pop a stable identity even if a
-		// replacement was pushed before this event reached us.
-		if (expected !== null && historyLayerId(event.state) === expected) {
-			clearPendingCleanup();
+		// replacement was pushed before this event reached us. With no lower layer
+		// the first pop during the short cleanup grace is necessarily the direct
+		// history.back() cleanup, even if a replacement was pushed in the same flush.
+		if (expected === null || historyLayerId(event.state) === expected) {
 			event.stopImmediatePropagation();
-			flushDeferredLayers();
-			return;
-		}
-		// With no lower layer the first pop during the short cleanup grace is
-		// necessarily the direct history.back() cleanup, even if a replacement was
-		// pushed in the same flush.
-		if (expected === null) {
+			if (later.length) {
+				pendingCleanup.expectedLowerLayerIds = later;
+				return;
+			}
 			clearPendingCleanup();
-			event.stopImmediatePropagation();
 			flushDeferredLayers();
 			return;
 		}
@@ -98,7 +121,9 @@ function handlePopState(event: PopStateEvent): void {
 	// The entry this layer pushed is already gone; drop it before dispatching so
 	// a handler that re-enters cannot see a stale stack.
 	layers = layers.slice(0, -1);
-	if (top.onPop()) event.stopImmediatePropagation();
+	if (top.left || top.onPop()) event.stopImmediatePropagation();
+	// The layer that just closed may have had dismissed ones beneath it; Back never stops on their entries.
+	unwindLeftLayers(0);
 }
 
 function ensureListener(): void {
@@ -109,7 +134,8 @@ function ensureListener(): void {
 
 /**
  * Pushes a back layer. Returns a disposer that removes it, unwinding the
- * history entry it added when it is still the top of the stack.
+ * history entry it added when it is still the top of the stack, or once the
+ * layers above it have closed when it is not.
  */
 export function pushBackLayer(onPop: () => boolean): () => void {
 	if (typeof window === 'undefined') return () => {};
@@ -126,17 +152,17 @@ export function pushBackLayer(onPop: () => boolean): () => void {
 	}
 	return () => {
 		const idx = layers.findIndex((l) => l.id === layer.id);
-		if (idx < 0) return; // already consumed by a pop
+		if (idx < 0 || layer.left) return; // already consumed by a pop, or already dismissed
 		const wasTop = idx === layers.length - 1;
-		const wasPushed = layer.pushed;
+		// A buried layer's entry cannot be removed from under the open one above it.
+		if (!wasTop && layer.pushed) {
+			layer.left = true;
+			return;
+		}
 		layers = layers.filter((l) => l.id !== layer.id);
 		// Only a top layer with a published history entry owns the current browser
 		// entry. A deferred replacement can disappear without traversing history.
-		if (wasTop && wasPushed) {
-			const lowerPushed = [...layers].reverse().find((candidate) => candidate.pushed);
-			expectCleanup(lowerPushed?.id ?? null);
-			history.back();
-		}
+		if (wasTop) unwindLeftLayers(layer.pushed ? 1 : 0);
 	};
 }
 
@@ -146,7 +172,7 @@ export function resetBackLayers(): void {
 	clearPendingCleanup();
 }
 
-/** Test seam — how many layers are currently registered. */
+/** Test seam — how many layers are currently open. */
 export function backLayerDepth(): number {
-	return layers.length;
+	return layers.filter((layer) => !layer.left).length;
 }

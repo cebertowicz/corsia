@@ -23,6 +23,7 @@ import { restoreWorkspace as restorePersistedWorkspace } from './artifactWorkspa
 import type {
 	ArtifactTab,
 	DuplicateMergeGuard,
+	ImageViewportPlace,
 	OpenArtifactInput,
 	OpenLegacyDiscussionInput,
 	OpenSubagentInput,
@@ -35,6 +36,7 @@ export type {
 	ArtifactTab,
 	ArtifactTabStatus,
 	DuplicateMergeGuard,
+	ImageViewportPlace,
 	OpenArtifactInput,
 	OpenLegacyDiscussionInput,
 	OpenSubagentInput,

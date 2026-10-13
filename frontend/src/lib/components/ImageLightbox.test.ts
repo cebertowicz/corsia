@@ -27,7 +27,7 @@ const sizes = { width: 548, height: 400 };
 function define(name: string, get: () => number) {
 	Object.defineProperty(HTMLElement.prototype, name, { configurable: true, get });
 }
-const settle = async () => { for (let i = 0; i < 4; i++) { await Promise.resolve(); flushSync(); } };
+const settle = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); flushSync(); } };
 
 function render(props: Record<string, unknown> = {}) {
 	component = mount(ImageLightbox, { target: host, props: { src: '/api/files/content?path=%2Fws%2Fa.png', alt: 'Mock screen', ...props } });
@@ -70,6 +70,20 @@ describe('ImageLightbox', () => {
 		expect(width(img)).toBeCloseTo(500);
 		expect(button('Fit').getAttribute('aria-pressed')).toBe('true');
 		expect(host.querySelector('.level')!.textContent).toBe('50%');
+	});
+
+	it('keeps a saved camera hidden until its scale and offsets are both restored', async () => {
+		const img = render({ place: { scale: 1, scrollLeft: 123, scrollTop: 45 } });
+		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: NATURAL.width });
+		Object.defineProperty(img, 'naturalHeight', { configurable: true, value: NATURAL.height });
+		img.dispatchEvent(new Event('load'));
+		flushSync();
+		expect(host.querySelector('.viewport')!.classList).toContain('pending');
+		await settle();
+		const viewportEl = host.querySelector<HTMLElement>('.viewport')!;
+		expect(viewportEl.classList).not.toContain('pending');
+		expect(width(img)).toBe(1000);
+		expect([viewportEl.scrollLeft, viewportEl.scrollTop]).toEqual([123, 45]);
 	});
 
 	it('never enlarges an image that fits at its own size', async () => {

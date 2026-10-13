@@ -35,6 +35,8 @@
 		saveStatus,
 		pendingSel,
 		onStartComment,
+		tabInstanceId = null,
+		onDocumentPlace,
 	}: {
 		docState: DocState;
 		loadError: string;
@@ -59,6 +61,8 @@
 		saveStatus: 'idle' | 'saving' | 'saved';
 		pendingSel: PendingSelection | null;
 		onStartComment: () => void;
+		tabInstanceId?: string | null;
+		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
 	} = $props();
 
 	// The button follows the selection's end but never leaves the visible document column.
@@ -85,7 +89,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+			<MarkdownEditor bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}

@@ -10,6 +10,7 @@
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
+	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import { createImageComments } from '$lib/imageComments.svelte';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
 	import type { ImageRegion } from '$lib/imageRegions';
@@ -22,7 +23,7 @@
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
-	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), onLoaded, onFailed, onRetry }: {
+	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), place = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
@@ -47,6 +48,8 @@
 		feedback?: DocFeedback | null;
 		/** A new comment has text, so the review bar must not answer over it. */
 		draftOpen?: boolean;
+		place?: ImageViewportPlace | null;
+		onPlace?: (place: ImageViewportPlace) => void;
 		onLoaded?: () => void;
 		onFailed?: () => void;
 		onRetry?: () => void;
@@ -160,7 +163,7 @@
 <div class="image-comments">
 <div class="layout" class:drawer-open={trackOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
 	<div class="viewer-cell">
-		<ImageLightbox bind:this={lightbox} {src} {alt} {docName} {onBack} onLoaded={imageLoaded} {onFailed} {onRetry}>
+		<ImageLightbox bind:this={lightbox} {src} {alt} {docName} {onBack} {place} {onPlace} onLoaded={imageLoaded} {onFailed} {onRetry}>
 			{#snippet barActions({ loaded })}
 				{#if artifactId}
 					<ImageCommentBar

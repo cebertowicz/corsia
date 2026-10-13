@@ -106,7 +106,7 @@ function runFlow(width: number, height: number, touch: boolean, scheme: Scheme) 
 					} else {
 						await page.getByRole('tab', { name: 'INDEX.md' }).click();
 					}
-					await expect(page.getByText('Filler paragraph 1 so')).toBeVisible();
+					await expect(content).toBeVisible();
 				};
 
 				// At rest: the URL is hidden, the link is styled, and it carries its destination.

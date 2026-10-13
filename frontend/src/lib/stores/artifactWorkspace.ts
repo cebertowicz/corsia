@@ -1,13 +1,15 @@
 import { writable, get } from 'svelte/store';
 import {
 	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, openTab,
-	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus, type OpenArtifactInput,
-	openLegacyDiscussionTab, type OpenLegacyDiscussionInput, openSubagentTab, type OpenSubagentInput,
-	type RevisionCheck, type TabLoadSignal, type ThreadArtifactWorkspace,
+	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus,
+	type OpenArtifactInput, openLegacyDiscussionTab, type OpenLegacyDiscussionInput,
+	openSubagentTab, type OpenSubagentInput, type RevisionCheck, type TabLoadSignal,
+	type ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
 import { clearDraft, existingDraft } from '$lib/stores/docSaveQueue';
 import { closeLiveDocument } from '$lib/stores/liveDocuments';
 import { token } from '$lib/stores/auth';
+import { clearTabViewState } from '$lib/stores/tabViewState';
 
 export {
 	emptyWorkspace, tabKey, getActiveTab, isTabChanged, hasChangedTab,
@@ -138,8 +140,11 @@ function mutate(
 		for (const tab of current.tabs) if (!remaining.has(tab.instanceId)) removed.push(tab.instanceId);
 		return { ...all, [threadId]: next };
 	});
-	// Every dropped tab takes its live binding with it (4.1 close sync), however it was removed.
-	for (const instanceId of removed) closeLiveDocument(instanceId);
+	// Every dropped tab takes its live binding and in-session camera/place with it, however it was removed.
+	for (const instanceId of removed) {
+		closeLiveDocument(instanceId);
+		clearTabViewState(threadId, instanceId);
+	}
 	return removed;
 }
 

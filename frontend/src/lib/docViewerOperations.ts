@@ -64,6 +64,15 @@ export async function markFreshnessVerified(
 	return { ...freshness, verified_at: new Date().toISOString(), age_days: 0, due_at: null, state: 'current' };
 }
 
+/** Verify an open document and hand its refreshed status back to its owning viewer. */
+export async function verifyAndApplyDocumentFreshness(
+	artifactId: string | null,
+	freshness: DocumentFreshness | null,
+	apply: (next: DocumentFreshness) => void,
+): Promise<void> {
+	apply(await markFreshnessVerified(artifactId, freshness));
+}
+
 export function teardownDocumentViewer(
 	target: DocViewerTarget | null,
 	flush: () => void,
