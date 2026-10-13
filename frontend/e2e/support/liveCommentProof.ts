@@ -192,6 +192,8 @@ export async function outsideClose(page: Page): Promise<void> {
 
 export async function expectToastLayout(page: Page, toast: Locator): Promise<void> {
 	await expect(toast).toBeVisible();
+	// Measure the settled toast: mid toast-in its transformed quads carry float error (44px reads 43.99997).
+	await toast.evaluate(element => Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)));
 	const box = await toast.boundingBox(), viewport = page.viewportSize()!;
 	expect(box).not.toBeNull();
 	expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.y).toBeGreaterThanOrEqual(0);

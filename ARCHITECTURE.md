@@ -210,6 +210,38 @@ outside module on that load path imports `plans.public` only under
 `TYPE_CHECKING` or inside a function; otherwise it would read a half-built
 facade. `backend/tests/test_plans_public_boundary.py` enforces both rules.
 
+### Plan reads cost the open work
+
+A plan read costs the plan's open work, a recent window and its depth, never its
+settled history. `plans/open_tree.py` is the one loader: it reads open rows
+through `idx_plan_nodes_open`, the settled leaves of the recent window, and the
+ancestors those rows climb through, and nothing else. What the unread settled
+rows would have said comes from stored aggregates carried on every row
+(`child_in_work`, `folded`, `sub_done`, `sub_failed`, and per-level
+`child_folded_*` counts by tone). An equivalence property test holds its
+`Shape` equal to `plans.node_states` run over the full row list.
+
+`plans/aggregates.py` is the only writer of those columns
+(`infra/plan_aggregates_schema.py` defines them). `apply` runs inside the two
+writers of an aggregate input, `service.touch_node` and node creation, and
+updates one statement per level up to the root. The fold count always
+propagates; done, failed, closed and in-work counts stop at a retired node. It
+never writes `revision` or `updated_at`, and the plan revision trigger ignores
+these columns. `plans/aggregates_rebuild.py` computes the same figures from
+scratch (the schema 106 backfill and test fixtures), and
+`plans/aggregates_recount.py` is the independent check both must equal. The
+migration asserts it before committing, and the tests use it as their oracle.
+
+The server alone decides what folds. A pane read reports, per listed level, how
+many folded rows sit beneath it and how many it left out
+(`plans/open_folds.py`); `plans/folded_reads.py` pages the rest one level at a
+time, newest first, from `idx_plan_nodes_folded`, and `read_path` places one
+node the client has not loaded. The client computes no fold or count of its
+own. The post-write status drain finds touched plans with one read per table
+(`status_context.touched_plans`). Its branches join with `UNION ALL`, because a
+plain `UNION` lets SQLite 3.53 scan every `plan_nodes` row on every plan write.
+`test_plan_write_cost` pins that query plan.
+
 ### Delegated workers join a plan task
 
 `delegate_task` (`backend/tools/delegate_task.py`) hands its new worker a plan

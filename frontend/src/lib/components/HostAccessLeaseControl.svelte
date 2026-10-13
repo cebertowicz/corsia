@@ -409,27 +409,26 @@
 				<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'State stale' : duration(currentPending.requested_duration_seconds)} size="sm" />
 				<span class="pending-action">Review →</span>
 			</button>
-			{#if pendingOpen}
-				{#key currentPending.id}
-					<AdaptiveDrawer
-						ariaLabel="Review temporary host access"
-						onClose={closePendingDrawer}
-					>
-						<HostAccessPendingRequestDrawer
-							lease={currentPending}
-							{stale}
-							deciding={decidingLeaseId === currentPending.id}
-							rejectDisabled={decisionBlocked(currentPending, stale, decidingLeaseId)}
-							approveDisabled={stale || decidingLeaseId !== null}
-							onApprove={() => { void decide(currentPending, 'approve'); }}
-							onReject={(event) => { void decide(
-								currentPending, 'reject', event.currentTarget instanceof Element ? event.currentTarget : null,
-							); }}
-							onRetry={() => { void refresh(); }}
-						/>
-					</AdaptiveDrawer>
-				{/key}
-			{/if}
+			{#key currentPending.id}
+				<AdaptiveDrawer
+					ariaLabel="Review temporary host access"
+					open={pendingOpen}
+					onClose={closePendingDrawer}
+				>
+					<HostAccessPendingRequestDrawer
+						lease={currentPending}
+						{stale}
+						deciding={decidingLeaseId === currentPending.id}
+						rejectDisabled={decisionBlocked(currentPending, stale, decidingLeaseId)}
+						approveDisabled={stale || decidingLeaseId !== null}
+						onApprove={() => { void decide(currentPending, 'approve'); }}
+						onReject={(event) => { void decide(
+							currentPending, 'reject', event.currentTarget instanceof Element ? event.currentTarget : null,
+						); }}
+						onRetry={() => { void refresh(); }}
+					/>
+				</AdaptiveDrawer>
+			{/key}
 		{/if}
 	</div>
 {/if}

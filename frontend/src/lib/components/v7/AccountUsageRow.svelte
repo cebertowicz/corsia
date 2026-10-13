@@ -3,6 +3,7 @@
 	import { accountSegments, accountSpendingSegment, accountWindowSegment } from '$lib/stores/modelGroups';
 	import { formatUsageLimit } from '$lib/stores/overageSetting';
 	import type { VendorAccount } from '$lib/stores/vendorAccounts';
+	import CurrentCheck from '../CurrentCheck.svelte';
 
 	/**
 	 * The one account row. Settings renders it in full (`settings`, or `compact` in a policy list);
@@ -55,6 +56,7 @@
 			{/each}
 		</span>
 	</span>
+	{#if marked}<CurrentCheck />{/if}
 {/snippet}
 
 {#if variant === 'picker'}
@@ -110,7 +112,7 @@
 		background: none; border: none; border-radius: var(--radius-xs);
 	}
 	button.account-usage-row.picker { cursor: pointer; }
-	button.account-usage-row.picker:hover:not(:disabled) { background: var(--bg-hover); }
+	button.account-usage-row.picker:hover:not(:disabled):not(.marked) { background: var(--bg-hover); }
 	button.account-usage-row.picker:disabled { cursor: default; }
 	.account-usage-row.picker.blocked { color: var(--text-secondary); }
 	/* The account's selected fill shares the model row's inset; its label remains aligned with the model status dot. */

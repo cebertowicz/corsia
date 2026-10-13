@@ -46,7 +46,7 @@ it('offers Reload comment placements only for live orphans and describes a disco
 	const reload = vi.fn(() => true);
 	setup(); render({ orphanedCount: 2, onReloadPlacements: reload, liveConnection: 'connected' });
 	const control = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
-	expect(control.textContent).toBe('Place again');
+	expect(control.textContent?.trim()).toBe('Place again');
 	expect(control.disabled).toBe(false);
 	control.click(); expect(reload).toHaveBeenCalledOnce();
 

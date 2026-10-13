@@ -12,15 +12,17 @@
 	import { holdDocFeedback } from '$lib/docFeedback.svelte';
 	import { token } from '$lib/stores/auth';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
-	import type { TabLoadSignal } from '$lib/artifactTabs';
+	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
 
-	let { target, onSignal, stale = false, onReload }: {
+	let { target, onSignal, stale = false, onReload, place = null, onPlace }: {
 		target: DocViewerTarget;
 		/** Reports load progress against the tab instance that started it. */
 		onSignal?: (signal: TabLoadSignal) => void;
 		/** A newer revision exists than the one on screen. */
 		stale?: boolean;
 		onReload?: () => void;
+		place?: ImageViewportPlace | null;
+		onPlace?: (place: ImageViewportPlace) => void;
 	} = $props();
 
 	type ImageState = 'loading' | 'ready' | 'error';
@@ -32,6 +34,8 @@
 	let reloadNonce = $state(0);
 	let loadSeq = 0;
 	let draftOpen = $state(false);
+	// The review bar reports how much of the viewer its floating phone capsule covers.
+	let capsuleClearance = $state(0);
 	let lightbox = $state<ReturnType<typeof ImageCommentLightbox>>();
 	const artifactId = $derived(resolvedArtifactId ?? target.artifactId ?? null);
 	// The image's own batch is held by its tab, not the lightbox: a reload remounts that, and is not leaving.
@@ -96,8 +100,9 @@
 	}
 </script>
 
-<div class="image-viewer">
-	<ReviewBar {artifactId} {draftOpen} />
+<!-- The canvas ends above the review bar's floating capsule on a phone, so the capsule never covers its edge or focus ring. -->
+<div class="image-viewer" style:--capsule-clearance="{capsuleClearance}px">
+	<ReviewBar {artifactId} {draftOpen} bind:capsuleClearance />
 	{#if stale && imageState === 'ready'}
 		<div class="stale-row" role="status">
 			<button type="button" class="stale-control" onclick={() => onReload?.()}>File changed · Reload</button>
@@ -112,12 +117,12 @@
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
+		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 
 <style>
-	.image-viewer { --doc-rail: 0px; position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; }
+	.image-viewer { --doc-rail: 0px; position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; padding-bottom: var(--capsule-clearance, 0px); }
 	.stale-row { display: flex; }
 	.stale-control {
 		display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 0;

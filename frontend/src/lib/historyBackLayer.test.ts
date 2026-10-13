@@ -123,6 +123,31 @@ describe('pushBackLayer', () => {
 		expect(replacement).toHaveBeenCalledOnce();
 	});
 
+	it('swallows both cleanup pops when two top layers are dismissed in one flush, keeping the surface open', () => {
+		// A pick in the tab sheet closes the sheet and, as the picked tab shows, the image viewer beneath it.
+		const surface = vi.fn(() => true);
+		pushBackLayer(surface);
+		const disposeImage = pushBackLayer(() => true);
+		const disposeSheet = pushBackLayer(() => true);
+		const [surfaceState, imageState] = vi.mocked(history.pushState).mock.calls.map((call) => call[0]);
+		const ordinaryNavigation = vi.fn();
+		window.addEventListener('popstate', ordinaryNavigation);
+
+		disposeSheet();
+		disposeImage();
+		expect(history.back).toHaveBeenCalledTimes(2);
+		expect(pop(imageState).stopImmediatePropagation).toHaveBeenCalledOnce();
+		expect(pop(surfaceState).stopImmediatePropagation).toHaveBeenCalledOnce();
+		expect(surface).not.toHaveBeenCalled();
+		expect(ordinaryNavigation).not.toHaveBeenCalled();
+		expect(backLayerDepth()).toBe(1);
+
+		// The user's own Back afterwards closes the surface.
+		pop();
+		expect(surface).toHaveBeenCalledOnce();
+		window.removeEventListener('popstate', ordinaryNavigation);
+	});
+
 	it('preserves a same-flush replacement while the old no-lower cleanup pop arrives', () => {
 		const disposeOldArtifact = pushBackLayer(() => true);
 		disposeOldArtifact();
@@ -166,6 +191,45 @@ describe('pushBackLayer', () => {
 		pushBackLayer(() => true);
 		buried();
 		expect(history.back).not.toHaveBeenCalled();
+		expect(backLayerDepth()).toBe(1);
+	});
+
+	it('unwinds a buried dismissed layer together with the layer above it, so Back never lands on its entry', () => {
+		// A tab closed from the sheet takes its image viewer with it while the sheet stays open; a pick then closes the sheet.
+		const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+		const surface = vi.fn(() => true);
+		pushBackLayer(surface);
+		const disposeImage = pushBackLayer(() => true);
+		const disposeSheet = pushBackLayer(() => true);
+		const surfaceState = vi.mocked(history.pushState).mock.calls[0][0];
+
+		disposeImage();
+		expect(history.back).not.toHaveBeenCalled();
+		disposeSheet();
+		expect(go).toHaveBeenCalledExactlyOnceWith(-2);
+		expect(history.back).not.toHaveBeenCalled();
+		expect(pop(surfaceState).stopImmediatePropagation).toHaveBeenCalledOnce();
+		expect(surface).not.toHaveBeenCalled();
+		expect(backLayerDepth()).toBe(1);
+
+		pop();
+		expect(surface).toHaveBeenCalledOnce();
+	});
+
+	it('skips a buried dismissed layer after the user Back closes the layer above it', () => {
+		const surface = vi.fn(() => true);
+		pushBackLayer(surface);
+		const disposeImage = pushBackLayer(() => true);
+		const sheet = vi.fn(() => true);
+		pushBackLayer(sheet);
+		const [surfaceState, imageState] = vi.mocked(history.pushState).mock.calls.map((call) => call[0]);
+
+		disposeImage();
+		expect(pop(imageState).stopImmediatePropagation).toHaveBeenCalledOnce();
+		expect(sheet).toHaveBeenCalledOnce();
+		expect(history.back).toHaveBeenCalledOnce();
+		expect(pop(surfaceState).stopImmediatePropagation).toHaveBeenCalledOnce();
+		expect(surface).not.toHaveBeenCalled();
 		expect(backLayerDepth()).toBe(1);
 	});
 

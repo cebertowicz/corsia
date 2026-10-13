@@ -4,9 +4,9 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 
 const imageRequestAt = vi.fn();
-const remapDocumentImage = vi.fn();
+const remapTabDocumentImage = vi.fn();
 vi.mock('$lib/cm/markdown-image', () => ({ imageRequestAt: (...args: unknown[]) => imageRequestAt(...args) }));
-vi.mock('$lib/stores/documentImageViewer', () => ({ remapDocumentImage: (...args: unknown[]) => remapDocumentImage(...args) }));
+vi.mock('$lib/stores/tabViewState', () => ({ remapTabDocumentImage: (...args: unknown[]) => remapTabDocumentImage(...args) }));
 
 const { createDocViewerImages } = await import('./docViewerImages');
 
@@ -19,30 +19,35 @@ const TARGET: DocViewerTarget = { instanceId: 'tab-1', path: 'doc.md', name: 'do
 const batch = { pendingCount: 0 } as unknown as DocFeedback;
 const DRAWN = { src: '/ws/a.png', alt: 'Mock', from: 10, to: 24, scrollTop: 0, top: 0 };
 
-function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null } = {}) {
+function viewer(overrides: { onOpenImage?: ((request: unknown) => void) | null; target?: DocViewerTarget | null; artifactId?: string | null } = {}) {
 	const onOpenImage = overrides.onOpenImage === undefined ? vi.fn() : overrides.onOpenImage;
 	const showInText = vi.fn();
 	const comments = [onImage('one'), onImage('two'), onImage('later', 40, 54), comment('text', { from: 10, to: 24 })];
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage ?? undefined, root: () => document.createElement('div'), comments: () => comments,
-		artifactId: () => 'a1', target: () => (overrides.target === undefined ? TARGET : overrides.target), readOnly: () => false,
+		artifactId: () => (overrides.artifactId === undefined ? 'a1' : overrides.artifactId), target: () => (overrides.target === undefined ? TARGET : overrides.target), readOnly: () => false,
 		text: () => '', session: () => undefined, accent: () => null, feedback: () => batch, showInText,
 	});
 	return { images, onOpenImage, showInText };
 }
 
 describe('opening a document image from its comments', () => {
-	beforeEach(() => { imageRequestAt.mockReset(); remapDocumentImage.mockReset(); });
+	beforeEach(() => { imageRequestAt.mockReset(); remapTabDocumentImage.mockReset(); });
 
-	it('opens the image all the comments are on, at the focused one, with its comments', async () => {
+	it('opens the image all the comments are on, at the focused one', async () => {
 		imageRequestAt.mockResolvedValue(DRAWN);
 		const { images, onOpenImage } = viewer();
 		const otherwise = vi.fn();
 		images.openOr(['one'], { id: 'one' }, otherwise);
 		await vi.waitFor(() => expect(onOpenImage).toHaveBeenCalledOnce());
 		expect(imageRequestAt).toHaveBeenCalledWith(expect.any(HTMLElement), { from: 10, to: 24 });
-		expect(onOpenImage).toHaveBeenCalledWith(expect.objectContaining({ ...DRAWN, focus: { id: 'one' }, comments: expect.objectContaining({ artifactId: 'a1', projectId: 'p1', readOnly: false, feedback: batch }) }));
+		expect(onOpenImage).toHaveBeenCalledWith({ ...DRAWN, focus: { id: 'one' } });
 		expect(otherwise).not.toHaveBeenCalled();
+	});
+
+	it('gives the comments of a shown image from the document as it is now, and none without an artifact', () => {
+		expect(viewer().images.comments()).toEqual(expect.objectContaining({ artifactId: 'a1', projectId: 'p1', readOnly: false, feedback: batch }));
+		expect(viewer({ artifactId: null }).images.comments()).toBeUndefined();
 	});
 
 	it('falls back when the comments are not all on one image, without trying to draw', () => {
@@ -86,8 +91,8 @@ describe('opening a document image from its comments', () => {
 	it('keeps an open image on its markdown when the document changes, only for a document in a thread', () => {
 		const mapPos = (pos: number) => pos + 1;
 		viewer().images.remap(mapPos);
-		expect(remapDocumentImage).toHaveBeenCalledWith('t1', 'tab-1', mapPos);
+		expect(remapTabDocumentImage).toHaveBeenCalledWith('t1', 'tab-1', mapPos);
 		viewer({ target: { ...TARGET, threadId: null } }).images.remap(mapPos);
-		expect(remapDocumentImage).toHaveBeenCalledOnce();
+		expect(remapTabDocumentImage).toHaveBeenCalledOnce();
 	});
 });

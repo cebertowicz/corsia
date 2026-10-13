@@ -2,28 +2,28 @@
 	import { tick, untrack } from 'svelte';
 	import DocViewer from './DocViewer.svelte';
 	import ImageViewer from './ImageViewer.svelte';
-	import ImageLightbox from './ImageLightbox.svelte';
-	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
+	import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
-	import type { TabLoadSignal } from '$lib/artifactTabs';
+	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
 	import { returnToPlanNode } from '$lib/planLeafReturn';
 	import { pushBackLayer } from '$lib/historyBackLayer';
-	import {
-		closeDocumentImage, documentImageViewers, openDocumentImage, type DocumentImageRequest,
-	} from '$lib/stores/documentImageViewer';
+	import type { DocumentImageRequest } from '$lib/docViewerImages';
 	import { widenForImageViewer } from '$lib/imageViewerPane';
-	import { restoreDocumentPlace } from '$lib/documentImagePlace';
+	import { restoreDocumentPlace, type RestoreDocumentPlaceOptions, type TextDocumentPlace } from '$lib/documentImagePlace';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { docSaveDrafts, relocateDraftTarget } from '$lib/stores/docSaveQueue';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import {
 		threadWorkspaces, emptyWorkspace, getActiveTab, isTabChanged, type ArtifactTab,
-		setActiveTab, setActiveSurface, setLeafVisible,
-		applyTabLoadSignal, markTabSaved,
+		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved,
 	} from '$lib/stores/artifactWorkspace';
+	import {
+		tabViewState, tabDocumentImage, recordTabDocumentPlace, recordTabImagePlace, openTabDocumentImage,
+		recordTabDocumentImageCamera, clearTabDocumentImage,
+	} from '$lib/stores/tabViewState';
 	import {
 		abandonArtifactOpen, beginArtifactOpen, failArtifactOpen, markArtifactRendered,
 	} from '$lib/openTimingRuntime';
@@ -66,38 +66,55 @@
 	const target = $derived(showsImage ? null : showable);
 	const imageTarget = $derived(showsImage ? showable : null);
 	const activeStale = $derived(activeTab ? isTabChanged(activeTab) : false);
+	const activeViewState = $derived(threadId && activeTab ? tabViewState(threadId, activeTab.instanceId) : null);
 
 	let viewer = $state<DocViewer | undefined>(undefined);
 	let imageViewer = $state<ImageViewer | undefined>(undefined);
 	let leafEl = $state<HTMLElement | undefined>(undefined);
 	let leafBodyEl = $state<HTMLElement | undefined>(undefined);
+	let restoringDocument = $state<string | null>(null);
+	let documentRestore: AbortController | null = null;
+	function restoreDocument(place: Parameters<typeof restoreDocumentPlace>[1], options: RestoreDocumentPlaceOptions = {}) {
+		documentRestore?.abort();
+		const controller = new AbortController();
+		documentRestore = controller;
+		void restoreDocumentPlace(leafBodyEl, place, { ...options, signal: controller.signal }).finally(() => {
+			if (documentRestore === controller) documentRestore = null;
+		});
+	}
 
-	// An image of the open document shown larger. The document stays mounted beneath it, so closing the viewer
-	// returns to the same live document; the viewer belongs to the tab it was opened from.
-	const shownImage = $derived(threadId && target ? ($documentImageViewers[threadId] ?? null) : null);
-	const imageOpen = $derived(shownImage !== null && shownImage.instanceId === target?.instanceId);
+	// An image of the open document shown larger. Its tab's view state is the one record of it and its camera, so a
+	// tab switch keeps it with its tab. The document stays mounted beneath it, so closing it returns to the same live
+	// document; its comments are taken from that document each time it shows, never kept with the image.
+	const shownImage = $derived(threadId && target ? tabDocumentImage(threadId, target.instanceId) : null);
+	const imageOpen = $derived(shownImage !== null && mode !== 'rail');
+	const imageComments = $derived(imageOpen && viewer ? viewer.imageComments() : undefined);
+	// Opening an image from its document eases the canvas wider and Back eases it back. Any other change (a tab switch,
+	// or a return to a tab whose image is open) puts the canvas at its width at once, in the frame the tab turns active.
+	let easeCanvas = false;
 	function openImage(request: DocumentImageRequest) {
-		if (threadId && target) openDocumentImage(threadId, { ...request, instanceId: target.instanceId });
+		easeCanvas = true;
+		if (threadId && target) openTabDocumentImage(threadId, target.instanceId, request);
 	}
 	function closeImage() {
-		const tid = threadId;
 		const image = shownImage;
-		if (!tid || !image) return;
-		closeDocumentImage(tid);
-		void restoreDocumentPlace(leafBodyEl, image);
+		if (!threadId || !target || !image) return;
+		easeCanvas = true;
+		restoringDocument = null;
+		clearTabDocumentImage(threadId, target.instanceId);
+		restoreDocument(image);
 	}
-	// Every other way out (another tab, the leaf collapsing or going away, another thread) drops the viewer too.
+	// Collapsing the pane to its rail closes the image; a tab switch, or leaving for chat, keeps it with its tab.
 	$effect(() => {
-		const tid = threadId;
-		if (tid && $documentImageViewers[tid] && (!imageOpen || mode === 'rail')) closeDocumentImage(tid);
+		const tid = threadId, instanceId = activeTab?.instanceId;
+		if (mode === 'rail' && tid && instanceId) untrack(() => clearTabDocumentImage(tid, instanceId));
 	});
-	$effect(() => {
-		const tid = threadId;
-		return () => { if (tid) closeDocumentImage(tid); };
-	});
+	$effect(() => () => documentRestore?.abort());
 	$effect(() => {
 		if (!imageOpen || mode !== 'expanded') return;
-		return widenForImageViewer(untrack(() => leafEl?.getBoundingClientRect().width ?? 0));
+		const release = widenForImageViewer(untrack(() => leafEl?.getBoundingClientRect().width ?? 0), { instant: !easeCanvas });
+		easeCanvas = false;
+		return () => { release({ instant: !easeCanvas }); easeCanvas = false; };
 	});
 	// Back (a phone's or the browser's) closes the viewer before it leaves the document.
 	$effect(() => {
@@ -162,6 +179,15 @@
 		const kept = imageTabs.filter((k) => !k.startsWith(prefix) || open.has(k));
 		if (kept.length !== imageTabs.length) imageTabs = kept;
 	});
+	function recordDocumentPlace(instanceId: string, place: TextDocumentPlace) {
+		if (threadId) recordTabDocumentPlace(threadId, instanceId, place);
+	}
+	function recordImagePlace(instanceId: string, place: ImageViewportPlace) {
+		if (threadId) recordTabImagePlace(threadId, instanceId, place);
+	}
+	function recordDocumentImageCamera(instanceId: string, camera: ImageViewportPlace) {
+		if (threadId) recordTabDocumentImageCamera(threadId, instanceId, camera);
+	}
 	function onSignal(signal: TabLoadSignal) {
 		if (signal.renderer) {
 			const key = imageKey(signal.instanceId);
@@ -172,6 +198,18 @@
 		if (signal.status === 'ready') {
 			// The viewer has its content; the DOM update lands on the next tick.
 			void tick().then(() => markArtifactRendered(signal.instanceId));
+			const place = threadId && activeTab?.instanceId === signal.instanceId
+				? tabViewState(threadId, signal.instanceId)?.documentPlace
+				: null;
+			if (place) {
+				restoringDocument = signal.instanceId;
+				restoreDocument(place, {
+					mode: 'tab-return',
+					onPlaced: () => {
+						if (restoringDocument === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
+					},
+				});
+			}
 		} else if (signal.status === 'error' || signal.status === 'unavailable') {
 			failArtifactOpen(signal.instanceId);
 		}
@@ -251,6 +289,8 @@
 				<ImageViewer
 					bind:this={imageViewer}
 					target={imageTarget}
+					place={activeViewState?.imagePlace ?? null}
+					onPlace={(place) => recordImagePlace(imageTarget.instanceId, place)}
 					{onSignal}
 					stale={activeStale}
 					onReload={() => imageViewer?.reload()}
@@ -258,7 +298,7 @@
 			{:else if target}
 				<!-- DocViewer owns Escape precedence (comment draft, then selection),
 				     so handing it onClose keeps that order intact in compact. -->
-				<div class="doc-host" class:covered={imageOpen} inert={imageOpen}>
+				<div class="doc-host" class:covered={imageOpen || restoringDocument === target.instanceId} inert={imageOpen || restoringDocument === target.instanceId}>
 					<DocViewer
 						bind:this={viewer}
 						{target}
@@ -268,36 +308,20 @@
 						stale={activeStale}
 						onReload={() => viewer?.reload()}
 						onOpenImage={openImage}
+						onDocumentPlace={recordDocumentPlace}
 						covered={imageOpen}
 					/>
 				</div>
-				{#if imageOpen && shownImage}
-					<div class="image-overlay">
-						{#if shownImage.comments}
-							{@const comments = shownImage.comments}
-							<!-- Keyed on the image, so opening another one starts its comments afresh. -->
-							{#key `${shownImage.src}\u0000${shownImage.focus?.id ?? ''}`}
-								<ImageCommentLightbox
-									src={shownImage.src}
-									alt={shownImage.alt}
-									artifactId={comments.artifactId}
-									projectId={comments.projectId}
-									readOnly={comments.readOnly}
-									docName={target.name}
-									onBack={closeImage}
-									inDocument={{
-										occurrence: { from: shownImage.from, to: shownImage.to },
-										post: (region, text) => comments.post(shownImage.from, shownImage.to, region, text),
-										failure: comments.failure,
-									}}
-									focus={shownImage.focus ?? null}
-									feedback={comments.feedback ?? null}
-								/>
-							{/key}
-						{:else}
-							<ImageLightbox src={shownImage.src} alt={shownImage.alt} docName={target.name} onBack={closeImage} />
-						{/if}
-					</div>
+				<!-- Shown once the document under it is bound, so its comments come from that document from the first frame. -->
+				{#if imageOpen && shownImage && viewer}
+					<ArtifactDocumentImageOverlay
+						image={shownImage}
+						comments={imageComments}
+						{target}
+						place={shownImage.camera ?? null}
+						onBack={closeImage}
+						onPlace={(camera) => recordDocumentImageCamera(target.instanceId, camera)}
+					/>
 				{/if}
 			{/if}
 		</div>
@@ -345,10 +369,10 @@
 	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
 	.doc-host { display: contents; }
 	.doc-host.covered { visibility: hidden; }
-	.image-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: 8px 12px 12px; box-sizing: border-box; background: var(--bg-primary); }
 	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
-	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; } }
+	/* The document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
+	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; padding-top: 0; } }
 
 	.gone {
 		display: flex; flex-direction: column; align-items: flex-start; gap: 6px;

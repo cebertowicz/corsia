@@ -12,19 +12,22 @@
 		targetInstanceId,
 		onFeedbackChanged,
 		compact = false,
+		withSend = true,
 	}: {
 		artifactId: string | null;
 		targetInstanceId: string | null;
 		onFeedbackChanged?: () => void;
 		/** Shown in a narrow bar (DocFeedbackControls). */
 		compact?: boolean;
+		/** Show Send here (DocFeedbackControls); false where another surface shows it. */
+		withSend?: boolean;
 	} = $props();
 
 	const feedback = holdDocFeedback(() => ({ artifactId, targetInstanceId }), () => onFeedbackChanged?.());
 
 	export function commentCreated() { feedback.commentCreated(); }
 	export function sync(id: string, current: CommentFeedback) { feedback.sync(id, current); }
-	/** The batch itself, for an image viewer over this document to show and send. */
+	/** The batch itself, for the header's unsent mark, the comments drawer's Send now and an image viewer over this document. */
 	export function controller(): DocFeedback { return feedback; }
 
 	onMount(() => subscribeToDocumentCommentChanges(
@@ -33,4 +36,4 @@
 	));
 </script>
 
-<DocFeedbackControls {feedback} {compact} />
+<DocFeedbackControls {feedback} {compact} {withSend} />

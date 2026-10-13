@@ -1,6 +1,18 @@
+import { get } from "svelte/store";
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toastClearance } from "$lib/stores/toastClearance";
 import AdaptiveDrawerHarness from "./fixtures/AdaptiveDrawerHarness.svelte";
+
+// The reduced-motion preference, read when the drawer subscribes; false unless a test sets it.
+const reduced = vi.hoisted(() => ({ current: false }));
+vi.mock("$lib/stores/viewport", async (importOriginal) => {
+  const { readable } = await import("svelte/store");
+  return {
+    ...(await importOriginal<typeof import("$lib/stores/viewport")>()),
+    prefersReducedMotion: { subscribe: (run: (value: boolean) => void) => readable(reduced.current).subscribe(run) },
+  };
+});
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null;
@@ -30,6 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  reduced.current = false;
   if (component) unmount(component);
   component = null;
   host.replaceChildren();
@@ -69,6 +82,109 @@ describe("AdaptiveDrawer", () => {
     expect(dialog?.getAttribute("aria-label")).toBe("Focused action");
     expect(document.activeElement?.textContent).toBe("Primary action");
     expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(1);
+  });
+
+  it("can keep a sheet non-modal without changing the modal default", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { onClose: vi.fn(), modal: false },
+    });
+    await settle();
+
+    const backdrop = host.querySelector("[data-adaptive-drawer]");
+    const dialog = host.querySelector('[role="dialog"]');
+    expect(backdrop?.classList.contains("nonmodal")).toBe(true);
+    expect(dialog?.getAttribute("aria-modal")).toBe("false");
+  });
+
+  it("keeps a half-height RSR-8 sheet non-modal so the visible document remains interactive", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { onClose: vi.fn(), detent: "half" },
+    });
+    await settle();
+
+    const backdrop = host.querySelector("[data-adaptive-drawer]");
+    const dialog = host.querySelector('[role="dialog"]');
+    expect(backdrop?.classList.contains("half")).toBe(true);
+    expect(backdrop?.classList.contains("nonmodal")).toBe(true);
+    expect(dialog?.getAttribute("aria-modal")).toBe("false");
+  });
+
+  it("stays open but hidden and out of reach while something opened from it covers it", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
+    await settle();
+    const uncovered = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+    expect(uncovered.classList.contains("covered")).toBe(false);
+    expect(uncovered.inert).toBeFalsy();
+    unmount(component);
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn(), covered: true } });
+    await settle();
+    // Still mounted, so its scroll and place are kept for when it is uncovered.
+    const covered = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+    expect(covered.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(covered.classList.contains("covered")).toBe(true);
+    expect(covered.inert).toBe(true);
+  });
+
+  it("calls onClosed once after the local outro", async () => {
+    const closed = vi.fn();
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { callerControlled: true, onClose: closed },
+    });
+    await settle();
+
+    (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+    await settle();
+    (host.querySelector(".drawer-done") as HTMLButtonElement).click();
+    await settle();
+
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(0);
+  });
+
+  it("under reduced motion keeps the drawer through the backdrop's crossfade, then calls onClosed once", async () => {
+    // jsdom's stand-in animations end at once; these end after their duration, on timers the test advances.
+    const instant = Element.prototype.animate;
+    Element.prototype.animate = function animate(_keyframes, options) {
+      const duration = typeof options === "number" ? options : Number(options?.duration ?? 0);
+      const animation = { cancel() {}, finish() {}, currentTime: 0, playState: "running" } as unknown as Animation;
+      Object.defineProperty(animation, "onfinish", {
+        set(callback: ((event: Event) => void) | null) {
+          if (callback) setTimeout(() => callback(new Event("finish")), duration);
+        },
+      });
+      return animation;
+    };
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      reduced.current = true;
+      document.documentElement.style.setProperty("--dur-tight", "120ms");
+      const closed = vi.fn();
+      component = mount(AdaptiveDrawerHarness, { target: host, props: { callerControlled: true, onClose: closed } });
+      await settle();
+      (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+      await settle();
+      await vi.advanceTimersByTimeAsync(200);
+      const backdrop = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+
+      (host.querySelector(".drawer-done") as HTMLButtonElement).click();
+      await settle();
+      await vi.advanceTimersByTimeAsync(60);
+      // Mid-crossfade: the backdrop is still on screen fading, and the drawer is not closed yet.
+      expect(backdrop.isConnected).toBe(true);
+      expect(closed).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(80);
+      await settle();
+      expect(closed).toHaveBeenCalledTimes(1);
+      expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+      Element.prototype.animate = instant;
+      document.documentElement.style.removeProperty("--dur-tight");
+    }
   });
 
   it("closes from its explicit control and Escape", async () => {
@@ -132,6 +248,21 @@ describe("AdaptiveDrawer", () => {
     handle.dispatchEvent(pointer("pointermove", 280, 8));
     handle.dispatchEvent(pointer("pointerup", 280, 8));
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers desktop resting occupancy including its bottom margin and releases it at close start", async () => {
+    component = mount(AdaptiveDrawerHarness, { target: host, props: { onClose: vi.fn() } });
+    await settle();
+
+    const panel = host.querySelector(".drawer-panel") as HTMLElement;
+    panel.style.marginBottom = "16px";
+    Object.defineProperty(panel, "offsetHeight", { configurable: true, value: 440 });
+    window.dispatchEvent(new Event("resize"));
+
+    expect(get(toastClearance)).toBe(456);
+
+    (host.querySelector("[data-adaptive-drawer]") as HTMLElement).dispatchEvent(new Event("outrostart"));
+    expect(get(toastClearance)).toBe(0);
   });
 
   it("keeps a dedicated independently scrollable body for long content", async () => {

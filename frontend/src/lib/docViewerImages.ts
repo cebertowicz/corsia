@@ -5,14 +5,31 @@ import { sharedImage, type ImageOccurrence } from '$lib/docImageComments';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
-import { regionColor } from '$lib/imageRegions';
+import { regionColor, type ImageRegion } from '$lib/imageRegions';
 import { token } from '$lib/stores/auth';
 import type { DocComment } from '$lib/stores/docComments';
-import { remapDocumentImage, type DocumentImageRequest } from '$lib/stores/documentImageViewer';
 import { addDocImageComment } from '$lib/stores/imageRegionComments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
+import { remapTabDocumentImage } from '$lib/stores/tabViewState';
 
 type Focus = { id: string; move?: boolean };
+
+/** An image of a document to show larger: where its markdown is, and, with `focus`, the comment tag to open on (with `move`, placing its pin again). */
+export type DocumentImageRequest = OpenImageRequest & { focus?: Focus };
+
+/** What the viewer needs to show and take comments on parts of an image inside a document (DCOL-FR13.3). */
+export interface DocumentImageComments {
+	/** The document's artifact: its comments are the image's. */
+	artifactId: string;
+	projectId: string | null;
+	readOnly: boolean;
+	/** Post a region comment anchored on the image's markdown, where it is now. */
+	post: (from: number, to: number, region: ImageRegion, text: string) => Promise<string>;
+	/** What a failed post says. */
+	failure?: (error: unknown) => string;
+	/** The document's feedback batch: the viewer shows its pending-send status and Send (DCOL-FR13.12). */
+	feedback?: DocFeedback;
+}
 
 /** The document viewer's current state, each read at use. */
 interface DocViewerImagesOptions {
@@ -37,12 +54,16 @@ interface DocViewerImagesOptions {
 export function createDocViewerImages(options: DocViewerImagesOptions) {
 	const projectId = () => options.target()?.projectId ?? null;
 	function open(request: OpenImageRequest, focus?: Focus) {
+		options.onOpenImage()?.({ ...request, focus });
+	}
+	/** The comments of an image shown now, bound to this document as it is; none when it has no artifact to hold them. */
+	function comments(): DocumentImageComments | undefined {
 		const artifactId = options.artifactId();
-		options.onOpenImage()?.({ ...request, focus, comments: artifactId ? {
+		return artifactId ? {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
 			post: (from, to, region, body) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session() }, region, body),
 			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
-		} : undefined });
+		} : undefined;
 	}
 	/** The one image all of `ids` are region comments on, when the viewer can open images. */
 	function imageOf(ids: string[]): ImageOccurrence | null {
@@ -66,12 +87,12 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	/** The document changed under an open image: it keeps to its markdown. */
 	function remap(mapPos: (pos: number) => number) {
 		const target = options.target();
-		if (target?.threadId) remapDocumentImage(target.threadId, target.instanceId, mapPos);
+		if (target?.threadId) remapTabDocumentImage(target.threadId, target.instanceId, mapPos);
 	}
 	const groups = {
 		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '' }) : null),
 		colorOf: (comment: DocComment) => regionColor(comment, projectId(), options.accent()),
 		onOpen: (comment: DocComment, focus?: Focus) => openOr([comment.id], focus, () => options.showInText(comment.id)),
 	};
-	return { open, openOr, remap, groups };
+	return { open, openOr, comments, remap, groups };
 }

@@ -246,9 +246,9 @@ header "6/7 read cost (head vs the committed baseline)"
 # Builds the synthetic production-shaped database, measures SQLite VM steps, statements and response bytes
 # per read route on this tree, and compares them with quality/speed-gate-baseline.json using the same
 # `compare` as the speed-gate CI job. Counts only, on one pinned SQLite build, so the numbers here match
-# CI's. Phase 1 is report-only, here as in CI: a route that rose past the rule, or fell enough that the
-# baseline should drop, prints a yellow warning naming the routes and this step still passes. A harness that
-# could not run, or a pin that does not match, fails: a gate that did not run is never a pass.
+# CI's. It enforces: a route that rises past the rule, or falls enough that the baseline should drop, fails
+# with the routes and one rebaseline command. A harness that could not run, or a pin that does not match,
+# also fails: a gate that did not run is never a pass.
 # SPEED_GATE_SKIP=1 skips it.
 if [ "${SPEED_GATE_SKIP:-0}" = "1" ]; then
   yellow "read cost: skipped (SPEED_GATE_SKIP=1)"
@@ -300,11 +300,11 @@ print(digest.hexdigest()[:16])' scripts/speed_gate/requirements.txt)" || fail "r
     SG_LOG="$SG_DIR/last-run.log"
     set +e
     { SPEED_GATE_SQLEAN_PATH="$SG_SITE" PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli measure \
-        --backend backend --out "$SG_DIR/measurement.json" --repeats 2
+        --backend backend --out "$SG_DIR/measurement.json" --repeats 2 --enforce
       SG_RC=$?
       if [ "$SG_RC" = "0" ]; then
         SPEED_GATE_SQLEAN_PATH="$SG_SITE" PYTHONPATH=scripts "$VENV_PY" -m speed_gate.cli compare \
-          --current "$SG_DIR/measurement.json" --baseline quality/speed-gate-baseline.json
+          --current "$SG_DIR/measurement.json" --baseline quality/speed-gate-baseline.json --enforce
         SG_RC=$?
       fi
       exit "$SG_RC"
@@ -313,17 +313,14 @@ print(digest.hexdigest()[:16])' scripts/speed_gate/requirements.txt)" || fail "r
     set -e
     SG_SECONDS=$(( $(date +%s) - SG_START ))
     if [ "$SG_RC" != "0" ]; then
-      fail "read cost: the fixture build or a harness run could not run, or a measurement guard or the SQLite pin stopped it (exit $SG_RC); there is no verdict"
+      case "$SG_RC" in
+        1) fail "read cost: enforcement failed; fix the read or use the exact rebaseline command in the report above (measurement kept at $SG_DIR/measurement.json)" ;;
+        2) fail "read cost: SQLite version mismatch; regenerate the baseline with the exact rebaseline command in the report above" ;;
+        3) fail "read cost: repeated runs disagreed; fix the measurement instability before relying on this gate" ;;
+        *) fail "read cost: the fixture build or a harness run could not run, or a measurement guard or the SQLite pin stopped it (exit $SG_RC); there is no verdict" ;;
+      esac
     fi
-    SG_WARNED=0
-    while IFS= read -r line; do
-      yellow "read cost: ${line#speed-gate: }"; SG_WARNED=1
-    done < <(grep '^speed-gate: ' "$SG_LOG" || true)
-    if [ "$SG_WARNED" = "1" ]; then
-      yellow "read cost: measured in ${SG_SECONDS}s; report-only in phase 1, so this passes (measurement kept at $SG_DIR/measurement.json)"
-    else
-      green "read cost: measured in ${SG_SECONDS}s and matches the committed baseline"
-    fi
+    green "read cost: measured in ${SG_SECONDS}s and matches the committed baseline"
   fi
 fi
 

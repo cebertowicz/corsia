@@ -22,13 +22,27 @@ const RUNTIME_PROVIDED = new Set([
 	'--chat-attention-occupied-height',
 	'--floater-bottom-pad',
 	'--input-bar-height',
+	// PaneShell writes it on the canvas: the pane's width while it overlays the canvas, else 0.
+	'--pane-overlay-inset',
+	// ReviewBar measures it (its bindable `capsuleClearance`) and the image viewer writes it with `style:--x`: the room
+	// its canvas leaves for the phone review capsule.
+	'--capsule-clearance',
 	// Set per-instance via Svelte `style:--x` or a parent inline style.
 	'--drawer-drag-y',
+	// AdaptiveDrawer's `within` sheet: the measured document column, written with `style:--drawer-*`.
+	'--drawer-top',
+	'--drawer-right',
+	'--drawer-bottom',
+	'--drawer-left',
+	'--drawer-h',
 	'--depth',
 	// The comment rail width: DocViewer's `style:--doc-rail` and the editor's rail, both from railWidth().
 	'--doc-rail',
 	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
 	'--region-color',
+	// ToastContainer's `style:--toast-clearance` (the toastClearance store) and `style:--toast-height`.
+	'--toast-clearance',
+	'--toast-height',
 ]);
 
 /**
