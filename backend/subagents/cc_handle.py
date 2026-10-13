@@ -129,6 +129,7 @@ async def retire_if_current(
     expected_owner,
     broadcast: Broadcast | None = None,
     operation_id: str | None = None,
+    keep_resume_handle: bool = False,
 ) -> bool:
     """Retire only the exact CC owner captured before a context commit."""
     from subagents.cc_shutdown import retire_live, retire_provider_session
@@ -141,7 +142,8 @@ async def retire_if_current(
                     "model switch source runtime branch=owner_gone thread_id=%s operation_id=%s",
                     session_id, operation_id or "unknown",
                 )
-            await run_in_db(retire_provider_session, session_id)
+            if not keep_resume_handle:
+                await run_in_db(retire_provider_session, session_id)
             return True
         if expected_owner is None or live_handle_fingerprint(session_id, live) != expected_owner:
             log.warning(

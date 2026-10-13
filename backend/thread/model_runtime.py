@@ -118,6 +118,7 @@ async def _transition_claude_runtime(
         expected_owner=expected_owner,
         broadcast=broadcast,
         operation_id=operation_id,
+        keep_resume_handle=True,
     )
 
 
@@ -158,6 +159,7 @@ async def _transition_codex_runtime(
         expected_owner=expected_owner,
         broadcast=broadcast,
         operation_id=operation_id,
+        keep_resume_handle=True,
     )
 
 

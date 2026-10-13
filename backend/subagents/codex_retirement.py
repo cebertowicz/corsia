@@ -15,6 +15,7 @@ async def retire_if_current(
     db=None,
     broadcast=None,
     operation_id: str | None = None,
+    keep_resume_handle: bool = False,
 ) -> bool:
     """Retire only the Codex owner captured before a context commit."""
     from subagents import codex_runtime
@@ -22,14 +23,19 @@ async def retire_if_current(
     lock = codex_runtime._LIVE.lock(thread_id)
     async with lock:
         current_owner = codex_runtime.current_handle_fingerprint(thread_id)
-        if current_owner is None:
+        process_gone = (
+            codex_runtime._LIVE.get(thread_id) is None
+            and codex_runtime._APP_SESSIONS.get(thread_id) is None
+        )
+        if current_owner is None and process_gone:
             if expected_owner is not None:
                 log.info(
                     "model switch source runtime branch=owner_gone thread_id=%s operation_id=%s",
                     thread_id, operation_id or "unknown",
                 )
-            # No live handle, but the durable provider thread must not resume.
-            await codex_runtime._retire_locked(thread_id, db=db, broadcast=broadcast)
+            if not keep_resume_handle:
+                # No process to refuse, only the durable provider thread to drop.
+                await codex_runtime._retire_locked(thread_id, db=db, broadcast=broadcast)
             return True
         if expected_owner is None or current_owner != expected_owner:
             log.warning(

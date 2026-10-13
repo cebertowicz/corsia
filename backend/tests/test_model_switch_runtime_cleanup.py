@@ -26,6 +26,61 @@ async def test_codex_captured_owner_already_gone_is_a_success(monkeypatch, caplo
 
 
 @pytest.mark.asyncio
+async def test_codex_newer_runtime_without_thread_id_is_not_retired(monkeypatch, caplog) -> None:
+    """A starting runtime has no fingerprint yet but is not the gone owner."""
+    from subagents import codex_retirement, codex_runtime
+
+    retire = AsyncMock(return_value=True)
+    monkeypatch.setattr(codex_runtime, "current_handle_fingerprint", lambda _thread_id: None)
+    monkeypatch.setattr(codex_runtime, "_retire_locked", retire)
+    monkeypatch.setitem(codex_runtime._APP_SESSIONS, "thread-1", object())
+    caplog.set_level(logging.WARNING, logger=codex_retirement.__name__)
+
+    assert await codex_runtime.retire_if_current(
+        "thread-1", expected_owner="old-owner", operation_id="switch-1",
+    ) is False
+    retire.assert_not_awaited()
+    assert "branch=owner_changed thread_id=thread-1 operation_id=switch-1" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("harness", ["claude-code", "codex"])
+async def test_resume_switch_with_gone_owner_keeps_durable_session(monkeypatch, harness) -> None:
+    """A provider-resume switch keeps the provider session when the process has exited."""
+    from subagents import cc_handle, codex_runtime
+    from thread import model_runtime
+
+    if harness == "claude-code":
+        runtime = cc_handle
+        retired = AsyncMock(return_value=True)
+        monkeypatch.setattr(cc_handle, "run_in_db", retired)
+        transition = model_runtime._transition_claude_runtime
+        extra = {"expected_context_usage_floor": None}
+    else:
+        runtime = codex_runtime
+        retired = AsyncMock(return_value=True)
+        monkeypatch.setattr(codex_runtime, "current_handle_fingerprint", lambda _thread_id: None)
+        monkeypatch.setattr(codex_runtime, "_retire_locked", retired)
+        transition = model_runtime._transition_codex_runtime
+        extra = {}
+    monkeypatch.setattr(runtime, "retarget_if_current", AsyncMock(return_value=False), raising=False)
+    target = Mock(harness=harness)
+
+    assert await transition(
+        "thread-1",
+        runtime=runtime,
+        expected_owner="owner",
+        destination_target=target,
+        runtime_context_epoch=0,
+        preserve_thread=True,
+        broadcast=None,
+        operation_id="switch-1",
+        **extra,
+    ) is True
+    retired.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_claude_captured_owner_already_gone_retires_durable_session(monkeypatch) -> None:
     """An exited Claude process still needs its durable provider session retired."""
     from subagents import cc_handle
