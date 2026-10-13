@@ -132,7 +132,7 @@ def _dependent_titles(connection, plan_id: str, rows) -> dict[str, list[str]]:
                 FROM plan_node_dependencies e
                 CROSS JOIN plan_nodes d ON d.id=e.node_id
                 WHERE e.depends_on_node_id IN ({",".join("?" for _ in chunk)})
-                  AND d.plan_id=? AND {node_states.in_work_sql('d')}
+                  AND d.plan_id=? AND {node_states.open_sql('d')}
                 ORDER BY d.order_key,d.id""",
             (*chunk, plan_id),
         )

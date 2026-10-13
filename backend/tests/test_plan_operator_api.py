@@ -720,3 +720,33 @@ def test_operator_node_carries_its_assignee(db):
     assert nodes[mine.id]["waiting_on"] == ["Ship it"]
     assert nodes[agent.id]["assignee"] is None
     assert nodes[agent.id]["waiting_on"] == []
+
+
+def test_person_step_lists_only_open_same_plan_work_waiting_on_it(db):
+    """Settled, archived and other-plan dependents never read as waiting on the person."""
+    from plans import closure
+
+    plan = service.ensure_plan("thread", "parent", db=db)
+    other = service.ensure_plan("thread", "other", db=db)
+    mine = _task(plan.id, "Mine", db=db, assignee="user")
+    titles = ("Open", "Accepted", "Failed", "Closed", "Archived")
+    dependents = {title: _task(plan.id, title, db=db) for title in titles}
+    foreign = _task(other.id, "Foreign", db=db)
+    for node in (*dependents.values(), foreign):
+        dependencies.add_dependency(node.id, mine.id, db=db)
+    service.transition_node(dependents["Failed"].id, "active", db=db)
+    service.transition_node(dependents["Failed"].id, "failed", db=db)
+    closure.close_node(dependents["Closed"].id, reason="Not needed", db=db)
+    # Acceptance refuses while the person step is open, so seed a dependent
+    # settled before the dependency joined.
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET archived_at=? WHERE id=?",
+            ("2026-07-03T00:00:00+00:00", dependents["Archived"].id),
+        )
+        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (dependents["Accepted"].id,))
+
+    payload = _projection().read_thread("parent", actor=_actor(), db=db)
+    nodes = {node["id"]: node for node in payload["plans"][0]["nodes"]}
+
+    assert nodes[mine.id]["waiting_on"] == ["Open"]
