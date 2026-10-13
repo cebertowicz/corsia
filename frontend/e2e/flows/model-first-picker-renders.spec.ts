@@ -35,9 +35,10 @@ async function openPicker(page: Page, title?: string) {
 	await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
 }
-async function capture(page: Page, id: string) {
+async function capture(page: Page, id: string, prepare?: () => Promise<void>) {
 	for (const [device, width, height] of [['desktop', 1440, 1000], ['phone', 390, 844]] as const) {
 		await page.setViewportSize({ width, height });
+		await prepare?.();
 		for (const theme of ['light', 'dark']) {
 			await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
 			const layout = await page.evaluate((scenario) => {
@@ -175,17 +176,35 @@ test('renders six anonymous account recovery states in the actual picker', async
 	const fresh = account('claude-fresh', 'Fresh allowed account', 'claude-code', usage(12, 62));
 	const freshCodex = account('codex-fresh', 'Fresh Codex account', 'codex', usage(28, 51));
 	const extraCodex = account('codex-extra', 'Extra Codex account', 'codex', usage(67, 79));
+	const claudeEntries = [
+		entry(failedKnown, true, { status: 'unavailable', status_reason: 'usage_limited', resets_at: at }),
+		entry(failedUnknown, false, { status: 'unavailable', status_reason: 'usage_limited', resets_at: null }),
+		entry(checking, false, { status: 'unavailable', status_reason: 'usage_limited', resets_at: at }),
+		entry(fresh),
+	];
 	fixture = {
-		rows: [...models('claude-code', [failedKnown, failedUnknown, checking, fresh]), ...models('codex', [freshCodex, extraCodex]), ...external(), ...local()],
+		rows: [...models('claude-code', [failedKnown, failedUnknown, checking, fresh], claudeEntries), ...models('codex', [freshCodex, extraCodex]), ...external(), ...local()],
 		accounts: [failedKnown, failedUnknown, checking, fresh, freshCodex, extraCodex],
 	};
 	await openPicker(page);
 	const claude = page.locator('section[aria-label="Claude Code"]');
+	const codex = page.locator('section[aria-label="Codex"]');
+	const figures = (name: string) => claude.locator('.account-usage-row', { hasText: name }).locator('.figures');
 	await claude.locator('button.picker-account-title').click();
 	await expect(claude.locator('.account-usage-row')).toHaveCount(4);
-	await expect(claude).toContainText('Known reset — unusually long anonymous account label');
-	await expect(claude).toContainText('No reset — unusually long anonymous account label');
-	await expect(claude).toContainText('limited · checking');
-	await expect(claude).toContainText("couldn't verify");
+	await expect(figures('Known reset — unusually long anonymous account label')).toContainText('back');
+	await expect(figures('Known reset — unusually long anonymous account label')).toContainText("couldn't verify");
+	await expect(figures('No reset — unusually long anonymous account label')).toContainText("couldn't verify");
+	await expect(figures('No reset — unusually long anonymous account label')).not.toContainText('back');
+	await expect(figures('Checking account')).toContainText('checking');
+	await expect(figures('Fresh allowed account')).toContainText('left');
 	await capture(page, 'M604-six-accounts');
+	await codex.locator('button.picker-account-title').click();
+	await expect(codex.locator('.account-usage-row')).toHaveCount(2);
+	await capture(page, 'M604-six-accounts-codex-scrolled', async () => {
+		await codex.scrollIntoViewIfNeeded();
+		if ((page.viewportSize()?.width ?? 0) <= 480) {
+			for (const row of await codex.locator('.account-usage-row .figures').all()) await expect(row).toBeInViewport();
+		}
+	});
 });
