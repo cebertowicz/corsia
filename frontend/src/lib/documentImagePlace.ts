@@ -14,6 +14,8 @@ export interface RestoreDocumentPlaceOptions {
 	mode?: 'back' | 'tab-return';
 	/** Called immediately after the initial offset is set, while canonical anchor correction continues. */
 	onPlaced?: () => void;
+	/** A newer restore superseded this one; it must stop before touching the document again. */
+	signal?: AbortSignal;
 }
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -65,12 +67,15 @@ export async function restoreDocumentPlace(
 	options: RestoreDocumentPlaceOptions = {},
 ): Promise<void> {
 	await tick();
+	if (options.signal?.aborted) return;
 	if (root && options.mode !== 'tab-return') await widthSettled(root);
+	if (options.signal?.aborted) return;
 	const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
 	if (!root || !scroller) return;
 	scroller.scrollTop = place.scrollTop;
 	// CodeMirror draws the newly visible line on the next frame; reveal a returning tab after that draw, not after the full anchor hold.
 	if (options.onPlaced) await nextFrame();
+	if (options.signal?.aborted) return;
 	options.onPlaced?.();
 	const image = 'src' in place ? place : null;
 	const view = image ? null : EditorView.findFromDOM(scroller);
@@ -88,9 +93,9 @@ export async function restoreDocumentPlace(
 	for (const type of USER_INPUT) scroller.addEventListener(type, onInput, { capture: true, passive: true });
 	try {
 		let held = 0;
-		for (let frame = 0; frame < MAX_ANCHOR_FRAMES && held < ANCHOR_HOLD_FRAMES && !touched; frame++) {
+		for (let frame = 0; frame < MAX_ANCHOR_FRAMES && held < ANCHOR_HOLD_FRAMES && !touched && !options.signal?.aborted; frame++) {
 			await nextFrame();
-			if (touched) break;
+			if (touched || options.signal?.aborted) break;
 			const currentTop = anchorTop();
 			// CodeMirror draws a newly visible line or image a frame after the offset lands.
 			if (currentTop === null) continue;

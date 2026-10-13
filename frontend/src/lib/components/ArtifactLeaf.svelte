@@ -14,7 +14,7 @@
 		closeDocumentImage, documentImageViewers, openDocumentImage, type DocumentImageRequest,
 	} from '$lib/stores/documentImageViewer';
 	import { widenForImageViewer } from '$lib/imageViewerPane';
-	import { restoreDocumentPlace, type TextDocumentPlace } from '$lib/documentImagePlace';
+	import { restoreDocumentPlace, type RestoreDocumentPlaceOptions, type TextDocumentPlace } from '$lib/documentImagePlace';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { docSaveDrafts, relocateDraftTarget } from '$lib/stores/docSaveQueue';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
@@ -73,6 +73,15 @@
 	let leafEl = $state<HTMLElement | undefined>(undefined);
 	let leafBodyEl = $state<HTMLElement | undefined>(undefined);
 	let restoringDocument = $state<string | null>(null);
+	let documentRestore: AbortController | null = null;
+	function restoreDocument(place: Parameters<typeof restoreDocumentPlace>[1], options: RestoreDocumentPlaceOptions = {}) {
+		documentRestore?.abort();
+		const controller = new AbortController();
+		documentRestore = controller;
+		void restoreDocumentPlace(leafBodyEl, place, { ...options, signal: controller.signal }).finally(() => {
+			if (documentRestore === controller) documentRestore = null;
+		});
+	}
 
 	// An image of the open document shown larger. The document stays mounted beneath it, so closing the viewer
 	// returns to the same live document; the viewer belongs to the tab it was opened from.
@@ -90,9 +99,10 @@
 		const tid = threadId;
 		const image = displayedImage;
 		if (!tid || !image) return;
+		restoringDocument = null;
 		clearTabDocumentImage(tid, image.instanceId);
 		closeDocumentImage(tid);
-		void restoreDocumentPlace(leafBodyEl, image);
+		restoreDocument(image);
 	}
 	// A tab switch hides the global overlay but keeps its tab-owned request and camera. Collapsing remains a close.
 	$effect(() => {
@@ -109,7 +119,10 @@
 	});
 	$effect(() => {
 		const tid = threadId;
-		return () => { if (tid) closeDocumentImage(tid); };
+		return () => {
+			documentRestore?.abort();
+			if (tid) closeDocumentImage(tid);
+		};
 	});
 	$effect(() => {
 		if (!imageOpen || mode !== 'expanded') return;
@@ -202,7 +215,7 @@
 				: null;
 			if (place) {
 				restoringDocument = signal.instanceId;
-				void restoreDocumentPlace(leafBodyEl, place, {
+				restoreDocument(place, {
 					mode: 'tab-return',
 					onPlaced: () => {
 						if (restoringDocument === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;

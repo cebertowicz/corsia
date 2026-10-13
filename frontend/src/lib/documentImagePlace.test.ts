@@ -115,4 +115,19 @@ describe('restoreDocumentPlace', () => {
 		expect(placed).toHaveBeenCalledOnce();
 		await pending;
 	});
+
+	it('stops a superseded anchor correction before it can overwrite a newer restore', async () => {
+		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
+		const widget = root.querySelector<HTMLElement>('[data-from="40"]')!;
+		let shift = 0;
+		vi.spyOn(widget, 'getBoundingClientRect').mockImplementation(() => ({ top: 100 + shift - (scroller.scrollTop - 300) }) as DOMRect);
+		const controller = new AbortController();
+		const pending = restoreDocumentPlace(root, { ...image, top: 100 }, { mode: 'tab-return', signal: controller.signal });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		controller.abort();
+		shift = 100;
+		scroller.scrollTop = 700;
+		await pending;
+		expect(scroller.scrollTop).toBe(700);
+	});
 });
