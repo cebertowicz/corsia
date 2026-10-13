@@ -43,11 +43,23 @@ def _encoded(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
+_CLOSED_SOCKET_SEND_ERRORS = {
+    "Unexpected ASGI message 'websocket.send', after sending 'websocket.close'",
+    "Unexpected ASGI message 'websocket.send', after sending 'websocket.close' or response already completed.",
+}
+
+
+def _closed_socket_error(error: BaseException) -> bool:
+    """Whether document delivery lost a socket after its work already completed."""
+    return isinstance(error, (WebSocketDisconnect, ConnectionError)) or (
+        isinstance(error, RuntimeError) and str(error) in _CLOSED_SOCKET_SEND_ERRORS)
+
+
 def _observe_send(task: asyncio.Task) -> None:
     """Retrieve a broadcast write's outcome; a socket that closed first is expected."""
     if task.cancelled() or (error := task.exception()) is None:
         return
-    if isinstance(error, (WebSocketDisconnect, RuntimeError, ConnectionError)):
+    if _closed_socket_error(error):
         log.debug("Live-document frame not delivered to a closed socket: %s", error)
     else:
         log.warning("Live-document frame not delivered", exc_info=error)
@@ -308,7 +320,10 @@ async def handle_frame(socket, user: dict, data: dict) -> None:
                                     "blocking": isinstance(exc, StoreRefused) or getattr(exc, "blocking", False),
                                     **({"title": title} if title else {}),
                                     "message": str(exc.detail) if isinstance(exc, HTTPException) else str(exc)})
-    except Exception:
+    except Exception as error:
+        if _closed_socket_error(error):
+            log.debug("Live-document frame not delivered to a closed socket: %s", error)
+            return
         log.exception("Live document frame failed")
         await send_to_client(socket, {"type": "doc_error", "artifact_id": data.get("artifact_id"),
                                     "request_id": data.get("request_id"), "kind": "internal",
