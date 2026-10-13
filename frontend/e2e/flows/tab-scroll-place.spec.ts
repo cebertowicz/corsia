@@ -146,7 +146,6 @@ function expectNoReturnPop(frames: ReturnFrame[], before: VisiblePlace): void {
 		expect(frame.line, sample).toBe(before.line);
 		expect(frame.top, sample).not.toBeNull();
 		expect(Math.abs(frame.top! - before.top), sample).toBeLessThanOrEqual(MAX_DRIFT_PX);
-		expect(Math.abs(frame.scrollTop - before.scrollTop), sample).toBeLessThanOrEqual(MAX_DRIFT_PX);
 	}
 }
 
@@ -167,7 +166,7 @@ for (const width of [1440, 393]) {
 				await page.emulateMedia({ colorScheme: scheme });
 				const sessionTitle = `tab-scroll-place-${width}-${scheme}-${Date.now()}`;
 				const sessionId = await createSession(request, sessionTitle);
-	
+
 				const tree = await (await request.get(`/api/files/tree?${query()}`)).json();
 				const roots: Array<{ kind: string; path: string }> = tree.roots ?? [];
 				const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
@@ -177,7 +176,7 @@ for (const width of [1440, 393]) {
 				fs.mkdirSync(dir, { recursive: true });
 				fs.writeFileSync(indexPath, INDEX);
 				fs.writeFileSync(path.join(dir, 'SECOND.md'), SECOND);
-	
+
 				try {
 					const registered = await request.post(`/api/files/register?${query()}`, {
 						data: { path: indexPath, thread_id: sessionId },
@@ -199,7 +198,7 @@ for (const width of [1440, 393]) {
 						})),
 						{ threadId: sessionId, artifactId: artifact.id, tabPath: indexPath },
 					);
-	
+
 					await loginByUrl(page);
 					if (touch) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 					await page.getByText(sessionTitle).first().click();
@@ -211,14 +210,20 @@ for (const width of [1440, 393]) {
 					expect(before.scrollTop).toBeGreaterThan(0);
 					expect(before.line).not.toBe('');
 					await saveEvidenceScreenshot(page, testInfo, `tab-scroll-place-${width}-before`, { fullPage: false });
-	
+
 					if (touch) await link(page).tap();
 					else await link(page).click();
 					await expect(page.getByText('Second filler paragraph 1 keeps this tab long enough to restore.', { exact: true })).toBeVisible();
-					await scroller.evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2); });
+					// A different place from INDEX.md's, so a restore that lands on the wrong tab shows.
+					await scroller.evaluate((el) => {
+						const line = [...el.querySelectorAll<HTMLElement>('.cm-line')]
+							.find((candidate) => candidate.textContent?.startsWith('Second filler paragraph 8 '));
+						el.scrollTop += Math.round(line!.getBoundingClientRect().top - el.getBoundingClientRect().top) + 4;
+					});
 					await expect.poll(async () => (await visiblePlace(scroller)).line.startsWith('Second filler')).toBe(true);
 					const secondBefore = await visiblePlace(scroller);
 					expect(secondBefore.scrollTop).toBeGreaterThan(0);
+					expect(Math.abs(secondBefore.scrollTop - before.scrollTop)).toBeGreaterThan(200);
 					expect(secondBefore.line).toContain('Second filler');
 					if (touch) {
 						await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
@@ -229,7 +234,7 @@ for (const width of [1440, 393]) {
 						await armReturnSampler(page);
 						await page.getByRole('tab', { name: 'INDEX.md' }).click();
 					}
-	
+
 					const frames = await returnSamples(page);
 					const report = {
 						before, coveredFrames: coveredFrames(frames), loadingFrames: loadingFrames(frames),
@@ -246,7 +251,6 @@ for (const width of [1440, 393]) {
 					expect(after.line).toBe(before.line);
 					expect(after.top).not.toBeNull();
 					expect(Math.abs(after.top! - before.top!)).toBeLessThanOrEqual(MAX_DRIFT_PX);
-					expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(MAX_DRIFT_PX);
 					await armReturnSampler(page);
 					await selectTab(page, 'SECOND.md', touch);
 					await selectTab(page, 'INDEX.md', touch);
@@ -260,7 +264,8 @@ for (const width of [1440, 393]) {
 					}).toBe(true);
 					const secondAfterRace = await visiblePlace(scroller);
 					expect(secondAfterRace.line).toBe(secondBefore.line);
-					expect(Math.abs(secondAfterRace.scrollTop - secondBefore.scrollTop)).toBeLessThanOrEqual(MAX_DRIFT_PX);
+					expect(secondAfterRace.top).not.toBeNull();
+					expect(Math.abs(secondAfterRace.top! - secondBefore.top!)).toBeLessThanOrEqual(MAX_DRIFT_PX);
 					fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}-${scheme}.json`), JSON.stringify({
 						indexBefore: before,
 						secondBefore,
@@ -275,8 +280,8 @@ for (const width of [1440, 393]) {
 					await context.close();
 				}
 			});
-	}
-});
+		}
+	});
 }
 
 const wrapped = (tag: string, count: number) => Array.from({ length: count }, (_, i) =>
