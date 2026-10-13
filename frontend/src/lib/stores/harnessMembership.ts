@@ -63,9 +63,9 @@ export function settingsHarnessModelIds(
 		.filter((id) => settingsIds.has(id));
 	const visible = new Set(pickerIds);
 	for (const row of settingsRows) {
-		if (!isSettingsHarness(row, harness) || row.enabled !== 0 || !isDiscoveredHarnessModel(row)) continue;
+		if (!isSettingsHarness(row, harness) || !isDiscoveredHarnessModel(row)) continue;
 		if (row.source === 'reference' || settingsRowIsAlias(row) || typeof row.id !== 'string') continue;
-		visible.add(row.id);
+		if (pickerIds.length === 0 || row.enabled === 0) visible.add(row.id);
 	}
 	return [...pickerIds, ...settingsRows
 		.filter((row) => typeof row.id === 'string' && visible.has(row.id) && !pickerIds.includes(row.id))

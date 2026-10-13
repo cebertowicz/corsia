@@ -37,12 +37,11 @@ def status_env(monkeypatch):
     monkeypatch.setattr(ms, "_network_server_status", lambda: dict(servers))
     monkeypatch.setattr(ms, "_loaded_model_ids_fn", lambda: (lambda sid: loaded.get(sid, set())))
     monkeypatch.setattr(ms, "_cloud_providers_active", lambda: {"anthropic"})
-    harness_connections = {"claude-code": False, "codex": False}
+    harness_connections = {"claude-code": (False, True), "codex": (False, True)}
     envelopes: dict[str, dict | None] = {}
     monkeypatch.setattr(
-        ms, "_harness_connection_available",
-        lambda provider: harness_connections.get(provider, False),
-        raising=False,
+        ms, "_harness_connection_facts",
+        lambda: dict(harness_connections),
     )
     monkeypatch.setattr(
         ms, "_harness_discovery_envelope", lambda provider: envelopes.get(provider),
@@ -59,8 +58,8 @@ def status_env(monkeypatch):
         def set_server(self, sid, st):
             servers[sid] = st
 
-        def set_harness_connection(self, provider, available):
-            harness_connections[provider] = available
+        def set_harness_connection(self, provider, available, enabled=True):
+            harness_connections[provider] = (available, enabled)
 
         def set_envelope(self, provider, envelope):
             envelopes[provider] = envelope
@@ -184,6 +183,21 @@ class TestGetModelStatusRows:
         cached = get_model_status_rows()[0]
         assert cached["status"] == "ready"
         assert cached["cache_marker"] == "Cached"
+
+    def test_disabled_harness_stays_in_catalog_with_its_own_reason(self, status_env):
+        from llm.model_status import get_model_status_rows
+        status_env.set_harness_connection("codex", True, enabled=False)
+        status_env.set_rows([_catalog_row(
+            id="codex/spark-probe", harness="codex", backend="codex",
+            provider="codex", provider_model_id="spark-probe", display_name="Spark",
+            litellm_model="codex/spark-probe", context_window=128000,
+            metadata_json='{"discovered_capabilities": {}, "discovery_order": 0}',
+        )])
+
+        row = get_model_status_rows()[0]
+
+        assert row["status"] == "unavailable"
+        assert row["status_reason"] == "provider_disabled"
 
     def test_user_alias_overrides_display_name_in_switcher(self, status_env):
         # A user-set alias replaces the discovered display_name in the picker.

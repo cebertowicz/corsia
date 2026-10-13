@@ -44,6 +44,15 @@ describe('deliveryPresentation', () => {
 			failed: false,
 		});
 	});
+	it('points a held Codex input to the enabled provider card', () => {
+		const held = {
+			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,
+			active_turn_id: null, delivery_error: 'codex_provider_disabled', metadata: {},
+		};
+		expect(deliveryPresentation(held)).toMatchObject({
+			label: 'Codex is turned off · Settings > Providers', pending: true, failed: false,
+		});
+	});
 	it('asks for a model when the thread has none, with the same pending treatment', () => {
 		const held = {
 			delivery_state: 'queued' as const, write_outcome: 'proved_no_write' as const,
