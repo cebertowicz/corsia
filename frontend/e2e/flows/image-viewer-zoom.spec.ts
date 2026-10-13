@@ -147,16 +147,20 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			await overlay.getByRole('button', { name: 'Zoom out' }).click();
 			await expect(level(page)).toHaveText('100%');
 
-			// Pan by drag, and by the scrollbars the region carries; the image is larger than the viewport.
+			// Pan by Space-drag (a bare drag draws a box), and by the scrollbars the region carries; the image is larger than the viewport.
 			const region = page.locator('.image-overlay .viewport');
 			const scrollable = await region.evaluate((el) => ({ x: el.scrollWidth > el.clientWidth, y: el.scrollHeight > el.clientHeight }));
 			expect(scrollable).toEqual({ x: true, y: true });
 			const spot = { x: viewport.x + viewport.width / 2, y: viewport.y + viewport.height / 2 };
 			const panFrom = await region.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
 			await page.mouse.move(spot.x, spot.y);
+			await page.keyboard.down('Space');
 			await page.mouse.down();
 			await page.mouse.move(spot.x - 120, spot.y - 80, { steps: 6 });
 			await page.mouse.up();
+			await page.keyboard.up('Space');
+			// Space only pans: the zoom button that still has focus is not pressed by it.
+			await expect(level(page)).toHaveText('100%');
 			const panned = await region.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
 			expect(panned.left - panFrom.left).toBeGreaterThan(100);
 			expect(panned.top - panFrom.top).toBeGreaterThan(60);
@@ -307,7 +311,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 		}
 	});
 
-	test('phone: Back and Fit only, one finger pans, two pinch, and Back returns to the document (393)', async ({ page, request }, testInfo) => {
+	test('phone: Back, comment controls and Fit, one finger pans, two pinch, and Back returns to the document (393)', async ({ page, request }, testInfo) => {
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
 		await page.setViewportSize({ width: 393, height: 852 });
 		const seeded = await seedDocument(page, request, 'viewer-zoom-393');
@@ -324,7 +328,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			const overlay = page.locator('.image-overlay');
 			await expect(overlay.locator('.frame img')).toBeVisible();
 			const labels = await overlay.locator('.bar button').evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim()));
-			expect(labels).toEqual(['Back to walkthrough.md', 'Fit']);
+			expect(labels).toEqual(['Back to walkthrough.md', 'Comment', '0 open threads', 'Fit']);
 			await expect(overlay.locator('.back-text')).toHaveText('Back');
 			await expect(overlay.getByRole('button', { name: 'Fit' })).toHaveAttribute('aria-pressed', 'true');
 			expect((await page.locator('.image-overlay .bar button').first().boundingBox())!.height).toBeGreaterThanOrEqual(44);
