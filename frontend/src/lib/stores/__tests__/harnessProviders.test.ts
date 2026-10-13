@@ -14,11 +14,42 @@ const pickerRow = (over: Partial<Model> = {}): Model => ({
 	status: 'ready', available: true, litellm_model: 'codex/gpt-5.6-sol', ...over,
 });
 
+describe('pickerCatalogModels', () => {
+	it('drops a switched-off harness from the picker but keeps the thread\'s own model', () => {
+		const off = { status: 'unavailable' as const, status_reason: 'provider_disabled' };
+		const catalog = [
+			pickerRow({ id: 'codex/one', ...off }),
+			pickerRow({ id: 'codex/two', ...off }),
+			pickerRow({ id: 'codex/other', status: 'unavailable', status_reason: 'discovered_model_unavailable' }),
+		];
+
+		expect(pickerCatalogModels(catalog).map((model) => model.id)).toEqual(['codex/other']);
+		expect(pickerCatalogModels(catalog, 'codex/two').map((model) => model.id)).toEqual(['codex/two', 'codex/other']);
+	});
+});
+
 describe('harnessSummaries', () => {
 	it('counts available rows and drops a harness with none', () => {
 		const catalog = [pickerRow(), pickerRow({ id: 'codex/gpt-6-sol', status: 'unavailable' })];
 		expect(harnessSummaries([row({ id: 'codex/gpt-5.6-sol' }), row({ id: 'codex/gpt-6-sol' })], catalog))
-			.toEqual([{ name: 'codex', label: 'Codex', total: 1, ready: 1 }]);
+			.toEqual([{ name: 'codex', label: 'Codex', enabled: true, total: 1, ready: 1 }]);
+	});
+
+	it('keeps an off harness card and its model controls from settings inventory', () => {
+		const settingsRows = [
+			row({ id: 'codex/one', provider_enabled: false }),
+			row({ id: 'codex/two', provider_enabled: false }),
+		];
+		const catalog = [
+			pickerRow({ id: 'codex/one', status: 'unavailable', status_reason: 'provider_disabled' }),
+			pickerRow({ id: 'codex/two', status: 'unavailable', status_reason: 'provider_disabled' }),
+		];
+
+		expect(harnessSummaries(settingsRows, catalog)).toContainEqual(
+			{ name: 'codex', label: 'Codex', enabled: false, total: 2, ready: 0 },
+		);
+		expect(harnessProviderModels(settingsRows, 'codex', catalog).map((model) => model.id))
+			.toEqual(['codex/one', 'codex/two']);
 	});
 });
 
@@ -91,7 +122,7 @@ describe('harnessProviderModels', () => {
 			pickerRow({ id: 'codex/limited', status: 'unavailable', status_reason: 'usage_limited', available: true }),
 		];
 		expect(harnessSummaries([row({}), row({ id: 'codex/limited' })], catalog))
-			.toEqual([{ name: 'codex', label: 'Codex', total: 2, ready: 1 }]);
+			.toEqual([{ name: 'codex', label: 'Codex', enabled: true, total: 2, ready: 1 }]);
 	});
 
 	it('shows the label over the discovered name and keeps both', () => {

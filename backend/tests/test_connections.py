@@ -47,6 +47,7 @@ def connections_db(tmp_path, monkeypatch):
             provider TEXT NOT NULL,
             config TEXT,
             status TEXT NOT NULL DEFAULT 'available',
+            enabled INTEGER NOT NULL DEFAULT 1,
             scope TEXT NOT NULL DEFAULT 'global',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -173,6 +174,22 @@ class TestConnectionModels:
                           status=ConnectionStatus.AVAILABLE, db=connections_db)
         set_connection_status("claude-code", ConnectionStatus.NEEDS_AUTH, db=connections_db)
         assert connection_available("claude-code", db=connections_db) is False
+
+    def test_harness_switch_preserves_observed_status(self, connections_db):
+        from connections.models import (
+            ConnectionStatus, ConnectionType, get_connection,
+            set_harness_enabled, upsert_connection,
+        )
+        upsert_connection(type=ConnectionType.CLI, provider="codex",
+                          status=ConnectionStatus.NEEDS_AUTH, db=connections_db)
+
+        set_harness_enabled("codex", False, db=connections_db)
+        assert get_connection("codex", db=connections_db)["enabled"] == 0
+        assert get_connection("codex", db=connections_db)["status"] == ConnectionStatus.NEEDS_AUTH.value
+
+        set_harness_enabled("codex", True, db=connections_db)
+        assert get_connection("codex", db=connections_db)["enabled"] == 1
+        assert get_connection("codex", db=connections_db)["status"] == ConnectionStatus.NEEDS_AUTH.value
 
 
 

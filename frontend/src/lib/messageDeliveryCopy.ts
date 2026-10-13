@@ -35,6 +35,19 @@ export const SET_ASIDE_COPY: Readonly<Record<string, {
 
 /** The hold cause the backend writes while a selected model cannot run. */
 export const SELECTED_MODEL_UNAVAILABLE = 'selected_model_unavailable';
+export const CLAUDE_CODE_PROVIDER_DISABLED = 'claude_code_provider_disabled';
+export const CODEX_PROVIDER_DISABLED = 'codex_provider_disabled';
+
+export const HARNESS_PROVIDER_DISABLED_HOLD = Object.freeze({
+	[CLAUDE_CODE_PROVIDER_DISABLED]: {
+		label: 'Claude Code is turned off · Settings > Providers',
+		title: 'Your message is saved and will send when Claude Code is turned back on.',
+	},
+	[CODEX_PROVIDER_DISABLED]: {
+		label: 'Codex is turned off · Settings > Providers',
+		title: 'Your message is saved and will send when Codex is turned back on.',
+	},
+} as const);
 
 export const WAITING_FOR_MODEL = {
 	label: 'Waiting for model',

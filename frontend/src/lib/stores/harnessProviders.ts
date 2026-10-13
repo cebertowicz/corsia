@@ -19,6 +19,8 @@ export interface HarnessSummary {
 	total: number;
 	/** Rows the chat picker can offer now: public catalog status `ready`, the picker's own rule. */
 	ready: number;
+	/** Independent provider-wide CLI switch from settings inventory. */
+	enabled: boolean;
 }
 
 type CatalogRow = Record<string, any>;
@@ -32,11 +34,29 @@ export async function fetchCatalogInventory(): Promise<CatalogRow[]> {
 	return (await res.json()).models ?? [];
 }
 
+/** Save the provider-wide Agent CLI switch without changing its source status. */
+export async function setHarnessEnabled(harness: string, enabled: boolean): Promise<{ ok: boolean; message?: string }> {
+	try {
+		const res = await fetch(`/api/providers/harnesses/${encodeURIComponent(harness)}/enabled`, {
+			method: 'PUT',
+			headers: { Authorization: `Bearer ${t()}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify({ enabled }),
+		});
+		if (res.ok) return { ok: true };
+		const data = await res.json().catch(() => null);
+		return { ok: false, message: plainErrorText(data?.detail, 'Could not save the provider setting. Try again.') };
+	} catch (error) {
+		console.error('[providers] harness enable request failed', error);
+		return { ok: false, message: SERVER_UNREACHABLE };
+	}
+}
+
 export function harnessSummaries(settingsRows: CatalogRow[], catalog: Model[]): HarnessSummary[] {
 	const catalogById = new Map(catalog.map((model) => [model.id, model]));
 	return HARNESSES.map(({ name, label }) => {
 		const ids = settingsHarnessModelIds(settingsRows, name, catalog);
-		return { name, label, total: ids.length, ready: ids.filter((id) => catalogById.get(id)?.status === 'ready').length };
+		const enabled = settingsRows.find((row) => row.harness === name || row.provider === name)?.provider_enabled !== false;
+		return { name, label, enabled, total: ids.length, ready: ids.filter((id) => catalogById.get(id)?.status === 'ready').length };
 	}).filter((summary) => summary.total > 0);
 }
 

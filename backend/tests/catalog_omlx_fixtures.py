@@ -165,6 +165,7 @@ def fresh_db(tmp_path, monkeypatch):
             provider TEXT NOT NULL UNIQUE,
             config TEXT,
             status TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
             scope TEXT NOT NULL DEFAULT 'global',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL

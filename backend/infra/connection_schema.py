@@ -8,6 +8,7 @@ CONNECTION_SCHEMA_SQL = """
         provider TEXT NOT NULL,
         config TEXT,
         status TEXT NOT NULL DEFAULT 'available',
+        enabled INTEGER NOT NULL DEFAULT 1,
         scope TEXT NOT NULL DEFAULT 'global',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,

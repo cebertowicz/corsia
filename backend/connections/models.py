@@ -160,6 +160,24 @@ def set_connection_status(
         return _row_to_dict(row) if row else None
 
 
+def set_harness_enabled(provider: str, enabled: bool, db=None) -> dict[str, Any] | None:
+    """Set the person's independent enable choice for a CLI harness.
+
+    The source-check pipeline owns ``status``. Toggling this field therefore
+    cannot manufacture a sign-in transition or invalidate account-limit facts.
+    """
+    if provider not in VENDORS:
+        raise ValueError(f"{provider!r} is not a harness provider")
+    now = datetime.now(timezone.utc).isoformat()
+    with write_transaction(db, scope="set_harness_enabled") as _db:
+        _db.execute(
+            "UPDATE connections SET enabled=?, updated_at=? WHERE provider=?",
+            (int(enabled), now, provider),
+        )
+        row = _db.execute("SELECT * FROM connections WHERE provider=?", (provider,)).fetchone()
+        return _row_to_dict(row) if row else None
+
+
 def connection_available(provider: str, db=None) -> bool:
     """True iff a connection row exists for ``provider`` with status 'available'.
 
