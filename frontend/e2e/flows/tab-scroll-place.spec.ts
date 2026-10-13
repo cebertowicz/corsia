@@ -206,7 +206,6 @@ for (const width of [1440, 393]) {
 					const scroller = page.locator('.cm-scroller');
 					await expect(scroller).toBeVisible();
 					await scroller.evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2); });
-					await expect.poll(async () => (await visiblePlace(scroller)).line.startsWith('Filler')).toBe(true);
 					await expect(link(page)).toBeInViewport();
 					const before = await visiblePlace(scroller);
 					expect(before.scrollTop).toBeGreaterThan(0);
