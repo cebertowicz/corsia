@@ -121,14 +121,16 @@ PAUSED_LINE = (
     "message here asks; otherwise read, reply and update your plan, and change "
     "nothing else. Only the user resumes.]"
 )
+PAUSED_SCHEDULE_LINE = (
+    "[Paused by the user since {since}. The user asked for this schedule: in this Turn "
+    "do its task only, update your plan, and change nothing else. Only the user resumes.]"
+)
 
 
 def paused_line(since: str, *, scheduled_wake: bool = False) -> str:
     """Return the line opening an input stamped with its plan's pause time."""
-    line = PAUSED_LINE.format(since=since[:16].replace("T", " ") + " UTC")
-    if scheduled_wake:
-        line = line[:-1] + " Do this schedule's task only, then stop.]"
-    return line + "\n\n"
+    template = PAUSED_SCHEDULE_LINE if scheduled_wake else PAUSED_LINE
+    return template.format(since=since[:16].replace("T", " ") + " UTC") + "\n\n"
 
 
 def ask_release_summary(
