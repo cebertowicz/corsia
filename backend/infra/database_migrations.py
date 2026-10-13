@@ -793,29 +793,46 @@ def _database_bytes(source: Path) -> int:
 
 
 def _backup_room_state(source: Path) -> tuple[int, int, list[Path]]:
-    """Return the room threshold, physical free bytes, and safely prunable backups."""
+    """Share the preflight and migration room calculation so their decisions agree."""
     needed = _database_bytes(source)
     required = int(needed * _BACKUP_MIN_FREE_RATIO) + _BACKUP_FREE_FLOOR_BYTES
     return required, shutil.disk_usage(source.parent).free, _pre_migration_backups(source)[:-1]
 
 
 def backup_room(source: Path) -> tuple[int, int]:
-    """Return required and available backup bytes without changing the filesystem."""
+    """Share preflight/migration available-room accounting without changing the filesystem."""
     required, free, stale = _backup_room_state(source)
     return required, free + sum(path.stat().st_size for path in stale)
 
 
+def _backup_room_error(
+    source: Path, from_version: int, required: int, available: int,
+) -> BackupRoomError:
+    """Describe a shared preflight or migration refusal with operator recovery steps."""
+    needed = _database_bytes(source)
+    return BackupRoomError(
+        f"not enough free space for the pre-migration backup of schema "
+        f"v{from_version}: {available / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
+        f"required to copy a {needed / 1e9:.2f} GB database and keep a "
+        f"{_BACKUP_FREE_FLOOR_BYTES / 1e9:.2f} GB reserve. Free space, then "
+        f"start again; the database is unchanged. Superseded backups in "
+        f"{source.parent} are the usual place to reclaim it.",
+        required,
+        available,
+    )
+
+
 def require_backup_room(source: Path, from_version: int) -> tuple[int, int]:
-    """Refuse when the backup and reserve cannot fit after stale-backup cleanup."""
+    """Refuse before copying when the backup and reserve cannot fit.
+
+    The reserve is required after the copy: a crash-restart attempt is a fresh,
+    uncontested lock winner, so nothing else limits how many copies it can
+    write. Refusing startup is the honest outcome because migrating without a
+    backup is unsafe.
+    """
     required, available = backup_room(source)
     if available < required:
-        raise BackupRoomError(
-            f"not enough free space for the pre-migration backup of schema "
-            f"v{from_version}: {available / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
-            f"required. Free space, then start again; the database is unchanged.",
-            required,
-            available,
-        )
+        raise _backup_room_error(source, from_version, required, available)
     return required, available
 
 
@@ -868,17 +885,16 @@ def _prune_backups(source: Path, keep_path: Path | None) -> None:
 
 
 def _ensure_backup_room(source: Path, from_version: int) -> None:
-    """Prune only the backups credited by :func:`backup_room` before copying."""
+    """Prune oldest superseded backups, never the newest, before copying.
+
+    Only backups credited by the shared preflight calculation are removed, and
+    only until the backup plus reserve fits. If even that cannot make room,
+    refusing is safer than migrating without a backup.
+    """
     required, free, stale = _backup_room_state(source)
     available = free + sum(path.stat().st_size for path in stale)
     if available < required:
-        raise BackupRoomError(
-            f"not enough free space for the pre-migration backup of schema "
-            f"v{from_version}: {available / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
-            f"required. Free space, then start again; the database is unchanged.",
-            required,
-            available,
-        )
+        raise _backup_room_error(source, from_version, required, available)
     if free >= required:
         return
     removed: list[Path] = []
