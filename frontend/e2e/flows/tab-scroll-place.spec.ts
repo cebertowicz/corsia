@@ -38,7 +38,7 @@ async function selectTab(page: Page, title: string, touch: boolean): Promise<voi
 
 type VisiblePlace = { scrollTop: number; line: string; top: number | null };
 /** `editor` is false while the tab still shows its loading state, before the document's text arrived. */
-type ReturnFrame = VisiblePlace & { elapsedMs: number; editor: boolean; scrollerVisible: boolean };
+type ReturnFrame = VisiblePlace & { elapsedMs: number; editor: boolean; scrollerVisible: boolean; commentText: string; tabReadOnly: boolean };
 
 async function visiblePlace(scroller: ReturnType<Page['locator']>): Promise<VisiblePlace> {
 	return scroller.evaluate((el) => {
@@ -92,6 +92,8 @@ async function armReturnSampler(page: Page): Promise<void> {
 						top: visibleLine && box ? visibleLine.getBoundingClientRect().top - box.top : null,
 						editor: Boolean(scroller),
 						scrollerVisible: Boolean(box && style && style.visibility !== 'hidden' && style.display !== 'none'),
+						commentText: document.querySelector<HTMLElement>('.comment-status')?.textContent?.trim() ?? '',
+						tabReadOnly: Boolean(document.querySelector('.tab-ro')),
 					};
 				};
 				// The window ends on the frame whose own reading reached it, so that frame is the last recorded.
@@ -116,7 +118,7 @@ async function returnSamples(page: Page): Promise<ReturnFrame[]> {
 	});
 }
 
-/** At most this many frames after the tab is activated may show no document while its place is put back. */
+/** At most this many frames may show no document while an image's Back puts the document's place back. */
 const MAX_HIDDEN_FRAMES = 1;
 /** From its first visible frame the saved line stays within this many pixels of where it was. */
 const MAX_DRIFT_PX = 2;
@@ -137,15 +139,16 @@ function loadingFrames(frames: ReturnFrame[]): number {
 function expectNoReturnPop(frames: ReturnFrame[], before: VisiblePlace): void {
 	if (before.top === null) throw new Error('saved document place has no visible line');
 	expect(frames.at(-1)?.elapsedMs).toBeGreaterThanOrEqual(1_000);
-	expect(coveredFrames(frames), `covered frames after activation: ${JSON.stringify(frames.slice(0, 4))}`).toBeLessThanOrEqual(MAX_HIDDEN_FRAMES);
-	const firstVisible = frames.findIndex((frame) => frame.scrollerVisible);
-	expect(firstVisible).toBeGreaterThanOrEqual(0);
-	for (const frame of frames.slice(firstVisible)) {
+	expect(loadingFrames(frames), `loading frames after activation: ${JSON.stringify(frames.slice(0, 4))}`).toBe(0);
+	expect(coveredFrames(frames), `covered frames after activation: ${JSON.stringify(frames.slice(0, 4))}`).toBe(0);
+	for (const frame of frames) {
 		const sample = `at ${Math.round(frame.elapsedMs)}ms: ${JSON.stringify(frame)}`;
 		expect(frame.scrollerVisible, sample).toBe(true);
 		expect(frame.line, sample).toBe(before.line);
 		expect(frame.top, sample).not.toBeNull();
 		expect(Math.abs(frame.top! - before.top), sample).toBeLessThanOrEqual(MAX_DRIFT_PX);
+		expect(frame.commentText, sample).not.toContain('…');
+		expect(frame.tabReadOnly, sample).toBe(false);
 	}
 }
 
@@ -238,7 +241,7 @@ for (const width of [1440, 393]) {
 					const frames = await returnSamples(page);
 					const report = {
 						before, coveredFrames: coveredFrames(frames), loadingFrames: loadingFrames(frames),
-						maxHiddenFrames: MAX_HIDDEN_FRAMES, maxDriftPx: MAX_DRIFT_PX, frames,
+						maxDriftPx: MAX_DRIFT_PX, frames,
 					};
 					fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}.json`), JSON.stringify(report));
 					expectNoReturnPop(frames, before);
@@ -256,7 +259,8 @@ for (const width of [1440, 393]) {
 					await selectTab(page, 'INDEX.md', touch);
 					await selectTab(page, 'SECOND.md', touch);
 					const raceFrames = await returnSamples(page);
-					expect(coveredFrames(raceFrames)).toBeLessThanOrEqual(MAX_HIDDEN_FRAMES);
+					expect(loadingFrames(raceFrames)).toBe(0);
+					expect(coveredFrames(raceFrames)).toBe(0);
 					await expect.poll(async () => {
 						const current = await visiblePlace(scroller);
 						return current.line === secondBefore.line && current.top !== null && secondBefore.top !== null

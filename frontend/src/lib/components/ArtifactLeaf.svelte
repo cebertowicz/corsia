@@ -72,7 +72,8 @@
 	let imageViewer = $state<ImageViewer | undefined>(undefined);
 	let leafEl = $state<HTMLElement | undefined>(undefined);
 	let leafBodyEl = $state<HTMLElement | undefined>(undefined);
-	let restoringDocument = $state<string | null>(null);
+	/** The tab whose place is being put back; a document not on screen yet stays covered until it is in place. */
+	let restoringDocument = $state<{ instanceId: string; covered: boolean } | null>(null);
 	let documentRestore: AbortController | null = null;
 	function restoreDocument(place: Parameters<typeof restoreDocumentPlace>[1], options: RestoreDocumentPlaceOptions = {}) {
 		documentRestore?.abort();
@@ -88,6 +89,7 @@
 	// document; its comments are taken from that document each time it shows, never kept with the image.
 	const shownImage = $derived(threadId && target ? tabDocumentImage(threadId, target.instanceId) : null);
 	const imageOpen = $derived(shownImage !== null && mode !== 'rail');
+	const documentCovered = $derived(imageOpen || (restoringDocument?.covered === true && restoringDocument.instanceId === target?.instanceId));
 	const imageComments = $derived(imageOpen && viewer ? viewer.imageComments() : undefined);
 	// Opening an image from its document eases the canvas wider and Back eases it back. Any other change (a tab switch,
 	// or a return to a tab whose image is open) puts the canvas at its width at once, in the frame the tab turns active.
@@ -112,7 +114,7 @@
 	$effect(() => () => documentRestore?.abort());
 	$effect(() => {
 		const activeInstanceId = activeTab?.instanceId;
-		if (restoringDocument !== null && restoringDocument !== activeInstanceId) {
+		if (restoringDocument !== null && restoringDocument.instanceId !== activeInstanceId) {
 			documentRestore?.abort();
 			restoringDocument = null;
 		}
@@ -209,11 +211,11 @@
 				? tabViewState(threadId, signal.instanceId)?.documentPlace
 				: null;
 			if (place) {
-				restoringDocument = signal.instanceId;
+				restoringDocument = { instanceId: signal.instanceId, covered: !signal.shown };
 				restoreDocument(place, {
 					mode: 'tab-return',
 					onPlaced: () => {
-						if (restoringDocument === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
+						if (restoringDocument?.instanceId === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
 					},
 				});
 			}
@@ -305,7 +307,7 @@
 			{:else if target}
 				<!-- DocViewer owns Escape precedence (comment draft, then selection),
 				     so handing it onClose keeps that order intact in compact. -->
-				<div class="doc-host" class:covered={imageOpen || restoringDocument === target.instanceId} inert={imageOpen || restoringDocument === target.instanceId}>
+				<div class="doc-host" class:covered={documentCovered} inert={documentCovered}>
 					<DocViewer
 						bind:this={viewer}
 						{target}

@@ -215,6 +215,18 @@ describe('docSaveQueue', () => {
 		clearDraft(doc);
 	});
 
+	it('frees the saved text a returning tab paints from once the tab closes', async () => {
+		const doc = target({ path: '/project/closing.md', artifactId: 'closing' });
+		seedDraft(doc, 'saved text');
+
+		const onClose = vi.fn();
+		const result = await closeTabWithSaveGate(doc, { onClose, onBringIntoView: vi.fn() });
+
+		expect(result).toEqual({ closed: true });
+		expect(onClose).toHaveBeenCalledOnce();
+		expect(existingDraft(doc)).toBeUndefined();
+	});
+
 	it('clears a failed draft when the user restores the last saved text', async () => {
 		const doc = target({ path: '/project/reverted.md', artifactId: 'reverted' });
 		mocks.writeContent.mockRejectedValue(new Error('network failed'));

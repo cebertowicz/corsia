@@ -519,6 +519,8 @@ describe('ArtifactLeaf load-status ownership', () => {
 		firstLoad.resolve({ text: '# First', revision: 'r-1', writable: true, artifact: { id: 'first' } });
 		await vi.waitFor(() => expect(tabsOf().find((tab) => tab.instanceId === first)?.status).toBe('ready'));
 		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledOnce());
+		// Its first reveal was not on screen yet, so it stays covered until it is in place.
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(true);
 
 		setActiveTab(THREAD, second);
 		flushSync();
@@ -531,11 +533,17 @@ describe('ArtifactLeaf load-status ownership', () => {
 
 		expect(secondScroller.scrollTop).toBe(31);
 		expect(tabViewState(THREAD, second)?.documentPlace).toEqual({ from: 0, top: 0, scrollTop: 31 });
+		expect(tabViewState(THREAD, first)?.documentPlace).toEqual({ from: 0, top: 0, scrollTop: 420 });
 
 		setActiveTab(THREAD, first);
 		flushSync();
-		expect(host.querySelector('.doc-host')?.hasAttribute('inert')).toBe(false);
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledTimes(2));
+		// The return paints its cached text at once, so neither its place nor the confirmed load's covers it.
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
 		returningFirstLoad.resolve({ text: '# First', revision: 'r-1', writable: true, artifact: { id: 'first' } });
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledTimes(3));
+		expect(host.querySelector('.doc-host')?.classList.contains('covered')).toBe(false);
 	});
 
 	it('keeps a tab restored before the socket connects loading, then opens it once connected', async () => {

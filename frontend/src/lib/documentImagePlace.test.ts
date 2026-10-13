@@ -158,18 +158,18 @@ describe('restoreDocumentPlace', () => {
 		await pending;
 	});
 
-	it('places a returning text line inside the editor measure and reveals the tab in that same pass', async () => {
+	it('hands a returning text line to the editor as its scroll target and reveals the tab once the measure finds it there', async () => {
 		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
 		const readAt: number[] = [];
+		const target = vi.spyOn(EditorView, 'scrollIntoView');
 		const found = vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
 			state: { doc: { length: 1000 } },
 			viewport: { from: 0, to: 0 },
 			get documentTop() { return -scroller.scrollTop; },
-			// The editor estimates the undrawn text above the line 90 px shorter than it measures once drawn.
 			lineBlockAt: () => ({ top: 400 }),
-			// The line has no coordinates until the editor has drawn it, near where it is scrolled to.
 			coordsAtPos: () => (scroller.scrollTop < 200 ? null : { top: 490 - scroller.scrollTop }),
-			// Within one measure pass, a request made while writing is read and written again before the frame paints.
+			// The editor lays its scroll target from the line as it draws it, inside its own measure pass.
+			dispatch: () => { scroller.scrollTop = 390; },
 			requestMeasure: ({ read, write }: { read: () => number; write: (top: number) => void }) => {
 				queueMicrotask(() => { readAt.push(scroller.scrollTop); write(read()); });
 			},
@@ -179,13 +179,34 @@ describe('restoreDocumentPlace', () => {
 			mode: 'tab-return',
 			onPlaced: () => placedAt.push(scroller.scrollTop),
 		});
-		// The saved offset was never used: the estimate moved the line near its place, the drawn line corrected it, and
-		// the tab was revealed from inside that measure. Every later pass found it held there.
-		expect(readAt.slice(0, 3)).toEqual([0, 300, 390]);
-		expect(new Set(readAt.slice(3))).toEqual(new Set([390]));
+		// The saved offset was never used, and no offset was written over the editor's own placement: every measured pass
+		// found the line already where it was.
+		expect(target).toHaveBeenCalledWith(80, { y: 'start', yMargin: 100 });
+		expect(new Set(readAt)).toEqual(new Set([390]));
 		expect(placedAt).toEqual([390]);
 		expect(scroller.scrollTop).toBe(390);
 		found.mockRestore();
+	});
+
+	it('stops a superseded text restore inside the measure pass, before it moves the document again', async () => {
+		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
+		const controller = new AbortController();
+		let passes = 0;
+		editor(scroller, {
+			coordsAtPos: () => ({ top: 490 - scroller.scrollTop }),
+			dispatch: () => {},
+			// A newer restore starts while this one's pass is pending.
+			requestMeasure: ({ read, write }: { read: () => number; write: (top: number) => void }) => {
+				passes += 1;
+				controller.abort();
+				write(read());
+			},
+		});
+		const placed = vi.fn();
+		await restoreDocumentPlace(root, { from: 80, top: 100, scrollTop: 2000 }, { mode: 'tab-return', signal: controller.signal, onPlaced: placed });
+		expect(scroller.scrollTop).toBe(0);
+		expect(passes).toBe(1);
+		expect(placed).not.toHaveBeenCalled();
 	});
 
 	it('stops a superseded anchor correction before it can overwrite a newer restore', async () => {

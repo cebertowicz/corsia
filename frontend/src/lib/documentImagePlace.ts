@@ -51,13 +51,14 @@ type Placed = 'missing' | 'held' | 'moved';
  * `now` runs the pass at once, inside the current frame, instead of in the editor's next one: an animation-frame
  * callback otherwise paints the layout it read before the editor measures the width that frame gave it.
  */
-function placeInMeasure(view: EditorView, scroller: HTMLElement, anchorTop: AnchorTop, top: number, now = false): Promise<Placed> {
+function placeInMeasure(view: EditorView, scroller: HTMLElement, anchorTop: AnchorTop, top: number, now = false, signal?: AbortSignal): Promise<Placed> {
 	return new Promise((resolve) => {
 		let moves = 0;
 		const measure = () => view.requestMeasure({
 			read: anchorTop,
 			write: (current) => {
-				if (current === null) {
+				// A newer restore owns the document now; this one stops moving it.
+				if (current === null || signal?.aborted) {
 					resolve(moves ? 'moved' : 'missing');
 					return;
 				}
@@ -148,8 +149,14 @@ export async function restoreDocumentPlace(
 	const anchorTop = view ? anchorReader(root, scroller, view, place) : widgetReader(root, scroller, place);
 	const back = options.mode !== 'tab-return';
 	if (!back) {
-		if (view && !('src' in place)) await placeInMeasure(view, scroller, anchorTop, place.top);
-		else scroller.scrollTop = place.scrollTop;
+		if (view && !('src' in place)) {
+			// The editor holds the text that was at the top when its measure pass began: an offset written inside the pass is
+			// pushed back by that text's corrected height. Its own scroll target moves that hold to the saved line, and
+			// reading its layout runs the pass now, before the frame paints; the measured placement then checks it.
+			view.dispatch({ effects: EditorView.scrollIntoView(Math.min(place.from, view.state.doc.length), { y: 'start', yMargin: place.top }) });
+			view.lineBlockAt(0);
+			await placeInMeasure(view, scroller, anchorTop, place.top, true, options.signal);
+		} else scroller.scrollTop = place.scrollTop;
 		if (options.signal?.aborted) return;
 		options.onPlaced?.();
 	} else if (!view) scroller.scrollTop = place.scrollTop;
@@ -182,7 +189,7 @@ export async function restoreDocumentPlace(
 			width = now;
 			let placed: Placed;
 			if (view) {
-				placed = await placeInMeasure(view, scroller, anchorTop, place.top, true);
+				placed = await placeInMeasure(view, scroller, anchorTop, place.top, true, options.signal);
 				if (placed === 'missing') {
 					if (back && frame === 0) scroller.scrollTop = place.scrollTop;
 					break;
