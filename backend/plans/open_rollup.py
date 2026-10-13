@@ -98,12 +98,12 @@ def rollup_open(
     ])
     child_plans = hierarchy.shown_worker_plans(connection, rows)
     waits = node_waits.project(connection, rows)
-    dependent_titles = rollup._dependent_titles(connection, str(plan["id"]))
+    titles = rollup._dependent_titles(connection, str(plan["id"]), rows)
     completed, linked = completions(connection, ids), links(connection, ids)
     ordered: list[dict] = []
     for row, path in listed:
         node = rollup._node_rollup(
-            connection, row, path, completed, linked, waits, dependent_titles, 0, memo,
+            connection, row, path, completed, linked, waits, titles, 0, memo,
             child_plans, {},
         )
         node["has_child_in_work"] = row["child_in_work"] > 0

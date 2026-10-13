@@ -110,27 +110,34 @@ def _links_by_node(connection, plan_id: str) -> dict:
     return indexed
 
 
-def _dependent_titles(connection, plan_id: str) -> dict[str, list[str]]:
-    """Return this plan's still-open work released by each user step.
+_DEPENDENT_CHUNK = 400
+
+
+def _dependent_titles(connection, plan_id: str, rows) -> dict[str, list[str]]:
+    """Return this plan's still-open work released by each listed user step.
 
     A dependency can cross plan boundaries, but the pane must not disclose a
-    different plan's titles. This plan's open dependents answer the local
-    question without a per-row query.
+    different plan's titles. Only the listed user steps are looked up, by the
+    dependency target index; CROSS JOIN keeps SQLite from driving the join
+    from the plan's nodes, so the cost follows the rows shown rather than the
+    plan's settled history.
     """
-    rows = fetch_all(
-        connection,
-        f"""SELECT p.id AS prerequisite_id,d.title
-            FROM plan_node_dependencies e
-            JOIN plan_nodes p ON p.id=e.depends_on_node_id
-            JOIN plan_nodes d ON d.id=e.node_id
-            WHERE p.plan_id=? AND p.assignee='user' AND d.plan_id=?
-              AND {node_states.in_work_sql('d')}
-            ORDER BY d.order_key,d.id""",
-        (plan_id, plan_id),
-    )
+    steps = list(dict.fromkeys(str(row["id"]) for row in rows if row["assignee"] == "user"))
     indexed: dict[str, list[str]] = {}
-    for row in rows:
-        indexed.setdefault(str(row["prerequisite_id"]), []).append(str(row["title"]))
+    for start in range(0, len(steps), _DEPENDENT_CHUNK):
+        chunk = steps[start:start + _DEPENDENT_CHUNK]
+        found = fetch_all(
+            connection,
+            f"""SELECT e.depends_on_node_id AS prerequisite_id,d.title
+                FROM plan_node_dependencies e
+                CROSS JOIN plan_nodes d ON d.id=e.node_id
+                WHERE e.depends_on_node_id IN ({",".join("?" for _ in chunk)})
+                  AND d.plan_id=? AND {node_states.in_work_sql('d')}
+                ORDER BY d.order_key,d.id""",
+            (*chunk, plan_id),
+        )
+        for row in found:
+            indexed.setdefault(str(row["prerequisite_id"]), []).append(str(row["title"]))
     return indexed
 
 
@@ -188,12 +195,12 @@ def _rollup_plan(
     """Project one plan's nodes in canonical plan order, recursing into child plans."""
     completed, sent_back = _settlements(connection, plan_row["id"])
     links = _links_by_node(connection, plan_row["id"])
-    dependent_titles = _dependent_titles(connection, plan_row["id"])
     rounds = {str(row["id"]) for row, _path in listed if row["sent_back"]}
     rows = [
         (row, path) for row, path in listed
         if str(row["id"]) not in rounds and rounds.isdisjoint(path)
     ]
+    dependent_titles = _dependent_titles(connection, plan_row["id"], (row for row, _path in rows))
     waits = node_waits.project(connection, [row for row, _path in rows])
     ordered: list[dict] = []
     for row, path in rows:
