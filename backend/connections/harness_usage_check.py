@@ -123,7 +123,7 @@ async def _check(provider: str, account_id: str) -> None:
         if binary is None:
             await _check_failed(provider, receipt, "Harness connection is unavailable")
         elif provider == "claude-code":
-            await _check_claude(binary, receipt, context=None if context.is_default else context)
+            await _check_claude(binary, receipt, **({} if context.is_default else {'context': context}))
         else:
             await _check_codex(binary, receipt)
     except Exception as exc:
