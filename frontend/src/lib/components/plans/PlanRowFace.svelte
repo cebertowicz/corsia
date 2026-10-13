@@ -21,7 +21,7 @@
 
 	// A branch row in the tree carries its count on its expand control instead.
 	// threads, moves: this row's rolled work (`rolledLive`); carriedBelow: what rows rendered under it already show.
-	let { node, isNext = false, showProgress = true, threads = [], moves = false, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; threads?: readonly string[]; moves?: boolean; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
+	let { node, isNext = false, showProgress = true, detailsOpen = false, threads = [], moves = false, carriedBelow = [], scheduledView }: { node: OperatorNode; isNext?: boolean; showProgress?: boolean; detailsOpen?: boolean; threads?: readonly string[]; moves?: boolean; carriedBelow?: readonly string[]; scheduledView?: ScheduledView } = $props();
 
 	const state = $derived(nodeDisplayState(node));
 	const tone = $derived(nodeStateTone(node));
@@ -60,7 +60,7 @@
 <span class="state-icon {state} {tone}" class:spinning={moving} title={label} aria-hidden="true">{#if scheduled}<SnoozeClock />{:else}{symbol}{/if}</span>
 <span class="row-copy">
 	<span class="row-line">
-		<span class="row-title" title={node.title}>{node.title}</span>
+		<span class="row-title" class:details-open={detailsOpen} title={node.title}>{node.title}</span>
 		{#if branchProgress}<span class="branch-progress">{branchProgress}<span class="sr-only">{' done'}</span></span>{/if}
 		<span class="row-status sr-only">{label}</span>
 	</span>
@@ -91,11 +91,13 @@
 	.row-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 	.row-title {
 		overflow: hidden; color: var(--text-primary); font-size: var(--text-subhead);
-		font-weight: var(--fw-medium); text-overflow: ellipsis; white-space: nowrap;
+		font-weight: var(--fw-medium); line-height: var(--lh-normal); text-overflow: ellipsis; white-space: nowrap;
 	}
 	/* One line: the icon carries status, the title truncates, progress never wraps. */
 	.row-line { display: flex; min-width: 0; align-items: baseline; gap: var(--space-2); }
 	.row-title { flex: 0 1 auto; min-width: 0; }
+	/* Open details make the same title readable in place; closed rows remain compact. */
+	.row-title.details-open { flex: 1 1 0; min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; }
 	.branch-progress {
 		flex: none; color: var(--text-tertiary); font-size: var(--text-caption);
 		font-variant-numeric: tabular-nums;
