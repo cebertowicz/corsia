@@ -8,6 +8,7 @@
 	import SettingsKeys from './SettingsKeys.svelte';
 	import { loadServerVersion } from '$lib/version';
 	import IconButton from '$lib/components/ui/IconButton.svelte';
+	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 	import { settingsActiveSection, settingsAnchorRequest, type SettingsSection } from '$lib/stores/settingsNavigation';
 
 	let { onClose, systemStatus = {} as any }: {
@@ -65,7 +66,7 @@
 		{/each}
 	</nav>
 
-	<div class="settings-content">
+	<div class="settings-content" use:toastAnchorSurface>
 		{#if $settingsActiveSection === 'providers'}
 			<div class="providers-host">
 				<ProviderManager />
