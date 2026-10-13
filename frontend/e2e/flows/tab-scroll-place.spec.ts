@@ -212,7 +212,7 @@ for (const width of [1440, 393]) {
 	
 					if (touch) await link(page).tap();
 					else await link(page).click();
-					await expect(page.getByText('This is the second tab.')).toBeVisible();
+					await expect(page.getByText('Second document')).toBeVisible();
 					await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
 					const secondBefore = await visiblePlace(scroller);
 					expect(secondBefore.scrollTop).toBeGreaterThan(0);
