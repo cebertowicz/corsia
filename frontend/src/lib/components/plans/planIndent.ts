@@ -12,21 +12,11 @@
 export const INDENT_STEP = 22;
 /** The least width a row's title keeps, at any depth. */
 export const MIN_TITLE = 96;
-/**
- * What the widest row spends on everything but its indent and title, one figure for every row so
- * siblings stay aligned. That row is a delegated one: status mark, gaps, the "N left" chip, the
- * chevron, and the row's left and right padding. Measured on the ellipsized rows of the render
- * (`_checks.txt`): 122px in the 283px desktop column, 139.3px in the 337px phone drawer, whose
- * buttons carry the 44px touch minimum. The figure is the phone's, plus 8px so a two-digit count fits.
- * A leaf row spends about 46px, so its title has that much to spare.
- */
-export const INDENT_RESERVE = 148;
 /** The share of the available indent stepped in linearly before the step starts to shrink. */
 const KNEE = 2 / 3;
 
-// The active reserve comes from the tree's CSS custom property; INDENT_RESERVE is the unmeasured/test fallback.
 /** The indent, in pixels, of a row `depth` levels in, in a tree `width` pixels wide (0: unmeasured). */
-export function indentOffset(depth: number, width: number, reserve = INDENT_RESERVE): number {
+export function indentOffset(depth: number, width: number, reserve: number): number {
 	const linear = depth * INDENT_STEP;
 	if (depth <= 0 || width <= 0) return Math.max(0, linear);
 	const max = Math.max(0, width - reserve - MIN_TITLE);
@@ -38,11 +28,11 @@ export function indentOffset(depth: number, width: number, reserve = INDENT_RESE
 }
 
 /** What one level steps in at `depth`: the offset it adds over the level above. */
-export function indentStep(depth: number, width: number, reserve = INDENT_RESERVE): number {
+export function indentStep(depth: number, width: number, reserve: number): number {
 	return indentOffset(depth, width, reserve) - indentOffset(depth - 1, width, reserve);
 }
 
 /** The offset as the CSS length every surface reads from `--indent`. */
-export function indentVar(depth: number, width: number, reserve = INDENT_RESERVE): string {
+export function indentVar(depth: number, width: number, reserve: number): string {
 	return `${Math.round(indentOffset(depth, width, reserve) * 100) / 100}px`;
 }

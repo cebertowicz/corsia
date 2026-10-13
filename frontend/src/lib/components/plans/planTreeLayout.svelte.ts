@@ -20,6 +20,6 @@ export function createPlanTreeLayout(
 		return () => watch.disconnect();
 	});
 
-	const depthStyle = (depth: number) => `--depth:${depth};--indent:${indentAt(depth, treeWidth, indentReserve)}`;
+	const depthStyle = (depth: number) => `--indent:${indentAt(depth, treeWidth, indentReserve)}`;
 	return { indentAt: (depth: number) => indentAt(depth, treeWidth, indentReserve), depthStyle };
 }

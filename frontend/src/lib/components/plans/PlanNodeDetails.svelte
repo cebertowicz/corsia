@@ -11,7 +11,7 @@
 	let {
 		node,
 		id,
-		indent = indentVar(node.depth, 0),
+		indent = indentVar(node.depth, 0, 0),
 	}: {
 		node: OperatorNode;
 		id: string;

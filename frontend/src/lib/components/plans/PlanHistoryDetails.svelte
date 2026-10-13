@@ -41,6 +41,7 @@
 	}
 	.history-details[role='alert'] { color: var(--red-text); }
 	@media (max-width: 620px) {
-		.history-details { margin-left: calc(18px + var(--indent)); }
+		/* Match PlanNodeDetails so this placeholder does not shift when content loads. */
+		.history-details { margin-left: calc(34px + var(--indent)); }
 	}
 </style>

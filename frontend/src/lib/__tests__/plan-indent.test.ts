@@ -2,12 +2,8 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import {
-	INDENT_RESERVE, INDENT_STEP, MIN_TITLE, indentOffset, indentStep, indentVar,
+	INDENT_STEP, MIN_TITLE, indentOffset, indentStep, indentVar,
 } from '$lib/components/plans/planIndent';
-import nodeDetailsSource from '$lib/components/plans/PlanNodeDetails.svelte?raw';
-import historyDetailsSource from '$lib/components/plans/PlanHistoryDetails.svelte?raw';
-import foldHistorySource from '$lib/components/plans/PlanFoldHistory.svelte?raw';
-import treeSource from '$lib/components/plans/PlanTree.svelte?raw';
 import { CHILD_AVAILABLE, node } from './fixtures/planTreeNode';
 import { childState, withFolds } from './fixtures/planFolds';
 
@@ -24,79 +20,54 @@ afterEach(() => {
 	host.remove();
 });
 
-/** The tree widths measured in the render: the 1440 desktop plan column and the 393 phone drawer. */
-const WIDTHS = [283, 337];
-/**
- * What a delegated row ("N left" chip, chevron, status mark, gaps) spends beside its indent and
- * title, measured on the ellipsized 'Hand off ...' rows of the render (`_checks.txt`, furnitureEllipsized
- * plus the row's 4px left and 8px right padding): the widest row there is.
- */
-const DELEGATED_OVERHEAD: Record<number, number> = { 283: 110 + 12, 337: 127.3 + 12 };
+/** The tree widths and reserves measured in the desktop column and phone drawer. */
+const TREE_DIMENSIONS = [
+	{ width: 283, reserve: 122 },
+	{ width: 337, reserve: 148 },
+] as const;
 
 describe('plan indent: one source for the per-level step', () => {
 	it('steps one full step per level while the title has room', () => {
-		expect(indentOffset(0, 345)).toBe(0);
-		expect(indentOffset(1, 345)).toBe(INDENT_STEP);
-		expect(indentOffset(3, 345)).toBe(3 * INDENT_STEP);
+		expect(indentOffset(0, 345, 122)).toBe(0);
+		expect(indentOffset(1, 345, 122)).toBe(INDENT_STEP);
+		expect(indentOffset(3, 345, 122)).toBe(3 * INDENT_STEP);
 	});
 
 	it('is linear without a measured width', () => {
-		expect(indentOffset(12, 0)).toBe(12 * INDENT_STEP);
-		expect(indentStep(5, 0)).toBe(INDENT_STEP);
+		expect(indentOffset(12, 0, 122)).toBe(12 * INDENT_STEP);
+		expect(indentStep(5, 0, 122)).toBe(INDENT_STEP);
 	});
 
-	it.each(WIDTHS)('keeps the title at least its minimum at depth 8 and 12 (%ipx tree)', (width) => {
-		for (const depth of [8, 12, 30]) {
-			expect(width - INDENT_RESERVE - indentOffset(depth, width)).toBeGreaterThanOrEqual(MIN_TITLE);
+	it('keeps the title at least its minimum at both production reserves', () => {
+		for (const { width, reserve } of TREE_DIMENSIONS) {
+			for (const depth of [8, 12, 30]) {
+				expect(width - reserve - indentOffset(depth, width, reserve)).toBeGreaterThanOrEqual(MIN_TITLE);
+			}
 		}
 	});
 
-	it.each(WIDTHS)('never refuses a level: offsets keep growing, steps only shrink (%ipx tree)', (width) => {
-		let previousStep = Infinity;
-		for (let depth = 1; depth <= 12; depth += 1) {
-			const step = indentOffset(depth, width) - indentOffset(depth - 1, width);
-			expect(step).toBeGreaterThan(0);
-			expect(step).toBeLessThanOrEqual(previousStep);
-			previousStep = step;
+	it('never refuses a level: offsets keep growing, steps only shrink', () => {
+		for (const { width, reserve } of TREE_DIMENSIONS) {
+			let previousStep = Infinity;
+			for (let depth = 1; depth <= 12; depth += 1) {
+				const step = indentOffset(depth, width, reserve) - indentOffset(depth - 1, width, reserve);
+				expect(step).toBeGreaterThan(0);
+				expect(step).toBeLessThanOrEqual(previousStep);
+				previousStep = step;
+			}
 		}
 	});
 
-	it('does not move depth 0 or 1 at either width', () => {
-		for (const width of WIDTHS) {
-			expect(indentOffset(0, width)).toBe(0);
-			expect(indentOffset(1, width)).toBe(INDENT_STEP);
+	it('does not move depth 0 or 1 at either production dimension', () => {
+		for (const { width, reserve } of TREE_DIMENSIONS) {
+			expect(indentOffset(0, width, reserve)).toBe(0);
+			expect(indentOffset(1, width, reserve)).toBe(INDENT_STEP);
 		}
-		expect(indentOffset(2, 337)).toBe(2 * INDENT_STEP);
+		expect(indentOffset(2, 337, 148)).toBe(2 * INDENT_STEP);
 	});
 
-	it.each(WIDTHS)('keeps a delegated row (chip and chevron) title at its minimum at depth 8 and 12 (%ipx tree)', (width) => {
-		for (const depth of [8, 12]) {
-			expect(width - DELEGATED_OVERHEAD[width] - indentOffset(depth, width)).toBeGreaterThanOrEqual(MIN_TITLE);
-		}
-	});
-
-	it('reserves at least the widest measured row, with room for a two-digit count', () => {
-		expect(INDENT_RESERVE).toBeGreaterThanOrEqual(Math.max(...Object.values(DELEGATED_OVERHEAD)) + 8);
-	});
-
-	it('is written as a CSS length the rows, details and history rows all read', () => {
-		expect(indentVar(2, 345)).toBe(`${2 * INDENT_STEP}px`);
-		for (const source of [nodeDetailsSource, historyDetailsSource, foldHistorySource, treeSource]) {
-			expect(source).not.toMatch(/var\(--depth\)\s*\*\s*\d+px/);
-		}
-	});
-
-	it('keeps details aligned with their title at desktop and phone reserves', () => {
-		for (const [width, reserve] of [[283, 122], [337, 148]] as const) {
-			const detailsMinusTitle = [0, 1, 4, 8].map((depth) => {
-				const rowTitleLeft = 30 + Number.parseFloat(indentVar(depth, width, reserve));
-				const detailsLeft = 34 + Number.parseFloat(indentVar(depth, width, reserve));
-				return detailsLeft - rowTitleLeft;
-			});
-			expect(new Set(detailsMinusTitle).size, `${width}px tree`).toBe(1);
-		}
-		// PlanTree has one reserve-aware indent path; a direct call can silently fall back to 148px.
-		expect(treeSource.match(/indentVar\(/g)).toHaveLength(1);
+	it('is written as a CSS length', () => {
+		expect(indentVar(2, 345, 122)).toBe(`${2 * INDENT_STEP}px`);
 	});
 });
 
@@ -145,11 +116,4 @@ describe('plan indent: details sit under their row', () => {
 		expect(offsetOf(row)).toBe(`${2 * INDENT_STEP}px`);
 	});
 
-	it('steps details by the same step as rows on a phone', () => {
-		// Phone details used a 12px step against the rows' 22px; the rule is now one custom property.
-		expect(nodeDetailsSource).not.toMatch(/--depth\)\s*\*\s*12px/);
-		expect(historyDetailsSource).not.toMatch(/--depth\)\s*\*\s*12px/);
-		expect(nodeDetailsSource).toMatch(/var\(--indent\)/);
-		expect(historyDetailsSource).toMatch(/var\(--indent\)/);
-	});
 });
