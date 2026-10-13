@@ -116,6 +116,33 @@ describe('restoreDocumentPlace', () => {
 		await pending;
 	});
 
+	it('places a returning text line inside the editor measure and reveals the tab in that same pass', async () => {
+		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
+		const readAt: number[] = [];
+		const found = vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
+			state: { doc: { length: 1000 } },
+			get documentTop() { return -scroller.scrollTop; },
+			// The editor estimates the undrawn text above the line 90 px shorter than it measures once drawn.
+			lineBlockAt: () => ({ top: 400 }),
+			coordsAtPos: () => ({ top: 490 - scroller.scrollTop }),
+			// The editor's measure pass runs before the next frame is painted.
+			requestMeasure: ({ read, write }: { read: () => number | null; write: (top: number | null) => void }) => {
+				queueMicrotask(() => { readAt.push(scroller.scrollTop); write(read()); });
+			},
+		} as unknown as EditorView);
+		const placedAt: number[] = [];
+		await restoreDocumentPlace(root, { from: 80, top: 100, scrollTop: 2000 }, {
+			mode: 'tab-return',
+			onPlaced: () => placedAt.push(scroller.scrollTop),
+		});
+		// The saved offset was never used: the estimate put the line near its place, the measure corrected it, and the
+		// tab was revealed from inside that measure.
+		expect(readAt).toEqual([300]);
+		expect(placedAt).toEqual([390]);
+		expect(scroller.scrollTop).toBe(390);
+		found.mockRestore();
+	});
+
 	it('stops a superseded anchor correction before it can overwrite a newer restore', async () => {
 		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
 		const widget = root.querySelector<HTMLElement>('[data-from="40"]')!;

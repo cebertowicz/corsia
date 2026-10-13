@@ -42,6 +42,30 @@ async function widthSettled(el: HTMLElement): Promise<void> {
 	}
 }
 
+/**
+ * Lays a returning tab's saved line at its saved distance inside the editor's own measure pass, so the frame that
+ * reveals the tab is the first one painted and already shows the line in place. The offset alone is not enough: the
+ * editor estimates the height of text it has not drawn, so the saved offset lands on a different line until it measures.
+ */
+function placeInMeasure(view: EditorView, scroller: HTMLElement, place: TextDocumentPlace): Promise<void> {
+	const from = Math.min(place.from, view.state.doc.length);
+	return new Promise((resolve) => {
+		scroller.scrollTop += view.documentTop + view.lineBlockAt(from).top - scroller.getBoundingClientRect().top - place.top;
+		view.requestMeasure({
+			read: () => {
+				const coords = view.coordsAtPos(from, 1);
+				return coords ? coords.top - scroller.getBoundingClientRect().top : null;
+			},
+			write: (top) => {
+				if (top !== null) scroller.scrollTop += top - place.top;
+				resolve();
+			},
+		});
+		// An editor torn down before it measures never answers; the tab still shows.
+		void nextFrame().then(nextFrame).then(() => resolve());
+	});
+}
+
 /** Reads the first visible CodeMirror line as an anchor before its tab leaves the screen. */
 export function captureDocumentPlace(root: HTMLElement | undefined): TextDocumentPlace | null {
 	const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
@@ -72,9 +96,9 @@ export async function restoreDocumentPlace(
 	if (options.signal?.aborted) return;
 	const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
 	if (!root || !scroller) return;
-	scroller.scrollTop = place.scrollTop;
-	// CodeMirror draws the newly visible line on the next frame; reveal a returning tab after that draw, not after the full anchor hold.
-	if (options.onPlaced) await nextFrame();
+	const editor = options.mode === 'tab-return' && !('src' in place) ? EditorView.findFromDOM(scroller) : null;
+	if (editor) await placeInMeasure(editor, scroller, place);
+	else scroller.scrollTop = place.scrollTop;
 	if (options.signal?.aborted) return;
 	options.onPlaced?.();
 	const image = 'src' in place ? place : null;
