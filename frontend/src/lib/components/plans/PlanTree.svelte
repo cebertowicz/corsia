@@ -347,6 +347,10 @@
 		padding: 6px 8px 6px calc(4px + var(--indent)); border-radius: var(--radius-xs);
 		width: 100%;
 	}
+	/* The fold face keeps its whole width, so the actions sit beside the
+	   outcome counts when they fit and wrap below them only when they don't. */
+	.fold-row { flex-wrap: wrap; }
+	.fold-row .row-body { flex: 0 1 auto; }
 	/* A long-press opens the task menu, so it must not also select text or raise the iOS callout. */
 	@media (pointer: coarse) {
 		.tree-row.has-menu { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
@@ -388,11 +392,6 @@
 	/* A notice with a retry is prose, not a plan row: it may wrap. */
 	.child-error { flex-wrap: wrap; color: var(--red-text); justify-content: space-between; }
 	.child-stale { flex-wrap: wrap; color: var(--amber); justify-content: space-between; }
-	@media (max-width: 620px) {
-		.tree-row, .drill-row { --plan-row-action-height: 44px; }
-		.drill-row { min-height: 44px; }
-		/* The details target is the whole row body, so it carries the touch
-		   minimum rather than a small label needing an invisible hit extension. */
-		button.row-body { min-height: 44px; }
-	}
+	/* The details target is the whole row body, so it carries the touch minimum. */
+	@media (max-width: 620px) { .tree-row, .drill-row { --plan-row-action-height: 44px; } .drill-row, button.row-body { min-height: 44px; } }
 </style>

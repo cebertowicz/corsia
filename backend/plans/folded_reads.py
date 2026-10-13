@@ -9,7 +9,7 @@ its ancestors, and the page of its parent's folded rows it sits on.
 
 from __future__ import annotations
 
-from plans import node_states, service
+from plans import closure, node_states, service
 from plans.boundary import PlanActor, _authorize_plan_scope
 from plans.operator_display_state import TERMINAL_DISPLAY
 from plans.operator_projection import OperatorNotFound, _require_human
@@ -19,7 +19,7 @@ ROOT = "root"
 _UNAVAILABLE = "operator target is unavailable"
 _BUCKET_STATE = {"done": "accepted", "failed": "failed", "closed": "closed"}
 _COLUMNS = (
-    "id,parent_id,kind,title,state,fold_bucket,folded_at,"
+    "id,parent_id,kind,title,state,assignee,fold_bucket,folded_at,"
     "child_folded_done,child_folded_failed,child_folded_closed"
 )
 _FOLDED = f"plan_id=? AND {node_states.unarchived_sql('plan_nodes')} AND folded=1 AND sent_back=0"
@@ -48,7 +48,7 @@ def _row_of(plan_id: str, node_id: str, *, db):
     return row
 
 
-def _item(row) -> dict:
+def _item(row, reasons: dict[str, str]) -> dict:
     """One folded row as the pane shows it: its tone, and the folded rows beneath it by tone."""
     state = str(row["state"])
     shown = state if state in TERMINAL_DISPLAY else _BUCKET_STATE.get(str(row["fold_bucket"]), "closed")
@@ -59,12 +59,20 @@ def _item(row) -> dict:
         "kind": row["kind"],
         "title": row["title"],
         "state": state,
+        # What the row records about how it ended, read as the pane reads it, so a
+        # history row says why it was not done (or who marked it) like an open one.
+        "status_reason": reasons.get(str(row["id"])),
         "folded_at": row["folded_at"],
         "fold_bucket": row["fold_bucket"],
         "display": dict(TERMINAL_DISPLAY[shown]),
         "folds": folds,
         "has_folded_children": any(folds.values()),
     }
+
+
+def _reasons(rows, *, db) -> dict[str, str]:
+    """Settled reasons for one page of rows: a bounded read, never the plan's history."""
+    return closure.settled_reasons(db, rows, labels={})
 
 
 def _cursor(row) -> str:
@@ -104,10 +112,11 @@ def read_folded(
         params += (after[0], after[0], after[1])
     rows = db.execute(sql + " ORDER BY folded_at DESC, id LIMIT ?", (*params, PAGE_SIZE + 1)).fetchall()
     page = rows[:PAGE_SIZE]
+    reasons = _reasons(page, db=db)
     return {
         "plan_id": plan["id"],
         "parent": parent,
-        "items": [_item(row) for row in page],
+        "items": [_item(row, reasons) for row in page],
         "next_cursor": _cursor(page[-1]) if len(rows) > PAGE_SIZE else None,
     }
 
@@ -144,7 +153,7 @@ def read_path(plan_id: str, node_id: str, *, actor: PlanActor, db) -> dict:
     row = _row_of(plan_id, node_id, db=db)
     answer = {
         "plan_id": plan_id,
-        "node": _item(row) if row["folded"] else None,
+        "node": _item(row, _reasons([row], db=db)) if row["folded"] else None,
         "ancestors": _ancestors(plan_id, row, db=db),
         "page": None,
     }
