@@ -212,7 +212,7 @@ for (const width of [1440, 393]) {
 	
 					if (touch) await link(page).tap();
 					else await link(page).click();
-					await expect(page.locator('.cm-line').filter({ hasText: /^Second document$/ })).toBeVisible();
+					await expect(page.locator('.cm-line').filter({ hasText: /^Second filler paragraph 1/ })).toBeVisible();
 					await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
 					const secondBefore = await visiblePlace(scroller);
 					expect(secondBefore.scrollTop).toBeGreaterThan(0);
