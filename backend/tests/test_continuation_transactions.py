@@ -56,6 +56,13 @@ class RaisingDueSource:
         raise RuntimeError("due failed")
 
 
+class ForeignTransactionPrepareSource:
+    kind = "foreign_transaction"
+
+    def prepare(self, _now, *, db):
+        raise RuntimeError("prepare failed")
+
+
 class FailCommit:
     def __init__(self, db):
         self.db = db
@@ -236,6 +243,26 @@ async def test_sweep_skips_raising_due_source_and_runs_later_source(
     assert not db.in_transaction
     logger.exception.assert_called_once_with(
         "continuation {} source due failed", "raising_due",
+    )
+
+
+def test_prepare_failure_preserves_a_foreign_transaction(
+    continuation_db, monkeypatch,
+):
+    db = database.get_db()
+    logger = MagicMock()
+    monkeypatch.setattr(runner, "logger", logger)
+    db.execute("INSERT INTO continuation_markers VALUES ('caller')")
+    try:
+        assert runner._prepare(NOW, [ForeignTransactionPrepareSource()], db) == []
+        assert db.in_transaction
+        assert stored(continuation_db) == ([], [])
+        db.commit()
+        assert stored(continuation_db) == ([("caller",)], [])
+    finally:
+        db.rollback()
+    logger.exception.assert_called_once_with(
+        "continuation {} source prepare failed", "foreign_transaction",
     )
 
 

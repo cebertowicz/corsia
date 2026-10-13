@@ -78,13 +78,14 @@ def _prepare(now: str, sources: list[TriggerSource], db) -> list[str]:
     for source in sources:
         prepare = getattr(source, "prepare", None)
         if callable(prepare):
+            was_clean = not shared_db.in_transaction
             try:
                 woken.extend(prepare(now, db=db) or ())
             except Exception:
                 logger.exception(
                     "continuation {} source prepare failed", source.kind,
                 )
-                if shared_db.in_transaction:
+                if was_clean and shared_db.in_transaction:
                     shared_db.rollback()
     return woken
 
@@ -99,13 +100,14 @@ def _collect(
     read_db = db if db is not None else get_db()
     requests = []
     for source in sources:
+        was_clean = not read_db.in_transaction
         try:
             requests.extend(
                 (request, source) for request in source.due(now, db=read_db)
             )
         except Exception:
             logger.exception("continuation {} source due failed", source.kind)
-            if read_db.in_transaction:
+            if was_clean and read_db.in_transaction:
                 read_db.rollback()
     rows = []
     with write_transaction(db, scope="continuation_collect") as connection:
