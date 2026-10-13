@@ -921,13 +921,56 @@ async def test_fresh_process_initial_fold_follows_harness_no_warm_policy(
         assert sum(line.startswith("INFO|Optional checkpoint skipped") for line in lines) == 1
         refused = (
             "INFO|checkpoint warm capture refused for thread-fresh "
-            "(claude-code): no_live_handle\n"
+            f"(claude-code): no_live_handle mode={mode} has_session=no "
+            "session_registered=no eager=none\n"
         )
         assert lines.count(refused) == 1
         assert not any(line.startswith("WARNING|") for line in lines)
     else:
         assert admission.request.mode == "cold"
         assert [call["context"] for call in cold_calls] == [context]
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected"),
+    [
+        (
+            {},
+            "no_live_handle mode=exact_replay has_session=no session_registered=no eager=none",
+        ),
+        (
+            {"provider_registered": True},
+            "no_live_handle mode=exact_replay has_session=yes session_registered=yes eager=none",
+        ),
+        (
+            {"provider_registered": True, "eager_checkpoint_id": "eager-1"},
+            "no_live_handle mode=exact_replay has_session=no session_registered=yes "
+            "eager=pending",
+        ),
+        (
+            {
+                "provider_registered": True,
+                "eager_checkpoint_id": "eager-1",
+                "registered_checkpoint_id": "eager-1",
+            },
+            "no_live_handle mode=exact_replay has_session=yes session_registered=yes "
+            "eager=adopted",
+        ),
+    ],
+)
+def test_no_live_handle_names_why_the_launch_was_not_provider_resume(fields, expected):
+    from core.checkpoint_warm_request import _no_live_handle_reason
+    from history.types import HistoryBoundary
+    from subagents import harness_checkpoint_resume as bridge
+
+    context = bridge.ExternalCheckpointContext(
+        thread_row={}, target=_target("claude-code"), history=object(),
+        boundary=HistoryBoundary("thread-fresh", 0, 7, "through-row"),
+        previous_generation_id=None, working_dir="/tmp",
+        tail_tokens=100, minimum_tail_tokens=10, **fields,
+    )
+
+    assert _no_live_handle_reason(SimpleNamespace(mode="exact_replay"), context) == expected
 
 
 @pytest.mark.asyncio
