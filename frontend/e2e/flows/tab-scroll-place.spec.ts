@@ -13,13 +13,28 @@ import { syntheticPng } from '../support/syntheticImages';
 const FILLER = Array.from({ length: 34 }, (_, i) => `Filler paragraph ${i + 1} keeps this tab long enough to restore.\n`);
 const INDEX = [
 	'# Index', '',
-	...FILLER,
+	...FILLER.slice(0, 18),
 	'Open [the second document](./SECOND.md) from this saved place.', '',
+	...FILLER.slice(18),
 ].join('\n');
-const SECOND = '# Second document\n\nThis is the second tab.\n';
+const SECOND = [
+	'# Second document', '',
+	...FILLER.map((line) => line.replace('Filler', 'Second filler')),
+	'This is the second tab.', '',
+].join('\n');
 
 const query = () => new URLSearchParams({ token: TEST_TOKEN }).toString();
 const link = (page: Page) => page.locator('.cm-md-link-open', { hasText: 'the second document' });
+
+async function selectTab(page: Page, title: string, touch: boolean): Promise<void> {
+	if (touch) {
+		await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
+		await page.getByRole('dialog', { name: 'Open side panel items' })
+			.getByRole('button', { name: title, exact: true }).click();
+		return;
+	}
+	await page.getByRole('tab', { name: title, exact: true }).click();
+}
 
 type VisiblePlace = { scrollTop: number; line: string; top: number | null };
 /** `editor` is false while the tab still shows its loading state, before the document's text arrived. */
@@ -138,98 +153,134 @@ for (const width of [1440, 393]) {
 	const touch = width <= 768;
 	const height = touch ? 852 : 900;
 	test.describe(`@flow:tab-scroll-place @surface:documents tab place survives at ${width}px`, () => {
-		test(`returns to the same document line and scroll offset at ${width}px`, async ({ browser, request }, testInfo) => {
-			test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
-			const context = await browser.newContext({
-				baseURL: testInfo.project.use.baseURL,
-				viewport: { width, height },
-				hasTouch: touch,
-				recordVideo: { dir: testInfo.outputPath('video'), size: { width, height } },
-			});
-			const page = await context.newPage();
-			const sessionTitle = `tab-scroll-place-${width}-${Date.now()}`;
-			const sessionId = await createSession(request, sessionTitle);
-
-			const tree = await (await request.get(`/api/files/tree?${query()}`)).json();
-			const roots: Array<{ kind: string; path: string }> = tree.roots ?? [];
-			const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
-			expect(workspaceRoot).toEqual(expect.any(String));
-			const dir = path.join(workspaceRoot, sessionTitle);
-			const indexPath = path.join(dir, 'INDEX.md');
-			fs.mkdirSync(dir, { recursive: true });
-			fs.writeFileSync(indexPath, INDEX);
-			fs.writeFileSync(path.join(dir, 'SECOND.md'), SECOND);
-
-			try {
-				const registered = await request.post(`/api/files/register?${query()}`, {
-					data: { path: indexPath, thread_id: sessionId },
+		for (const scheme of ['light', 'dark'] as const) {
+			test(`returns to the same document line and scroll offset at ${width}px (${scheme})`, async ({ browser, request }, testInfo) => {
+				test.skip(testInfo.project.name !== 'chromium-desktop', 'Sizes are set by the spec itself');
+				const context = await browser.newContext({
+					baseURL: testInfo.project.use.baseURL,
+					viewport: { width, height },
+					hasTouch: touch,
+					recordVideo: { dir: testInfo.outputPath('video'), size: { width, height } },
 				});
-				expect(registered.ok(), `register failed: ${registered.status()}`).toBeTruthy();
-				const artifact = (await registered.json()).artifact;
-				await page.addInitScript(
-					({ threadId, artifactId, tabPath }) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
-						threads: {
-							[threadId]: {
-								tabs: [{
-									instanceId: 'tab-index', artifactId, path: tabPath, title: 'INDEX.md',
-									loadedRevision: null, latestRevision: null, status: 'loading',
-								}],
-								activeTabId: 'tab-index', visible: true, activeSurface: 'artifact',
+				const page = await context.newPage();
+				await page.emulateMedia({ colorScheme: scheme });
+				const sessionTitle = `tab-scroll-place-${width}-${scheme}-${Date.now()}`;
+				const sessionId = await createSession(request, sessionTitle);
+
+				const tree = await (await request.get(`/api/files/tree?${query()}`)).json();
+				const roots: Array<{ kind: string; path: string }> = tree.roots ?? [];
+				const workspaceRoot = (roots.find((root) => root.kind === 'workspace') ?? roots[0])?.path;
+				expect(workspaceRoot).toEqual(expect.any(String));
+				const dir = path.join(workspaceRoot, sessionTitle);
+				const indexPath = path.join(dir, 'INDEX.md');
+				fs.mkdirSync(dir, { recursive: true });
+				fs.writeFileSync(indexPath, INDEX);
+				fs.writeFileSync(path.join(dir, 'SECOND.md'), SECOND);
+
+				try {
+					const registered = await request.post(`/api/files/register?${query()}`, {
+						data: { path: indexPath, thread_id: sessionId },
+					});
+					expect(registered.ok(), `register failed: ${registered.status()}`).toBeTruthy();
+					const artifact = (await registered.json()).artifact;
+					await page.addInitScript(
+						({ threadId, artifactId, tabPath }) => localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({
+							threads: {
+								[threadId]: {
+									tabs: [{
+										instanceId: 'tab-index', artifactId, path: tabPath, title: 'INDEX.md',
+										loadedRevision: null, latestRevision: null, status: 'loading',
+									}],
+									activeTabId: 'tab-index', visible: true, activeSurface: 'artifact',
+								},
 							},
-						},
-						splitWidth: null,
-					})),
-					{ threadId: sessionId, artifactId: artifact.id, tabPath: indexPath },
-				);
+							splitWidth: null,
+						})),
+						{ threadId: sessionId, artifactId: artifact.id, tabPath: indexPath },
+					);
 
-				await loginByUrl(page);
-				if (touch) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-				await page.getByText(sessionTitle).first().click();
-				const scroller = page.locator('.cm-scroller');
-				await expect(scroller).toBeVisible();
-				await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-				await expect(link(page)).toBeInViewport();
-				const before = await visiblePlace(scroller);
-				expect(before.scrollTop).toBeGreaterThan(0);
-				expect(before.line).not.toBe('');
-				await saveEvidenceScreenshot(page, testInfo, `tab-scroll-place-${width}-before`, { fullPage: false });
+					await loginByUrl(page);
+					if (touch) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+					await page.getByText(sessionTitle).first().click();
+					const scroller = page.locator('.cm-scroller');
+					await expect(scroller).toBeVisible();
+					await scroller.evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2); });
+					await expect(link(page)).toBeInViewport();
+					const before = await visiblePlace(scroller);
+					expect(before.scrollTop).toBeGreaterThan(0);
+					expect(before.line).not.toBe('');
+					await saveEvidenceScreenshot(page, testInfo, `tab-scroll-place-${width}-before`, { fullPage: false });
 
-				if (touch) await link(page).tap();
-				else await link(page).click();
-				await expect(page.getByText('This is the second tab.')).toBeVisible();
-				if (touch) {
-					await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
+					if (touch) await link(page).tap();
+					else await link(page).click();
+					await expect(page.getByText('Second filler paragraph 1 keeps this tab long enough to restore.', { exact: true })).toBeVisible();
+					// A different place from INDEX.md's, so a restore that lands on the wrong tab shows.
+					await scroller.evaluate((el) => {
+						const line = [...el.querySelectorAll<HTMLElement>('.cm-line')]
+							.find((candidate) => candidate.textContent?.startsWith('Second filler paragraph 8 '));
+						el.scrollTop += Math.round(line!.getBoundingClientRect().top - el.getBoundingClientRect().top) + 4;
+					});
+					await expect.poll(async () => (await visiblePlace(scroller)).line.startsWith('Second filler')).toBe(true);
+					const secondBefore = await visiblePlace(scroller);
+					expect(secondBefore.scrollTop).toBeGreaterThan(0);
+					expect(Math.abs(secondBefore.scrollTop - before.scrollTop)).toBeGreaterThan(200);
+					expect(secondBefore.line).toContain('Second filler');
+					if (touch) {
+						await page.getByRole('button', { name: /Tabs \(2\)/ }).click();
+						await armReturnSampler(page);
+						await page.getByRole('dialog', { name: 'Open side panel items' })
+							.getByRole('button', { name: 'INDEX.md', exact: true }).click();
+					} else {
+						await armReturnSampler(page);
+						await page.getByRole('tab', { name: 'INDEX.md' }).click();
+					}
+
+					const frames = await returnSamples(page);
+					const report = {
+						before, coveredFrames: coveredFrames(frames), loadingFrames: loadingFrames(frames),
+						maxHiddenFrames: MAX_HIDDEN_FRAMES, maxDriftPx: MAX_DRIFT_PX, frames,
+					};
+					fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}.json`), JSON.stringify(report));
+					expectNoReturnPop(frames, before);
+					await expect.poll(async () => {
+						const current = await visiblePlace(scroller);
+						return current.line === before.line && current.top !== null && before.top !== null
+							&& Math.abs(current.top - before.top) <= MAX_DRIFT_PX;
+					}).toBe(true);
+					const after = await visiblePlace(scroller);
+					expect(after.line).toBe(before.line);
+					expect(after.top).not.toBeNull();
+					expect(Math.abs(after.top! - before.top!)).toBeLessThanOrEqual(MAX_DRIFT_PX);
 					await armReturnSampler(page);
-					await page.getByRole('dialog', { name: 'Open side panel items' })
-						.getByRole('button', { name: 'INDEX.md', exact: true }).click();
-				} else {
-					await armReturnSampler(page);
-					await page.getByRole('tab', { name: 'INDEX.md' }).click();
+					await selectTab(page, 'SECOND.md', touch);
+					await selectTab(page, 'INDEX.md', touch);
+					await selectTab(page, 'SECOND.md', touch);
+					const raceFrames = await returnSamples(page);
+					expect(coveredFrames(raceFrames)).toBeLessThanOrEqual(MAX_HIDDEN_FRAMES);
+					await expect.poll(async () => {
+						const current = await visiblePlace(scroller);
+						return current.line === secondBefore.line && current.top !== null && secondBefore.top !== null
+							&& Math.abs(current.top - secondBefore.top) <= MAX_DRIFT_PX;
+					}).toBe(true);
+					const secondAfterRace = await visiblePlace(scroller);
+					expect(secondAfterRace.line).toBe(secondBefore.line);
+					expect(secondAfterRace.top).not.toBeNull();
+					expect(Math.abs(secondAfterRace.top! - secondBefore.top!)).toBeLessThanOrEqual(MAX_DRIFT_PX);
+					fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}-${scheme}.json`), JSON.stringify({
+						indexBefore: before,
+						secondBefore,
+						indexAfter: after,
+						secondAfterRace,
+						frames,
+						raceFrames,
+					}));
+					await saveEvidenceScreenshot(page, testInfo, `tab-scroll-place-${width}-${scheme}-after`, { fullPage: false });
+				} finally {
+					fs.rmSync(dir, { recursive: true, force: true });
+					await context.close();
 				}
-
-				const frames = await returnSamples(page);
-				const report = {
-					before, coveredFrames: coveredFrames(frames), loadingFrames: loadingFrames(frames),
-					maxHiddenFrames: MAX_HIDDEN_FRAMES, maxDriftPx: MAX_DRIFT_PX, frames,
-				};
-				fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}.json`), JSON.stringify(report));
-				expectNoReturnPop(frames, before);
-				await expect.poll(async () => {
-					const current = await visiblePlace(scroller);
-					return current.line === before.line && current.top !== null && before.top !== null
-						&& Math.abs(current.top - before.top) <= MAX_DRIFT_PX;
-				}).toBe(true);
-				const after = await visiblePlace(scroller);
-				expect(after.line).toBe(before.line);
-				expect(after.top).not.toBeNull();
-				expect(Math.abs(after.top! - before.top!)).toBeLessThanOrEqual(MAX_DRIFT_PX);
-				fs.writeFileSync(testInfo.outputPath(`tab-scroll-place-${width}.json`), JSON.stringify({ ...report, after }));
-				await saveEvidenceScreenshot(page, testInfo, `tab-scroll-place-${width}-after`, { fullPage: false });
-			} finally {
-				fs.rmSync(dir, { recursive: true, force: true });
-				await context.close();
-			}
-		});
+			});
+		}
 	});
 }
 

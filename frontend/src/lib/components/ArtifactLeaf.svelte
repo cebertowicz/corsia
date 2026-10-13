@@ -111,6 +111,13 @@
 	});
 	$effect(() => () => documentRestore?.abort());
 	$effect(() => {
+		const activeInstanceId = activeTab?.instanceId;
+		if (restoringDocument !== null && restoringDocument !== activeInstanceId) {
+			documentRestore?.abort();
+			restoringDocument = null;
+		}
+	});
+	$effect(() => {
 		if (!imageOpen || mode !== 'expanded') return;
 		const release = widenForImageViewer(untrack(() => leafEl?.getBoundingClientRect().width ?? 0), { instant: !easeCanvas });
 		easeCanvas = false;

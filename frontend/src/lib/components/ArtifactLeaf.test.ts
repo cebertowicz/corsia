@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
 		leaveDocFeedback: vi.fn(),
 		returnDocFeedback: vi.fn(),
 		retryDocFeedback: vi.fn(),
+		restoreDocumentPlace: vi.fn(),
 		setComments(value: Record<string, unknown[]>) {
 			comments = value;
 			for (const run of subscribers) run(comments);
@@ -69,6 +70,10 @@ vi.mock('$lib/stores/docComments', () => ({
 	flushPositions: vi.fn(),
 }));
 
+vi.mock('$lib/documentImagePlace', () => ({
+	restoreDocumentPlace: mocks.restoreDocumentPlace,
+}));
+
 import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';
 import { updateDocumentOpenCapability } from '$lib/ws/presence';
@@ -83,7 +88,7 @@ import { setWs } from '$lib/ws/state';
 import { connectionState } from '$lib/stores/connection';
 import { LIVE_OPEN_WAIT_MS, startLiveDocuments } from '$lib/stores/liveDocuments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { tabDocumentImage } from '$lib/stores/tabViewState';
+import { recordTabDocumentPlace, tabDocumentImage, tabViewState } from '$lib/stores/tabViewState';
 import { EditorView } from '@codemirror/view';
 
 let host: HTMLElement;
@@ -185,6 +190,7 @@ beforeEach(() => {
 	mocks.leaveDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.returnDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
 	mocks.retryDocFeedback.mockReset().mockResolvedValue({ woken: [], undelivered_batches: [] });
+	mocks.restoreDocumentPlace.mockReset().mockResolvedValue(undefined);
 	mocks.setComments({});
 	resetDocPresenceForTests();
 	liveOpens.length = 0;
@@ -481,6 +487,57 @@ describe('ArtifactLeaf in-canvas comments', () => {
 });
 
 describe('ArtifactLeaf load-status ownership', () => {
+	it('cancels an interrupted tab-return restore before it can change the next tab', async () => {
+		let continueRestore: (() => void) | undefined;
+		const firstLoad = deferred<{ text: string; revision: string; writable: boolean; artifact: { id: string } }>();
+		const returningFirstLoad = deferred<{ text: string; revision: string; writable: boolean; artifact: { id: string } }>();
+		mocks.fetchContent.mockImplementation((path: string) => {
+			if (path === '/first.md' && mocks.fetchContent.mock.calls.filter(([requested]) => requested === path).length > 1) return returningFirstLoad.promise;
+			if (path === '/first.md') return firstLoad.promise;
+			return Promise.resolve({ text: '# Second', revision: 'r-2', writable: true, artifact: { id: 'second' } });
+		});
+		mocks.restoreDocumentPlace.mockImplementation((root: HTMLElement | undefined, place: { scrollTop: number }, options: { signal?: AbortSignal } = {}) => new Promise<void>((resolve) => {
+			continueRestore = () => {
+				if (!options.signal?.aborted) {
+					const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
+					if (scroller) {
+						scroller.scrollTop = place.scrollTop;
+						scroller.dispatchEvent(new Event('scroll'));
+					}
+				}
+				resolve();
+			};
+		}));
+
+		openArtifactTab(THREAD, { path: '/first.md', title: 'first.md' });
+		const first = get(threadWorkspaces)[THREAD].activeTabId!;
+		openArtifactTab(THREAD, { path: '/second.md', title: 'second.md' });
+		const second = get(threadWorkspaces)[THREAD].activeTabId!;
+		setActiveTab(THREAD, first);
+		recordTabDocumentPlace(THREAD, first, { from: 0, top: 0, scrollTop: 420 });
+		render();
+		firstLoad.resolve({ text: '# First', revision: 'r-1', writable: true, artifact: { id: 'first' } });
+		await vi.waitFor(() => expect(tabsOf().find((tab) => tab.instanceId === first)?.status).toBe('ready'));
+		await vi.waitFor(() => expect(mocks.restoreDocumentPlace).toHaveBeenCalledOnce());
+
+		setActiveTab(THREAD, second);
+		flushSync();
+		await vi.waitFor(() => expect(tabsOf().find((tab) => tab.instanceId === second)?.status).toBe('ready'));
+		const secondScroller = host.querySelector<HTMLElement>('.cm-scroller')!;
+		secondScroller.scrollTop = 31;
+		recordTabDocumentPlace(THREAD, second, { from: 0, top: 0, scrollTop: 31 });
+		continueRestore!();
+		await Promise.resolve();
+
+		expect(secondScroller.scrollTop).toBe(31);
+		expect(tabViewState(THREAD, second)?.documentPlace).toEqual({ from: 0, top: 0, scrollTop: 31 });
+
+		setActiveTab(THREAD, first);
+		flushSync();
+		expect(host.querySelector('.doc-host')?.hasAttribute('inert')).toBe(false);
+		returningFirstLoad.resolve({ text: '# First', revision: 'r-1', writable: true, artifact: { id: 'first' } });
+	});
+
 	it('keeps a tab restored before the socket connects loading, then opens it once connected', async () => {
 		connectionState.set('connecting');
 		mocks.fetchContent.mockResolvedValue({ text: '# restored', revision: 'r-1', writable: true, artifact: { id: 'art-restored' } });
