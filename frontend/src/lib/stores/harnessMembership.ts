@@ -20,10 +20,14 @@ export function isDiscoveredHarnessModel(row: { available?: unknown }): boolean 
 	return Boolean(row.available);
 }
 
-/** The catalog rows the picker can group; stale blocked-row suppression is group-local. */
+/**
+ * The catalog rows the picker can group; stale blocked-row suppression is group-local.
+ * A harness the person switched off leaves the picker, except the thread's own model.
+ */
 export function pickerCatalogModels(all: Model[], current?: string | null): Model[] {
 	return all.filter((model) => {
 		if (!isPickerMember(model, current)) return false;
+		if (model.status_reason === 'provider_disabled' && !modelMatchesId(model, current)) return false;
 		if (isHarnessModel(model) && !isDiscoveredHarnessModel(model) && !modelMatchesId(model, current)) return false;
 		const turn = modelAvailability(model);
 		return turn.status === 'ready' || (turn.status === 'unavailable' && Boolean(turn.status_reason));

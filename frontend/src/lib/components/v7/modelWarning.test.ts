@@ -46,6 +46,11 @@ describe('chatPickerWarning', () => {
 		expect(text).not.toContain('details');
 	});
 
+	it('is silent for a harness the person switched off; its card says so', () => {
+		const off = [row('codex/off', 'unavailable', 'provider_disabled')];
+		expect(chatPickerWarning(off, 'codex/off', false)).toBeNull();
+	});
+
 	it('names a disconnected harness', () => {
 		expect(chatPickerWarning(catalog, 'codex/x', false)).toContain('isn’t connected');
 	});

@@ -14,6 +14,20 @@ const pickerRow = (over: Partial<Model> = {}): Model => ({
 	status: 'ready', available: true, litellm_model: 'codex/gpt-5.6-sol', ...over,
 });
 
+describe('pickerCatalogModels', () => {
+	it('drops a switched-off harness from the picker but keeps the thread\'s own model', () => {
+		const off = { status: 'unavailable' as const, status_reason: 'provider_disabled' };
+		const catalog = [
+			pickerRow({ id: 'codex/one', ...off }),
+			pickerRow({ id: 'codex/two', ...off }),
+			pickerRow({ id: 'codex/other', status: 'unavailable', status_reason: 'discovered_model_unavailable' }),
+		];
+
+		expect(pickerCatalogModels(catalog).map((model) => model.id)).toEqual(['codex/other']);
+		expect(pickerCatalogModels(catalog, 'codex/two').map((model) => model.id)).toEqual(['codex/two', 'codex/other']);
+	});
+});
+
 describe('harnessSummaries', () => {
 	it('keeps both harness cards while deriving each model total from its inventory', () => {
 		const catalog = [pickerRow(), pickerRow({ id: 'codex/gpt-6-sol', status: 'unavailable' })];

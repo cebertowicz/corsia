@@ -27,6 +27,8 @@ export function chatPickerWarning(
 		case 'connection_unavailable':
 			return 'Not in the chat picker: this harness isn’t connected.';
 		case 'usage_limited':
+		case 'provider_disabled':
+			// The account row and the provider card say these; the model row adds nothing.
 			return null;
 		default:
 			return 'Not in the chat picker: this model is unavailable right now.';
