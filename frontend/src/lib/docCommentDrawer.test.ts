@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { clickedOpener, footerFocusHome, openerFocus } from './docCommentDrawer';
+import { clickedOpener, footerFocusHome, openerFocus, presence } from './docCommentDrawer';
 
 afterEach(() => document.body.replaceChildren());
 
@@ -105,5 +105,20 @@ describe('openerFocus', () => {
 		card.remove();
 		expect(openerFocus(card, null)).toBeNull();
 		expect(openerFocus(null, null)).toBeNull();
+	});
+});
+
+describe('presence', () => {
+	it('reports shown when the first element mounts and gone only once the last has left', () => {
+		const reports: boolean[] = [];
+		const shown = presence((value) => reports.push(value));
+		const sheet = shown(document.createElement('section'));
+		expect(reports).toEqual([true]);
+		// The drawer changes form: the new one mounts before the old one's outro ends, and nothing is reported.
+		const beside = shown(document.createElement('section'));
+		sheet.destroy();
+		expect(reports).toEqual([true]);
+		beside.destroy();
+		expect(reports).toEqual([true, false]);
 	});
 });

@@ -66,3 +66,15 @@ export function drawerKeys(element: HTMLElement, onClose: () => void) {
 	element.addEventListener('keydown', onKey);
 	return { destroy() { element.removeEventListener('keydown', onKey); } };
 }
+
+/**
+ * Reports whether any element using the returned action is on screen: true when the first one mounts, false once the
+ * last has left. Svelte tears an action down only after its element's outro ends, so a leaving element still counts.
+ */
+export function presence(report: (shown: boolean) => void) {
+	let mounted = 0;
+	return (_node: Element) => {
+		if (mounted++ === 0) report(true);
+		return { destroy() { if (--mounted === 0) report(false); } };
+	};
+}

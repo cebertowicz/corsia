@@ -190,12 +190,16 @@ async function clipOf(page: Page, around: Locator): Promise<Box> {
  * Animation.setPlaybackRate), so the frames land inside it, and each frame reads `probe` (the changed
  * element's own property), so an unrelated animation elsewhere cannot pass for this one. Frames go to
  * `<name>-fNN.png`, the probe readings to `<name>.json`.
+ * The animation clock stands still while a frame is read and taken, and `probe` is read again after the frame:
+ * a reading that changed while the frame was taken goes to `<name>.after.json`, so a reading never silently
+ * describes a different frame from its picture.
  */
 export async function record(page: Page, testInfo: TestInfo, name: string, around: Locator, trigger: () => Promise<unknown>,
 	probe: () => Promise<string | number>, { rate = 0.1, frames = 10, every = 120 } = {}): Promise<Array<string | number>> {
 	const clip = await clipOf(page, around);
 	const cdp = await page.context().newCDPSession(page);
 	const values: Array<string | number> = [];
+	const moved: Array<{ frame: number; before: string | number; after: string | number }> = [];
 	try {
 		await cdp.send('Animation.enable');
 		await cdp.send('Animation.setPlaybackRate', { playbackRate: rate });
@@ -205,8 +209,13 @@ export async function record(page: Page, testInfo: TestInfo, name: string, aroun
 		// A trigger that detaches its own CDP session (touchDrag) puts the clock back to 1, so set it again.
 		await cdp.send('Animation.setPlaybackRate', { playbackRate: rate });
 		for (let index = 1; index <= frames; index++) {
-			values.push(await probe());
+			await cdp.send('Animation.setPlaybackRate', { playbackRate: 0 });
+			const reading = await probe();
+			values.push(reading);
 			await still(page, testInfo, `${name}-f${String(index).padStart(2, '0')}`, clip);
+			const after = await probe();
+			if (after !== reading) moved.push({ frame: index, before: reading, after });
+			await cdp.send('Animation.setPlaybackRate', { playbackRate: rate });
 			await page.waitForTimeout(every);
 		}
 	} finally {
@@ -214,6 +223,7 @@ export async function record(page: Page, testInfo: TestInfo, name: string, aroun
 		await cdp.detach();
 	}
 	fs.writeFileSync(testInfo.outputPath(`${name}.json`), JSON.stringify(values));
+	if (moved.length) fs.writeFileSync(testInfo.outputPath(`${name}.after.json`), JSON.stringify(moved));
 	return values;
 }
 

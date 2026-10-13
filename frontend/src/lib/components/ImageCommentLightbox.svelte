@@ -18,6 +18,7 @@
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
 	import { commentLoads, docComments, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
 	import { isPaneDrawer } from '$lib/stores/paneOpen';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
@@ -124,6 +125,12 @@
 
 	// The drawer opens by growing its grid track, so the image above or beside it moves with it rather than jumping.
 	const drawerOpen = $derived(image.ui.state?.kind === 'list');
+	/**
+	 * Under reduced motion nothing glides: the drawer crossfades, in a sheet or beside the image, and the image holds its
+	 * place until the drawer has gone, then moves once. So the track stays open while the drawer is still on screen.
+	 */
+	let drawerShown = $state(false);
+	const trackOpen = $derived(drawerOpen || ($prefersReducedMotion && drawerShown));
 	const DRAWER_GAP = 8;
 	let drawerSize = $state(0);
 	/**
@@ -151,7 +158,7 @@
 <svelte:window onkeydowncapture={image.onKeydownCapture} />
 
 <div class="image-comments">
-<div class="layout" class:drawer-open={drawerOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
+<div class="layout" class:drawer-open={trackOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
 	<div class="viewer-cell">
 		<ImageLightbox bind:this={lightbox} {src} {alt} {docName} {onBack} onLoaded={imageLoaded} {onFailed} {onRetry}>
 			{#snippet barActions({ loaded })}
@@ -225,6 +232,7 @@
 			{artifactId}
 			readOnly={!canComment}
 			feedback={inDocument ? null : feedback}
+			onDrawerShown={(shown) => drawerShown = shown}
 			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
 		/>
 	{/if}
@@ -252,13 +260,7 @@
 		.layout.drawer-open { grid-template-columns: minmax(0, 1fr) 328px; grid-template-rows: minmax(0, 1fr); }
 		.layout :global(.canvas-comment-drawer) { align-self: stretch; justify-self: start; width: 320px; height: auto; margin: 0 0 0 8px; }
 	}
-	/*
-	 * Reduced motion skips the slide: the track opens at once, and on close holds its size through the drawer's crossfade
-	 * (DocCommentSurface's drawerMotion: --dur-tight at 0.7 pace) before it closes at once, so the fade is never clipped.
-	 */
-	@media (prefers-reduced-motion: reduce) {
-		.layout { transition: grid-template-rows 0s calc(var(--dur-tight) * 0.7), grid-template-columns 0s calc(var(--dur-tight) * 0.7); }
-		.layout.drawer-open { transition: none; }
-	}
+	/* Reduced motion skips the slide: the track opens at once, and closes at once when the drawer has gone (trackOpen). */
+	@media (prefers-reduced-motion: reduce) { .layout { transition: none; } }
 	.viewer-cell { grid-area: viewer; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 </style>

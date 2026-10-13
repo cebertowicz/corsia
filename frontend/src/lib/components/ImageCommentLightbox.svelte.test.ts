@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
+import type { Writable } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ fetchComments: vi.fn() }));
@@ -22,6 +22,7 @@ vi.mock('$lib/stores/viewport', async () => {
 
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import { docComments } from '$lib/stores/docComments';
+import { prefersReducedMotion } from '$lib/stores/viewport';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
 const row = (id: string, number: number, x: number) => ({
@@ -266,18 +267,90 @@ describe('ImageCommentLightbox', () => {
 			expect(layout.classList.contains('drawer-open')).toBe(false);
 		});
 
-		it('with reduced motion, holds the closing track open through the drawer\'s crossfade, then closes it at once', () => {
-			// jsdom applies no media queries or transitions, so this reads the rule itself. The hold matches
-			// DocCommentSurface's drawerMotion: a reduced-motion close fades over --dur-tight at 0.7 pace.
-			const source = readFileSync('src/lib/components/ImageCommentLightbox.svelte', 'utf8');
-			const reduced = source.slice(source.indexOf('@media (prefers-reduced-motion: reduce)'));
-			const closing = /\.layout \{ transition: ([^;]+); \}/.exec(reduced)?.[1] ?? '';
-			expect(closing).toContain('grid-template-rows 0s calc(var(--dur-tight) * 0.7)');
-			expect(closing).toContain('grid-template-columns 0s calc(var(--dur-tight) * 0.7)');
-			expect(reduced).toMatch(/\.layout\.drawer-open \{ transition: none; \}/);
-			const surface = readFileSync('src/lib/components/DocCommentSurface.svelte', 'utf8');
-			expect(surface).toMatch(/const pace = leaving \? 0\.7 : 1;/);
-			expect(surface).toMatch(/prefersReducedMotion\)\) return \{ duration: token\('--dur-tight'\) \* pace/);
+	});
+
+	describe('the image while the drawer closes', () => {
+		const reduced = prefersReducedMotion as unknown as Writable<boolean>;
+		let instant: typeof Element.prototype.animate;
+		beforeEach(() => {
+			// jsdom's stand-in animations end at once; these end after their duration, on timers the test advances.
+			instant = Element.prototype.animate;
+			Element.prototype.animate = function animate(_keyframes, options) {
+				const duration = typeof options === 'number' ? options : Number(options?.duration ?? 0);
+				const animation = { cancel() {}, finish() {}, currentTime: 0, playState: 'running' } as unknown as Animation;
+				Object.defineProperty(animation, 'onfinish', {
+					set(callback: ((event: Event) => void) | null) {
+						if (callback) setTimeout(() => callback(new Event('finish')), duration);
+					},
+				});
+				return animation;
+			};
+			vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+			Object.defineProperty(Element.prototype, 'scrollTo', { configurable: true, value: vi.fn() });
+			Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+			document.documentElement.style.setProperty('--dur-tight', '120ms');
+			document.documentElement.style.setProperty('--dur-drawer', '320ms');
+		});
+		afterEach(() => {
+			Element.prototype.animate = instant;
+			vi.useRealTimers();
+			delete (Element.prototype as unknown as Record<string, unknown>).scrollTo;
+			delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+			reduced.set(false);
+			document.documentElement.style.removeProperty('--dur-tight');
+			document.documentElement.style.removeProperty('--dur-drawer');
+		});
+		// A sheet is placed outside the viewer, so the drawer is looked up in the whole document.
+		const drawer = () => document.querySelector('[data-doc-comments-drawer]');
+		/** Opens the drawer, closes it from the pill, and returns the layout and every change of its open track since the close. */
+		async function closeAfterOpening(width: number) {
+			Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			const layout = host.querySelector<HTMLElement>('.layout')!;
+			pill()!.click();
+			await settle();
+			await vi.advanceTimersByTimeAsync(400);
+			await settle();
+			expect(drawer()).not.toBeNull();
+			// A pane-sized canvas takes the drawer in a sheet; a wide one beside the image.
+			expect(drawer()!.closest('.drawer-panel') !== null).toBe(width <= 1024);
+			expect(layout.classList.contains('drawer-open')).toBe(true);
+			const changes: boolean[] = [];
+			const watch = new MutationObserver(() => changes.push(layout.classList.contains('drawer-open')));
+			watch.observe(layout, { attributes: true, attributeFilter: ['class'] });
+			pill()!.click();
+			await settle();
+			await vi.advanceTimersByTimeAsync(40);
+			await settle();
+			return { layout, changes, watch };
+		}
+
+		for (const [form, width] of [['beside the image', 1440], ['in a sheet', 393]] as const) {
+			it(`with reduced motion, holds the image in place while the drawer ${form} fades, then moves it once`, async () => {
+				reduced.set(true);
+				const { layout, changes, watch } = await closeAfterOpening(width);
+				// Mid-crossfade: the drawer is still on screen, so its track is still open and the image has not moved.
+				expect(drawer()).not.toBeNull();
+				expect(layout.classList.contains('drawer-open')).toBe(true);
+				await vi.advanceTimersByTimeAsync(300);
+				await settle();
+				// The drawer has gone: the track closed once, as it left, and not before.
+				expect(drawer()).toBeNull();
+				expect(layout.classList.contains('drawer-open')).toBe(false);
+				watch.disconnect();
+				expect(changes).toEqual([false]);
+			});
+		}
+
+		it('in full motion, closes the track as the close commits, so the image glides back alongside the drawer\'s outro', async () => {
+			const { layout, changes, watch } = await closeAfterOpening(1440);
+			expect(drawer()).not.toBeNull();
+			expect(layout.classList.contains('drawer-open')).toBe(false);
+			await vi.advanceTimersByTimeAsync(400);
+			await settle();
+			expect(drawer()).toBeNull();
+			watch.disconnect();
+			expect(changes).toEqual([false]);
 		});
 	});
 
