@@ -61,7 +61,7 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		expect(row('Done step').textContent).not.toContain('Agent');
 		// Status stays available to assistive technology without a visible subline.
 		expect(row('Running step').querySelector('.row-status')?.textContent).toBe('Working');
-		expect(row('Done step').querySelector('.state-icon')?.getAttribute('title')).toBe('Finished');
+		expect(row('Done step').querySelector('.state-icon')?.getAttribute('title')).toBe('Done');
 	});
 
 	it('names a specific wait cause under the title', () => {

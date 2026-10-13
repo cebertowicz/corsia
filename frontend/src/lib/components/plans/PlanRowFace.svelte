@@ -12,7 +12,7 @@
 	import { activeToolsByThread } from '$lib/stores/threads';
 	import { minuteClock } from '$lib/time';
 	import { turnStates } from '$lib/ws/turnState';
-	import { nodeDisplayLabel, nodeDisplayState, nodeStateTone, nodeSubline, type ScheduledView } from './planDisplay';
+	import { nodeDisplayLabel, nodeDisplayState, nodeStateTone, nodeSublineParts, type ScheduledView } from './planDisplay';
 	import { isScheduledTask } from './planWaits';
 	import SnoozeClock from './SnoozeClock.svelte';
 	import { planLiveStep } from './planLiveStep';
@@ -28,7 +28,8 @@
 	// A task the agent set aside until a date wears the snooze clock; other waits keep the dot.
 	const scheduled = $derived(state === 'waiting' && isScheduledTask(node));
 	const label = $derived(nodeDisplayLabel(node, isNext));
-	const subline = $derived(nodeSubline(node, $minuteClock, scheduledView));
+	// A narrow row cuts the reason first; when a settled row settled stays whole.
+	const subline = $derived(nodeSublineParts(node, $minuteClock, scheduledView));
 	// AS14: running work reads its current step on the row itself.
 	const liveNow = $derived(planLiveStep(threads, $turnStates, $activeToolsByThread));
 	const liveLine = createLiveLine(
@@ -65,8 +66,8 @@
 		<span class="row-status sr-only">{label}</span>
 	</span>
 	{#if liveStep}
-		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} />{#if subline}<span class="subline-text">{' · '}{subline}</span>{/if}</span>
-	{:else if subline}<span class="row-subline {state} {tone}"><span class="subline-text">{subline}</span></span>{/if}
+		<span class="row-subline {state} {tone}"><PlanLiveStep step={liveStep} />{#if subline.lead}<span class="subline-text">{' · '}{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{' · '}{subline.moment}</span>{/if}</span>
+	{:else if subline.lead || subline.moment}<span class="row-subline {state} {tone}">{#if subline.lead}<span class="subline-text">{subline.lead}</span>{/if}{#if subline.moment}<span class="subline-moment">{subline.lead ? ' · ' : ''}{subline.moment}</span>{/if}</span>{/if}
 </span>
 
 <style>
@@ -108,6 +109,7 @@
 	}
 	/* A flex row shows no ellipsis on bare text, so the text gets its own block. */
 	.subline-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+	.subline-moment { flex: none; white-space: pre; }
 	.row-subline.needs-you { color: var(--amber); }
 	.row-subline.waiting { color: var(--text-secondary); }
 	.row-subline.finished.failed { color: var(--red); }
