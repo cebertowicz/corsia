@@ -13,10 +13,13 @@ def limited_admission(
     thread_id: str, model: str, *, account_id: str | None = None,
     db: sqlite3.Connection | None = None,
 ) -> HeldAdmission | None:
-    """Return the hold the selected or explicitly resolved account gives this model.
+    """Return the hold this model gets on the account a launch will use.
 
     The one predicate for "limited": admission, the checkpoint fold gate and
-    delegation status all read it, so they cannot disagree. It only reads.
+    delegation status all read it. With no ``account_id`` it reads the thread's
+    chosen account; a caller whose launch is already bound to an account (a
+    model-switch checkpoint) passes that account, so the gate and the launch
+    check the same one. It only reads.
     """
     connection = db or get_db()
     try:

@@ -230,6 +230,27 @@ async def test_target_checkpoint_claims_ready_rollover_account(isolated_db, laun
 
 
 @pytest.mark.asyncio
+async def test_unbound_fold_holds_on_limited_chosen_account_even_with_a_ready_rollover_account(
+    isolated_db, launch,
+):
+    """A pressure fold launches on the chosen account, so the gate checks that one."""
+    from core.checkpoint_account import admit_checkpoint
+
+    _seed("unbound-rollover", SONNET)
+    first, _second = _configure_rollover("unbound-rollover", enabled=True)
+    _limit_sonnet(account_id=first)
+    request, provider = _pair("unbound-rollover", "c-unbound-rollover", SONNET)
+    assert provider.vendor_account_bound is False
+    assert admit_checkpoint(provider).vendor_account_id == first
+
+    with pytest.raises(CheckpointTargetLimited):
+        await request_checkpoint(request, provider)
+
+    assert _checkpoint_rows() == 0
+    launch.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_target_checkpoint_holds_on_limited_chosen_account_when_rollover_is_off(isolated_db, launch):
     _seed("no-rollover", SONNET)
     first, _second = _configure_rollover("no-rollover", enabled=False)

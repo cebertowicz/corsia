@@ -198,7 +198,9 @@ def _target_cold_admission(
             mcp_config=context.destination_mcp_config,
             db=db,
         )
-        if destination.harness not in {"claude-code", "codex"}:
+        from connections.vendor_accounts import VENDORS
+
+        if destination.harness not in VENDORS:
             return admission
         from connections.account_policy import turn_account
 
