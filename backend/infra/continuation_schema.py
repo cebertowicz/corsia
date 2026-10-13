@@ -49,8 +49,7 @@ CONTINUATION_SCHEMA_SQL = """
         payload_json TEXT,
         created_by_actor TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        asked_by_user INTEGER NOT NULL DEFAULT 0
+        updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_automation_schedules_due
         ON automation_schedules(state, next_run_at);

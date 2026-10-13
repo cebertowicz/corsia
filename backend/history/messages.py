@@ -25,7 +25,6 @@ _INBOUND_SOURCE_KEYS = (
     "scope",
     "routed_event",
     "plan_paused_since",
-    "plan_paused_schedule",
     "reply_via_post_update",
     "viewing_document",
 )
