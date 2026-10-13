@@ -91,12 +91,13 @@
 	});
 	let stopToastClearance: (() => void) | undefined;
 
-	const flyParams = $derived(sheetFly($prefersReducedMotion));
 	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
 	// The token is read once on mount, never inside the derivation.
 	let tightMs = $state(120);
 	onMount(() => { tightMs = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 120; });
 	const fadeParams = $derived({ duration: $prefersReducedMotion ? tightMs : 160 });
+	// The sheet's outro ends in onClosed, so under reduced motion it holds still for the crossfade instead of ending at once.
+	const flyParams = $derived(sheetFly($prefersReducedMotion, tightMs));
 
 	function onBackdrop(event: MouseEvent): void {
 		if (modal && detent !== 'half' && event.target === event.currentTarget) onClose();

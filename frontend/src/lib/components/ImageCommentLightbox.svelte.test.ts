@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
@@ -263,6 +264,20 @@ describe('ImageCommentLightbox', () => {
 			pill()!.click();
 			await settle();
 			expect(layout.classList.contains('drawer-open')).toBe(false);
+		});
+
+		it('with reduced motion, holds the closing track open through the drawer\'s crossfade, then closes it at once', () => {
+			// jsdom applies no media queries or transitions, so this reads the rule itself. The hold matches
+			// DocCommentSurface's drawerMotion: a reduced-motion close fades over --dur-tight at 0.7 pace.
+			const source = readFileSync('src/lib/components/ImageCommentLightbox.svelte', 'utf8');
+			const reduced = source.slice(source.indexOf('@media (prefers-reduced-motion: reduce)'));
+			const closing = /\.layout \{ transition: ([^;]+); \}/.exec(reduced)?.[1] ?? '';
+			expect(closing).toContain('grid-template-rows 0s calc(var(--dur-tight) * 0.7)');
+			expect(closing).toContain('grid-template-columns 0s calc(var(--dur-tight) * 0.7)');
+			expect(reduced).toMatch(/\.layout\.drawer-open \{ transition: none; \}/);
+			const surface = readFileSync('src/lib/components/DocCommentSurface.svelte', 'utf8');
+			expect(surface).toMatch(/const pace = leaving \? 0\.7 : 1;/);
+			expect(surface).toMatch(/prefersReducedMotion\)\) return \{ duration: token\('--dur-tight'\) \* pace/);
 		});
 	});
 

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { expect, test, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { syntheticPng } from '../support/syntheticImages';
-import { drag, sendFromDrawerByKeyboard, shoot } from '../support/imageRegionComments';
+import { drag, sendFromDrawerByKeyboard, settled, shoot } from '../support/imageRegionComments';
 
 // Comments on parts of an image inside a document (DCOL-FR13.3, 13.5, 13.6, 13.12): the viewer over the document,
 // the margin marker and drawer group back in it, and the one feedback batch both show and send.
@@ -92,6 +92,8 @@ async function cardOpensViewerAndReturns(page: Page, testInfo: TestInfo, text: s
 	await expect(overlay(page)).toBeVisible();
 	await expect(overlay(page).locator('[data-region-tag][aria-pressed="true"]:not([inert])')).toHaveCount(1);
 	await expect(page.locator('[data-doc-comments-drawer]')).toBeHidden();
+	// The viewer fits its image as the panes slide; its card is placed beside the tag once they stop.
+	await settled(page);
 	await shoot(page, testInfo, `${name}-viewer`, true);
 	// Escape first closes the comment's own card in the viewer; on a phone its sheet pops its history entry afterwards.
 	const layer = () => page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
@@ -109,12 +111,8 @@ async function cardOpensViewerAndReturns(page: Page, testInfo: TestInfo, text: s
 	await expect.poll(() => card.evaluate((el) => el.contains(document.activeElement)), 'that card has focus').toBe(true);
 	expect(await drawerList(page).evaluate((list) => list.scrollTop), 'the drawer list is where it was').toBe(scrolled);
 	// The shell slides its panes back as the viewer leaves, and a sheet follows the document column frame by frame;
-	// the frame is taken once it is back over that column, not mid-slide.
-	await expect.poll(() => page.evaluate(() => {
-		const sheet = document.querySelector('[data-adaptive-drawer].within')?.getBoundingClientRect();
-		const column = document.querySelector('.leaf-body')?.getBoundingClientRect();
-		return !sheet || !column || (Math.abs(sheet.left - column.left) < 1 && Math.abs(sheet.right - column.right) < 1);
-	}), 'the drawer sits over the document column').toBe(true);
+	// the frame is taken once the slide has ended and the sheet is back over that column.
+	await settled(page);
 	await shoot(page, testInfo, `${name}-back`, true);
 }
 const surface = (page: Page) => overlay(page).locator('[data-image-regions]');

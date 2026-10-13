@@ -252,6 +252,13 @@
 		.layout.drawer-open { grid-template-columns: minmax(0, 1fr) 328px; grid-template-rows: minmax(0, 1fr); }
 		.layout :global(.canvas-comment-drawer) { align-self: stretch; justify-self: start; width: 320px; height: auto; margin: 0 0 0 8px; }
 	}
-	@media (prefers-reduced-motion: reduce) { .layout { transition: none; } }
+	/*
+	 * Reduced motion skips the slide: the track opens at once, and on close holds its size through the drawer's crossfade
+	 * (DocCommentSurface's drawerMotion: --dur-tight at 0.7 pace) before it closes at once, so the fade is never clipped.
+	 */
+	@media (prefers-reduced-motion: reduce) {
+		.layout { transition: grid-template-rows 0s calc(var(--dur-tight) * 0.7), grid-template-columns 0s calc(var(--dur-tight) * 0.7); }
+		.layout.drawer-open { transition: none; }
+	}
 	.viewer-cell { grid-area: viewer; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 </style>

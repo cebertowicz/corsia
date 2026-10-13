@@ -4,6 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toastClearance } from "$lib/stores/toastClearance";
 import AdaptiveDrawerHarness from "./fixtures/AdaptiveDrawerHarness.svelte";
 
+// The reduced-motion preference, read when the drawer subscribes; false unless a test sets it.
+const reduced = vi.hoisted(() => ({ current: false }));
+vi.mock("$lib/stores/viewport", async (importOriginal) => {
+  const { readable } = await import("svelte/store");
+  return {
+    ...(await importOriginal<typeof import("$lib/stores/viewport")>()),
+    prefersReducedMotion: { subscribe: (run: (value: boolean) => void) => readable(reduced.current).subscribe(run) },
+  };
+});
+
 let host: HTMLElement;
 let component: Record<string, unknown> | null;
 
@@ -32,6 +42,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  reduced.current = false;
   if (component) unmount(component);
   component = null;
   host.replaceChildren();
@@ -131,6 +142,49 @@ describe("AdaptiveDrawer", () => {
 
     expect(closed).toHaveBeenCalledTimes(1);
     expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(0);
+  });
+
+  it("under reduced motion keeps the drawer through the backdrop's crossfade, then calls onClosed once", async () => {
+    // jsdom's stand-in animations end at once; these end after their duration, on timers the test advances.
+    const instant = Element.prototype.animate;
+    Element.prototype.animate = function animate(_keyframes, options) {
+      const duration = typeof options === "number" ? options : Number(options?.duration ?? 0);
+      const animation = { cancel() {}, finish() {}, currentTime: 0, playState: "running" } as unknown as Animation;
+      Object.defineProperty(animation, "onfinish", {
+        set(callback: ((event: Event) => void) | null) {
+          if (callback) setTimeout(() => callback(new Event("finish")), duration);
+        },
+      });
+      return animation;
+    };
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      reduced.current = true;
+      document.documentElement.style.setProperty("--dur-tight", "120ms");
+      const closed = vi.fn();
+      component = mount(AdaptiveDrawerHarness, { target: host, props: { callerControlled: true, onClose: closed } });
+      await settle();
+      (host.querySelector("[data-drawer-trigger]") as HTMLButtonElement).click();
+      await settle();
+      await vi.advanceTimersByTimeAsync(200);
+      const backdrop = host.querySelector("[data-adaptive-drawer]") as HTMLElement;
+
+      (host.querySelector(".drawer-done") as HTMLButtonElement).click();
+      await settle();
+      await vi.advanceTimersByTimeAsync(60);
+      // Mid-crossfade: the backdrop is still on screen fading, and the drawer is not closed yet.
+      expect(backdrop.isConnected).toBe(true);
+      expect(closed).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(80);
+      await settle();
+      expect(closed).toHaveBeenCalledTimes(1);
+      expect(host.querySelectorAll("[data-adaptive-drawer]")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+      Element.prototype.animate = instant;
+      document.documentElement.style.removeProperty("--dur-tight");
+    }
   });
 
   it("closes from its explicit control and Escape", async () => {

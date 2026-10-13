@@ -54,14 +54,30 @@ describe('createCommentSheet', () => {
 		t.teardown();
 	});
 
-	it('runs the close only after the drawer outro finishes', () => {
+	it('commits its own close at once and holds what it showed through the outro', () => {
+		const t = setup({ state: { kind: 'list' } });
+		// The surface's close clears its state, as DocViewer's does.
+		t.onClose.mockImplementation(() => t.set({ state: null }));
+		t.sheet.close();
+		expect(t.onClose).toHaveBeenCalledOnce();
+		expect(t.sheet.open).toBe(false);
+		expect(t.sheet.closing).toBe(true);
+		expect(t.sheet.state).toEqual({ kind: 'list' });
+		t.sheet.finishClose();
+		flushSync();
+		expect(t.sheet.closing).toBe(false);
+		expect(t.sheet.state).toBeNull();
+		expect(t.onClose).toHaveBeenCalledOnce();
+		t.teardown();
+	});
+
+	it('stays open when the surface does not close', () => {
 		const t = setup({ state: { kind: 'list' } });
 		t.sheet.close();
 		flushSync();
-		expect(t.sheet.open).toBe(false);
-		expect(t.onClose).not.toHaveBeenCalled();
-		t.sheet.finishClose();
 		expect(t.onClose).toHaveBeenCalledOnce();
+		expect(t.sheet.open).toBe(true);
+		expect(t.sheet.closing).toBe(false);
 		t.teardown();
 	});
 

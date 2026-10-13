@@ -1,8 +1,12 @@
 import { cubicOut } from 'svelte/easing';
 
-/** The sheet's slide: up from 72 px below over 260 ms, or none under reduced motion, where the backdrop's fade carries it. */
-export function sheetFly(reduced: boolean) {
-	return reduced ? { y: 0, duration: 0 } : { y: 72, duration: 260, easing: cubicOut };
+/**
+ * The sheet's slide: up from 72 px below over 260 ms. Under reduced motion it neither moves nor fades, the backdrop's
+ * crossfade carries it, but it still lasts `holdMs`, that crossfade's length: the drawer's onClosed waits for this
+ * outro to end, so the backdrop's fade plays out before the drawer is unmounted.
+ */
+export function sheetFly(reduced: boolean, holdMs = 0) {
+	return reduced ? { y: 0, opacity: 1, duration: holdMs } : { y: 72, duration: 260, easing: cubicOut };
 }
 
 /** How far a downward drag must go to dismiss: about a quarter of the sheet, held between 96 and 180 px. */

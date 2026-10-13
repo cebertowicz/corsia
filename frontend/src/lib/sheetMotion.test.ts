@@ -6,7 +6,9 @@ const base = { detent: 'full' as const, released: true, raw: 0, elapsed: 500, he
 describe('sheetFly', () => {
 	it('slides 72px over 260ms, or not at all under reduced motion', () => {
 		expect(sheetFly(false)).toMatchObject({ y: 72, duration: 260 });
-		expect(sheetFly(true)).toEqual({ y: 0, duration: 0 });
+		expect(sheetFly(true)).toEqual({ y: 0, opacity: 1, duration: 0 });
+		// Under reduced motion the sheet holds still and opaque for the backdrop's crossfade, so its outro ends with that fade, not before it.
+		expect(sheetFly(true, 120)).toEqual({ y: 0, opacity: 1, duration: 120 });
 	});
 });
 

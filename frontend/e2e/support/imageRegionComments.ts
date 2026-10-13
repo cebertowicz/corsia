@@ -147,6 +147,30 @@ export async function shoot(page: Page, testInfo: TestInfo, name: string, both =
 	await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 	await saveEvidenceScreenshot(page, testInfo, `${name}-dark`, { fullPage: false });
 }
+/**
+ * Waits until the layout has settled, for two frames in a row: no finite animation or transition is running anywhere in
+ * the page, and the comments sheet, where it sits uncovered over the document's column, has that column's left and right
+ * edges. A screenshot fast-forwards running CSS transitions to their end, but not what script places from them (the sheet
+ * following its column, a card placed beside its tag), so a frame taken earlier shows those where they were mid-slide.
+ */
+export async function settled(page: Page) {
+	await expect.poll(() => page.evaluate(() => new Promise<string>((resolve) => {
+		const check = () => {
+			const running = document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity);
+			if (running.length) return `${running.length} running`;
+			const sheet = document.querySelector('[data-adaptive-drawer].within:not(.covered)')?.getBoundingClientRect();
+			const column = document.querySelector('.cm-editor')?.closest('.leaf-body')?.getBoundingClientRect();
+			if (sheet && column && (Math.abs(sheet.left - column.left) >= 1 || Math.abs(sheet.right - column.right) >= 1)) {
+				return `sheet ${sheet.left}-${sheet.right}, column ${column.left}-${column.right}`;
+			}
+			return 'settled';
+		};
+		requestAnimationFrame(() => {
+			const first = check();
+			requestAnimationFrame(() => { const second = check(); resolve(first === 'settled' ? second : first); });
+		});
+	})), 'the layout has settled').toBe('settled');
+}
 /** A plain frame that never fast-forwards a running transition. */
 export async function still(page: Page, testInfo: TestInfo, name: string, clip?: Box) {
 	await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: false, animations: 'allow', ...(clip ? { clip } : {}) });
