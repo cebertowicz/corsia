@@ -50,9 +50,9 @@ def test_creation_gate_leaves_agent_adds_and_existing_user_step_paths_usable(db)
     assert agent["node"]["assignee"] is None
     plan_update(
         db, plan.id, "edit",
-        {"node_id": user["id"], "expected_revision": user["revision"], "description": "Updated instructions."},
+        {"node_id": user["id"], "expected_revision": user["revision"], "description": _DESCRIPTION},
     )
-    assert row(db, user["id"])["description"] == "Updated instructions."
+    assert row(db, user["id"])["description"] == _DESCRIPTION
 
     settled = plan_update(
         db, plan.id, "mark_done",
@@ -66,6 +66,28 @@ def test_creation_gate_leaves_agent_adds_and_existing_user_step_paths_usable(db)
         {"node_id": closed["id"], "expected_revision": closed["revision"], "reason": "The person will not do this."},
     )
     assert row(db, closed["id"])["state"] == "closed"
+
+
+def test_edit_and_split_cannot_strip_a_user_step_tried_marker(db):
+    plan = owner_plan(db)
+    user = _add(plan.id, db=db)["node"]
+
+    with pytest.raises(service.PlanInputError, match="Already tried"):
+        plan_update(
+            db, plan.id, "edit",
+            {"node_id": user["id"], "expected_revision": user["revision"], "description": "New instructions."},
+        )
+    with pytest.raises(service.PlanInputError, match="Already tried"):
+        plan_update(
+            db, plan.id, "split",
+            {"node_id": user["id"], "expected_revision": user["revision"], "title": "Second command", "acceptance_criteria": "Done", "description": "New instructions."},
+        )
+
+    split = plan_update(
+        db, plan.id, "split",
+        {"node_id": user["id"], "expected_revision": user["revision"], "title": "Second command", "acceptance_criteria": "Done", "description": _DESCRIPTION},
+    )
+    assert split["node"]["assignee"] == "user"
 
 
 def test_decision_writer_and_worker_refusal_stay_outside_the_creation_gate(db):
