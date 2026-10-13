@@ -46,6 +46,7 @@ def _encoded(data: bytes) -> str:
 _CLOSED_SOCKET_SEND_ERRORS = {
     "Unexpected ASGI message 'websocket.send', after sending 'websocket.close'",
     "Unexpected ASGI message 'websocket.send', after sending 'websocket.close' or response already completed.",
+    'Cannot call "send" once a close message has been sent.',
 }
 
 

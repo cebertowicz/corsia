@@ -100,7 +100,12 @@ async def test_frames_open_merge_ack_and_flush_without_whole_text_save(ownership
 
 
 @pytest.mark.asyncio
-async def test_closed_socket_drops_landed_replace_reply_without_an_error(ownership_scope, tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize("error_message", [
+    "Unexpected ASGI message 'websocket.send', after sending 'websocket.close'",
+    'Cannot call "send" once a close message has been sent.',
+])
+async def test_closed_socket_drops_landed_replace_reply_without_an_error(ownership_scope, tmp_path, monkeypatch, caplog,
+                                                                          error_message):
     from ws import document_control
     from doceditor import live_runtime
     scope = ownership_scope
@@ -109,8 +114,7 @@ async def test_closed_socket_drops_landed_replace_reply_without_an_error(ownersh
                             db_path=Path(scope["db"].execute("PRAGMA database_list").fetchone()[2]))
     monkeypatch.setattr(live_runtime, "_manager", manager)
     user_id = scope["db"].execute("SELECT user_id FROM threads WHERE id=?", (scope["owner"],)).fetchone()[0]
-    socket = SaveReplyFailureSocket(
-        RuntimeError("Unexpected ASGI message 'websocket.send', after sending 'websocket.close'"))
+    socket = SaveReplyFailureSocket(RuntimeError(error_message))
     try:
         await document_control.handle_frame(socket, {"id": user_id}, {
             "type": "doc_open", "path": str(scope["category"] / "live.md"),
