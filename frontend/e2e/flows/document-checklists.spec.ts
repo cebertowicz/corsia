@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
 
 async function openChecklist(
 	page: Page,
@@ -71,6 +72,7 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		test.skip((page.viewportSize()?.width ?? 0) <= 1024, 'Desktop assertions use the split artifact leaf.');
 
 		const fixture = await openChecklist(page, request, '- [ ] active\n- [x] done\n1. ordered\n');
+		await observeSaveCue(page);
 		const active = page.getByRole('checkbox', { name: 'Mark task complete: active' });
 		const done = page.getByRole('checkbox', { name: 'Mark task incomplete: done' });
 		await expect(active).toBeVisible();
@@ -109,12 +111,14 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		await expect(fixture.editor).not.toContainText('[ ]');
 
 		await page.keyboard.press('ControlOrMeta+S');
-		await expect(page.getByText('✓ Saved')).toBeVisible();
-		const savedResponse = await request.get(
-			`/api/files/content?token=${fixture.token}&path=${encodeURIComponent(fixture.docPath)}&thread_id=${fixture.sessionId}`,
-		);
-		expect(savedResponse.ok()).toBeTruthy();
-		expect((await savedResponse.json()).text).toContain('- [x] checked\n- [ ]');
+		await expect.poll(async () => {
+			const savedResponse = await request.get(
+				`/api/files/content?token=${fixture.token}&path=${encodeURIComponent(fixture.docPath)}&thread_id=${fixture.sessionId}`,
+			);
+			expect(savedResponse.ok()).toBeTruthy();
+			return (await savedResponse.json()).text;
+		}).toContain('- [x] checked\n- [ ]');
+		await expectQuietSave(page);
 
 		await page.reload();
 		await page.getByText(fixture.title).first().click();

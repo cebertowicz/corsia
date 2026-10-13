@@ -1,41 +1,132 @@
-import type { DocSaveStatus } from './docSaveQueue';
+import { fromStore, derived, writable } from 'svelte/store';
+import {
+	confirmReconnectSave, docSaveActivities, docSaveDrafts, idleDocSaveActivity,
+	type DocSaveActivity, type DocSaveDraft,
+} from './docSaveQueue';
 
 export type DocSaveIndicator = 'idle' | 'saving' | 'saved';
+export interface DocSaveCueSnapshot {
+	key: string | null;
+	draft: DocSaveDraft | undefined;
+	activity?: DocSaveActivity;
+}
+interface Episode {
+	startedAt: number;
+	suspendedAt: number | null;
+	showedSaving: boolean;
+	settled: boolean;
+	timer: ReturnType<typeof setTimeout> | null;
+}
 
-/**
- * The "✓ Saved" ghost badge is a transient cosmetic — the store's status
- * stays 'saved' until the next edit, so the 1400ms auto-hide lives here.
- * It shows only when the watched draft turns 'saved' while watched: a switch
- * to another draft, or the first look at one, finds a save that already
- * happened and stays quiet.
- * Call during component init; the effect is torn down with the component.
- */
-export function docSaveGhost(status: () => DocSaveStatus | undefined, key: () => string | null) {
-	let showSavedGhost = $state(false);
-	let savedGhostTimer: ReturnType<typeof setTimeout> | null = null;
-	let watched: { key: string | null; status: DocSaveStatus | undefined } | null = null;
-	const stopTimer = () => {
-		if (savedGhostTimer) { clearTimeout(savedGhostTimer); savedGhostTimer = null; }
+const EPISODE_NOTICE_MS = 400;
+const SAVED_NOTICE_MS = 1400;
+
+/** One timer owner for every draft, independent of which viewer is mounted. */
+export function createDocSaveCues(confirm: (key: string) => void) {
+	const episodes = new Map<string, Episode>();
+	const indicators = writable<Record<string, DocSaveIndicator>>({});
+	const show = (key: string, value: DocSaveIndicator) => {
+		indicators.update((all) => all[key] === value ? all : { ...all, [key]: value });
 	};
-	$effect(() => {
-		const now = { key: key(), status: status() };
-		const sameDraft = watched !== null && watched.key === now.key;
-		const turnedSaved = now.status === 'saved' && sameDraft && watched!.status !== 'saved';
-		watched = now;
-		if (turnedSaved) {
-			stopTimer();
-			showSavedGhost = true;
-			savedGhostTimer = setTimeout(() => { savedGhostTimer = null; showSavedGhost = false; }, 1400);
-		} else if (now.status !== 'saved' || !sameDraft) {
-			// A re-read of the same saved draft keeps the badge and its timer.
-			stopTimer();
-			showSavedGhost = false;
+	const stop = (episode: Episode) => {
+		if (episode.timer !== null) clearTimeout(episode.timer);
+		episode.timer = null;
+	};
+	const forget = (key: string, episode: Episode) => {
+		stop(episode);
+		episodes.delete(key);
+		show(key, 'idle');
+	};
+	const scheduleSaving = (key: string, episode: Episode) => {
+		stop(episode);
+		episode.timer = setTimeout(() => {
+			episode.timer = null;
+			episode.showedSaving = true;
+			show(key, 'saving');
+		}, Math.max(0, EPISODE_NOTICE_MS - (Date.now() - episode.startedAt)));
+	};
+	const finish = (key: string, episode: Episode, owed: boolean) => {
+		stop(episode);
+		episode.settled = true;
+		if (!episode.showedSaving && !owed) {
+			forget(key, episode);
+			return;
 		}
+		show(key, 'saved');
+		episode.timer = setTimeout(() => forget(key, episode), SAVED_NOTICE_MS);
+		if (owed) confirm(key);
+	};
+	const update = ({ key, draft, activity = idleDocSaveActivity }: DocSaveCueSnapshot) => {
+		if (!key) return;
+		let episode = episodes.get(key);
+		if (!draft || draft.status === 'error') {
+			if (episode) forget(key, episode);
+			else show(key, 'idle');
+			return;
+		}
+		const clean = draft.editText === draft.savedText && !activity.writeInFlight && !activity.resaveQueued;
+		if (episode?.settled) {
+			// A fresh edit dismisses the old badge; its save starts a fresh clock.
+			if (!clean) forget(key, episode);
+			else return;
+			episode = undefined;
+		}
+		if (!episode && (activity.writeInFlight || activity.confirmationOwed)) {
+			episode = { startedAt: Date.now(), suspendedAt: null, showedSaving: false, settled: false, timer: null };
+			episodes.set(key, episode);
+			scheduleSaving(key, episode);
+		}
+		if (!episode) return;
+		if (activity.awaitingReconnect) {
+			if (episode.suspendedAt === null) episode.suspendedAt = Date.now();
+			stop(episode);
+			show(key, 'idle');
+			return;
+		}
+		if (episode.suspendedAt !== null) {
+			episode.startedAt += Date.now() - episode.suspendedAt;
+			episode.suspendedAt = null;
+			scheduleSaving(key, episode);
+		}
+		if (clean) finish(key, episode, activity.confirmationOwed);
+	};
+	return {
+		store: { subscribe: indicators.subscribe },
+		update,
+		prune(keys: Set<string>) {
+			for (const [key, episode] of episodes) if (!keys.has(key)) forget(key, episode);
+			indicators.update((all) => Object.fromEntries(Object.entries(all).filter(([key]) => keys.has(key))));
+		},
+		destroy() { for (const episode of episodes.values()) stop(episode); episodes.clear(); },
+	};
+}
+
+const cues = createDocSaveCues(confirmReconnectSave);
+// Observe every draft, including inactive tabs. Closing the draft removes its clock.
+derived([docSaveDrafts, docSaveActivities], ([drafts, activities]) => ({ drafts, activities }))
+	.subscribe(({ drafts, activities }) => {
+		cues.prune(new Set(Object.keys(drafts)));
+		for (const [key, draft] of Object.entries(drafts)) cues.update({ key, draft, activity: activities[key] });
 	});
-	$effect(() => stopTimer);
+
+/** A tab switch never replays a confirmation that already happened offscreen. */
+export function docSaveGhost(key: () => string | null) {
+	const indicators = fromStore(cues.store);
+	let watched = $state<string | null>(null);
+	let showSaved = $state(false);
+	let previous: DocSaveIndicator = 'idle';
+	$effect(() => {
+		const now = key();
+		const value = now ? indicators.current[now] ?? 'idle' : 'idle';
+		showSaved = now === watched && value === 'saved' && (showSaved || previous !== 'saved');
+		watched = now;
+		previous = value;
+	});
 	return {
 		get current(): DocSaveIndicator {
-			return status() === 'saving' ? 'saving' : showSavedGhost ? 'saved' : 'idle';
+			const now = key();
+			const value = now ? indicators.current[now] ?? 'idle' : 'idle';
+			return value === 'saved' ? (now === watched && showSaved ? 'saved' : 'idle') : value;
 		},
 	};
 }

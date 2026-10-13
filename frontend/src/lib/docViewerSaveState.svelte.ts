@@ -5,7 +5,7 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 
 /**
  * The save state of the viewer's current target, sourced from the per-tab-instance save queue, never a single shared
- * "current doc" flag. `status` is the indicator the header shows: the queue's 'saved' lingers as a short ghost.
+ * "current doc" flag. `status` is the indicator the header shows for the queue's per-draft writing episode.
  * Call during component init.
  */
 export function createDocSaveState(target: () => DocViewerTarget | null) {
@@ -14,7 +14,7 @@ export function createDocSaveState(target: () => DocViewerTarget | null) {
 		const current = target();
 		return current ? drafts.current[draftKey(current)] : undefined;
 	});
-	const ghost = docSaveGhost(() => draft?.status, () => {
+	const ghost = docSaveGhost(() => {
 		const current = target();
 		return current ? draftKey(current) : null;
 	});
