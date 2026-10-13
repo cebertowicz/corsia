@@ -78,7 +78,7 @@
 		replyText?: string;
 		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
 		replySelection?: [number, number] | null;
-		onReplySelection?: (selection: [number, number]) => void;
+		onReplySelection?: (selection: [number, number] | null) => void;
 	} = $props();
 
 	const me = $derived($userParticipant);
@@ -140,8 +140,8 @@
 		if (readOnly || !t || replyPosting) return;
 		replyPosting = true;
 		try {
-			await onReply?.(comment.id, t);
-			replyText = ''; showReplies = true;
+				await onReply?.(comment.id, t);
+			replyText = ''; onReplySelection?.(null); showReplies = true;
 		} finally {
 			replyPosting = false;
 		}

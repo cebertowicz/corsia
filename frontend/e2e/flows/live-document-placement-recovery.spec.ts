@@ -120,6 +120,7 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await closeComments();
 		await reload.click();
 		await expect(reader.getByRole('status').filter({ hasText: "1 comment still couldn't be placed" })).toBeVisible();
+		await expect(reload).toBeFocused();
 		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
 		await openComments();
 		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
@@ -135,6 +136,7 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await reload.click();
 		await expect.poll(refuse.refused, { timeout: 20_000 }).toBe(1);
 		await expect(reader.getByRole('status').filter({ hasText: "Couldn't reload comment placements" })).toBeVisible();
+		await expect(reload).toBeFocused();
 		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
 		await openComments();
 		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));

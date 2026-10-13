@@ -8,7 +8,7 @@
 		selection?: [number, number] | null;
 		keepVisible?: boolean;
 		onSend: () => void;
-		onSelection?: (selection: [number, number]) => void;
+		onSelection?: (selection: [number, number] | null) => void;
 	} = $props();
 
 	let input = $state<HTMLTextAreaElement>();
@@ -25,6 +25,11 @@
 
 	function saveSelection() {
 		if (!input) return;
+		if (!value) {
+			appliedSelection = null;
+			onSelection?.(null);
+			return;
+		}
 		appliedSelection = `${input.selectionStart}:${input.selectionEnd}`;
 		onSelection?.([input.selectionStart, input.selectionEnd]);
 	}
@@ -40,7 +45,7 @@
 </script>
 
 <div class="ct-compose open">
-	<textarea class="ct-input" rows="1" placeholder="Reply…" aria-label="Reply" bind:this={input} use:keepInView={keepVisible} use:autosize={value} bind:value oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onkeydown={onKey} onclick={(e) => e.stopPropagation()}></textarea>
+	<textarea class="ct-input" rows="1" placeholder="Reply…" aria-label="Reply" bind:this={input} use:keepInView={keepVisible} use:autosize={value} bind:value oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 	{#if value.trim()}
 		<button class="ct-send" onclick={(e) => { e.stopPropagation(); onSend(); }} aria-label="Send reply" title="Reply">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
