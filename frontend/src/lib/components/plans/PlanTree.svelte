@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { OperatorArtifactLink, OperatorNode, UserActionHandler } from '$lib/api/plans';
 	import { buildPlanTreeView, childPlanView, indexPlanNodes } from './planTreeFilter';
-	import { isFinished, levelOf } from './planTreeFold';
+	import { levelOf } from './planTreeFold';
 	import { buildFoldLevels, foldRemaining, type FoldedWork } from './planFoldLevels';
 	import { createFoldHistory } from './foldHistory.svelte';
 	import { formatMoment, minuteClock } from '$lib/time';
@@ -9,6 +9,7 @@
 	import { createFocusKeeper } from './focusKeeper.svelte';
 	import { indentVar } from './planIndent';
 	import { createPlanTreeLayout } from './planTreeLayout.svelte';
+	import { isVisibleFinished } from './planTreeNodeState.svelte';
 	import { createPlanTreeRows } from './planTreeRows.svelte';
 	import { blockSlot } from '$lib/slotMotion';
 	import PlanRowFace from './PlanRowFace.svelte';
@@ -138,12 +139,9 @@
 		return rowControls.focusRow(nodeId);
 	}
 
-	// The controller owns person-requested page motion; keep these names local so the tree's transition wiring stays explicit.
+	// The controller owns person-requested disclosure and page motion; keep this gate local so transition wiring stays explicit.
 	const userPaging = $derived(reveal.userPaging);
 	const pendingFoldLevel = $derived(reveal.pendingFoldLevel);
-	function isFinishedNode(node: OperatorNode): boolean {
-		return isFinished(node) && !index.openBlocked.has(node.id);
-	}
 
 	// The fold wave (`foldMotion`): rows that fold or sink since the last render glide as one wave.
 	let treeElement = $state<HTMLElement | null>(null);
@@ -174,7 +172,7 @@
 		nodes: () => shownNodes,
 		items: () => items,
 		element: () => treeElement,
-		isFinished: isFinishedNode,
+		isFinished: (node) => isVisibleFinished(node, index.openBlocked),
 		keyOf: (node) => ({ id: `${scope}${node.id}`, level: `${scope}${levelOf(node, index.byId)}` }),
 	});
 
@@ -206,7 +204,7 @@
 				aria-controls={rowControls.detailsId(node.id)}
 				aria-haspopup={onUserAction && node.user_actions.length > 0 ? 'menu' : undefined}
 				title="{detailsExpanded(node.id) ? 'Hide' : 'Show'} details"
-				onclick={() => toggleDetails(node.id)}
+				onclick={() => reveal.byRequest(() => toggleDetails(node.id))}
 			>
 				<PlanRowFace
 					{node} isNext={nextNodeIds.includes(node.id)} showProgress={!branchParents.has(node.id)} detailsOpen={detailsExpanded(node.id)}
@@ -216,16 +214,18 @@
 			<PlanRowActions
 				{node} {ask} isBranch={branchParents.has(node.id)} branchExpanded={isBranchExpanded(node.id)} detailsOpen={detailsExpanded(node.id)}
 				controls={rowControls.controlledRowIds(node.id)} childExpanded={isChildExpanded(node.id)}
-				onToggleBranch={() => toggleBranch(node.id)} {onOpenArtifact} {onOpenLegacyDiscussion}
+				onToggleBranch={() => reveal.byRequest(() => toggleBranch(node.id))} {onOpenArtifact} {onOpenLegacyDiscussion}
 				onToggleChild={() => onToggleChild(node.id)}
 				onOpenChild={() => onOpenChild(node.id, node.child!.thread_id, node.title)}
 			/>
 		</div>
 		{#if detailsExpanded(node.id)}
-			<PlanRowDetails
-				{node} id={rowControls.detailsId(node.id)} planId={folded?.planId ?? ''} fromHistory={historyIds.has(node.id)}
-				indent={indentAt(depthOffset + node.depth + nest)}
-			/>
+			<div class="details-slot" in:blockSlot|global={{ off: !userPaging }} out:blockSlot|global={{ off: !userPaging }}>
+				<PlanRowDetails
+					{node} id={rowControls.detailsId(node.id)} planId={folded?.planId ?? ''} fromHistory={historyIds.has(node.id)}
+					indent={indentAt(depthOffset + node.depth + nest)}
+				/>
+			</div>
 		{/if}
 		{#if node.child?.available && isChildExpanded(node.id)}
 			{@const child = childRowState(node.id)}
@@ -388,6 +388,8 @@
 		position: absolute; width: 1px; height: 1px; overflow: hidden;
 		clip: rect(0 0 0 0); white-space: nowrap;
 	}
+	/* Keep the details section's margins inside its measured motion slot. */
+	.details-slot { display: flow-root; }
 	.child-row { color: var(--text-secondary); }
 	/* A notice with a retry is prose, not a plan row: it may wrap. */
 	.child-error { flex-wrap: wrap; color: var(--red-text); justify-content: space-between; }
