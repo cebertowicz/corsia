@@ -58,7 +58,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await expect(reader.locator('.cm-line').filter({ hasText: quote })).toHaveCount(2);
 			await expect(reader.locator('.cm-content')).toContainText(`reply anchor ${stamp}`);
 			await expect(reader.locator('.cm-content')).toContainText(`remote edit ${stamp}`);
-			const reload = reader.getByRole('button', { name: 'Reload comment placements', exact: true });
+			const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
 			await expect(reload).toBeVisible();
 			const reloadBox = await reload.boundingBox();
 			expect(reloadBox).not.toBeNull();
@@ -70,8 +70,8 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await reload.click();
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await expect(reply).toHaveValue(`draft ${stamp}`);
-			await expect(reader.getByRole('button', { name: /^3 open threads\b/ })).toBeFocused();
-			await expect(reader.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
+			await expect(comments.getByRole('heading', { name: /^Comments\b/ })).toBeFocused();
+			await expect(comments.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
 			await expect(reload).toHaveCount(0);
 			await reader.screenshot({ path: testInfo.outputPath(`comment-reload-success-${width}.png`) });
 			await reader.reload();

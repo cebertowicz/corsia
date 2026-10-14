@@ -137,6 +137,43 @@ describe('DocCommentSurface suggestions', () => {
 		expect(host.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer);
 	});
 
+	it('restores focus to the orphan recovery action after a reload leaves the comment unplaced', async () => {
+		const reloading = writable(false);
+		const live = fromStore(reloading);
+		render({
+			state: { kind: 'list' },
+			comments: [{ ...suggestion, orphaned: true }],
+			get placementRecovery() { return { onReload: () => true, reloading: live.current }; },
+		});
+		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
+		button.focus();
+		button.click();
+		reloading.set(true); flushSync();
+		reloading.set(false); flushSync();
+		await tick();
+		expect(document.activeElement).toBe(host.querySelector('[aria-label="Reload comment placements"]'));
+	});
+
+	it('keeps a successful placement announcement in the drawer after the recovery action is gone', async () => {
+		const reloading = writable(false);
+		const comments = writable([{ ...suggestion, orphaned: true }]);
+		const liveReloading = fromStore(reloading);
+		const liveComments = fromStore(comments);
+		render({
+			state: { kind: 'list' },
+			get comments() { return liveComments.current; },
+			get placementRecovery() { return { onReload: () => true, reloading: liveReloading.current }; },
+		});
+		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+		reloading.set(true); flushSync();
+		comments.set([]); flushSync();
+		reloading.set(false); flushSync();
+		await tick();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe('Comments placed');
+		expect(host.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
+		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
+	});
+
 	it('keeps a disconnected placement retry focusable and names its live status', () => {
 		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: vi.fn(), unavailable: true, connectionDescriptionId: 'live-connection-artifact' } });
 		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;

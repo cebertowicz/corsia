@@ -86,6 +86,7 @@ async function expectLayout(page: Page, mode: Mode) {
 	}
 	else if (mode === 'default') expect(await canvas(), 'the default layout is a narrow canvas').toBeLessThan(600);
 	// A 16ch ask gets a full-width ellipsized row once the 408px review-line budget cannot fit it with the name and tools.
+	// A collapsed phone ask instead keeps just its requester and disclosure in the compact header row.
 	const line = page.locator('.document-header .review-bar.ask .rb-line');
 	if (await line.count()) {
 		const header = await page.locator('.document-header').evaluate((el) => {
@@ -93,7 +94,8 @@ async function expectLayout(page: Page, mode: Mode) {
 			return el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
 		});
 		test.info().annotations.push({ type: 'header-content-width', description: `${mode}: ${header}` });
-		const fallback = header < 408;
+		const collapsedPhone = mode === 'phone' && await line.getAttribute('aria-expanded') === 'false';
+		const fallback = header < 408 && !collapsedPhone;
 		expect(await line.evaluate((el) => getComputedStyle(el).display), `review line at a ${header}px header`).toBe(fallback ? 'grid' : 'flex');
 		if (fallback) {
 			const rows = await line.evaluate((el) => {
