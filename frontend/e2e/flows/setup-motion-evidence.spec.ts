@@ -1,12 +1,25 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-test.use({ video: 'on' });
+test.use({ video: { mode: 'on', size: { width: 1280, height: 900 } } });
 
 async function openFixture(page: Page, reducedMotion: 'reduce' | 'no-preference' = 'no-preference') {
 	await page.setViewportSize({ width: 1280, height: 900 });
 	await page.emulateMedia({ colorScheme: 'light', reducedMotion });
 	await page.goto('/_design/setup-motion');
 	await expect(page.getByRole('heading', { name: 'Setup motion fixture' })).toBeVisible();
+}
+
+async function waitForSettled(page: Page, target: Locator) {
+	const duration = await target.evaluate((element) => {
+		const token = getComputedStyle(element).getPropertyValue('--dur-standard').trim();
+		const value = Number.parseFloat(token) || 0;
+		return value * (token.endsWith('ms') ? 2 : 2_000);
+	});
+	await page.waitForTimeout(duration);
+}
+
+async function assertDoneCheckSettled(target: Locator) {
+	await expect(target.locator('.done-check path').evaluate((path) => Number.parseFloat(getComputedStyle(path).strokeDashoffset))).resolves.toBe(0);
 }
 
 async function hold(page: Page, target: Locator) {
@@ -28,13 +41,16 @@ test.describe('@surface:setup-rail motion evidence', () => {
 		await expect(step).toHaveClass(/current/);
 		await advanceStep.click();
 		await expect(step).toHaveClass(/done/);
+		await waitForSettled(page, step);
 		await expect(step.locator('.done-check')).toBeVisible();
+		await assertDoneCheckSettled(step);
 		await page.screenshot({ path: testInfo.outputPath('setup-motion-rail-todo-current-done-light-1280x900.png'), scale: 'css' });
 
 		const advanceState = page.getByRole('button', { name: 'Advance background state', exact: true });
 		await page.getByRole('button', { name: 'Advance background jobs', exact: true }).click();
 		const firstJob = page.locator('.job-row').filter({ hasText: 'First background job' });
 		const firstJobRail = firstJob.locator('.row');
+		await waitForSettled(page, firstJob);
 		await expect(firstJob).toHaveCSS('opacity', '1');
 		await expect.poll(() => firstJob.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
 		await page.screenshot({ path: testInfo.outputPath('setup-motion-jobs-one-light-1280x900.png'), scale: 'css' });

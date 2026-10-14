@@ -41,7 +41,7 @@
 		{#key state}
 			<span class="lead-state" in:tokenFade out:tokenFade>
 				{#if state === 'done'}
-					<svg class="done-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+					<svg class="done-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path pathLength="1" d="M5 12.5l4.5 4.5L19 7.5" /></svg>
 				{:else if state === 'busy'}
 					<svg class="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>
 				{:else if state === 'error'}
@@ -102,7 +102,7 @@
 	.row.current .lead :global(svg) { opacity: 1; }
 	.row.done .lead, .row.busy .lead { color: var(--accent-line); }
 	.reddot { width: calc(var(--space-1) * 2); height: calc(var(--space-1) * 2); border-radius: var(--radius-circle); background: var(--red); }
-	.done-check path { stroke-dasharray: 18; stroke-dashoffset: 18; animation: draw-check var(--dur-tight) var(--ease-snap) forwards; }
+	.done-check path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw-check var(--dur-tight) var(--ease-snap) forwards; }
 	.spinner { animation: spin var(--dur-hero-plus) linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 	@keyframes draw-check { to { stroke-dashoffset: 0; } }

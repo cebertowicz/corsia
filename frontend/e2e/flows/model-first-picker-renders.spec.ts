@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 
-test.use({ video: 'on' });
+test.use({ video: { mode: 'on', size: { width: 1440, height: 1000 } } });
 
 const shots = process.env.PICKER_SHOTS_DIR;
 const authed = (path: string) => `${path}?${['to', 'ken'].join('')}=${TEST_TOKEN}`;

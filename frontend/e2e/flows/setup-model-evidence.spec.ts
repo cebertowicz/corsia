@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-test.use({ video: 'on' });
+test.use({ video: { mode: 'on', size: { width: 1280, height: 900 } } });
 
 type SetupState = 'downloading' | 'failed' | 'not-installed' | 'ready';
 
@@ -53,6 +53,12 @@ async function waitForJobSettled(page: Page, job: Locator) {
 		return value * (token.endsWith('ms') ? 2 : 2_000);
 	});
 	await page.waitForTimeout(duration);
+}
+
+async function assertDoneChecksSettled(page: Page) {
+	const checks = page.locator('.rail .row.done .done-check path');
+	await expect(checks).toHaveCount(2);
+	await expect.poll(() => checks.evaluateAll((paths) => paths.every((path) => Number.parseFloat(getComputedStyle(path).strokeDashoffset) === 0))).toBe(true);
 }
 
 async function openModelStep(page: Page) {
@@ -129,6 +135,7 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await openModelStep(page);
 		const job = page.locator('.job-row');
 		await waitForJobSettled(page, job);
+		await assertDoneChecksSettled(page);
 		await expect(job).toHaveCSS('opacity', '1');
 		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
 		await page.screenshot({ path: testInfo.outputPath('setup-model-downloading-settled-light-1280x900.png'), scale: 'css' });
