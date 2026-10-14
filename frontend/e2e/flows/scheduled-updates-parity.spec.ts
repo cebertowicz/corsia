@@ -102,26 +102,42 @@ test.describe('@surface:settings scheduled updates parity', () => {
 		}
 	});
 
-	for (const dismissPath of ['close', 'later', 'scrim', 'escape'] as const) {
-		test(`records choice-sheet open and close motion through ${dismissPath}`, async ({ page }) => {
-			const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
-			await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
-			await page.route('**/api/system/update-schedule', (route) => route.fulfill({ json: schedule }));
-			await openSystem(page, 'light', 1440);
+	for (const viewport of [
+		{ width: 1440 as const, label: '1440 desktop' },
+		{ width: 393 as const, label: '393 mobile' },
+	]) {
+		for (const dismissPath of ['close', 'later', 'scrim', 'escape'] as const) {
+			test(`records ${viewport.label} choice-sheet open and close motion through ${dismissPath}`, async ({ page }) => {
+				const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
+				await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
+				await page.route('**/api/system/update-schedule', (route) => route.fulfill({ json: schedule }));
+				await openSystem(page, 'light', viewport.width);
+				await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(viewport.width);
 
-			const sheet = page.getByLabel('Update CORSIA');
-			const open = async () => {
-				await page.getByRole('button', { name: 'Update', exact: true }).click();
-				await expect(sheet).toBeVisible();
-			};
-			const closed = async () => expect(sheet).toBeHidden();
+				const sheet = page.getByLabel('Update CORSIA');
+				const open = async () => {
+					await page.getByRole('button', { name: 'Update', exact: true }).click();
+					await expect(sheet).toBeVisible();
+					if (viewport.width === 393) {
+						await expect(page.locator('[data-adaptive-drawer]')).toBeVisible();
+					} else {
+						await expect(page.locator('.modal')).toBeVisible();
+						await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);
+					}
+				};
+				const closed = async () => expect(sheet).toBeHidden();
 
-			await open();
-			if (dismissPath === 'close') await page.getByRole('button', { name: 'Close', exact: true }).click();
-			if (dismissPath === 'later') await page.getByRole('button', { name: 'Later' }).click();
-			if (dismissPath === 'scrim') await page.locator('.bg').click({ position: { x: 8, y: 8 } });
-			if (dismissPath === 'escape') await page.keyboard.press('Escape');
-			await closed();
-		});
+				await open();
+				await page.waitForTimeout(500);
+				if (dismissPath === 'close') {
+					if (viewport.width === 393) await page.locator('[data-adaptive-drawer] .drawer-done').click();
+					else await page.getByRole('button', { name: 'Close', exact: true }).click();
+				}
+				if (dismissPath === 'later') await page.getByRole('button', { name: 'Later' }).click();
+				if (dismissPath === 'scrim') await page.locator(viewport.width === 393 ? '[data-adaptive-drawer]' : '.bg').click({ position: { x: 8, y: 8 } });
+				if (dismissPath === 'escape') await page.keyboard.press('Escape');
+				await closed();
+			});
+		}
 	}
 });
