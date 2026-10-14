@@ -40,7 +40,9 @@ test.describe('@flow:browser-pane animated browser control', () => {
     stamp.style.cssText = 'position:fixed;top:2px;right:2px;z-index:9999;background:#111;color:white;font:11px monospace;pointer-events:none';
     document.body.append(stamp);
    }, process.env.CORSIA_PANE_BUILD ?? 'unknown');
+   if (mobile) await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
    await page.getByRole('button', { name: 'Open browser', exact: true }).click();
+   if (mobile) await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
    const address = page.getByRole('textbox', { name: 'Browser address' });
    const probe = new URL('/browser-pane-probe.html', page.url());
    probe.searchParams.set('stress', '1'); probe.searchParams.set('report', `http://127.0.0.1:${port}`);
