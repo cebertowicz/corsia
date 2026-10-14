@@ -18,8 +18,8 @@ test.describe('@flow:browser-pane animated browser control', () => {
   let frameCount = 0, frameBytes = 0, remoteWidth = 0, remoteHeight = 0;
   const started = Date.now();
   try {
-   // Enter through the same pane controls, then exercise the phone composition with real touch enabled.
-   if (mobile) await page.setViewportSize({ width: 1440, height: 1000 });
+   // Keep real touch enabled and enter the browser through the phone's own controls.
+   if (mobile) await page.setViewportSize({ width: 393, height: 851 });
    const title = `pane-stress-${Date.now()}`;
    const threadId = await createSession(request, title);
    page.on('websocket', socket => {
@@ -32,6 +32,7 @@ test.describe('@flow:browser-pane animated browser control', () => {
     });
    });
    await loginByUrl(page);
+   if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
    await page.getByText(title).first().click();
    await page.evaluate(build => {
     const stamp = document.createElement('div');
@@ -46,28 +47,32 @@ test.describe('@flow:browser-pane animated browser control', () => {
    await address.fill(probe.href);
    await page.getByRole('button', { name: 'Go', exact: true }).click();
    const canvas = page.locator('canvas[aria-label="Shared browser"]');
-   if (mobile) await page.setViewportSize({ width: 393, height: 851 });
    await page.emulateMedia({ colorScheme: 'dark' });
    await expect.poll(() => reports.some(report => report.ready)).toBe(true);
    await expect.poll(async () => Math.abs(remoteWidth - (await canvas.boundingBox())!.width)).toBeLessThan(2);
    await expect.poll(() => frameCount).toBeGreaterThan(2);
    await page.getByRole('button', { name: 'Take over', exact: true }).click();
    await expect(page.getByText('You have control. The agent waits')).toBeVisible();
-   await canvas.evaluate(node => {
+   await canvas.evaluate((node, sampleTarget) => {
     const c = node as HTMLCanvasElement;
-    const state = { samples: [] as number[], blank: 0, ticks: 0, seen: false, down: 0, before: [] as number[], end: performance.now() + 10000 };
+    const state = { samples: [] as number[], target: sampleTarget, blank: 0, ticks: 0, seen: false, down: 0, before: [] as number[], end: performance.now() + 10000 };
     (window as unknown as { paneMeasurement: typeof state }).paneMeasurement = state;
     const pixel = () => Array.from(c.getContext('2d')!.getImageData(Math.floor(c.width * .05), Math.floor(c.height * .5), 1, 1).data);
-    c.addEventListener('pointerdown', () => { state.before = pixel(); state.down = performance.now(); });
+    c.addEventListener('pointerdown', () => {
+     if (state.samples.length < state.target) { state.before = pixel(); state.down = performance.now(); }
+    });
     function sample() {
-     const color = pixel(); state.ticks++;
-     if (state.seen && color[3] === 0) state.blank++;
+     const now = performance.now(), color = pixel();
+     if (now < state.end) {
+      state.ticks++;
+      if (state.seen && color[3] === 0) state.blank++;
+     }
      if (color[3] > 0) state.seen = true;
-     if (state.down && Math.abs(color[0] - state.before[0]) > 80) { state.samples.push(performance.now() - state.down); state.down = 0; }
-     if (performance.now() < state.end) requestAnimationFrame(sample);
+     if (state.down && color[3] > 0 && Math.abs(color[0] - state.before[0]) > 80) { state.samples.push(now - state.down); state.down = 0; }
+     if (now < state.end || state.samples.length < state.target) requestAnimationFrame(sample);
     }
     requestAnimationFrame(sample);
-   });
+   }, mobile ? 0 : 30);
    const bounds = (await canvas.boundingBox())!;
    if (mobile) {
     const session = await context.newCDPSession(page);
