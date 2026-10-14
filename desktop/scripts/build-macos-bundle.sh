@@ -32,6 +32,9 @@ fetch_verified() {
 [ "$(uname -s)" = "Darwin" ] || fail "macOS is required"
 [ "$(uname -m)" = "arm64" ] || fail "Apple silicon is required"
 command -v npm >/dev/null || fail "npm is required"
+short_sha="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
+app_version="${CORSIA_APP_VERSION:-0.0.0-dev.$short_sha}"
+[[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || fail "invalid app version: $app_version"
 "$ROOT/desktop/scripts/install-rust-toolchain.sh"
 export RUSTUP_HOME="$ROOT/desktop/.rust-toolchain/rustup"
 export CARGO_HOME="$ROOT/desktop/.rust-toolchain/cargo"
@@ -64,7 +67,7 @@ install -m 0755 "$ROOT/desktop/scripts/omlx" "$BUNDLE_ROOT/bin/omlx"
 
 (
   cd "$ROOT/desktop/src-tauri"
-  "$ROOT/frontend/node_modules/.bin/tauri" build --target aarch64-apple-darwin --bundles app
+  "$ROOT/frontend/node_modules/.bin/tauri" build --target aarch64-apple-darwin --bundles app --config "{\"version\":\"$app_version\"}"
 )
 readonly APP="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/CORSIA.app"
 readonly DMG_DIR="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
