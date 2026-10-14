@@ -276,9 +276,9 @@
 		.shell-header::before {
 			background-image: linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--bg-primary) 70%, transparent) 0%,
-				color-mix(in srgb, var(--bg-primary) 45%, transparent) 50%,
-				color-mix(in srgb, var(--bg-primary) 15%, transparent) 80%,
+				color-mix(in srgb, var(--header-top-base) 70%, transparent) 0%,
+				color-mix(in srgb, var(--header-top-base) 45%, transparent) 50%,
+				color-mix(in srgb, var(--header-top-base) 15%, transparent) 80%,
 				transparent 100%
 			);
 		}

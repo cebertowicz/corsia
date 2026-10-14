@@ -60,13 +60,43 @@ async function capture(page: Page, id: string, prepare?: () => Promise<void>) {
 					range.selectNodeContents(el);
 					return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size > 1;
 				}).map((el) => el.textContent);
-				return { clipped, overflows: sheet.scrollWidth > sheet.clientWidth, overlaps, gutterOffset, wrappedVendors };
+				// The current model's and the current account's checks share one gutter column, clear of the dot and order beside them.
+				const accountCheck = document.querySelector<HTMLElement>('.model-sheet .account-usage-row .check-glyph')?.getBoundingClientRect();
+				const modelCheck = document.querySelector<HTMLElement>('.model-sheet .model-list-item .check-glyph')?.getBoundingClientRect();
+				const checkColumnOffset = accountCheck && modelCheck ? Math.round(accountCheck.left - modelCheck.left) : 0;
+				const checkOverlaps = [...document.querySelectorAll<HTMLElement>('.model-sheet .check-glyph')].filter((check) => {
+					const next = check.parentElement!.querySelector<HTMLElement>('.model-status-dot, .order, .picker-label');
+					return next ? check.getBoundingClientRect().right > next.getBoundingClientRect().left : false;
+				}).length;
+				// The check sits on its row's first line, even when the row wraps its figures onto a second line.
+				const checkRowDrift = Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.model-sheet .check-glyph')].map((check) => {
+					const row = check.parentElement!;
+					const mark = row.querySelector<HTMLElement>('.model-status-dot, .order');
+					const label = row.querySelector<HTMLElement>('.picker-label, .model-list-name');
+					const text = label ? document.createTreeWalker(label, NodeFilter.SHOW_TEXT, { acceptNode: (node) => (node.textContent?.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) }).nextNode() : null;
+					const range = document.createRange();
+					if (text) { range.setStart(text, 0); range.setEnd(text, 1); }
+					const anchor = mark?.getBoundingClientRect() ?? (text ? range.getClientRects()[0] : undefined);
+					const box = check.getBoundingClientRect();
+					return anchor ? Math.abs((box.top + box.bottom) / 2 - (anchor.top + anchor.bottom) / 2) : Number.POSITIVE_INFINITY;
+				}));
+				// The chooser caret is a drawn chevron centred on its title line, not a text glyph riding the baseline.
+				const caretDrift = Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.model-sheet button.picker-account-title')].map((title) => {
+					const caret = title.querySelector('.chooser-caret svg')?.getBoundingClientRect();
+					const vendor = title.querySelector('.vendor')!.getBoundingClientRect();
+					return caret ? Math.abs((caret.top + caret.bottom) / 2 - (vendor.top + vendor.bottom) / 2) : Number.POSITIVE_INFINITY;
+				}));
+				return { clipped, overflows: sheet.scrollWidth > sheet.clientWidth, overlaps, gutterOffset, checkColumnOffset, checkOverlaps, checkRowDrift, caretDrift, wrappedVendors };
 			}, id);
 			expect(layout.clipped).toEqual([]);
 			if (device === 'phone') expect(layout.overflows).toBe(false);
 			expect(layout.overlaps).toEqual([]);
 			expect(layout.wrappedVendors).toEqual([]);
 			expect(layout.gutterOffset).toBe(0);
+			expect(layout.checkColumnOffset).toBe(0);
+			expect(layout.checkOverlaps).toBe(0);
+			expect(layout.checkRowDrift).toBeLessThanOrEqual(2);
+			expect(layout.caretDrift).toBeLessThanOrEqual(1);
 			if (shots) await page.screenshot({ path: `${shots}/${id}-${device}-${theme}.png`, scale: 'css', animations: 'disabled' });
 		}
 	}

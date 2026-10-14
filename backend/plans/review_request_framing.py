@@ -15,6 +15,10 @@ REVIEW_FRAMING = (
     "reach the owner when you pass `submit: true` on your last comment, or about "
     "{quiet} after it; this task then settles by itself, so do not close it."
 )
+STOPPED_DELIVERY_NOTE = (
+    "{evidence} This step was stopped then, so it did not settle by itself. Do not "
+    "review again: once it resumes, mark it done with that delivery as the evidence."
+)
 
 
 def note_block(request: Any) -> str:

@@ -20,6 +20,7 @@ const backendPython =
 	process.env.CORSIA_E2E_PYTHON ||
 	'../.venv/bin/python';
 const mockMode = process.env.CORSIA_E2E_MOCK === '1';
+const includeStress = process.env.CORSIA_E2E_INCLUDE_STRESS === '1';
 const backendApp = mockMode ? 'e2e_app:app' : 'main:app';
 // A fault run is deliberately more explicit than ordinary mock E2E: callers
 // must attest the roots were freshly prepared before a process may be killed.
@@ -44,6 +45,8 @@ const backendCommand = [
 
 export default defineConfig({
 	testDir: './e2e',
+	// Stress video/measurement runs are on-demand, never part of the default CI flow.
+	grepInvert: includeStress ? undefined : /@stress/,
 	globalSetup: './e2e/global-setup.ts',
 	// In mock mode, tests complete in seconds (no real LLM round-trip).
 	// In real mode, Haiku one-word replies take 1-3s but slow-network

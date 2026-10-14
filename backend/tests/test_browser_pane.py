@@ -248,7 +248,10 @@ async def test_pane_resizes_are_matched_one_at_a_time_latest_first(monkeypatch):
             await asyncio.sleep(1)
             raise StopAsyncIteration
 
-    pane.receive_text, pane.send_json = receive_text, send_json
+    async def send_text(payload):
+        pane.sent.append(json.loads(payload))
+
+    pane.receive_text, pane.send_json, pane.send_text = receive_text, send_json, send_text
     with pytest.raises(browser_stream.WebSocketDisconnect):
         await browser_stream._relay(pane, Stream(), "thread-1", "user-1")
     # The first fit runs; the two that arrive meanwhile collapse into the latest one.
@@ -275,9 +278,9 @@ async def test_a_newer_pane_size_supersedes_an_older_connections(monkeypatch):
     browser_stream._request_match("thread-1", "old-pane", {**size, "height": 1000})
     browser_stream._request_match("thread-1", "new-pane", {**size, "height": 830})
     release.set()
-    await browser_stream._matchers["thread-1"]
+    await browser_stream._runners["thread-1"]
     assert fitted == [("old-pane", 1030), ("new-pane", 830)]
-    assert "thread-1" not in browser_stream._matchers
+    assert "thread-1" not in browser_stream._runners
     # Each applied appearance is redrawn, since Chrome may send no frame for it on a static page.
     assert repainted == ["old-pane", "new-pane"]
 
@@ -294,10 +297,14 @@ async def test_agent_close_waits_while_the_user_controls(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("returncode", "announced"), [(0, ["thread-1"]), (1, [])])
-async def test_browser_opened_is_announced_only_after_a_successful_open(monkeypatch, returncode, announced):
+@pytest.mark.parametrize(("returncode", "show_window", "announced"), [
+    (0, False, []),
+    (0, True, ["thread-1", "thread-1"]),
+    (1, True, []),
+])
+async def test_browser_opened_is_announced_after_every_successful_shared_open(monkeypatch, returncode, show_window, announced):
     owner = BrowserSessionOwner(namespace="corsia-pane-test")
-    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session"))
+    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session", show_window=show_window))
     seen = []
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
@@ -305,6 +312,7 @@ async def test_browser_opened_is_announced_only_after_a_successful_open(monkeypa
     monkeypatch.setattr(owner, "_run_admitted", lambda *_args, **_kwargs: asyncio.sleep(
         0, result=(CommandResult(returncode, "", "failed"), False)))
     monkeypatch.setattr(browser_control, "announce_browser_opened", seen.append)
+    await owner.run("thread-1", ("open", "https://example.test"))
     await owner.run("thread-1", ("open", "https://example.test"))
     assert seen == announced
 

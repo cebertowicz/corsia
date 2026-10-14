@@ -26,9 +26,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		const browserFrames: string[] = [];
 		page.on('websocket', (socket) => {
 			browserSockets.push(socket.url());
-			socket.on('framereceived', (frame) => {
-				try { browserFrames.push(`${socket.url()}:${String(frame.payload)}`); } catch { /* non-JSON frames are irrelevant */ }
-			});
+			socket.on('framereceived', (frame) => browserFrames.push(`${socket.url()}:${String(frame.payload)}`));
 		});
 		await loginByUrl(page);
 		await page.getByText(title).first().click();
