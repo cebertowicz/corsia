@@ -276,6 +276,28 @@ async def _prepare_owned_release(
         raise
 
 
+async def _check_room_or_compensate(operation_id: str, acquired_ids: list[str]) -> None:
+    """Refuse an update without backup room, releasing the hold on any failure."""
+    try:
+        await _check_update_backup_room()
+    except asyncio.CancelledError as error:
+        await _compensate_cancelled_acquire(acquired_ids, error)
+        raise
+    except BaseException as error:
+        from infra.database_migrations import BackupRoomError
+
+        room = {"needed_bytes": error.needed_bytes, "free_bytes": error.free_bytes} if isinstance(error, BackupRoomError) else None
+        await _compensate_preparation_failure(
+            operation_id,
+            error,
+            failure_code="disk_space" if room else getattr(error, "update_failure_code", None),
+            failure_detail=json.dumps(room) if room else _failure_detail(error),
+        )
+        if room:
+            raise HTTPException(409, {"code": "disk_space", **room}) from error
+        raise
+
+
 async def _launch_settings_restart(
     operation_id: str,
     prepared: bool,
@@ -361,11 +383,11 @@ async def prelaunch_settings_restart(
             raise
 
         if prepared:
-            from api.update_preparation import prepare_update_before_drain
-
-            script_args = await prepare_update_before_drain(
+            await _check_room_or_compensate(operation_id, acquired_ids)
+            await _prepare_owned_release(
                 operation_id, acquired_ids, corsia_script, restart_env
             )
+            script_args = ["restart-prepared"]
 
         try:
             await _begin_settings_drain(operation_id, mode)

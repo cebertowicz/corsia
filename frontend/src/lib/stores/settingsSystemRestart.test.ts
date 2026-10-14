@@ -35,30 +35,27 @@ describe('waitForSystemRestart', () => {
 			return json({ status: 'failed', failure_code: 'build_failed', error: 'build summary' });
 		}));
 
-		const waiting = waitForSystemRestart('update', before, 'operation-1');
+		const waiting = waitForSystemRestart('restart', before, 'operation-1');
 		await vi.advanceTimersByTimeAsync(500);
 
-		await expect(waiting).resolves.toEqual({
-			ok: false,
-			message: 'Could not build the update. CORSIA is still running.',
-		});
+		await expect(waiting).resolves.toEqual({ ok: false, message: 'build summary' });
 	});
 
-	it('shows the durable disk-space numbers in rounded GB', async () => {
+	it('reports a cancelled plain restart with its stored summary, not update wording', async () => {
 		token.set('test-token');
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (
 			String(input) === '/api/version'
 				? json(completedVersion)
 				: json({
-					status: 'failed',
-					failure_code: 'disk_space',
-					failure_detail: JSON.stringify({ needed_bytes: 12_600_000_000, free_bytes: 8_400_000_000 }),
+					status: 'cancelled',
+					failure_code: 'drain_cancelled',
+					error: 'restart control cancelled during steering',
 				})
 		)));
 
-		await expect(waitForSystemRestart('update', before, 'operation-2')).resolves.toEqual({
+		await expect(waitForSystemRestart('restart', before, 'operation-2')).resolves.toEqual({
 			ok: false,
-			message: 'Needs 13 GB free; this Mac has 8 GB.',
+			message: 'restart control cancelled during steering',
 		});
 	});
 

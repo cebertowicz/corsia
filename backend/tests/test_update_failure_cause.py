@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -49,6 +50,42 @@ async def test_update_disk_refusal_persists_numbers_before_any_drain(isolated_db
         "failure_code": "disk_space",
         "failure_detail": '{"needed_bytes": 13, "free_bytes": 8}',
     }
+    prepare.assert_not_awaited()
+    drain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raised_error", [OSError("stat failed"), asyncio.CancelledError()])
+async def test_update_room_check_failure_leaves_no_in_flight_operation(
+    isolated_db, monkeypatch, raised_error
+):
+    """Any failure of the room check, cancellation included, releases the hold."""
+    from api import settings_restart
+    from infra.database import get_db
+
+    prepare = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", prepare)
+    monkeypatch.setattr(
+        settings_restart, "_check_update_backup_room", AsyncMock(side_effect=raised_error)
+    )
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+
+    with pytest.raises(type(raised_error)):
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "steve"}, "update", Path("/unused"), {}, ["restart"],
+            lambda name: Path(name), caller_token="test-token",
+        )
+
+    connection = get_db()
+    try:
+        rows = [dict(row) for row in connection.execute(
+            "SELECT status,phase FROM self_restart_requests"
+        ).fetchall()]
+    finally:
+        connection.close()
+    assert rows
+    assert all(row["status"] != "in_flight" for row in rows)
     prepare.assert_not_awaited()
     drain.assert_not_awaited()
 
@@ -154,3 +191,33 @@ async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolate
     finally:
         connection.close()
     assert told_at is None
+
+
+@pytest.mark.asyncio
+async def test_conductor_notice_failure_never_skips_resume(isolated_db, monkeypatch):
+    """The best-effort notice runs after the drain clear and the resume, and cannot undo them."""
+    from automation import restart, self_restart, update_failure_notice
+    from infra import drain
+
+    operation_id = self_restart.try_acquire(
+        None, "steve", None, None, "update", kind="update", trigger="manual"
+    )
+    assert operation_id is not None
+    monkeypatch.setattr(
+        update_failure_notice, "tell_conductor_about_failed_update",
+        AsyncMock(side_effect=RuntimeError("notice failed")),
+    )
+    cleared = []
+    resumed = []
+    monkeypatch.setattr(drain, "cancel_drain_projection", lambda: cleared.append(True))
+    monkeypatch.setattr(
+        restart, "resume_threads_detached", lambda threads, *_args: resumed.append(tuple(threads))
+    )
+
+    released = await restart.abort_restart_control(
+        operation_id, error="build summary", failure_code="build_failed"
+    )
+
+    assert released is True
+    assert cleared == [True]
+    assert len(resumed) == 1

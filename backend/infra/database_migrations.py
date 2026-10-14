@@ -1082,7 +1082,7 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
 
                 # The lock makes this the only backup within one boot. It cannot
                 # bound copies across boots: a crash-restart loop is a fresh
-                # uncontested winner every time, which is why `_require_backup_room`
+                # uncontested winner every time, which is why `require_backup_room`
                 # reserves space the copy may not consume.
                 backup_path = _write_backup(conn, locked_version)
                 log.info(

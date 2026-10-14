@@ -29,6 +29,7 @@ beforeEach(() => {
 	token.set('test-token');
 	resetUpdateStoreForTests();
 	sessionStorage.clear();
+	localStorage.clear();
 });
 
 afterEach(() => {
@@ -186,5 +187,42 @@ describe('update store', () => {
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => done })));
 		await loadUpdateStatus();
 		expect(releaseNotesFor(get(updateOperation), get(updateStatus))?.changes?.items).toEqual(['One']);
+	});
+
+	it('pins a completed update once per browser, not once per tab', async () => {
+		const hash = 'a'.repeat(40);
+		const version = { frontend: { full_hash: hash }, backend: { full_hash: hash, current_head: { full_hash: hash } } };
+		const done = { ...running('holding'), available: false, operation: { ...running('holding').operation, status: 'complete' } };
+		const fetchMock = vi.fn(async (url: string) => (
+			url.startsWith('/api/version') ? { ok: true, json: async () => version } : { ok: true, json: async () => done }
+		));
+		vi.stubGlobal('fetch', fetchMock);
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(get(toasts).filter((toast) => toast.pinned?.key === 'update')).toHaveLength(1);
+
+		for (const toast of get(toasts)) toasts.dismiss(toast.id);
+		resetUpdateStoreForTests();
+		sessionStorage.clear();
+		fetchMock.mockClear();
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(get(toasts).filter((toast) => toast.pinned?.key === 'update')).toHaveLength(0);
+		expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/version'))).toBe(false);
+	});
+
+	it('does not re-judge the versions of a completed update that was already handled', async () => {
+		localStorage.setItem('corsia:update:handled-operation-ids', JSON.stringify(['update-1']));
+		const done = { ...running('holding'), available: false, operation: { ...running('holding').operation, status: 'complete' } };
+		const fetchMock = vi.fn(async (url: string) => (
+			url.startsWith('/api/version')
+				? { ok: true, json: async () => ({ frontend: { full_hash: 'a' }, backend: { full_hash: 'b' } }) }
+				: { ok: true, json: async () => done }
+		));
+		vi.stubGlobal('fetch', fetchMock);
+		await loadUpdateStatus();
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(get(toasts).filter((toast) => toast.pinned?.key === 'update')).toHaveLength(0);
+		expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/version'))).toBe(false);
 	});
 });

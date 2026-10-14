@@ -306,13 +306,6 @@ async def system_restart_self(
     return _self_restart_response(auth, redeploy)
 
 
-def _update_operation_status(operation: dict) -> dict:
-    """Project durable Update truth without changing prior status fields."""
-    from infra.update_operation import project_update_operation
-
-    return project_update_operation(operation)
-
-
 @router.get("/system/update-status")
 async def system_update_status(
     refresh: bool = False, user: dict = Depends(require_user)
@@ -327,6 +320,7 @@ async def system_update_status(
     from core.turn_core import active_turn_count
     from infra import drain
     from infra.db_async import run_in_db
+    from infra.update_operation import project_update_operation
     from infra.update_status import update_status
 
     status = await asyncio.to_thread(update_status, refresh)
@@ -340,7 +334,7 @@ async def system_update_status(
     result["schedule"] = await asyncio.to_thread(get_update_schedule)
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:
-        result["operation"] = _update_operation_status(operation)
+        result["operation"] = await run_in_db(project_update_operation, operation)
     return result
 
 
