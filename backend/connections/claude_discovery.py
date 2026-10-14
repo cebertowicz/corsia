@@ -80,11 +80,16 @@ async def run_claude_control(
         replies = phase.replies_observed
         log.warning(
             "claude_control_timeout operation=%s scope=%s session=%s stdin_written=%s "
-            "usage_reply_observed=%s catalog_reply_observed=%s context_reply_observed=%s "
+            "stdin_drain_completed=%s stdin_close_completed=%s "
+            "stdout_eof_completed=%s stderr_eof_completed=%s "
+            "usage_reply_observed=%s usage_response_subtype=%s usage_verdict=%s "
+            "catalog_reply_observed=%s context_reply_observed=%s end_session_reply_observed=%s "
             "process_exited_at_timeout=%s returncode_at_timeout=%s",
             claude_control_io.log_operation(operation), claude_control_io.log_scope(context),
-            session, phase.stdin_written,
-            replies["usage"], replies["catalog"], replies["context"],
+            session, phase.stdin_written, phase.stdin_drain_completed, phase.stdin_close_completed,
+            phase.stdout_eof_completed, phase.stderr_eof_completed,
+            replies["usage"], phase.usage_response_subtype, phase.usage_verdict,
+            replies["catalog"], replies["context"], replies["end"],
             phase.process_exited_at_timeout, phase.returncode_at_timeout,
         )
         raise RuntimeError(f"Claude Code {operation} timed out") from None

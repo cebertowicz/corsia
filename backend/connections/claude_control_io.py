@@ -12,6 +12,7 @@ _REPLY_PURPOSES = {
     "get_usage": "usage",
     "list_models": "catalog",
     "get_context_usage": "context",
+    "end_session": "end",
 }
 _LOG_CORRELATION_KEY = secrets.token_bytes(16)
 
@@ -37,8 +38,14 @@ class ControlPhase:
     """Local lifecycle facts retained only until a timeout warning is emitted."""
 
     stdin_written: bool = False
+    stdin_drain_completed: bool = False
+    stdin_close_completed: bool = False
+    stdout_eof_completed: bool = False
+    stderr_eof_completed: bool = False
+    usage_response_subtype: str = "none"
+    usage_verdict: str = "none"
     replies_observed: dict[str, bool] = field(
-        default_factory=lambda: {"usage": False, "catalog": False, "context": False},
+        default_factory=lambda: {"usage": False, "catalog": False, "context": False, "end": False},
     )
     process_exited_at_timeout: bool | None = None
     returncode_at_timeout: int | None = None
@@ -63,14 +70,40 @@ def prepare_control_request(frames: list[dict[str, Any]]) -> tuple[bytes, dict[s
     return payload, expected
 
 
-def observe_control_reply(data: bytes, expected: dict[str, str], phase: ControlPhase) -> None:
-    """Record expected response presence without retaining payload or disrupting bytes."""
+def _usage_verdict_category(response: object) -> str:
+    """Reduce the canonical usage verdict to a log-safe fixed category."""
     try:
-        response = json.loads(data.decode("utf-8")).get("response") or {}
-    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
-        return
-    if isinstance(response, dict) and (purpose := expected.get(str(response.get("request_id") or ""))):
+        from connections.claude_usage import usage_verdict
+
+        verdict = usage_verdict(response).get("verdict")
+    except Exception:
+        return "unknown"
+    return verdict if verdict in {"allowed", "limited", "unknown"} else "unknown"
+
+
+def observe_control_reply(data: bytes, expected: dict[str, str], phase: ControlPhase) -> None:
+    """Record fixed expected-response facts without retaining or changing payload bytes."""
+    try:
+        envelope = json.loads(data.decode("utf-8"))
+        response = envelope.get("response") if isinstance(envelope, dict) else None
+        if not isinstance(response, dict):
+            return
+        purpose = expected.get(str(response.get("request_id") or ""))
+        if purpose is None:
+            return
         phase.replies_observed[purpose] = True
+        if purpose != "usage":
+            return
+        subtype = response.get("subtype")
+        phase.usage_response_subtype = (
+            subtype if isinstance(subtype, str) and subtype in {"success", "error"} else "other"
+        )
+        phase.usage_verdict = (
+            _usage_verdict_category(response.get("response"))
+            if subtype == "success" else "none"
+        )
+    except Exception:
+        return
 
 
 async def _feed_stdin(process, payload: bytes, phase: ControlPhase) -> None:
@@ -79,9 +112,11 @@ async def _feed_stdin(process, payload: bytes, phase: ControlPhase) -> None:
         process.stdin.write(payload)
         phase.stdin_written = True
         await process.stdin.drain()
+        phase.stdin_drain_completed = True
     except (BrokenPipeError, ConnectionResetError):
         pass
     process.stdin.close()
+    phase.stdin_close_completed = True
 
 
 async def _read_stdout(process, expected: dict[str, str], phase: ControlPhase) -> bytes:
@@ -98,7 +133,15 @@ async def _read_stdout(process, expected: dict[str, str], phase: ControlPhase) -
     if pending:
         observe_control_reply(pending, expected, phase)
     process._transport.get_pipe_transport(1).close()
+    phase.stdout_eof_completed = True
     return b"".join(chunks)
+
+
+async def _read_stderr(process, phase: ControlPhase) -> bytes:
+    """Drain stderr through asyncio's private stream owner and record EOF completion."""
+    stderr = await process._read_stream(2)
+    phase.stderr_eof_completed = True
+    return stderr
 
 
 async def communicate(process, payload: bytes, expected: dict[str, str], phase: ControlPhase) -> tuple[bytes, bytes]:
@@ -106,7 +149,7 @@ async def communicate(process, payload: bytes, expected: dict[str, str], phase: 
     _stdin, stdout, stderr = await asyncio.gather(
         _feed_stdin(process, payload, phase),
         _read_stdout(process, expected, phase),
-        process._read_stream(2),
+        _read_stderr(process, phase),
     )
     await process.wait()
     return stdout, stderr
