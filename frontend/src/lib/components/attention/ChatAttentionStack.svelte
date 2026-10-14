@@ -19,7 +19,6 @@
 	 * owns the complete stacking and height contract.
 	 */
 	import type { Snippet } from 'svelte';
-	import { toastClearanceBand } from '$lib/stores/toastClearance';
 
 	let { children }: { children?: Snippet } = $props();
 
@@ -64,7 +63,7 @@
 	});
 </script>
 
-<div class="chat-attention-stack" bind:this={slot} use:toastClearanceBand>
+<div class="chat-attention-stack" bind:this={slot}>
 	{@render children?.()}
 </div>
 

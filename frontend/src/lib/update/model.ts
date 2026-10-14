@@ -59,13 +59,6 @@ export interface UpdateOffer {
 	changes: UpdateChanges | null;
 }
 
-export const UPDATE_STEPS = [
-	'Getting the update',
-	'Stopping agents safely',
-	'Restarting CORSIA',
-	'Checking everything and resuming agents',
-] as const;
-
 export function isInFlight(op: UpdateOperation | null | undefined): op is UpdateOperation & { status: 'in_flight' } {
 	return op?.status === 'in_flight';
 }
@@ -75,10 +68,20 @@ export function holdsNewWork(op: UpdateOperation | null | undefined): boolean {
 	return isInFlight(op) && op.kind === 'update' && op.phase !== 'holding';
 }
 
-/** The step the operation is on, 0 to 3. A server that cannot be reached is restarting. */
-export function stepIndex(op: UpdateOperation | null, unreachable: boolean): number {
-	if (unreachable && op && op.phase !== 'holding') return 2;
-	switch (op?.phase) {
+/**
+ * The step an in-flight operation is on, 0 to 3, or null when it has none: a settled operation (its
+ * phase is cleared on settle) is past every step, and a phase this client cannot place is not step 0.
+ * A server that cannot be reached is restarting, whatever phase was seen last.
+ */
+export function stepIndex(op: UpdateOperation | null, unreachable: boolean): number | null {
+	if (!op) return unreachable ? 2 : 0;
+	if (!isInFlight(op)) return null;
+	if (unreachable) return 2;
+	switch (op.phase) {
+		case 'holding':
+		case null:
+		case undefined:
+			return 0;
 		case 'steering':
 		case 'draining':
 			return 1;
@@ -88,7 +91,7 @@ export function stepIndex(op: UpdateOperation | null, unreachable: boolean): num
 		case 'resuming':
 			return 3;
 		default:
-			return 0;
+			return null;
 	}
 }
 
@@ -142,28 +145,27 @@ function agentsLabel(count: number): string {
 	return `${count} agent${count === 1 ? '' : 's'}`;
 }
 
-/** The one line the progress toast carries, without its ticking time. */
-export function stepMessage(op: UpdateOperation | null, unreachable: boolean): string {
-	const step = stepIndex(op, unreachable);
-	if (step === 0) return 'Getting the update';
-	if (step === 1) {
-		const counts = agentsSafe(op);
-		return counts ? `Stopping agents · ${counts.safe} of ${counts.total} safe` : 'Stopping agents';
-	}
-	if (step === 2) return 'Restarting';
-	const total = op?.drain_total ?? 0;
-	return total > 0 ? `Resuming ${agentsLabel(total)}` : 'Resuming';
+/** What an update costs, in one sentence: the restart, and what working agents do through it. */
+export function costLine(usualSeconds: number | null | undefined, agents: number): string {
+	if (agents <= 0) return 'CORSIA restarts to finish.';
+	const restart = usualSeconds != null ? `CORSIA restarts for about ${humanDuration(usualSeconds)}` : 'CORSIA restarts to finish';
+	return agents === 1
+		? `${restart}; 1 working agent pauses and picks up where it left off.`
+		: `${restart}; ${agents} working agents pause and pick up where they left off.`;
 }
 
-/** The sentence under the active step in the panel. */
-export function stepDetail(op: UpdateOperation | null, unreachable: boolean): string | null {
-	if (stepIndex(op, unreachable) !== 1) return null;
-	const counts = agentsSafe(op);
-	if (!counts) return null;
-	const base = `${counts.safe} of ${counts.total} ${counts.total === 1 ? 'agent is' : 'agents are'} at a safe point.`;
-	const remaining = op?.hard_cap_remaining;
-	if (counts.safe === counts.total || remaining == null) return base;
-	return `${base} Stopping the rest in ${formatElapsed(remaining)}.`;
+/** The one line the progress toast and the Version row carry, without the ticking time. */
+export function stepMessage(op: UpdateOperation | null, unreachable: boolean): string {
+	const step = stepIndex(op, unreachable);
+	if (step === null) return 'Updating';
+	if (step === 0) return 'Installing update';
+	if (step === 1) {
+		const counts = agentsSafe(op);
+		return counts ? `Pausing agents · ${counts.safe} of ${counts.total}` : 'Pausing agents';
+	}
+	if (step === 2) return 'Restarting CORSIA';
+	const total = op?.drain_total ?? 0;
+	return total > 0 ? `Resuming ${agentsLabel(total)}` : 'Resuming agents';
 }
 
 /** A problem the client itself found, which no stored operation holds. */
@@ -207,6 +209,20 @@ export function currentOperation(op: UpdateOperation | null | undefined, status:
 	if (isResolvedFailure(op)) return null;
 	const offered = status?.available ? status.target_version : null;
 	return offered && op.target_version && offered !== op.target_version ? null : op;
+}
+
+/** A development build's commit title as a plain line: no lane tag, no pull-request number, first letter capitalised. */
+export function plainChangeTitle(title: string): string {
+	const text = title.replace(/^\[[^\]]+\]\s*/, '').replace(/\s*\(#\d+\)\s*$/, '').trim();
+	return text ? text[0].toUpperCase() + text.slice(1) : title;
+}
+
+/** The heading and lines for a change list: release notes read "What's new", a development build's commit titles "Recent changes". */
+export function changeList(changes: UpdateChanges | null | undefined): { heading: string; items: string[] } | null {
+	if (!changes || changes.items.length === 0) return null;
+	return changes.kind === 'changelog'
+		? { heading: "What's new", items: changes.items }
+		: { heading: 'Recent changes', items: changes.items.map(plainChangeTitle) };
 }
 
 export interface UpdateReleaseNotes {

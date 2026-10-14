@@ -20,7 +20,7 @@
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { closeScopeSettings, workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { settingsOpenRequest } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, settingsOpenRequest } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
 	import { fetchConductor, landOnFirstRun, type ConductorLookup } from '$lib/utils/conductor';
@@ -291,7 +291,7 @@
 			threads: $threads,
 			closeProjectSettings: () => projectSettingsOpen.set(false),
 			closeThreadSettings,
-			closeSettings: openActivity,
+			closeSettings: () => closeSettingsBack((id) => selectThread(id, 'other'), openActivity),
 			closeDocuments: closeDocumentsView,
 		});
 	});
@@ -490,7 +490,7 @@
 	onToggleSidebar={toggleSidebar} onTogglePane={togglePane} onOpenLightbox={openLightbox}
 	onAutoCreateThread={async () => { await newThread($uiScope?.id ?? undefined); }}
 	onPickProject={pickProject} onPickProjectAndClosePane={pickProjectAndClosePane}
-	onCloseSettings={openActivity}
+	onCloseSettings={() => closeSettingsBack((id) => selectThread(id, 'other'), openActivity)}
 	onMeasurement={() => resetSurface('measurement', { preserveActiveThread: true })}
 	onCloseMeasurement={() => closeMeasurementSurface({ resetSurface, setActiveThread: (threadId) => activeThreadId.set(threadId) })}
 	onPickConversation={(id) => selectThread(id, 'sidebar')}

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Button, Field, IconButton, Message, Modal, Section, StatePill } from '$lib/components/ui';
-	import MaterialShowcase from './MaterialShowcase.svelte'; import CommentsShowcase from './CommentsShowcase.svelte';
+	import MaterialShowcase from './MaterialShowcase.svelte'; import CommentsShowcase from './CommentsShowcase.svelte'; import SpinnerShowcase from './SpinnerShowcase.svelte';
 
 	import AttentionDockShowcase from './AttentionDockShowcase.svelte';
 
@@ -423,7 +423,7 @@
 	</section>
 
 	<MaterialShowcase />
-	<CommentsShowcase />
+	<CommentsShowcase /><SpinnerShowcase />
 	<!-- ── The one attention dock (PLANS-AC34) ── -->
 	<section class="block" id="attention-dock">
 		<header class="block-head">

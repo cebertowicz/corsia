@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
-import { TEST_SESSION_TOKEN, openSettings, saveEvidenceScreenshot } from '../support/corsia';
+import { TEST_SESSION_TOKEN, chatComposer, openSettings, saveEvidenceScreenshot } from '../support/corsia';
 
 test.use({ video: 'on' });
 
@@ -65,29 +65,18 @@ test.describe('@surface:settings scheduled updates parity', () => {
 		schedule = { automatic: true, time: '03:30', tonight_at: null };
 		for (const cell of cells) await captureSettings(page, testInfo, cell.theme, cell.width, schedule, `settings-on-${cell.suffix}`);
 
+		// The decision lives in the Updates card: changes, one cost sentence, Update now and Tonight, and no sheet opens.
 		schedule = { automatic: false, time: '03:00', tonight_at: null };
 		for (const cell of cells) {
 			await openSystem(page, cell.theme, cell.width);
-			await page.getByRole('button', { name: 'Update', exact: true }).click();
-			const updateSheet = page.getByLabel('Update CORSIA');
-			await expect(updateSheet.getByText('Keep CORSIA up to date automatically')).toBeVisible();
-			await expect(updateSheet.getByText('CORSIA will be unavailable — usually about a minute.')).toBeVisible();
-			if (cell.width === 393) {
-				await expect(page.locator('[data-adaptive-drawer]')).toBeVisible();
-				const geometry = await updateSheet.evaluate((panel) => {
-					const drain = panel.querySelector<HTMLElement>('[data-update-drain]')!;
-					const actions = panel.querySelector<HTMLElement>('[data-update-mobile-actions]')!;
-					const panelBox = panel.getBoundingClientRect();
-					const drainBox = drain.getBoundingClientRect();
-					const actionsBox = actions.getBoundingClientRect();
-					return {
-						drainFits: drain.scrollHeight <= drain.clientHeight && drainBox.top >= panelBox.top && drainBox.bottom <= panelBox.bottom - 8,
-						actionsReachable: actionsBox.top >= panelBox.top && actionsBox.bottom <= panelBox.bottom,
-					};
-				});
-				expect(geometry).toEqual({ drainFits: true, actionsReachable: true });
-			}
-			await saveEvidenceScreenshot(page, testInfo, `sheet-drain-cue-${cell.suffix}`);
+			const card = page.locator('[data-settings-anchor="update"]');
+			await expect(card.getByText('Schedules stay visible')).toBeVisible();
+			await expect(card.getByText('CORSIA restarts for about a minute; 2 working agents pause and pick up where they left off.')).toBeVisible();
+			await expect(card.getByRole('button', { name: 'Update now' })).toBeVisible();
+			await expect(card.getByRole('button', { name: 'Tonight at 3:00 AM' })).toBeVisible();
+			await expect(card.getByText('Keep CORSIA up to date automatically')).toBeVisible();
+			await expect(page.getByRole('dialog')).toHaveCount(0);
+			await saveEvidenceScreenshot(page, testInfo, `offer-card-${cell.suffix}`);
 		}
 
 		schedule = { automatic: true, time: '03:30', tonight_at: null };
@@ -106,39 +95,20 @@ test.describe('@surface:settings scheduled updates parity', () => {
 		{ width: 1440 as const, label: '1440 desktop' },
 		{ width: 393 as const, label: '393 mobile' },
 	]) {
-		for (const dismissPath of ['close', 'later', 'scrim', 'escape'] as const) {
-			test(`records ${viewport.label} choice-sheet open and close motion through ${dismissPath}`, async ({ page }, testInfo) => {
-				test.skip(testInfo.project.name.includes('mobile') !== (viewport.width === 393), 'each recording runs only in the project matching its asserted viewport');
-				const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
-				await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
-				await page.route('**/api/system/update-schedule', (route) => route.fulfill({ json: schedule }));
-				await openSystem(page, 'light', viewport.width);
-				await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(viewport.width);
+		test(`${viewport.label}: the update notice opens Settings at the Updates card and Back returns to the chat`, async ({ page }) => {
+			test.skip(test.info().project.name.includes('mobile') !== (viewport.width === 393), 'each run uses the project matching its asserted viewport');
+			const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
+			await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
+			await page.setViewportSize({ width: viewport.width, height: viewport.width === 393 ? 852 : 1000 });
+			await page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`);
 
-				const sheet = page.getByLabel('Update CORSIA');
-				const open = async () => {
-					await page.getByRole('button', { name: 'Update', exact: true }).click();
-					await expect(sheet).toBeVisible();
-					if (viewport.width === 393) {
-						await expect(page.locator('[data-adaptive-drawer]')).toBeVisible();
-					} else {
-						await expect(page.locator('.modal')).toBeVisible();
-						await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);
-					}
-				};
-				const closed = async () => expect(sheet).toBeHidden();
-
-				await open();
-				await page.waitForTimeout(500);
-				if (dismissPath === 'close') {
-					if (viewport.width === 393) await page.locator('[data-adaptive-drawer] .drawer-done').click();
-					else await page.getByRole('button', { name: 'Close', exact: true }).click();
-				}
-				if (dismissPath === 'later') await page.getByRole('button', { name: 'Later' }).click();
-				if (dismissPath === 'scrim') await page.locator(viewport.width === 393 ? '[data-adaptive-drawer]' : '.bg').click({ position: { x: 8, y: 8 } });
-				if (dismissPath === 'escape') await page.keyboard.press('Escape');
-				await closed();
-			});
-		}
+			const notice = page.getByRole('button', { name: 'Update ready. Open Updates' });
+			await expect(notice).toBeVisible();
+			await notice.click();
+			await expect(page.locator('[data-settings-anchor="update"]').getByRole('button', { name: 'Update now' })).toBeInViewport();
+			// Back returns to the chat the notice was opened from, not to Activity.
+			await page.getByRole('button', { name: viewport.width === 393 ? 'Back' : 'Close settings', exact: true }).click();
+			await expect(chatComposer(page)).toBeVisible();
+		});
 	}
 });
