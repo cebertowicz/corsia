@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { Button, RailRow, RailSection } from '$lib/components/ui';
 
@@ -19,8 +20,8 @@
 	}
 
 	const { steps, jobs = [], title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
-	let shownJobs = $state<SetupJob[]>(jobs);
-	let jobRegionOpen = $state(jobs.length > 0);
+	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
+	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 
 	$effect(() => {
 		if (jobs.length > 0) {

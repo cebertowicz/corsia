@@ -56,12 +56,15 @@ describe('SetupScreen', () => {
 		expect(host.textContent).not.toContain('This Mac can’t run a local model.');
 	});
 
-	it('starts the gated selected local download with Get started', async () => {
+	it('keeps the setup shell mounted while Get started moves the local download into the rail', async () => {
 		await settle();
 		expect(host.textContent).toContain('Download Example model now');
+		const shell = host.querySelector('.setup-shell');
+		expect(shell).not.toBeNull();
 		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
 		action?.click();
 		await settle();
+		expect(host.querySelector('.setup-shell')).toBe(shell);
 		expect(calls).toContain('/api/setup/local-download');
 		expect(host.textContent).toContain('Create your account');
 		expect(host.textContent).toContain('In the background');

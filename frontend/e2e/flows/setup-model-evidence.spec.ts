@@ -149,11 +149,32 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.addInitScript(() => localStorage.setItem('corsia_theme', 'auto'));
 		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 		await page.goto('/');
+		await page.locator('html').evaluate((element) => {
+			element.style.setProperty('--dur-standard', '3000ms');
+		});
+		const shell = page.locator('.setup-shell');
+		await shell.evaluate((element) => element.setAttribute('data-persistence-probe', 'welcome'));
 		await page.getByRole('button', { name: 'Get started' }).click();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+		await expect(shell).toHaveAttribute('data-persistence-probe', 'welcome');
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		const job = page.locator('.job-row');
+		const motion = await page.evaluate(async () => {
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			const region = document.querySelector<HTMLElement>('.job-region');
+			if (!region) throw new Error('Missing background-job region');
+			const token = getComputedStyle(region).getPropertyValue('--dur-standard').trim();
+			const duration = (Number.parseFloat(token) || 0) * (token.endsWith('ms') ? 1 : 1_000);
+			const leadStateCount = document.querySelectorAll('.rail .lead-state').length;
+			await new Promise<void>((resolve) => window.setTimeout(resolve, duration / 2));
+			return { halfHeight: region.getBoundingClientRect().height, leadStateCount };
+		});
+		await page.screenshot({ path: testInfo.outputPath('setup-model-get-started-background-job-halfway-light-1280x900.png'), scale: 'css' });
 		await waitForJobSettled(page, job);
+		const fullHeight = await page.locator('.job-region').evaluate((element) => element.getBoundingClientRect().height);
+		expect(motion.halfHeight).toBeGreaterThan(0);
+		expect(motion.halfHeight).toBeLessThan(fullHeight);
+		expect(motion.leadStateCount).toBeGreaterThan(3);
 		await expect(job).toHaveCSS('opacity', '1');
 		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
 		await expect(job.getByText('Qwen 3.8', { exact: true })).toBeVisible();

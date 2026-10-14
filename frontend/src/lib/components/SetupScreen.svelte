@@ -68,6 +68,26 @@
 	const modelSize = $derived(status.model_size_gb ? `${status.model_size_gb} GB` : 'a local model');
 	const downloadModelLabel = $derived(status.model_name || 'local model');
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? "Use 1–32 lowercase letters, numbers, '-' or '_'." : '');
+	type SetupPrimary = { label: string; disabled?: boolean; loading?: boolean; note?: string };
+	type SetupView = { title: string; lede?: string; primary?: SetupPrimary; onPrimary?: () => void; mark?: boolean };
+	const shellView = $derived.by((): SetupView => {
+		switch (page) {
+			case 'checking':
+				return { title: 'Checking this computer', lede: 'This takes a moment.' };
+			case 'hard-stop':
+				if (status.apple_silicon === false) return { title: 'CORSIA needs Apple silicon', lede: 'This version of CORSIA runs on Macs with Apple silicon.' };
+				if (status.macos_supported === false) return { title: 'Update macOS to continue', lede: 'Update to macOS 15 or later, then open CORSIA again.' };
+				return { title: 'Move CORSIA to Applications', lede: 'Move CORSIA to Applications, then open it again so updates work.' };
+			case 'welcome':
+				return { title: 'Welcome to CORSIA', lede: 'CORSIA runs AI agents that work on your projects with you.', primary: { label: 'Get started' }, onPrimary: beginSetup, mark: true };
+			case 'account':
+				return { title: 'Create your account', primary: { label: 'Continue', disabled: accountBusy || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }, onPrimary: createAccount };
+			case 'error':
+				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
+			case 'models':
+				return { title: 'Choose an AI model', lede: 'Your agents need at least one. You can add more later in Settings.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
+		}
+	});
 
 	async function readStatus() {
 		statusError = '';
@@ -212,14 +232,16 @@
 	});
 </script>
 
-{#if page === 'checking'}
-	<SetupShell {steps} title="Checking this computer" lede="This takes a moment." />
-{:else if page === 'hard-stop'}
-	<SetupShell {steps} title={status.apple_silicon === false ? 'CORSIA needs Apple silicon' : status.macos_supported === false ? 'Update macOS to continue' : 'Move CORSIA to Applications'} lede={status.apple_silicon === false ? 'This version of CORSIA runs on Macs with Apple silicon.' : status.macos_supported === false ? 'Update to macOS 15 or later, then open CORSIA again.' : 'Move CORSIA to Applications, then open it again so updates work.'}>
-		{#snippet secondary()}<Button variant="chip" onclick={readStatus}>Check again</Button>{/snippet}
-	</SetupShell>
-{:else if page === 'welcome'}
-	<SetupShell {steps} title="Welcome to CORSIA" mark lede="CORSIA runs AI agents that work on your projects with you." primary={{ label: 'Get started' }} onPrimary={beginSetup}>
+<SetupShell {steps} {jobs} title={shellView.title} lede={shellView.lede} primary={shellView.primary} mark={shellView.mark} onPrimary={shellView.onPrimary}>
+	{#snippet secondary()}
+		{#if page === 'hard-stop'}
+			<Button variant="chip" onclick={readStatus}>Check again</Button>
+		{:else if page === 'error'}
+			<Button variant="chip" onclick={() => page = 'account'}>Back</Button>
+		{/if}
+	{/snippet}
+
+	{#if page === 'welcome'}
 		<div class="welcome-copy">
 			{#if status.local_eligible === false}
 				<p>This computer can’t run a local model. You can connect Claude Code, Codex, or an API key in the next step.</p>
@@ -233,9 +255,7 @@
 				</div>
 			{/if}
 		</div>
-	</SetupShell>
-{:else if page === 'account'}
-	<SetupShell {steps} {jobs} title="Create your account" primary={{ label: 'Continue', disabled: accountBusy || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }} onPrimary={createAccount}>
+	{:else if page === 'account'}
 		<form class="form" onsubmit={(event) => { event.preventDefault(); createAccount(); }}>
 			<Field variant="chip" layout="stacked" label="Name"><input autocomplete="name" bind:value={name} /></Field>
 			<Field variant="chip" layout="stacked" label="Username" error={usernameError || undefined}><input autocomplete="username" autocapitalize="off" bind:value={username} /></Field>
@@ -245,13 +265,7 @@
 			<div class="folder"><span>Work folder</span><strong>{folder}</strong></div>
 			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
 		</form>
-	</SetupShell>
-{:else if page === 'error'}
-	<SetupShell {steps} {jobs} title="CORSIA couldn’t start" lede={statusError || accountError || 'Try again.'} primary={{ label: 'Try again' }} onPrimary={page === 'error' && !get(token) ? readStatus : createAccount}>
-		{#snippet secondary()}<Button variant="chip" onclick={() => page = 'account'}>Back</Button>{/snippet}
-	</SetupShell>
-{:else}
-	<SetupShell {steps} {jobs} title="Choose an AI model" lede="Your agents need at least one. You can add more later in Settings." primary={{ label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }} onPrimary={onFinished}>
+	{:else if page === 'models'}
 		<div class="sources">
 			{#each sources as source (source.source)}
 				<ListRow name={source.source === 'omlx' ? 'This computer' : source.name} meta={[sourceMeta(source)]} centered>
@@ -273,8 +287,8 @@
 			{:else}<div class="api-key-action"><Button variant="chip" size="sm" onclick={() => keyOpen = true}>Use an API key instead</Button></div>{/if}
 			{#if sourceError}<Message variant="err">{sourceError}</Message>{/if}
 		</div>
-	</SetupShell>
-{/if}
+	{/if}
+</SetupShell>
 
 <style>
 	.form { display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(var(--space-8) * 8); }
