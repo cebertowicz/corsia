@@ -80,14 +80,18 @@ def test_control_log_scope_is_opaque_per_scoped_account_generation():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("reply", "expected"), [
-    ('{"response":{"request_id":"corsia-usage","subtype":"success"}}', True),
-    ('{"response":{"request_id":"corsia-usage","subtype":"error"}}', True),
-    ('{"response":{"request_id":"corsia-usage"', False),
-    (None, False),
-], ids=("usage-success", "usage-error", "malformed-usage", "no-usage-reply"))
-async def test_timeout_logs_usage_reply_presence_before_cleanup(
-        tmp_path, monkeypatch, caplog, reply, expected):
+@pytest.mark.parametrize(("reply", "expected", "subtype", "verdict"), [
+    ('{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":25}}}}}', True, "success", "allowed"),
+    ('{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":100}}}}}', True, "success", "limited"),
+    ('{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits_available":false,"account_id":"private-account-id","path":"/private/source","private":"do-not-log"}}}', True, "success", "unknown"),
+    ('{"response":{"request_id":"corsia-usage","subtype":"success","response":"private-malformed-payload"}}', True, "success", "unknown"),
+    ('{"response":{"request_id":"corsia-usage","subtype":"error","error":"private-error"}}', True, "error", "none"),
+    ('{"response":{"request_id":"corsia-usage","subtype":"unexpected","response":"private-other"}}', True, "other", "none"),
+    ('{"response":{"request_id":"corsia-usage"', False, "none", "none"),
+    (None, False, "none", "none"),
+], ids=("usage-allowed", "usage-limited", "usage-unavailable", "usage-malformed", "usage-error", "usage-other", "malformed-envelope", "no-usage-reply"))
+async def test_timeout_logs_fixed_usage_response_and_lifecycle_facts_before_cleanup(
+        tmp_path, monkeypatch, caplog, reply, expected, subtype, verdict):
     from connections import claude_discovery
 
     body = f"printf '%s\\n' '{reply}'" if reply else ":"
@@ -100,8 +104,45 @@ async def test_timeout_logs_usage_reply_presence_before_cleanup(
     release.touch()
     message = _timeout_log(caplog)
     assert f"usage_reply_observed={expected}" in message
+    assert f"usage_response_subtype={subtype}" in message
+    assert f"usage_verdict={verdict}" in message
+    assert "stdin_drain_completed=True" in message
+    assert "stdin_close_completed=True" in message
+    assert "stdout_eof_completed=False" in message
+    assert "stderr_eof_completed=False" in message
     assert "process_exited_at_timeout=False" in message
     assert "returncode_at_timeout=None" in message
+    assert "do-not-log" not in message
+    assert "private-account-id" not in message
+    assert "/private/source" not in message
+    assert "utilization" not in message
+    assert "private-malformed-payload" not in message
+    assert "private-error" not in message
+    assert "private-other" not in message
+
+
+@pytest.mark.asyncio
+async def test_timeout_records_completed_stdout_and_stderr_eof(tmp_path, monkeypatch, caplog):
+    from connections import claude_discovery
+
+    ready = tmp_path / "closed-pipes-ready"
+    release = tmp_path / "closed-pipes-release"
+    reply = '{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":25}}}}}'
+    binary = _control_harness(
+        tmp_path, "closed-pipes",
+        f"printf '%s\\n' '{reply}'; echo $$ > '{ready}'; exec 1>&-; exec 2>&-; while [ ! -e '{release}' ]; do sleep 0.01; done",
+    )
+    _start_timeout_after_ready(monkeypatch, claude_discovery, ready)
+
+    with pytest.raises(RuntimeError, match="Claude Code get_usage timed out"):
+        await claude_discovery.run_claude_control(binary, _usage_frame(), operation="get_usage")
+
+    release.touch()
+    message = _timeout_log(caplog)
+    assert "stdin_drain_completed=True" in message
+    assert "stdin_close_completed=True" in message
+    assert "stdout_eof_completed=True" in message
+    assert "stderr_eof_completed=True" in message
 
 
 @pytest.mark.asyncio
@@ -131,6 +172,25 @@ async def test_catalog_and_end_replies_do_not_imply_usage_reply(tmp_path, monkey
     assert "catalog_reply_observed=True" in message
     assert "usage_reply_observed=False" in message
     assert "context_reply_observed=False" in message
+    assert "end_session_reply_observed=True" in message
+
+
+def test_observer_never_raises_or_retains_non_utf8_or_malformed_usage():
+    from connections import claude_control_io
+
+    phase = claude_control_io.ControlPhase()
+    expected = {"corsia-usage": "usage"}
+    for data in (
+        b"\xff",
+        b'{"response":{"request_id":"corsia-usage","subtype":"success","response":"private"}}',
+        b'{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":100,"resets_at":1e999}}}}}',
+        b'{"response":{"request_id":"corsia-usage","subtype":[]}}',
+        b"[]",
+    ):
+        claude_control_io.observe_control_reply(data, expected, phase)
+
+    assert phase.usage_response_subtype == "other"
+    assert phase.usage_verdict == "none"
 
 
 @pytest.mark.asyncio
