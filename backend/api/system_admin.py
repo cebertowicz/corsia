@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -47,11 +48,12 @@ def _restart_log_path(name: str) -> Path:
 
 async def launch_update(
     user: dict,
-    caller_token: str | None,
+    caller_token: str | Callable[[str], str] | None,
     trigger: str,
     target_version: str | None,
     *,
     port: int,
+    drain_max_wait: int | None = None,
 ) -> tuple[str, object]:
     """Launch the one Settings Update lifecycle from any approved trigger."""
     if trigger not in {"manual", "tonight", "automatic"}:
@@ -64,6 +66,8 @@ async def launch_update(
         "BACKEND_PORT": str(port),
         "CORSIA_RESTART_BACKEND_PORT": str(port),
     }
+    if drain_max_wait is not None:
+        restart_env["CORSIA_DRAIN_MAX_WAIT"] = str(drain_max_wait)
     if caller_token is None:
         from infra.accounts import issue_lifecycle_service_token
 

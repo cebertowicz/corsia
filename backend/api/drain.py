@@ -18,11 +18,6 @@ def _require_user(token: str) -> dict:
     return user
 
 
-async def _require_lifecycle_callback(token: str, operation_id: str) -> None:
-    """Authorize a lifecycle caller with the ordinary account-token path."""
-    _require_user(token)
-
-
 @router.post("/drain")
 async def system_drain(
     background: BackgroundTasks,
@@ -80,40 +75,10 @@ async def get_drain_status_route(token: str):
     return get_drain_status(user_id=user["id"])
 
 
-@router.post("/drain/credential-expired")
-async def credential_expired(token: str, body: dict):
-    """Terminalize only the operation whose expired service token reported itself."""
-    operation_id = str(body.get("operation_id") or "")
-    if not operation_id:
-        raise HTTPException(400, "operation_id is required")
-    from automation import self_restart
-    from automation.restart import abort_restart_control
-    from infra.accounts import expired_lifecycle_service_token_matches
-    from infra.db_async import run_in_db
-
-    operation = await run_in_db(self_restart.operation_by_id, operation_id)
-    if operation is None or not operation.get("requester_user"):
-        raise HTTPException(401)
-    if not await run_in_db(
-        expired_lifecycle_service_token_matches,
-        operation["requester_user"],
-        operation_id,
-        token,
-    ):
-        raise HTTPException(401)
-    if not await abort_restart_control(
-        operation_id,
-        error="lifecycle service credential expired",
-        failure_code="credential_expired",
-    ):
-        raise HTTPException(409, "restart operation changed before credential failure")
-    return {"ok": True, "operation_id": operation_id, "failure_code": "credential_expired"}
-
-
 @router.delete("/drain")
 async def cancel_drain(token: str, operation_id: str):
     """Compensate and cancel only the exact active restart operation."""
-    await _require_lifecycle_callback(token, operation_id)
+    _require_user(token)
     from automation.restart import abort_restart_control
 
     if not await abort_restart_control(operation_id, cancelled=True):
@@ -127,7 +92,7 @@ async def drain_ready(token: str, body: dict):
     operation_id = str(body.get("operation_id") or "")
     if not operation_id:
         raise HTTPException(400, "operation_id is required")
-    await _require_lifecycle_callback(token, operation_id)
+    _require_user(token)
     from automation.restart import advance_restart_readiness, mark_restarting
     if not advance_restart_readiness(operation_id):
         raise HTTPException(409, "restart operation is not quiescent")
@@ -142,7 +107,7 @@ async def drain_hard_cap(token: str, body: dict):
     operation_id = str(body.get("operation_id") or "")
     if not operation_id:
         raise HTTPException(400, "operation_id is required")
-    await _require_lifecycle_callback(token, operation_id)
+    _require_user(token)
     from automation.restart import enforce_restart_hard_cap, mark_restarting
     try:
         outcome = await enforce_restart_hard_cap(operation_id)

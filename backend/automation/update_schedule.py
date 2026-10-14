@@ -52,6 +52,10 @@ def update_schedule_patch(
             current["automatic"] = payload["automatic"]
         if "time" in payload:
             current["time"] = payload["time"]
+            if current.get("tonight_at") is not None:
+                current["tonight_at"] = next_local_time(
+                    now, current["time"]
+                ).astimezone().isoformat()
         if "tonight" in payload:
             current["tonight_at"] = (
                 next_local_time(now, current["time"]).astimezone().isoformat()
@@ -71,6 +75,15 @@ def _parse(value: str | None) -> datetime | None:
         return None
 
 
+def _tonight_due_at(schedule: dict, now: datetime) -> datetime | None:
+    tonight_at = _parse(schedule.get("tonight_at"))
+    if tonight_at is None:
+        return None
+    scheduled_night = tonight_at.astimezone(now.tzinfo)
+    hour, minute = _time_parts(schedule["time"])
+    return scheduled_night.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
 def due_trigger(
     schedule: dict,
     *,
@@ -78,18 +91,18 @@ def due_trigger(
     update_available: bool,
     attempted_today: bool,
 ) -> str | None:
-    """Return the one schedule trigger due at this tick, without launching it."""
-    tonight_at = _parse(schedule.get("tonight_at"))
-    if tonight_at is not None:
-        scheduled_night = tonight_at.astimezone(now.tzinfo)
-        hour, minute = _time_parts(schedule["time"])
-        due_at = scheduled_night.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if due_at <= now < due_at + SCHEDULE_WINDOW:
-            return "tonight" if update_available else None
-    if not schedule.get("automatic") or not update_available or attempted_today:
+    """Return the one due trigger after the tick has fetched update status."""
+    candidate = possible_trigger(schedule, now=now, attempted_today=attempted_today)
+    return candidate if update_available else None
+
+
+def possible_trigger(schedule: dict, *, now: datetime, attempted_today: bool) -> str | None:
+    """Return a due trigger from local state before a remote status fetch."""
+    tonight_due_at = _tonight_due_at(schedule, now)
+    if tonight_due_at is not None and tonight_due_at <= now < tonight_due_at + SCHEDULE_WINDOW:
+        return "tonight"
+    if not schedule.get("automatic") or attempted_today:
         return None
-    # Same one-hour window as Tonight, from the exact chosen minute. The window
-    # ends at local midnight: the attempted-today guard resets there.
     hour, minute = _time_parts(schedule["time"])
     due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     return "automatic" if due_at <= now < due_at + SCHEDULE_WINDOW else None
@@ -97,26 +110,28 @@ def due_trigger(
 
 def should_drop_tonight(schedule: dict, *, now: datetime) -> bool:
     """Return whether the one-hour Tonight window has expired silently."""
-    tonight_at = _parse(schedule.get("tonight_at"))
-    if tonight_at is None:
+    due_at = _tonight_due_at(schedule, now)
+    return due_at is not None and due_at + SCHEDULE_WINDOW <= now
+
+
+def claim_tonight(schedule: dict) -> bool:
+    """Atomically consume the exact Tonight choice read by this tick."""
+    expected = schedule.get("tonight_at")
+    if expected is None:
         return False
-    scheduled_night = tonight_at.astimezone(now.tzinfo)
-    hour, minute = _time_parts(schedule["time"])
-    due_at = scheduled_night.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    return due_at + SCHEDULE_WINDOW <= now
+    with write_transaction(None, scope="update_schedule") as connection:
+        current = get_update_schedule(db=connection, include_owner=True)
+        if current.get("tonight_at") != expected:
+            return False
+        current["tonight_at"] = None
+        set_setting("update_schedule", current, db=connection)
+        return True
 
 
 def clear_tonight(schedule: dict) -> dict:
-    """Clear Tonight only if the tick still owns the value it read."""
-    expected = schedule.get("tonight_at")
-    if expected is None:
-        return schedule
-    with write_transaction(None, scope="update_schedule") as connection:
-        current = get_update_schedule(db=connection, include_owner=True)
-        if current.get("tonight_at") == expected:
-            current["tonight_at"] = None
-            set_setting("update_schedule", current, db=connection)
-        return get_update_schedule(db=connection)
+    """Drop an expired Tonight choice only if this tick still owns it."""
+    claim_tonight(schedule)
+    return get_update_schedule()
 
 
 def update_attempted_today(*, now: datetime | None = None, db=None) -> bool:

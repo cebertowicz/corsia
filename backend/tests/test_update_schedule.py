@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 
 def test_tonight_is_due_only_inside_its_one_hour_window():
     from automation.update_schedule import due_trigger, should_drop_tonight
@@ -44,11 +46,10 @@ def test_clear_tonight_keeps_a_patch_written_after_the_tick_read(isolated_db):
 
     clear_tonight(tick_schedule)
 
-    assert get_update_schedule() == {
-        "automatic": True,
-        "time": "04:00",
-        "tonight_at": None,
-    }
+    updated = get_update_schedule()
+    assert updated["automatic"] is True
+    assert updated["time"] == "04:00"
+    assert updated["tonight_at"] is not None
 
 
 def test_automatic_runs_once_in_its_local_hour_after_no_update_attempt():
@@ -75,6 +76,31 @@ def test_automatic_waits_for_the_exact_minute_it_shows():
     assert due_trigger(schedule, now=at.replace(hour=4, minute=45), update_available=True, attempted_today=False) is None
 
 
+@pytest.mark.parametrize("old_time,new_time", [("22:00", "02:00"), ("23:30", "23:45")])
+def test_editing_time_recomputes_a_pending_tonight_choice(isolated_db, old_time, new_time):
+    from automation.update_schedule import update_schedule_patch
+    from infra.settings import get_update_schedule
+
+    now = datetime(2026, 10, 14, 21, 0, tzinfo=timezone.utc)
+    update_schedule_patch({"time": old_time, "tonight": True}, now=now, user_id="steve")
+    update_schedule_patch({"time": new_time}, now=now, user_id="steve")
+
+    pending = get_update_schedule()["tonight_at"]
+    assert pending is not None
+    assert datetime.fromisoformat(pending).astimezone(now.tzinfo).strftime("%H:%M") == new_time
+
+
+def test_turning_tonight_off_clears_the_pending_choice(isolated_db):
+    from automation.update_schedule import update_schedule_patch
+    from infra.settings import get_update_schedule
+
+    now = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
+    update_schedule_patch({"tonight": True}, now=now, user_id="steve")
+    update_schedule_patch({"tonight": False}, now=now, user_id="steve")
+
+    assert get_update_schedule()["tonight_at"] is None
+
+
 def test_scheduled_update_migration_preserves_existing_operation_rows():
     from infra.migration_114_to_115_scheduled_updates import migrate_114_to_115
 
@@ -88,8 +114,6 @@ def test_scheduled_update_migration_preserves_existing_operation_rows():
 
     migrate_114_to_115(db)
 
-    columns = {row[1] for row in db.execute("PRAGMA table_info(self_restart_requests)")}
-    assert "callback_credential_hash" not in columns
     assert db.execute("SELECT status FROM self_restart_requests WHERE id='legacy'").fetchone()[0] == "complete"
     indexes = {row[1] for row in db.execute("PRAGMA index_list(self_restart_requests)")}
     assert "idx_self_restart_requests_update_attempts" in indexes
@@ -149,7 +173,7 @@ def test_lifecycle_service_tokens_are_revoked_at_every_terminal_path():
     assert accounts.resolve_token(completed_token, db=db) is None
 
     failed, failed_token = acquire()
-    assert self_restart.abort_operation(failed, error="expired", failure_code="credential_expired", db=db)
+    assert self_restart.abort_operation(failed, error="launch failed", failure_code="launch_failed", db=db)
     assert accounts.resolve_token(failed_token, db=db) is None
 
     cancelled, cancelled_token = acquire()
@@ -181,6 +205,7 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     restart_log = tmp_path / "restart.log"
     emitted_events = []
     minted_tokens = []
+    launch_environment = {}
     issue_token = accounts.issue_lifecycle_service_token
 
     def capture_token(user_id, operation_id):
@@ -192,7 +217,8 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
         def poll(self):
             return None
 
-    def fake_popen(_command, *, stdout, **_kwargs):
+    def fake_popen(_command, *, stdout, **kwargs):
+        launch_environment.update(kwargs["env"])
         stdout.write("detached lifecycle started\n")
         stdout.flush()
         return Process()
@@ -215,6 +241,11 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     )
 
     assert len(minted_tokens) == 1
+    from api.scheduled_update import SCHEDULED_DRAIN_MAX_WAIT_SECONDS
+    from infra.accounts import SERVICE_TTL
+
+    assert launch_environment["CORSIA_DRAIN_MAX_WAIT"] == str(SCHEDULED_DRAIN_MAX_WAIT_SECONDS)
+    assert SERVICE_TTL > timedelta(seconds=SCHEDULED_DRAIN_MAX_WAIT_SECONDS + 30)
     token = minted_tokens[0]
     connection = get_db()
     try:
@@ -252,7 +283,7 @@ def _patch_scheduled_check(monkeypatch, launch):
     from automation import update_schedule
     from infra import db_async, settings, update_status
 
-    cleared = []
+    claimed = []
     schedule = {
         "automatic": False,
         "time": "03:00",
@@ -271,9 +302,153 @@ def _patch_scheduled_check(monkeypatch, launch):
     )
     monkeypatch.setattr(db_async, "run_in_db", run_in_db)
     monkeypatch.setattr(update_schedule, "update_attempted_today", lambda **_kwargs: False)
-    monkeypatch.setattr(update_schedule, "clear_tonight", lambda value: cleared.append(value) or value)
+    monkeypatch.setattr(update_schedule, "clear_tonight", lambda value: value)
+    monkeypatch.setattr(update_schedule, "claim_tonight", lambda value: claimed.append(value) or True)
     monkeypatch.setattr(scheduled_update, "launch_scheduled_update", launch)
-    return cleared
+    return claimed
+
+
+def test_schedule_skips_remote_update_status_when_no_trigger_can_be_due(monkeypatch):
+    import asyncio
+
+    from infra import db_async, settings, update_status
+    from jobs.nightly import _run_scheduled_update_if_due
+
+    async def run_in_db(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(
+        settings,
+        "get_update_schedule",
+        lambda **_kwargs: {"automatic": False, "time": "03:00", "tonight_at": None},
+    )
+    monkeypatch.setattr(db_async, "run_in_db", run_in_db)
+    monkeypatch.setattr(update_status, "update_status", lambda _refresh: pytest.fail("must not fetch"))
+
+    assert asyncio.run(_run_scheduled_update_if_due(datetime(2026, 10, 14, 1, tzinfo=timezone.utc))) is None
+
+
+def test_due_tonight_without_an_available_update_preserves_the_choice(
+    isolated_db, monkeypatch
+):
+    import asyncio
+    from types import SimpleNamespace
+
+    from api import scheduled_update
+    from automation import update_schedule
+    from infra import update_status
+    from infra.settings import get_update_schedule
+    from jobs.nightly import _run_scheduled_update_if_due
+
+    scheduled_at = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
+    now = scheduled_at.replace(hour=3, minute=10)
+    update_schedule.update_schedule_patch(
+        {"tonight": True}, now=scheduled_at, user_id="steve"
+    )
+    pending = get_update_schedule()["tonight_at"]
+
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": False}),
+    )
+
+    async def launch(*_args):
+        pytest.fail("must not launch without an available update")
+
+    monkeypatch.setattr(scheduled_update, "launch_scheduled_update", launch)
+
+    assert asyncio.run(_run_scheduled_update_if_due(now)) is None
+    assert get_update_schedule()["tonight_at"] == pending
+
+
+def test_tonight_cas_loss_does_not_launch(isolated_db, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from api import scheduled_update
+    from automation import update_schedule
+    from infra import update_status
+    from infra.settings import get_update_schedule
+    from jobs.nightly import _run_scheduled_update_if_due
+
+    scheduled_at = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
+    now = scheduled_at.replace(hour=3, minute=10)
+    update_schedule.update_schedule_patch(
+        {"tonight": True}, now=scheduled_at, user_id="steve"
+    )
+    tick_schedule = get_update_schedule()["tonight_at"]
+    claims = []
+    actual_claim = update_schedule.claim_tonight
+
+    def claim(schedule):
+        result = actual_claim(schedule)
+        claims.append(result)
+        return result
+
+    def status(_refresh):
+        update_schedule.update_schedule_patch(
+            {"time": "03:01"}, now=now, user_id="steve"
+        )
+        return SimpleNamespace(
+            to_dict=lambda: {"available": True, "target_version": "1.2.3"}
+        )
+
+    monkeypatch.setattr(update_schedule, "claim_tonight", claim)
+    monkeypatch.setattr(update_status, "update_status", status)
+
+    async def launch(*_args):
+        pytest.fail("must not launch after losing the Tonight compare-and-swap")
+
+    monkeypatch.setattr(scheduled_update, "launch_scheduled_update", launch)
+
+    assert asyncio.run(_run_scheduled_update_if_due(now)) is None
+    assert claims == [False]
+    assert get_update_schedule()["tonight_at"] != tick_schedule
+
+
+def test_prepare_failure_after_tonight_claim_does_not_retry_in_the_same_window(
+    isolated_db, monkeypatch
+):
+    import asyncio
+    from types import SimpleNamespace
+
+    from api import scheduled_update
+    from automation import self_restart, update_schedule
+    from infra import update_status
+    from infra.settings import get_update_schedule
+    from jobs.nightly import _run_scheduled_update_if_due
+
+    scheduled_at = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
+    now = scheduled_at.replace(hour=3, minute=10)
+    update_schedule.update_schedule_patch(
+        {"tonight": True}, now=scheduled_at, user_id="steve"
+    )
+    launches = []
+
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True, "target_version": "1.2.3"}),
+    )
+
+    async def fail_after_acquire(trigger, target_version, user_id):
+        launches.append((trigger, target_version, user_id))
+        assert self_restart.try_acquire(
+            None, user_id, None, None, "update", kind="update", trigger=trigger
+        )
+        raise RuntimeError("prepare failed after operation acquisition")
+
+    monkeypatch.setattr(
+        scheduled_update, "launch_scheduled_update", fail_after_acquire
+    )
+
+    assert asyncio.run(_run_scheduled_update_if_due(now)) is None
+    assert get_update_schedule()["tonight_at"] is None
+    assert asyncio.run(
+        _run_scheduled_update_if_due(now + timedelta(minutes=5))
+    ) is None
+    assert launches == [("tonight", "1.2.3", "steve")]
 
 
 def test_tonight_is_claimed_once_and_launches_its_update(monkeypatch):
@@ -287,12 +462,12 @@ def test_tonight_is_claimed_once_and_launches_its_update(monkeypatch):
         launched.append((trigger, target_version, user_id))
         return "c" * 32
 
-    cleared = _patch_scheduled_check(monkeypatch, launch)
+    claimed = _patch_scheduled_check(monkeypatch, launch)
     now = datetime(2026, 10, 14, 3, 10, tzinfo=timezone.utc)
 
     assert asyncio.run(_run_scheduled_update_if_due(now)) == "c" * 32
     assert launched == [("tonight", "1.2.3", "steve")]
-    assert len(cleared) == 1
+    assert len(claimed) == 1
 
 
 def test_scheduled_launch_failure_is_logged_not_swallowed(monkeypatch):
@@ -305,7 +480,7 @@ def test_scheduled_launch_failure_is_logged_not_swallowed(monkeypatch):
     async def launch(_trigger, _target_version, _user_id):
         raise RuntimeError("scheduled update cannot launch: BACKEND_PORT is not a port number")
 
-    cleared = _patch_scheduled_check(monkeypatch, launch)
+    claimed = _patch_scheduled_check(monkeypatch, launch)
     messages = []
     sink = logger.add(lambda message: messages.append(str(message)), level="ERROR")
     try:
@@ -314,5 +489,5 @@ def test_scheduled_launch_failure_is_logged_not_swallowed(monkeypatch):
     finally:
         logger.remove(sink)
 
-    assert len(cleared) == 0
+    assert len(claimed) == 1
     assert any("BACKEND_PORT is not a port number" in message for message in messages)

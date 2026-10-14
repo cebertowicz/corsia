@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -87,6 +88,36 @@ async def test_update_room_check_failure_leaves_no_in_flight_operation(
     assert rows
     assert all(row["status"] != "in_flight" for row in rows)
     prepare.assert_not_awaited()
+    drain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_token_mint_failure_releases_the_prepared_update_hold(isolated_db, monkeypatch):
+    from api import settings_restart
+    from infra.database import get_db
+
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", AsyncMock())
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+
+    def mint(_operation_id: str) -> str:
+        raise sqlite3.OperationalError("token store unavailable")
+
+    with pytest.raises(sqlite3.OperationalError):
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "steve"}, "update", Path("/unused"), {}, ["restart"],
+            lambda name: Path(name), caller_token=mint,
+        )
+
+    connection = get_db()
+    try:
+        statuses = [row[0] for row in connection.execute(
+            "SELECT status FROM self_restart_requests"
+        ).fetchall()]
+    finally:
+        connection.close()
+    assert statuses and all(status != "in_flight" for status in statuses)
     drain.assert_not_awaited()
 
 

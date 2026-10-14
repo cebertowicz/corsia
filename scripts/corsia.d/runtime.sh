@@ -248,17 +248,6 @@ current_drain_url() {
         "$port" "to""ken" "$CORSIA_TOKEN"
 }
 
-record_credential_expired() {
-    local drain_url="$1" operation_id="$2"
-    local drain_base="${drain_url%%\?*}" drain_query="${drain_url#*\?}"
-    warn "Lifecycle credential expired; recording credential_expired"
-    curl -sS --max-time 5 -X POST \
-        "${drain_base}/credential-expired?${drain_query}" \
-        -H "Content-Type: application/json" \
-        -d "{\"operation_id\":\"$operation_id\"}" > /dev/null 2>&1 || \
-        warn "Could not record credential_expired"
-}
-
 drain_and_wait() {
     local reason="${1:-restart}"
     local port="${2:-$BACKEND_PORT}"
@@ -365,10 +354,7 @@ drain_and_wait() {
         fi
         status_http_status="${status_output##*$'\n'}"
         status="${status_output%$'\n'*}"
-        if [ "$status_http_status" = "401" ]; then
-            record_credential_expired "$drain_url" "$operation_id"
-            return 1
-        fi
+
         if [ "$status_http_status" != "200" ]; then
             warn "Could not read drain status"
             cancel_failed_drain "$drain_url" "$operation_id" || :
@@ -482,10 +468,7 @@ if json.load(sys.stdin) != {"detail": "restart operation is not quiescent"}:
                 sleep 2
                 continue
             fi
-            if [ "$ready_http_status" = "401" ]; then
-                record_credential_expired "$drain_url" "$operation_id"
-                return 1
-            fi
+
             if [ "$ready_http_status" != "200" ]; then
                 warn "Could not mark drain ready"
                 cancel_failed_drain "$drain_url" "$operation_id" || :
@@ -530,10 +513,7 @@ if payload.get("ok") is not True or payload.get("operation_id") != expected:
     fi
     hard_cap_http_status="${hard_cap_output##*$'\n'}"
     hard_cap_response="${hard_cap_output%$'\n'*}"
-    if [ "$hard_cap_http_status" = "401" ]; then
-        record_credential_expired "$drain_url" "$operation_id"
-        return 1
-    fi
+
     if [ "$hard_cap_http_status" != "200" ]; then
         warn "Could not enforce drain hard cap; cancelling restart"
         cancel_failed_drain "$drain_url" "$operation_id" || :

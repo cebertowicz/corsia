@@ -264,18 +264,6 @@ def revoke_lifecycle_service_token(
     return revoke_label(user_id, lifecycle_token_label(operation_id), db=db)
 
 
-def expired_lifecycle_service_token_matches(
-    user_id: str, operation_id: str, token: str, *, db: sqlite3.Connection | None = None
-) -> bool:
-    """Accept an expired operation token only to record its terminal failure."""
-    row = _db(db).execute(
-        "SELECT 1 FROM auth_tokens WHERE token_hash=? AND user_id=? AND kind='service' "
-        "AND label=? AND expires_at IS NOT NULL AND expires_at <= ?",
-        (token_digest(token), user_id, lifecycle_token_label(operation_id), utc_now_iso()),
-    ).fetchone()
-    return row is not None
-
-
 def issue_token(
     user_id: str,
     *,

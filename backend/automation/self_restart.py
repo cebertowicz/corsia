@@ -96,7 +96,6 @@ def operation_by_id(operation_id: str, *, db=None) -> dict | None:
             connection.close()
 
 
-
 def record_drain_total(operation_id: str, total: int, *, db=None) -> bool:
     """Persist the exact number of Turns present when steering began."""
     with write_transaction(db, scope="restart_operation") as connection:

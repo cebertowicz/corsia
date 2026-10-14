@@ -16,8 +16,10 @@ from api.update_preflight import check_update_backup_room as _check_update_backu
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
-_RELEASE_FAILURE_NOTE = ("Restart control could not be released automatically; "
-                         "the active operation may still be holding ingress.")
+_RELEASE_FAILURE_NOTE = (
+    "Restart control could not be released automatically; "
+    "the active operation may still be holding ingress."
+)
 # Exit codes of `corsia prepare-redeploy`; any other nonzero exit is `prepare_failed`.
 _PREPARE_EXIT_CODES = {
     41: "fetch_failed",
@@ -120,12 +122,8 @@ def _discard_prepared_release(
 
 
 async def _acquire_settings_restart(
-    user: dict | None,
-    mode: str,
-    acquired_ids: list[str],
-    *,
-    trigger: str | None = None,
-    target_version: str | None = None,
+    user: dict | None, mode: str, acquired_ids: list[str], *,
+    trigger: str | None = None, target_version: str | None = None,
 ) -> str:
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
@@ -133,6 +131,8 @@ async def _acquire_settings_restart(
     from infra.update_status import cached_changes, cached_target_version
 
     def _try_acquire() -> str | None:
+        version = (target_version or cached_target_version()) if mode == "update" else None
+        changes = cached_changes() if mode == "update" else None
         operation_id = self_restart.try_acquire(
             None,
             user.get("id") if user else None,
@@ -141,8 +141,8 @@ async def _acquire_settings_restart(
             mode,
             kind="update" if mode == "update" else "restart",
             trigger=trigger if mode == "update" else None,
-            target_version=(target_version or cached_target_version()) if mode == "update" else None,
-            changes=json.dumps(cached_changes()) if mode == "update" and cached_changes() else None,
+            target_version=version if mode == "update" else None,
+            changes=json.dumps(changes) if changes else None,
         )
         if operation_id is not None:
             acquired_ids.append(operation_id)
@@ -296,17 +296,14 @@ async def _launch_settings_restart(
     log_path = restart_log_path("restart.log")
     try:
         with log_path.open("w") as log_fh:
+            credential = caller_token(operation_id) if callable(caller_token) else caller_token
             return spawn_restart_lifecycle(
                 corsia_script,
                 script_args,
                 restart_env,
                 operation_id,
                 log_fh,
-                caller_credential=(
-                    caller_token(operation_id)
-                    if callable(caller_token)
-                    else caller_token
-                ),
+                caller_credential=credential,
             )
     except (OSError, ValueError) as exc:
         from automation.restart import abort_restart_control
@@ -343,8 +340,7 @@ async def prelaunch_settings_restart(
     restart_log_path: Callable[[str], Path],
     *,
     caller_token: str | Callable[[str], str],
-    trigger: str | None = "manual",
-    target_version: str | None = None,
+    trigger: str | None = "manual", target_version: str | None = None,
 ) -> tuple[str, object]:
     """Hand Settings restart ownership from preparation through child launch."""
     prepared = mode == "update"
@@ -354,11 +350,7 @@ async def prelaunch_settings_restart(
         acquired_ids: list[str] = []
         try:
             operation_id = await _acquire_settings_restart(
-                user,
-                mode,
-                acquired_ids,
-                trigger=trigger,
-                target_version=target_version,
+                user, mode, acquired_ids, trigger=trigger, target_version=target_version
             )
         except asyncio.CancelledError as error:
             await _compensate_cancelled_acquire(
@@ -373,6 +365,15 @@ async def prelaunch_settings_restart(
                 operation_id, acquired_ids, corsia_script, restart_env
             )
             script_args = ["restart-prepared"]
+            if callable(caller_token):
+                try:
+                    caller_token = caller_token(operation_id)
+                except asyncio.CancelledError as error:
+                    await _compensate_cancelled_acquire(acquired_ids, error)
+                    raise
+                except BaseException as error:
+                    await _compensate_preparation_failure(operation_id, error)
+                    raise
 
         try:
             await _begin_settings_drain(operation_id, mode)
