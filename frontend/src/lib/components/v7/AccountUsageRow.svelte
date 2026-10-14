@@ -105,6 +105,7 @@
 	/* Picker: one compact line under the vendor's group header, set in with the model rows. */
 	.account-usage-row.picker {
 		position: relative;
+		--check-top: calc(6px + 0.5lh); /* the first line's centre: the figures may wrap to a second line */
 		display: flex; align-items: baseline; gap: 8px;
 		width: 100%; box-sizing: border-box;
 		padding: 6px 10px 6px 32px;

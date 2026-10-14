@@ -297,7 +297,6 @@
 }
 .cap-glyph { display: block; }
 .cc-mark { font-size: var(--text-footnote); color: var(--teal); }
-.model-list-item.active .check-glyph { color: var(--violet); flex-shrink: 0; }
 
 .mobile-attach-row {
 	display: flex; gap: 8px; padding: 8px;
