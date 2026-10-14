@@ -25,14 +25,15 @@ class PaneAppearance:
     @classmethod
     def parse(cls, data: dict) -> PaneAppearance | None:
         """Accept only a screen-sized pane and a light or dark theme."""
-        width, height, scale = data.get("width"), data.get("height"), data.get("scale")
-        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (width, height, scale)):
+        numbers = [data.get(key) for key in ("width", "height", "scale")]
+        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in numbers):
             return None
+        width, height, scale = (float(value) for value in numbers if isinstance(value, (int, float)))
         if not (200 <= width <= 7680 and 150 <= height <= 4320 and 1 <= scale <= 4):
             return None
         if data.get("scheme") not in {"light", "dark"}:
             return None
-        return cls(int(width), int(height), round(float(scale), 2), data["scheme"])
+        return cls(int(width), int(height), round(scale, 2), data["scheme"])
 
 
 async def stream_port(thread_id: str) -> StreamPortResult:
