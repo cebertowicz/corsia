@@ -22,7 +22,14 @@
 	const panel = $derived($updateSurface === 'panel' || running);
 	const failure = $derived(operation ? failureCopy(failureFromOperation(operation)) : null);
 	const elapsed = $derived(formatElapsed(elapsedSeconds(operation, now, $updateServerClockOffsetMs)));
-	const screen = $derived(failed || $updateFailureMessage ? 'failure' : panel ? 'panel' : completed ? 'notes' : 'sheet');
+	const liveScreen = $derived(failed || $updateFailureMessage ? 'failure' : panel ? 'panel' : completed ? 'notes' : 'sheet');
+	// The surface keeps its last screen while it plays its closing motion.
+	let shownScreen: typeof liveScreen = 'sheet';
+	const screen = $derived.by(() => {
+		if ($updateSurface !== 'closed') shownScreen = liveScreen;
+		return shownScreen;
+	});
+	const surfaceOpen = $derived($updateSurface !== 'closed');
 	const installedAt = $derived(operation?.settled_at ? formatInstalledAt(operation.settled_at, now) : null);
 	const notes = $derived(releaseNotesFor(operation, $updateStatus));
 	const targetVersion = $derived(notes?.targetVersion ?? operation?.target_version ?? $updateStatus?.target_version ?? 'the latest version');
@@ -43,16 +50,15 @@
 	function totalChanges() { return (notes?.changes?.items.length ?? 0) + (notes?.changes?.more ?? 0); }
 </script>
 
-{#if $updateSurface !== 'closed'}
-	{#if $isMobile}
-		<AdaptiveDrawer ariaLabel={heading} {heading} doneLabel={screen === 'sheet' ? 'Later' : screen === 'panel' ? 'Hide' : screen === 'notes' ? 'Done' : 'Close'} onClose={close} fill>
-			{#if screen === 'sheet' || screen === 'notes'}{@render decision()}{:else if screen === 'panel'}{@render progress()}{:else}{@render failurePanel()}{/if}
-		</AdaptiveDrawer>
-	{:else}
-		<Modal ariaLabel={heading} onClose={close} head={modalHead} foot={modalFoot}>
-			{#if screen === 'sheet' || screen === 'notes'}{@render decision()}{:else if screen === 'panel'}{@render progress()}{:else}{@render failurePanel()}{/if}
-		</Modal>
-	{/if}
+<!-- Each surface toggles at its own block so its closing motion plays: a parent block removing it would skip the outro. -->
+{#if $isMobile}
+	<AdaptiveDrawer ariaLabel={heading} {heading} doneLabel={screen === 'sheet' ? 'Later' : screen === 'panel' ? 'Hide' : screen === 'notes' ? 'Done' : 'Close'} open={surfaceOpen} onClose={close} fill>
+		{#if screen === 'sheet' || screen === 'notes'}{@render decision()}{:else if screen === 'panel'}{@render progress()}{:else}{@render failurePanel()}{/if}
+	</AdaptiveDrawer>
+{:else if surfaceOpen}
+	<Modal ariaLabel={heading} onClose={close} head={modalHead} foot={modalFoot}>
+		{#if screen === 'sheet' || screen === 'notes'}{@render decision()}{:else if screen === 'panel'}{@render progress()}{:else}{@render failurePanel()}{/if}
+	</Modal>
 {/if}
 
 {#snippet modalHead()}
@@ -85,7 +91,7 @@
 			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and restarted when CORSIA is back.</span>{/if}</div>
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.usual_seconds != null}<p class="muted">Usually about {humanDuration($updateStatus.usual_seconds)}.</p>{/if}
-		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button onclick={updateNow}>Update now</Button></div>{/if}
+		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button variant="primary" onclick={updateNow}>Update now</Button></div>{/if}
 	</section>
 {/snippet}
 
@@ -121,7 +127,7 @@
 	ul { margin: 0; padding-left: var(--space-5); } li + li { margin-top: var(--space-1); } .show-all { margin-top: var(--space-2); padding: 0; }
 	.cost { display: grid; gap: var(--space-2); margin-top: var(--space-5); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--violet-bg); } .cost strong { color: var(--text-primary); }
 	.muted { color: var(--text-tertiary); } .steps { display: grid; gap: var(--space-3); margin: var(--space-3) 0; padding: 0; list-style: none; }
-	.steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--text-tertiary); } .steps li.active { color: var(--text-primary); font-weight: var(--fw-semibold); } .steps li.done { color: var(--green); }
+	.steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--text-tertiary); } .steps li.active { color: var(--text-primary); font-weight: var(--fw-semibold); } .steps li.done { color: var(--green-text); }
 	.step-mark { width: 18px; height: 18px; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-circle); } .done .step-mark { border-color: transparent; }
 	.spinner { width: 10px; height: 10px; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); border-radius: var(--radius-circle); animation: spin .8s linear infinite; }
 	.step-detail { margin: var(--space-4) 0; } .timing { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text-tertiary); font-size: var(--text-footnote); } .timing strong { color: var(--text-primary); }

@@ -58,11 +58,11 @@
 		deliveryState === 'queued' || deliveryState === 'sending',
 	);
 	const queuedForUpdate = $derived(
-		deliveryState === 'queued' && messageThreadId === $activeThreadId && holdsNewWork($updateOperation),
+		deliveryState === 'queued' && delivery?.label === 'Queued' && !activeTurnOwnsInput && holdsNewWork($updateOperation),
 	);
 	const deliveryLabel = $derived(queuedForUpdate ? 'Sends after the update' : delivery?.label ?? null);
 	// Delivery status derives from the canonical projection.
-	const deliveryTitle = $derived(delivery?.title ?? null);
+	const deliveryTitle = $derived(queuedForUpdate ? 'Sends after the update' : delivery?.title ?? null);
 	const deliveryFailed = $derived(delivery?.failed === true);
 	const parkedOnOurDefect = $derived(isParkedOnOurDefect(msg));
 	// Codes that mean "we do not know whether the provider got it". A resend may

@@ -2,6 +2,7 @@
 	import { toasts, type Toast } from '$lib/stores/toast';
 	import { toastAnchor } from '$lib/stores/toastAnchor';
 	import { toastClearance } from '$lib/stores/toastClearance';
+	import { toastStackHeight } from '$lib/stores/toastStack';
 	import { toastFit } from '$lib/stores/toastFit';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
@@ -18,10 +19,11 @@
 	function measureToastHeight(node: HTMLElement) {
 		const update = () => {
 			toastHeight = node.getBoundingClientRect().height;
+			toastStackHeight.set(toastHeight);
 		};
 		if (typeof ResizeObserver === 'undefined') {
 			update();
-			return {};
+			return { destroy: () => toastStackHeight.set(0) };
 		}
 		const observer = new ResizeObserver(update);
 		observer.observe(node);
@@ -29,6 +31,7 @@
 		return {
 			destroy() {
 				observer.disconnect();
+				toastStackHeight.set(0);
 			},
 		};
 	}
@@ -160,10 +163,11 @@
 	}
 
 	.toast--success {
-		background: color-mix(in srgb, #22c55e 15%, var(--bg-secondary));
-		color: #22c55e;
-		border: 1px solid color-mix(in srgb, #22c55e 30%, transparent);
+		background: var(--bg-secondary);
+		color: var(--text-primary);
+		border: 1px solid var(--border-subtle);
 	}
+	.toast--success .toast-icon { color: var(--green-text); }
 
 	.toast--error {
 		background: color-mix(in srgb, var(--status-blocked) 15%, var(--bg-secondary));

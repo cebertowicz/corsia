@@ -90,15 +90,21 @@ describe('UserMessageBubble — human message path', () => {
 		expect(wrapper.querySelector('.delivery-status.sending')).toBeNull();
 		expect(wrapper.querySelector('.delivery-failed-mark')).toBeNull();
 	});
-	it('shows the update delivery promise for a queued message in the current thread', () => {
+	it.each([
+		['a requested queue', { metadata: { delivery_intent: 'queue_after_turn' } }, 'Sends after the update'],
+		['a checkpoint hold', { write_outcome: 'proved_no_write', delivery_error: 'checkpoint unavailable' }, 'Waiting for checkpoint'],
+		['an apply-now hold', {}, 'Sending when ready…'],
+	])('changes only %s to the update delivery promise', (_name, message, expected) => {
 		activeThreadId.set('thread-update');
 		updateStatus.set({
 			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
 			available: true, checked_at: 1, error: null,
 			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining' },
 		});
-		const wrapper = render(humanMsg({ thread_id: 'thread-update', delivery_state: 'queued' }));
-		expect(wrapper.textContent).toContain('Sends after the update');
+		const wrapper = render(humanMsg({
+			thread_id: 'thread-update', delivery_state: 'queued', ...message,
+		}));
+		expect(wrapper.textContent).toContain(expected);
 	});
 
 	it('renders the message content', () => {

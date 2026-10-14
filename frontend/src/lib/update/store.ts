@@ -47,11 +47,17 @@ export const updateFailureMessage = writable<string | null>(null);
 export const updateServerClockOffsetMs = writable(0);
 export const updateOperation = derived(updateStatus, ($status) => $status?.operation ?? null);
 export const updateInFlight = derived(updateOperation, ($operation) => isInFlight($operation));
+/** The server is down or coming back: the composer cannot send. */
+export const updateRestarting = derived(
+	[updateOperation, updateUnreachable],
+	([$operation, $unreachable]) => isInFlight($operation) && ($unreachable || $operation?.phase === 'restarting'),
+);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let versionPollTimer: ReturnType<typeof setInterval> | null = null;
 let terminalCheckRunning = false;
 let versionMismatchStartedAt: number | null = null;
+let noticeToastId: string | null = null;
 
 function stopStatusPolling(): void {
 	if (pollTimer !== null) clearInterval(pollTimer);
@@ -107,10 +113,15 @@ function pollVersionWhileUnreachable(): void {
 	void observeRecovery();
 }
 
+function dismissNotice(): void {
+	if (noticeToastId) toasts.dismiss(noticeToastId);
+	noticeToastId = null;
+}
+
 function showNotice(status: UpdateStatus): void {
 	const version = status.target_version;
-	if (!status.available || isInFlight(status.operation) || !version || !rememberId(NOTICED_KEY, version)) return;
-	toasts.showAction('An update is ready to install.', {
+	if (!status.available || isInFlight(status.operation) || status.operation?.target_version === version || !version || !rememberId(NOTICED_KEY, version)) return;
+	noticeToastId = toasts.showAction('An update is ready to install.', {
 		label: 'View',
 		run: openUpdateSheet,
 	});
@@ -127,7 +138,7 @@ function showTerminal(operation: UpdateOperation): void {
 		});
 		return;
 	}
-	if (isFailedOperation(operation)) {
+	if (isFailedOperation(operation) && get(updateSurface) === 'closed') {
 		const copy = failureCopy(failureFromOperation(operation));
 		toasts.pin('update', {
 			type: 'error', message: copy.title, detail: copy.toastLine ?? undefined,
@@ -221,11 +232,13 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 
 /** Open the one update surface at its decision or last-terminal state. */
 export function openUpdateSheet(): void {
+	dismissNotice();
 	updateSurface.set('sheet');
 }
 
 /** Open the update panel without creating a second source of operation truth. */
 export function openUpdatePanel(): void {
+	dismissNotice();
 	updateSurface.set('panel');
 }
 
@@ -247,7 +260,7 @@ export async function startUpdate(): Promise<void> {
 		}
 		const message = result.message ?? "Update didn't start.";
 		updateFailureMessage.set(message);
-		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdateSheet, dismiss: false } });
+		if (get(updateSurface) === 'closed') toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdateSheet, dismiss: false } });
 		openUpdateSheet();
 		return;
 	}
@@ -266,6 +279,7 @@ export function resetUpdateStoreForTests(): void {
 	stopVersionPolling();
 	terminalCheckRunning = false;
 	versionMismatchStartedAt = null;
+	noticeToastId = null;
 	updateStatus.set(null);
 	updateSurface.set('closed');
 	updateUnreachable.set(false);
