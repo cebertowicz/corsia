@@ -3,6 +3,8 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
 import {
+	failureCopy,
+	failureFromOperation,
 	isFailedOperation,
 	isInFlight,
 	type ClientVerdict,
@@ -10,7 +12,6 @@ import {
 } from './model';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
 import { hasId, releaseNotesFor, rememberApprovedNotes, rememberId, snapshotReleaseNotes } from './releaseNotes';
-import { presentUpdateTerminal } from './terminal';
 
 export { releaseNotesFor };
 export type { UpdateReleaseNotes } from './releaseNotes';
@@ -89,11 +90,24 @@ function showNotice(status: UpdateStatus): void {
 	});
 }
 
-function showTerminal(operation: UpdateOperation): Promise<void> {
-	return presentUpdateTerminal({
-		operation, status: get(updateStatus), authToken: get(token), handledKey: HANDLED_KEY,
-		surfaceClosed: get(updateSurface) === 'closed', onDetails: openUpdateSheet,
-	});
+function showTerminal(operation: UpdateOperation): void {
+	if (!rememberId(HANDLED_KEY, operation.operation_id, 'browser')) return;
+	if (operation.status === 'complete') {
+		const version = operation.target_version ?? get(updateStatus)?.target_version ?? 'the latest version';
+		toasts.pin('update', {
+			type: 'success',
+			message: `Updated to ${version}`,
+			action: { label: "See what's new", run: openUpdateSheet },
+		});
+		return;
+	}
+	if (isFailedOperation(operation) && get(updateSurface) === 'closed') {
+		const copy = failureCopy(failureFromOperation(operation));
+		toasts.pin('update', {
+			type: 'error', message: copy.title, detail: copy.toastLine ?? undefined,
+			action: { label: 'Details', run: openUpdateSheet },
+		});
+	}
 }
 
 async function verifyComplete(operation: UpdateOperation): Promise<void> {
@@ -107,7 +121,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		}
 		if (versionHashesAgree(version)) {
 			versionMismatchStartedAt = null;
-			void showTerminal(operation);
+			showTerminal(operation);
 			return;
 		}
 		versionMismatchStartedAt ??= Date.now();
@@ -134,7 +148,7 @@ function reconcileOperation(status: UpdateStatus): void {
 	stopVersionPolling();
 	if (operation?.status === 'complete') {
 		if (!hasId(HANDLED_KEY, operation.operation_id, 'browser')) void verifyComplete(operation);
-	} else if (operation && isFailedOperation(operation)) void showTerminal(operation);
+	} else if (operation && isFailedOperation(operation)) showTerminal(operation);
 }
 
 /** Read the durable operation projection and start polling only while it is active. */
