@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { fade } from 'svelte/transition';
+	import { fade, fly } from 'svelte/transition';
 
 	/**
 	 * One row of the setup rail: icon, label, and an optional second line, with the accent left bar and tint when it
@@ -26,6 +26,13 @@
 
 	function tokenFade(node: Element) {
 		return fade(node, { duration: Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 });
+	}
+
+	function railMotion(node: Element) {
+		const duration = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-standard')) || 0;
+		return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+			? fade(node, { duration: Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 })
+			: fly(node, { y: 4, duration });
 	}
 </script>
 
@@ -65,9 +72,9 @@
 {/snippet}
 
 {#if interactive}
-	<button type="button" class="row {state}" {onclick}>{@render inner()}</button>
+	<button type="button" class="row {state}" in:railMotion out:railMotion {onclick}>{@render inner()}</button>
 {:else}
-	<div class="row {state}" aria-current={state === 'current' ? 'step' : undefined}>{@render inner()}</div>
+	<div class="row {state}" in:railMotion out:railMotion aria-current={state === 'current' ? 'step' : undefined}>{@render inner()}</div>
 {/if}
 
 <style>
@@ -79,6 +86,8 @@
 	}
 	button.row { cursor: pointer; }
 	button.row:hover { background: var(--bg-hover); color: var(--text-primary); }
+	button.row:active { background: var(--accent-wash); }
+	@media (prefers-reduced-motion: reduce) { button.row { transition: background var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap); } }
 	.row.todo { color: var(--text-tertiary); }
 	.row.current { background: var(--accent-wash); color: var(--text-primary); }
 	.row.current .lbl { font-weight: var(--fw-medium); }
@@ -108,5 +117,5 @@
 	.row.error .meta { color: var(--red-text); }
 	.hair { display: block; height: calc(var(--space-1) / 2); margin-top: var(--space-1); border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
 	.hair i { display: block; height: 100%; background: var(--accent-line); border-radius: inherit; transition: width var(--dur-standard) var(--ease-material); }
-	@media (prefers-reduced-motion: reduce) { .details { transition: opacity var(--dur-tight) var(--ease-snap); } .details.open { grid-template-rows: 1fr; } }
+	@media (prefers-reduced-motion: reduce) { .details { transition: opacity var(--dur-tight) var(--ease-snap); } .details.open { grid-template-rows: 1fr; } .hair i { transition: none; } }
 </style>

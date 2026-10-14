@@ -138,6 +138,7 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('username is already in use');
 		expect(host.textContent).toContain('Create your account');
 		expect(host.textContent).not.toContain('CORSIA couldn’t start');
+		expect(Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => (input as HTMLInputElement).value)).toEqual(['correct-password', 'correct-password']);
 	});
 
 	it('renders Claude Code and Codex beside an inert local download state', async () => {
@@ -174,7 +175,8 @@ describe('SetupScreen', () => {
 		expect(text).toContain('Claude Code');
 		expect(text).toContain('Codex');
 		expect(text).toContain('Downloading in the background');
-		expect(text).toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
+		expect(text).not.toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
+		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', false);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
 	});
 });

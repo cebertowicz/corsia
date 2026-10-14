@@ -101,11 +101,15 @@ def _macos_supported() -> bool:
 def _app_location_class(executable: Path | None = None) -> str:
     """Expose a coarse package class, never the executable's path."""
     parts = (executable or Path(sys.executable)).parts
-    if "Volumes" in parts:
+    if "AppTranslocation" in parts:
         return "disk_image"
-    if "Applications" in parts:
-        return "applications"
-    return "other"
+    if len(parts) > 1 and parts[1] == "Volumes":
+        return "disk_image"
+    try:
+        app_index = parts.index("CORSIA.app")
+    except ValueError:
+        return "other"
+    return "applications" if app_index > 0 and parts[app_index - 1] == "Applications" else "other"
 
 
 def _work_folder_display(workspace: Path) -> str:

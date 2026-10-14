@@ -67,8 +67,10 @@
 		border: 1px solid;
 	}
 	.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.btn:not(:disabled):active { transform: scale(0.98); }
 	.btn.loading { cursor: wait; }
 	.btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+	@media (prefers-reduced-motion: reduce) { .btn:not(:disabled):active { transform: none; } }
 	@media (max-width: 768px) {
 		.btn::after { content: ''; position: absolute; border-radius: inherit; }
 		.btn.md::after { inset: -6px; }

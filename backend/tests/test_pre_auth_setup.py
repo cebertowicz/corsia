@@ -242,6 +242,8 @@ def test_macos_support_uses_the_approved_major_version_floor(monkeypatch, system
     [
         (Path("/Applications/CORSIA.app/Contents/MacOS/corsia"), "applications"),
         (Path("/Volumes/CORSIA/CORSIA.app/Contents/MacOS/corsia"), "disk_image"),
+        (Path("/private/var/folders/x/AppTranslocation/id/d/CORSIA.app/Contents/MacOS/corsia"), "disk_image"),
+        (Path("/private/Applications/cache/corsia"), "other"),
         (Path("/opt/corsia/bin/corsia"), "other"),
     ],
 )

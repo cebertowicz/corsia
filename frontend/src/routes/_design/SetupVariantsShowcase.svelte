@@ -59,7 +59,7 @@
 				<RailRow label="A choice" state="idle" onclick={() => {}} />
 			</RailSection>
 			<RailSection label="In the background">
-				<RailRow label="Qwen 3.8" state="busy" meta="34% · about 18 min left" progress={0.34} />
+				<RailRow label="Qwen 3.8" state="busy" meta="34%" progress={0.34} />
 				<RailRow label="Starting CORSIA" state="done" />
 				<RailRow label="Stopping the old CORSIA" state="error" meta="Won’t stop" onclick={() => {}} />
 			</RailSection>
@@ -76,8 +76,8 @@
 					<RailRow label="A very long setup step name that must truncate instead of pushing the rail wider" state={evidenceStep} />
 				</RailSection>
 				<RailSection label="Long background job">
-					{#if evidenceJob === 'busy-34'}<RailRow label="A very long background model download name that remains legible inside the narrow rail" state="busy" meta="34% · about 18 min left" progress={0.34} />
-					{:else if evidenceJob === 'busy-68'}<RailRow label="A very long background model download name that remains legible inside the narrow rail" state="busy" meta="68% · about 9 min left" progress={0.68} />
+					{#if evidenceJob === 'busy-34'}<RailRow label="A very long background model download name that remains legible inside the narrow rail" state="busy" meta="34%" progress={0.34} />
+					{:else if evidenceJob === 'busy-68'}<RailRow label="A very long background model download name that remains legible inside the narrow rail" state="busy" meta="68%" progress={0.68} />
 					{:else if evidenceJob === 'done'}<RailRow label="A very long background model download name that remains legible inside the narrow rail" state="done" />
 					{:else}<RailRow label="A very long background model download name that remains legible inside the narrow rail" state="error" meta="Couldn’t finish" />{/if}
 				</RailSection>

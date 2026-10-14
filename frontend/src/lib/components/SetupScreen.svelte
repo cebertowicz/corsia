@@ -4,9 +4,10 @@
 	import { Button, Field, ListRow, Message, StatePill, Toggle } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import { token, user } from '$lib/stores/auth';
-	import { fetchSources, recheckSources, sourceIsReady, type ModelSource } from '$lib/conductorSources';
+	import { fetchSources, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
 	import { accountToSignIn, startSignin } from '$lib/conductorSourcesApi';
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
+	import { on } from '$lib/ws/events';
 
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
@@ -27,6 +28,8 @@
 	let confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]);
 	let sourceError = $state('');
+	let localStartError = $state('');
+	let localSetupBusy = $state(false);
 	let keyOpen = $state(false);
 	let providerName = $state('anthropic');
 	let apiKey = $state('');
@@ -43,11 +46,19 @@
 		...(local?.setup_downloading || local?.setup_stage ? [{ label: status.model_name || local.name || 'Local model', state: 'busy' as const, meta: local.download_percent == null ? 'Downloading' : `${local.download_percent}%`, progress: localProgress }] : []),
 		...(page === 'account' && accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const, meta: 'Preparing your account' }] : []),
 		...(page === 'error' ? [{ label: 'Starting CORSIA', state: 'error' as const, meta: 'Couldn’t start' }] : []),
-		...(page === 'models' ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
+		...(page === 'models' && canFinish && !localDownloading ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
 	]);
 	const anyReady = $derived(sources.some(sourceIsReady));
 	const localReady = $derived(local?.state === 'ready');
-	const canFinish = $derived(anyReady || localReady);
+	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage));
+	const canFinish = $derived(anyReady || localReady || localDownloading);
+	const finishNote = $derived(
+		localStartError || local?.setup_error
+			? 'The local model couldn’t start. Try again, or choose another source.'
+			: localDownloading
+				? 'Ready when the download finishes. You can close this window; CORSIA keeps going.'
+				: 'Sign in, add an API key, or download the local model to continue.',
+	);
 	const modelSize = $derived(status.model_size_gb ? `${status.model_size_gb} GB` : 'a local model');
 	const downloadModelLabel = $derived(status.model_name || 'local model');
 	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? "Use 1–32 lowercase letters, numbers, '-' or '_'." : '');
@@ -74,15 +85,20 @@
 		}
 	}
 
-	async function startLocalDownload() {
-		if (!localWanted) return;
+	async function startLocalDownload(): Promise<boolean> {
+		if (!localWanted) return true;
 		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-		if (!response.ok && response.status !== 409) throw new Error('download failed');
+		const result = await response.json().catch(() => null);
+		return (response.ok || response.status === 409) && result?.ok !== false;
 	}
 
 	async function beginSetup() {
-		try { await startLocalDownload(); page = 'account'; }
-		catch { statusError = 'The local model download couldn’t start. You can continue without it and sign in to another model.'; page = 'account'; }
+		try {
+			if (!await startLocalDownload()) localStartError = 'The local model download couldn’t start.';
+		} catch {
+			localStartError = 'The local model download couldn’t start.';
+		}
+		page = 'account';
 	}
 
 	function validateConfirmation() {
@@ -109,9 +125,10 @@
 			onAccountCreated();
 			token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() });
 			await refreshSources();
+			password = ''; confirmation = '';
 			page = 'models';
-		} catch { accountError = 'CORSIA couldn’t start. Try again.'; page = 'error'; }
-		finally { accountBusy = false; password = ''; confirmation = ''; }
+		} catch { accountError = 'CORSIA couldn’t create your account. Try again.'; }
+		finally { accountBusy = false; }
 	}
 
 	async function refreshSources() {
@@ -134,6 +151,34 @@
 		} catch { sourceError = `CORSIA couldn’t start ${source.name} sign-in. Try again.`; }
 	}
 
+	async function retryLocalDownload() {
+		const current = get(token);
+		if (!current || localSetupBusy || localDownloading) return;
+		localSetupBusy = true;
+		sourceError = '';
+		localStartError = '';
+		try {
+			const result = await setupLocalSource(current);
+			if (!result.ok) sourceError = 'The local model couldn’t start. Try again, or choose another source.';
+		} catch {
+			sourceError = 'The local model couldn’t start. Try again, or choose another source.';
+		} finally {
+			await refreshSources();
+			localSetupBusy = false;
+		}
+	}
+
+	function sourceMeta(source: ModelSource): string {
+		if (source.source === 'omlx') {
+			if (source.setup_downloading || source.setup_stage) return 'Downloading in the background';
+			if (source.setup_error || localStartError) return 'Download needs attention';
+			return `Local model · ${modelSize}`;
+		}
+		if (source.state === 'not_installed') return `${source.name} needs its official app installed first.`;
+		if (source.state === 'needs_auth') return 'Sign in to use your subscription';
+		return 'Check this source, then try again.';
+	}
+
 	async function saveApiKey() {
 		if (!apiKey.trim() || savingKey) return;
 		savingKey = true; sourceError = '';
@@ -145,7 +190,10 @@
 		finally { savingKey = false; }
 	}
 
-	onMount(readStatus);
+	onMount(() => {
+		void readStatus();
+		return on('models_updated', () => { if (page === 'models') void refreshSources(); });
+	});
 </script>
 
 {#if page === 'checking'}
@@ -187,15 +235,16 @@
 		{#snippet secondary()}<Button variant="chip" onclick={() => page = 'account'}>Back</Button>{/snippet}
 	</SetupShell>
 {:else}
-	<SetupShell {steps} {jobs} title="Choose an AI model" lede="Your agents need at least one. You can add more later in Settings." primary={{ label: 'Start using CORSIA', disabled: !canFinish, note: 'Ready when the download finishes. You can close this window; CORSIA keeps going.' }} onPrimary={onFinished}>
+	<SetupShell {steps} {jobs} title="Choose an AI model" lede="Your agents need at least one. You can add more later in Settings." primary={{ label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }} onPrimary={onFinished}>
 		<div class="sources">
 			{#each sources as source (source.source)}
-				<ListRow name={source.source === 'omlx' ? 'This computer' : source.name} meta={[source.setup_downloading && source.source === 'omlx' ? 'Downloading in the background' : source.reason || (source.source === 'omlx' ? `Local model · ${modelSize}` : 'Use your subscription')]} centered>
+				<ListRow name={source.source === 'omlx' ? 'This computer' : source.name} meta={[sourceMeta(source)]} centered>
 					{#snippet actions()}
 						{#if sourceIsReady(source)}<StatePill look="dot" state="success" label="Ready" />
-						{:else if source.source === 'omlx' && source.setup_downloading}<StatePill look="dot" state="loading" label="Downloading" />
-						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" onclick={async () => { await startLocalDownload(); await refreshSources(); }}>Download</Button>
-						{:else}<Button variant="chip" size="sm" onclick={() => signIn(source)}>{source.state === 'not_installed' ? 'Install' : 'Sign in'}</Button>{/if}
+						{:else if source.source === 'omlx' && localDownloading}<StatePill look="dot" state="loading" label="Downloading" />
+						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" loading={localSetupBusy} disabled={localSetupBusy} onclick={retryLocalDownload}>{source.setup_error || localStartError ? 'Try again' : 'Download'}</Button>
+						{:else if source.state === 'not_installed'}<StatePill look="dot" state="error" label="Install required" />
+						{:else}<Button variant="chip" size="sm" onclick={() => signIn(source)}>Sign in</Button>{/if}
 					{/snippet}
 				</ListRow>
 			{/each}

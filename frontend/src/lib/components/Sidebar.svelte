@@ -22,6 +22,7 @@
 	import SidebarAttentionList from './SidebarAttentionList.svelte';
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { updateStatus } from '$lib/stores/settings';
+
 	const updateAvailable = $derived($updateStatus?.available === true);
 
 	let projectNames = $derived(Object.fromEntries($projects.map((p) => [p.id, p.name])));
@@ -337,7 +338,7 @@
 		height: 0;
 	}
 
-	:global(.rail-nav) {
+	.rail-nav {
 		display: flex; flex-direction: column; gap: 1px; flex-shrink: 0;
 		padding: 8px 8px 4px;
 	}
