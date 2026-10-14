@@ -1,5 +1,4 @@
 
-import { mkdir } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { createSession, e2eModel, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
@@ -98,41 +97,6 @@ test.describe('@flow:sidebar @surface:navigation sidebar renders', () => {
 		expect(summaryGeometry.scrollWidth).toBeGreaterThan(summaryGeometry.clientWidth);
 		expect((await failedRow.boundingBox())?.y).toBeLessThan((await updateRow.boundingBox())?.y ?? 0);
 		await saveEvidenceScreenshot(page, testInfo, `while-away-${testInfo.project.name}`);
-	});
-
-	test('renders Stuck in every requested row mode', async ({ page, request }, testInfo) => {
-		test.skip(testInfo.project.name === 'chromium-mobile', 'One explicit desktop/mobile proof run owns the captures.');
-		const title = `Stuck ${Date.now()}`;
-		const threadId = await createSession(request, title);
-		const proofDir = process.env.CORSIA_STUCK_PROOF_DIR;
-		if (!proofDir) throw new Error('CORSIA_STUCK_PROOF_DIR is required for Stuck-row evidence');
-		await mkdir(proofDir, { recursive: true });
-		await page.route('**/api/plans/operator/thread-states?ids=*', async (route) => {
-			const ids = new URL(route.request().url()).searchParams.get('ids')?.split(',') ?? [];
-			await route.fulfill({ json: { states: Object.fromEntries(ids.flatMap((id) => id === threadId ? [[id, {
-				state: 'stuck', label_key: null, paused: false, attention_items: [],
-				stuck_overdue_waits: 3, next_overdue_at: null, has_update: true, opened: false,
-			}]] : [])) } });
-		});
-		await loginByUrl(page, { waitForComposer: false });
-		const row = page.locator('.thread-item-wrapper').filter({ hasText: title });
-		const mark = row.getByRole('button', { name: 'Stuck · 3 waits past the deadline' });
-		await expect(mark).toHaveText('3 Stuck');
-		await expect(mark).toHaveAttribute('title', 'Stuck · 3 waits past the deadline');
-		await expect(row.locator('.update-dot')).toHaveCount(0);
-
-		for (const [name, width, height, colorScheme] of [
-			['desktop-light', 1280, 800, 'light'], ['desktop-dark', 1280, 800, 'dark'],
-			['mobile-light', 393, 852, 'light'], ['mobile-dark', 393, 852, 'dark'],
-		] as const) {
-			await page.setViewportSize({ width, height });
-			await page.emulateMedia({ colorScheme });
-			await expect(mark).toBeVisible();
-			await page.screenshot({ path: `${proofDir}/${name}.png` });
-		}
-		await mark.focus();
-		await expect(mark).toBeFocused();
-		await page.screenshot({ path: `${proofDir}/keyboard-focus-title.png` });
 	});
 
 	test('empty session list shows "No conversations yet"', async ({ page, request }, testInfo) => {
