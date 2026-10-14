@@ -11,7 +11,7 @@ from automation.restart_callbacks import (
     callback_credential_matches,
     mint_callback_credential,
 )
-from automation.update_schedule import claim_overnight_outcome, update_attempted_today
+from automation.update_schedule import update_attempted_today
 from infra.database import get_db, write_transaction
 
 IN_FLIGHT_TTL_SECONDS = 600
@@ -194,6 +194,7 @@ def try_acquire(
     trigger: str | None = None,
     target_version: str | None = None,
     callback_hash: str | None = None,
+    changes: str | None = None,
     operation_id: str | None = None,
     db=None,
     _target_phase: str = "holding",
@@ -233,8 +234,8 @@ def try_acquire(
         connection.execute(
             "INSERT INTO self_restart_requests "
             "(id,requester_thread_id,requester_user,from_sha,branch,reason,"
-            "kind,trigger,target_version,callback_credential_hash,status,phase,requested_at,cutoff_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,'in_flight',?,?,?,?)",
+            "kind,trigger,target_version,callback_credential_hash,changes,status,phase,requested_at,cutoff_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,'in_flight',?,?,?,?)",
             (
                 operation_id,
                 requester_thread_id,
@@ -246,6 +247,7 @@ def try_acquire(
                 trigger,
                 target_version,
                 callback_hash,
+                changes,
                 _target_phase,
                 now,
                 now,

@@ -218,9 +218,12 @@ async def begin_restart_drain(
             failure_code="drain_cancelled",
         )
         raise
-    except Exception:
+    except Exception as exc:
         await abort_restart_control(
-            operation_id, error="restart control setup failed",
+            operation_id,
+            error="restart control setup failed",
+            failure_code="drain_failed",
+            failure_detail=f'{{"exception": "{type(exc).__name__}"}}',
         )
         raise
 

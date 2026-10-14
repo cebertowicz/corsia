@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ToastContainer from '$lib/components/ToastContainer.svelte';
+import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import UpdateJourney from './UpdateJourney.svelte';
 import {
@@ -13,6 +14,16 @@ import {
 	updateUnreachable,
 	type UpdateStatus,
 } from './store';
+
+const restartSpies = vi.hoisted(() => ({
+	readSystemVersion: vi.fn(async () => ({ pid: 1 })),
+	restartSystem: vi.fn(async () => ({ ok: true, operation_id: 'restart-1' })),
+	waitForSystemRestart: vi.fn(async () => ({ ok: true })),
+}));
+vi.mock('$lib/stores/settingsSystemRestart', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/stores/settingsSystemRestart')>()),
+	...restartSpies,
+}));
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -45,7 +56,7 @@ afterEach(() => {
 
 describe('UpdateJourney', () => {
 	it('keeps the progress toast closed for the rest of its operation, and still shows what settles it', async () => {
-		const running = (phase: string) => status({ available: false, operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase, requested_at: new Date().toISOString() } });
+		const running = (phase: string) => status({ available: false, operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: phase as never, requested_at: new Date().toISOString() } });
 		const progress = () => get(toasts).filter((toast) => toast.pinned?.key === 'update' && toast.type === 'progress');
 		updateStatus.set(running('draining'));
 		updateSurface.set('closed');
@@ -270,5 +281,24 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).not.toContain('The update ended before CORSIA restarted');
 		expect(host.textContent).not.toContain('nothing was changed');
 		expect(host.textContent).not.toContain('conductor has been told');
+	});
+
+	it('offers Restart now for a staged update and restarts instead of asking for another update', async () => {
+		const fetchMock = vi.fn(async (_url: string) => ({ ok: true, json: async () => ({}) }));
+		vi.stubGlobal('fetch', fetchMock);
+		token.set('test-token');
+		updateStatus.set(status({ operation: { operation_id: 'update-1', kind: 'update', status: 'failed', failure_code: 'restart_pending', settled_at: '2026-10-13T22:00:00Z' } }));
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+		expect(host.querySelector('.failure > .headline')?.textContent).toBe('An update is already downloaded and waiting for a restart.');
+		const button = [...host.querySelectorAll('button')].find((item) => item.textContent?.trim() === 'Restart now')!;
+		expect(button).toBeTruthy();
+		button.click();
+		await vi.advanceTimersByTimeAsync(10);
+		expect(restartSpies.restartSystem).toHaveBeenCalledWith('restart');
+		expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/system/update-operations/update-1/outcome-seen')).toBe(true);
+		expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/system/restart'))).toBe(false);
+		vi.unstubAllGlobals();
 	});
 });

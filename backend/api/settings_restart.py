@@ -12,16 +12,23 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from api.restart_shell import spawn_restart_lifecycle
-from api.settings_restart_output import clean_update_output, terminal_update_summary
 from api.update_preflight import check_update_backup_room as _check_update_backup_room
+from infra.update_prepare_output import clean_update_output, terminal_update_summary
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
 _RELEASE_FAILURE_NOTE = (
     "Restart control could not be released automatically; "
     "the active operation may still be holding ingress."
 )
-_PREPARE_FETCH_FAILED = 41
-_PREPARE_BUILD_FAILED = 42
+# Exit codes of `corsia prepare-redeploy`; any other nonzero exit is `prepare_failed`.
+_PREPARE_EXIT_CODES = {
+    41: "fetch_failed",
+    42: "build_failed",
+    43: "index_locked",
+    44: "checkout_detached",
+    45: "checkout_dirty",
+    46: "restart_pending",
+}
 
 
 def _update_log_path() -> Path:
@@ -30,8 +37,6 @@ def _update_log_path() -> Path:
 
     return LOGS_DIR / f"update-{uuid.uuid4().hex}.log"
 
-
-_clean_update_output = clean_update_output
 
 
 def _failure_summary(failure: BaseException) -> str:
@@ -43,7 +48,10 @@ def _failure_detail(failure: BaseException) -> str | None:
     return json.dumps({"log_path": str(log_path)}) if log_path else None
 
 
-_terminal_update_summary = terminal_update_summary
+def _with_failure_code(failure: HTTPException, code: str) -> HTTPException:
+    """Name the durable cause the Update journey shows for this failure."""
+    setattr(failure, "update_failure_code", code)
+    return failure
 
 
 def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -> None:
@@ -58,14 +66,17 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        raise HTTPException(
-            504, "Update timed out before restart; CORSIA is still running."
+        raise _with_failure_code(
+            HTTPException(504, "Update timed out before restart; CORSIA is still running."),
+            "update_timed_out",
         ) from exc
     except OSError as exc:
-        raise HTTPException(500, f"Could not start the update: {exc}") from exc
+        raise _with_failure_code(
+            HTTPException(500, f"Could not start the update: {exc}"), "prepare_failed"
+        ) from exc
 
-    stdout = _clean_update_output(result.stdout)
-    stderr = _clean_update_output(result.stderr)
+    stdout = clean_update_output(result.stdout)
+    stderr = clean_update_output(result.stderr)
     log_path = _update_log_path()
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,24 +85,23 @@ def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -
         )
     except OSError as exc:
         if result.returncode != 0:
-            raise HTTPException(
-                500,
-                "Update stopped before restart, and its full log could not be written; "
-                "CORSIA is still running.",
+            raise _with_failure_code(
+                HTTPException(
+                    500,
+                    "Update stopped before restart, and its full log could not be written; "
+                    "CORSIA is still running.",
+                ),
+                _PREPARE_EXIT_CODES.get(result.returncode, "prepare_failed"),
             ) from exc
     if result.returncode == 0:
         return
 
-    summary = _terminal_update_summary(stdout, stderr)
+    summary = terminal_update_summary(stdout, stderr)
     failure = HTTPException(
         409,
         f"Update stopped before restart: {summary}. Full log: {log_path}",
     )
-    setattr(
-        failure,
-        "update_failure_code",
-        {_PREPARE_FETCH_FAILED: "fetch_failed", _PREPARE_BUILD_FAILED: "build_failed"}.get(result.returncode),
-    )
+    _with_failure_code(failure, _PREPARE_EXIT_CODES.get(result.returncode, "prepare_failed"))
     setattr(failure, "update_log_path", log_path)
     raise failure
 
@@ -124,7 +134,7 @@ async def _acquire_settings_restart(
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
     from infra.db_async import run_in_db
-    from infra.update_status import cached_target_version
+    from infra.update_status import cached_changes, cached_target_version
 
     def _try_acquire() -> str | None:
         operation_id = self_restart.try_acquire(
@@ -137,6 +147,7 @@ async def _acquire_settings_restart(
             trigger=trigger if mode == "update" else None,
             target_version=(target_version or cached_target_version()) if mode == "update" else None,
             callback_hash=callback_hash,
+            changes=json.dumps(cached_changes()) if mode == "update" and cached_changes() else None,
         )
         if operation_id is not None:
             acquired_ids.append(operation_id)
@@ -178,6 +189,7 @@ async def _compensate_cancelled_acquire(
                 acquired_ids[0],
                 error="settings restart cancelled before launch",
                 cancelled=True,
+                failure_code="drain_cancelled",
             )
         except Exception as error:
             cancellation.add_note(f"Restart cancellation compensation failed: {error}")

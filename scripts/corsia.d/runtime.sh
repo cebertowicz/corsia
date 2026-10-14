@@ -868,31 +868,36 @@ redeploy_sync_python_dependencies() {
 
 UPDATE_PREPARE_FETCH_FAILED=41
 UPDATE_PREPARE_BUILD_FAILED=42
+# Refusals before any pull: nothing can change by retrying until the person acts.
+UPDATE_PREPARE_INDEX_LOCKED=43
+UPDATE_PREPARE_DETACHED=44
+UPDATE_PREPARE_DIRTY=45
+UPDATE_PREPARE_AWAITING_RESTART=46
 
 # Pull, dependency-check, and stage a build from the serving checkout's CURRENT
 # branch. The caller holds the Update mutex for this whole function.
 prepare_redeploy_locked() {
     local checkout="$1" git_dir="$2" branch fe stage prepared backup absent
 
-    recover_stale_git_index_lock "$git_dir" || return "$UPDATE_PREPARE_FETCH_FAILED"
+    recover_stale_git_index_lock "$git_dir" || return "$UPDATE_PREPARE_INDEX_LOCKED"
     branch="$(git -C "$checkout" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
     if [ -z "$branch" ]; then
         fail "Redeploy refused: serving checkout is in detached HEAD — no branch to pull"
-        return "$UPDATE_PREPARE_FETCH_FAILED"
+        return "$UPDATE_PREPARE_DETACHED"
     fi
     if [ -n "$(git -C "$checkout" status --porcelain 2>/dev/null)" ]; then
         fail "Redeploy refused: serving checkout has uncommitted changes (deployment surface must stay clean)"
-        return "$UPDATE_PREPARE_FETCH_FAILED"
+        return "$UPDATE_PREPARE_DIRTY"
     fi
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     if [ -e "$prepared" ]; then
         if [ ! -d "$stage" ]; then
             fail "Redeploy refused: prepared frontend ownership marker has no matching staged build at $stage"
-            return "$UPDATE_PREPARE_FETCH_FAILED"
+            return 1
         fi
         fail "Redeploy refused: a validated frontend update is already awaiting restart at $stage"
-        return "$UPDATE_PREPARE_FETCH_FAILED"
+        return "$UPDATE_PREPARE_AWAITING_RESTART"
     fi
     echo "  Pulling --ff-only ($branch) in $checkout ..."
     if ! git -C "$checkout" pull --ff-only; then

@@ -2,24 +2,13 @@ import { derived, get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
-import {
-	failureCopy,
-	failureFromOperation,
-	isFailedOperation,
-	isInFlight,
-	type ClientVerdict,
-	type UpdateOperation,
-} from './model';
+import { failureCopy, failureFromOperation } from './failureCopy';
+import { isFailedOperation, isInFlight, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
+import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
-import { hasId, releaseNotesFor, rememberApprovedNotes, rememberId, snapshotReleaseNotes } from './releaseNotes';
-
-export { releaseNotesFor };
-export type { UpdateReleaseNotes } from './releaseNotes';
 
 const BASE = '';
 const POLL_MS = 1_000;
-const HANDLED_KEY = 'corsia:update:handled-operation-ids';
-const NOTICED_KEY = 'corsia:update:noticed-target-versions';
 
 import type { UpdateSchedule, UpdateStatus, UpdateSurface } from './types';
 
@@ -46,6 +35,9 @@ let versionPollTimer: ReturnType<typeof setInterval> | null = null;
 let terminalCheckRunning = false;
 let versionMismatchStartedAt: number | null = null;
 let noticeToastId: string | null = null;
+// What this page already showed. The durable record of what any device showed is the operation's `outcome_seen_at`.
+const shownOutcomes = new Set<string>();
+const noticedVersions = new Set<string>();
 
 function stopStatusPolling(): void {
 	if (pollTimer !== null) clearInterval(pollTimer);
@@ -83,15 +75,23 @@ function dismissNotice(): void {
 
 function showNotice(status: UpdateStatus): void {
 	const version = status.target_version;
-	if (!status.available || isInFlight(status.operation) || status.operation?.target_version === version || !version || !rememberId(NOTICED_KEY, version)) return;
+	if (!status.available || isInFlight(status.operation) || status.operation?.target_version === version || !version || noticedVersions.has(version)) return;
+	noticedVersions.add(version);
 	noticeToastId = toasts.showAction('An update is ready to install.', {
 		label: 'View',
 		run: openUpdateSheet,
 	});
 }
 
+/** Remove the progress toast; a tab that reads a terminal status second must never keep a spinner. */
+function dropProgressToast(): void {
+	if (get(toasts).find((toast) => toast.pinned?.key === 'update')?.type === 'progress') toasts.unpin('update');
+}
+
+/** Show an unseen outcome once per page. A success is seen once shown; a failure only when someone dismisses or retries it. */
 function showTerminal(operation: UpdateOperation): void {
-	if (!rememberId(HANDLED_KEY, operation.operation_id, 'browser')) return;
+	if (shownOutcomes.has(operation.operation_id)) return;
+	shownOutcomes.add(operation.operation_id);
 	if (operation.status === 'complete') {
 		const version = operation.target_version ?? get(updateStatus)?.target_version ?? 'the latest version';
 		toasts.pin('update', {
@@ -99,6 +99,7 @@ function showTerminal(operation: UpdateOperation): void {
 			message: `Updated to ${version}`,
 			action: { label: "See what's new", run: openUpdateSheet },
 		});
+		void markOutcomeSeen(operation.operation_id);
 		return;
 	}
 	if (isFailedOperation(operation) && get(updateSurface) === 'closed') {
@@ -106,12 +107,13 @@ function showTerminal(operation: UpdateOperation): void {
 		toasts.pin('update', {
 			type: 'error', message: copy.title, detail: copy.toastLine ?? undefined,
 			action: { label: 'Details', run: openUpdateSheet },
+			onClose: () => { void markOutcomeSeen(operation.operation_id); },
 		});
 	}
 }
 
 async function verifyComplete(operation: UpdateOperation): Promise<void> {
-	if (terminalCheckRunning) return;
+	if (terminalCheckRunning || shownOutcomes.has(operation.operation_id)) return;
 	terminalCheckRunning = true;
 	try {
 		const version = await readVersionWithinFiveSeconds();
@@ -129,7 +131,8 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 			setTimeout(() => { void loadUpdateStatus(); }, POLL_MS);
 			return;
 		}
-		rememberId(HANDLED_KEY, operation.operation_id, 'browser');
+		shownOutcomes.add(operation.operation_id);
+		void markOutcomeSeen(operation.operation_id);
 		updateFailureVerdict.set({ kind: 'version_mismatch', message: 'The page, the backend and the checkout are not on the same version.' });
 		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdateSheet } });
 	} finally {
@@ -146,9 +149,10 @@ function reconcileOperation(status: UpdateStatus): void {
 	}
 	stopStatusPolling();
 	stopVersionPolling();
-	if (operation?.status === 'complete') {
-		if (!hasId(HANDLED_KEY, operation.operation_id, 'browser')) void verifyComplete(operation);
-	} else if (operation && isFailedOperation(operation)) showTerminal(operation);
+	dropProgressToast();
+	if (!operation || operation.outcome_seen_at) return;
+	if (operation.status === 'complete') void verifyComplete(operation);
+	else if (isFailedOperation(operation)) showTerminal(operation);
 }
 
 /** Read the durable operation projection and start polling only while it is active. */
@@ -163,7 +167,6 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 		if (!response.ok) throw new Error(`Update check returned ${response.status}`);
 		const status = await response.json() as UpdateStatus;
 		updateStatus.set(status);
-		if (isInFlight(status.operation)) snapshotReleaseNotes(status);
 		const serverTime = status.server_time ? Date.parse(status.server_time) : Number.NaN;
 		if (!Number.isNaN(serverTime)) updateServerClockOffsetMs.set(serverTime - Date.now());
 		updateUnreachable.set(false);
@@ -244,8 +247,10 @@ export function closeUpdateSurface(): void {
 /** Start the approved update lifecycle, then immediately adopt its durable record. */
 export async function startUpdate(): Promise<void> {
 	updateFailureVerdict.set(null);
-	const previousOperationId = get(updateStatus)?.operation?.operation_id;
-	rememberApprovedNotes(get(updateStatus));
+	const previous = get(updateStatus)?.operation;
+	const previousOperationId = previous?.operation_id;
+	// Retrying is acting on the failure: it no longer needs to greet any device.
+	if (isFailedOperation(previous)) void markOutcomeSeen(previous.operation_id);
 	updateStarting.set(true);
 	// The request answers only once the update is built; adopt the operation record meanwhile so the surface shows progress.
 	const adopt = setInterval(() => { void loadUpdateStatus(); }, POLL_MS);
@@ -280,6 +285,8 @@ export function resetUpdateStoreForTests(): void {
 	terminalCheckRunning = false;
 	versionMismatchStartedAt = null;
 	noticeToastId = null;
+	shownOutcomes.clear();
+	noticedVersions.clear();
 	updateStatus.set(null);
 	updateSurface.set('closed');
 	updateUnreachable.set(false);

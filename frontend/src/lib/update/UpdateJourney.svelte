@@ -5,9 +5,11 @@
 	import { toasts } from '$lib/stores/toast';
 	import { Button, Modal, Toggle } from '$lib/components/ui';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
-	import { UPDATE_STEPS, elapsedSeconds, failureCopy, failureFromOperation, failureFromVerdict, formatElapsed, formatInstalledAt, formatScheduleTime, humanDuration, isFailedOperation, isInFlight, stepDetail, stepIndex, stepMessage } from './model';
-	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, startUpdate, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
-	import { saveUpdateSchedule } from './store';
+	import { failureCopy, failureFromOperation, failureFromVerdict } from './failureCopy';
+	import { UPDATE_STEPS, currentOperation, elapsedSeconds, formatElapsed, formatInstalledAt, formatScheduleTime, humanDuration, isFailedOperation, isInFlight, releaseNotesFor, stepDetail, stepIndex, stepMessage } from './model';
+	import { markOutcomeSeen } from './outcome';
+	import { restartToFinishUpdate } from './restartToFinish';
+	import { closeUpdateSurface, openUpdatePanel, retryUpdate, saveUpdateSchedule, startUpdate, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
 
 	let now = $state(Date.now());
 	let showAll = $state(false);
@@ -15,14 +17,13 @@
 	onDestroy(() => clearInterval(tick));
 
 	const operation = $derived($updateOperation);
-	// A settled operation that targets an older version than the current offer is history, not this offer's outcome.
-	const superseded = $derived(Boolean($updateStatus?.available && $updateStatus.target_version && operation?.target_version && $updateStatus.target_version !== operation.target_version));
-	const failed = $derived(isFailedOperation(operation) && !superseded);
-	const completed = $derived(operation?.status === 'complete' && !superseded);
+	const current = $derived(currentOperation(operation, $updateStatus));
+	const failed = $derived(isFailedOperation(current));
+	const completed = $derived(current?.status === 'complete');
 	const running = $derived(isInFlight(operation));
 	const panel = $derived($updateSurface === 'panel' || running);
 	// A verdict the client reached itself wins over whatever the latest operation says.
-	const failureDetail = $derived($updateFailureVerdict ? failureFromVerdict($updateFailureVerdict) : operation ? failureFromOperation(operation) : null);
+	const failureDetail = $derived($updateFailureVerdict ? failureFromVerdict($updateFailureVerdict) : current ? failureFromOperation(current) : null);
 	const failure = $derived(failureDetail ? failureCopy(failureDetail) : null);
 	const elapsed = $derived(formatElapsed(elapsedSeconds(operation, now, $updateServerClockOffsetMs)));
 	const liveScreen = $derived(failed || $updateFailureVerdict ? 'failure' : panel ? 'panel' : completed ? 'notes' : 'sheet');
@@ -33,8 +34,8 @@
 		return shownScreen;
 	});
 	const surfaceOpen = $derived($updateSurface !== 'closed');
-	const installedAt = $derived(operation?.settled_at ? formatInstalledAt(operation.settled_at, now) : null);
-	const notes = $derived(releaseNotesFor(operation, $updateStatus));
+	const installedAt = $derived(completed && current?.settled_at ? formatInstalledAt(current.settled_at, now) : null);
+	const notes = $derived(releaseNotesFor(current, $updateStatus));
 	const targetVersion = $derived(notes?.targetVersion ?? operation?.target_version ?? $updateStatus?.target_version ?? 'the latest version');
 	const heading = $derived(screen === 'failure' ? (failure?.title ?? "Update didn't start") : screen === 'panel' ? 'Updating CORSIA' : screen === 'notes' ? `What's new in ${targetVersion}` : 'Update CORSIA');
 	const agentCount = $derived($drainStatus?.activeTurns ?? $updateStatus?.agents_working ?? 0);
@@ -52,8 +53,12 @@
 		toasts.pin('update', { onClose: () => { hiddenProgressFor = operationId; }, type: 'progress', message: stepMessage(operation, $updateUnreachable), time: elapsed, closeLabel: 'Hide progress', action: { label: 'Details', run: openUpdatePanel } });
 	});
 
-	function close(): void { closeUpdateSurface(); }
-	function retry(): void { void retryUpdate(); }
+	// Closing a failure is acting on it; until then it stays visible on every device.
+	function close(): void {
+		if (screen === 'failure' && failed && current) void markOutcomeSeen(current.operation_id);
+		closeUpdateSurface();
+	}
+	function retry(): void { void (failure?.retryAction === 'restart' ? restartToFinishUpdate() : retryUpdate()); }
 	function updateNow(): void { void startUpdate(); }
 	async function tonight(): Promise<void> {
 		if (!await saveUpdateSchedule({ tonight: true })) return;

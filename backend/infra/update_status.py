@@ -155,6 +155,12 @@ def cached_target_version() -> str | None:
     return cached.target_version if cached is not None else None
 
 
+def cached_changes() -> dict | None:
+    """Return the change list the cached probe offered, without probing the remote."""
+    cached = _cache["data"]
+    return cached.changes if cached is not None else None
+
+
 def invalidate_cache() -> None:
     """Drop the cached answer so the next read re-probes the remote."""
     _cache["data"] = None

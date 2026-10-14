@@ -3,8 +3,6 @@ import { get, writable } from 'svelte/store';
 export interface ToastAction {
 	label: string;
 	run: () => void | Promise<unknown>;
-	/** Keep a persistent pinned outcome visible after its Details action opens. */
-	dismiss?: boolean;
 }
 
 export type OrdinaryToastType = 'info' | 'success' | 'error';
@@ -182,7 +180,7 @@ function createToastStore() {
 		const action = get(store).find((toast) => toast.id === id)?.action;
 		if (!action) return;
 		runningActions.add(id);
-		if (action.dismiss !== false) dismiss(id);
+		dismiss(id);
 		try {
 			await action.run();
 		} finally {

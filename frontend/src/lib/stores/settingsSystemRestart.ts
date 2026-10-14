@@ -51,8 +51,6 @@ export interface SystemRestartStatus {
 	status: 'in_flight' | 'complete' | 'failed' | 'cancelled' | 'superseded';
 	phase?: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming' | null;
 	error?: string | null;
-	failure_code?: 'disk_space' | 'fetch_failed' | 'build_failed' | 'launch_failed' | 'drain_cancelled' | null;
-	failure_detail?: string | null;
 }
 
 type RestartStatusRead = SystemRestartStatus | string | null;

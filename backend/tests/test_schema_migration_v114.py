@@ -23,8 +23,8 @@ def test_v114_adds_update_operation_columns_to_existing_database(tmp_path) -> No
         columns = {row[1] for row in connection.execute("PRAGMA table_info(self_restart_requests)")}
         row = connection.execute(
             "SELECT kind,trigger,target_version,drain_total,failure_code,"
-            "failure_detail,conductor_told_at FROM self_restart_requests"
+            "failure_detail,conductor_told_at,changes,outcome_seen_at FROM self_restart_requests"
         ).fetchone()
     assert result.migrated is True
-    assert {"kind", "trigger", "target_version", "drain_total", "failure_code", "failure_detail", "conductor_told_at"} <= columns
-    assert row == (None, None, None, None, None, None, None)
+    assert {"kind", "trigger", "target_version", "drain_total", "failure_code", "failure_detail", "conductor_told_at", "changes", "outcome_seen_at"} <= columns
+    assert row == (None, None, None, None, None, None, None, None, None)

@@ -11,7 +11,14 @@ export type UpdateFailureCode =
 	| 'fetch_failed'
 	| 'build_failed'
 	| 'launch_failed'
-	| 'drain_cancelled';
+	| 'drain_cancelled'
+	| 'drain_failed'
+	| 'update_timed_out'
+	| 'prepare_failed'
+	| 'index_locked'
+	| 'checkout_detached'
+	| 'checkout_dirty'
+	| 'restart_pending';
 
 export interface UpdateOperation {
 	operation_id: string;
@@ -30,6 +37,10 @@ export interface UpdateOperation {
 	requested_at?: string | null;
 	settled_at?: string | null;
 	log_tail?: string | null;
+	/** The change list this update was offered with; it lives on the row so every device shows the same notes. */
+	changes?: UpdateChanges | null;
+	/** Set by the first client to show the outcome (a failure only once someone acts on it). */
+	outcome_seen_at?: string | null;
 }
 
 export interface UpdateChanges {
@@ -44,24 +55,6 @@ export interface UpdateOffer {
 	version: string;
 	currentVersion: string | null;
 	changes: UpdateChanges | null;
-}
-
-/** A problem the client itself found, which no stored operation holds. */
-export interface ClientVerdict {
-	/** `version_mismatch`: a completed update whose running versions disagree; `refused`: a start the server turned away. */
-	kind: 'version_mismatch' | 'refused';
-	message: string;
-}
-
-/** A failure to show: a stored operation, or a verdict the client reached itself. */
-export interface UpdateFailure {
-	code: UpdateFailureCode | null;
-	detail: string | null;
-	summary: string | null;
-	conductorTold: boolean;
-	/** Set when the client, not the operation, found the problem; it wins over the operation's own copy. */
-	client?: ClientVerdict;
-	log: string | null;
 }
 
 export const UPDATE_STEPS = [
@@ -171,25 +164,50 @@ export function stepDetail(op: UpdateOperation | null, unreachable: boolean): st
 	return `${base} Stopping the rest in ${formatElapsed(remaining)}.`;
 }
 
-// Failure-copy parsing and presentation live in failure-copy.ts.
-
-export function failureFromOperation(op: UpdateOperation): UpdateFailure {
-	return {
-		code: op.failure_code ?? null,
-		detail: op.failure_detail ?? null,
-		summary: op.error ?? null,
-		conductorTold: Boolean(op.conductor_told_at),
-		log: op.log_tail ?? null,
-	};
+/** A problem the client itself found, which no stored operation holds. */
+export interface ClientVerdict {
+	/** `version_mismatch`: a completed update whose running versions disagree; `refused`: a start the server turned away. */
+	kind: 'version_mismatch' | 'refused';
+	message: string;
 }
 
-export function failureFromVerdict(client: ClientVerdict): UpdateFailure {
-	return { code: null, detail: null, summary: null, conductorTold: false, log: null, client };
+/** A failure to show: a stored operation, or a verdict the client reached itself. */
+export interface UpdateFailure {
+	code: UpdateFailureCode | null;
+	detail: string | null;
+	summary: string | null;
+	conductorTold: boolean;
+	/** Set when the client, not the operation, found the problem; it wins over the operation's own copy. */
+	client?: ClientVerdict;
+	log: string | null;
 }
 
-export { failureCopy, type FailureCopy } from './failure-copy';
-
-/** Failure copy for an operation that ended without the update installing. */
+/** An operation that ended without the update installing. */
 export function isFailedOperation(op: UpdateOperation | null | undefined): op is UpdateOperation {
 	return op?.status === 'failed' || op?.status === 'cancelled';
+}
+
+/** What a surface needs to know about the update on offer. */
+interface OfferState {
+	available?: boolean | null;
+	target_version?: string | null;
+	changes?: UpdateChanges | null;
+}
+
+/** The one rule for which operation a surface treats as current: a settled one targeting an older version than the offer is history. */
+export function currentOperation(op: UpdateOperation | null | undefined, status: OfferState | null | undefined): UpdateOperation | null {
+	if (!op || isInFlight(op)) return op ?? null;
+	const offered = status?.available ? status.target_version : null;
+	return offered && op.target_version && offered !== op.target_version ? null : op;
+}
+
+export interface UpdateReleaseNotes {
+	targetVersion: string;
+	changes: UpdateChanges | null;
+}
+
+/** The notes of the current operation, or of the offer when no operation is current; both come from the server. */
+export function releaseNotesFor(op: UpdateOperation | null | undefined, status: OfferState | null | undefined): UpdateReleaseNotes | null {
+	const targetVersion = op?.target_version ?? status?.target_version;
+	return targetVersion ? { targetVersion, changes: op?.changes ?? status?.changes ?? null } : null;
 }

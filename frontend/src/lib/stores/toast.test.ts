@@ -167,17 +167,6 @@ describe('pinned slot', () => {
 		expect(get(toasts)).toEqual([]);
 	});
 
-	it('keeps a pinned failure visible when Details opens', async () => {
-		const run = vi.fn();
-		const id = toasts.pin('update', {
-			type: 'error',
-			message: "Update didn't start",
-			action: { label: 'Details', run, dismiss: false },
-		});
-		await toasts.runAction(id);
-		expect(run).toHaveBeenCalledOnce();
-		expect(get(toasts)).toHaveLength(1);
-	});
 });
 
 describe('action toasts', () => {
