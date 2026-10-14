@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -10,6 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from api.restart_shell import spawn_restart_lifecycle
+from api.self_restart_response import emit_self_restart_audit as _emit_self_restart_audit
+from api.self_restart_response import self_restart_response as _self_restart_response
 from api.settings_restart import prelaunch_settings_restart
 from infra.auth import authenticate, require_human_user, require_user
 
@@ -43,6 +46,49 @@ def _restart_log_path(name: str) -> Path:
     return LOGS_DIR / name
 
 
+async def launch_update(
+    user: dict,
+    caller_token: str | None,
+    trigger: str,
+    target_version: str | None,
+    *,
+    port: int,
+    claim: Callable[[object], bool] | None = None,
+) -> tuple[str, object] | None:
+    """Launch the one Settings Update lifecycle from any approved trigger."""
+    if trigger not in {"manual", "tonight", "automatic"}:
+        raise ValueError("update trigger is invalid")
+    corsia_script = Path(__file__).parent.parent.parent / "scripts" / "corsia"
+    if not corsia_script.exists():
+        raise RuntimeError("CORSIA management script not found")
+    restart_env = {
+        **os.environ,
+        "BACKEND_PORT": str(port),
+        "CORSIA_RESTART_BACKEND_PORT": str(port),
+    }
+    from infra.drain import drain_wait_seconds
+
+    restart_env["CORSIA_DRAIN_MAX_WAIT"] = str(drain_wait_seconds())
+    # A scheduled run mints its service credential only after it acquires ownership.
+    prelaunch = await prelaunch_settings_restart(
+        user,
+        "update",
+        corsia_script,
+        restart_env,
+        ["restart"],
+        _restart_log_path,
+        caller_token=caller_token,
+        claim=claim,
+        trigger=trigger,
+        target_version=target_version,
+    )
+    if prelaunch is None:
+        return None
+    operation_id, process = prelaunch
+    await _monitor_restart_process(process, operation_id)
+    return operation_id, process
+
+
 @router.post("/system/restart")
 async def system_restart(
     request: Request,
@@ -73,22 +119,34 @@ async def system_restart(
         )
 
     port = _own_backend_port(request)
-    restart_env = {
-        **os.environ,
-        "BACKEND_PORT": str(port),
-        "CORSIA_RESTART_BACKEND_PORT": str(port),
-    }
     prepared = mode == "update"
-    operation_id, process = await prelaunch_settings_restart(
-        user,
-        mode,
-        corsia_script,
-        restart_env,
-        script_args,
-        _restart_log_path,
-        caller_token=token,
-    )
-    await _monitor_restart_process(process, operation_id)
+    if prepared:
+        operation_id, _process = await launch_update(
+            user,
+            token,
+            "manual",
+            None,
+            port=port,
+        )
+    else:
+        from infra.drain import drain_wait_seconds
+
+        restart_env = {
+            **os.environ,
+            "BACKEND_PORT": str(port),
+            "CORSIA_RESTART_BACKEND_PORT": str(port),
+            "CORSIA_DRAIN_MAX_WAIT": str(drain_wait_seconds()),
+        }
+        operation_id, process = await prelaunch_settings_restart(
+            user,
+            mode,
+            corsia_script,
+            restart_env,
+            script_args,
+            _restart_log_path,
+            caller_token=token,
+        )
+        await _monitor_restart_process(process, operation_id)
 
     message = (
         "Current branch updated and built. Safe restart initiated."
@@ -144,33 +202,6 @@ async def _spawn_self_restart_after_response(
     await _monitor_restart_process(process, operation_id)
 
 
-def _emit_self_restart_audit(
-    auth,
-    user: dict,
-    requester_thread_id: str | None,
-    reason: str | None,
-    redeploy: bool,
-) -> None:
-    """Emit the analytics twin of the durable self_restart_requests audit row."""
-    from infra.product_events import emit_product_event
-
-    emit_product_event(
-        "self_restart",
-        "requested",
-        thread_id=requester_thread_id,
-        user_id=user.get("id"),
-        properties={
-            "serving_sha": auth.head_sha,
-            "serving_short_sha": auth.short_sha,
-            "branch": auth.branch,
-            "serving_root": auth.serving_root,
-            "requester_thread_id": requester_thread_id,
-            "reason": reason,
-            "redeploy": redeploy,
-        },
-    )
-
-
 def _spawn_self_restart(
     own_port: int,
     redeploy: bool,
@@ -198,29 +229,6 @@ def _spawn_self_restart(
             log_fh,
             caller_credential=caller_token,
         )
-
-
-def _self_restart_response(auth, redeploy: bool) -> dict:
-    """Return the acknowledged self-restart response."""
-    action = (
-        "pull origin (--ff-only, current branch), rebuild, then drain and restart"
-        if redeploy
-        else "drain and restart the current on-disk build"
-    )
-    return {
-        "ok": True,
-        "redeploy": redeploy,
-        "serving_sha": auth.short_sha,
-        "serving_root": auth.serving_root,
-        "message": (
-            f"Restart acknowledged. This instance will {action}; this connection "
-            f"drops during the bounce. A dirty, detached, or non-fast-forward "
-            f"serving checkout fails closed before any bounce. Your Turn will "
-            f"receive a restart-pending notice shortly; call restart_resume at "
-            f"your next safe boundary if unfinished work must continue after "
-            f"startup."
-        ),
-    }
 
 
 def _requested_redeploy(body: dict | None) -> bool:
@@ -319,6 +327,7 @@ async def system_update_status(
     completed — the UI must not present that as up to date.
     """
     from automation import self_restart
+    from automation.update_outcome import staged_update_activated
     from core.turn_core import active_turn_count
     from infra import drain
     from infra.db_async import run_in_db
@@ -331,15 +340,38 @@ async def system_update_status(
     result["usual_seconds"] = await run_in_db(self_restart.usual_update_seconds)
     result["agents_working"] = await run_in_db(active_turn_count)
     result["server_time"] = datetime.now(timezone.utc).isoformat()
+    from infra.settings import get_update_schedule
+
+    result["schedule"] = await asyncio.to_thread(get_update_schedule)
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:
-        result["operation"] = await run_in_db(project_update_operation, operation)
+        activated = await run_in_db(staged_update_activated, operation)
+        result["operation"] = await run_in_db(
+            lambda: project_update_operation(operation, activated_by_restart=activated)
+        )
     return result
+
+
+@router.put("/system/update-schedule")
+async def update_schedule(body: dict, user: dict = Depends(require_user)):
+    """Save the human-controlled local scheduled Update preference."""
+    require_human_user(user)
+    from automation.update_schedule import update_schedule_patch
+
+    try:
+        return await asyncio.to_thread(
+            update_schedule_patch,
+            body,
+            now=datetime.now().astimezone(),
+            user_id=user["id"],
+        )
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
 
 
 @router.post("/system/update-operations/{operation_id}/outcome-seen")
 async def system_update_outcome_seen(
-    operation_id: str, user: dict = Depends(require_user)
+    operation_id: str, user: dict = Depends(require_human_user)
 ):
     """Mark one settled Update's outcome as shown; the first client to do so wins."""
     from automation.update_outcome import mark_outcome_seen

@@ -11,6 +11,11 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from api.restart_compensation import (
+    compensate_cancelled_acquire as _compensate_cancelled_acquire,
+    compensate_preparation_failure as _compensate_preparation_failure,
+    failure_detail as _failure_detail,
+)
 from api.restart_shell import spawn_restart_lifecycle
 from api.update_preflight import check_update_backup_room as _check_update_backup_room
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
@@ -37,14 +42,6 @@ def _update_log_path() -> Path:
 
     return LOGS_DIR / f"update-{uuid.uuid4().hex}.log"
 
-
-def _failure_summary(failure: BaseException) -> str:
-    return str(getattr(failure, "detail", failure))[:500]
-
-
-def _failure_detail(failure: BaseException) -> str | None:
-    log_path = getattr(failure, "update_log_path", None)
-    return json.dumps({"log_path": str(log_path)}) if log_path else None
 
 
 def _with_failure_code(failure: HTTPException, code: str) -> HTTPException:
@@ -122,33 +119,40 @@ def _discard_prepared_release(
 
 
 async def _acquire_settings_restart(
-    user: dict,
+    user: dict | None,
     mode: str,
     acquired_ids: list[str],
-) -> str:
+    *,
+    trigger: str | None = None,
+    target_version: str | None = None,
+    claim: Callable[[object], bool] | None = None,
+) -> str | None:
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
     from infra.db_async import run_in_db
     from infra.update_status import cached_changes, cached_target_version
 
     def _try_acquire() -> str | None:
+        version = (target_version or cached_target_version()) if mode == "update" else None
+        changes = cached_changes() if mode == "update" else None
         operation_id = self_restart.try_acquire(
             None,
-            user.get("id"),
+            user.get("id") if user else None,
             None,
             None,
             mode,
             kind="update" if mode == "update" else "restart",
-            trigger="manual" if mode == "update" else None,
-            target_version=cached_target_version() if mode == "update" else None,
-            changes=json.dumps(cached_changes()) if mode == "update" and cached_changes() else None,
+            trigger=trigger if mode == "update" else None,
+            target_version=version if mode == "update" else None,
+            changes=json.dumps(changes) if changes else None,
+            claim=claim,
         )
         if operation_id is not None:
             acquired_ids.append(operation_id)
         return operation_id
 
     operation_id = await run_in_db(_try_acquire)
-    if operation_id is None:
+    if operation_id is None and claim is None:
         raise HTTPException(409, "A restart is already in flight.")
     return operation_id
 
@@ -169,52 +173,6 @@ async def _begin_settings_drain(operation_id: str, mode: str) -> None:
             409, f"Restart control could not be established: {exc}"
         ) from exc
 
-
-async def _compensate_cancelled_acquire(
-    acquired_ids: list[str],
-    cancellation: asyncio.CancelledError,
-) -> None:
-    """Compensate committed ownership without replacing the caller cancellation."""
-    if acquired_ids:
-        from automation.restart import abort_restart_control
-
-        try:
-            await abort_restart_control(
-                acquired_ids[0],
-                error="settings restart cancelled before launch",
-                cancelled=True,
-                failure_code="drain_cancelled",
-            )
-        except Exception as error:
-            cancellation.add_note(f"Restart cancellation compensation failed: {error}")
-        except asyncio.CancelledError:
-            cancellation.add_note("Restart cancellation compensation was interrupted.")
-
-
-async def _compensate_preparation_failure(
-    operation_id: str,
-    failure: BaseException,
-    *,
-    failure_code: str | None = None,
-    failure_detail: str | None = None,
-) -> None:
-    """Release the exact reservation without replacing its preparation failure."""
-    from automation.restart import abort_restart_control
-
-    try:
-        released = await abort_restart_control(
-            operation_id,
-            error=_failure_summary(failure),
-            failure_code=failure_code,
-            failure_detail=failure_detail,
-        )
-    except asyncio.CancelledError:
-        failure.add_note("Restart preparation compensation was interrupted.")
-    except Exception as error:
-        failure.add_note(f"Restart preparation compensation failed: {error}")
-    else:
-        if not released:
-            failure.add_note("Restart preparation compensation lost exact ownership.")
 
 
 async def _await_preparation(task: asyncio.Task[None]) -> None:
@@ -330,29 +288,39 @@ async def _launch_settings_restart(
 
 
 async def prelaunch_settings_restart(
-    user: dict,
+    user: dict | None,
     mode: str,
     corsia_script: Path,
     restart_env: dict[str, str],
     script_args: list[str],
     restart_log_path: Callable[[str], Path],
     *,
-    caller_token: str,
-) -> tuple[str, object]:
-    """Hand Settings restart ownership from preparation through child launch."""
+    caller_token: str | None,
+    trigger: str | None = "manual",
+    target_version: str | None = None,
+    claim: Callable[[object], bool] | None = None,
+) -> tuple[str, object] | None:
+    """Hand Settings restart ownership from acquisition through child launch."""
     prepared = mode == "update"
     if prepared:
         await _UPDATE_REQUEST_LOCK.acquire()
     try:
         acquired_ids: list[str] = []
         try:
-            operation_id = await _acquire_settings_restart(user, mode, acquired_ids)
-        except asyncio.CancelledError as error:
-            await _compensate_cancelled_acquire(
+            operation_id = await _acquire_settings_restart(
+                user,
+                mode,
                 acquired_ids,
-                error,
+                trigger=trigger,
+                target_version=target_version,
+                claim=claim,
             )
+        except asyncio.CancelledError as error:
+            await _compensate_cancelled_acquire(acquired_ids, error)
             raise
+
+        if operation_id is None:
+            return None
 
         if prepared:
             await _check_room_or_compensate(operation_id, acquired_ids)
@@ -360,14 +328,23 @@ async def prelaunch_settings_restart(
                 operation_id, acquired_ids, corsia_script, restart_env
             )
             script_args = ["restart-prepared"]
+            if caller_token is None:
+                try:
+                    from infra.accounts import issue_lifecycle_service_token
+                    from infra.db_async import run_in_db
+
+                    caller_token = await run_in_db(issue_lifecycle_service_token, user["id"], operation_id)
+                except asyncio.CancelledError as error:
+                    await _compensate_cancelled_acquire(acquired_ids, error)
+                    raise
+                except BaseException as error:
+                    await _compensate_preparation_failure(operation_id, error)
+                    raise
 
         try:
             await _begin_settings_drain(operation_id, mode)
         except asyncio.CancelledError as error:
-            await _compensate_cancelled_acquire(
-                acquired_ids,
-                error,
-            )
+            await _compensate_cancelled_acquire(acquired_ids, error)
             raise
 
         restart_env["CORSIA_RESTART_OPERATION_ID"] = operation_id

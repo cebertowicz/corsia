@@ -5,6 +5,7 @@ import { toasts } from '$lib/stores/toast';
 import {
 	loadUpdateStatus,
 	resetUpdateStoreForTests,
+	saveUpdateSchedule,
 	startUpdate,
 	updateFailureVerdict,
 	updateInFlight,
@@ -67,6 +68,25 @@ afterEach(() => {
 });
 
 describe('update store', () => {
+	it('persists Tonight and adopts the returned server schedule', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+			expect(url).toContain('/api/system/update-schedule');
+			expect(init?.method).toBe('PUT');
+			return { ok: true, json: async () => ({ automatic: false, time: '03:00', tonight_at: '2026-10-14T03:00:00+00:00' }) };
+		}));
+
+		expect(await saveUpdateSchedule({ tonight: true })).toBe(true);
+		expect(get(updateStatus)).toBeNull();
+	});
+
+	it('shows a retry toast when a schedule save fails', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500 })));
+
+		expect(await saveUpdateSchedule({ automatic: true })).toBe(false);
+		const failure = get(toasts).find((toast) => toast.message === "Couldn't save the schedule");
+		expect(failure?.action?.label).toBe('Try again');
+	});
+
 	it('adopts the operation while the start request is still pending', async () => {
 		let release: (value: unknown) => void = () => {};
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -270,5 +290,31 @@ describe('update store', () => {
 		await startUpdate();
 		expect(get(updateFailureVerdict)).toBeNull();
 		expect(get(updateOperation)?.operation_id).toBe('update-1');
+	});
+
+	it('shows no failure for a staged update that a restart has since activated', async () => {
+		const row = { failure_code: 'restart_pending', operation_id: 'update-1' };
+		const state = { status: failedRow({ ...row, activated_by_restart: true }) };
+		const { fetchMock, seen } = backend(state);
+		vi.stubGlobal('fetch', fetchMock);
+		await loadUpdateStatus();
+		expect(pinned()).toEqual([]);
+
+		resetUpdateStoreForTests();
+		state.status = failedRow({ ...row });
+		await loadUpdateStatus();
+		expect(pinned()[0]?.type).toBe('error');
+		expect(seen).toEqual([]);
+	});
+
+	it('shows the same quiet state in a second tab', async () => {
+		const state = { status: failedRow({ failure_code: 'restart_pending', activated_by_restart: true }) };
+		const { fetchMock } = backend(state);
+		vi.stubGlobal('fetch', fetchMock);
+		const tabA = await freshTab();
+		const tabB = await freshTab();
+		await tabA.store.loadUpdateStatus();
+		await tabB.store.loadUpdateStatus();
+		for (const tab of [tabA, tabB]) expect(get(tab.toasts).filter((toast) => toast.type === 'error' || toast.pinned?.key === 'update')).toEqual([]);
 	});
 });

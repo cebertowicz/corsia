@@ -41,6 +41,8 @@ export interface UpdateOperation {
 	changes?: UpdateChanges | null;
 	/** Set by the first client to show the outcome (a failure only once someone acts on it). */
 	outcome_seen_at?: string | null;
+	/** A staged update that stopped awaiting a restart, and a restart has since finished: the failure is history. */
+	activated_by_restart?: boolean;
 }
 
 export interface UpdateChanges {
@@ -94,6 +96,16 @@ export function formatElapsed(totalSeconds: number): string {
 	const seconds = Math.max(0, Math.floor(totalSeconds));
 	const minutes = Math.floor(seconds / 60);
 	return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+/** Format the configured 24-hour schedule value wherever a person sees it. */
+export function formatScheduleTime(value: string | null | undefined): string {
+	const matched = /^(\d{2}):(\d{2})$/.exec(value ?? '');
+	if (!matched) return '';
+	const hour = Number(matched[1]);
+	const minute = Number(matched[2]);
+	if (hour > 23 || minute > 59) return '';
+	return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
 /** "today at 11:42 AM" for a same-day timestamp, otherwise "Oct 9, 4:15 PM". */
@@ -184,9 +196,15 @@ interface OfferState {
 	changes?: UpdateChanges | null;
 }
 
-/** The one rule for which operation a surface treats as current: a settled one targeting an older version than the offer is history. */
+/** A failure the server reports as resolved: its staged update came up with a later restart. */
+export function isResolvedFailure(op: UpdateOperation | null | undefined): boolean {
+	return isFailedOperation(op) && op.activated_by_restart === true;
+}
+
+/** The one rule for which operation a surface treats as current: a settled one targeting an older version than the offer, or a failure a restart resolved, is history. */
 export function currentOperation(op: UpdateOperation | null | undefined, status: OfferState | null | undefined): UpdateOperation | null {
 	if (!op || isInFlight(op)) return op ?? null;
+	if (isResolvedFailure(op)) return null;
 	const offered = status?.available ? status.target_version : null;
 	return offered && op.target_version && offered !== op.target_version ? null : op;
 }

@@ -217,3 +217,81 @@ def test_an_unwritable_log_keeps_the_refusal_the_script_reported(monkeypatch):
 
     assert failure.status_code == 500
     assert failure.update_failure_code == "checkout_dirty"
+
+
+# A staged update that a later restart activated is no longer a failure.
+
+
+def _restart(*, settle: str | None) -> str:
+    """One plain restart acquired after the current rows; `settle` is how it ended (None: still running)."""
+    from automation import self_restart
+
+    operation_id = self_restart.try_acquire(None, "steve", None, None, "restart", kind="restart")
+    assert operation_id is not None
+    if settle == "complete":
+        for expected, target in [("holding", "steering"), ("steering", "resuming")]:
+            assert self_restart.transition_operation(operation_id, expected=expected, target=target)
+        assert self_restart.complete_operation(operation_id)
+    elif settle == "failed":
+        assert self_restart.abort_operation(operation_id, error="stopped", failure_code="launch_failed")
+    return operation_id
+
+
+def _failed_update(code: str) -> str:
+    from automation import self_restart
+
+    operation_id = _update()
+    assert self_restart.abort_operation(operation_id, error="stopped", failure_code=code)
+    return operation_id
+
+
+def _projected_status() -> dict:
+    from api.system_admin import system_update_status
+
+    with patch("infra.update_status.update_status") as status:
+        status.return_value.to_dict.return_value = {"available": False}
+        return asyncio.run(system_update_status(user={}))["operation"]
+
+
+def test_a_completed_restart_after_a_staged_update_failure_is_reported(isolated_db):
+    failed = _failed_update("restart_pending")
+    assert _projected_status()["activated_by_restart"] is False
+
+    _restart(settle="complete")
+
+    operation = _projected_status()
+    assert operation["operation_id"] == failed
+    assert operation["activated_by_restart"] is True
+
+
+@pytest.mark.parametrize("settle", [None, "failed"])
+def test_a_restart_that_did_not_finish_activates_nothing(isolated_db, settle):
+    _failed_update("restart_pending")
+    _restart(settle=settle)
+
+    assert _projected_status()["activated_by_restart"] is False
+
+
+@pytest.mark.parametrize("code", ["build_failed", "fetch_failed", "checkout_dirty", None])
+def test_a_restart_does_not_clear_a_failure_it_could_not_have_fixed(isolated_db, code):
+    _failed_update(code)
+    _restart(settle="complete")
+
+    assert _projected_status()["activated_by_restart"] is False
+
+
+def test_a_restart_before_the_failure_does_not_clear_it(isolated_db):
+    _restart(settle="complete")
+    _failed_update("restart_pending")
+
+    assert _projected_status()["activated_by_restart"] is False
+
+
+def test_a_plain_restart_with_no_update_history_reports_no_operation(isolated_db):
+    from api.system_admin import system_update_status
+
+    _restart(settle="complete")
+
+    with patch("infra.update_status.update_status") as status:
+        status.return_value.to_dict.return_value = {"available": False}
+        assert "operation" not in asyncio.run(system_update_status(user={}))

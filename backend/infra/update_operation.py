@@ -38,7 +38,7 @@ def _stored_changes(operation: dict) -> dict | None:
     return changes if isinstance(changes, dict) else None
 
 
-def project_update_operation(operation: dict) -> dict:
+def project_update_operation(operation: dict, *, activated_by_restart: bool = False) -> dict:
     """Project durable Update state without disclosing arbitrary filesystem paths."""
     blocking = None
     hard_cap_remaining = None
@@ -64,6 +64,7 @@ def project_update_operation(operation: dict) -> dict:
         "log_tail": _failure_log_tail(operation),
         "changes": _stored_changes(operation),
         "outcome_seen_at": operation.get("outcome_seen_at"),
+        "activated_by_restart": activated_by_restart,
         "error": operation.get("error"),
         "requested_at": operation.get("requested_at"),
         "settled_at": operation.get("settled_at"),

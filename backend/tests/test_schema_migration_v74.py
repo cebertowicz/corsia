@@ -19,7 +19,7 @@ def _columns(db) -> set[str]:
 def test_fresh_schema_has_the_checkpoint_through_at_column():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 114
+        assert SCHEMA_VERSION == 115
         assert "through_at" in _columns(db)
 
 
