@@ -435,7 +435,7 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
 	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
 ], async ({ page, request, info, mode, theme }) => {
-	const doc = await seed(request, `Review orphan-heavy ${mode} ${theme}`);
+	const doc = await seed(request, `Review orphan-heavy ${mode} ${theme}`, { sharedAsOf: '2026-09-12' });
 	for (let index = 0; index < 22; index += 1) await comment(request, doc, `Unplaced comment ${index + 1}`, 1);
 	orphanComments(doc.artifactId);
 	raiseAsk(doc.threadId, doc.artifactId, 'Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
@@ -450,6 +450,15 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 		expect(measurements.capsuleHeight, 'the fixed review action bar stays compact').toBeLessThanOrEqual(64);
 		for (const button of await bar(page).locator('.rb-capsule .btn').all()) expect((await button.boundingBox())!.height, 'phone review action touch target').toBeGreaterThanOrEqual(44);
 		expect(bar(page).locator('.rb-ask')).toBeHidden();
+	}
+	await shot(page, `orphan-heavy-reading-${mode}-${theme}`, info);
+	if (mode === 'phone') {
+		await bar(page).locator('.rb-line').click();
+		await expect(bar(page).locator('.rb-ask-full')).toHaveText('Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
+		await expect(bar(page).locator('.rb-who')).toBeVisible();
+		await expect(page.locator('.identity-age')).toContainText(`Owner: ${doc.title}`);
+		await expect(page.locator('.identity-age')).toContainText(/as of \w+ \d+/);
+		await shot(page, `orphan-heavy-expanded-${mode}-${theme}`, info);
 	}
 	expect(page.locator('.document-header [aria-label="Reload comment placements"]')).toHaveCount(0);
 	const comments = page.locator('.comment-status');

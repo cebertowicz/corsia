@@ -8,13 +8,22 @@ import { syntheticPng } from './syntheticImages';
 /** The desktop and mobile projects share one database, so every seeded thread needs a title no other run reuses. */
 export const uniqueTitle = (title: string) => `${title} ${Math.random().toString(36).slice(2, 7)}`;
 
-export async function seed(request: APIRequestContext, baseTitle: string) {
+export async function seed(request: APIRequestContext, baseTitle: string, options: { sharedAsOf?: string } = {}) {
 	const title = uniqueTitle(baseTitle);
 	const threadId = await createSession(request, title);
 	const roots = await request.get('/api/files/tree', { params: { token: TEST_TOKEN } });
 	const workspace = (await roots.json()).roots.find((root: { kind: string }) => root.kind === 'workspace').path;
-	const name = `${title} ${Date.now()}.md`, docPath = path.join(workspace, name);
+	const name = `${options.sharedAsOf ? `${options.sharedAsOf}-` : ''}${title} ${Date.now()}.md`;
+	const docPath = options.sharedAsOf ? path.join(workspace, 'shared', 'documents', name) : path.join(workspace, name);
 	const text = '# Rollout plan\n\n' + Array.from({ length: 12 }, (_, index) => `Step ${index + 1}: the rollout proceeds to the next ring.\n\n`).join('');
+	if (options.sharedAsOf) {
+		fs.mkdirSync(path.dirname(docPath), { recursive: true });
+		fs.writeFileSync(path.join(workspace, 'shared', 'documents', 'INDEX.md'), '# Documents\n');
+		fs.writeFileSync(docPath, text);
+		const registered = await request.post('/api/files/register', { params: { token: TEST_TOKEN }, data: { path: docPath, thread_id: threadId } });
+		expect(registered.ok(), await registered.text()).toBeTruthy();
+		return { threadId, title, name, docPath, text, artifactId: (await registered.json()).artifact.id as string };
+	}
 	const seeded = await request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: docPath, text, thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	return { threadId, title, name, docPath, text, artifactId: (await seeded.json()).artifact.id as string };
