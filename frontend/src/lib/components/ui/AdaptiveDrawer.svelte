@@ -8,7 +8,6 @@
 	import { trackColumnBox, type ColumnBox } from '$lib/actions/trackColumnBox';
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import { toastClearance } from '$lib/stores/toastClearance';
 	import { sheetFly } from '$lib/sheetMotion';
 	import { createSheetDrag } from '$lib/sheetDrag.svelte';
 
@@ -89,7 +88,6 @@
 		onExpand: () => onDetent?.('full'),
 		onDismiss: () => onClose(),
 	});
-	let stopToastClearance: (() => void) | undefined;
 
 	// Reduced motion crossfades over --dur-tight instead of sliding: the sheet is never cut in or out.
 	// The token is read once on mount, never inside the derivation.
@@ -103,21 +101,8 @@
 		if (modal && detent !== 'half' && event.target === event.currentTarget) onClose();
 	}
 
-	function restingViewportBottomOccupancy(node: HTMLElement): number {
-		const bottomMargin = Number.parseFloat(getComputedStyle(node).marginBottom) || 0;
-		return node.offsetHeight + bottomMargin;
-	}
-
-	function releaseToastClearance(): void {
-		stopToastClearance?.();
-		stopToastClearance = undefined;
-	}
-
 	$effect(() => {
 		if (!open || !panel) return;
-		stopToastClearance = toastClearance.register(panel, {
-			measure: () => restingViewportBottomOccupancy(panel!),
-		});
 		const removeBackLayer = pushBackLayer(() => {
 			onClose();
 			return true;
@@ -129,7 +114,6 @@
 		});
 		return () => {
 			mounted = false;
-			releaseToastClearance();
 			removeBackLayer();
 		};
 	});
@@ -159,7 +143,6 @@
 	style:--drawer-h="{box?.height ?? 0}px"
 	data-adaptive-drawer
 	onclick={onBackdrop}
-		onoutrostart={releaseToastClearance}
 		in:fade|global={fadeParams}
 		out:fade={fadeParams}
 		use:portal

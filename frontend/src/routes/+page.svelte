@@ -20,7 +20,7 @@
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { closeScopeSettings, workspaceSettingsOpen } from '$lib/stores/workspaceSettings';
 	import { contextAttachTarget } from '$lib/stores/contextAttach';
-	import { settingsOpenRequest, settingsReturnThread } from '$lib/stores/settingsNavigation';
+	import { closeSettingsBack, settingsOpenRequest } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
 	import { fetchConductor, landOnFirstRun, type ConductorLookup } from '$lib/utils/conductor';
@@ -118,14 +118,6 @@
 
 	function openActivity() {
 		resetSurface('activity');
-	}
-
-	/** Settings opened from a thread (the update notice) goes back to that thread; any other Settings goes back to Activity. */
-	async function closeSettingsBack() {
-		const id = get(settingsReturnThread);
-		settingsReturnThread.set(null);
-		if (id) await selectThread(id, 'other');
-		else openActivity();
 	}
 
 	async function goConductor(): Promise<boolean> {
@@ -299,7 +291,7 @@
 			threads: $threads,
 			closeProjectSettings: () => projectSettingsOpen.set(false),
 			closeThreadSettings,
-			closeSettings: closeSettingsBack,
+			closeSettings: () => closeSettingsBack((id) => selectThread(id, 'other'), openActivity),
 			closeDocuments: closeDocumentsView,
 		});
 	});
@@ -498,7 +490,7 @@
 	onToggleSidebar={toggleSidebar} onTogglePane={togglePane} onOpenLightbox={openLightbox}
 	onAutoCreateThread={async () => { await newThread($uiScope?.id ?? undefined); }}
 	onPickProject={pickProject} onPickProjectAndClosePane={pickProjectAndClosePane}
-	onCloseSettings={closeSettingsBack}
+	onCloseSettings={() => closeSettingsBack((id) => selectThread(id, 'other'), openActivity)}
 	onMeasurement={() => resetSurface('measurement', { preserveActiveThread: true })}
 	onCloseMeasurement={() => closeMeasurementSurface({ resetSurface, setActiveThread: (threadId) => activeThreadId.set(threadId) })}
 	onPickConversation={(id) => selectThread(id, 'sidebar')}

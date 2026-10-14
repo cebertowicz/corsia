@@ -71,7 +71,7 @@ test.describe('@surface:settings scheduled updates parity', () => {
 			await openSystem(page, cell.theme, cell.width);
 			const card = page.locator('[data-settings-anchor="update"]');
 			await expect(card.getByText('Schedules stay visible')).toBeVisible();
-			await expect(card.getByText('CORSIA restarts for about 45 seconds; 2 working agents pause and pick up where they left off.')).toBeVisible();
+			await expect(card.getByText('CORSIA restarts for about a minute; 2 working agents pause and pick up where they left off.')).toBeVisible();
 			await expect(card.getByRole('button', { name: 'Update now' })).toBeVisible();
 			await expect(card.getByRole('button', { name: 'Tonight at 3:00 AM' })).toBeVisible();
 			await expect(card.getByText('Keep CORSIA up to date automatically')).toBeVisible();

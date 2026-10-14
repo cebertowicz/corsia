@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 
 export const SETTINGS_SECTIONS = ['providers', 'system', 'keys', 'debug'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
@@ -26,4 +26,12 @@ export function requestServerCard(serverId: string) {
 export function requestProviderCard(connection: string) {
 	providerCardRequest.set(connection);
 	requestSettingsSection('providers');
+}
+
+/** Close Settings: back to the thread a deep link came from, else to the fallback (Activity). */
+export async function closeSettingsBack(selectThread: (id: string) => Promise<unknown>, fallback: () => void) {
+	const id = get(settingsReturnThread);
+	settingsReturnThread.set(null);
+	if (id) await selectThread(id);
+	else fallback();
 }

@@ -225,21 +225,21 @@ describe('ToastContainer pinned slot', () => {
 		expect(host.querySelector('.toast:not(.toast--pinned) .toast-icon')).toBeNull();
 	});
 
-	it('renders the one ordinary toast above the pinned one, replacing in place', async () => {
+	it('renders the one ordinary toast below the pinned one, replacing in place', async () => {
 		toasts.pin('update', { type: 'progress', message: 'Restarting' });
 		toasts.show('Archived');
 		mountContainer();
 		expect([...host.querySelectorAll('.toast-text')].map((el) => el.textContent)).toEqual([
-			'Archived',
 			'Restarting',
+			'Archived',
 		]);
 
 		toasts.show('Moved');
 		await tick();
 		await vi.advanceTimersByTimeAsync(300);
 		expect([...host.querySelectorAll('.toast-text')].map((el) => el.textContent)).toEqual([
-			'Moved',
 			'Restarting',
+			'Moved',
 		]);
 	});
 

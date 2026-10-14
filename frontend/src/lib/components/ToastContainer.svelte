@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { toasts, type Toast } from '$lib/stores/toast';
 	import { toastAnchor } from '$lib/stores/toastAnchor';
-	import { toastClearance } from '$lib/stores/toastClearance';
-	import { toastStackHeight } from '$lib/stores/toastStack';
+	import { toastTop } from '$lib/stores/toastTop';
 	import { toastFit } from '$lib/stores/toastFit';
 	import { cssVar, ms } from '$lib/popoverMotion';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
@@ -11,7 +10,8 @@
 	import { get } from 'svelte/store';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 
-	let toastHeight = $state(0);
+	/** The pinned progress toast leads the stack; ordinary toasts follow below it. */
+	const ordered = $derived([...$toasts.filter((toast) => toast.pinned), ...$toasts.filter((toast) => !toast.pinned)]);
 
 	/** Until when a toast is fading out; the toast above waits for that before it glides into the freed place. */
 	let leavingUntil = 0;
@@ -34,29 +34,9 @@
 		const duration = leaveMs();
 		leavingUntil = Date.now() + duration;
 		const from = get(prefersReducedMotion) ? { opacity: 1 } : { opacity: 1, transform: 'none' };
-		const to = get(prefersReducedMotion) ? { opacity: 0 } : { opacity: 0, transform: 'translateY(8px)' };
+		const to = get(prefersReducedMotion) ? { opacity: 0 } : { opacity: 0, transform: 'translateY(-8px)' };
 		node.animate([from, to], { duration, easing: cssVar('--ease-snap') || 'ease-out', fill: 'forwards' });
 		return { duration };
-	}
-
-	function measureToastHeight(node: HTMLElement) {
-		const update = () => {
-			toastHeight = node.getBoundingClientRect().height;
-			toastStackHeight.set(toastHeight);
-		};
-		if (typeof ResizeObserver === 'undefined') {
-			update();
-			return { destroy: () => toastStackHeight.set(0) };
-		}
-		const observer = new ResizeObserver(update);
-		observer.observe(node);
-		update();
-		return {
-			destroy() {
-				observer.disconnect();
-				toastStackHeight.set(0);
-			},
-		};
 	}
 
 	/** Only the pinned slot settles its fit; the parameter re-measures on change. */
@@ -91,13 +71,11 @@
 		class="toast-container"
 		aria-live="polite"
 		aria-atomic="false"
-		style:--toast-clearance="{$toastClearance}px"
-		style:--toast-height="{toastHeight}px"
+		style:--toast-top="{$toastTop}px"
 		style:--toast-anchor-x={$toastAnchor ? `${$toastAnchor.x}px` : undefined}
 		style:--toast-anchor-width={$toastAnchor ? `${$toastAnchor.width}px` : undefined}
-		use:measureToastHeight
 	>
-		{#each $toasts as toast (toast.id)}
+		{#each ordered as toast (toast.id)}
 			{@const type = toast.type ?? 'info'}
 			{@const pinned = toast.pinned}
 			{@const press = onPress(toast)}
@@ -159,15 +137,12 @@
 
 <style>
 	.toast-container {
-		--toast-base-offset: var(--space-6);
 		/* The column the stack centres on: the chat column in a thread, the main
 		   area elsewhere, the window until one registers. */
 		--toast-column: min(100vw, var(--toast-anchor-width, 100vw));
 		position: fixed;
-		bottom: min(
-			max(var(--toast-base-offset), calc(var(--toast-clearance) + var(--space-4))),
-			calc(100dvh - var(--toast-height) - var(--header-height) - var(--space-3) - env(safe-area-inset-top, 0px))
-		);
+		/* Under the header and the last status banner. */
+		top: calc(var(--toast-top, 0px) + var(--space-2));
 		left: var(--toast-anchor-x, 50%);
 		transform: translateX(-50%);
 		width: max-content;
@@ -181,7 +156,7 @@
 		/* The stack follows its column as a pane opens or closes, on the
 		   drawer's own timing, instead of snapping when the column settles. */
 		transition:
-			bottom var(--dur-drawer) var(--ease-ios-sheet),
+			top var(--dur-drawer) var(--ease-ios-sheet),
 			left var(--dur-drawer) var(--ease-ios-sheet);
 	}
 
@@ -313,7 +288,8 @@
 		border: none;
 		cursor: pointer;
 		color: inherit;
-		opacity: 0.6;
+		/* 3:1 against the failure tint in dark mode (0.6 measured 2.95:1). */
+		opacity: 0.75;
 		font-size: var(--text-callout);
 		line-height: 1;
 		padding: 0 2px;
@@ -324,7 +300,6 @@
 	.toast-close:hover { opacity: 1; }
 	@media (max-width: 600px) {
 		.toast-container {
-			--toast-base-offset: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
 			/* The pinned line spans the column, sharing the composer's edges;
 			   ordinary toasts keep their own width. */
 			width: calc(var(--toast-column) - var(--space-3) * 2);
@@ -343,10 +318,11 @@
 
 	@media (prefers-reduced-motion: reduce) {
 		.toast-container { transition: none; }
+		.toast { animation: none; }
 	}
 
 	@keyframes toast-in {
-		from { opacity: 0; transform: translateY(8px); }
+		from { opacity: 0; transform: translateY(-8px); }
 		to { opacity: 1; transform: translateY(0); }
 	}
 </style>
