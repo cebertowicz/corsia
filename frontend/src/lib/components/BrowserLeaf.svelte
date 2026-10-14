@@ -207,7 +207,15 @@
 	function sendKey(event: KeyboardEvent) {
 		if (socket?.readyState !== WebSocket.OPEN) return;
 		event.preventDefault();
-		socket.send(JSON.stringify({ type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp', key: event.key, code: event.code, text: keyText(event) }));
+		socket.send(JSON.stringify({
+			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
+			key: event.key, code: event.code, text: keyText(event), modifiers: keyModifiers(event)
+		}));
+	}
+
+	// Chrome's CDP modifier bits preserve shortcuts that the person performs in the shared page.
+	function keyModifiers(event: KeyboardEvent) {
+		return (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
 	}
 
 	// Chrome types only keys that carry text; Enter must carry a return to submit a form.

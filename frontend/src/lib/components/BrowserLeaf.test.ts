@@ -124,6 +124,18 @@ describe('BrowserLeaf navigation metadata', () => {
 	});
 });
 
+describe('BrowserLeaf keyboard relay', () => {
+	it('preserves the modifier bits required by page shortcuts', () => {
+		const { canvas, socket } = render();
+		canvas.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Meta', code: 'MetaLeft', metaKey: true }));
+		canvas.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'a', code: 'KeyA', metaKey: true }));
+		expect(socket.sent.filter(message => message.type === 'input_keyboard')).toEqual([
+			{ type: 'input_keyboard', eventType: 'keyDown', key: 'Meta', code: 'MetaLeft', text: '', modifiers: 4 },
+			{ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', text: '', modifiers: 4 },
+		]);
+	});
+});
+
 describe('BrowserLeaf reconnect', () => {
 	it('reconnects an ended stream when the agent opens its browser again', () => {
 		const { socket } = render();
