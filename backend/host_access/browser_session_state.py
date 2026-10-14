@@ -40,15 +40,6 @@ class BrowserRuntime:
     close_task: asyncio.Task[None] | None = None
     report: browser_reporting.CleanupNotice | None = None
     report_task: asyncio.Task[browser_reporting.CleanupNotice] | None = None
-    browser_opened_announced: bool = False
-
-    def claim_opened_announcement(self, command: str, unfinished: bool, rendered: str) -> bool:
-        """A successful shared open announces once during this runtime's lifetime."""
-        if (command != "open" or not self.record.show_window or self.browser_opened_announced
-                or unfinished or rendered.startswith("Error:")):
-            return False
-        self.browser_opened_announced = True
-        return True
 
 
 class BrowserSessionError(RuntimeError):

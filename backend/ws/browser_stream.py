@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections import deque
 import json
 import logging
 import secrets
+from typing import Callable
 
-from fastapi import WebSocket, WebSocketDisconnect
 import websockets
+from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_control, browser_pane
@@ -84,14 +84,17 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
 
     frames = PaneFrames()
     overflow = asyncio.Event()
-    _navigation_relays[connection_token] = (frames, overflow)
+
+    def report(message: dict) -> None:
+        # A result landing after this relay exits fills a queue nobody sends; that is harmless.
+        if not frames.control(message):
+            overflow.set()
 
     async def send_control() -> None:
-        if not frames.control({
+        report({
             "type": "control",
             "has_control": browser_control.holds_control(thread_id, connection_token),
-        }):
-            overflow.set()
+        })
 
     async def from_stream() -> None:
         async for message in stream:
@@ -99,9 +102,29 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                 overflow.set()
                 return
 
-    from_pane = _receive_pane_messages(
-        pane, stream, frames, thread_id, user_id, connection_token, overflow, send_control,
-    )
+    async def from_pane() -> None:
+        while True:
+            message = await pane.receive_text()
+            try:
+                data = json.loads(message)
+            except (TypeError, ValueError):
+                continue
+            kind = data.get("type") if isinstance(data, dict) else None
+            if kind == "take_over":
+                if browser_control.take_control(thread_id, connection_token):
+                    emit_product_event("browser_pane", "take_over", thread_id=thread_id, user_id=user_id)
+                await send_control()
+            elif kind == "hand_back":
+                if browser_control.hand_back(thread_id, connection_token):
+                    emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
+                await send_control()
+            elif kind == "navigate":
+                _request_navigate(thread_id, connection_token, data, report)
+            elif kind == "appearance":
+                _request_match(thread_id, connection_token, data)
+            elif (kind in {"input_mouse", "input_keyboard"}
+                  and browser_control.holds_control(thread_id, connection_token)):
+                await stream.send(message)
 
     tasks: set[asyncio.Task] = set()
     try:
@@ -109,7 +132,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         await send_control()
         tasks = {
             asyncio.create_task(from_stream()),
-            asyncio.create_task(from_pane),
+            asyncio.create_task(from_pane()),
             asyncio.create_task(frames.send(pane.send_text)),
             asyncio.create_task(_close_on_overflow(pane, overflow)),
         }
@@ -124,76 +147,11 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
             if not task.done():
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        # A navigation that outlives this relay has nowhere safe to report.
-        _navigation_relays.pop(connection_token, None)
         # A closed connection's size must never land after a newer pane's.
         if (queued := _latest_appearance.get(thread_id)) and queued[0] == connection_token:
             del _latest_appearance[thread_id]
         if browser_control.hand_back(thread_id, connection_token):
             emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
-
-
-async def _receive_pane_messages(
-    pane: WebSocket, stream, frames: PaneFrames, thread_id: str, user_id: str,
-    connection_token: str, overflow: asyncio.Event, send_control,
-) -> None:
-    """Receive pane controls while module-owned page commands continue after relay exit."""
-    while True:
-        message = await pane.receive_text()
-        try:
-            data = json.loads(message)
-        except (TypeError, ValueError):
-            continue
-        kind = data.get("type") if isinstance(data, dict) else None
-        if kind in {"take_over", "hand_back"}:
-            changed = (browser_control.take_control if kind == "take_over" else browser_control.hand_back)(thread_id, connection_token)
-            if changed:
-                emit_product_event("browser_pane", kind, thread_id=thread_id, user_id=user_id)
-            await send_control()
-        elif kind == "navigate":
-            _request_navigation(data, thread_id, connection_token)
-        elif kind == "appearance":
-            _request_match(thread_id, connection_token, data)
-        elif (kind in {"input_mouse", "input_keyboard"}
-              and browser_control.holds_control(thread_id, connection_token)):
-            await stream.send(message)
-
-
-# A page command must outlive any individual pane relay: cancelling an admitted command
-# closes its shared browser session. Like appearance matching, each thread owns one runner.
-_navigation_requests: dict[str, deque[tuple[dict, str]]] = {}
-_navigators: dict[str, asyncio.Task] = {}
-_navigation_relays: dict[str, tuple[PaneFrames, asyncio.Event]] = {}
-
-
-def _request_navigation(request: dict, thread_id: str, connection_token: str) -> None:
-    """Queue one ordered navigation for the thread without making its relay own the task."""
-    _navigation_requests.setdefault(thread_id, deque()).append((request, connection_token))
-    if (navigator := _navigators.get(thread_id)) is None or navigator.done():
-        navigator = _navigators[thread_id] = asyncio.create_task(_run_navigation_queue(thread_id))
-        navigator.add_done_callback(
-            lambda done: _navigators.pop(thread_id) if _navigators.get(thread_id) is done else None,
-        )
-
-
-async def _run_navigation_queue(thread_id: str) -> None:
-    """Run queued page commands in order; a departed relay simply loses its result."""
-    requests = _navigation_requests.setdefault(thread_id, deque())
-    try:
-        while requests:
-            request, connection_token = requests.popleft()
-            try:
-                result = await _navigate(thread_id, connection_token, request)
-            except Exception:
-                log.exception("browser pane navigation failed")
-                result = {"type": "navigate_result", "error": "Browser navigation failed"}
-            if (relay := _navigation_relays.get(connection_token)) is not None:
-                frames, overflow = relay
-                if not frames.control(result):
-                    overflow.set()
-    finally:
-        if _navigation_requests.get(thread_id) is requests:
-            _navigation_requests.pop(thread_id)
 
 
 async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
@@ -203,31 +161,55 @@ async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
         await pane.close(code=1013)
 
 
-# Matching waits behind any running page command, so it runs beside each input loop. Per thread,
-# only the newest request from any pane connection is applied, one at a time. A match is never
-# cancelled: cancelling a running browser command resets the session.
+# Page commands wait behind any running browser command, so one runner per thread runs them beside
+# every input loop. Only the newest appearance from any pane connection is applied, and at most one
+# navigation waits: a newer one replaces it. A running command is never cancelled: cancelling it
+# resets the shared session. A navigation carries its own pane's report, so no relay owns the runner.
 _latest_appearance: dict[str, tuple[str, browser_pane.PaneAppearance]] = {}
-_matchers: dict[str, asyncio.Task] = {}
+_pending_navigation: dict[str, tuple[str, dict, Callable[[dict], None]]] = {}
+_runners: dict[str, asyncio.Task] = {}
 
 
 def _request_match(thread_id: str, connection_token: str, data: dict) -> None:
     if (appearance := browser_pane.PaneAppearance.parse(data)) is None:
         return
     _latest_appearance[thread_id] = (connection_token, appearance)
-    if (matcher := _matchers.get(thread_id)) is None or matcher.done():
-        matcher = _matchers[thread_id] = asyncio.create_task(_match_latest(thread_id))
-        matcher.add_done_callback(lambda done: _matchers.pop(thread_id) if _matchers.get(thread_id) is done else None)
+    _run_page_commands(thread_id)
 
 
-async def _match_latest(thread_id: str) -> None:
-    """Match the page to the newest pane; a refusal keeps the old size, which the pane letterboxes."""
-    while (queued := _latest_appearance.pop(thread_id, None)) is not None:
-        connection_token, appearance = queued
-        try:
-            await browser_pane.match_pane(thread_id, appearance, connection_token)
-            await browser_pane.repaint(thread_id, connection_token)
-        except (BrowserSessionError, ProcessOwnerError) as exc:
-            log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
+def _request_navigate(thread_id: str, connection_token: str, data: dict, report: Callable[[dict], None]) -> None:
+    if (replaced := _pending_navigation.get(thread_id)) is not None:
+        replaced[2]({"type": "navigate_result", "error": "Superseded by a newer navigation"})
+    _pending_navigation[thread_id] = (connection_token, data, report)
+    _run_page_commands(thread_id)
+
+
+def _run_page_commands(thread_id: str) -> None:
+    if (runner := _runners.get(thread_id)) is None or runner.done():
+        runner = _runners[thread_id] = asyncio.create_task(_run_pending(thread_id))
+        runner.add_done_callback(lambda done: _runners.pop(thread_id) if _runners.get(thread_id) is done else None)
+
+
+async def _run_pending(thread_id: str) -> None:
+    """Navigate, then match the page to the newest pane; a refusal keeps the old size, which the pane letterboxes."""
+    while True:
+        if (navigation := _pending_navigation.pop(thread_id, None)) is not None:
+            connection_token, data, report = navigation
+            try:
+                result = await _navigate(thread_id, connection_token, data)
+            except Exception:
+                log.exception("browser pane navigation failed")
+                result = {"type": "navigate_result", "error": "Browser navigation failed"}
+            report(result)
+        elif (queued := _latest_appearance.pop(thread_id, None)) is not None:
+            connection_token, appearance = queued
+            try:
+                await browser_pane.match_pane(thread_id, appearance, connection_token)
+                await browser_pane.repaint(thread_id, connection_token)
+            except (BrowserSessionError, ProcessOwnerError) as exc:
+                log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
+        else:
+            return
 
 
 async def _navigate(thread_id: str, connection_token: str, data: dict) -> dict:

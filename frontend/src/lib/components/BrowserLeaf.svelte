@@ -7,6 +7,7 @@
 	import { BrowserPaneInput } from '$lib/browserPaneInput';
 	import { on } from '$lib/ws/events';
 	import { get } from 'svelte/store';
+	import { untrack } from 'svelte';
 
 	let { threadId }: { threadId: string } = $props();
 	let canvas: HTMLCanvasElement;
@@ -23,6 +24,8 @@
 	let lastAppearance = '';
 	let activePointer: number | null = null;
 	let decodeGeneration = 0;
+	let decodeWarned = false;
+	let drawnArea = '';
 	const paneInput = new BrowserPaneInput(message => {
 		if (hasControl && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 	});
@@ -92,7 +95,11 @@
 			if (generation !== decodeGeneration) return;
 			image = next;
 			redraw();
-		}).catch(() => {});
+		}, (error) => {
+			// An undecodable frame keeps the last good picture; a drawing failure is not caught here.
+			if (!decodeWarned) console.warn('Browser pane could not decode a frame', error);
+			decodeWarned = true;
+		});
 	}
 
 	// Where the page sits in the canvas: drawing and input share it, so a click lands where it is drawn.
@@ -114,6 +121,14 @@
 		}
 		const context = canvas.getContext('2d');
 		if (!context) return;
+		// A new page size moves the letterbox even when the pane keeps its size: clear the whole backing
+		// store so no strip of the earlier picture survives beside the new one.
+		const area = `${left},${top},${width * scale},${height * scale}`;
+		if (area !== drawnArea) {
+			context.setTransform(1, 0, 0, 1, 0, 0);
+			context.clearRect(0, 0, canvas.width, canvas.height);
+			drawnArea = area;
+		}
 		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
 		// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
 		// top-left corner with blank space beside it, so draw only the page's part of the frame.
@@ -227,7 +242,8 @@
 		});
 		const unsubscribeTheme = theme.subscribe(() => sendAppearance());
 		observer.observe(canvas);
-		redraw();
+		// Untracked, so a new frame does not rebuild the observer and cancel a pending fit or pointer move.
+		untrack(redraw);
 		return () => {
 			observer.disconnect();
 			unsubscribeTheme();

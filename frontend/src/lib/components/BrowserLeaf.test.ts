@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import BrowserLeaf from './BrowserLeaf.svelte';
+import { emit } from '$lib/ws/events';
 
 class FakeSocket {
 	static CONNECTING = 0;
@@ -32,6 +33,7 @@ class TestPointerEvent extends MouseEvent {
 
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
+let drawing: string[] = [];
 
 function pointer(type: string, x: number, y: number, pointerType = 'mouse') {
 	return new TestPointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 1, pointerType });
@@ -56,7 +58,12 @@ beforeEach(() => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 	vi.stubGlobal('Image', class { naturalWidth = 100; naturalHeight = 50; src = ''; decode() { return Promise.resolve(); } });
 	vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
-	vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ setTransform() {}, drawImage() {} } as unknown as CanvasRenderingContext2D);
+	drawing = [];
+	vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+		setTransform() {},
+		clearRect(...area: number[]) { drawing.push(`clear ${area.join(',')}`); },
+		drawImage(_image: unknown, ...area: number[]) { drawing.push(`draw ${area.slice(4).join(',')}`); },
+	} as unknown as CanvasRenderingContext2D);
 	Object.defineProperties(HTMLCanvasElement.prototype, {
 		setPointerCapture: { configurable: true, value() {} },
 		releasePointerCapture: { configurable: true, value() {} },
@@ -70,6 +77,30 @@ afterEach(() => {
 	host?.remove();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
+});
+
+describe('BrowserLeaf drawing', () => {
+	it('clears the old letterbox when the page size changes inside an unchanged pane', async () => {
+		const { socket } = render();
+		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
+		drawing = [];
+		socket.receive({ type: 'frame', metadata: { deviceWidth: 100, deviceHeight: 50 }, data: '' });
+		await vi.waitFor(() => expect(drawing).toEqual(['draw 0,25,100,50']));
+		drawing = [];
+		socket.receive({ type: 'frame', metadata: { deviceWidth: 50, deviceHeight: 50 }, data: '' });
+		await vi.waitFor(() => expect(drawing).toEqual(['clear 0,0,100,100', 'draw 0,0,100,100']));
+	});
+});
+
+describe('BrowserLeaf reconnect', () => {
+	it('reconnects an ended stream when the agent opens its browser again', () => {
+		const { socket } = render();
+		socket.close();
+		emit('browser_opened', { thread_id: 'thread' });
+		expect(FakeSocket.instances).toHaveLength(2);
+		emit('browser_opened', { thread_id: 'thread' });
+		expect(FakeSocket.instances).toHaveLength(2);
+	});
 });
 
 describe('BrowserLeaf letterbox input', () => {

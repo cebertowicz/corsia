@@ -26,21 +26,36 @@ function keyOf(threadId: string, artifactId: string): string {
 	return tab.instanceId;
 }
 
+// The first-reveal memory lasts the app session, so each case uses its own thread.
 describe('openBrowserPane', () => {
-	it('foregrounds and reveals a newly agent-opened browser tab', () => {
-		openBrowserPane('thread-1', true);
-		const ws = get(threadWorkspaces)['thread-1'];
+	it('foregrounds and reveals an agent first opened browser tab', () => {
+		openBrowserPane('browser-first', true);
+		const ws = get(threadWorkspaces)['browser-first'];
 		expect(ws).toMatchObject({ visible: true, activeSurface: 'artifact', activeTabId: ws.tabs[0].instanceId });
 	});
 
 	it('does not interrupt the tab or surface after an agent reopens its browser', () => {
-		openBrowserPane('thread-1', true);
-		openArtifactTab('thread-1', { artifactId: 'art-1', path: '/docs/a.md', title: 'a.md' });
-		const before = get(threadWorkspaces)['thread-1'];
-		openBrowserPane('thread-1', true);
-		const after = get(threadWorkspaces)['thread-1'];
+		openBrowserPane('browser-reopen', true);
+		openArtifactTab('browser-reopen', { artifactId: 'art-1', path: '/docs/a.md', title: 'a.md' });
+		const before = get(threadWorkspaces)['browser-reopen'];
+		openBrowserPane('browser-reopen', true);
+		const after = get(threadWorkspaces)['browser-reopen'];
 		expect(after.activeTabId).toBe(before.activeTabId);
 		expect(after.activeSurface).toBe(before.activeSurface);
+	});
+
+	it('re-adds a browser tab the user closed in the background on a later agent open', () => {
+		openBrowserPane('browser-closed', true);
+		openArtifactTab('browser-closed', { artifactId: 'art-1', path: '/docs/a.md', title: 'a.md' });
+		const browserTab = get(threadWorkspaces)['browser-closed'].tabs.find((tab) => tab.kind === 'browser')!;
+		closeArtifactTab('browser-closed', browserTab.instanceId);
+		setActiveSurface('browser-closed', 'chat');
+		const before = get(threadWorkspaces)['browser-closed'];
+		openBrowserPane('browser-closed', true);
+		const after = get(threadWorkspaces)['browser-closed'];
+		expect(after.tabs.filter((tab) => tab.kind === 'browser')).toHaveLength(1);
+		expect(after.activeTabId).toBe(before.activeTabId);
+		expect(after.activeSurface).toBe('chat');
 	});
 });
 

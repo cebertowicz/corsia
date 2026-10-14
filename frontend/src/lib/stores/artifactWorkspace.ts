@@ -109,10 +109,14 @@ function stripAuxiliaryTabs(): void {
 threadWorkspaces.subscribe(persist);
 splitWidth.subscribe(persist);
 
+// Threads whose browser an agent has revealed since this account signed in to this app session.
+const revealedBrowsers = new Set<string>();
+
 let lastToken = get(token);
 token.subscribe((value) => {
 	if (value === lastToken) return;
 	lastToken = value;
+	revealedBrowsers.clear();
 	stripAuxiliaryTabs();
 });
 
@@ -158,12 +162,14 @@ export function openAgentDocumentTab(threadId: string, input: OpenArtifactInput)
 	mutate(threadId, (ws) => ({ ...openTab(ws, input), activeSurface: ws.activeSurface }));
 }
 
-/** Opens a browser pane. An agent reveal foregrounds a new tab but never steals an existing one. */
+/**
+ * Opens a browser pane. Only an agent's first reveal of a thread's browser in this app session takes
+ * the view; a later one adds a missing tab in the background, even after the user closed it.
+ */
 export function openBrowserPane(threadId: string, agentOpened = false): void {
-	mutate(threadId, (ws) => {
-		const alreadyOpen = ws.tabs.some((tab) => tab.kind === 'browser' && tab.threadId === threadId);
-		return openBrowserTab(ws, { threadId }, newInstanceId, !agentOpened || !alreadyOpen);
-	});
+	const foreground = !agentOpened || !revealedBrowsers.has(threadId);
+	if (agentOpened) revealedBrowsers.add(threadId);
+	mutate(threadId, (ws) => openBrowserTab(ws, { threadId }, newInstanceId, foreground));
 }
 
 /** Opens a canonical child conversation beside its still-mounted parent. */

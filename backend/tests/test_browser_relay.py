@@ -57,25 +57,35 @@ async def test_navigation_does_not_block_input_and_its_result_is_delivered(monke
 
 
 @pytest.mark.asyncio
-async def test_navigation_requests_serialize_and_deliver_results_in_order(monkeypatch):
-    first_started, second_started = asyncio.Event(), asyncio.Event()
-    release_first, release_second, delivered = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    started, results = [], []
+async def test_one_runner_keeps_one_waiting_navigation_and_the_newest_appearance(monkeypatch):
+    first_started, third_started = asyncio.Event(), asyncio.Event()
+    release_first, release_third, delivered = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    commands, results = [], []
 
     async def open_url(_thread_id, url, _connection_token):
-        started.append(url)
+        commands.append(url)
         if url.endswith("first"):
             first_started.set()
             await release_first.wait()
             return "Error:first"
-        second_started.set()
-        await release_second.wait()
-        return "Error:second"
+        third_started.set()
+        await release_third.wait()
+        return "Error:third"
+
+    async def match_pane(_thread_id, appearance, _connection_token):
+        commands.append(appearance.width)
+
+    async def repaint(*_args):
+        pass
 
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
+    monkeypatch.setattr(browser_stream.browser_pane, "match_pane", match_pane)
+    monkeypatch.setattr(browser_stream.browser_pane, "repaint", repaint)
 
     class Pane(FakePane):
         async def receive_text(self):
+            if len(self.messages) == 3:
+                await first_started.wait()
             if self.messages:
                 return self.messages.pop(0)
             await delivered.wait()
@@ -86,28 +96,32 @@ async def test_navigation_requests_serialize_and_deliver_results_in_order(monkey
             result = json.loads(payload)
             if result.get("type") == "navigate_result":
                 results.append(result)
-                if len(results) == 2:
+                if len(results) == 3:
                     delivered.set()
 
     pane = Pane([json.dumps(message) for message in [
         {"type": "take_over"},
         {"type": "navigate", "url": "https://example.test/first"},
+        {"type": "appearance", "width": 400, "height": 600, "scale": 1, "scheme": "light"},
         {"type": "navigate", "url": "https://example.test/second"},
+        {"type": "navigate", "url": "https://example.test/third"},
     ]])
     relay = asyncio.create_task(browser_stream._relay(pane, FakeStream(), "thread", "user"))
     try:
         await asyncio.wait_for(first_started.wait(), 1)
-        assert started == ["https://example.test/first"]
         release_first.set()
-        await asyncio.wait_for(second_started.wait(), 1)
-        assert started == ["https://example.test/first", "https://example.test/second"]
-        release_second.set()
+        await asyncio.wait_for(third_started.wait(), 1)
+        # Nothing else ran beside the running navigation, and the replaced one never started.
+        assert commands == ["https://example.test/first", "https://example.test/third"]
+        release_third.set()
         with pytest.raises(WebSocketDisconnect):
             await asyncio.wait_for(relay, 1)
         assert results == [
+            {"type": "navigate_result", "error": "Superseded by a newer navigation"},
             {"type": "navigate_result", "error": "Error:first"},
-            {"type": "navigate_result", "error": "Error:second"},
+            {"type": "navigate_result", "error": "Error:third"},
         ]
+        assert commands[-1] == 400
     finally:
         if not relay.done():
             relay.cancel()
@@ -144,7 +158,7 @@ async def test_relay_exit_keeps_running_navigation_alive(monkeypatch):
     try:
         with pytest.raises(WebSocketDisconnect):
             await asyncio.wait_for(browser_stream._relay(pane, FakeStream(), "thread", "user"), 1)
-        navigation = browser_stream._navigators["thread"]
+        navigation = browser_stream._runners["thread"]
         assert not cancelled.is_set()
         release.set()
         await asyncio.wait_for(finished.wait(), 1)
