@@ -370,6 +370,36 @@ def _stop_review(db, node_id, stop):
     db.commit()
 
 
+def _resume_review(db, node_id, stop):
+    from plans import holds, lifecycle, service
+    node = public.get_node(node_id, db=db)
+    if stop == "paused plan":
+        lifecycle.transition(
+            node.plan_id, "active", actor_id="user:test", provenance="test",
+            expected_revision=service._plan_row(db, node.plan_id)["revision"], db=db,
+        )
+    else:
+        hold = db.execute(
+            "SELECT id,kind FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node_id,),
+        ).fetchone()
+        holds.clear(
+            node_id, hold["id"], expected_kind=hold["kind"], expected_revision=node.revision,
+            actor_id="user:test", provenance="test", db=db,
+        )
+    db.commit()
+
+
+def _mark_done_as_reviewer(db, node_id):
+    from plans.boundary import PlanActor, mutate
+    node = public.get_node(node_id, db=db)
+    mutate(node.plan_id, "mark_done", {
+        "node_id": node_id, "expected_revision": node.revision,
+        "evidence": "Comments delivered to the owner while stopped (see the note).",
+    }, actor=PlanActor("reviewer", "owner-token", None), provenance="test",
+        mutation_id=f"done-{node_id}", db=db)
+    db.commit()
+
+
 @pytest.mark.parametrize("stop", ["paused plan", "paused step"])
 def test_a_stopped_reviewers_comments_reach_the_owner_and_the_review_waits(review_env, stop):
     # 2026-10-14: comments coming due for a reviewer whose plan was paused
@@ -391,6 +421,15 @@ def test_a_stopped_reviewers_comments_reach_the_owner_and_the_review_waits(revie
         "SELECT COUNT(*) FROM plan_node_events WHERE node_id=? AND new_state='accepted'",
         (result["node_id"],),
     ).fetchone()[0] == 0
+    # Nothing settles it after resume, so the task must stop promising that it
+    # settles by itself and tell its owner to finish it with the delivery.
+    node = public.get_node(result["node_id"], db=db)
+    assert f"batch {batches(db)[0]['id']}" in node.description
+    assert "mark it done" in node.description
+
+    _resume_review(db, result["node_id"], stop)
+    _mark_done_as_reviewer(db, result["node_id"])
+    assert public.get_node(result["node_id"], db=db).state == "accepted"
 
 
 def test_one_batch_that_fails_to_close_does_not_hold_back_the_others(review_env, monkeypatch):
