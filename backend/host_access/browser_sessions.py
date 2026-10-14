@@ -7,7 +7,7 @@ from dataclasses import replace
 import socket
 import secrets
 import time
-from typing import Sequence, TypeAlias
+from typing import Literal, Sequence, TypeAlias
 
 from host_access import browser_cli, browser_control, browser_identity as identity, browser_reporting
 from host_access.browser_streaming import StreamPortResult, prepare_stream_port
@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 BROWSER_NAMESPACE = "corsia-prod"
 CommandResult: TypeAlias = browser_cli.CommandResult
+# Which session a command may use: any (start one if needed), only a new one, or only the open one.
+SessionAdmission: TypeAlias = Literal["any", "new", "existing"]
 _EXECUTABLE_CHANGED = (
     "browser executable identity changed after CORSIA started using it; "
     "close the browser session with browser_close, then restart CORSIA to use the new build"
@@ -60,7 +62,7 @@ class BrowserSessionOwner:
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
                   show_window: bool | None = None, control_token: str | None = None,
-                  new_session_only: bool = False) -> str:
+                  session: SessionAdmission = "any") -> str:
         """Run a stock CLI command through the exact opaque thread session, as ``control_token``'s pane."""
         if not isinstance(thread_id, str) or not thread_id:
             raise BrowserSessionError("browser command requires exact thread identity")
@@ -77,7 +79,7 @@ class BrowserSessionOwner:
         # Preflight has no session effects and must not poison an existing binding.
         await self._pin_native()
         runtime = await self._admit(
-            thread_id, lease_id=lease_id, show_window=show_window, new_session_only=new_session_only,
+            thread_id, lease_id=lease_id, show_window=show_window, session=session,
         )
         result, unfinished = await self._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
         if result.timed_out and args[0] == "wait":
@@ -150,17 +152,19 @@ class BrowserSessionOwner:
 
 
     async def _admit(self, thread_id: str, *, lease_id: str | None,
-                     show_window: bool | None = None, new_session_only: bool = False) -> BrowserRuntime:
+                     show_window: bool | None = None, session: SessionAdmission = "any") -> BrowserRuntime:
         async with self._owner_lock:
             if self._shutting_down or lease_id in self._closed_leases:
                 raise BrowserSessionError("browser session admission is closed")
             runtime = self._sessions.get(thread_id)
+            if runtime is None and session == "existing":
+                raise BrowserSessionError("the browser is no longer open")
             if runtime is None:
                 runtime = BrowserRuntime(BrowserSessionRecord(
                     thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window),
                 ))
                 self._sessions[thread_id] = runtime
-            elif new_session_only:
+            elif session == "new":
                 raise BrowserSessionError("the browser is already open; take over in the pane to navigate it")
             if runtime.record.terminal_state != "running":
                 return runtime  # The serialized command path reports this responsibility.
