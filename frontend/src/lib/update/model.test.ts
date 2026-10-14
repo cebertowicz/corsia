@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { failureCopy, holdsNewWork, type UpdateFailure, type UpdateOperation } from './model';
+import { failureCopy, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
 
 const failure = (code: UpdateFailure['code']): UpdateFailure => ({
 	code, phase: null, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
 });
 
 describe('update model', () => {
+	it('words the safe-point count for one agent in the singular', () => {
+		const op = { operation_id: 'u', kind: 'update', status: 'in_flight', phase: 'draining', drain_total: 1, blocking: 1, hard_cap_remaining: 299 } as UpdateOperation;
+		expect(stepDetail(op, false)).toBe('0 of 1 agent is at a safe point. Stopping the rest in 4:59.');
+		expect(stepDetail({ ...op, drain_total: 3, blocking: 3 } as UpdateOperation, false)).toContain('0 of 3 agents are at a safe point.');
+	});
+
 	it.each([
 		['disk_space', 'Not enough disk space for a safety backup.'],
 		['fetch_failed', "Couldn't download the update."],

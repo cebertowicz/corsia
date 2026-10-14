@@ -44,6 +44,7 @@ export const updateStatus = writable<UpdateStatus | null>(null);
 export const updateSurface = writable<UpdateSurface>('closed');
 export const updateUnreachable = writable(false);
 export const updateFailureMessage = writable<string | null>(null);
+export const updateStarting = writable(false);
 /** Offset between this browser clock and the status response's server clock. */
 export const updateServerClockOffsetMs = writable(0);
 export const updateOperation = derived(updateStatus, ($status) => $status?.operation ?? null);
@@ -253,7 +254,10 @@ export function closeUpdateSurface(): void {
 export async function startUpdate(): Promise<void> {
 	updateFailureMessage.set(null);
 	snapshotReleaseNotes(get(updateStatus) ?? {} as UpdateStatus);
-	const result = await restartSystem('update');
+	updateStarting.set(true);
+	// The request answers only once the update is built; adopt the operation record meanwhile so the surface shows progress.
+	const adopt = setInterval(() => { void loadUpdateStatus(); }, POLL_MS);
+	const result = await restartSystem('update').finally(() => { clearInterval(adopt); updateStarting.set(false); });
 	if (!result.ok) {
 		await loadUpdateStatus(true);
 		if (isFailedOperation(get(updateStatus)?.operation)) {
@@ -286,5 +290,6 @@ export function resetUpdateStoreForTests(): void {
 	updateSurface.set('closed');
 	updateUnreachable.set(false);
 	updateFailureMessage.set(null);
+	updateStarting.set(false);
 	updateServerClockOffsetMs.set(0);
 }

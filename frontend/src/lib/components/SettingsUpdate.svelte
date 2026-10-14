@@ -8,7 +8,11 @@
 	const running = $derived($updateInFlight);
 	const refusal = $derived(isFailedOperation(operation) ? failureCopy(failureFromOperation(operation)) : null);
 	const completedVersion = $derived(operation?.status === 'complete' ? operation.target_version : null);
-	const currentVersion = $derived($updateStatus?.current_version ?? 'Unknown');
+	// A same-day development build is told apart by time; the update that installed it carries that longer form.
+	const currentVersion = $derived(
+		completedVersion && $updateStatus?.current_version && completedVersion.startsWith($updateStatus.current_version)
+			? completedVersion : ($updateStatus?.current_version ?? 'Unknown'),
+	);
 	const targetVersion = $derived(operation?.target_version ?? $updateStatus?.target_version);
 	const showAvailable = $derived(!running && !refusal && $updateStatus?.available && targetVersion);
 	const installedAt = $derived(operation?.settled_at ? formatInstalledAt(operation.settled_at, Date.now()) : null);

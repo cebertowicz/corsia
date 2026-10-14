@@ -113,10 +113,19 @@ def _development_details(git: Git, branch: str) -> UpdateDetails:
     )
 
 
+def _current_version_only(git: Git, branch: str) -> str | None:
+    if branch == "main":
+        return _tag_version(git, "HEAD")
+    current_date = _commit_date(git, "HEAD")
+    return current_date.strftime("%Y.%m.%d") if current_date else None
+
+
 def build_update_details(available: bool | None, branch: str | None, git: Git) -> UpdateDetails:
-    """Return version/change detail only when the existing probe found an update."""
-    if available is not True or branch is None:
+    """Return the version on disk, and target and changes only when the probe found an update."""
+    if branch is None:
         return UpdateDetails(None, None, None)
+    if available is not True:
+        return UpdateDetails(_current_version_only(git, branch) if available is False else None, None, None)
     try:
         return _published_details(git, branch) if branch == "main" else _development_details(git, branch)
     except Exception:

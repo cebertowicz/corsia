@@ -149,7 +149,7 @@ export function stepDetail(op: UpdateOperation | null, unreachable: boolean): st
 	if (stepIndex(op, unreachable) !== 1) return null;
 	const counts = agentsSafe(op);
 	if (!counts) return null;
-	const base = `${counts.safe} of ${counts.total} agents are at a safe point.`;
+	const base = `${counts.safe} of ${counts.total} ${counts.total === 1 ? 'agent is' : 'agents are'} at a safe point.`;
 	const remaining = op?.hard_cap_remaining;
 	if (counts.safe === counts.total || remaining == null) return base;
 	return `${base} Stopping the rest in ${formatElapsed(remaining)}.`;

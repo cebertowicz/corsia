@@ -6,8 +6,10 @@ import {
 	loadUpdateStatus,
 	releaseNotesFor,
 	resetUpdateStoreForTests,
+	startUpdate,
 	updateInFlight,
 	updateOperation,
+	updateStarting,
 	updateStatus,
 	updateSurface,
 	updateUnreachable,
@@ -37,6 +39,26 @@ afterEach(() => {
 });
 
 describe('update store', () => {
+	it('adopts the operation while the start request is still pending', async () => {
+		let release: (value: unknown) => void = () => {};
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (String(url).includes('/api/system/restart')) {
+				await new Promise((resolve) => { release = resolve; });
+				return { ok: true, json: async () => ({ ok: true, operation_id: 'update-1' }) };
+			}
+			return { ok: true, json: async () => running('holding') };
+		}));
+		const started = startUpdate();
+		expect(get(updateStarting)).toBe(true);
+		await vi.advanceTimersByTimeAsync(1_100);
+		expect(get(updateInFlight)).toBe(true);
+		expect(get(updateStarting)).toBe(true);
+		release(null);
+		await started;
+		expect(get(updateStarting)).toBe(false);
+		expect(get(updateSurface)).toBe('panel');
+	});
+
 	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming'] as const)(
 		'adopts the durable %s phase on load', async (phase) => {
 			vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => running(phase) })));

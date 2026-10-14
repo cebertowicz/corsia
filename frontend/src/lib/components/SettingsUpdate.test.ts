@@ -35,6 +35,17 @@ afterEach(() => {
 });
 
 describe('SettingsUpdate', () => {
+	it('shows the longer same-day version the last update installed', () => {
+		updateStatus.set(status({
+			current_version: '2026.10.14',
+			operation: { operation_id: 'update-1', kind: 'update', status: 'complete', target_version: '2026.10.14.0431', settled_at: '2026-10-14T01:33:58Z' },
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.querySelector('.service-version')?.textContent).toBe('2026.10.14.0431');
+	});
+
 	it('keeps the current version while offering the target update', () => {
 		updateStatus.set(status({ available: true, target_version: '1.1.0' }));
 		component = mount(SettingsUpdate, { target: host });

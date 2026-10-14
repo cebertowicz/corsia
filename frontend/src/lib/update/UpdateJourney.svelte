@@ -6,7 +6,7 @@
 	import { Button, Modal } from '$lib/components/ui';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import { UPDATE_STEPS, elapsedSeconds, failureCopy, failureFromOperation, formatElapsed, formatInstalledAt, humanDuration, isFailedOperation, isInFlight, stepDetail, stepIndex, stepMessage } from './model';
-	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, startUpdate, updateFailureMessage, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStatus, updateSurface, updateUnreachable } from './store';
+	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, startUpdate, updateFailureMessage, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
 
 	let now = $state(Date.now());
 	let showAll = $state(false);
@@ -75,10 +75,10 @@
 
 {#snippet modalFoot()}
 	<div class="update-foot">
-		{#if screen === 'sheet'}<Button variant="ghost" onclick={close}>Later</Button><Button variant="primary" onclick={updateNow}>Update now</Button>
+		{#if screen === 'sheet'}<Button variant="ghost" onclick={close}>Later</Button><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button>
 		{:else if screen === 'panel'}<Button variant="ghost" onclick={close}>Hide</Button>
 		{:else if screen === 'notes'}<Button variant="primary" onclick={close}>Done</Button>
-		{:else}{#if failure?.retryLabel}<Button onclick={retry}>{failure.retryLabel}</Button>{/if}<Button variant="primary" onclick={close}>Close</Button>{/if}
+		{:else}{#if failure?.retryLabel}<Button loading={$updateStarting} onclick={retry}>{failure.retryLabel}</Button>{/if}<Button variant="primary" onclick={close}>Close</Button>{/if}
 	</div>
 {/snippet}
 
@@ -95,7 +95,7 @@
 			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{#if agentCount === 1}1 agent is working: it gets up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. If it is still mid-step, it is stopped and restarted when CORSIA is back.{:else}{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and restarted when CORSIA is back.{/if}</span>{/if}</div>
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.usual_seconds != null}<p class="muted">Usually about {humanDuration($updateStatus.usual_seconds)}.</p>{/if}
-		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button variant="primary" onclick={updateNow}>Update now</Button></div>{/if}
+		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button></div>{/if}
 	</section>
 {/snippet}
 
@@ -115,7 +115,7 @@
 		{#if failure?.body}<p>{failure.body}</p>{/if}
 		{#if operation?.conductor_told_at}<p class="conductor"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5a3 3 0 0 1 0 6m2 3c1.8.5 3 2.1 3 4"/></svg>Your workspace conductor has been told.</p>{/if}
 		{#if detailLine(failureDetail?.summary) || failureDetail?.detail || operation?.log_tail}<details><summary>Details <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>{#if detailLine(failureDetail?.summary)}<pre>{detailLine(failureDetail?.summary)}</pre>{/if}{#if failureDetail?.detail}<pre>{failureDetail.detail}</pre>{/if}{#if operation?.log_tail}<pre>{operation.log_tail}</pre>{/if}</details>{/if}
-		{#if $isMobile && failure?.retryLabel}<div class="mobile-actions"><Button onclick={retry}>{failure.retryLabel}</Button></div>{/if}
+		{#if $isMobile && failure?.retryLabel}<div class="mobile-actions"><Button loading={$updateStarting} onclick={retry}>{failure.retryLabel}</Button></div>{/if}
 	</section>
 {/snippet}
 

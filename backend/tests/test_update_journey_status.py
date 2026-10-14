@@ -90,7 +90,12 @@ def test_development_details_drop_merge_subjects_and_disambiguate_dates(tmp_path
         "items": ["Useful change"],
         "more": 0,
     }
-    assert build_update_details(False, "dev", _real_git(clone)).target_version is None
+    current = build_update_details(False, "dev", _real_git(clone))
+    assert current.target_version is None
+    assert current.changes is None
+    assert current.current_version == "2026.10.13"
+    assert build_update_details(False, "main", _real_git(clone)).current_version == "1.0.0"
+    assert build_update_details(None, "dev", _real_git(clone)).current_version is None
 
 
 def test_usual_update_seconds_uses_ten_newest_completed_rows():
