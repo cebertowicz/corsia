@@ -129,8 +129,8 @@
   --violet-bg: rgba(139, 92, 246, 0.10);
   --violet-line: rgba(139, 92, 246, 0.28);
   --violet-brand: #8b5cf6;
-  /* Proposed (pending Product Experience and Steve): the five accent roles. New code names these, never --violet*
-     or --accent. They are defined here from today's values so nothing changes until the brand source derives them. */
+  /* The five accent roles are approved for setup-only use. Do not expand them beyond setup without a Product Experience
+     decision. They are defined here from today's values so nothing changes until the brand source derives them. */
   --accent-fill: var(--violet);
   --accent-on-fill: #ffffff;
   --accent-text: var(--violet-text, var(--violet));
@@ -221,8 +221,8 @@
   --violet-text: #5b3fd0;
   --violet-bg: rgba(124, 92, 246, 0.08);
   --violet-line: rgba(124, 92, 246, 0.32);
-  /* Proposed (pending Product Experience and Steve): the five accent roles. New code names these, never --violet*
-     or --accent. They are defined here from today's values so nothing changes until the brand source derives them. */
+  /* The five accent roles are approved for setup-only use. Do not expand them beyond setup without a Product Experience
+     decision. They are defined here from today's values so nothing changes until the brand source derives them. */
   --accent-fill: var(--violet);
   --accent-on-fill: #ffffff;
   --accent-text: var(--violet-text, var(--violet));

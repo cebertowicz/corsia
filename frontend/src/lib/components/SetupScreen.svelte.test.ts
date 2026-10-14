@@ -38,6 +38,22 @@ describe('SetupScreen', () => {
 		expect(calls).toEqual(['/api/setup/status']);
 	});
 
+	it('uses This computer for the ineligible local-model explanation', async () => {
+		if (component) await unmount(component);
+		calls = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_size_gb: 30, work_folder: '~/CORSIA' });
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+
+		await settle();
+		expect(host.textContent).toContain('This computer can’t run a local model.');
+		expect(host.textContent).not.toContain('This Mac can’t run a local model.');
+	});
+
 	it('starts the gated selected local download with Get started', async () => {
 		await settle();
 		expect(host.textContent).toContain('Download Example model now');

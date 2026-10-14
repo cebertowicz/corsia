@@ -155,7 +155,7 @@
 		{#snippet secondary()}<Button variant="chip" onclick={readStatus}>Check again</Button>{/snippet}
 	</SetupShell>
 {:else if page === 'welcome'}
-	<SetupShell {steps} title="Welcome to CORSIA" lede={status.local_eligible === false ? 'This Mac can’t run a local model. You can connect Claude Code, Codex, or an API key in the next step.' : `This computer can run ${modelSize}.`} primary={{ label: 'Get started' }} onPrimary={beginSetup}>
+	<SetupShell {steps} title="Welcome to CORSIA" lede={status.local_eligible === false ? 'This computer can’t run a local model. You can connect Claude Code, Codex, or an API key in the next step.' : `This computer can run ${modelSize}.`} primary={{ label: 'Get started' }} onPrimary={beginSetup}>
 		<div class="welcome-copy">
 			{#if status.local_eligible === false}
 				<p>Local models need more available memory. You can still finish setup with a signed-in model source.</p>
