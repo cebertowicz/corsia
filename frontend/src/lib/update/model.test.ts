@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { failureCopy, failureFromVerdict } from './failureCopy';
-import { currentOperation, formatScheduleTime, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
+import { changeList, costLine, currentOperation, formatScheduleTime, holdsNewWork, plainChangeTitle, stepIndex, stepMessage, type UpdateFailure, type UpdateOperation } from './model';
 
 const failure = (code: UpdateFailure['code']): UpdateFailure => ({
 	code, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
@@ -13,10 +13,40 @@ describe('update model', () => {
 		expect(formatScheduleTime('00:00')).toBe('12:00 AM');
 	});
 
-	it('words the safe-point count for one agent in the singular', () => {
-		const op = { operation_id: 'u', kind: 'update', status: 'in_flight', phase: 'draining', drain_total: 1, blocking: 1, hard_cap_remaining: 299 } as UpdateOperation;
-		expect(stepDetail(op, false)).toBe('0 of 1 agent is at a safe point. Stopping the rest in 4:59.');
-		expect(stepDetail({ ...op, drain_total: 3, blocking: 3 } as UpdateOperation, false)).toContain('0 of 3 agents are at a safe point.');
+	it('words each step in the toast phrases, with the safe-point count when agents are draining', () => {
+		const op = { operation_id: 'u', kind: 'update', status: 'in_flight', phase: 'holding' } as UpdateOperation;
+		expect(stepMessage(op, false)).toBe('Installing update');
+		const draining = { ...op, phase: 'draining', drain_total: 3, blocking: 2 } as UpdateOperation;
+		expect(stepMessage(draining, false)).toBe('Pausing agents \u00b7 1 of 3');
+		expect(stepMessage({ ...draining, drain_total: 0 } as UpdateOperation, false)).toBe('Pausing agents');
+		expect(stepMessage({ ...op, phase: 'restarting' } as UpdateOperation, false)).toBe('Restarting CORSIA');
+		expect(stepMessage({ ...op, phase: 'resuming', drain_total: 1 } as UpdateOperation, false)).toBe('Resuming 1 agent');
+		expect(stepMessage({ ...op, phase: 'resuming', drain_total: 3 } as UpdateOperation, false)).toBe('Resuming 3 agents');
+		expect(stepMessage({ ...op, phase: 'resuming', drain_total: 0 } as UpdateOperation, false)).toBe('Resuming agents');
+		expect(stepMessage(op, true)).toBe('Restarting CORSIA');
+	});
+
+	it('names no step for a settled operation or a phase it cannot place', () => {
+		const settled = { operation_id: 'u', kind: 'update', status: 'complete', phase: null } as UpdateOperation;
+		expect(stepIndex(settled, false)).toBeNull();
+		expect(stepMessage(settled, false)).toBe('Updating');
+		const unknown = { operation_id: 'u', kind: 'update', status: 'in_flight', phase: 'unplaceable' } as unknown as UpdateOperation;
+		expect(stepIndex(unknown, false)).toBeNull();
+	});
+
+	it('words the cost as one sentence for 0, 1 and several working agents', () => {
+		expect(costLine(60, 0)).toBe('CORSIA restarts to finish.');
+		expect(costLine(60, 1)).toBe('CORSIA restarts for about a minute; 1 working agent pauses and picks up where it left off.');
+		expect(costLine(120, 40)).toBe('CORSIA restarts for about 2 minutes; 40 working agents pause and pick up where they left off.');
+		expect(costLine(null, 3)).toBe('CORSIA restarts to finish; 3 working agents pause and pick up where they left off.');
+	});
+
+	it("lists release notes as written and cleans a development build's commit titles", () => {
+		expect(plainChangeTitle('[Infrastructure] fix the lock message (#123)')).toBe('Fix the lock message');
+		expect(changeList({ kind: 'changelog', headline: null, items: ['Faster search'], more: 0 })).toEqual({ heading: "What's new", items: ['Faster search'] });
+		expect(changeList({ kind: 'commits', headline: null, items: ['[Bugs] tidy the list (#9)'], more: 0 })).toEqual({ heading: 'Recent changes', items: ['Tidy the list'] });
+		expect(changeList({ kind: 'commits', headline: null, items: [], more: 0 })).toBeNull();
+		expect(changeList(null)).toBeNull();
 	});
 
 	it.each([
@@ -30,13 +60,13 @@ describe('update model', () => {
 	});
 
 	it.each([
-		['drain_failed', "Couldn't bring your agents to a safe stopping point.", 'Try again'],
+		['drain_failed', "Your agents didn't reach a safe stopping point in time.", 'Try again'],
 		['update_timed_out', 'The update took too long to download and build.', 'Try again'],
 		['prepare_failed', "Couldn't prepare the update.", 'Try again'],
-		['index_locked', "Another Git process is holding this install's lock.", 'Try again after clearing it'],
-		['checkout_detached', "This install isn't on a branch.", null],
-		['checkout_dirty', "This install has changes that aren't committed.", 'Try again after cleaning up'],
-		['restart_pending', 'An update is already downloaded and waiting for a restart.', 'Restart now'],
+		['index_locked', "Another program is using CORSIA's files.", 'Try again'],
+		['checkout_detached', "This copy of CORSIA can't update itself because it isn't set up to follow updates.", null],
+		['checkout_dirty', 'This copy of CORSIA has local changes.', 'Try again'],
+		['restart_pending', 'An update is ready and waiting for a restart.', 'Restart now'],
 	] as const)('words %s truthfully and names its action', (code, headline, retryLabel) => {
 		const copy = failureCopy(failure(code));
 		expect(copy.headline).toBe(headline);
@@ -77,12 +107,12 @@ describe('update model', () => {
 	it('gives a client verdict its own copy, never the operation copy', () => {
 		const mismatch = failureCopy({ ...failure(null), client: { kind: 'version_mismatch', message: 'Versions differ.' } });
 		expect(mismatch.title).toBe("The update didn't finish");
-		expect(mismatch.headline).toBe('The update finished, but the running versions do not match.');
+		expect(mismatch.headline).toBe('The update finished, but CORSIA still shows the old version.');
 		expect(mismatch.body).toBe('Versions differ.');
 		const refused = failureCopy(failureFromVerdict({ kind: 'refused', message: 'A restart is already in flight.' }));
 		expect(refused.title).toBe("Update didn't start");
 		expect(refused.headline).toBe('A restart is already in flight.');
-		expect(refused.headline).not.toContain('versions do not match');
+		expect(refused.headline).not.toContain('old version');
 	});
 
 	it('shows both disk figures and the action amount', () => {

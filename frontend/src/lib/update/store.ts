@@ -1,6 +1,8 @@
 import { derived, get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
+import { activeThreadId } from '$lib/stores/threads';
+import { requestSettingsSection, settingsReturnThread } from '$lib/stores/settingsNavigation';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
 import { failureCopy, failureFromOperation } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
@@ -10,12 +12,13 @@ import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe
 const BASE = '';
 const POLL_MS = 1_000;
 
-import type { UpdateSchedule, UpdateStatus, UpdateSurface } from './types';
+import type { UpdateSchedule, UpdateStatus } from './types';
 
-export type { UpdateSchedule, UpdateStatus, UpdateSurface } from './types';
+export type { UpdateSchedule, UpdateStatus } from './types';
 
 export const updateStatus = writable<UpdateStatus | null>(null);
-export const updateSurface = writable<UpdateSurface>('closed');
+/** The person shrank the progress toast to its pill; it lasts until the operation settles. */
+export const updateProgressMinimized = writable(false);
 export const updateUnreachable = writable(false);
 /** A problem this client found that no stored operation holds; it wins over the operation's own failure copy. */
 export const updateFailureVerdict = writable<ClientVerdict | null>(null);
@@ -77,10 +80,7 @@ function showNotice(status: UpdateStatus): void {
 	const version = status.target_version;
 	if (!status.available || isInFlight(status.operation) || status.operation?.target_version === version || !version || noticedVersions.has(version)) return;
 	noticedVersions.add(version);
-	noticeToastId = toasts.showAction('An update is ready to install.', {
-		label: 'View',
-		run: openUpdateSheet,
-	});
+	noticeToastId = toasts.showButton('Update ready. Open Updates', openUpdates);
 }
 
 /** Remove the progress toast; a tab that reads a terminal status second must never keep a spinner. */
@@ -94,19 +94,20 @@ function showTerminal(operation: UpdateOperation): void {
 	shownOutcomes.add(operation.operation_id);
 	if (operation.status === 'complete') {
 		const version = operation.target_version ?? get(updateStatus)?.target_version ?? 'the latest version';
+		const overnight = operation.trigger === 'tonight' || operation.trigger === 'automatic';
 		toasts.pin('update', {
 			type: 'success',
-			message: `Updated to ${version}`,
-			action: { label: "See what's new", run: openUpdateSheet },
+			message: overnight ? `Updated overnight to ${version}` : `Updated to ${version}`,
+			action: { label: operation.changes?.kind === 'commits' ? 'See changes' : "What's new", run: openUpdates },
 		});
 		void markOutcomeSeen(operation.operation_id);
 		return;
 	}
-	if (isFailedOperation(operation) && get(updateSurface) === 'closed') {
+	if (isFailedOperation(operation)) {
 		const copy = failureCopy(failureFromOperation(operation));
 		toasts.pin('update', {
 			type: 'error', message: copy.title, detail: copy.toastLine ?? undefined,
-			action: { label: 'Details', run: openUpdateSheet },
+			action: { label: 'Details', run: openUpdates },
 			onClose: () => { void markOutcomeSeen(operation.operation_id); },
 		});
 	}
@@ -134,7 +135,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		shownOutcomes.add(operation.operation_id);
 		void markOutcomeSeen(operation.operation_id);
 		updateFailureVerdict.set({ kind: 'version_mismatch', message: 'The page, the backend and the checkout are not on the same version.' });
-		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdateSheet } });
+		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdates } });
 	} finally {
 		terminalCheckRunning = false;
 	}
@@ -150,6 +151,7 @@ function reconcileOperation(status: UpdateStatus): void {
 	stopStatusPolling();
 	stopVersionPolling();
 	dropProgressToast();
+	updateProgressMinimized.set(false);
 	if (!operation || operation.outcome_seen_at || isResolvedFailure(operation)) return;
 	if (operation.status === 'complete') void verifyComplete(operation);
 	else if (isFailedOperation(operation)) showTerminal(operation);
@@ -227,21 +229,11 @@ export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'au
 	}
 }
 
-/** Open the one update surface at its decision or last-terminal state. */
-export function openUpdateSheet(): void {
+/** Open Settings > System at the Updates card, remembering the thread so Back returns to it. */
+export function openUpdates(): void {
 	dismissNotice();
-	updateSurface.set('sheet');
-}
-
-/** Open the update panel without creating a second source of operation truth. */
-export function openUpdatePanel(): void {
-	dismissNotice();
-	updateSurface.set('panel');
-}
-
-/** Hide the surface while the operation and its pinned outcome continue independently. */
-export function closeUpdateSurface(): void {
-	updateSurface.set('closed');
+	settingsReturnThread.set(get(activeThreadId));
+	requestSettingsSection('system', 'update');
 }
 
 /** Start the approved update lifecycle, then immediately adopt its durable record. */
@@ -259,17 +251,13 @@ export async function startUpdate(): Promise<void> {
 		await loadUpdateStatus(true);
 		const latest = get(updateStatus)?.operation;
 		// Only a failure this request recorded is its outcome; an older failed row is history.
-		if (isFailedOperation(latest) && latest.operation_id !== previousOperationId) {
-			openUpdateSheet();
-			return;
-		}
+		// The failed row surfaces itself through the poll; nothing more to show here.
+		if (isFailedOperation(latest) && latest.operation_id !== previousOperationId) return;
 		const message = result.message ?? "Update didn't start.";
 		updateFailureVerdict.set({ kind: 'refused', message });
-		if (get(updateSurface) === 'closed') toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdateSheet } });
-		openUpdateSheet();
+		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdates } });
 		return;
 	}
-	openUpdatePanel();
 	await loadUpdateStatus(true);
 }
 
@@ -288,7 +276,7 @@ export function resetUpdateStoreForTests(): void {
 	shownOutcomes.clear();
 	noticedVersions.clear();
 	updateStatus.set(null);
-	updateSurface.set('closed');
+	updateProgressMinimized.set(false);
 	updateUnreachable.set(false);
 	updateFailureVerdict.set(null);
 	updateStarting.set(false);

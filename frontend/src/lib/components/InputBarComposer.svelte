@@ -2,7 +2,6 @@
 	import InputBarControls from './InputBarControls.svelte';
 	import QueuedInputStack from './QueuedInputStack.svelte';
 	import type { Attachment, SheetView } from './inputBarHelpers';
-	import { toastClearanceSurface } from '$lib/stores/toastClearance';
 	import { updateOperation, updateRestarting } from '$lib/update/store';
 	import { holdsNewWork } from '$lib/update/model';
 
@@ -76,7 +75,7 @@
 	}
 </script>
 
-<div use:toastClearanceSurface>
+<div>
 	<QueuedInputStack {threadId} />
 
 	<div class="input-chip" class:multi-line={isMultiLine}>

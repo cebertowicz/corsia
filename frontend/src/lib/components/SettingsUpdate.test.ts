@@ -7,8 +7,8 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import {
 	resetUpdateStoreForTests,
+	updateFailureVerdict,
 	updateStatus,
-	updateSurface,
 	type UpdateStatus,
 } from '$lib/update/store';
 
@@ -72,7 +72,11 @@ describe('SettingsUpdate', () => {
 
 		expect(host.querySelector('.pill.active')).toBeNull();
 		expect(host.textContent).not.toContain('1.1.0 available');
-		expect(host.textContent).toContain('Updating to 1.1.0');
+		// The Version row carries the toast's words and a spinner, not a second phrasing.
+		expect(host.textContent).toContain('Pausing agents');
+		expect(host.querySelector('.updating .spinner')).toBeTruthy();
+		expect(host.textContent).not.toContain('Updating to');
+		expect(host.querySelector('.offer')).toBeNull();
 	});
 
 	it('does not repeat the installed version as a last update', () => {
@@ -123,18 +127,111 @@ describe('SettingsUpdate', () => {
 		expect(get(toasts).some((toast) => toast.message === "Couldn't save the schedule")).toBe(true);
 	});
 
-	it('keeps the refusal reason and its Details action', () => {
+	it('carries the failure itself in the Last update row, with Details for the raw reason and a retry', () => {
 		updateStatus.set(status({
-			operation: { operation_id: 'update-1', status: 'failed', failure_code: 'fetch_failed' },
+			operation: { operation_id: 'update-1', status: 'failed', failure_code: 'fetch_failed', error: 'network stopped', conductor_told_at: '2026-10-14T01:00:00Z' },
 		}));
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
 
+		expect(host.textContent).toContain('Last update');
+		expect(host.textContent).toContain("Couldn't download the update.");
 		expect(host.textContent).toContain('CORSIA kept running and nothing was changed.');
-		const details = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Details');
-		expect(details).toBeDefined();
-		details?.click();
-		expect(get(updateSurface)).toBe('sheet');
+		expect(host.textContent).toContain('Your workspace conductor has been told.');
+		expect(host.textContent).not.toContain('\u234c');
+		const details = host.querySelector('details')!;
+		expect(details.querySelector('summary')?.textContent?.trim()).toBe('Details');
+		expect(details.querySelector('pre')?.textContent).toBe('network stopped.');
+		const retry = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Try again');
+		expect(retry).toBeDefined();
+		expect(host.querySelector('.offer')).toBeNull();
+	});
+
+	it('shows a refusal the client found, ahead of an older stored failure', () => {
+		updateStatus.set(status({ operation: { operation_id: 'update-0', status: 'failed', failure_code: 'fetch_failed' } }));
+		updateFailureVerdict.set({ kind: 'refused', message: 'A restart is already in flight.' });
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.textContent).toContain('A restart is already in flight.');
+		expect(host.textContent).not.toContain("Couldn't download the update.");
+	});
+
+	it('offers the update with its changes, one cost sentence, Update now and Tonight', () => {
+		updateStatus.set(status({
+			available: true, target_version: '1.1.0', usual_seconds: 60, agents_working: 2,
+			changes: { kind: 'changelog', headline: null, items: ['Faster search', 'Calmer toasts', 'Clearer errors', 'Fewer restarts'], more: 21 },
+			schedule: { automatic: false, time: '03:00', tonight_at: null },
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		const offer = host.querySelector('.offer')!;
+		expect(offer.querySelector('h4')?.textContent).toBe("What's new");
+		expect(offer.querySelectorAll('li')).toHaveLength(3);
+		expect(offer.textContent).toContain('CORSIA restarts for about a minute; 2 working agents pause and pick up where they left off.');
+		const labels = Array.from(offer.querySelectorAll('button')).map((button) => button.textContent?.trim());
+		expect(labels).toContain('Update now');
+		expect(labels).toContain('Tonight at 3:00 AM');
+		expect(labels).toContain('Show all 25');
+
+		Array.from(offer.querySelectorAll<HTMLButtonElement>('button')).find((button) => button.textContent?.trim() === 'Show all 25')!.click();
+		flushSync();
+		expect(offer.querySelectorAll('li')).toHaveLength(4);
+	});
+
+	it('headlines a development build\'s commit titles as Recent changes without lane tags or PR numbers', () => {
+		updateStatus.set(status({
+			available: true, target_version: '2026.10.14.0431',
+			changes: { kind: 'commits', headline: null, items: ['[Infrastructure] fix the lock message (#123)'], more: 0 },
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.querySelector('.offer h4')?.textContent).toBe('Recent changes');
+		expect(host.querySelector('.offer li')?.textContent).toBe('Fix the lock message');
+	});
+
+	it('lists the notes of an update that just installed, and names an overnight one', () => {
+		updateStatus.set(status({
+			current_version: '1.1.0',
+			operation: {
+				operation_id: 'update-1', kind: 'update', trigger: 'tonight', status: 'complete', target_version: '1.1.0',
+				settled_at: new Date().toISOString(), changes: { kind: 'changelog', headline: null, items: ['Faster search'], more: 0 },
+			},
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.querySelector('.notes h4')?.textContent).toBe("What's new in 1.1.0");
+		expect(host.querySelector('.notes li')?.textContent).toBe('Faster search');
+		expect(host.querySelector('.installed')?.textContent).toMatch(/^Updated overnight at /);
+	});
+
+	it('keeps Update now and offers Cancel tonight when tonight is scheduled', () => {
+		updateStatus.set(status({
+			available: true, target_version: '1.1.0',
+			schedule: { automatic: false, time: '03:00', tonight_at: '2026-10-14T03:00:00Z' },
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		const labels = Array.from(host.querySelectorAll('.offer button')).map((button) => button.textContent?.trim());
+		expect(labels).toContain('Update now');
+		expect(labels).toContain("Cancel tonight's update");
+		expect(labels).not.toContain('Tonight at 3:00 AM');
+	});
+
+	it('schedules tonight and offers Undo', async () => {
+		token.set('test-token');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ automatic: false, time: '03:00', tonight_at: '2026-10-14T03:00:00Z' }) })));
+		updateStatus.set(status({ available: true, target_version: '1.1.0', schedule: { automatic: false, time: '03:00', tonight_at: null } }));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		Array.from(host.querySelectorAll<HTMLButtonElement>('.offer button')).find((button) => button.textContent?.trim() === 'Tonight at 3:00 AM')!.click();
+		await vi.waitFor(() => expect(get(toasts).some((toast) => toast.message === 'Update scheduled for 3:00 AM tonight.')).toBe(true));
+		expect(get(toasts).find((toast) => toast.action?.label === 'Undo')).toBeDefined();
 	});
 
 	it('drops the failed pill once a restart has activated the staged update', () => {
