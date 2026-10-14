@@ -455,7 +455,15 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	const measurements = await page.locator('.doc').evaluate((root) => {
 		const firstLine = root.querySelector<HTMLElement>('.cm-line')!.getBoundingClientRect();
 		const capsule = root.querySelector<HTMLElement>('.rb-capsule')!.getBoundingClientRect();
-		return { firstBodyY: firstLine.top, capsuleHeight: capsule.height };
+		const requester = root.querySelector<HTMLElement>('.rb-who')!.getBoundingClientRect();
+		const ask = root.querySelector<HTMLElement>('.rb-ask')!.getBoundingClientRect();
+		const comments = root.querySelector<HTMLElement>('.comment-status')!;
+		return {
+			firstBodyY: firstLine.top,
+			capsuleHeight: capsule.height,
+			leadRow: { requesterWidth: requester.width, askWidth: ask.width },
+			commentsPillName: comments.getAttribute('aria-label'),
+		};
 	});
 	if (mode === 'phone') {
 		expect(measurements.firstBodyY, 'the first document line stays in the phone reading area').toBeLessThanOrEqual(150);
@@ -486,6 +494,17 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	await expect(recovery.getByRole('status')).toHaveText("22 comments couldn't be placed");
 	await expect(recovery.getByRole('button', { name: 'Reload comment placements' })).toBeVisible();
 	await settled(page);
+	if (mode === 'phone') {
+		const drawerMeasurements = await drawer.evaluate((element) => {
+			const footer = element.querySelector<HTMLElement>('.drawer-footers')!.getBoundingClientRect();
+			const list = element.querySelector<HTMLElement>('.drawer-comments')!.getBoundingClientRect();
+			return { drawerFooterHeight: footer.height, listVisibleHeight: list.height };
+		});
+		await info.attach(`gate0-worst-state-${theme}`, {
+			body: JSON.stringify({ ...measurements, ...drawerMeasurements }, null, 2),
+			contentType: 'application/json',
+		});
+	}
 	await shot(page, `orphan-heavy-${mode}-${theme}`, info);
 	test.info().annotations.push({ type: 'orphan-heavy-layout', description: JSON.stringify(measurements) });
 });
@@ -515,6 +534,7 @@ async function expectNameClearOfControls(page: Page, title: string) {
 /** At 1280 the open plan pane overlays the document instead of docking beside it, so the whole header (tools and both ask lines) ends before it rather than under it. */
 for (const theme of ['light', 'dark'] as const) {
 	test(`@surface:review-bar the header and its ask stay clear of the overlaid plan pane (1280 ${theme})`, async ({ page, request }, info) => {
+		test.setTimeout(120_000);
 		test.skip(info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
 		// A 21-character asker: the title plus the five-character suffix that keeps it unique.
 		const doc = await seed(request, `Overlay 1280 ${theme === 'light' ? 'lt' : 'dk'}`, { sharedAsOf: '2026-09-12' });
@@ -612,10 +632,11 @@ for (const theme of ['light', 'dark'] as const) {
 		await approve.click();
 		await expect(bar(page).locator('.rb-receipt')).toContainText('You approved this');
 
-		// At 1440 the expanded sidebar can leave a canvas below its combined split minimum, so it may rightly overlay.
-		// At 1920 the pane docks beside the canvas and the header keeps its place with no inset at all.
-		await page.setViewportSize({ width: 1920, height: 900 });
-		await expect(pane).not.toHaveClass(/\boverlay\b/);
-		await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), '1920 docked').toBe('0px');
+		// At 1440 and above this seeded desktop canvas can host the minimum split, so the pane docks beside it and the header has no inset.
+		for (const width of [1440, 1920]) {
+			await page.setViewportSize({ width, height: 900 });
+			await expect(pane).not.toHaveClass(/\boverlay\b/);
+			await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), `${width} docked`).toBe('0px');
+		}
 	});
 }

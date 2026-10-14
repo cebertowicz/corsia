@@ -154,6 +154,29 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.activeElement).toBe(host.querySelector('[aria-label="Reload comment placements"]'));
 	});
 
+	it('announces every failed placement retry even when the unplaced count does not change', async () => {
+		const reloading = writable(false);
+		const live = fromStore(reloading);
+		render({
+			state: { kind: 'list' },
+			comments: [{ ...suggestion, orphaned: true }],
+			get placementRecovery() { return { onReload: () => true, orphanedCount: 1, reloading: live.current }; },
+		});
+		const retry = async () => {
+			host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+			reloading.set(true); flushSync();
+			reloading.set(false); flushSync();
+			await tick();
+		};
+		await retry();
+		const first = host.querySelector('[data-drawer-placement] [role="status"]')!;
+		expect(first.textContent).toBe("1 comment still couldn't be placed");
+		await retry();
+		const second = host.querySelector('[data-drawer-placement] [role="status"]')!;
+		expect(second.textContent).toBe("1 comment still couldn't be placed");
+		expect(second).not.toBe(first);
+	});
+
 	it('keeps a successful placement announcement in the drawer after the recovery action is gone', async () => {
 		const reloading = writable(false);
 		const comments = writable([{ ...suggestion, orphaned: true }]);

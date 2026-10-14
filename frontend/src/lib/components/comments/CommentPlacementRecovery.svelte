@@ -18,6 +18,7 @@
 	let requested = $state(false);
 	let sawBusy = $state(false);
 	let announcement = $state('');
+	let announcementVersion = $state(0);
 	let announcedCount = $state<number | null>(null);
 	let placementFooter = $state<HTMLElement>();
 	$effect(() => {
@@ -34,6 +35,7 @@
 		requested = false;
 		sawBusy = false;
 		announcement = reloadError ? "Couldn't reload comment placements" : orphanedCount ? `${orphanedCount} comment${orphanedCount === 1 ? '' : 's'} still couldn't be placed` : 'Comments placed';
+		announcementVersion += 1;
 		announcedCount = orphanedCount;
 		// The loading button may be replaced while its request settles; restore focus to the surviving recovery action.
 		if (orphanedCount) void tick().then(() => placementFooter?.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')?.focus());
@@ -48,7 +50,7 @@
 
 {#if (orphanedCount || announcement) && onReload}
 	<div class="drawer-placement" data-drawer-placement bind:this={placementFooter} use:footerFocusHome={onFocusHome}>
-		<p role="status">{announcement || unplacedPhrase}</p>
+		{#key announcementVersion}<p role="status">{announcement || unplacedPhrase}</p>{/key}
 		{#if orphanedCount}<Button size="sm" variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={unavailable || reloading} describedby={unavailable ? connectionDescriptionId : undefined} onclick={reload} loading={reloading}>Place again</Button>{/if}
 	</div>
 {/if}
