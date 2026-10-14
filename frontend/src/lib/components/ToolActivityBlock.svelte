@@ -11,6 +11,8 @@
 	} from '$lib/toolMeta';
 	import { lineDiff, diffStats } from '$lib/diff';
 	import ToolDiff from './ToolDiff.svelte';
+	import Expand from './ui/Expand.svelte';
+	import { press } from './ui/press';
 
 	export interface ActivityTool {
 		id: string;
@@ -70,8 +72,12 @@
 	const summaryLabel = $derived(summarySegments.map((segment) => segment.label).join(' · '));
 	const isExpanded = $derived(expandedTools.has(blockKey));
 
+	// The rows stay mounted while they close, so their exit is seen.
+	let rowsPresent = $state(false);
 	const visibleRows = $derived(
-		isExpanded ? tools : anyRunning ? tools.filter((t) => t.status === 'running') : []
+		isExpanded || (rowsPresent && !anyRunning)
+			? tools
+			: anyRunning ? tools.filter((t) => t.status === 'running') : []
 	);
 
 	function rowDiff(t: ActivityTool) {
@@ -126,7 +132,7 @@
 </script>
 
 <div class="ta-block" class:running={anyRunning} class:open={visibleRows.length > 0}>
-	<button class="ta-summary press-tint" aria-label={summaryLabel} onclick={() => onToggle(blockKey)}>
+	<button class="ta-summary" use:press aria-label={summaryLabel} onclick={() => onToggle(blockKey)}>
 		{#if anyRunning}
 			<svg class="ta-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 		{:else if hasFailure}
@@ -145,7 +151,7 @@
 		<svg class="ta-chevron" class:rotated={isExpanded} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
 	</button>
 
-	{#if visibleRows.length > 0}
+	<Expand open={isExpanded || (anyRunning && visibleRows.length > 0)} bind:present={rowsPresent}>
 		<div class="ta-rows">
 			{#each visibleRows as t (t.id)}
 				{@const displayArgs = toolDisplayArgs(t.name, t.args)}
@@ -156,7 +162,7 @@
 				{@const diff = rowExpanded ? rowDiff(t) : null}
 				{@const badge = !rowExpanded ? rowDiff(t) : diff}
 				<div class="ta-row-wrap">
-					<button class="ta-row press-tint" class:active={isRunning} disabled={isRunning} onclick={() => toggleToolRow(t)}>
+					<button class="ta-row" use:press class:active={isRunning} disabled={isRunning} onclick={() => toggleToolRow(t)}>
 						{#if isRunning}
 							<svg class="ta-spin row-glyph" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 						{:else}
@@ -174,7 +180,7 @@
 							<svg class="ta-chevron" class:rotated={rowExpanded} width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
 						{/if}
 					</button>
-					{#if rowExpanded}
+					<Expand open={rowExpanded}>
 						<div class="ta-detail">
 							{#if t.resultState === 'loading'}
 								<div class="ta-load-state"><span class="ta-spin" aria-hidden="true"></span> Loading output…</div>
@@ -214,11 +220,11 @@
 								{/if}
 							{/if}
 						</div>
-					{/if}
+					</Expand>
 				</div>
 			{/each}
 		</div>
-	{/if}
+	</Expand>
 </div>
 
 <style>
@@ -262,15 +268,14 @@
 	.ta-seg.bad { color: var(--red); }
 	.ta-seg.unknown { color: var(--text-tertiary); }
 	.ta-sep { color: var(--text-tertiary); opacity: 0.5; }
-	.ta-chevron { flex-shrink: 0; color: var(--text-tertiary); opacity: 0.6; transition: transform var(--dur-tight) ease; }
-	.ta-chevron.rotated { transform: rotate(180deg); }
+	.ta-chevron { flex-shrink: 0; color: var(--text-tertiary); opacity: 0.6; transition: transform calc(var(--dur-standard) * 0.7) var(--ease-snap); }
+	.ta-chevron.rotated { transform: rotate(180deg); transition: transform var(--dur-standard) var(--ease-entrance); }
 
 	.ta-rows {
 		position: relative;
 		border-top: 1px solid var(--border-subtle);
 		padding: 4px 4px 4px 0;
 		display: flex; flex-direction: column;
-		animation: ta-in var(--dur-tight) ease-out;
 	}
 	.ta-rows::before {
 		content: ''; position: absolute;
@@ -318,7 +323,6 @@
 	.ta-detail {
 		padding: 2px 8px 8px 28px;
 		display: flex; flex-direction: column; gap: 6px;
-		animation: ta-in var(--dur-tight) ease-out;
 	}
 	.ta-load-state, .ta-load-error {
 		font-size: var(--text-footnote); color: var(--text-tertiary);
@@ -366,7 +370,6 @@
 	}
 	.ta-lc { flex: 1; min-width: 0; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; padding-right: 8px; }
 
-	@keyframes ta-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
 	@keyframes ta-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 	@media (max-width: 768px) {

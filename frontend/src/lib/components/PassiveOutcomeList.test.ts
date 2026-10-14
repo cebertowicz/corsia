@@ -152,7 +152,8 @@ describe('completed task rows', () => {
   expect(second.getAttribute('title')).toMatch(/\d{4}/);
   expect(second.getAttribute('aria-label')).toContain(earlier);
  });
- it('expands in place to the breadcrumb, description and Open in plan, one row at a time', () => {
+ const exit = async () => { await new Promise((resolve) => setTimeout(resolve, 400)); flushSync(); };
+ it('expands in place to the breadcrumb, description and Open in plan, one row at a time', async () => {
   plan.payload = planRead(
    planNode('top', null), planNode('mid', 'top'), planNode('parent', 'mid'),
    planNode('node-1', 'parent', { description: 'Why this matters' }), planNode('node-2', null, { acceptance_criteria: 'Tests pass' }),
@@ -171,13 +172,15 @@ describe('completed task rows', () => {
   expect(second.querySelector('.crumbs')).toBeNull();
   expect(second.querySelector('.text')!.textContent).toBe('Done when: Tests pass');
   expand(0);
+  await exit();
   expect(host.querySelectorAll('.detail')).toHaveLength(1);
  });
- it('collapsing the list collapses every expanded row', () => {
+ it('collapsing the list collapses every expanded row', async () => {
   plan.payload = planRead(planNode('node-1', null));
   render([card(1)]); openList(); expand(0);
   expect(host.querySelector('.detail')).not.toBeNull();
   openList(); openList();
+  await exit();
   expect(host.querySelector('.detail')).toBeNull();
   expect(rowButton(0).getAttribute('aria-expanded')).toBe('false');
  });

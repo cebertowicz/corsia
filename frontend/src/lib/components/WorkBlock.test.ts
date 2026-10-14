@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -68,7 +70,7 @@ describe('WorkBlock structure', () => {
 		expect(toggle().textContent).toContain('Worked');
 	});
 
-	it('opens a body the header controls, and closes it again', () => {
+	it('opens a body the header controls, and closes it again once the exit has played', async () => {
 		render(present([work('a', 1, '10:01:00'), said('reply', 5, '10:10:00')]));
 
 		toggle().click();
@@ -80,6 +82,8 @@ describe('WorkBlock structure', () => {
 		expect(toggle().getAttribute('aria-label')).toMatch(/^Collapse /);
 
 		toggle().click();
+		flushSync();
+		await new Promise((resolve) => setTimeout(resolve, 400));
 		flushSync();
 		expect(host.querySelector('.fold-details')).toBeNull();
 	});
@@ -118,5 +122,10 @@ describe('WorkBlock new marker (F2)', () => {
 
 		expect(host.querySelector('[data-new-capsule]')).toBeNull();
 		expect(toggle().getAttribute('aria-label')).not.toContain('new since');
+	});
+
+	it('does not move its rows after the region settles: no message entrance runs inside the details', () => {
+		const source = readFileSync(join(process.cwd(), 'src/lib/components/WorkBlock.svelte'), 'utf8');
+		expect(source).toContain('.fold-details :global(.message.assistant), .fold-details :global(.message.system) { animation: none; }');
 	});
 });

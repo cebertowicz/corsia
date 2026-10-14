@@ -4,6 +4,8 @@
 	import { externalModelDisplayName } from '$lib/modelDisplayName';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
+	import Expand from './ui/Expand.svelte';
+	import { press } from './ui/press';
 
 	let {
 		msg,
@@ -124,16 +126,16 @@
 	{/if}
 
 	{#if showActivity && msg.reasoning}
-		<button class="reasoning-toggle" onclick={() => onToggleReasoning(msg.id)}>
+		<button class="reasoning-toggle" use:press onclick={() => onToggleReasoning(msg.id)}>
 			<svg class="reasoning-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 				<path d="M9 4a3 3 0 00-3 3 3 3 0 00-3 3 3 3 0 001 5 3 3 0 005 1 3 3 0 003-3V4z"/><path d="M15 4a3 3 0 013 3 3 3 0 013 3 3 3 0 01-1 5 3 3 0 01-5 1 3 3 0 01-3-3V4z"/>
 			</svg>
 			<span>Thought</span>
 			<svg class="reasoning-chevron" class:expanded={expandedReasoning.has(msg.id)} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
 		</button>
-		{#if expandedReasoning.has(msg.id)}
+		<Expand open={expandedReasoning.has(msg.id)}>
 			<div class="reasoning-content"><div class="md-content">{@html renderMarkdown(msg.reasoning)}</div></div>
-		{/if}
+		</Expand>
 	{/if}
 
 	{#if showContent && msg.content}
@@ -192,8 +194,8 @@
 	}
 	.reasoning-toggle:hover { background: var(--bg-hover); }
 	.reasoning-icon { opacity: 0.7; color: var(--text-tertiary); }
-	.reasoning-chevron { transition: transform var(--dur-standard); }
-	.reasoning-chevron.expanded { transform: rotate(180deg); }
+	.reasoning-chevron { transition: transform calc(var(--dur-standard) * 0.7) var(--ease-snap); }
+	.reasoning-chevron.expanded { transform: rotate(180deg); transition: transform var(--dur-standard) var(--ease-entrance); }
 	.reasoning-content {
 		background: var(--bg-secondary); border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
 		padding: 8px 12px; margin-bottom: 8px; border-radius: var(--radius-2xs);

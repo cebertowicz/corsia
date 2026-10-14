@@ -7,9 +7,12 @@
 	import type { OperatorKey } from '$lib/stores/planKeys';
 	import { breadcrumbName, indexNodes, taskDetail } from './completedTaskDetail';
 	import OutcomeTime from './OutcomeTime.svelte';
+	import Expand from './ui/Expand.svelte';
+	import { press } from './ui/press';
 
 	let { cards, id }: { cards: UpdateCard[]; id: string } = $props();
 	let expanded = $state(false);
+	let listPresent = $state(false);
 	let openCards = $state<Set<number>>(new Set());
 	const failed = $derived(cards.filter((card) => card.kind === 'failed').length);
 	const closed = $derived(cards.filter((card) => card.kind === 'closed').length);
@@ -55,10 +58,23 @@
 		}
 	}
 
+	// A closing detail keeps showing what it showed while it was open, so its exit is seen.
+	const lastShown = new Map<number, ReturnType<typeof view>>();
+
 	function toggle(card: UpdateCard): void {
 		const next = new Set(openCards);
-		if (!next.delete(card.id)) next.add(card.id);
+		if (next.delete(card.id)) lastShown.set(card.id, view(card));
+		else next.add(card.id);
 		openCards = next;
+	}
+
+	function collapseAll(): void {
+		for (const id of openCards) {
+			const card = cards.find((candidate) => candidate.id === id);
+			if (card) lastShown.set(id, view(card));
+		}
+		expanded = false;
+		openCards = new Set();
 	}
 
 	function open(card: UpdateCard, stepId: string | null = null): void {
@@ -111,22 +127,24 @@
 {/snippet}
 
 <section class="passive-outcomes" aria-label={label}>
-	<button type="button" class="passive-toggle" bind:this={toggleButton} aria-expanded={expanded} aria-controls={id} onclick={() => { expanded = !expanded; if (!expanded) openCards = new Set(); }}>
+	<button type="button" class="passive-toggle" bind:this={toggleButton} use:press aria-expanded={expanded} aria-controls={id} onclick={() => { if (expanded) collapseAll(); else expanded = true; }}>
 		{@render glyph(completed === 0, completed === 0 && closed === 0 && failed > 0)}
 		<span>{lead}{lead && failure ? ' · ' : ''}{#if failure}<span class="failed-count">{failure}</span>{/if}</span>
 		<svg class="passive-chevron" class:expanded width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
 	</button>
-	<ul id={id} hidden={!expanded}>
+	<Expand open={expanded} bind:present={listPresent} keep>
+	<ul {id} hidden={!expanded && !listPresent}>
 		{#each cards as card (card.id)}
 			{@const isOpen = openCards.has(card.id)}
-			{@const shown = isOpen ? view(card) : null}
+			{@const shown = isOpen ? view(card) : (lastShown.get(card.id) ?? null)}
 			<li data-update-id={card.id}>
 				{#if card.node_exists && card.node_id && shown?.state !== 'unplaced'}
-					<button type="button" class="row" aria-expanded={isOpen} aria-controls={`${id}-${card.id}`} onclick={() => toggle(card)}>
+					<button type="button" class="row" use:press aria-expanded={isOpen} aria-controls={`${id}-${card.id}`} onclick={() => toggle(card)}>
 						{@render rowIcon(card)}{@render snapshot(card)}
 						<svg class="row-chevron" class:expanded={isOpen} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
 					</button>
 				{:else}<div class="row deleted">{@render rowIcon(card)}{@render snapshot(card)}</div>{/if}
+				<Expand open={isOpen && !!shown && shown.state !== 'unplaced'}>
 				{#if shown && shown.state !== 'unplaced'}
 					<div class="detail" id={`${id}-${card.id}`}>
 						{#if shown.state === 'detail'}
@@ -147,9 +165,11 @@
 						<button type="button" class="link open-plan" onclick={() => open(card, shown.state === 'outside' ? shown.stepId : null)}>Open in plan</button>
 					</div>
 				{/if}
+				</Expand>
 			</li>
 		{/each}
 	</ul>
+	</Expand>
 </section>
 
 <style>
@@ -158,8 +178,8 @@
 	.outcome-icon { color: var(--green-text); flex: 0 0 auto; }
 	.outcome-icon.closed { color: var(--text-tertiary); }
 	.outcome-icon.failed, .failed-count { color: var(--red-text); }
-	.passive-chevron { margin-left: auto; flex: 0 0 auto; transition: transform var(--dur-tight); }
-	.passive-chevron.expanded { transform: rotate(90deg); }
+	.passive-chevron { margin-left: auto; flex: 0 0 auto; transition: transform calc(var(--dur-standard) * 0.7) var(--ease-snap); }
+	.passive-chevron.expanded { transform: rotate(90deg); transition: transform var(--dur-standard) var(--ease-entrance); }
 	ul { list-style: none; margin: 0 0 0 22px; padding: 0 4px; }
 	li { padding: 0; }
 	.row { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 7px; padding: 4px 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
@@ -170,8 +190,8 @@
 	.qualifier { flex: 0 0 auto; color: var(--text-secondary); white-space: nowrap; }
 	.when { margin-left: auto; flex: 0 0 auto; padding-left: 8px; white-space: nowrap; }
 	.when :global(time) { white-space: nowrap; }
-	.row-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform var(--dur-tight); }
-	.row-chevron.expanded { transform: rotate(90deg); }
+	.row-chevron { flex: 0 0 auto; color: var(--text-tertiary); transition: transform calc(var(--dur-standard) * 0.7) var(--ease-snap); }
+	.row-chevron.expanded { transform: rotate(90deg); transition: transform var(--dur-standard) var(--ease-entrance); }
 	.detail { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 8px 23px; }
 	.detail p { margin: 0; }
 	.crumbs { color: var(--text-tertiary); overflow-wrap: anywhere; }
