@@ -146,15 +146,56 @@ def test_settle_on_a_paused_plan_settles_and_the_plan_stays_paused(db):
     assert open_attempt(db, mine.id) is not None
 
 
-def test_settle_ends_a_hold_on_the_step(db):
+@pytest.mark.parametrize("by", [OWNER, HUMAN], ids=["agent", "person"])
+def test_settle_ends_a_pause_on_the_step_even_the_persons_own(db, by):
+    """The person did the step, so their own earlier pause on it has nothing left to stop."""
     plan = owner_plan(db)
     step = _open(db)
     service.transition_node(step, "active", db=db)
     db.commit()
-    pause(db, plan.id, step)
+    pause(db, plan.id, step, actor=by)
 
     assert _settle(db, step) is True
     assert row(db, step)["state"] == "accepted"
+
+
+def test_settle_withdraws_the_questions_drafted_from_the_step(db):
+    from plans import decision_lifecycle, decision_projection, decisions
+
+    plan = owner_plan(db)
+    step = _open(db)
+    common = {"actor": OWNER, "provenance": "test.system_user_step", "db": db}
+    drafted = decisions.draft(
+        plan.id, source_node_id=step, mutation_id="decision-draft",
+        title="Which account do we sign in with?", context="Two accounts are in play.",
+        tradeoff="One is personal, one is shared.", recommendation="A",
+        rationale="The shared one is meant for this.", other_enabled=True,
+        options=[
+            {"id": "A", "label": "Shared account", "detail": "Used by the team."},
+            {"id": "B", "label": "Personal account", "detail": "Yours only."},
+        ],
+        **common,
+    ).result["decision"]
+    reviewed = decisions.parent_review(
+        drafted["id"], expected_revision=drafted["revision"],
+        mutation_id="decision-review", **common,
+    ).result["decision"]
+    raised = decisions.raise_to_user(
+        reviewed["id"], expected_revision=reviewed["revision"],
+        mutation_id="decision-raise", **common,
+    ).result["decision"]
+
+    assert _settle(db, step) is True
+
+    assert decision_projection.read(raised["id"], db=db)["state"] == "invalidated"
+    reasons = [
+        json.loads(event["payload_json"])["reason"]
+        for event in db.execute(
+            "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='decision_invalidated'",
+            (raised["node_id"],),
+        ).fetchall()
+    ]
+    assert reasons == [decision_lifecycle.SOURCE_DONE]
 
 
 @pytest.mark.parametrize("ending", ["closed", "settled", "archived"])

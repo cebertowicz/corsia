@@ -11,17 +11,18 @@ agent's selected task, if any, gains a dependency on the step, so the plan
 carries the wait: settling or closing the step wakes that task through the
 dependency path, and a paused plan stays paused until resume.
 
-Settling is the person's Mark done, observed by the system: it ends the
-step's stops and never refuses on a pause or hold, because those stop agents,
-not the person. A step already settled, closed or archived is left alone. The
-row reads ``Marked by CORSIA`` (``plans.closure.settled_reasons``).
+Settling is the person's Mark done, observed by the system, through the same
+writer (``plans.user_settle.settle``): open rows beneath settle first, the
+step's stops end, and questions drafted from it are withdrawn. It never
+refuses on a pause or hold, the person's own pause included, because the
+person has done the step. A step already settled, closed or archived is left
+alone. The row reads ``Marked by CORSIA`` (``plans.closure.settled_reasons``).
 
 Both join the caller's write transaction when there is one.
 """
 
 from __future__ import annotations
 
-import plans.boundary_after as after
 import plans.errors as errors
 import plans.service as service
 from plans.plan_write import transaction
@@ -43,9 +44,12 @@ def open_user_step(
         raise errors.PlanInputError("open_user_step needs a non-empty key")
     with transaction(db) as connection:
         plan = service.ensure_plan("thread", thread_id, db=connection)
+        # Only the plan's person steps are probed for the event, so the read
+        # stays small however long the agent's own history grows.
         existing = connection.execute(
-            """SELECT e.node_id FROM plan_node_events e JOIN plan_nodes n ON n.id=e.node_id
-               WHERE n.plan_id=? AND e.event=? AND json_extract(e.payload_json,'$.key')=?
+            """SELECT e.node_id FROM plan_nodes n JOIN plan_node_events e ON e.node_id=n.id
+               WHERE n.plan_id=? AND n.assignee='user' AND e.event=?
+                 AND json_extract(e.payload_json,'$.key')=?
                ORDER BY e.created_at,e.rowid LIMIT 1""",
             (plan.id, OPENED, key),
         ).fetchone()
@@ -71,28 +75,19 @@ def open_user_step(
 
 def settle_user_step(db, node_id: str, *, evidence: str, provenance: str) -> bool:
     """Settle the person's step as done; False when it had already ended."""
-    from plans import review_evidence, user_settle
+    from plans import user_settle
 
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
         if node["archived_at"] is not None or node["state"] in service._TERMINAL_STATES:
             return False
-        common = {"db": connection, "actor_id": None, "provenance": provenance}
-        user_settle.clear_stops(connection, node_id, common)
-        if node["state"] == "pending":
-            service.transition_node(node_id, "active", **common)
-        if service._node_row(connection, node_id)["state"] == "active":
-            review_evidence.submit(
-                node_id, evidence=evidence, expected_revision=None,
-                paused_plan_binds=False, **common,
-            )
-        else:
-            review_evidence.record_verdict(node_id, evidence, verdict="Accepted", **common)
-        service.transition_node(
-            node_id, "accepted", verification_result="passed",
-            verified_by=f"{VERIFIER_PREFIX}{provenance}", **common,
+        user_settle.settle(
+            "mark_done",
+            {"node_id": node_id, "expected_revision": node["revision"]},
+            f"{VERIFIER_PREFIX}{provenance}",
+            {"db": connection, "actor_id": None, "provenance": provenance},
+            evidence=evidence,
         )
-        after.after_transition(node_id, "accepted", common)
         return True
 
 
