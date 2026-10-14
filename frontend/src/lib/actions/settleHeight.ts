@@ -89,7 +89,8 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 	const run = (from: number, to: number) => {
 		const inset = border();
 		const style = getComputedStyle(node);
-		animation = node.animate(
+		// `fill: 'both'` holds the end height until `finish`, where the effect is cancelled so content sizes the panel again.
+		const current = node.animate(
 			[{ height: `${from - inset}px` }, { height: `${to - inset}px` }],
 			{
 				duration: Number.parseFloat(style.getPropertyValue('--dur-standard')) || 0,
@@ -97,15 +98,23 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 				fill: 'both',
 			},
 		);
-		const done = () => {
+		animation = current;
+		const cancelled = () => {
+			if (animation !== current) return;
 			animation = null;
+			last = node.getBoundingClientRect().height;
+		};
+		const done = () => {
+			current.removeEventListener('cancel', cancelled);
+			current.cancel();
+			if (animation === current) animation = null;
 			// Content may have changed again while this ran; ease on from where it stopped.
 			const now = node.getBoundingClientRect().height;
 			last = now;
 			if (enabled && Math.abs(now - to) > 1) run(to, now);
 		};
-		animation.addEventListener('finish', done, { once: true });
-		animation.addEventListener('cancel', () => { animation = null; last = node.getBoundingClientRect().height; }, { once: true });
+		current.addEventListener('finish', done, { once: true });
+		current.addEventListener('cancel', cancelled, { once: true });
 	};
 	const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
 		const now = node.getBoundingClientRect().height;
@@ -137,6 +146,9 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 		if (reduced) settleReduced(from, now);
 	};
 	const additions = typeof MutationObserver === 'undefined' ? null : new MutationObserver((records) => {
+		// Only reduced motion fades inserted content; tracking it otherwise would hold nodes nothing consumes.
+		if (!reduced || !enabled) return;
+		for (const item of Array.from(insertedContent)) if (!node.contains(item)) insertedContent.delete(item);
 		let inserted = false;
 		for (const record of records) for (const added of record.addedNodes) {
 			if (added instanceof HTMLElement && !added.matches('[data-settle-height-reveal]')) {
@@ -145,8 +157,7 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 				inserted = true;
 			}
 		}
-		if (!inserted) return;
-		if (reduced && enabled) fadeNewContent();
+		if (inserted) fadeNewContent();
 	});
 	node.addEventListener('transitionrun', moveStart);
 	node.addEventListener('transitionend', moveEnd);

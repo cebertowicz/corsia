@@ -8,6 +8,7 @@ const animate = vi.fn();
 const revealAnimate = vi.fn();
 let originalElementAnimate: PropertyDescriptor | undefined;
 let finish: () => void = () => {};
+const cancelHeight = vi.fn();
 
 beforeEach(() => {
 	height = 300;
@@ -19,10 +20,12 @@ beforeEach(() => {
 	});
 	animate.mockReset();
 	revealAnimate.mockReset();
+	cancelHeight.mockReset();
 	revealAnimate.mockImplementation(() => ({ addEventListener: vi.fn(), cancel: vi.fn() }));
 	animate.mockImplementation(() => ({
 		addEventListener: (type: string, listener: () => void) => { if (type === 'finish') finish = listener; },
-		cancel: vi.fn(),
+		removeEventListener: vi.fn(),
+		cancel: cancelHeight,
 	}));
 	vi.stubGlobal('ResizeObserver', class {
 		constructor(callback: () => void) { notify = callback; }
@@ -58,6 +61,34 @@ describe('settleHeight', () => {
 		const frames = animate.mock.calls[0][0] as Array<{ height: string }>;
 		expect(frames.map((frame) => frame.height)).toEqual(['300px', '200px']);
 		expect(animate.mock.calls[0][1]).toMatchObject({ fill: 'both' });
+	});
+
+	it('releases the held end height once the ease finishes, so later content sizes the panel', () => {
+		const node = panel();
+		settleHeight(node, { enabled: true });
+		height = 200;
+		notify();
+		expect(cancelHeight).not.toHaveBeenCalled();
+		finish();
+		expect(cancelHeight).toHaveBeenCalledTimes(1);
+		height = 260;
+		notify();
+		expect(animate).toHaveBeenCalledTimes(2);
+		expect((animate.mock.calls[1][0] as Array<{ height: string }>).map((frame) => frame.height)).toEqual(['200px', '260px']);
+	});
+
+	it('does not hold insertions made outside reduced motion', () => {
+		const node = panel();
+		const added = document.createElement('footer');
+		const addedAnimate = vi.fn(() => ({ addEventListener: vi.fn(), cancel: vi.fn() }));
+		added.animate = addedAnimate as unknown as typeof added.animate;
+		const action = settleHeight(node, { enabled: true });
+		node.append(added);
+		noteAdditions([{ addedNodes: [added] } as unknown as MutationRecord]);
+		action.update({ enabled: true, reduced: true });
+		height = 400;
+		notify();
+		expect(addedAnimate).not.toHaveBeenCalled();
 	});
 
 	it('cuts when disabled, as under reduced motion or a drag', () => {
