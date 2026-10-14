@@ -4,7 +4,9 @@
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
 	import { clampPoint } from '$lib/browserPane';
+	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput } from '$lib/browserPaneInput';
+	import AvatarStack from '$lib/components/ui/AvatarStack.svelte';
 	import { on } from '$lib/ws/events';
 	import { get } from 'svelte/store';
 	import { untrack } from 'svelte';
@@ -12,8 +14,9 @@
 	let { threadId }: { threadId: string } = $props();
 	let canvas: HTMLCanvasElement;
 	let socket: WebSocket | null = null;
-	let hasControl = $state(false);
+	let passwordPage = $state(false);
 	let status = $state('Connecting to browser');
+	const presence = $derived([{ id: threadId, name: 'Agent', color: agentColor(threadId), detail: 'Agent is in this page' }]);
 	let url = $state('');
 	let width = $state(0);
 	let height = $state(0);
@@ -27,7 +30,7 @@
 	let decodeWarned = false;
 	let drawnArea = '';
 	const paneInput = new BrowserPaneInput(message => {
-		if (hasControl && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 	});
 
 	function resetPointer() {
@@ -55,7 +58,6 @@
 			// The server releases control whenever this connection ends, so the pane must too.
 			if (streaming) status = 'Browser stream ended. Reconnect to watch';
 			streaming = false;
-			hasControl = false;
 			resetPointer();
 		};
 	}
@@ -67,14 +69,13 @@
 		} catch {
 			return;
 		}
-		if (message.type === 'control' && typeof message.has_control === 'boolean') {
-			hasControl = message.has_control;
-			if (!hasControl) resetPointer();
-			status = controlStatus();
+		if (message.type === 'browser_password_page' && typeof message.visible === 'boolean') {
+			passwordPage = message.visible;
+			if (!passwordPage) status = 'Agent can see the page again';
 			return;
 		}
 		if (message.type === 'navigate_result') {
-			status = typeof message.error === 'string' ? `Browser could not open this URL: ${message.error}` : controlStatus();
+			status = typeof message.error === 'string' ? `Browser could not open this URL: ${message.error}` : 'Ready';
 			return;
 		}
 		if (message.type === 'browser_state') {
@@ -156,7 +157,7 @@
 	}
 
 	function sendMouse(event: PointerEvent) {
-		if (!hasControl || socket?.readyState !== WebSocket.OPEN || !width || !height) return;
+		if (socket?.readyState !== WebSocket.OPEN || !width || !height) return;
 		if (!event.isPrimary) return;
 		const point = coordinates(event, event.type !== 'pointerdown' && (event.type !== 'pointermove' || activePointer !== null));
 		if (!point) return;
@@ -177,15 +178,15 @@
 	}
 
 	function sendWheel(event: WheelEvent) {
-		if (!hasControl || socket?.readyState !== WebSocket.OPEN) return;
+		if (socket?.readyState !== WebSocket.OPEN) return;
 		event.preventDefault();
 		const point = coordinates(event);
 		if (!point) return;
-		socket.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX: event.deltaX, deltaY: event.deltaY }));
+		socket.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: event.deltaMode }));
 	}
 
 	function sendKey(event: KeyboardEvent) {
-		if (!hasControl || socket?.readyState !== WebSocket.OPEN) return;
+		if (socket?.readyState !== WebSocket.OPEN) return;
 		event.preventDefault();
 		socket.send(JSON.stringify({ type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp', key: event.key, code: event.code, text: keyText(event) }));
 	}
@@ -196,18 +197,14 @@
 		return event.key === 'Enter' ? '\r' : event.key.length === 1 ? event.key : '';
 	}
 
-	function toggleControl() {
-		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: hasControl ? 'hand_back' : 'take_over' }));
-	}
-
 	function controlStatus() {
-		return hasControl ? 'You have control. The agent waits' : 'Agent is driving. Watch only';
+		return 'Ready';
 	}
 
 	async function go() {
 		// An open browser navigates only through the stream that holds control.
 		if (streaming) {
-			if (!hasControl || socket?.readyState !== WebSocket.OPEN) return;
+			if (socket?.readyState !== WebSocket.OPEN) return;
 			status = 'Opening';
 			socket.send(JSON.stringify({ type: 'navigate', url }));
 			return;
@@ -224,7 +221,7 @@
 	}
 
 	function history(action: 'back' | 'forward' | 'reload') {
-		if (!hasControl || socket?.readyState !== WebSocket.OPEN) return;
+		if (socket?.readyState !== WebSocket.OPEN) return;
 		socket.send(JSON.stringify({ type: 'navigate', action }));
 	}
 
@@ -267,25 +264,29 @@
 
 <div class="browser-leaf">
 	<form class="toolbar" onsubmit={submitAddress}>
-		<button type="button" class="icon" aria-label="Back" title="Back" onclick={() => history('back')} disabled={!streaming || !hasControl}>
+		<button type="button" class="icon" aria-label="Back" title="Back" onclick={() => history('back')} disabled={!streaming}>
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
 		</button>
-		<button type="button" class="icon" aria-label="Forward" title="Forward" onclick={() => history('forward')} disabled={!streaming || !hasControl}>
+		<button type="button" class="icon" aria-label="Forward" title="Forward" onclick={() => history('forward')} disabled={!streaming}>
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
 		</button>
-		<button type="button" class="icon" aria-label="Reload" title="Reload" onclick={() => history('reload')} disabled={!streaming || !hasControl}>
+		<button type="button" class="icon" aria-label="Reload" title="Reload" onclick={() => history('reload')} disabled={!streaming}>
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" /></svg>
 		</button>
+		<div class="agent-seam"><AvatarStack people={presence} max={3} /></div>
 		<input aria-label="Browser address" bind:value={url} placeholder="http:// or https://" />
-		<button type="submit" disabled={streaming && !hasControl}>Go</button>
+		<button type="submit" disabled={false}>Go</button>
 		{#if streaming}
-			<button type="button" onclick={toggleControl}>{hasControl ? 'Hand back' : 'Take over'}</button>
+			<span>Shared with the agent</span>
 		{:else}
 			<button type="button" onclick={connect}>Reconnect</button>
 		{/if}
 		<span>{status}</span>
 	</form>
-	<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+	<div class:agent-present={!passwordPage} class="browser-page" style:--presence-color={agentColor(threadId)}>
+		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+		{#if passwordPage}<div class="password-notice" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
+	</div>
 </div>
 
 <style>
@@ -297,5 +298,11 @@
 	.toolbar .icon { display: inline-flex; padding: 2px; border: 0; background: none; color: var(--text-secondary); cursor: pointer; }
 	.toolbar .icon:disabled { color: var(--text-tertiary); cursor: default; }
 	.toolbar .icon svg { width: 16px; height: 16px; }
+	.agent-seam { display: inline-flex; }
+	.browser-page { position: relative; display: flex; flex: 1; min-height: 0; }
+	.browser-page.agent-present { box-shadow: inset 0 0 0 2px var(--presence-color, var(--accent)); transition: opacity 160ms ease; }
+	.password-notice { position: absolute; z-index: 1; bottom: 16px; left: 50%; display: inline-flex; gap: 8px; width: max-content; height: 44px; align-items: center; padding: 0 16px; border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); border-radius: var(--radius-pill); background: var(--glass-regular-thick); box-shadow: var(--glass-elevation-1), var(--glass-rim); backdrop-filter: var(--glass-blur); transform: translateX(-50%); }
+	.password-notice svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
 	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; }
+	@media (prefers-reduced-motion: reduce) { .browser-page.agent-present { transition: none; } }
 </style>
