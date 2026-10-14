@@ -80,15 +80,53 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
     """Proxy frames and accept input only from this connection's control holder."""
     connection_token = secrets.token_urlsafe(18)
 
+    reliable: asyncio.Queue[str] = asyncio.Queue()
+    latest_frame: str | None = None
+    frame_ready = asyncio.Event()
+
     async def send_control() -> None:
-        await pane.send_json({
+        await reliable.put(json.dumps({
             "type": "control",
             "has_control": browser_control.holds_control(thread_id, connection_token),
-        })
+        }))
+
+    async def send_latest() -> None:
+        """Keep control/status ordered while replacing frames a slow pane cannot yet see."""
+        nonlocal latest_frame
+        while True:
+            try:
+                message = reliable.get_nowait()
+            except asyncio.QueueEmpty:
+                message = None
+            if message is not None:
+                await pane.send_text(message)
+                continue
+            if latest_frame is not None:
+                message, latest_frame = latest_frame, None
+                frame_ready.clear()
+                await pane.send_text(message)
+                continue
+            reliable_wait = asyncio.create_task(reliable.get())
+            frame_wait = asyncio.create_task(frame_ready.wait())
+            done, pending = await asyncio.wait({reliable_wait, frame_wait}, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            if reliable_wait in done:
+                await pane.send_text(reliable_wait.result())
 
     async def from_stream() -> None:
+        nonlocal latest_frame
         async for message in stream:
-            await pane.send_text(message)
+            try:
+                kind = json.loads(message).get("type")
+            except (TypeError, ValueError):
+                kind = None
+            if kind == "frame":
+                latest_frame = message
+                frame_ready.set()
+            else:
+                await reliable.put(message)
 
     async def from_pane() -> None:
         while True:
@@ -107,7 +145,14 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                     emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
                 await send_control()
             elif kind == "navigate":
-                await pane.send_json(await _navigate(thread_id, connection_token, data))
+                # Navigation can take seconds; keep accepting control input while it runs.
+                task = asyncio.create_task(_navigate(thread_id, connection_token, data))
+
+                def publish_navigation(done: asyncio.Task) -> None:
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        reliable.put_nowait(json.dumps(done.result()))
+
+                task.add_done_callback(publish_navigation)
             elif kind == "appearance":
                 _request_match(thread_id, connection_token, data)
             elif (kind in {"input_mouse", "input_keyboard"}
@@ -115,12 +160,12 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                 await stream.send(message)
 
     try:
+        # A stream connection alone supplies stale dimensions in agent-browser 0.31.2; this explicit
+        # screencast keeps the remote viewport matched to the pane.
         await stream.send(json.dumps({"type": "screencast_start"}))
         await send_control()
-        done, pending = await asyncio.wait(
-            {asyncio.create_task(from_stream()), asyncio.create_task(from_pane())},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        tasks = {asyncio.create_task(from_stream()), asyncio.create_task(from_pane()), asyncio.create_task(send_latest())}
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)

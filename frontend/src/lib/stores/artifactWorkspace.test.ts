@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	threadWorkspaces, splitWidth, emptyWorkspace, getActiveTab,
-	openArtifactTab, openAgentDocumentTab, openSubagentConversationTab, openLegacyDiscussionArchiveTab,
+	openArtifactTab, openAgentDocumentTab, openBrowserPane, openSubagentConversationTab, openLegacyDiscussionArchiveTab,
 	closeArtifactTab, setActiveTab, setActiveSurface, setLeafVisible, markTabStatus,
 } from './artifactWorkspace';
 import { token } from './auth';
@@ -25,6 +25,24 @@ function keyOf(threadId: string, artifactId: string): string {
 	if (!tab) throw new Error(`no tab for ${artifactId}`);
 	return tab.instanceId;
 }
+
+describe('openBrowserPane', () => {
+	it('foregrounds and reveals a newly agent-opened browser tab', () => {
+		openBrowserPane('thread-1', true);
+		const ws = get(threadWorkspaces)['thread-1'];
+		expect(ws).toMatchObject({ visible: true, activeSurface: 'artifact', activeTabId: ws.tabs[0].instanceId });
+	});
+
+	it('does not interrupt the tab or surface after an agent reopens its browser', () => {
+		openBrowserPane('thread-1', true);
+		openArtifactTab('thread-1', { artifactId: 'art-1', path: '/docs/a.md', title: 'a.md' });
+		const before = get(threadWorkspaces)['thread-1'];
+		openBrowserPane('thread-1', true);
+		const after = get(threadWorkspaces)['thread-1'];
+		expect(after.activeTabId).toBe(before.activeTabId);
+		expect(after.activeSurface).toBe(before.activeSurface);
+	});
+});
 
 describe('openArtifactTab', () => {
 	it('reveals and selects an agent-requested document without switching the chat surface', () => {

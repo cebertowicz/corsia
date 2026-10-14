@@ -158,9 +158,12 @@ export function openAgentDocumentTab(threadId: string, input: OpenArtifactInput)
 	mutate(threadId, (ws) => ({ ...openTab(ws, input), activeSurface: ws.activeSurface }));
 }
 
-/** Opens a browser pane, optionally preserving the tab the user is viewing. */
+/** Opens a browser pane. An agent reveal foregrounds a new tab but never steals an existing one. */
 export function openBrowserPane(threadId: string, background = false): void {
-	mutate(threadId, (ws) => openBrowserTab(ws, { threadId }, newInstanceId, !background));
+	mutate(threadId, (ws) => {
+		const alreadyOpen = ws.tabs.some((tab) => tab.kind === 'browser' && tab.threadId === threadId);
+		return openBrowserTab(ws, { threadId }, newInstanceId, !background || !alreadyOpen);
+	});
 }
 
 /** Opens a canonical child conversation beside its still-mounted parent. */

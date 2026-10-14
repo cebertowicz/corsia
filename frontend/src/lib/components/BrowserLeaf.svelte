@@ -3,6 +3,7 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
+	import { AnimationFrameCoalescer, clampPoint, LatestFramePipeline, type PanePoint } from '$lib/browserPane';
 	import { on } from '$lib/ws/events';
 	import { get } from 'svelte/store';
 
@@ -14,15 +15,23 @@
 	let url = $state('');
 	let width = $state(0);
 	let height = $state(0);
-	let image = $state<HTMLImageElement | null>(null);
 	let streaming = $state(false);
 	let opening = false;
 	let fitTimer: ReturnType<typeof setTimeout> | undefined;
+	let lastAppearance = '';
+	let activePointer: number | null = null;
+	let touchStart: { clientX: number; clientY: number; point: PanePoint } | null = null;
+	let touchLast: { clientX: number; clientY: number; point: PanePoint } | null = null;
+	let touchDragging = false;
+	const framePipeline = new LatestFramePipeline(drawFrame);
+	const mouseMoves = new AnimationFrameCoalescer(sendMouseMove);
+	const touchWheels = new AnimationFrameCoalescer(sendTouchWheel);
 
 	function connect() {
 		socket?.close();
 		const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const next = new WebSocket(`${protocol}//${location.host}/api/browser/${threadId}/stream`);
+		lastAppearance = '';
 		socket = next;
 		// A connecting socket counts as streaming, so browser_opened never races a second one.
 		streaming = true;
@@ -67,9 +76,7 @@
 		if (typeof metadata.deviceWidth !== 'number' || typeof metadata.deviceHeight !== 'number') return;
 		width = metadata.deviceWidth;
 		height = metadata.deviceHeight;
-		image = new Image();
-		image.onload = redraw;
-		image.src = `data:image/jpeg;base64,${message.data}`;
+		framePipeline.offer({ data: message.data, width, height });
 	}
 
 	// Where the page sits in the canvas: drawing and input share it, so a click lands where it is drawn.
@@ -79,19 +86,25 @@
 		return { bounds, scale, left: (bounds.width - width * scale) / 2, top: (bounds.height - height * scale) / 2 };
 	}
 
-	function redraw() {
-		if (!canvas || !image || !width || !height) return;
+	function drawFrame(bitmap: ImageBitmap, frame: { width: number; height: number }) {
+		if (!canvas || !frame.width || !frame.height) return;
 		const { bounds, scale, left, top } = placement();
-		canvas.width = bounds.width * devicePixelRatio;
-		canvas.height = bounds.height * devicePixelRatio;
+		const backingWidth = Math.round(bounds.width * devicePixelRatio);
+		const backingHeight = Math.round(bounds.height * devicePixelRatio);
+		// Changing a canvas backing store clears it; leave the current picture intact for ordinary frames.
+		if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+			canvas.width = backingWidth;
+			canvas.height = backingHeight;
+		}
 		const context = canvas.getContext('2d');
 		if (!context) return;
-		context.scale(devicePixelRatio, devicePixelRatio);
-		// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
-		// top-left corner with blank space beside it, so draw only the page's part of the frame.
-		// Frame pixels per page pixel; above 1 on a high-density pane.
-		const density = Math.min(image.naturalWidth / width, image.naturalHeight / height);
-		context.drawImage(image, 0, 0, width * density, height * density, left, top, width * scale, height * scale);
+		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+		const density = Math.min(bitmap.width / frame.width, bitmap.height / frame.height);
+		context.drawImage(bitmap, 0, 0, frame.width * density, frame.height * density, left, top, frame.width * scale, frame.height * scale);
+	}
+
+	function redraw() {
+		framePipeline.redraw();
 	}
 
 	// The page takes the pane's size, pixel density and CORSIA theme: it fills the pane sharply, never glaring.
@@ -99,27 +112,94 @@
 		if (!canvas || socket?.readyState !== WebSocket.OPEN) return;
 		const bounds = canvas.getBoundingClientRect();
 		if (bounds.width < 1 || bounds.height < 1) return;
-		socket.send(JSON.stringify({
-			type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height),
-			scale: devicePixelRatio, scheme: get(theme),
-		}));
+		const appearance = { type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height), scale: devicePixelRatio, scheme: get(theme) };
+		const key = JSON.stringify(appearance);
+		if (key === lastAppearance) return;
+		lastAppearance = key;
+		socket.send(key);
 	}
 
-	function coordinates(event: PointerEvent | WheelEvent) {
+	function coordinates(event: PointerEvent | WheelEvent, clamp = false) {
 		const { bounds, scale, left, top } = placement();
-		const x = (event.clientX - bounds.left - left) / scale;
-		const y = (event.clientY - bounds.top - top) / scale;
-		return x >= 0 && y >= 0 && x <= width && y <= height ? { x, y } : null;
+		const point = { x: (event.clientX - bounds.left - left) / scale, y: (event.clientY - bounds.top - top) / scale };
+		return clamp ? clampPoint(point, width, height) : point.x >= 0 && point.y >= 0 && point.x <= width && point.y <= height ? point : null;
+	}
+
+	function sendInput(eventType: 'mouseMoved' | 'mousePressed' | 'mouseReleased', point: PanePoint, button: 'left' | 'none', clickCount: number) {
+		if (socket?.readyState !== WebSocket.OPEN) return;
+		socket.send(JSON.stringify({ type: 'input_mouse', eventType, ...point, button, clickCount }));
+	}
+
+	function sendMouseMove(point: PanePoint) {
+		if (hasControl) sendInput('mouseMoved', point, 'none', 0);
+	}
+
+	function sendTouchWheel(value: { point: PanePoint; deltaX: number; deltaY: number }) {
+		if (hasControl && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseWheel', ...value }));
 	}
 
 	function sendMouse(event: PointerEvent) {
 		if (!hasControl || socket?.readyState !== WebSocket.OPEN || !width || !height) return;
-		if (event.type === 'pointerdown') canvas.focus();
-		const point = coordinates(event);
+		if (event.pointerType === 'touch') {
+			handleTouch(event);
+			return;
+		}
+		if (event.type === 'pointerdown') {
+			canvas.focus();
+			activePointer = event.pointerId;
+			canvas.setPointerCapture(event.pointerId);
+			const point = coordinates(event, true);
+			if (!point) return;
+			// Move before pressing because Chrome may use the last cursor position for a press.
+			sendInput('mouseMoved', point, 'none', 0);
+			sendInput('mousePressed', point, 'left', 1);
+			return;
+		}
+		const point = coordinates(event, event.type === 'pointerup' || event.type === 'pointercancel');
 		if (!point) return;
-		const eventType = event.type === 'pointerdown' ? 'mousePressed' : event.type === 'pointerup' ? 'mouseReleased' : 'mouseMoved';
-		const button = eventType === 'mouseMoved' && !(event.buttons & 1) ? 'none' : 'left';
-		socket.send(JSON.stringify({ type: 'input_mouse', eventType, ...point, button, clickCount: eventType === 'mouseMoved' ? 0 : 1 }));
+		if (event.type === 'pointermove') mouseMoves.push(point);
+		else {
+			mouseMoves.cancel();
+			sendInput('mouseReleased', point, 'left', 1);
+			if (activePointer === event.pointerId && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+			activePointer = null;
+		}
+	}
+
+	function handleTouch(event: PointerEvent) {
+		const point = coordinates(event, true);
+		if (!point) return;
+		if (event.type === 'pointerdown') {
+			canvas.focus();
+			activePointer = event.pointerId;
+			canvas.setPointerCapture(event.pointerId);
+			touchStart = { clientX: event.clientX, clientY: event.clientY, point };
+			touchLast = touchStart;
+			touchDragging = false;
+			return;
+		}
+		if (!touchStart || !touchLast) return;
+		if (event.type === 'pointermove') {
+			event.preventDefault();
+			const distance = Math.hypot(event.clientX - touchStart.clientX, event.clientY - touchStart.clientY);
+			if (distance > 8) touchDragging = true;
+			if (touchDragging) {
+				const { scale } = placement();
+				touchWheels.push({ point, deltaX: (touchLast.clientX - event.clientX) / scale, deltaY: (touchLast.clientY - event.clientY) / scale });
+			}
+			touchLast = { clientX: event.clientX, clientY: event.clientY, point };
+			return;
+		}
+		if (!touchDragging && event.type === 'pointerup') {
+			sendInput('mouseMoved', touchStart.point, 'none', 0);
+			sendInput('mousePressed', touchStart.point, 'left', 1);
+			sendInput('mouseReleased', point, 'left', 1);
+		}
+		touchWheels.cancel();
+		if (activePointer === event.pointerId && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+		activePointer = null;
+		touchStart = null;
+		touchLast = null;
 	}
 
 	function sendWheel(event: WheelEvent) {
@@ -193,6 +273,9 @@
 			observer.disconnect();
 			unsubscribeTheme();
 			clearTimeout(fitTimer);
+			mouseMoves.cancel();
+			touchWheels.cancel();
+			framePipeline.dispose();
 		};
 	});
 
@@ -229,7 +312,7 @@
 		{/if}
 		<span>{status}</span>
 	</form>
-	<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+	<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
 </div>
 
 <style>
@@ -239,5 +322,5 @@
 	.toolbar .icon { display: inline-flex; padding: 2px; border: 0; background: none; color: var(--text-secondary); cursor: pointer; }
 	.toolbar .icon:disabled { color: var(--text-tertiary); cursor: default; }
 	.toolbar .icon svg { width: 16px; height: 16px; }
-	canvas { flex: 1; min-height: 0; width: 100%; outline: none; }
+	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; }
 </style>
