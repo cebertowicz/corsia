@@ -226,7 +226,7 @@ def test_profile_seeding_matches_the_cli_create_or_add_email_behavior(monkeypatc
     assert additions == [(tmp_path, "first@example.test")]
 
 
-def test_status_has_a_stable_low_ram_variant(monkeypatch, tmp_path):
+def test_status_has_a_stable_below_minimum_ram_variant(monkeypatch, tmp_path):
     from llm import local_setup_gates
 
     monkeypatch.setattr(local_setup_gates, "host_ram_bytes", lambda: 1)
@@ -236,7 +236,7 @@ def test_status_has_a_stable_low_ram_variant(monkeypatch, tmp_path):
     monkeypatch.setattr(setup_api.config, "STATE_ROOT", tmp_path)
     monkeypatch.setattr(setup_api.config, "WORKSPACE", tmp_path / "workspace")
     status = setup_api._setup_status()
-    assert status["ram_tier"] == "low"
+    assert status["ram_tier"] == "below_minimum"
     assert status["local_eligible"] is False
     assert status["free_disk_gb"] is not None
     assert status["work_folder"] == "…/workspace"

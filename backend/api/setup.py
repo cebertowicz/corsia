@@ -129,7 +129,7 @@ def _setup_status() -> dict:
     return {
         "apple_silicon": apple_silicon,
         "macos_supported": macos_supported,
-        "ram_tier": "eligible" if profile_eligible else "low",
+        "ram_tier": "eligible" if profile_eligible else "below_minimum",
         "free_disk_gb": free_disk_gb,
         "app_location": _app_location_class(),
         "local_eligible": apple_silicon and macos_supported and profile_eligible,
