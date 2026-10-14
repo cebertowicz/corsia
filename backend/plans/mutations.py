@@ -135,10 +135,6 @@ def edit_node(
     with service._connection(db) as connection, service._write(connection):
         node = service._live_node_row(connection, node_id)
         _assert_revision(node, expected_revision)
-        if node["assignee"] == "user" and description is not None:
-            from plans.boundary_fields import _user_step_description
-
-            _user_step_description({"kind": node["kind"], "assignee": "user", "description": description})
         next_title, next_description, next_dod, next_watchdog, next_size, restated = _next_edit_values(
             node, title, description, acceptance_criteria, watchdog_budget_seconds, size,
         )
@@ -255,10 +251,6 @@ def split_node(
         if source["kind"] != "task" or source["state"] in service._TERMINAL_STATES:
             raise service.PlanError("only non-terminal task nodes can be split")
         _assert_revision(source, expected_revision)
-        if source["assignee"] == "user":
-            from plans.boundary_fields import _user_step_description
-
-            _user_step_description({"kind": "task", "assignee": "user", "description": description})
         sibling = service._create_node(
             connection, source["plan_id"], kind="task", title=title,
             acceptance_criteria=acceptance_criteria, parent_id=source["parent_id"],

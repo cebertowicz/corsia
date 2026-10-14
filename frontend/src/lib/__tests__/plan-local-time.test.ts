@@ -151,7 +151,7 @@ describe('a settled row says when it settled', () => {
 			state: 'closed', status_reason: 'Not needed after all',
 			display: { label_key: 'finished', tone_key: 'closed' },
 		});
-		expect(nodeSubline(closed, NOW)).toBe(`Won’t do · Not needed after all · today at ${clock(at(0, 8, 40))}`);
+		expect(nodeSubline(closed, NOW)).toBe(`Won’t do: Not needed after all · today at ${clock(at(0, 8, 40))}`);
 		expect(settledMoment(operatorNode({ id: 'open', last_transition_at: at(0, 8).toISOString() }), NOW)).toBeNull();
 	});
 

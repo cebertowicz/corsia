@@ -178,5 +178,8 @@ describe('MeasurementSizeHeadline', () => {
 		unmount(component!); host.remove();
 		const future = render(coverage({ comparable_reason: 'method_retired' }), 10, false);
 		expect(future.querySelector('.comparability')?.textContent).toBe('Not comparable with other weeks.');
+		unmount(component!); host.remove();
+		const known = render(coverage({ comparable_reason: 'mixed_profiles' }), 10, false);
+		expect(known.querySelector('.comparability')?.textContent).toContain('rated by more than one rater or rubric');
 	});
 });

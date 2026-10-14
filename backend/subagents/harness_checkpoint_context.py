@@ -26,7 +26,6 @@ class ExternalCheckpointContext:
     installed_checkpoint: Any = None
     registered_checkpoint_id: str | None = None
     eager_checkpoint_id: str | None = None
-    provider_registered: bool = False
     previous: Any = None
     reasoning_effort: str | None = None
     binary: str | None = None
@@ -283,7 +282,6 @@ def read_external_checkpoint_context(
             installed_checkpoint=installed,
             registered_checkpoint_id=registered_checkpoint_id(registration),
             eager_checkpoint_id=eager.id if eager is not None else None,
-            provider_registered=registration is not None,
             previous=previous,
             reasoning_effort=effective_reasoning_effort(
                 thread_row["reasoning_effort"], target.catalog_id

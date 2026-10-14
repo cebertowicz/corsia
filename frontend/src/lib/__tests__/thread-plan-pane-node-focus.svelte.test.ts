@@ -47,7 +47,7 @@ function planNodes(threadId: string): OperatorNode[] {
 const OLD = {
 	id: 'old', parent_id: null, kind: 'task', title: 'Old failure', state: 'failed', folded_at: '2026-09-01T00:00:00Z',
 	fold_bucket: 'failed', display: { label_key: 'finished', tone_key: 'failed' },
-	status_reason: null, folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false,
+	folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false,
 };
 
 function envelope(threadId: string, nodes = planNodes(threadId)): OperatorEnvelope {

@@ -5,7 +5,6 @@
 	import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
-	import BrowserLeaf from './BrowserLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
@@ -19,7 +18,7 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import {
 		threadWorkspaces, emptyWorkspace, getActiveTab, isTabChanged, type ArtifactTab,
-		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved, openBrowserPane,
+		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved,
 	} from '$lib/stores/artifactWorkspace';
 	import {
 		tabViewState, tabDocumentImage, recordTabDocumentPlace, recordTabImagePlace, openTabDocumentImage,
@@ -28,6 +27,7 @@
 	import {
 		abandonArtifactOpen, beginArtifactOpen, failArtifactOpen, markArtifactRendered,
 	} from '$lib/openTimingRuntime';
+
 	let { threadId, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {} }: {
 		threadId: string | null;
 		mode: 'rail' | 'expanded' | 'compact';
@@ -36,8 +36,10 @@
 		onEscapeClose?: () => void;
 		onOpenLightbox?: (url: string) => void;
 	} = $props();
+
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
 	const activeTab = $derived(getActiveTab(workspace));
+
 	function targetForTab(t: ArtifactTab): DocViewerTarget {
 		if (t.kind !== 'document') throw new Error('Only document tabs have DocViewer targets');
 		return {
@@ -49,6 +51,7 @@
 			artifactId: t.artifactId,
 		};
 	}
+
 	// Every tab opens in the document viewer. A file the backend says is an image
 	// is switched to the image viewer for as long as this leaf is mounted; nothing
 	// about it is stored on the tab, so a file replaced by one of the other kind
@@ -64,6 +67,7 @@
 	const imageTarget = $derived(showsImage ? showable : null);
 	const activeStale = $derived(activeTab ? isTabChanged(activeTab) : false);
 	const activeViewState = $derived(threadId && activeTab ? tabViewState(threadId, activeTab.instanceId) : null);
+
 	let viewer = $state<DocViewer | undefined>(undefined);
 	let imageViewer = $state<ImageViewer | undefined>(undefined);
 	let leafEl = $state<HTMLElement | undefined>(undefined);
@@ -126,6 +130,7 @@
 		if (!imageOpen) return;
 		return pushBackLayer(() => { closeImage(); return true; });
 	});
+
 	// One timing sample per artifact this leaf actually brings on screen (#2280).
 	// Keyed on the tab instance, not on re-renders, so a reactive re-run can only
 	// ever report the same open once; leaving the leaf abandons what was pending.
@@ -143,6 +148,7 @@
 		// An already-loaded tab renders from memory: there is nothing to wait for.
 		if (tab.status === 'ready' || tab.status === 'readonly') markArtifactRendered(instanceId);
 	});
+
 	// A tab that saved rebaselines on the revision the server returned for its
 	// own write, which is what keeps the dot off the saving tab while the same
 	// document dots in every other thread that has it open.
@@ -156,6 +162,7 @@
 			if (revision && revision !== tab.loadedRevision) markTabSaved(tid, tab.instanceId, revision);
 		}
 	});
+
 	// A relocated document keeps editing where it now lives.
 	$effect(() => {
 		for (const tab of workspace.tabs) {
@@ -164,6 +171,7 @@
 			if (draft && draft.target.path !== tab.path) relocateDraftTarget(draft.target, tab.path);
 		}
 	});
+
 	function onLeafClick() {
 		if (threadId) setActiveSurface(threadId, 'artifact');
 	}
@@ -239,9 +247,6 @@
 		setLeafVisible(threadId, true);
 		setActiveSurface(threadId, 'artifact');
 	}
-	function openBrowser() {
-		if (threadId) openBrowserPane(threadId);
-	}
 	function collapse() {
 		if (!threadId) return;
 		const source = activeTab?.kind === 'subagent' ? activeTab : null;
@@ -268,7 +273,6 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="leaf" class:compact={mode === 'compact'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
 		{#if mode === 'expanded'}
-			<div class="leaf-actions"><button type="button" onclick={openBrowser}>Browser</button></div>
 			<ArtifactTabStrip
 				tabs={workspace.tabs}
 				activeKey={workspace.activeTabId}
@@ -278,10 +282,8 @@
 				onCollapse={collapse}
 			/>
 		{/if}
-		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
-			{#if activeTab?.kind === 'browser' && activeTab.threadId}
-				<BrowserLeaf threadId={activeTab.threadId} />
-				{:else if activeTab?.kind === 'subagent' && activeTab.threadId}
+		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} bind:this={leafBodyEl}>
+			{#if activeTab?.kind === 'subagent' && activeTab.threadId}
 				<SubagentConversationLeaf threadId={activeTab.threadId} {onOpenLightbox} />
 				{:else if activeTab?.kind === 'legacy-discussion' && activeTab.artifactId}
 					<LegacyPlanDiscussionLeaf artifactId={activeTab.artifactId} title={activeTab.title} />
@@ -358,8 +360,6 @@
 		background: var(--accent);
 	}
 
-	.leaf-actions { display: flex; justify-content: flex-end; padding: 4px 8px 0; background: var(--glass-thin); }
-	.leaf-actions button { color: var(--text-secondary); background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); font: inherit; cursor: pointer; padding: 3px 7px; }
 	.leaf {
 		height: 100%; display: flex; flex: 1; flex-direction: column; min-width: 0;
 		min-height: 0; overflow: hidden;
@@ -378,8 +378,7 @@
 	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
 	.doc-host { display: contents; }
 	.doc-host.covered { visibility: hidden; }
-	.leaf-body.image-canvas, .leaf-body.browser-canvas { overflow: hidden; display: flex; flex-direction: column; }
-	.leaf-body.browser-canvas { padding: 0; }
+	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
 	/* The document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
 	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; padding-top: 0; } }

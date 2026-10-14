@@ -591,10 +591,6 @@ _CASES = {
         "request_review", {"node_id": OWN, "expected_revision": REV,
                            "evidence": "Focused checks passed.", "next_node_id": 7},
     ),
-    ("boundary_fields.py", "USER_STEP_DESCRIPTION_REFUSAL"): _operation(
-        "add", {"kind": "task", "title": "Run command", "acceptance_criteria": "Done",
-                "assignee": "user"},
-    ),
     ("boundary_fields.py", '"edit requires at least one changed field"'):
         _operation("edit", {"node_id": NODE, "expected_revision": REV}),
     ("boundary_fields.py", '"verification_result must be \'passed\' when supplied"'):

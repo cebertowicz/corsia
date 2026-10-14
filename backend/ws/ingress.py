@@ -27,13 +27,7 @@ def _observe_background_task(task: asyncio.Task[Any]) -> None:
     except (asyncio.CancelledError, RuntimeError):
         return
     if error is not None:
-        coroutine = task.get_coro()
-        coroutine_name = getattr(coroutine, "__qualname__", None) or "<unknown>"
-        logger.opt(exception=error).error(
-            "Background WebSocket work failed (task={}, coroutine={})",
-            task.get_name(),
-            coroutine_name,
-        )
+        logger.error("Background WebSocket work failed: {}", error)
 
 
 def track_background_task(task: asyncio.Task[Any]) -> None:

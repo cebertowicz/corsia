@@ -144,7 +144,7 @@ def test_order_and_default_survive_persistence_and_existing_binding(accounts):
     saved = set_legacy_policy("destination-project", "codex", allowlist=ordered,
                        default_account_id=second["id"], db=db)
     assert saved["order"] == [second["id"], third["id"], legacy["id"]]
-    assert effective_policy("destination-project", "codex", db=db) == {key: value for key, value in saved.items() if key != "units"}
+    assert effective_policy("destination-project", "codex", db=db) == saved
     assert select_account("destination", "codex", db=db) == second["id"]
     set_legacy_policy("destination-project", "codex", allowlist=ordered,
                default_account_id=third["id"], db=db)
@@ -241,13 +241,13 @@ def test_project_policy_returns_to_workspace_after_project_override_is_removed(a
     set_use_workspace("destination-project", use_workspace=False, expected_revision=0, db=db)
     project = set_policy("destination-project", "codex", rollover=False, order=[second["id"]],
                          disabled=[legacy["id"]], expected_revision=workspace["revision"], db=db)
-    assert effective_policy("destination-project", "codex", db=db) == {key: value for key, value in project.items() if key != "units"}
+    assert effective_policy("destination-project", "codex", db=db) == project
 
     set_use_workspace("destination-project", use_workspace=True, expected_revision=1, db=db)
 
     assert db.execute("SELECT COUNT(*) FROM project_policy_overrides WHERE project_id='destination-project'").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM provider_policies WHERE project_id='destination-project'").fetchone()[0] == 0
-    assert effective_policy("destination-project", "codex", db=db) == {key: value for key, value in workspace.items() if key != "units"}
+    assert effective_policy("destination-project", "codex", db=db) == workspace
 
 
 def test_project_override_owns_every_provider_policy(accounts):

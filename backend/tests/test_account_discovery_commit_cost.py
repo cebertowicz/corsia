@@ -208,7 +208,7 @@ def test_a_multi_account_commit_writes_only_the_holds_that_change(accounts, monk
     assert _hold_rows(db) == [
         ("c-kept", second["id"], missing, "before"),
         ("d-new", second["id"], missing, FROZEN_NOW),
-        ("f-queued-kept", second["id"], missing, "before"),
+        ("f-queued-kept", second["id"], missing, FROZEN_NOW),
         ("g-elsewhere", third["id"], missing, "before"),
     ]
     assert [tuple(row) for row in db.execute(

@@ -17,7 +17,7 @@
 	/* A level whose finished work includes a failure or a closure never wears green. */
 	.fold-mark.mixed { border-color: var(--text-tertiary); color: var(--text-tertiary); }
 	.fold-label {
-		min-width: 0; color: var(--text-secondary); font-size: var(--text-footnote);
-		font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+		min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+		color: var(--text-secondary); font-size: var(--text-footnote); font-variant-numeric: tabular-nums;
 	}
 </style>

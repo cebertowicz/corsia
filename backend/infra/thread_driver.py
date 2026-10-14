@@ -225,7 +225,7 @@ def finish_turn(
         parent = _parent_completion(connection, turn_id, thread_id) if outcome == "completed" else None
         if outcome == "cancelled" and isinstance(error, PlanLimitStop):
             queue_plan_limit_continue(connection, turn_id, thread_id)
-        elif outcome == "error" and isinstance(limits.limit, Recorded):
+        elif outcome == "error" and isinstance(limits.limit, Recorded) and limits.fail_closed is None:
             queue_limit_refusal_continue(connection, turn_id, thread_id)
         successor, switch_transition, switch_request, idle = _claim_after_terminal(
             connection,

@@ -19,7 +19,7 @@ from typing import Any
 from api.measurement_queries import query_family
 from core.size_rating import (
     AUTHOR_DECLARED_PROFILE, BASIS_AUTHOR_DECLARED, CLASS_MIDPOINT_HOURS, LATEST_EVIDENCE_SQL, NO_EVIDENCE,
-    PROFILE_KEYS, SERVED_BASES, SIZE_EVENT, SUBJECT_PREFIX, UNKNOWN,
+    PROFILE_KEYS, SERVED_BASES, SIZE_EVENT, SUBJECT_PREFIX, UNKNOWN, UNKNOWN_VERSION,
     fact_status, profile,
 )
 
@@ -162,6 +162,31 @@ def size_period_totals(db, params: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return periods
 
 
+def _same_method(profiles: Any) -> bool:
+    """Whether every profile is the same rating method.
+
+    A profile is who rated, with which method and rubric, and which rater
+    version. An unrecorded rater version says nothing about the method, so it
+    matches any version; two recorded versions that differ, or any other
+    differing key, are a real change in how outcomes were rated.
+    """
+    at = PROFILE_KEYS.index("rater_version")
+    methods = {item[:at] + item[at + 1:] for item in profiles}
+    versions = {item[at] for item in profiles} - {UNKNOWN_VERSION}
+    return len(methods) <= 1 and len(versions) <= 1
+
+
+def _comparable_reason(profiles: Counter, period_comparable: bool, range_profiles: set) -> str | None:
+    """Name why a period cannot be compared with others, or None when it can."""
+    if not period_comparable:
+        return "outcome_definition_changed"
+    if not _same_method(profiles):
+        return "mixed_profiles"
+    if not _same_method(range_profiles):
+        return "profile_changes_in_range"
+    return None
+
+
 def _rate_reason(measured: bool, active_hours: float, sized: int, minimum_n: int) -> str | None:
     """Name why a period's rate is withheld, or None when it is served."""
     if not measured:
@@ -202,6 +227,7 @@ def size_rows(metric: str, minimum_n: int, spine: list[str], sources: list[dict[
     and comparability break, so a reader names them without a second copy.
     """
     by_period = {row["period"]: row for row in sources}
+    range_profiles = {item for row in sources if row["period"] in spine for item in row["profiles"]}
     rows = []
     for period in spine:
         source = by_period.get(period) or {"outcomes": 0, "estimated_hours": 0.0, "basis": Counter(),
@@ -212,8 +238,8 @@ def size_rows(metric: str, minimum_n: int, spine: list[str], sources: list[dict[
         # Before the minimum is applied: still a figure when the ratings are few, never when there are none.
         raw_value = source["estimated_hours"] / active_hours if rate_reason in (None, "below_minimum") else None
         n = 0 if rate_reason == "before_data_start" else sized
-        # Who rated an outcome, and whether its author declared the size, is served as coverage, never as a break.
-        reason = None if comparable(metric, period) else "outcome_definition_changed"
+        reason = _comparable_reason(source["profiles"], comparable(metric, period), range_profiles) if sized else None
+        reason = reason or (None if comparable(metric, period) else "outcome_definition_changed")
         rows.append({
             "period": period, "series": metric, "value": value, "raw_value": raw_value, "n": n, "proxy": True,
             "partial": sized < source["outcomes"],

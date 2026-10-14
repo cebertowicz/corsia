@@ -96,16 +96,14 @@ def require_same_operation_home(request, source_home):
     if source_home is None and not launch.custom:
         source_home = launch.warm_home
     if source_home is None or Path(source_home).absolute() != Path(expected).absolute():
-        _refuse_warm_source('warm_fork_home_mismatch')
+        from core.checkpoint_types import WarmForkUnusable
+
+        raise WarmForkUnusable('warm_fork_home_mismatch')
     receipt = getattr(request, 'vendor_account_receipt', None)
     if getattr(request.warm_source, 'vendor_account_receipt', None) != receipt:
-        _refuse_warm_source('warm_fork_login_mismatch')
+        from core.checkpoint_types import WarmForkUnusable
 
-
-def _refuse_warm_source(reason):
-    from core.checkpoint_types import WarmForkUnusable
-
-    raise WarmForkUnusable(reason, reason=reason)
+        raise WarmForkUnusable('warm_fork_login_mismatch')
 
 
 @contextmanager

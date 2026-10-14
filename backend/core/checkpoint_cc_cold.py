@@ -8,8 +8,6 @@ import time
 from dataclasses import replace
 from typing import Any
 
-from loguru import logger
-
 from core.checkpoint_types import (
     CHECKPOINT_TOOL_ROUND_TRIP_TOKENS, ColdInputCallback, ProviderCheckpointRejected,
     ProviderCheckpointRequest,
@@ -200,26 +198,12 @@ async def prepare_warm_payload(process, request, cancel_event, spawned_at: float
     tokens, window = await _loaded_context(process, request, spawned_at)
     if cancel_event.is_set():
         raise asyncio.CancelledError
+    instruction_tokens = measure_request({"messages": [
+        {"role": "user", "content": request.instruction},
+    ]}, target=request.target).tokens
     reserve = request.max_output_tokens + CHECKPOINT_TOOL_ROUND_TRIP_TOKENS
-
-    def fits(instruction: str) -> bool:
-        instruction_tokens = measure_request({"messages": [
-            {"role": "user", "content": instruction},
-        ]}, target=request.target).tokens
-        return tokens + instruction_tokens + reserve <= window
-
-    if fits(request.instruction):
-        return build_user_frame(request.instruction)
-    # The review block was sized for the static window, not for this fork's
-    # real occupancy; it is an addition, so the checkpoint goes ahead without it.
-    bare = request.instruction_without_review
-    if bare is not None and fits(bare):
-        logger.info(
-            "placement.review_skipped thread={} checkpoint={} reason=no-room-at-fork",
-            request.thread_id, request.checkpoint_id,
-        )
-        return build_user_frame(bare)
-    return None
+    fits = tokens + instruction_tokens + reserve <= window
+    return build_user_frame(request.instruction) if fits else None
 
 
 async def prepare_cold_payload(

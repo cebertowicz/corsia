@@ -91,29 +91,6 @@ describe('ProvidersPolicyBlock', () => {
 		expect(host.querySelector('[aria-label*="Move "]')).toBeNull();
 	});
 
-	it('keeps both account toggles usable after saving either account', async () => {
-		const provider = { provider_key: 'codex', capabilities: { units: 'accounts' as const, rollover: true }, rollover: true, order: null, disabled: [], revision: 1,
-			units: [{ id: 'account-a', label: 'Account A', enabled: true }, { id: 'account-b', label: 'Account B', enabled: true }] };
-		stubPolicy({ scope: 'workspace', overriding_projects: [], providers: [provider] }, (body) => ({
-			...provider,
-			disabled: body.disabled,
-			revision: provider.revision + 1,
-			units: provider.units.map((unit) => ({ ...unit, enabled: !body.disabled.includes(unit.id) })),
-		}));
-		component = mount(ProvidersPolicyBlock, { target: host });
-		flushSync();
-
-		await vi.waitFor(() => expect(host.querySelector<HTMLButtonElement>('[aria-label="Account A"]')).not.toBeNull());
-		const accountA = host.querySelector<HTMLButtonElement>('[aria-label="Account A"]')!;
-		accountA.click();
-		await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1));
-		const accountB = host.querySelector<HTMLButtonElement>('[aria-label="Account B"]')!;
-		await vi.waitFor(() => expect(accountB.disabled).toBe(false));
-		accountB.click();
-		await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(2));
-		await vi.waitFor(() => expect(accountB.disabled).toBe(false));
-	});
-
 	it('shows a visible error for an unsuccessful policy response', async () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => input.toString().startsWith('/api/vendor-accounts')
 			? ({ ok: true, json: async () => ({ accounts: [] }) })

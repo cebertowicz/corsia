@@ -9,7 +9,7 @@ export interface ImageViewportPlace {
 
 export interface ArtifactTab {
 	/** The artifact leaf hosts documents, child conversations, and bounded legacy discussion archives. */
-	kind: 'document' | 'subagent' | 'legacy-discussion' | 'browser';
+	kind: 'document' | 'subagent' | 'legacy-discussion';
 	/** Immutable tab-instance key. Never derived from artifact identity. */
 	instanceId: string;
 	/** Primary artifact identity once resolved. */
@@ -51,11 +51,6 @@ export interface OpenSubagentInput {
 	sourceNodeId?: string;
 	/** Set with `sourceNodeId` when that node belongs to a nested subagent plan: the owning step of this thread's plan. */
 	sourceStepId?: string;
-}
-
-export interface OpenBrowserInput {
-	threadId: string;
-	title?: string;
 }
 
 export interface OpenLegacyDiscussionInput {

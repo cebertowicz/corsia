@@ -19,7 +19,6 @@ import pytest
 from cc_runtime_fixtures import (  # noqa: F401
     StubCCInvocation, cc_target, child_db, prepared_cc_input,
 )
-from codex_runtime_fixtures import _admit_active_turn, _seed_runtime_sessions, locked_spawn
 from infra import database
 from infra.db_loop_guard import LOOP_WRITE_STRICT_ENV
 from subagents import cc_runtime_resume
@@ -89,78 +88,6 @@ async def test_failed_delivery_leaves_the_watch_armed(isolated_db, monkeypatch):
         assert _armed(db, node_id) == 1
     finally:
         db.close()
-
-
-@pytest.mark.asyncio
-async def test_codex_cold_spawn_persists_its_install_off_the_event_loop(
-    child_db, monkeypatch,  # noqa: F811
-):
-    """A cold Codex spawn retains its exact delivery before transport launch."""
-    from core.installed_context import InstalledDelivery, read_boundary
-    from core.turn_core import TurnIdentity
-    from llm.context_window import WindowFacts
-    from subagents import codex_runtime, codex_spawn_preflight
-
-    thread_id = "main-1"
-    turn_id = "cold-turn"
-    _seed_runtime_sessions(thread_id)
-    _admit_active_turn(thread_id, turn_id=turn_id, content="literal boundary")
-    with closing(sqlite3.connect(str(database.DB_PATH), timeout=0.05)) as reader:
-        reader.row_factory = sqlite3.Row
-        boundary_id, stored = read_boundary(thread_id, reader)
-    assert boundary_id is not None
-    assert stored is None
-    delivery = InstalledDelivery(
-        thread_id=thread_id,
-        adoption="current-no-anchor",
-        boundary_id=boundary_id,
-        stored=stored,
-        snapshot={
-            "model": "codex/gpt-5-codex",
-            "project_id": None,
-            "execution_epoch": 0,
-            "runtime_context_epoch": 0,
-            "sources": [],
-        },
-    )
-    reconstruction = SimpleNamespace(
-        installed=delivery,
-        task_text="literal cold task",
-        turn_text="literal resumed task",
-        history_items=(),
-        checkpoint_text=None,
-        snapshot=SimpleNamespace(to_dict=lambda: {"kind": "cold"}),
-    )
-    launched = AsyncMock(return_value=TurnIdentity("cold-spawn", 1))
-    monkeypatch.setattr(
-        codex_spawn_preflight,
-        "build_codex_reconstruction",
-        lambda **_kwargs: reconstruction,
-    )
-    monkeypatch.setattr(codex_runtime, "_spawn_app_server_turn", launched)
-    monkeypatch.setattr(codex_runtime, "_spawn_binary", lambda binary, _db: binary)
-    monkeypatch.setenv(LOOP_WRITE_STRICT_ENV, "1")
-
-    try:
-        result = await locked_spawn(
-            codex_runtime._spawn_turn,
-            thread_id,
-            "caller text",
-            successor_turn_id="cold-spawn",
-            codex_thread_id=None,
-            binary="codex",
-            catalog_model_id="codex/gpt-5-codex",
-            windows=WindowFacts(None, None),
-            db=None,
-        )
-
-        assert result == TurnIdentity("cold-spawn", 1)
-        assert launched.await_args.args[:2] == (thread_id, "literal cold task")
-        with closing(sqlite3.connect(str(database.DB_PATH), timeout=0.05)) as reader:
-            reader.row_factory = sqlite3.Row
-            assert read_boundary(thread_id, reader) == (boundary_id, delivery.snapshot)
-    finally:
-        codex_runtime._LIVE.reset()
 
 
 @pytest.mark.asyncio

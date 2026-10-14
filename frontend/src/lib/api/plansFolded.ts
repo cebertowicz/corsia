@@ -29,8 +29,6 @@ export interface FoldedItem {
 	kind: string;
 	title: string;
 	state: string;
-	/** Why it settled as it did (a Won't do reason); null when none was given. */
-	status_reason: string | null;
 	folded_at: string;
 	fold_bucket: string | null;
 	display: OperatorDisplay<OperatorNodeLabelKey>;
@@ -66,7 +64,7 @@ const isStrOrNull = (v: unknown): v is string | null => v === null || isStr(v);
 
 function isItem(v: unknown): v is FoldedItem {
 	return isObject(v) && isStr(v.id) && isStrOrNull(v.parent_id) && isStr(v.kind) && isStr(v.title)
-		&& isStr(v.state) && isStrOrNull(v.status_reason) && isStr(v.folded_at) && isStrOrNull(v.fold_bucket)
+		&& isStr(v.state) && isStr(v.folded_at) && isStrOrNull(v.fold_bucket)
 		&& isObject(v.display) && isStr(v.display.label_key) && isStr(v.display.tone_key)
 		&& isObject(v.folds) && isNum(v.folds.done) && isNum(v.folds.failed) && isNum(v.folds.closed)
 		&& typeof v.has_folded_children === 'boolean';

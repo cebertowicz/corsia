@@ -132,11 +132,7 @@
 		cursor: pointer; text-align: left;
 		transition: background var(--dur-tight);
 	}
-	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
-	@media (hover: hover) {
-		.task-menu-item:hover:not(:disabled) { background: var(--bg-hover); }
-	}
-	.task-menu-item:focus-visible { background: var(--bg-hover); }
+	.task-menu-item:hover:not(:disabled), .task-menu-item:focus-visible { background: var(--bg-hover); }
 	.task-menu-item:disabled { opacity: 0.6; cursor: default; }
 	.task-menu-item.danger { color: var(--red); }
 	.note { margin: 0; padding: 2px 10px 4px; color: var(--text-secondary); font-size: var(--text-caption); }
