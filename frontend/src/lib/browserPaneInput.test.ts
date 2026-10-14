@@ -30,8 +30,8 @@ describe('pane pointer input', () => {
   input.move(pointer('touch', 170), { x: 40, y: 340 }, .5);
   input.move(pointer('touch', 130), { x: 40, y: 260 }, .5);
   expect(send.mock.calls.map(([message]) => message)).toEqual([
-   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 340, deltaX: 0, deltaY: 60 },
-   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 260, deltaX: 0, deltaY: 80 },
+   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 340, deltaX: 0, deltaY: 60, deltaMode: 0 },
+   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 260, deltaX: 0, deltaY: 80, deltaMode: 0 },
   ]);
   input.move(pointer('touch', 110), { x: 40, y: 220 }, .5);
   input.release(pointer('touch', 110), { x: 40, y: 220 });
