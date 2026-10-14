@@ -6,6 +6,8 @@
 	import { clampPoint } from '$lib/browserPane';
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput } from '$lib/browserPaneInput';
+	import { browserAddressLabel, browserTabLabel } from '$lib/browserAddress';
+	import { setBrowserPaneLabel } from '$lib/stores/artifactWorkspace';
 	import AvatarStack from '$lib/components/ui/AvatarStack.svelte';
 	import { on } from '$lib/ws/events';
 	import { get } from 'svelte/store';
@@ -15,9 +17,12 @@
 	let canvas: HTMLCanvasElement;
 	let socket: WebSocket | null = null;
 	let passwordPage = $state(false);
+	let keyboardOpen = $state(false);
+	let addressFocused = $state(false);
 	let status = $state('Connecting to browser');
 	const presence = $derived([{ id: threadId, name: 'Agent', color: agentColor(threadId), detail: 'Agent is in this page' }]);
 	let url = $state('');
+	const shownAddress = $derived(addressFocused ? url : browserAddressLabel(url));
 	let width = $state(0);
 	let height = $state(0);
 	let image = $state<HTMLImageElement | null>(null);
@@ -75,7 +80,12 @@
 			return;
 		}
 		if (message.type === 'navigate_result') {
-			status = typeof message.error === 'string' ? `Browser could not open this URL: ${message.error}` : 'Ready';
+			if (typeof message.error === 'string') status = `Browser could not open this URL: ${message.error}`;
+			else {
+				if (typeof message.url === 'string') url = message.url;
+				if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof message.title === 'string' ? message.title : null, url));
+				status = 'Ready';
+			}
 			return;
 		}
 		if (message.type === 'browser_state') {
@@ -227,7 +237,12 @@
 
 	function submitAddress(event: SubmitEvent) {
 		event.preventDefault();
+		addressFocused = false;
 		void go();
+	}
+
+	function editAddress(event: Event) {
+		url = (event.currentTarget as HTMLInputElement).value;
 	}
 
 	$effect(() => {
@@ -251,12 +266,17 @@
 
 	$effect(() => {
 		if (!browser) return;
+		const viewport = window.visualViewport;
+		const updateKeyboard = () => { keyboardOpen = !!viewport && window.innerHeight - viewport.height > 160; };
+		updateKeyboard();
+		viewport?.addEventListener('resize', updateKeyboard);
 		connect();
 		const unsubscribe = on('browser_opened', (data: { thread_id?: string }) => {
 			if (data?.thread_id === threadId && !streaming && !opening) connect();
 		});
 		return () => {
 			unsubscribe();
+			viewport?.removeEventListener('resize', updateKeyboard);
 			socket?.close();
 		};
 	});
@@ -274,7 +294,7 @@
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" /></svg>
 		</button>
 		<div class="agent-seam"><AvatarStack people={presence} max={3} /></div>
-		<input aria-label="Browser address" bind:value={url} placeholder="http:// or https://" />
+		<input aria-label="Browser address" value={shownAddress} placeholder="http:// or https://" onfocus={() => addressFocused = true} onblur={() => addressFocused = false} oninput={editAddress} />
 		<button type="submit" disabled={false}>Go</button>
 		{#if streaming}
 			<span>Shared with the agent</span>
@@ -283,9 +303,10 @@
 		{/if}
 		<span>{status}</span>
 	</form>
-	<div class:agent-present={!passwordPage} class="browser-page" style:--presence-color={agentColor(threadId)}>
+	<div class:agent-present={!passwordPage} class:keyboard-open={keyboardOpen} class="browser-page" style:--presence-color={agentColor(threadId)}>
+		<span class="agent-field-marker" aria-label="Agent is active in this page">Agent</span>
 		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
-		{#if passwordPage}<div class="password-notice" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
+		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
 </div>
 
@@ -300,9 +321,13 @@
 	.toolbar .icon svg { width: 16px; height: 16px; }
 	.agent-seam { display: inline-flex; }
 	.browser-page { position: relative; display: flex; flex: 1; min-height: 0; }
-	.browser-page.agent-present { box-shadow: inset 0 0 0 2px var(--presence-color, var(--accent)); transition: opacity 160ms ease; }
+	.browser-page::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--presence-color, var(--accent)); opacity: 0; pointer-events: none; transition: opacity 160ms ease; }
+	.browser-page.agent-present::after { opacity: 1; }
+	.agent-field-marker { position: absolute; z-index: 1; top: 10px; right: 10px; padding: 3px 7px; border: 1px solid var(--presence-color, var(--accent)); border-radius: var(--radius-pill); color: var(--presence-color, var(--accent)); background: var(--bg-primary); font-size: var(--text-caption); opacity: 0; pointer-events: none; transition: opacity 160ms ease; }
+	.browser-page.agent-present .agent-field-marker { opacity: 1; }
 	.password-notice { position: absolute; z-index: 1; bottom: 16px; left: 50%; display: inline-flex; gap: 8px; width: max-content; height: 44px; align-items: center; padding: 0 16px; border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); border-radius: var(--radius-pill); background: var(--glass-regular-thick); box-shadow: var(--glass-elevation-1), var(--glass-rim); backdrop-filter: var(--glass-blur); transform: translateX(-50%); }
+	.password-notice.top { top: 10px; bottom: auto; }
 	.password-notice svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
 	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; }
-	@media (prefers-reduced-motion: reduce) { .browser-page.agent-present { transition: none; } }
+	@media (prefers-reduced-motion: reduce) { .browser-page::after, .agent-field-marker { transition: none; } }
 </style>

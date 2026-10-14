@@ -92,6 +92,15 @@ describe('BrowserLeaf drawing', () => {
 	});
 });
 
+describe('BrowserLeaf navigation metadata', () => {
+	it('shows an address led by the registrable domain after navigation', () => {
+		const { socket } = render();
+		socket.receive({ type: 'navigate_result', error: null, url: 'https://accounts.example.co.uk/a/long/page', title: 'Example page' });
+		flushSync();
+		expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('example.co.uk · accounts · …page');
+	});
+});
+
 describe('BrowserLeaf reconnect', () => {
 	it('reconnects an ended stream when the agent opens its browser again', () => {
 		const { socket } = render();
