@@ -2,8 +2,8 @@
 
 The shared browser's password guard is the first caller: a password page opens
 one step per page visit, the agent's current task waits on it, and the step
-settles when the field is gone, with the system (not the agent, not the
-person) on the record.
+settles when the guard observes the sign-in, with the system (not the agent,
+not the person) on the record.
 """
 
 from __future__ import annotations
@@ -261,3 +261,21 @@ def test_every_event_on_the_step_is_system_attributed(db):
         "SELECT actor_id FROM plan_node_events WHERE node_id=?", (step,),
     ).fetchall()}
     assert actors == {None}
+
+
+def test_the_key_and_opened_reads_are_primary_key_seeks_on_the_plans_receipts(db):
+    """Each open and settle reads a bounded key range, however long the plan's history."""
+    from plans import system_user_steps
+
+    plan = owner_plan(db)
+    step = _open(db)
+    open_plan = " ".join(r["detail"] for r in db.execute(
+        "EXPLAIN QUERY PLAN SELECT result_json FROM plan_mutation_receipts WHERE plan_id=? AND mutation_id=?",
+        (plan.id, "k"),
+    ).fetchall())
+    settle_plan = " ".join(r["detail"] for r in db.execute(
+        "EXPLAIN QUERY PLAN " + system_user_steps._OPENED_SQL,
+        system_user_steps._opened_params(plan.id, step),
+    ).fetchall())
+    for detail in (open_plan, settle_plan):
+        assert "USING PRIMARY KEY" in detail and "mutation_id" in detail, detail

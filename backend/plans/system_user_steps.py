@@ -6,12 +6,13 @@ step is the user's (``assignee='user'``), attributed to the system
 (``actor_id`` None plus the caller's provenance), never to the agent whose
 plan holds it, so it never reads as the agent asking.
 
-Opening is idempotent on the caller's key within that thread's plan. The
-agent's selected task, if any, gains a dependency on the step, so the plan
+Opening is idempotent on the caller's key within that thread's plan, through
+the plan's own mutation receipts (``plans.receipts``): one primary-key read,
+however long the plan's history. The agent's selected task, if any, gains a dependency on the step, so the plan
 carries the wait: settling or closing the step wakes that task through the
 dependency path, and a paused plan stays paused until resume.
 
-Settling accepts only a step this module opened (its ``OPENED`` event), so it
+Settling accepts only a step this module opened (its receipt), so it
 can never mark an agent's own work done. Such a step has no parent, which is
 why the owner's top-level transition notice always reaches the agent. It is
 the person's Mark done, observed by the system, through the same writer (``plans.user_settle.settle``): open rows beneath settle first, the
@@ -26,13 +27,19 @@ Both join the caller's write transaction when there is one.
 from __future__ import annotations
 
 import plans.errors as errors
+import plans.receipts as receipts
 import plans.service as service
 from plans.plan_write import transaction
 
-#: The plan event that records a system-opened step and its idempotency key.
-OPENED = "system_user_step_opened"
 #: The verifier prefix a system settlement records; the pane names CORSIA.
 VERIFIER_PREFIX = "system:"
+#: The receipt operation, and the mutation-id prefix that keys it in the plan.
+OPERATION = "open_user_step"
+_MUTATION_PREFIX = f"{VERIFIER_PREFIX}{OPERATION}:"
+# A primary-key range seek over this module's receipts in one plan only.
+_OPENED_SQL = """SELECT 1 FROM plan_mutation_receipts
+    WHERE plan_id=? AND mutation_id>=? AND mutation_id<?
+      AND operation=? AND json_extract(result_json,'$.node_id')=? LIMIT 1"""
 
 
 def open_user_step(
@@ -44,17 +51,15 @@ def open_user_step(
     key = str(key).strip()
     if not key:
         raise errors.PlanInputError("open_user_step needs a non-empty key")
+    receipt = {
+        "mutation_id": f"{_MUTATION_PREFIX}{key}",
+        "actor_id": f"{VERIFIER_PREFIX}{provenance}",
+        "operation": OPERATION,
+        "fingerprint": receipts.request_fingerprint(OPERATION, {"key": key}),
+    }
     with transaction(db) as connection:
         plan = service.ensure_plan("thread", thread_id, db=connection)
-        # Only the plan's person steps are probed for the event, so the read
-        # stays small however long the agent's own history grows.
-        existing = connection.execute(
-            """SELECT e.node_id FROM plan_nodes n JOIN plan_node_events e ON e.node_id=n.id
-               WHERE n.plan_id=? AND n.assignee='user' AND e.event=?
-                 AND json_extract(e.payload_json,'$.key')=?
-               ORDER BY e.created_at,e.rowid LIMIT 1""",
-            (plan.id, OPENED, key),
-        ).fetchone()
+        existing = receipts.load(connection, plan_id=plan.id, **receipt)
         if existing is not None:
             return str(existing["node_id"])
         selected = [
@@ -66,8 +71,7 @@ def open_user_step(
             description=description, assignee="user", actor_id=None,
             provenance=provenance, db=connection,
         )
-        service._event(connection, node.id, OPENED, actor_id=None,
-                       provenance=provenance, payload={"key": key})
+        receipts.record(connection, plan_id=plan.id, result={"node_id": node.id}, **receipt)
         for waiting in selected:
             dependencies.add_dependency(
                 waiting, node.id, actor_id=None, provenance=provenance, db=connection,
@@ -81,10 +85,7 @@ def settle_user_step(db, node_id: str, *, evidence: str, provenance: str) -> boo
 
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
-        opened = connection.execute(
-            "SELECT 1 FROM plan_node_events WHERE node_id=? AND event=? LIMIT 1",
-            (node_id, OPENED),
-        ).fetchone()
+        opened = connection.execute(_OPENED_SQL, _opened_params(node["plan_id"], node_id)).fetchone()
         if opened is None:
             raise errors.PlanInputError("settle_user_step settles only a step open_user_step opened")
         if node["archived_at"] is not None or node["state"] in service._TERMINAL_STATES:
@@ -97,6 +98,10 @@ def settle_user_step(db, node_id: str, *, evidence: str, provenance: str) -> boo
             evidence=evidence,
         )
         return True
+
+
+def _opened_params(plan_id: str, node_id: str) -> tuple:
+    return (plan_id, _MUTATION_PREFIX, _MUTATION_PREFIX[:-1] + ";", OPERATION, node_id)
 
 
 def is_system_verifier(verifier: str | None) -> bool:
