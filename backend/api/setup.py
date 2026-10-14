@@ -6,13 +6,14 @@ exist. They are not a general unauthenticated provider or account API.
 
 from __future__ import annotations
 
+import asyncio
 import platform
 import shutil
 import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from infra import accounts, config
 from infra.db_async import run_in_db
@@ -24,11 +25,18 @@ router = APIRouter(prefix="/api/setup", tags=["setup"])
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
 _TAURI_ORIGINS = frozenset({"tauri:" + "//localhost", "http:" + "//tauri.localhost"})
+_MINIMUM_MACOS_MAJOR = 15
 
 
 class FirstAccountRequest(BaseModel):
+    """The account screen's fields; password confirmation remains client-side."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=120)
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=1024)
+    email: str | None = Field(default=None, max_length=320)
 
 
 def _loopback_host(request: Request) -> bool:
@@ -68,18 +76,41 @@ def _trusted_json_post(request: Request) -> bool:
     return origin in allowed_origins
 
 
-def _ram_tier(ram_bytes: int) -> int:
-    """Return the highest local-profile RAM threshold this Mac reaches."""
-    from llm.local_profiles import PROFILES
-    from llm.local_setup_gates import GIB
+def _macos_supported() -> bool:
+    """Whether this Mac meets the approved macOS 15 floor."""
+    if platform.system() != "Darwin":
+        return False
+    try:
+        return int(platform.mac_ver()[0].split(".", 1)[0]) >= _MINIMUM_MACOS_MAJOR
+    except (TypeError, ValueError):
+        return False
 
-    return max(profile.min_ram_gib for profile in PROFILES if ram_bytes >= profile.min_ram_gib * GIB)
 
-
-def _app_location_class() -> str:
+def _app_location_class(executable: Path | None = None) -> str:
     """Expose a coarse package class, never the executable's path."""
-    executable = Path(sys.executable)
-    return "application_bundle" if ".app" in executable.parts else "other"
+    parts = (executable or Path(sys.executable)).parts
+    if "Volumes" in parts:
+        return "disk_image"
+    if "Applications" in parts:
+        return "applications"
+    return "other"
+
+
+def _work_folder_display(workspace: Path) -> str:
+    """Return a home-abbreviated workspace label with no account name leakage."""
+    try:
+        relative = workspace.resolve().relative_to(Path.home().resolve())
+    except ValueError:
+        return f"…/{workspace.name}" if workspace.name else "…"
+    return "~" if not relative.parts else f"~/{relative.as_posix()}"
+
+
+def _seed_workspace_profile(name: str, email: str) -> None:
+    """Use the CLI's existing profile-create-or-add-email behavior after account creation."""
+    from infra.user_profile import add_profile_email, mac_timezone, write_user_profile
+
+    if not write_user_profile(config.WORKSPACE, name, mac_timezone(), email):
+        add_profile_email(config.WORKSPACE, email)
 
 
 def _setup_status() -> dict:
@@ -88,17 +119,23 @@ def _setup_status() -> dict:
     from llm.local_profiles import DEFAULT_PROFILE
 
     ram_bytes = host_ram_bytes()
-    compatible = platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+    apple_silicon = platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+    macos_supported = _macos_supported()
+    profile_eligible = profile_eligibility(DEFAULT_PROFILE, ram_bytes).eligible
     try:
-        free_disk_bytes = shutil.disk_usage(config.STATE_ROOT).free
+        free_disk_gb = round(shutil.disk_usage(config.STATE_ROOT).free / 1000**3, 1)
     except OSError:
-        free_disk_bytes = None
+        free_disk_gb = None
     return {
-        "macos_apple_silicon": compatible,
-        "ram_tier_gib": _ram_tier(ram_bytes),
-        "free_disk_bytes": free_disk_bytes,
+        "apple_silicon": apple_silicon,
+        "macos_supported": macos_supported,
+        "ram_tier": "eligible" if profile_eligible else "low",
+        "free_disk_gb": free_disk_gb,
         "app_location": _app_location_class(),
-        "local_eligible": compatible and profile_eligibility(DEFAULT_PROFILE, ram_bytes).eligible,
+        "local_eligible": apple_silicon and macos_supported and profile_eligible,
+        "work_folder": _work_folder_display(config.WORKSPACE),
+        "model_name": DEFAULT_PROFILE.display_name,
+        "model_size_gb": round(DEFAULT_PROFILE.download_size_bytes / 1000**3, 1),
     }
 
 
@@ -141,6 +178,7 @@ async def first_account(request: Request) -> dict | Response:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
     except accounts.AccountError:
         return Response(status_code=422)
+    await asyncio.to_thread(_seed_workspace_profile, body.name, body.email or "")
     token, expires_at = await run_in_db(accounts.issue_token, user_id, kind="session", label="browser")
     user = await run_in_db(accounts.get_user, user_id)
     return {
