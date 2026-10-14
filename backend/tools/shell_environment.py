@@ -106,12 +106,8 @@ def safehouse_subprocess_env(
         env["CORSIA_THREAD_ID"] = str(thread_id)
     if thread_id and isinstance(invocation_id, str) and invocation_id.strip():
         env["CORSIA_TOOL_INVOCATION_ID"] = invocation_id
-    # Chromium cannot nest its own Seatbelt sandbox inside Safehouse's. A headed shared
-    # browser must also keep rendering while CORSIA obscures its native window.
-    additions = ("--no-sandbox", "--disable-backgrounding-occluded-windows",
-                 "--disable-renderer-backgrounding", "--disable-background-timer-throttling")
-    current = [arg for arg in env.get("AGENT_BROWSER_ARGS", "").split(",") if arg]
-    env["AGENT_BROWSER_ARGS"] = ",".join(dict.fromkeys((*current, *additions)))
+    # Chromium cannot nest its own Seatbelt sandbox inside Safehouse's.
+    env["AGENT_BROWSER_ARGS"] = "--no-sandbox"
     return env
 
 

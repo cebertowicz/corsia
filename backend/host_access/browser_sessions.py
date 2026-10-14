@@ -85,10 +85,8 @@ class BrowserSessionOwner:
         if result.timed_out and args[0] == "wait":
             return browser_cli.WAIT_TIMED_OUT
         rendered = self._model_result(result, runtime.record)
-        if (args[0] == "open" and runtime.record.show_window and not runtime.browser_opened_announced
-                and not unfinished and not rendered.startswith("Error:")):
+        if runtime.should_announce_opened(args[0], unfinished, rendered):
             browser_control.announce_browser_opened(thread_id)
-            runtime.browser_opened_announced = True
         return rendered
 
     async def stream_port(self, thread_id: str) -> StreamPortResult:

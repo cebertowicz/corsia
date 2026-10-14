@@ -3,7 +3,8 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
-	import { AnimationFrameCoalescer, clampPoint, LatestFramePipeline, type PanePoint } from '$lib/browserPane';
+	import { clampPoint, LatestFramePipeline } from '$lib/browserPane';
+	import { BrowserPaneInput } from '$lib/browserPaneInput';
 	import { on } from '$lib/ws/events';
 	import { get } from 'svelte/store';
 
@@ -20,12 +21,10 @@
 	let fitTimer: ReturnType<typeof setTimeout> | undefined;
 	let lastAppearance = '';
 	let activePointer: number | null = null;
-	let touchStart: { clientX: number; clientY: number; point: PanePoint } | null = null;
-	let touchLast: { clientX: number; clientY: number; point: PanePoint } | null = null;
-	let touchDragging = false;
 	const framePipeline = new LatestFramePipeline(drawFrame);
-	const mouseMoves = new AnimationFrameCoalescer(sendMouseMove);
-	const touchWheels = new AnimationFrameCoalescer(sendTouchWheel);
+	const paneInput = new BrowserPaneInput(message => {
+		if (hasControl && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+	});
 
 	function connect() {
 		socket?.close();
@@ -39,7 +38,7 @@
 			next.send(JSON.stringify({ token: get(token) ?? '' }));
 			sendAppearance();
 		};
-		next.onmessage = (event) => drawMessage(event.data);
+		next.onmessage = (event) => { if (socket === next) drawMessage(event.data); };
 		next.onclose = () => {
 			if (socket !== next) return;
 			// The server releases control whenever this connection ends, so the pane must too.
@@ -74,16 +73,7 @@
 		if (message.type !== 'frame' || !message.metadata || typeof message.data !== 'string') return;
 		const metadata = message.metadata as Record<string, unknown>;
 		if (typeof metadata.deviceWidth !== 'number' || typeof metadata.deviceHeight !== 'number') return;
-		const requested = lastAppearance ? JSON.parse(lastAppearance) as { width?: number; height?: number } : null;
-		if (requested && (requested.width !== metadata.deviceWidth || requested.height !== metadata.deviceHeight)) {
-			// A viewport match can race browser startup. Only remember a size after its frame confirms it.
-			lastAppearance = '';
-			clearTimeout(fitTimer);
-			fitTimer = setTimeout(sendAppearance, 150);
-		}
-		width = metadata.deviceWidth;
-		height = metadata.deviceHeight;
-		framePipeline.offer({ data: message.data, width, height });
+		framePipeline.offer({ data: message.data, width: metadata.deviceWidth, height: metadata.deviceHeight });
 	}
 
 	// Where the page sits in the canvas: drawing and input share it, so a click lands where it is drawn.
@@ -95,6 +85,8 @@
 
 	function drawFrame(bitmap: ImageBitmap, frame: { width: number; height: number }) {
 		if (!canvas || !frame.width || !frame.height) return;
+		width = frame.width;
+		height = frame.height;
 		const { bounds, scale, left, top } = placement();
 		const backingWidth = Math.round(bounds.width * devicePixelRatio);
 		const backingHeight = Math.round(bounds.height * devicePixelRatio);
@@ -106,6 +98,9 @@
 		const context = canvas.getContext('2d');
 		if (!context) return;
 		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+		// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
+		// top-left corner with blank space beside it, so draw only the page's part of the frame.
+		// Frame pixels per page pixel; above 1 on a high-density pane.
 		const density = Math.min(bitmap.width / frame.width, bitmap.height / frame.height);
 		context.drawImage(bitmap, 0, 0, frame.width * density, frame.height * density, left, top, frame.width * scale, frame.height * scale);
 	}
@@ -132,81 +127,25 @@
 		return clamp ? clampPoint(point, width, height) : point.x >= 0 && point.y >= 0 && point.x <= width && point.y <= height ? point : null;
 	}
 
-	function sendInput(eventType: 'mouseMoved' | 'mousePressed' | 'mouseReleased', point: PanePoint, button: 'left' | 'none', clickCount: number) {
-		if (socket?.readyState !== WebSocket.OPEN) return;
-		socket.send(JSON.stringify({ type: 'input_mouse', eventType, ...point, button, clickCount }));
-	}
-
-	function sendMouseMove(point: PanePoint) {
-		if (hasControl) sendInput('mouseMoved', point, 'none', 0);
-	}
-
-	function sendTouchWheel(value: { point: PanePoint; deltaX: number; deltaY: number }) {
-		if (hasControl && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseWheel', ...value }));
-	}
-
 	function sendMouse(event: PointerEvent) {
 		if (!hasControl || socket?.readyState !== WebSocket.OPEN || !width || !height) return;
-		if (event.pointerType === 'touch') {
-			handleTouch(event);
-			return;
-		}
+		if (!event.isPrimary) return;
+		const point = coordinates(event, activePointer !== null || event.type !== 'pointermove');
+		if (!point) return;
+		if (event.pointerType === 'touch') event.preventDefault();
 		if (event.type === 'pointerdown') {
 			canvas.focus();
 			activePointer = event.pointerId;
 			canvas.setPointerCapture(event.pointerId);
-			const point = coordinates(event, true);
-			if (!point) return;
 			// Move before pressing because Chrome may use the last cursor position for a press.
-			sendInput('mouseMoved', point, 'none', 0);
-			sendInput('mousePressed', point, 'left', 1);
-			return;
-		}
-		const point = coordinates(event, event.type === 'pointerup' || event.type === 'pointercancel');
-		if (!point) return;
-		if (event.type === 'pointermove') mouseMoves.push(point);
-		else {
-			mouseMoves.cancel();
-			sendInput('mouseReleased', point, 'left', 1);
-			if (activePointer === event.pointerId && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+			paneInput.press(event, point);
+		} else if (event.type === 'pointermove') {
+			paneInput.move(event, point, placement().scale);
+		} else {
+			paneInput.release(event, point, event.type === 'pointercancel');
+			if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 			activePointer = null;
 		}
-	}
-
-	function handleTouch(event: PointerEvent) {
-		const point = coordinates(event, true);
-		if (!point) return;
-		if (event.type === 'pointerdown') {
-			canvas.focus();
-			activePointer = event.pointerId;
-			canvas.setPointerCapture(event.pointerId);
-			touchStart = { clientX: event.clientX, clientY: event.clientY, point };
-			touchLast = touchStart;
-			touchDragging = false;
-			return;
-		}
-		if (!touchStart || !touchLast) return;
-		if (event.type === 'pointermove') {
-			event.preventDefault();
-			const distance = Math.hypot(event.clientX - touchStart.clientX, event.clientY - touchStart.clientY);
-			if (distance > 8) touchDragging = true;
-			if (touchDragging) {
-				const { scale } = placement();
-				touchWheels.push({ point, deltaX: (touchLast.clientX - event.clientX) / scale, deltaY: (touchLast.clientY - event.clientY) / scale });
-			}
-			touchLast = { clientX: event.clientX, clientY: event.clientY, point };
-			return;
-		}
-		if (!touchDragging && event.type === 'pointerup') {
-			sendInput('mouseMoved', touchStart.point, 'none', 0);
-			sendInput('mousePressed', touchStart.point, 'left', 1);
-			sendInput('mouseReleased', point, 'left', 1);
-		}
-		touchWheels.cancel();
-		if (activePointer === event.pointerId && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-		activePointer = null;
-		touchStart = null;
-		touchLast = null;
 	}
 
 	function sendWheel(event: WheelEvent) {
@@ -280,8 +219,7 @@
 			observer.disconnect();
 			unsubscribeTheme();
 			clearTimeout(fitTimer);
-			mouseMoves.cancel();
-			touchWheels.cancel();
+			paneInput.dispose();
 			framePipeline.dispose();
 		};
 	});
@@ -324,7 +262,9 @@
 
 <style>
 	.browser-leaf { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-primary); }
-	.toolbar { display: flex; gap: .5rem; align-items: center; padding: .5rem; font-size: .8rem; }
+	.toolbar { display: flex; flex-shrink: 0; gap: .5rem; align-items: center; padding: .5rem; font-size: .8rem; }
+	.toolbar span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.toolbar button { flex-shrink: 0; white-space: nowrap; }
 	.toolbar input { flex: 1; min-width: 0; }
 	.toolbar .icon { display: inline-flex; padding: 2px; border: 0; background: none; color: var(--text-secondary); cursor: pointer; }
 	.toolbar .icon:disabled { color: var(--text-tertiary); cursor: default; }

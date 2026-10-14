@@ -41,10 +41,12 @@ export class LatestFramePipeline {
 	private bitmap: ImageBitmap | null = null;
 	private displayedFrame: BrowserFrame | null = null;
 	private scheduled = 0;
+	private disposed = false;
 
 	constructor(private readonly draw: (bitmap: ImageBitmap, frame: BrowserFrame) => void) {}
 
 	offer(frame: BrowserFrame): void {
+		if (this.disposed) return;
 		this.queued = frame;
 		if (!this.decoding) void this.decodeLatest();
 	}
@@ -57,8 +59,8 @@ export class LatestFramePipeline {
 			try {
 				const response = await fetch(`data:image/jpeg;base64,${frame.data}`);
 				const bitmap = await createImageBitmap(await response.blob());
-				// A fresher undecoded frame makes this bitmap obsolete before it reaches the canvas.
-				if (this.queued) {
+				// A disposed component must release even a decode that completed after unmount.
+				if (this.disposed) {
 					bitmap.close();
 					continue;
 				}
@@ -86,6 +88,7 @@ export class LatestFramePipeline {
 	}
 
 	dispose(): void {
+		this.disposed = true;
 		if (this.scheduled) cancelAnimationFrame(this.scheduled);
 		this.scheduled = 0;
 		this.queued = null;

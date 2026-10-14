@@ -7,7 +7,6 @@ import json
 import logging
 import secrets
 
-import websockets
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
@@ -18,6 +17,8 @@ from infra.auth import authenticate
 from infra.database import get_db
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
+from ws.browser_frames import PaneFrames
+from ws.browser_source import BrowserStreamSource
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
         await ws.close()
         return
     try:
-        async with websockets.connect(f"ws://127.0.0.1:{outcome.port}", max_size=None) as stream:
+        async with BrowserStreamSource(f"ws://127.0.0.1:{outcome.port}") as stream:
             await _relay(ws, stream, thread_id, user["id"])
     except WebSocketDisconnect:
         pass
@@ -80,53 +81,17 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
     """Proxy frames and accept input only from this connection's control holder."""
     connection_token = secrets.token_urlsafe(18)
 
-    reliable: asyncio.Queue[str] = asyncio.Queue()
-    latest_frame: str | None = None
-    frame_ready = asyncio.Event()
+    frames = PaneFrames()
 
     async def send_control() -> None:
-        await reliable.put(json.dumps({
+        frames.control({
             "type": "control",
             "has_control": browser_control.holds_control(thread_id, connection_token),
-        }, separators=(",", ":")))
-
-    async def send_latest() -> None:
-        """Keep control/status ordered while replacing frames a slow pane cannot yet see."""
-        nonlocal latest_frame
-        while True:
-            try:
-                message = reliable.get_nowait()
-            except asyncio.QueueEmpty:
-                message = None
-            if message is not None:
-                await pane.send_text(message)
-                continue
-            if latest_frame is not None:
-                message, latest_frame = latest_frame, None
-                frame_ready.clear()
-                await pane.send_text(message)
-                continue
-            reliable_wait = asyncio.create_task(reliable.get())
-            frame_wait = asyncio.create_task(frame_ready.wait())
-            done, pending = await asyncio.wait({reliable_wait, frame_wait}, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-            if reliable_wait in done:
-                await pane.send_text(reliable_wait.result())
+        })
 
     async def from_stream() -> None:
-        nonlocal latest_frame
         async for message in stream:
-            try:
-                kind = json.loads(message).get("type")
-            except (TypeError, ValueError):
-                kind = None
-            if kind == "frame":
-                latest_frame = message
-                frame_ready.set()
-            else:
-                await reliable.put(message)
+            frames.offer(message)
 
     async def from_pane() -> None:
         while True:
@@ -155,7 +120,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                         result = done.result()
                     except Exception as exc:
                         result = {"type": "navigate_result", "error": str(exc)}
-                    reliable.put_nowait(json.dumps(result, separators=(",", ":")))
+                    frames.control(result)
 
                 task.add_done_callback(publish_navigation)
             elif kind == "appearance":
@@ -164,12 +129,11 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                   and browser_control.holds_control(thread_id, connection_token)):
                 await stream.send(message)
 
+    tasks: set[asyncio.Task] = set()
     try:
-        # A stream connection alone supplies stale dimensions in agent-browser 0.31.2; this explicit
-        # screencast keeps the remote viewport matched to the pane.
         await stream.send(json.dumps({"type": "screencast_start"}))
         await send_control()
-        tasks = {asyncio.create_task(from_stream()), asyncio.create_task(from_pane()), asyncio.create_task(send_latest())}
+        tasks = {asyncio.create_task(from_stream()), asyncio.create_task(from_pane()), asyncio.create_task(frames.send(pane.send_text))}
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
             task.cancel()
@@ -177,6 +141,10 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         for task in done:
             task.result()
     finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         # A closed connection's size must never land after a newer pane's.
         if (queued := _latest_appearance.get(thread_id)) and queued[0] == connection_token:
             del _latest_appearance[thread_id]

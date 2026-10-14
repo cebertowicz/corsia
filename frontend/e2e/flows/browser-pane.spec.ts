@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import './browser-pane-stress';
 import { createSession, loginByUrl, saveEvidenceScreenshot } from '../support/corsia';
 import type { Locator } from '@playwright/test';
 
@@ -24,10 +25,17 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		const threadId = await createSession(request, title);
 		const browserSockets: string[] = [];
 		const browserFrames: string[] = [];
+		let openedAt = 0, firstFrameMs = 0;
 		page.on('websocket', (socket) => {
 			browserSockets.push(socket.url());
 			socket.on('framereceived', (frame) => {
-				try { browserFrames.push(`${socket.url()}:${String(frame.payload)}`); } catch { /* non-JSON frames are irrelevant */ }
+				try {
+					browserFrames.push(`${socket.url()}:${String(frame.payload)}`);
+					if (openedAt && !firstFrameMs && socket.url().includes(`/api/browser/${threadId}/stream`) && JSON.parse(String(frame.payload)).type === 'frame') {
+						firstFrameMs = Date.now() - openedAt;
+						void testInfo.attach('first-pane-frame', { body: JSON.stringify({ firstFrameMs }), contentType: 'application/json' });
+					}
+				} catch { /* non-JSON frames are irrelevant */ }
 			});
 		});
 		await loginByUrl(page);
@@ -37,6 +45,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await expect(address).toBeVisible();
 		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html`);
 		const opened = page.waitForResponse((response) => response.url().includes(`/api/browser/${threadId}/open`));
+		openedAt = Date.now();
 		await page.getByRole('button', { name: 'Go' }).click();
 		const openResponse = await opened;
 		expect(openResponse.status(), await openResponse.text()).toBe(200);
