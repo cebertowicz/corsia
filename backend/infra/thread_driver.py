@@ -274,6 +274,8 @@ def _claim_after_terminal(
     a successor would claim is failed visibly instead (Amendment 16 C1, C2).
     """
 
+    from automation.restart_resumption import idle_threads_with_held_input
+    from automation.self_restart import restart_holds_new_work
     from infra.model_switches import activate_ready_switch, resolvable_switch
 
     switch_transition = activate_ready_switch(
@@ -282,22 +284,29 @@ def _claim_after_terminal(
     switch_request = (
         None if switch_transition is not None else resolvable_switch(connection, thread_id)
     )
-    successor = fail_claimable_prefix(
-        connection, thread_id, error=fail_closed,
-    ) if fail_closed is not None else start_idle_turn(
-        thread_id,
-        turn_id=successor_turn_id,
-        boot_epoch=boot_epoch,
-        started_at=ended_at,
-        db=connection,
-        hold_expired_limit_at_startup=hold_expired_limit_at_startup,
-    )
+    held_input = False
+    if fail_closed is not None:
+        successor = fail_claimable_prefix(connection, thread_id, error=fail_closed)
+    elif restart_holds_new_work(db=connection):
+        # A restart hold admits no new work: inputs stay queued until the hold
+        # releases, then startup or the abort wake claims them in FIFO order.
+        successor = None
+        held_input = bool(idle_threads_with_held_input(connection, thread_id))
+    else:
+        successor = start_idle_turn(
+            thread_id,
+            turn_id=successor_turn_id,
+            boot_epoch=boot_epoch,
+            started_at=ended_at,
+            db=connection,
+            hold_expired_limit_at_startup=hold_expired_limit_at_startup,
+        )
     idle = _write_idle_marker(connection, idle_marker_due(
         connection, turn_id, outcome=outcome,
         successor_claimed=isinstance(successor, ClaimedBatch),
         switch_pending=switch_transition is not None or switch_request is not None,
         mark_idle_checkpoint=mark_idle_checkpoint,
-        successor_held=isinstance(successor, HeldAdmission),
+        successor_held=held_input or isinstance(successor, HeldAdmission),
     ))
     return successor, switch_transition, switch_request, idle
 

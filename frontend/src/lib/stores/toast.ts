@@ -3,6 +3,8 @@ import { get, writable } from 'svelte/store';
 export interface ToastAction {
 	label: string;
 	run: () => void | Promise<unknown>;
+	/** Keep a persistent pinned outcome visible after its Details action opens. */
+	dismiss?: boolean;
 }
 
 export type OrdinaryToastType = 'info' | 'success' | 'error';
@@ -11,10 +13,14 @@ export type ToastType = OrdinaryToastType | 'progress';
 /** Present only on the toast that occupies the pinned slot. */
 export interface PinnedToastState {
 	key: string;
+	/** Optional second line for a persistent outcome. */
+	detail?: string;
 	/** Accessible name and tooltip for the close button; defaults to "Dismiss". */
 	closeLabel?: string;
 	/** A ticking segment shown after the message, dropped first when the line does not fit. */
 	time?: string;
+	/** Runs when the person closes this toast with its close button, never when the app unpins or replaces it. */
+	onClose?: () => void;
 }
 
 export interface Toast {
@@ -28,6 +34,8 @@ export interface Toast {
 
 export interface PinnedToastSpec {
 	message: string;
+	/** Optional secondary line, used when an outcome has a concrete next action. */
+	detail?: string;
 	/**
 	 * `progress` has no timeout and shows a spinner. `error` stays until it is
 	 * dismissed. `success` and `info` are outcomes: they last `duration` and then
@@ -37,6 +45,7 @@ export interface PinnedToastSpec {
 	action?: ToastAction;
 	closeLabel?: string;
 	time?: string;
+	onClose?: () => void;
 	/** Lifetime of a `success` or `info` outcome in ms. Default 8000. */
 	duration?: number;
 }
@@ -129,7 +138,7 @@ function createToastStore() {
 			type: spec.type,
 			duration,
 			action: spec.action,
-			pinned: { key, closeLabel: spec.closeLabel, time: spec.time },
+			pinned: { key, detail: spec.detail, closeLabel: spec.closeLabel, time: spec.time, onClose: spec.onClose },
 		};
 		store.update((items) => [...items.filter((item) => !item.pinned), toast]);
 		if (duration === undefined) clearTimer(id);
@@ -173,7 +182,7 @@ function createToastStore() {
 		const action = get(store).find((toast) => toast.id === id)?.action;
 		if (!action) return;
 		runningActions.add(id);
-		dismiss(id);
+		if (action.dismiss !== false) dismiss(id);
 		try {
 			await action.run();
 		} finally {

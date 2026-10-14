@@ -7,7 +7,7 @@ import asyncio
 from loguru import logger
 
 from automation.restart_messages import RESTART_DRAIN_REFUSAL, TURN_STOPPED_REFUSAL
-from automation.restart_resumption import resume_threads_detached
+from automation.restart_resumption import idle_threads_with_held_input, resume_threads_detached
 from infra.database import get_db, write_transaction
 
 RESTART_PENDING_MESSAGE = (
@@ -298,8 +298,8 @@ def _release_restart_control(
         )
         if not released:
             return None
-        return cancel_operation_registrations(operation_id, db=connection)
-
+        woken = cancel_operation_registrations(operation_id, db=connection)
+        return tuple(dict.fromkeys((*woken, *idle_threads_with_held_input(connection))))
 
 
 def advance_restart_readiness(operation_id: str) -> bool:

@@ -2,26 +2,50 @@
 	import { toasts, type Toast } from '$lib/stores/toast';
 	import { toastAnchor } from '$lib/stores/toastAnchor';
 	import { toastClearance } from '$lib/stores/toastClearance';
+	import { toastStackHeight } from '$lib/stores/toastStack';
 	import { toastFit } from '$lib/stores/toastFit';
+	import { cssVar, ms } from '$lib/popoverMotion';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
+	import { get } from 'svelte/store';
 
 	let toastHeight = $state(0);
 
-	/** The upper toast glides into the freed place when the one below it goes. */
+	/** Until when a toast is fading out; the toast above waits for that before it glides into the freed place. */
+	let leavingUntil = 0;
+	const leaveMs = () => ms('--dur-standard') * 0.7;
+
+	/** The upper toast glides into the freed place when the one below it goes, after that one has faded. */
 	function flipParams() {
 		const reduced =
 			typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-		return { duration: reduced ? 0 : 200, easing: cubicOut };
+		const waiting = !reduced && Date.now() < leavingUntil;
+		return { duration: reduced ? 0 : ms('--dur-standard'), delay: waiting ? leaveMs() : 0, easing: cubicOut };
+	}
+
+	/**
+	 * A toast fades and drops a few pixels as it leaves, at 70% of its entrance (motion.md); reduced
+	 * motion keeps the fade only. The leave is `global` so the last toast also plays it when the whole
+	 * stack goes.
+	 */
+	function toastLeave(node: HTMLElement) {
+		const duration = leaveMs();
+		leavingUntil = Date.now() + duration;
+		const from = get(prefersReducedMotion) ? { opacity: 1 } : { opacity: 1, transform: 'none' };
+		const to = get(prefersReducedMotion) ? { opacity: 0 } : { opacity: 0, transform: 'translateY(8px)' };
+		node.animate([from, to], { duration, easing: cssVar('--ease-snap') || 'ease-out', fill: 'forwards' });
+		return { duration };
 	}
 
 	function measureToastHeight(node: HTMLElement) {
 		const update = () => {
 			toastHeight = node.getBoundingClientRect().height;
+			toastStackHeight.set(toastHeight);
 		};
 		if (typeof ResizeObserver === 'undefined') {
 			update();
-			return {};
+			return { destroy: () => toastStackHeight.set(0) };
 		}
 		const observer = new ResizeObserver(update);
 		observer.observe(node);
@@ -29,6 +53,7 @@
 		return {
 			destroy() {
 				observer.disconnect();
+				toastStackHeight.set(0);
 			},
 		};
 	}
@@ -37,7 +62,7 @@
 	function fitParam(toast: Toast): string | null {
 		const pinned = toast.pinned;
 		if (!pinned) return null;
-		return `${toast.message}|${pinned.time ?? ''}|${toast.action?.label ?? ''}`;
+		return `${toast.message}|${pinned.detail ?? ''}|${pinned.time ?? ''}|${toast.action?.label ?? ''}`;
 	}
 
 	function pinnedFit(node: HTMLElement, param: string | null) {
@@ -65,6 +90,7 @@
 				role={pinned ? (type === 'error' ? 'alert' : undefined) : 'status'}
 				data-fit="full"
 				animate:flip={flipParams()}
+				out:toastLeave|global
 				use:pinnedFit={fitParam(toast)}
 				onmouseenter={() => toasts.pause(toast.id, 'pointer')}
 				onmouseleave={() => toasts.resume(toast.id, 'pointer')}
@@ -83,10 +109,11 @@
 				{:else if type === 'info' && pinned}
 					<svg class="toast-icon toast-icon--update" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8 12l4-4 4 4"/></svg>
 				{:else if type === 'error'}
-					<svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12.5"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+					<svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
 				{/if}
-				<span class="toast-line">
+				<span class="toast-line" class:toast-line--detail={Boolean(pinned?.detail)}>
 					<span class="toast-text" role={pinned && type !== 'error' ? 'status' : undefined}>{toast.message}</span>
+					{#if pinned?.detail}<span class="toast-detail">{pinned.detail}</span>{/if}
 					{#if pinned?.time}
 						<span class="toast-time" aria-hidden="true">{pinned.time}</span>
 					{/if}
@@ -98,7 +125,7 @@
 				{/if}
 				<button
 					class="toast-close"
-					onclick={() => toasts.dismiss(toast.id)}
+					onclick={() => { pinned?.onClose?.(); toasts.dismiss(toast.id); }}
 					aria-label={pinned?.closeLabel ?? 'Dismiss'}
 					title={pinned?.closeLabel}>×</button>
 			</div>
@@ -159,10 +186,11 @@
 	}
 
 	.toast--success {
-		background: color-mix(in srgb, #22c55e 15%, var(--bg-secondary));
-		color: #22c55e;
-		border: 1px solid color-mix(in srgb, #22c55e 30%, transparent);
+		background: var(--bg-secondary);
+		color: var(--text-primary);
+		border: 1px solid var(--border-subtle);
 	}
+	.toast--success .toast-icon { color: var(--green-text); }
 
 	.toast--error {
 		background: color-mix(in srgb, var(--status-blocked) 15%, var(--bg-secondary));
@@ -193,6 +221,9 @@
 		flex: 1;
 	}
 
+	.toast-detail { display: block; color: var(--text-secondary); font-weight: 400; }
+	.toast--error .toast-text { color: var(--red-text); font-weight: var(--fw-semibold); }
+	.toast--error .toast-action { color: var(--red-text); }
 	.toast-time {
 		color: var(--text-tertiary);
 		font-weight: 400;
@@ -208,6 +239,9 @@
 	   time, then the step text wrapped. */
 	.toast--pinned {
 		gap: var(--space-2);
+		/* The step text changes length (Stopping, Restarting, Resuming, Updated); holding the
+		   widest step's width keeps the toast from resizing, and its flip from stretching text. */
+		min-width: min(26rem, calc(var(--toast-column) - var(--space-7)));
 	}
 	.toast--pinned .toast-line {
 		flex: 0 0 auto;

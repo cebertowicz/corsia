@@ -15,6 +15,7 @@ import {
 } from '../stores/connection';
 import { isDisplayedThread } from '../stores/displayedThreads';
 import { clearAllContextUsage } from '../stores/contextUsageByThread';
+import { loadUpdateStatus } from '../update/store';
 import { emit } from './events';
 import { subscribedThreads } from './state';
 import { resubscribeWatchedThreads, stopRequestedTurns, subscribeThread } from './send';
@@ -95,6 +96,8 @@ export function handleAuthOk(
 
 export function handleSystemDraining(data: any) {
 	applyDrainStatus({ ...data, active: data.draining === true });
+	// A drain is how an update started on another device reaches this one: read the operation now.
+	void loadUpdateStatus();
 }
 
 function appendVisibleError(data: any): void {

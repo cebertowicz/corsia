@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { mount, tick, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toasts } from '$lib/stores/toast';
 import ToastContainer from './ToastContainer.svelte';
@@ -179,6 +179,7 @@ describe('ToastContainer pinned slot', () => {
 
 		toasts.show('Moved');
 		await tick();
+		await vi.advanceTimersByTimeAsync(300);
 		expect([...host.querySelectorAll('.toast-text')].map((el) => el.textContent)).toEqual([
 			'Moved',
 			'Restarting',
@@ -263,11 +264,76 @@ describe('ToastContainer fit', () => {
 		expect(toast.dataset.fit).toBe('full');
 	});
 
+	it('renders a pinned failure detail as a second line', () => {
+		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: 'Needs 12 GB more free space' });
+		mountContainer();
+		expect(host.querySelector('.toast-detail')?.textContent).toBe('Needs 12 GB more free space');
+	});
+
 	it('never measures an ordinary toast', async () => {
 		overflowsAt = () => true;
 		toasts.show('A long ordinary toast');
 		mountContainer();
 		await tick();
 		expect(host.querySelector<HTMLElement>('.toast')!.dataset.fit).toBe('full');
+	});
+});
+
+describe('ToastContainer leave', () => {
+	let leaveOptions: KeyframeAnimationOptions | undefined;
+
+	async function leaveKeyframes(reduced: boolean): Promise<Record<string, unknown>[]> {
+		const original = window.matchMedia;
+		window.matchMedia = ((query: string) => ({
+			matches: reduced && query.includes('prefers-reduced-motion'),
+			media: query,
+			addEventListener() {},
+			removeEventListener() {},
+			addListener() {},
+			removeListener() {},
+			dispatchEvent: () => false,
+		})) as unknown as typeof window.matchMedia;
+		const animate = vi.spyOn(Element.prototype, 'animate');
+		try {
+			toasts.show('Leaving');
+			component = mount(ToastContainer, { target: host });
+			flushSync();
+			animate.mockClear();
+			toasts.dismiss(get(toasts)[0].id);
+			flushSync();
+			await vi.advanceTimersByTimeAsync(10);
+			leaveOptions = animate.mock.calls.map(([, opts]) => opts as KeyframeAnimationOptions).find((opts) => opts?.fill === 'forwards');
+			return animate.mock.calls.flatMap(([frames]) => frames as Record<string, unknown>[]);
+		} finally {
+			animate.mockRestore();
+			window.matchMedia = original;
+		}
+	}
+
+	it('leaves at 70% of the standard duration on the snap easing, both read from the tokens', async () => {
+		const root = document.documentElement.style;
+		root.setProperty('--dur-standard', '200ms');
+		root.setProperty('--ease-snap', 'cubic-bezier(0.2, 0, 0, 1)');
+		try {
+			await leaveKeyframes(false);
+			expect(leaveOptions?.duration).toBe(140);
+			expect(leaveOptions?.easing).toBe('cubic-bezier(0.2, 0, 0, 1)');
+		} finally {
+			root.removeProperty('--dur-standard');
+			root.removeProperty('--ease-snap');
+		}
+	});
+
+	it('fades and drops a leaving toast, the last one included', async () => {
+		const frames = await leaveKeyframes(false);
+		expect(frames.length).toBeGreaterThan(1);
+		expect(frames.some((frame) => 'opacity' in frame)).toBe(true);
+		expect(frames.some((frame) => String(frame.transform ?? '').includes('translateY'))).toBe(true);
+	});
+
+	it('only fades under reduced motion', async () => {
+		const frames = await leaveKeyframes(true);
+		expect(frames.some((frame) => 'opacity' in frame)).toBe(true);
+		expect(frames.some((frame) => 'transform' in frame)).toBe(false);
 	});
 });
