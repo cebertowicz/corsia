@@ -11,7 +11,14 @@ export type UpdateFailureCode =
 	| 'fetch_failed'
 	| 'build_failed'
 	| 'launch_failed'
-	| 'drain_cancelled';
+	| 'drain_cancelled'
+	| 'drain_failed'
+	| 'update_timed_out'
+	| 'prepare_failed'
+	| 'index_locked'
+	| 'checkout_detached'
+	| 'checkout_dirty'
+	| 'restart_pending';
 
 export interface UpdateOperation {
 	operation_id: string;
@@ -30,6 +37,10 @@ export interface UpdateOperation {
 	requested_at?: string | null;
 	settled_at?: string | null;
 	log_tail?: string | null;
+	/** The change list this update was offered with; it lives on the row so every device shows the same notes. */
+	changes?: UpdateChanges | null;
+	/** Set by the first client to show the outcome (a failure only once someone acts on it). */
+	outcome_seen_at?: string | null;
 }
 
 export interface UpdateChanges {
@@ -44,24 +55,6 @@ export interface UpdateOffer {
 	version: string;
 	currentVersion: string | null;
 	changes: UpdateChanges | null;
-}
-
-/** A problem the client itself found, which no stored operation holds. */
-export interface ClientVerdict {
-	/** `version_mismatch`: a completed update whose running versions disagree; `refused`: a start the server turned away. */
-	kind: 'version_mismatch' | 'refused';
-	message: string;
-}
-
-/** A failure to show: a stored operation, or a verdict the client reached itself. */
-export interface UpdateFailure {
-	code: UpdateFailureCode | null;
-	detail: string | null;
-	summary: string | null;
-	conductorTold: boolean;
-	/** Set when the client, not the operation, found the problem; it wins over the operation's own copy. */
-	client?: ClientVerdict;
-	log: string | null;
 }
 
 export const UPDATE_STEPS = [
@@ -161,135 +154,50 @@ export function stepDetail(op: UpdateOperation | null, unreachable: boolean): st
 	return `${base} Stopping the rest in ${formatElapsed(remaining)}.`;
 }
 
-function parseDetail(detail: string | null | undefined): Record<string, unknown> {
-	try {
-		const parsed = JSON.parse(detail ?? '{}');
-		return parsed && typeof parsed === 'object' ? parsed : {};
-	} catch {
-		return {};
-	}
+/** A problem the client itself found, which no stored operation holds. */
+export interface ClientVerdict {
+	/** `version_mismatch`: a completed update whose running versions disagree; `refused`: a start the server turned away. */
+	kind: 'version_mismatch' | 'refused';
+	message: string;
 }
 
-export function diskNumbers(detail: string | null | undefined): { neededGb: number; freeGb: number } | null {
-	const parsed = parseDetail(detail);
-	const needed = Number(parsed.needed_bytes);
-	const free = Number(parsed.free_bytes);
-	if (!Number.isFinite(needed) || !Number.isFinite(free) || needed <= 0) return null;
-	return { neededGb: Math.ceil(needed / 1e9), freeGb: Math.max(0, Math.floor(free / 1e9)) };
+/** A failure to show: a stored operation, or a verdict the client reached itself. */
+export interface UpdateFailure {
+	code: UpdateFailureCode | null;
+	detail: string | null;
+	summary: string | null;
+	conductorTold: boolean;
+	/** Set when the client, not the operation, found the problem; it wins over the operation's own copy. */
+	client?: ClientVerdict;
+	log: string | null;
 }
 
-export function failureFromOperation(op: UpdateOperation): UpdateFailure {
-	return {
-		code: op.failure_code ?? null,
-		detail: op.failure_detail ?? null,
-		summary: op.error ?? null,
-		conductorTold: Boolean(op.conductor_told_at),
-		log: op.log_tail ?? null,
-	};
-}
-
-export function failureFromVerdict(client: ClientVerdict): UpdateFailure {
-	return { code: null, detail: null, summary: null, conductorTold: false, log: null, client };
-}
-
-export interface FailureCopy {
-	/** The panel's header and the toast's first line. */
-	title: string;
-	/** The one plain sentence naming the cause. */
-	headline: string;
-	/** What state CORSIA is in, with the figures a refusal carries. */
-	body: string;
-	/** The toast's second line: the number or fact to act on. */
-	toastLine: string | null;
-	/** The retry's label, named for the fix. */
-	retryLabel: string | null;
-}
-
-// Only where nothing was touched: the disk check and a download that never advanced the checkout.
-const RAN_ON = 'CORSIA kept running and nothing was changed.';
-// The checkout may already hold the new version, so this claims only what is certain.
-const KEPT_VERSION = 'CORSIA is still running the version it had.';
-
-function diskCopy(detail: string | null): FailureCopy {
-	const disk = diskNumbers(detail);
-	const body = disk ? `Needs ${disk.neededGb} GB free; this Mac has ${disk.freeGb} GB. ${RAN_ON}` : RAN_ON;
-	return {
-		title: "Update didn't start",
-		headline: 'Not enough disk space for a safety backup.',
-		body,
-		toastLine: disk ? `Needs ${Math.max(1, disk.neededGb - disk.freeGb)} GB more free space` : null,
-		retryLabel: 'Try again after freeing space',
-	};
-}
-
-/** One plain sentence per failure code; the stored summary when there is no code. */
-export function failureCopy(failure: UpdateFailure): FailureCopy {
-	if (failure.client?.kind === 'version_mismatch') {
-		return {
-			title: "The update didn't finish",
-			headline: 'The update finished, but the running versions do not match.',
-			body: failure.client.message,
-			toastLine: null,
-			retryLabel: null,
-		};
-	}
-	if (failure.client) {
-		return {
-			title: "Update didn't start",
-			headline: failure.client.message,
-			body: '',
-			toastLine: null,
-			retryLabel: 'Try again',
-		};
-	}
-	switch (failure.code) {
-		case 'disk_space':
-			return diskCopy(failure.detail);
-		case 'fetch_failed':
-			return {
-				title: "Update didn't start",
-				headline: "Couldn't download the update.",
-				body: RAN_ON,
-				toastLine: null,
-				retryLabel: 'Try again',
-			};
-		case 'build_failed':
-			return {
-				title: "Update didn't start",
-				headline: "Couldn't build the update.",
-				body: KEPT_VERSION,
-				toastLine: null,
-				retryLabel: 'Try again',
-			};
-		case 'launch_failed':
-			return {
-				title: "Update didn't finish",
-				headline: "Couldn't start the restart.",
-				body: 'CORSIA is still running.',
-				toastLine: null,
-				retryLabel: 'Try again',
-			};
-		case 'drain_cancelled':
-			return {
-				title: 'Update cancelled',
-				headline: 'The update was cancelled before CORSIA restarted.',
-				body: KEPT_VERSION,
-				toastLine: null,
-				retryLabel: 'Try again',
-			};
-		default:
-			// A terminal row carries no phase, so nothing here can say how far the update got.
-			return {
-				title: "Update didn't finish",
-				headline: 'The update stopped before it finished.',
-				body: '',
-				toastLine: null,
-				retryLabel: 'Try again',
-			};
-	}
-}
-
-/** Failure copy for an operation that ended without the update installing. */
+/** An operation that ended without the update installing. */
 export function isFailedOperation(op: UpdateOperation | null | undefined): op is UpdateOperation {
 	return op?.status === 'failed' || op?.status === 'cancelled';
+}
+
+/** What a surface needs to know about the update on offer. */
+interface OfferState {
+	available?: boolean | null;
+	target_version?: string | null;
+	changes?: UpdateChanges | null;
+}
+
+/** The one rule for which operation a surface treats as current: a settled one targeting an older version than the offer is history. */
+export function currentOperation(op: UpdateOperation | null | undefined, status: OfferState | null | undefined): UpdateOperation | null {
+	if (!op || isInFlight(op)) return op ?? null;
+	const offered = status?.available ? status.target_version : null;
+	return offered && op.target_version && offered !== op.target_version ? null : op;
+}
+
+export interface UpdateReleaseNotes {
+	targetVersion: string;
+	changes: UpdateChanges | null;
+}
+
+/** The notes of the current operation, or of the offer when no operation is current; both come from the server. */
+export function releaseNotesFor(op: UpdateOperation | null | undefined, status: OfferState | null | undefined): UpdateReleaseNotes | null {
+	const targetVersion = op?.target_version ?? status?.target_version;
+	return targetVersion ? { targetVersion, changes: op?.changes ?? status?.changes ?? null } : null;
 }

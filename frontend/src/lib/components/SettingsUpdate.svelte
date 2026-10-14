@@ -2,9 +2,10 @@
 	import { Button } from '$lib/components/ui';
 	import StatePill from '$lib/components/ui/StatePill.svelte';
 	import { openUpdatePanel, openUpdateSheet, updateInFlight, updateOperation, updateStatus } from '$lib/update/store';
-	import { failureCopy, failureFromOperation, formatInstalledAt, isFailedOperation, stepMessage } from '$lib/update/model';
+	import { failureCopy, failureFromOperation } from '$lib/update/failureCopy';
+	import { currentOperation, formatInstalledAt, isFailedOperation, stepMessage } from '$lib/update/model';
 
-	const operation = $derived($updateOperation);
+	const operation = $derived(currentOperation($updateOperation, $updateStatus));
 	const running = $derived($updateInFlight);
 	const refusal = $derived(isFailedOperation(operation) ? failureCopy(failureFromOperation(operation)) : null);
 	const completedVersion = $derived(operation?.status === 'complete' ? operation.target_version : null);
@@ -15,7 +16,7 @@
 	);
 	const targetVersion = $derived(operation?.target_version ?? $updateStatus?.target_version);
 	const showAvailable = $derived(!running && !refusal && $updateStatus?.available && targetVersion);
-	const installedAt = $derived(operation?.settled_at ? formatInstalledAt(operation.settled_at, Date.now()) : null);
+	const installedAt = $derived(operation?.status === 'complete' && operation.settled_at ? formatInstalledAt(operation.settled_at, Date.now()) : null);
 </script>
 
 <div class="service-row update-row">

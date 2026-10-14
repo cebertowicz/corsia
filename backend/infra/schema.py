@@ -400,7 +400,7 @@ SCHEMA_SQL = f"""
         cutoff_at TEXT,
         updated_at TEXT,
         error TEXT,
-        kind TEXT, trigger TEXT, target_version TEXT, drain_total INTEGER,
+        kind TEXT, trigger TEXT, target_version TEXT, drain_total INTEGER, changes TEXT, outcome_seen_at TEXT,
         failure_code TEXT, failure_detail TEXT, conductor_told_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_self_restart_requests_status

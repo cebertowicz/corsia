@@ -42,7 +42,7 @@ prepare_redeploy_locked "$CHECKOUT" "$GIT_DIR"
         },
     )
 
-    assert result.returncode == 41
+    assert result.returncode == 46
     assert "STEP:pull" not in trace.read_text()
 
 
@@ -52,12 +52,15 @@ prepare_redeploy_locked "$CHECKOUT" "$GIT_DIR"
         ("git pull", 41),
         ("redeploy_sync_python_dependencies", 42),
         ("redeploy_build", 42),
+        ("index lock", 43),
+        ("detached head", 44),
+        ("dirty checkout", 45),
     ],
 )
 def test_prepare_redeploy_preserves_fetch_and_build_stage_statuses(
     tmp_path: Path, failure: str, expected_status: int,
 ) -> None:
-    """The Python caller receives a code only when the failed stage is known."""
+    """Each stage or refusal that retrying cannot clear exits with its own status."""
     checkout = tmp_path / "serving-checkout"
     git_dir = tmp_path / "git-dir"
     checkout.mkdir()
@@ -69,11 +72,11 @@ ok() { :; }
 fail() { :; }
 PYTHON=.venv/bin/python
 source scripts/corsia.d/runtime.sh
-recover_stale_git_index_lock() { return 0; }
+recover_stale_git_index_lock() { [ "$FAILURE" = "index lock" ] && return 1; return 0; }
 git() {
     case "$*" in
-        *"symbolic-ref"*) echo dev ;;
-        *"status --porcelain"*) ;;
+        *"symbolic-ref"*) [ "$FAILURE" = "detached head" ] || echo dev ;;
+        *"status --porcelain"*) [ "$FAILURE" = "dirty checkout" ] && echo " M file" ;;
         *"pull --ff-only"*) [ "$FAILURE" = "git pull" ] && return 1 ;;
     esac
     return 0

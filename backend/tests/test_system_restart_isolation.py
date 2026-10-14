@@ -910,12 +910,15 @@ def test_prepare_current_release_returns_bounded_terminal_failure_with_full_log(
 
 @pytest.mark.parametrize(
     ("returncode", "failure_code"),
-    [(41, "fetch_failed"), (42, "build_failed"), (99, None)],
+    [
+        (41, "fetch_failed"), (42, "build_failed"), (43, "index_locked"), (44, "checkout_detached"),
+        (45, "checkout_dirty"), (46, "restart_pending"), (99, "prepare_failed"),
+    ],
 )
-def test_prepare_current_release_records_only_known_stage_codes(
+def test_prepare_current_release_names_every_refusal_it_knows(
     tmp_path: Path, returncode: int, failure_code: str | None,
 ):
-    """Only the shell's explicit fetch/build statuses become durable codes."""
+    """Each explicit shell status is its own durable cause; an unknown one is still named."""
     import subprocess
 
     from fastapi import HTTPException
@@ -933,8 +936,8 @@ def test_prepare_current_release_records_only_known_stage_codes(
     assert getattr(raised.value, "update_failure_code", None) == failure_code
 
 
-def test_prepare_current_release_timeout_has_no_stage_code(tmp_path: Path):
-    """A preparation timeout is a truthful unclassified failure."""
+def test_prepare_current_release_timeout_is_its_own_cause(tmp_path: Path):
+    """A preparation timeout names itself instead of falling back to generic copy."""
     import subprocess
 
     from fastapi import HTTPException
@@ -948,7 +951,7 @@ def test_prepare_current_release_timeout_has_no_stage_code(tmp_path: Path):
     ):
         settings_restart._prepare_current_release(Path("/tmp/corsia"), {})
 
-    assert getattr(raised.value, "update_failure_code", None) is None
+    assert getattr(raised.value, "update_failure_code", None) == "update_timed_out"
 
 
 def _corsia_script_text() -> str:

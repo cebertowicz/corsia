@@ -186,6 +186,7 @@ def try_acquire(
     kind: str | None = None,
     trigger: str | None = None,
     target_version: str | None = None,
+    changes: str | None = None,
     operation_id: str | None = None,
     db=None,
     _target_phase: str = "holding",
@@ -225,8 +226,8 @@ def try_acquire(
         connection.execute(
             "INSERT INTO self_restart_requests "
             "(id,requester_thread_id,requester_user,from_sha,branch,reason,"
-            "kind,trigger,target_version,status,phase,requested_at,cutoff_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,'in_flight',?,?,?,?)",
+            "kind,trigger,target_version,changes,status,phase,requested_at,cutoff_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,'in_flight',?,?,?,?)",
             (
                 operation_id,
                 requester_thread_id,
@@ -237,6 +238,7 @@ def try_acquire(
                 kind,
                 trigger,
                 target_version,
+                changes,
                 _target_phase,
                 now,
                 now,

@@ -171,7 +171,7 @@ def test_operation_projection_limits_logs_and_reports_live_blocking(tmp_path, mo
     assert project_update_operation(operation)["log_tail"] is None
 
 
-def test_update_status_route_reads_the_wait_the_lifecycle_script_uses(monkeypatch):
+def test_update_status_route_reads_the_wait_the_lifecycle_script_honors(monkeypatch):
     from api.system_admin import system_update_status
     from automation import self_restart
     from core.turn_core import active_turn_count
@@ -192,7 +192,7 @@ def test_update_status_route_reads_the_wait_the_lifecycle_script_uses(monkeypatc
 
     monkeypatch.setattr(update_status, "update_status", lambda refresh: Status())
     monkeypatch.setattr(db_async, "run_in_db", run_in_db)
-    monkeypatch.setattr(drain, "DRAIN_WAIT_SECONDS", 17)
+    monkeypatch.setenv("CORSIA_DRAIN_MAX_WAIT", "17")
 
     result = asyncio.run(system_update_status(user={}))
 
@@ -219,11 +219,14 @@ def test_settings_update_acquire_uses_cached_target_version(monkeypatch):
     monkeypatch.setattr(db_async, "run_in_db", run_in_db)
     monkeypatch.setattr(self_restart, "try_acquire", acquire)
     monkeypatch.setattr(update_status, "cached_target_version", lambda: "1.2.3")
+    monkeypatch.setattr(update_status, "cached_changes", lambda: {"kind": "changelog", "items": ["A"]})
 
     assert asyncio.run(_acquire_settings_restart({"id": "user"}, "update", [])) == "operation-id"
     assert captured[-1]["target_version"] == "1.2.3"
+    assert json.loads(captured[-1]["changes"]) == {"kind": "changelog", "items": ["A"]}
     assert asyncio.run(_acquire_settings_restart({"id": "user"}, "restart", [])) == "operation-id"
     assert captured[-1]["target_version"] is None
+    assert captured[-1]["changes"] is None
 
 
 def test_drain_wait_matches_the_lifecycle_script_default():
@@ -236,7 +239,7 @@ def test_drain_wait_matches_the_lifecycle_script_default():
     script = (Path(__file__).resolve().parents[2] / "scripts" / "corsia.d" / "runtime.sh").read_text()
     match = re.search(r'^CORSIA_DRAIN_MAX_WAIT="\$\{CORSIA_DRAIN_MAX_WAIT:-(\d+)\}"$', script, re.MULTILINE)
     assert match, "runtime.sh no longer declares the CORSIA_DRAIN_MAX_WAIT default this test reads"
-    assert int(match.group(1)) == drain.DRAIN_WAIT_SECONDS
+    assert int(match.group(1)) == drain.DEFAULT_DRAIN_WAIT_SECONDS
 
 
 def test_drain_status_counts_the_hard_cap_down_from_the_wait(monkeypatch):
@@ -257,4 +260,15 @@ def test_drain_status_counts_the_hard_cap_down_from_the_wait(monkeypatch):
 
     remaining = drain.get_drain_status()["hard_cap_remaining"]
 
-    assert remaining == drain.DRAIN_WAIT_SECONDS - 20
+    assert remaining == drain.drain_wait_seconds() - 20
+
+
+def test_drain_wait_follows_the_operator_override_the_script_honors(monkeypatch):
+    from infra import drain
+
+    monkeypatch.delenv("CORSIA_DRAIN_MAX_WAIT", raising=False)
+    assert drain.drain_wait_seconds() == 60
+    monkeypatch.setenv("CORSIA_DRAIN_MAX_WAIT", "5")
+    assert drain.drain_wait_seconds() == 5
+    monkeypatch.setenv("CORSIA_DRAIN_MAX_WAIT", "soon")
+    assert drain.drain_wait_seconds() == 60

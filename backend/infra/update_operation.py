@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+
+_LOG_TAIL_CHARS = 6000
 
 
 def _failure_log_tail(operation: dict) -> str | None:
@@ -19,9 +22,20 @@ def _failure_log_tail(operation: dict) -> str | None:
         resolved_logs = LOGS_DIR.resolve()
         resolved_path = Path(log_path).resolve()
         resolved_path.relative_to(resolved_logs)
-        return resolved_path.read_text(errors="replace")[-6000:]
+        with resolved_path.open("rb") as handle:
+            size = handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, size - _LOG_TAIL_CHARS))
+            return handle.read().decode(errors="replace")[-_LOG_TAIL_CHARS:]
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
+
+
+def _stored_changes(operation: dict) -> dict | None:
+    try:
+        changes = json.loads(operation.get("changes") or "null")
+    except (TypeError, ValueError):
+        return None
+    return changes if isinstance(changes, dict) else None
 
 
 def project_update_operation(operation: dict) -> dict:
@@ -48,6 +62,8 @@ def project_update_operation(operation: dict) -> dict:
         "failure_detail": operation.get("failure_detail"),
         "conductor_told_at": operation.get("conductor_told_at"),
         "log_tail": _failure_log_tail(operation),
+        "changes": _stored_changes(operation),
+        "outcome_seen_at": operation.get("outcome_seen_at"),
         "error": operation.get("error"),
         "requested_at": operation.get("requested_at"),
         "settled_at": operation.get("settled_at"),

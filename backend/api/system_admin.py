@@ -111,6 +111,8 @@ async def _monitor_restart_process(process, operation_id: str) -> None:
     await abort_restart_control(
         operation_id,
         error=f"restart script exited before restart: {returncode}",
+        failure_code="launch_failed",
+        failure_detail=f'{{"exit_code": {returncode}}}',
     )
 
 
@@ -325,7 +327,7 @@ async def system_update_status(
 
     status = await asyncio.to_thread(update_status, refresh)
     result = status.to_dict()
-    result["drain_cap_seconds"] = drain.DRAIN_WAIT_SECONDS
+    result["drain_cap_seconds"] = drain.drain_wait_seconds()
     result["usual_seconds"] = await run_in_db(self_restart.usual_update_seconds)
     result["agents_working"] = await run_in_db(active_turn_count)
     result["server_time"] = datetime.now(timezone.utc).isoformat()
@@ -333,6 +335,19 @@ async def system_update_status(
     if operation is not None:
         result["operation"] = await run_in_db(project_update_operation, operation)
     return result
+
+
+@router.post("/system/update-operations/{operation_id}/outcome-seen")
+async def system_update_outcome_seen(
+    operation_id: str, user: dict = Depends(require_user)
+):
+    """Mark one settled Update's outcome as shown; the first client to do so wins."""
+    from automation.update_outcome import mark_outcome_seen
+    from infra.db_async import run_in_db
+
+    if await run_in_db(mark_outcome_seen, operation_id) is None:
+        raise HTTPException(404, "No settled Update with that id.")
+    return {"operation_id": operation_id, "seen": True}
 
 
 @router.get("/system/host-resources")

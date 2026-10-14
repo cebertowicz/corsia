@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { failureCopy, failureFromVerdict, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
+import { failureCopy, failureFromVerdict } from './failureCopy';
+import { holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
 
 const failure = (code: UpdateFailure['code']): UpdateFailure => ({
 	code, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
@@ -20,6 +21,34 @@ describe('update model', () => {
 		['drain_cancelled', 'The update was cancelled before CORSIA restarted.'],
 	] as const)('maps D3 %s to one plain sentence', (code, headline) => {
 		expect(failureCopy(failure(code)).headline).toBe(headline);
+	});
+
+	it.each([
+		['drain_failed', "Couldn't bring your agents to a safe stopping point.", 'Try again'],
+		['update_timed_out', 'The update took too long to download and build.', 'Try again'],
+		['prepare_failed', "Couldn't prepare the update.", 'Try again'],
+		['index_locked', "Another Git process is holding this install's lock.", 'Try again after clearing it'],
+		['checkout_detached', "This install isn't on a branch.", null],
+		['checkout_dirty', "This install has changes that aren't committed.", 'Try again after cleaning up'],
+		['restart_pending', 'An update is already downloaded and waiting for a restart.', 'Restart now'],
+	] as const)('words %s truthfully and names its action', (code, headline, retryLabel) => {
+		const copy = failureCopy(failure(code));
+		expect(copy.headline).toBe(headline);
+		expect(copy.retryLabel).toBe(retryLabel);
+	});
+
+	it('sends restart_pending to a restart and every other failure to another update', () => {
+		expect(failureCopy(failure('restart_pending')).retryAction).toBe('restart');
+		expect(failureCopy(failure('drain_failed')).retryAction).toBeUndefined();
+	});
+
+	it('claims nothing was changed only for refusals made before anything was touched', () => {
+		for (const code of ['index_locked', 'checkout_detached', 'checkout_dirty'] as const) {
+			expect(failureCopy(failure(code)).body).toContain('nothing was changed');
+		}
+		for (const code of ['drain_failed', 'update_timed_out', 'prepare_failed', 'restart_pending'] as const) {
+			expect(failureCopy(failure(code)).body).not.toContain('nothing was changed');
+		}
 	});
 
 	it('keeps an unmapped failure reason out of the summary and claims nothing about how far the update got', () => {

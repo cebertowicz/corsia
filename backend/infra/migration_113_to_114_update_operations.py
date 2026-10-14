@@ -13,6 +13,8 @@ _COLUMNS = (
     ("failure_code", "TEXT"),
     ("failure_detail", "TEXT"),
     ("conductor_told_at", "TEXT"),
+    ("changes", "TEXT"),
+    ("outcome_seen_at", "TEXT"),
 )
 
 
