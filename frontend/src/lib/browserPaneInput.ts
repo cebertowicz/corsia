@@ -1,6 +1,6 @@
 import { AnimationFrameCoalescer, type PanePoint } from './browserPane';
 
-type MouseInput = { type: 'input_mouse'; eventType: string; x: number; y: number; button?: string; clickCount?: number; deltaX?: number; deltaY?: number };
+type MouseInput = { type: 'input_mouse'; eventType: string; x: number; y: number; button?: string; clickCount?: number; deltaX?: number; deltaY?: number; deltaMode?: number };
 type PointerPosition = { pointerId: number; pointerType: string; clientX: number; clientY: number };
 
 /** Mouse positions replace each other; touch wheel deltas preserve every drag movement. */
@@ -38,7 +38,7 @@ export class BrowserPaneInput {
 		if (!touch.dragging) return;
 		const deltaX = (touch.last.clientX - event.clientX) / scale;
 		const deltaY = (touch.last.clientY - event.clientY) / scale;
-		this.send({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX, deltaY });
+		this.send({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX, deltaY, deltaMode: 0 });
 		touch.last = event;
 	}
 

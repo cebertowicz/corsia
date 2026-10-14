@@ -122,4 +122,10 @@ describe('BrowserLeaf letterbox input', () => {
 			{ type: 'input_mouse', eventType: 'mouseReleased', x: 50, y: 50, button: 'left', clickCount: 1 },
 		]);
 	});
+
+	it('forwards wheel axes and mode without turning vertical input horizontal', () => {
+		const { canvas, socket } = render();
+		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaX: 3, deltaY: 90, deltaMode: 0 }));
+		expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 3, deltaY: 90, deltaMode: 0 });
+	});
 });
