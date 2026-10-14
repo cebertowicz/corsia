@@ -425,11 +425,11 @@ async def test_false_tonight_claim_aborts_after_acquire_without_launch(isolated_
     connection = get_db()
     try:
         rows = [dict(row) for row in connection.execute(
-            "SELECT status, phase FROM self_restart_requests"
+            "SELECT status, phase, conductor_told_at FROM self_restart_requests"
         ).fetchall()]
     finally:
         connection.close()
-    assert rows == [{"status": "failed", "phase": None}]
+    assert rows == [{"status": "cancelled", "phase": None, "conductor_told_at": None}]
     launch.assert_not_awaited()
 
 

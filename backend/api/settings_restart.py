@@ -297,7 +297,7 @@ async def prelaunch_settings_restart(
     """Hand Settings restart ownership from acquisition through child launch.
 
     Scheduled Tonight transition matrix: acquire refused -> choice stays set and
-    no row exists; acquired then claim false -> abort/release the row and do not
+    no row exists; acquired then claim false -> cancel the row and do not
     launch; acquired then preparation fails -> consume the choice and retain a
     failed row; acquired then launch succeeds -> consume the choice once.
     """

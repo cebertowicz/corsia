@@ -83,5 +83,6 @@ async def claim_scheduled_choice(
         await abort_restart_control(
             operation_id,
             error="scheduled update choice changed before launch",
+            cancelled=True,
         )
     return claimed
