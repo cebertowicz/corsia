@@ -86,7 +86,7 @@ test('@flow:chat @surface:chat ownerless Stop clears both tabs and permits the n
 		await revealWorked(observer);
 		await expect(lastAssistantMessage(page)).toContainText('ANSWER_AFTER_OWNERLESS_STOP');
 		await expect(lastAssistantMessage(observer)).toContainText('ANSWER_AFTER_OWNERLESS_STOP');
-		expect(await readMockCallCount(request)).toBeGreaterThanOrEqual(1);
+		expect(await readMockCallCount(request)).toBe(1);
 		await saveEvidenceScreenshot(page, testInfo, 'ownerless-stop');
 	} finally {
 		await observer.close();

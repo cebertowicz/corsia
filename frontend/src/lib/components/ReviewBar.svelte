@@ -45,8 +45,6 @@
 	const label = $derived(
 		`${asker} asked for your review: ${ask}${others.length ? `. ${others.join(' and ')} also asked.` : ''}`,
 	);
-	/** Whom the answer goes to, shown in the phone capsule while nothing else is being said there (PE F2). */
-	const toText = $derived(`To ${asker}${others.length ? ` and ${others.length} other${others.length === 1 ? '' : 's'}` : ''}`);
 	const alsoSends = $derived(round > 0 ? `Also sends your ${pending} to ${asker}` : undefined);
 	const receiptText = $derived.by(() => {
 		const receipt = bar.receipt;
@@ -225,9 +223,8 @@
 			</span>
 			<span class="rb-row2">
 				<div class="rb-capsule" class:suppressed bind:this={capsuleEl} out:capsuleOut|global>
-					<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward; when nothing else is said there it names whom the answer goes to. -->
+					<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
 					<span class="rb-status" class:busy role="status">{busy ? 'Sending your review…' : bar.failure}</span>
-					{#if !busy && !bar.failure && !noting}<span class="rb-to">{toText}</span>{/if}
 					{#if noting}
 						<textarea class="rb-note" rows="1" aria-label={`Note for ${asker}`} {placeholder} maxlength="2000" readonly={busy}
 							bind:this={noteInput} bind:value={bar.note} onkeydown={onNoteKey}></textarea>
@@ -286,7 +283,6 @@
 	.rb-row2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--space-7); }
 	.rb-status { flex: 1 1 0; min-width: 0; color: var(--amber-text); }
 	.rb-status.busy { color: var(--text-secondary); }
-	.rb-to { display: none; }
 	.review-bar.noting .rb-row2 { flex-wrap: wrap; }
 	.review-bar.noting .rb-status { order: 3; flex-basis: 100%; min-height: 0; }
 	.rb-capsule { display: contents; }
@@ -362,8 +358,6 @@
 			.rb-capsule.suppressed { transform: translateY(calc(100% + var(--space-3) + var(--safe-bottom))); pointer-events: none; visibility: hidden; transition-duration: calc(var(--dur-standard) * 0.7), 0s; transition-delay: 0s, calc(var(--dur-standard) * 0.7); }
 			.review-bar.ask .rb-capsule .rb-status { order: -1; flex: 1 0 100%; padding: 0 var(--space-2); }
 			.review-bar.ask .rb-capsule .rb-status:empty { display: none; }
-			/* The collapsed header already names the requester, so the capsule can reserve its only row for the two answer targets. */
-			.review-bar.ask .rb-capsule .rb-to { display: none; }
 			.rb-capsule .rb-actions { flex: 1 1 auto; margin-left: 0; }
 			.rb-capsule :global(.btn) { flex: 1 1 0; min-width: 0; min-height: var(--rb-hit); }
 			/* Request changes: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and Request changes right-aligned (PE B3). */

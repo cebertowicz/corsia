@@ -128,7 +128,7 @@ describe('DocCommentSurface suggestions', () => {
 
 	it('moves orphan placement recovery into the comments drawer with its existing live-state wiring', () => {
 		const reload = vi.fn(() => true);
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: reload } });
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: reload, orphanedCount: 1 } });
 		const footer = host.querySelector<HTMLElement>('[data-doc-comments-drawer] > [data-drawer-placement]')!;
 		expect(footer.querySelector('[role="status"]')?.textContent).toBe("1 comment couldn't be placed");
 		const button = footer.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
@@ -143,7 +143,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({
 			state: { kind: 'list' },
 			comments: [{ ...suggestion, orphaned: true }],
-			get placementRecovery() { return { onReload: () => true, reloading: live.current }; },
+			get placementRecovery() { return { onReload: () => true, orphanedCount: 1, reloading: live.current }; },
 		});
 		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
 		button.focus();
@@ -162,7 +162,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({
 			state: { kind: 'list' },
 			get comments() { return liveComments.current; },
-			get placementRecovery() { return { onReload: () => true, reloading: liveReloading.current }; },
+			get placementRecovery() { return { onReload: () => true, orphanedCount: liveComments.current.filter(comment => comment.orphaned && !comment.resolved).length, reloading: liveReloading.current }; },
 		});
 		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
 		reloading.set(true); flushSync();
@@ -174,8 +174,28 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
 	});
 
+	it('clears a successful placement announcement when a later refresh reports unplaced comments', async () => {
+		const reloading = writable(false);
+		const orphanedCount = writable(1);
+		const liveReloading = fromStore(reloading);
+		const liveOrphanedCount = fromStore(orphanedCount);
+		render({
+			state: { kind: 'list' },
+			get placementRecovery() { return { onReload: () => true, orphanedCount: liveOrphanedCount.current, reloading: liveReloading.current }; },
+		});
+		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+		reloading.set(true); flushSync();
+		orphanedCount.set(0); flushSync();
+		reloading.set(false); flushSync();
+		await tick();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe('Comments placed');
+		orphanedCount.set(2); flushSync();
+		await tick();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("2 comments couldn't be placed");
+	});
+
 	it('keeps a disconnected placement retry focusable and names its live status', () => {
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: vi.fn(), unavailable: true, connectionDescriptionId: 'live-connection-artifact' } });
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: vi.fn(), orphanedCount: 1, unavailable: true, connectionDescriptionId: 'live-connection-artifact' } });
 		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
 		expect(button.disabled).toBe(false);
 		expect(button.getAttribute('aria-disabled')).toBe('true');

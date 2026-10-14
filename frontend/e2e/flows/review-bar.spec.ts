@@ -450,10 +450,10 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 		return { firstBodyY: firstLine.top, capsuleHeight: capsule.height };
 	});
 	if (mode === 'phone') {
-		expect(measurements.firstBodyY, 'the first document line stays in the phone reading area').toBeLessThanOrEqual(240);
+		expect(measurements.firstBodyY, 'the first document line stays in the phone reading area').toBeLessThanOrEqual(150);
 		expect(measurements.capsuleHeight, 'the fixed review action bar stays compact').toBeLessThanOrEqual(64);
 		for (const button of await bar(page).locator('.rb-capsule .btn').all()) expect((await button.boundingBox())!.height, 'phone review action touch target').toBeGreaterThanOrEqual(44);
-		expect(bar(page).locator('.rb-ask')).toBeHidden();
+		await expect(bar(page).locator('.rb-ask')).toBeHidden();
 	}
 	await shot(page, `orphan-heavy-reading-${mode}-${theme}`, info);
 	if (mode === 'phone') {
@@ -464,7 +464,7 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 		await expect(page.locator('.identity-age')).toContainText(/as of \w+ \d+/);
 		await shot(page, `orphan-heavy-expanded-${mode}-${theme}`, info);
 	}
-	expect(page.locator('.document-header [aria-label="Reload comment placements"]')).toHaveCount(0);
+	await expect(page.locator('.document-header [aria-label="Reload comment placements"]')).toHaveCount(0);
 	const comments = page.locator('.comment-status');
 	await comments.click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });

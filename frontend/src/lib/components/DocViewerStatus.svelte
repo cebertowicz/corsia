@@ -9,6 +9,7 @@
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
+	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 
 	let {
 		title = 'Document',
@@ -70,7 +71,6 @@
 	let verifying = $state(false);
 	let verificationError = $state('');
 	let verificationNotice = $state('');
-	// Placement recovery is rendered and announced in the comments drawer, its canonical action surface.
 	let commentStatus = $state<HTMLButtonElement>();
 	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
@@ -78,15 +78,13 @@
 	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
 	// The live connection description is shared by document-status and drawer controls.
-	const liveConnectionDescriptionId = $derived(liveSession ? `live-connection-${liveSession.artifactId}` : undefined);
+	const connectionDescriptionId = $derived(liveConnectionDescriptionId(liveSession?.artifactId));
 	$effect(() => {
 		artifactId;
 		detailsOpen = false;
 		verificationError = '';
 		verificationNotice = '';
-		// The drawer resets its own placement-recovery announcement for each artifact.
 	});
-	// The comments drawer owns the placement-recovery action, its disabled state, and its outcome announcement.
 
 	async function markVerified(): Promise<void> {
 		if (!onMarkVerified || verifying) return;
@@ -158,7 +156,7 @@
 {/if}
 
 <DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
-	connectionStatusId={liveConnectionDescriptionId} />
+	connectionStatusId={connectionDescriptionId} />
 <span class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
 {#if readonly && ready}
 	<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>
@@ -166,7 +164,6 @@
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
 	<div class="document-status-row document-notices">
 		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
-		<!-- Placement recovery is available from the comments drawer opened by the status pill. -->
 	</div>
 {/if}
 </header>

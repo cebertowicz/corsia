@@ -32,6 +32,7 @@
 		enrichDraftTarget, setDraftText, flushDraft,
 	} from '$lib/stores/docSaveQueue';
 	import { docSaveGhost } from '$lib/stores/docSaveGhost.svelte';
+	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
@@ -379,7 +380,7 @@
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		feedback={feedbackStatus?.feedback()}
-		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => reloadPlacements(loadedArtifactId) : undefined, reloading: headerCommentStatus.placementReloading, reloadError: headerCommentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveSession ? `live-connection-${liveSession.artifactId}` : undefined }}
+		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => reloadPlacements(loadedArtifactId) : undefined, orphanedCount: headerCommentStatus.orphanedCount, reloading: headerCommentStatus.placementReloading, reloadError: headerCommentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveConnectionDescriptionId(liveSession?.artifactId) }}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}

@@ -147,7 +147,6 @@ describe('DocViewerStatus freshness metadata', () => {
 		render(value(), undefined, { orphanedCount: 1 });
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
 		expect(pill.getAttribute('aria-describedby')).toBeTruthy();
-		expect(host.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
 	});
 
 	it('removes Mark verified when the parent replaces freshness after success', async () => {

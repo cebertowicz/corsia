@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { Button } from '../ui';
-	import type { DocComment } from '$lib/stores/docComments';
 	import { drawerFooterHeight, footerFocusHome } from '$lib/docCommentDrawer';
 
 	export type PlacementRecoveryProps = {
@@ -10,18 +9,23 @@
 		reloadError?: boolean;
 		unavailable?: boolean;
 		connectionDescriptionId?: string;
+		orphanedCount: number;
 	};
-	let { comments, onReload, reloading = false, reloadError = false, unavailable = false, connectionDescriptionId, onFocusHome }: {
-		comments: DocComment[];
+	let { orphanedCount, onReload, reloading = false, reloadError = false, unavailable = false, connectionDescriptionId, onFocusHome }: PlacementRecoveryProps & {
 		onFocusHome: () => HTMLElement | undefined;
-	} & PlacementRecoveryProps = $props();
-
-	const orphanedCount = $derived(comments.filter((comment) => comment.orphaned && !comment.resolved).length);
+	} = $props();
 	const unplacedPhrase = $derived(`${orphanedCount} comment${orphanedCount === 1 ? '' : 's'} couldn't be placed`);
 	let requested = $state(false);
 	let sawBusy = $state(false);
 	let announcement = $state('');
+	let announcedCount = $state<number | null>(null);
 	let placementFooter = $state<HTMLElement>();
+	$effect(() => {
+		if (announcement && announcedCount !== orphanedCount) {
+			announcement = '';
+			announcedCount = null;
+		}
+	});
 
 	$effect(() => {
 		if (!requested) return;
@@ -30,6 +34,7 @@
 		requested = false;
 		sawBusy = false;
 		announcement = reloadError ? "Couldn't reload comment placements" : orphanedCount ? `${orphanedCount} comment${orphanedCount === 1 ? '' : 's'} still couldn't be placed` : 'Comments placed';
+		announcedCount = orphanedCount;
 		// The loading button may be replaced while its request settles; restore focus to the surviving recovery action.
 		if (orphanedCount) void tick().then(() => placementFooter?.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')?.focus());
 		else void tick().then(() => onFocusHome()?.focus());
