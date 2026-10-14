@@ -79,7 +79,7 @@ def _user_owns_thread(thread_id: str, user_id: str) -> bool:
 
 
 async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
-    """Proxy frames and accept input only from this connection's control holder."""
+    """Proxy shared page frames and pane input for one authenticated connection."""
     connection_token = secrets.token_urlsafe(18)
 
     browser_control.pane_connected(thread_id, connection_token)
