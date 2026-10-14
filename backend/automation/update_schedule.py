@@ -14,6 +14,7 @@ from infra.settings import get_update_schedule, parse_update_schedule_time, set_
 
 
 SCHEDULE_WINDOW = timedelta(hours=1)
+_SCHEDULE_NOTICE_TASKS: set[asyncio.Task] = set()
 
 
 def next_local_time(now: datetime, value: str) -> datetime:
@@ -82,12 +83,8 @@ def _tonight_due_at(schedule: dict, now: datetime) -> datetime | None:
     return scheduled_night.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
-def possible_trigger(
-    schedule: dict, *, now: datetime, attempted_today: bool, update_available: bool | None = None
-) -> str | None:
-    """Return the one due trigger, optionally after the remote status check."""
-    if update_available is False:
-        return None
+def possible_trigger(schedule: dict, *, now: datetime, attempted_today: bool) -> str | None:
+    """Return the one locally due scheduled trigger before its status check."""
     tonight_due_at = _tonight_due_at(schedule, now)
     if tonight_due_at is not None and tonight_due_at <= now < tonight_due_at + SCHEDULE_WINDOW:
         return "tonight"
@@ -151,8 +148,16 @@ def update_attempted_today(*, now: datetime | None = None, db=None) -> bool:
 
 
 async def run_scheduled_tick(now: datetime | None = None) -> str | None:
-    """Apply D7 once: each due scheduled exit changes exactly its stated state."""
+    """Apply D7's scheduled-update transition matrix once.
+
+    An expired Tonight choice clears without a row or user-facing state and sends
+    one detached conductor notice. A due, unavailable update simply consumes
+    Tonight. A missing owner disables automatic updates, clears Tonight, and
+    sends one detached conductor notice. Every other non-due or failed-check
+    outcome preserves the schedule.
+    """
     from api.system_admin import launch_update
+    from automation.update_failure_notice import tell_scheduled_lapse_detached
     from infra.accounts import get_user
     from infra.db_async import run_in_db
     from infra.settings import get_update_schedule
@@ -161,7 +166,16 @@ async def run_scheduled_tick(now: datetime | None = None) -> str | None:
     local_now = now or datetime.now().astimezone()
     schedule = await asyncio.to_thread(get_update_schedule, include_owner=True)
     if should_drop_tonight(schedule, now=local_now):
-        await run_in_db(claim_tonight, schedule)
+        if await run_in_db(claim_tonight, schedule):
+            due_at = _tonight_due_at(schedule, local_now)
+            window = due_at.strftime("%Y-%m-%d %H:%M %Z") if due_at else schedule["time"]
+            tell_scheduled_lapse_detached(
+                schedule.get("owner_id"),
+                f"Tonight's scheduled update did not run in its window ({window}); the choice was cleared. "
+                "Scheduled-update log lines name the cause.",
+                delivery_id=f"scheduled-update-lapsed:{schedule.get('tonight_at')}",
+                tasks=_SCHEDULE_NOTICE_TASKS,
+            )
         return None
     attempted_today = await run_in_db(update_attempted_today, now=local_now)
     trigger = possible_trigger(schedule, now=local_now, attempted_today=attempted_today)
@@ -185,6 +199,12 @@ async def run_scheduled_tick(now: datetime | None = None) -> str | None:
     if user is None:
         if await run_in_db(disable_missing_owner_schedule, schedule):
             logger.warning("scheduled update disabled because its owner account is missing")
+            tell_scheduled_lapse_detached(
+                owner_id,
+                "Automatic updates were turned off and Tonight was cleared because the account that set them no longer exists.",
+                delivery_id=f"scheduled-update-owner-missing:{schedule.get('tonight_at')}",
+                tasks=_SCHEDULE_NOTICE_TASKS,
+            )
         return None
     port = os.environ.get("BACKEND_PORT", "")
     if not port.isdigit():

@@ -58,9 +58,58 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
         logger.warning("update failure conductor notice could not be delivered")
 
 
+async def tell_conductor_about_scheduled_lapse(
+    owner_id: str | None,
+    summary: str,
+    *,
+    delivery_id: str,
+) -> None:
+    """Tell the workspace conductor that an owner-bound schedule did not run."""
+    from core.agent_roster_queries import workspace_conductor_contact
+    from infra.db_async import run_in_db
+
+    def contact_for_owner() -> tuple[dict | None, str | None]:
+        from infra.database import get_db
+
+        connection = get_db()
+        return workspace_conductor_contact(str(owner_id or ""), connection)
+
+    contact, gap = await run_in_db(contact_for_owner)
+    if contact is None:
+        if gap:
+            logger.warning("scheduled update conductor notice skipped: {}", gap)
+        return
+    from events.delivery import deliver_to_thread
+
+    sent = await deliver_to_thread(
+        str(contact["id"]),
+        "system.update_schedule_lapsed",
+        summary,
+        delivery_id=delivery_id,
+    )
+    if not sent:
+        logger.warning("scheduled update conductor notice could not be delivered")
+
+
 def tell_conductor_detached(operation_id: str, tasks: set[asyncio.Task]) -> None:
     """Send the notice without holding the release caller open on a conductor turn."""
     task = asyncio.create_task(tell_conductor_about_failed_update(operation_id))
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    task.add_done_callback(_log_notice_failure)
+
+
+def tell_scheduled_lapse_detached(
+    owner_id: str | None,
+    summary: str,
+    *,
+    delivery_id: str,
+    tasks: set[asyncio.Task],
+) -> None:
+    """Send a schedule-lapse notice without holding the nightly tick open."""
+    task = asyncio.create_task(
+        tell_conductor_about_scheduled_lapse(owner_id, summary, delivery_id=delivery_id)
+    )
     tasks.add(task)
     task.add_done_callback(tasks.discard)
     task.add_done_callback(_log_notice_failure)

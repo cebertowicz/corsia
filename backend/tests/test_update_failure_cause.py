@@ -238,6 +238,36 @@ async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolate
 
 
 @pytest.mark.asyncio
+async def test_scheduled_lapse_skips_unavailable_workspace_conductor(isolated_db, monkeypatch):
+    """A missing conductor logs the skip and cannot undo a cleared schedule."""
+    from automation import update_failure_notice
+    from core import agent_roster_queries
+    from events import delivery
+
+    warnings = []
+    monkeypatch.setattr(
+        agent_roster_queries,
+        "workspace_conductor_contact",
+        lambda _user, _db: (None, "no workspace conductor"),
+    )
+    monkeypatch.setattr(delivery, "deliver_to_thread", AsyncMock())
+    monkeypatch.setattr(
+        update_failure_notice.logger,
+        "warning",
+        lambda message, *args: warnings.append(message.format(*args)),
+    )
+
+    await update_failure_notice.tell_conductor_about_scheduled_lapse(
+        "missing",
+        "Tonight's scheduled update did not run.",
+        delivery_id="scheduled-update-lapsed:test",
+    )
+
+    assert warnings == ["scheduled update conductor notice skipped: no workspace conductor"]
+    delivery.deliver_to_thread.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_release_returns_while_the_conductor_notice_is_pending(isolated_db, monkeypatch):
     """A failed update's release answer never waits on a conductor turn, and the notice follows the resume."""
     from automation import restart, self_restart, update_failure_notice

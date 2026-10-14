@@ -14,9 +14,8 @@ def test_tonight_is_due_only_inside_its_one_hour_window():
     now = datetime(2026, 10, 14, 3, 30, tzinfo=timezone.utc)
     schedule = {"automatic": False, "time": "03:00", "tonight_at": "2026-10-14T03:00:00+00:00"}
 
-    assert possible_trigger(schedule, now=now, update_available=True, attempted_today=False) == "tonight"
+    assert possible_trigger(schedule, now=now, attempted_today=False) == "tonight"
     assert not should_drop_tonight(schedule, now=now)
-    assert possible_trigger(schedule, now=now, update_available=False, attempted_today=False) is None
     assert should_drop_tonight(schedule, now=now + timedelta(minutes=30))
 
 
@@ -31,8 +30,8 @@ def test_tonight_always_uses_the_current_schedule_minute():
     at_old_minute = datetime(2026, 10, 14, 3, 10, tzinfo=timezone.utc)
     at_new_minute = datetime(2026, 10, 14, 4, 10, tzinfo=timezone.utc)
 
-    assert possible_trigger(schedule, now=at_old_minute, update_available=True, attempted_today=False) is None
-    assert possible_trigger(schedule, now=at_new_minute, update_available=True, attempted_today=False) == "tonight"
+    assert possible_trigger(schedule, now=at_old_minute, attempted_today=False) is None
+    assert possible_trigger(schedule, now=at_new_minute, attempted_today=False) == "tonight"
 
 
 def test_claim_tonight_keeps_a_patch_written_after_the_tick_read(isolated_db):
@@ -60,10 +59,9 @@ def test_automatic_runs_once_in_its_local_hour_after_no_update_attempt():
     schedule = {"automatic": True, "time": "03:00", "tonight_at": None}
     at_three = datetime(2026, 10, 14, 3, 45, tzinfo=timezone.utc)
 
-    assert possible_trigger(schedule, now=at_three, update_available=True, attempted_today=False) == "automatic"
-    assert possible_trigger(schedule, now=at_three, update_available=True, attempted_today=True) is None
-    assert possible_trigger(schedule, now=at_three, update_available=False, attempted_today=False) is None
-    assert possible_trigger(schedule, now=at_three.replace(hour=4), update_available=True, attempted_today=False) is None
+    assert possible_trigger(schedule, now=at_three, attempted_today=False) == "automatic"
+    assert possible_trigger(schedule, now=at_three, attempted_today=True) is None
+    assert possible_trigger(schedule, now=at_three.replace(hour=4), attempted_today=False) is None
 
 
 def test_automatic_waits_for_the_exact_minute_it_shows():
@@ -72,10 +70,10 @@ def test_automatic_waits_for_the_exact_minute_it_shows():
     schedule = {"automatic": True, "time": "03:45", "tonight_at": None}
     at = datetime(2026, 10, 14, 3, 0, tzinfo=timezone.utc)
 
-    assert possible_trigger(schedule, now=at, update_available=True, attempted_today=False) is None
-    assert possible_trigger(schedule, now=at.replace(minute=45), update_available=True, attempted_today=False) == "automatic"
-    assert possible_trigger(schedule, now=at.replace(hour=4, minute=30), update_available=True, attempted_today=False) == "automatic"
-    assert possible_trigger(schedule, now=at.replace(hour=4, minute=45), update_available=True, attempted_today=False) is None
+    assert possible_trigger(schedule, now=at, attempted_today=False) is None
+    assert possible_trigger(schedule, now=at.replace(minute=45), attempted_today=False) == "automatic"
+    assert possible_trigger(schedule, now=at.replace(hour=4, minute=30), attempted_today=False) == "automatic"
+    assert possible_trigger(schedule, now=at.replace(hour=4, minute=45), attempted_today=False) is None
 
 
 @pytest.mark.parametrize("old_time,new_time", [("22:00", "02:00"), ("23:30", "23:45")])
@@ -123,7 +121,7 @@ def test_valid_schedule_time_round_trips_to_nightly_read(isolated_db):
 
     schedule = get_update_schedule(include_owner=True)
     assert schedule["time"] == "04:05"
-    assert possible_trigger(schedule, now=now, update_available=True, attempted_today=False) == "automatic"
+    assert possible_trigger(schedule, now=now, attempted_today=False) == "automatic"
 
 
 def test_turning_tonight_off_clears_the_pending_choice(isolated_db):
@@ -367,7 +365,7 @@ def test_due_tonight_without_an_available_update_consumes_the_choice(
     import asyncio
     from types import SimpleNamespace
 
-    from automation import update_schedule
+    from automation import update_failure_notice, update_schedule
     from infra import update_status
     from infra.settings import get_update_schedule
     from jobs.nightly import _run_scheduled_update_if_due
@@ -377,16 +375,21 @@ def test_due_tonight_without_an_available_update_consumes_the_choice(
     update_schedule.update_schedule_patch(
         {"tonight": True}, now=scheduled_at, user_id="steve"
     )
-    pending = get_update_schedule()["tonight_at"]
-
     monkeypatch.setattr(
         update_status,
         "update_status",
         lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": False}),
     )
+    notices = []
+    monkeypatch.setattr(
+        update_failure_notice,
+        "tell_scheduled_lapse_detached",
+        lambda *args, **kwargs: notices.append((args, kwargs)),
+    )
 
     assert asyncio.run(_run_scheduled_update_if_due(now)) is None
     assert get_update_schedule()["tonight_at"] is None
+    assert notices == []
 
 
 @pytest.mark.parametrize("available", [None, pytest.param(RuntimeError("status unavailable"), id="check-failed")])
@@ -424,10 +427,10 @@ def test_unavailable_or_failed_check_preserves_tonight_without_a_row(
         connection.close()
 
 
-def test_missed_tonight_window_drops_without_a_row_or_status_check(isolated_db, monkeypatch):
+def test_missed_tonight_window_notifies_once_without_a_row_or_status_check(isolated_db, monkeypatch):
     import asyncio
 
-    from automation import update_schedule
+    from automation import update_failure_notice, update_schedule
     from infra import update_status
     from infra.database import get_db
     from infra.settings import get_update_schedule
@@ -436,9 +439,19 @@ def test_missed_tonight_window_drops_without_a_row_or_status_check(isolated_db, 
     scheduled_at = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
     update_schedule.update_schedule_patch({"tonight": True}, now=scheduled_at, user_id="steve")
     monkeypatch.setattr(update_status, "update_status", lambda _refresh: pytest.fail("must not fetch"))
+    notices = []
+    monkeypatch.setattr(
+        update_failure_notice,
+        "tell_scheduled_lapse_detached",
+        lambda *args, **kwargs: notices.append((args, kwargs)),
+    )
 
-    assert asyncio.run(_run_scheduled_update_if_due(scheduled_at.replace(hour=4))) is None
+    now = scheduled_at.replace(hour=4)
+    assert asyncio.run(_run_scheduled_update_if_due(now)) is None
     assert get_update_schedule()["tonight_at"] is None
+    assert asyncio.run(_run_scheduled_update_if_due(now + timedelta(minutes=5))) is None
+    assert len(notices) == 1
+    assert "did not run" in notices[0][0][1]
     connection = get_db()
     try:
         assert connection.execute("SELECT COUNT(*) FROM self_restart_requests").fetchone()[0] == 0
@@ -446,11 +459,11 @@ def test_missed_tonight_window_drops_without_a_row_or_status_check(isolated_db, 
         connection.close()
 
 
-def test_missing_owner_clears_tonight_and_automatic_without_a_row(isolated_db, monkeypatch):
+def test_missing_owner_clears_tonight_and_automatic_and_notifies_once(isolated_db, monkeypatch):
     import asyncio
     from types import SimpleNamespace
 
-    from automation import update_schedule
+    from automation import update_failure_notice, update_schedule
     from infra import accounts, update_status
     from infra.database import get_db
     from infra.settings import get_update_schedule
@@ -467,11 +480,19 @@ def test_missing_owner_clears_tonight_and_automatic_without_a_row(isolated_db, m
         "update_status",
         lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True}),
     )
+    notices = []
+    monkeypatch.setattr(
+        update_failure_notice,
+        "tell_scheduled_lapse_detached",
+        lambda *args, **kwargs: notices.append((args, kwargs)),
+    )
 
     assert asyncio.run(_run_scheduled_update_if_due(now)) is None
     schedule = get_update_schedule()
     assert schedule["tonight_at"] is None
     assert schedule["automatic"] is False
+    assert len(notices) == 1
+    assert "no longer exists" in notices[0][0][1]
     connection = get_db()
     try:
         assert connection.execute("SELECT COUNT(*) FROM self_restart_requests").fetchone()[0] == 0
