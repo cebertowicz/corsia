@@ -433,6 +433,7 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 
 journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
+	['1440 light pane closed', 'closed', 'light'], ['1440 dark pane closed', 'closed', 'dark'],
 	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
 ], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Review orphan-heavy ${mode} ${theme}`, { sharedAsOf: '2026-09-12' });
@@ -440,6 +441,7 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	orphanComments(doc.artifactId);
 	raiseAsk(doc.threadId, doc.artifactId, 'Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
 	await open(page, doc, mode, theme);
+	await settled(page);
 	const measurements = await page.locator('.doc').evaluate((root) => {
 		const firstLine = root.querySelector<HTMLElement>('.cm-line')!.getBoundingClientRect();
 		const capsule = root.querySelector<HTMLElement>('.rb-capsule')!.getBoundingClientRect();
@@ -467,6 +469,7 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	const recovery = drawer.locator('[data-drawer-placement]');
 	await expect(recovery.getByRole('status')).toHaveText("22 comments couldn't be placed");
 	await expect(recovery.getByRole('button', { name: 'Reload comment placements' })).toBeVisible();
+	await settled(page);
 	await shot(page, `orphan-heavy-${mode}-${theme}`, info);
 	test.info().annotations.push({ type: 'orphan-heavy-layout', description: JSON.stringify(measurements) });
 });
