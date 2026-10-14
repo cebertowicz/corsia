@@ -6,6 +6,7 @@ import {
 	loadUpdateStatus,
 	releaseNotesFor,
 	resetUpdateStoreForTests,
+	saveUpdateSchedule,
 	startUpdate,
 	updateInFlight,
 	updateOperation,
@@ -40,6 +41,17 @@ afterEach(() => {
 });
 
 describe('update store', () => {
+	it('persists Tonight and adopts the returned server schedule', async () => {
+		vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+			expect(url).toContain('/api/system/update-schedule');
+			expect(init?.method).toBe('PUT');
+			return { ok: true, json: async () => ({ automatic: false, time: '03:00', tonight_at: '2026-10-14T03:00:00+00:00' }) };
+		}));
+
+		expect(await saveUpdateSchedule({ tonight: true })).toBe(true);
+		expect(get(updateStatus)).toBeNull();
+	});
+
 	it('adopts the operation while the start request is still pending', async () => {
 		let release: (value: unknown) => void = () => {};
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => {

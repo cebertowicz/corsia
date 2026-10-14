@@ -136,9 +136,13 @@ def _discard_prepared_release(
 
 
 async def _acquire_settings_restart(
-    user: dict,
+    user: dict | None,
     mode: str,
     acquired_ids: list[str],
+    *,
+    trigger: str | None = None,
+    target_version: str | None = None,
+    callback_hash: str | None = None,
 ) -> str:
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
@@ -148,13 +152,14 @@ async def _acquire_settings_restart(
     def _try_acquire() -> str | None:
         operation_id = self_restart.try_acquire(
             None,
-            user.get("id"),
+            user.get("id") if user else None,
             None,
             None,
             mode,
             kind="update" if mode == "update" else "restart",
-            trigger="manual" if mode == "update" else None,
-            target_version=cached_target_version() if mode == "update" else None,
+            trigger=trigger if mode == "update" else None,
+            target_version=(target_version or cached_target_version()) if mode == "update" else None,
+            callback_hash=callback_hash,
         )
         if operation_id is not None:
             acquired_ids.append(operation_id)
@@ -319,8 +324,9 @@ async def _launch_settings_restart(
         raise HTTPException(500, detail) from exc
 
 
+
 async def prelaunch_settings_restart(
-    user: dict,
+    user: dict | None,
     mode: str,
     corsia_script: Path,
     restart_env: dict[str, str],
@@ -328,6 +334,9 @@ async def prelaunch_settings_restart(
     restart_log_path: Callable[[str], Path],
     *,
     caller_token: str,
+    trigger: str | None = "manual",
+    target_version: str | None = None,
+    callback_hash: str | None = None,
 ) -> tuple[str, object]:
     """Hand Settings restart ownership from preparation through child launch."""
     prepared = mode == "update"
@@ -336,7 +345,14 @@ async def prelaunch_settings_restart(
     try:
         acquired_ids: list[str] = []
         try:
-            operation_id = await _acquire_settings_restart(user, mode, acquired_ids)
+            operation_id = await _acquire_settings_restart(
+                user,
+                mode,
+                acquired_ids,
+                trigger=trigger,
+                target_version=target_version,
+                callback_hash=callback_hash,
+            )
         except asyncio.CancelledError as error:
             await _compensate_cancelled_acquire(
                 acquired_ids,
@@ -345,32 +361,11 @@ async def prelaunch_settings_restart(
             raise
 
         if prepared:
-            try:
-                await _check_update_backup_room()
-            except Exception as error:
-                from infra.database_migrations import BackupRoomError
+            from api.update_preparation import prepare_update_before_drain
 
-                if isinstance(error, BackupRoomError):
-                    detail = json.dumps({
-                        "needed_bytes": error.needed_bytes,
-                        "free_bytes": error.free_bytes,
-                    })
-                    await _compensate_preparation_failure(
-                        operation_id,
-                        error,
-                        failure_code="disk_space",
-                        failure_detail=detail,
-                    )
-                    raise HTTPException(
-                        409,
-                        {"code": "disk_space", "needed_bytes": error.needed_bytes,
-                         "free_bytes": error.free_bytes},
-                    ) from error
-                raise
-            await _prepare_owned_release(
+            script_args = await prepare_update_before_drain(
                 operation_id, acquired_ids, corsia_script, restart_env
             )
-            script_args = ["restart-prepared"]
 
         try:
             await _begin_settings_drain(operation_id, mode)

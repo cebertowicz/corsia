@@ -6,7 +6,7 @@
 	import { Button, Modal } from '$lib/components/ui';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import { UPDATE_STEPS, elapsedSeconds, failureCopy, failureFromOperation, formatElapsed, formatInstalledAt, humanDuration, isFailedOperation, isInFlight, stepDetail, stepIndex, stepMessage } from './model';
-	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, startUpdate, updateFailureMessage, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
+	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, saveUpdateSchedule, startUpdate, updateFailureMessage, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
 
 	let now = $state(Date.now());
 	let showAll = $state(false);
@@ -52,6 +52,13 @@
 	function close(): void { closeUpdateSurface(); }
 	function retry(): void { void retryUpdate(); }
 	function updateNow(): void { void startUpdate(); }
+	async function tonight(): Promise<void> {
+		if (!await saveUpdateSchedule({ tonight: true })) return;
+		closeUpdateSurface();
+		toasts.showAction(`Scheduled for tonight at ${$updateStatus?.schedule?.time ?? '03:00'}.`, {
+			label: 'Undo', run: () => { void saveUpdateSchedule({ tonight: false }); },
+		});
+	}
 	function visibleChanges() { return showAll ? (notes?.changes?.items ?? []) : (notes?.changes?.items ?? []).slice(0, 3); }
 	function totalChanges() { return (notes?.changes?.items.length ?? 0) + (notes?.changes?.more ?? 0); }
 	function detailLine(value: string | null | undefined): string | null {
@@ -80,7 +87,7 @@
 
 {#snippet modalFoot()}
 	<div class="update-foot">
-		{#if screen === 'sheet'}<Button variant="ghost" onclick={close}>Later</Button><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button>
+		{#if screen === 'sheet'}<Button variant="ghost" onclick={close}>Later</Button><Button variant="ghost" onclick={() => void tonight()}>Tonight</Button><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button>
 		{:else if screen === 'panel'}<Button variant="ghost" onclick={close}>Hide</Button>
 		{:else if screen === 'notes'}<Button variant="primary" onclick={close}>Done</Button>
 		{:else}{#if failure?.retryLabel}<Button loading={$updateStarting} onclick={retry}>{failure.retryLabel}</Button>{/if}<Button variant="primary" onclick={close}>Close</Button>{/if}
@@ -104,7 +111,7 @@
 			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{#if agentCount === 1}1 agent is working: it gets up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. If it is still mid-step, it is stopped and starts that step again once CORSIA is back.{:else}{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and start that step again once CORSIA is back.{/if}</span>{/if}</div>
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.usual_seconds != null}<p class="muted">Usually about {humanDuration($updateStatus.usual_seconds)}.</p>{/if}
-		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button></div>{/if}
+		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button variant="ghost" onclick={() => void tonight()}>Tonight</Button><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button></div>{/if}
 	</section>
 {/snippet}
 

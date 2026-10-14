@@ -3,14 +3,13 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { readSystemVersion, restartSystem, type SystemVersionSnapshot } from '$lib/stores/settingsSystemRestart';
 import {
-	failureCopy,
-	failureFromOperation,
 	isFailedOperation,
 	isInFlight,
 	type UpdateChanges,
 	type UpdateOperation,
 } from './model';
 import { releaseNotesFor, rememberApprovedNotes, rememberId, snapshotReleaseNotes } from './releaseNotes';
+import { presentUpdateTerminal } from './terminal';
 
 export { releaseNotesFor };
 export type { UpdateReleaseNotes } from './releaseNotes';
@@ -19,6 +18,8 @@ const BASE = '';
 const POLL_MS = 1_000;
 const HANDLED_KEY = 'corsia:update:handled-operation-ids';
 const NOTICED_KEY = 'corsia:update:noticed-target-versions';
+
+export interface UpdateSchedule { automatic: boolean; time: string; tonight_at: string | null; }
 
 export interface UpdateStatus {
 	branch: string | null;
@@ -36,6 +37,7 @@ export interface UpdateStatus {
 	agents_working?: number | null;
 	server_time?: string | null;
 	operation?: UpdateOperation | null;
+	schedule?: UpdateSchedule | null;
 }
 
 export type UpdateSurface = 'closed' | 'sheet' | 'panel';
@@ -129,24 +131,11 @@ function showNotice(status: UpdateStatus): void {
 	});
 }
 
-function showTerminal(operation: UpdateOperation): void {
-	if (!rememberId(HANDLED_KEY, operation.operation_id)) return;
-	if (operation.status === 'complete') {
-		const version = operation.target_version ?? get(updateStatus)?.target_version ?? 'the latest version';
-		toasts.pin('update', {
-			type: 'success',
-			message: `Updated to ${version}`,
-			action: { label: "See what's new", run: openUpdateSheet },
-		});
-		return;
-	}
-	if (isFailedOperation(operation) && get(updateSurface) === 'closed') {
-		const copy = failureCopy(failureFromOperation(operation));
-		toasts.pin('update', {
-			type: 'error', message: copy.title, detail: copy.toastLine ?? undefined,
-			action: { label: 'Details', run: openUpdateSheet },
-		});
-	}
+function showTerminal(operation: UpdateOperation): Promise<void> {
+	return presentUpdateTerminal({
+		operation, status: get(updateStatus), authToken: get(token), handledKey: HANDLED_KEY,
+		surfaceClosed: get(updateSurface) === 'closed', onDetails: openUpdateSheet,
+	});
 }
 
 async function verifyComplete(operation: UpdateOperation): Promise<void> {
@@ -160,7 +149,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 		}
 		if (versionHashesAgree(version)) {
 			versionMismatchStartedAt = null;
-			showTerminal(operation);
+			void showTerminal(operation);
 			return;
 		}
 		versionMismatchStartedAt ??= Date.now();
@@ -185,7 +174,7 @@ function reconcileOperation(status: UpdateStatus): void {
 	stopStatusPolling();
 	stopVersionPolling();
 	if (operation?.status === 'complete') void verifyComplete(operation);
-	else if (operation && isFailedOperation(operation)) showTerminal(operation);
+	else if (operation && isFailedOperation(operation)) void showTerminal(operation);
 }
 
 /** Read the durable operation projection and start polling only while it is active. */
@@ -229,8 +218,22 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 			usual_seconds: current?.usual_seconds ?? null,
 			agents_working: current?.agents_working ?? null,
 			operation: current?.operation ?? null,
+			schedule: current?.schedule ?? null,
 		}));
 	}
+}
+
+export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): Promise<boolean> {
+	const authToken = get(token);
+	if (!authToken) return false;
+	const response = await fetch(`${BASE}/api/system/update-schedule`, {
+		method: 'PUT', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify(patch), cache: 'no-store',
+	});
+	if (!response.ok) return false;
+	const schedule = await response.json() as UpdateSchedule;
+	updateStatus.update((current) => current ? { ...current, schedule } : current);
+	return true;
 }
 
 /** Open the one update surface at its decision or last-terminal state. */

@@ -6,6 +6,12 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 import uuid
 
+from automation.restart_callbacks import (
+    callback_credential_hash,
+    callback_credential_matches,
+    mint_callback_credential,
+)
+from automation.update_schedule import claim_overnight_outcome, update_attempted_today
 from infra.database import get_db, write_transaction
 
 IN_FLIGHT_TTL_SECONDS = 600
@@ -93,6 +99,7 @@ def operation_by_id(operation_id: str, *, db=None) -> dict | None:
     finally:
         if db is None:
             connection.close()
+
 
 
 def record_drain_total(operation_id: str, total: int, *, db=None) -> bool:
@@ -186,6 +193,7 @@ def try_acquire(
     kind: str | None = None,
     trigger: str | None = None,
     target_version: str | None = None,
+    callback_hash: str | None = None,
     operation_id: str | None = None,
     db=None,
     _target_phase: str = "holding",
@@ -225,8 +233,8 @@ def try_acquire(
         connection.execute(
             "INSERT INTO self_restart_requests "
             "(id,requester_thread_id,requester_user,from_sha,branch,reason,"
-            "kind,trigger,target_version,status,phase,requested_at,cutoff_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,'in_flight',?,?,?,?)",
+            "kind,trigger,target_version,callback_credential_hash,status,phase,requested_at,cutoff_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,'in_flight',?,?,?,?)",
             (
                 operation_id,
                 requester_thread_id,
@@ -237,6 +245,7 @@ def try_acquire(
                 kind,
                 trigger,
                 target_version,
+                callback_hash,
                 _target_phase,
                 now,
                 now,
@@ -323,7 +332,7 @@ def complete_operation(
     with write_transaction(db, scope="restart_operation") as connection:
         cur = connection.execute(
             "UPDATE self_restart_requests SET status='complete',phase=NULL,"
-            "settled_at=?,updated_at=?,deployed_sha=?,error=NULL "
+            "settled_at=?,updated_at=?,deployed_sha=?,error=NULL,callback_credential_hash=NULL "
             "WHERE id=? AND status='in_flight' AND phase='resuming'",
             (_now_iso(), _now_iso(), deployed_sha, operation_id),
         )
@@ -345,7 +354,7 @@ def abort_operation(
         placeholders = ",".join("?" for _phase in ABORTABLE_PHASES)
         cur = connection.execute(
             "UPDATE self_restart_requests SET status=?,phase=NULL,settled_at=?,"
-            "updated_at=?,error=?,failure_code=?,failure_detail=? "
+            "updated_at=?,error=?,failure_code=?,failure_detail=?,callback_credential_hash=NULL "
             "WHERE id=? AND status='in_flight' "
             f"AND phase IN ({placeholders})",
             (
@@ -372,7 +381,7 @@ def clear_stale_in_flight(
     with write_transaction(db, scope="restart_operation") as connection:
         cur = connection.execute(
             "UPDATE self_restart_requests SET status='superseded',settled_at=?,"
-            "updated_at=?,deployed_sha=? WHERE status='in_flight' AND phase IS NULL "
+            "updated_at=?,deployed_sha=?,callback_credential_hash=NULL WHERE status='in_flight' AND phase IS NULL "
             "AND requested_at < ?",
             (_now_iso(), _now_iso(), deployed_sha, cutoff),
         )
