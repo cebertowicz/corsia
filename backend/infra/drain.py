@@ -153,7 +153,20 @@ def get_drain_operation_status(operation_id: str) -> dict | None:
     operation = operation_by_id(operation_id)
     if operation is None:
         return None
+    # The lifecycle shell polls this route for every restart, so it carries the
+    # same live drain fields as get_drain_status. Blockers stay scoped to the
+    # requester; a scheduled operation has none and reports counts only.
+    if operation["status"] == "in_flight":
+        requester = operation.get("requester_user")
+        live = {
+            "active": True,
+            **_active_work_counts(),
+            "blockingTurns": active_turn_blockers(user_id=requester) if requester else [],
+        }
+    else:
+        live = {"active": False, "activeProcesses": 0}
     return {
+        **live,
         "operation_id": str(operation["id"]),
         "status": operation["status"],
         "phase": operation.get("phase"),

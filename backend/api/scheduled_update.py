@@ -9,13 +9,13 @@ from api.settings_restart import prelaunch_settings_restart
 from automation.restart_callbacks import callback_credential_hash, mint_callback_credential
 
 
-async def launch_scheduled_update(trigger: str, target_version: str | None) -> str | None:
+async def launch_scheduled_update(trigger: str, target_version: str | None) -> str:
     """Run the approved Update lifecycle from the nightly loop without a human token."""
     if trigger not in {"tonight", "automatic"}:
         raise ValueError("scheduled update trigger is invalid")
     port = os.environ.get("BACKEND_PORT", "")
     if not port.isdigit():
-        return None
+        raise RuntimeError("scheduled update cannot launch: BACKEND_PORT is not a port number")
     from infra.config import LOGS_DIR
 
     credential = mint_callback_credential()

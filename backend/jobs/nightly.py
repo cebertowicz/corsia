@@ -251,12 +251,12 @@ async def _reap_worktrees_safely() -> None:
         logger.exception("nightly_job: worktree reaper failed")
 
 
-def _log_manual_corrections_drain(task: asyncio.Task[None]) -> None:
-    """Observe a detached manual drain; the drain logs its own failures."""
+def _log_corrections_drain(task: asyncio.Task[None]) -> None:
+    """Observe a detached nightly or manual drain; the drain logs its own failures."""
     try:
         task.result()
     except asyncio.CancelledError:
-        logger.info("nightly_job: manual corrections recording cancelled")
+        logger.info("nightly_job: corrections recording cancelled")
 
 
 async def nightly_job_loop() -> None:
@@ -287,7 +287,7 @@ async def nightly_job_loop() -> None:
                             _run_corrections_recording_safely(),
                             name="nightly-corrections-recording",
                         )
-                        nightly_corrections_task.add_done_callback(_log_manual_corrections_drain)
+                        nightly_corrections_task.add_done_callback(_log_corrections_drain)
                     else:
                         logger.info("nightly_job: skipping corrections; another drain is running")
                 elif _should_run_on_idle():
@@ -305,7 +305,7 @@ async def nightly_job_loop() -> None:
                                 _run_corrections_recording_safely(),
                                 name="manual-corrections-recording",
                             )
-                            manual_corrections_task.add_done_callback(_log_manual_corrections_drain)
+                            manual_corrections_task.add_done_callback(_log_corrections_drain)
             except Exception:
                 logger.exception("nightly_job: loop error")
 

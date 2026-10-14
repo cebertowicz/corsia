@@ -28,6 +28,18 @@ def test_automatic_runs_once_in_its_local_hour_after_no_update_attempt():
     assert due_trigger(schedule, now=at_three.replace(hour=4), update_available=True, attempted_today=False) is None
 
 
+def test_automatic_waits_for_the_exact_minute_it_shows():
+    from automation.update_schedule import due_trigger
+
+    schedule = {"automatic": True, "time": "03:45", "tonight_at": None}
+    at = datetime(2026, 10, 14, 3, 0, tzinfo=timezone.utc)
+
+    assert due_trigger(schedule, now=at, update_available=True, attempted_today=False) is None
+    assert due_trigger(schedule, now=at.replace(minute=45), update_available=True, attempted_today=False) == "automatic"
+    assert due_trigger(schedule, now=at.replace(hour=4, minute=30), update_available=True, attempted_today=False) == "automatic"
+    assert due_trigger(schedule, now=at.replace(hour=4, minute=45), update_available=True, attempted_today=False) is None
+
+
 def test_scheduled_update_migration_preserves_existing_operation_rows():
     from infra.migration_114_to_115_scheduled_updates import migrate_114_to_115
 
@@ -115,3 +127,71 @@ def test_scheduled_outcome_is_marked_once_across_devices():
 
     assert mark_outcome_seen("a" * 32, db=db) is True
     assert mark_outcome_seen("a" * 32, db=db) is True
+
+
+def _patch_scheduled_check(monkeypatch, launch):
+    from types import SimpleNamespace
+
+    from api import scheduled_update
+    from automation import self_restart, update_schedule
+    from infra import db_async, settings, update_status
+
+    cleared = []
+    schedule = {"automatic": False, "time": "03:00", "tonight_at": "2026-10-14T03:00:00+00:00"}
+
+    async def run_in_db(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(settings, "get_update_schedule", lambda: schedule)
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True, "target_version": "1.2.3"}),
+    )
+    monkeypatch.setattr(db_async, "run_in_db", run_in_db)
+    monkeypatch.setattr(self_restart, "update_attempted_today", lambda **_kwargs: False)
+    monkeypatch.setattr(update_schedule, "clear_tonight", lambda value: cleared.append(value) or value)
+    monkeypatch.setattr(scheduled_update, "launch_scheduled_update", launch)
+    return cleared
+
+
+def test_tonight_is_claimed_once_and_launches_its_update(monkeypatch):
+    import asyncio
+
+    from jobs.nightly import _run_scheduled_update_if_due
+
+    launched = []
+
+    async def launch(trigger, target_version):
+        launched.append((trigger, target_version))
+        return "c" * 32
+
+    cleared = _patch_scheduled_check(monkeypatch, launch)
+    now = datetime(2026, 10, 14, 3, 10, tzinfo=timezone.utc)
+
+    assert asyncio.run(_run_scheduled_update_if_due(now)) == "c" * 32
+    assert launched == [("tonight", "1.2.3")]
+    assert len(cleared) == 1
+
+
+def test_scheduled_launch_failure_is_logged_not_swallowed(monkeypatch):
+    import asyncio
+
+    from loguru import logger
+
+    from jobs.nightly import _run_scheduled_update_if_due
+
+    async def launch(_trigger, _target_version):
+        raise RuntimeError("scheduled update cannot launch: BACKEND_PORT is not a port number")
+
+    cleared = _patch_scheduled_check(monkeypatch, launch)
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        now = datetime(2026, 10, 14, 3, 10, tzinfo=timezone.utc)
+        assert asyncio.run(_run_scheduled_update_if_due(now)) is None
+    finally:
+        logger.remove(sink)
+
+    assert len(cleared) == 1
+    assert any("BACKEND_PORT is not a port number" in message for message in messages)

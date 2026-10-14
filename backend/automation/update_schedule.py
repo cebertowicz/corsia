@@ -79,8 +79,11 @@ def due_trigger(
             return "tonight" if update_available else None
     if not schedule.get("automatic") or not update_available or attempted_today:
         return None
-    hour, _minute = _time_parts(schedule["time"])
-    return "automatic" if now.hour == hour else None
+    # Same one-hour window as Tonight, from the exact chosen minute. The window
+    # ends at local midnight: the attempted-today guard resets there.
+    hour, minute = _time_parts(schedule["time"])
+    due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return "automatic" if due_at <= now < due_at + SCHEDULE_WINDOW else None
 
 
 def should_drop_tonight(schedule: dict, *, now: datetime) -> bool:

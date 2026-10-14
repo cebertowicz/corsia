@@ -155,6 +155,8 @@ class TestSelfRestartEndpoint:
         assert row["error"] == error[:500]
         assert exact_response.status_code == 200
         assert exact_response.json() == {
+            "active": False,
+            "activeProcesses": 0,
             "operation_id": row["id"],
             "status": row["status"],
             "phase": row["phase"],
