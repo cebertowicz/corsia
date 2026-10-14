@@ -69,7 +69,7 @@ Each recording below contains one `Update` opening and one named close action; t
 
 The test constructs are explicit: `openSystem(page, 'light', viewport.width)` at `frontend/e2e/flows/scheduled-updates-parity.spec.ts:114` reaches `page.setViewportSize` at line 21, and the 393 branch measures `window.innerWidth` at line 115 then asserts `[data-adaptive-drawer]` visible at line 122 before the close action. The 1440 branch instead asserts `.modal` visible and no adaptive drawer at lines 124–125. On mobile, the existing adaptive drawer has no ×; the × row records its equivalent header close control (`.drawer-done`) at line 133, while the separate Later row uses its accessible Later button at line 136.
 
-Capture recipe (after clearing ignored `frontend/test-results/`): the 2 matrix tests run to `test-results/matrix`; the four 1440 motion tests run with `--project chromium-desktop` to `test-results/motion-desktop`; and the four 393 motion tests run with `--project chromium-mobile` to `test-results/motion-mobile`. All ten selected tests passed without retries.
+Capture recipe (after clearing ignored `frontend/test-results/`): the 2 matrix tests run to `test-results/matrix`; the four 1440 motion tests run with `--project chromium-desktop` to `test-results/motion-desktop`; and the four 393 motion tests run with `--project chromium-mobile` to `test-results/motion-mobile`. Keep those `--project` filters: Playwright starts the video fixture before a runtime `test.skip()`, so the in-test viewport guard validates the match but does not itself prevent a cross-project video attachment. All ten selected tests passed without retries.
 
 ### Design-review regression self-check
 
