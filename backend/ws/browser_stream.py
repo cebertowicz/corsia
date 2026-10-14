@@ -84,28 +84,36 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
     frames = PaneFrames()
     navigation_tasks: set[asyncio.Task] = set()
     navigation_lock = asyncio.Lock()
+    overflow = asyncio.Event()
 
     async def send_control() -> None:
-        frames.control({
+        if not frames.control({
             "type": "control",
             "has_control": browser_control.holds_control(thread_id, connection_token),
-        })
+        }):
+            overflow.set()
 
     async def from_stream() -> None:
         async for message in stream:
             if not frames.offer(message):
-                await pane.close(code=1013)
+                overflow.set()
                 return
 
     from_pane = _receive_pane_messages(
-        pane, stream, frames, thread_id, user_id, connection_token, navigation_tasks, navigation_lock, send_control,
+        pane, stream, frames, thread_id, user_id, connection_token,
+        navigation_tasks, navigation_lock, overflow, send_control,
     )
 
     tasks: set[asyncio.Task] = set()
     try:
         await stream.send(json.dumps({"type": "screencast_start"}))
         await send_control()
-        tasks = {asyncio.create_task(from_stream()), asyncio.create_task(from_pane), asyncio.create_task(frames.send(pane.send_text))}
+        tasks = {
+            asyncio.create_task(from_stream()),
+            asyncio.create_task(from_pane),
+            asyncio.create_task(frames.send(pane.send_text)),
+            asyncio.create_task(_close_on_overflow(pane, overflow)),
+        }
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
             task.cancel()
@@ -126,7 +134,8 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
 
 async def _receive_pane_messages(
     pane: WebSocket, stream, frames: PaneFrames, thread_id: str, user_id: str,
-    connection_token: str, navigation_tasks: set[asyncio.Task], navigation_lock: asyncio.Lock, send_control,
+    connection_token: str, navigation_tasks: set[asyncio.Task], navigation_lock: asyncio.Lock,
+    overflow: asyncio.Event, send_control,
 ) -> None:
     """Receive pane controls while navigation runs in a serialized child task."""
     while True:
@@ -142,7 +151,9 @@ async def _receive_pane_messages(
                 emit_product_event("browser_pane", kind, thread_id=thread_id, user_id=user_id)
             await send_control()
         elif kind == "navigate":
-            _start_navigation(data, frames, thread_id, connection_token, navigation_tasks, navigation_lock)
+            _start_navigation(
+                data, frames, thread_id, connection_token, navigation_tasks, navigation_lock, overflow,
+            )
         elif kind == "appearance":
             _request_match(thread_id, connection_token, data)
         elif (kind in {"input_mouse", "input_keyboard"}
@@ -152,7 +163,7 @@ async def _receive_pane_messages(
 
 def _start_navigation(
     request: dict, frames: PaneFrames, thread_id: str, connection_token: str,
-    navigation_tasks: set[asyncio.Task], navigation_lock: asyncio.Lock,
+    navigation_tasks: set[asyncio.Task], navigation_lock: asyncio.Lock, overflow: asyncio.Event,
 ) -> None:
     """Start one navigation that serializes with other page commands and reports one safe result."""
     async def navigate() -> dict:
@@ -167,12 +178,21 @@ def _start_navigation(
         if done.cancelled():
             return
         try:
-            frames.control(done.result())
+            result = done.result()
         except Exception:
             log.exception("browser pane navigation failed")
-            frames.control({"type": "navigate_result", "error": "Browser navigation failed"})
+            result = {"type": "navigate_result", "error": "Browser navigation failed"}
+        if not frames.control(result):
+            overflow.set()
 
     task.add_done_callback(publish_navigation)
+
+
+async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
+    """Close the pane once any reliable output path exhausts its bounded queue."""
+    await overflow.wait()
+    with contextlib.suppress(Exception):
+        await pane.close(code=1013)
 
 
 # Matching waits behind any running page command, so it runs beside each input loop. Per thread,

@@ -2,8 +2,9 @@ import { expect, test } from '@playwright/test';
 import { createServer } from 'node:http';
 import { createSession, loginByUrl } from '../support/corsia';
 
+test.use({ video: 'on' });
+
 test.describe('@flow:browser-pane animated browser control', () => {
- test.use({ video: 'on' });
 
  test('delivers tile clicks and touch scrolling during animation', async ({ page, request, context }, testInfo) => {
   test.setTimeout(90_000);

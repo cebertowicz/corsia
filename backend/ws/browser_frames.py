@@ -31,9 +31,9 @@ class PaneFrames:
         self._ready.set()
         return True
 
-    def control(self, message: dict) -> None:
-        if not self.offer(json.dumps(message, separators=(",", ":"))):
-            raise RuntimeError("pane control queue overflow")
+    def control(self, message: dict) -> bool:
+        """Queue a reliable control message, reporting whether the bounded queue accepted it."""
+        return self.offer(json.dumps(message, separators=(",", ":")))
 
     async def send(self, send_text: Callable[[str], Awaitable[None]]) -> None:
         while True:
