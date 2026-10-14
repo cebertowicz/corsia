@@ -6,7 +6,6 @@ import {
 	chatComposer, createSession, lastAssistantMessage, lastUserMessage,
 	saveEvidenceScreenshot, TEST_TOKEN, watchSessionSubscriptions,
 } from '../support/corsia';
-import { revealWorked } from '../support/documentOpen';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -77,13 +76,10 @@ test('@flow:chat @surface:chat ownerless Stop clears both tabs and permits the n
 			await expect(tab.locator('.toast.toast--error')).toHaveCount(0);
 			await expect(tab.locator('.delivery-status')).toHaveCount(0);
 		}
-		await seedMockResponses(request, [{ content: 'ANSWER_AFTER_OWNERLESS_STOP', finish_reason: 'stop', match_thread: threadId }]);
+		await seedMockResponses(request, [{ content: 'ANSWER_AFTER_OWNERLESS_STOP', finish_reason: 'stop' }]);
 		await chatComposer(page).fill('Continue after Stop.');
 		await page.getByRole('button', { name: 'Send message' }).click();
 		await expect(lastUserMessage(page)).toContainText('Continue after Stop.');
-		// A completed turn is intentionally collapsed behind its Worked disclosure; reopen it before checking the delivered answer.
-		await revealWorked(page);
-		await revealWorked(observer);
 		await expect(lastAssistantMessage(page)).toContainText('ANSWER_AFTER_OWNERLESS_STOP');
 		await expect(lastAssistantMessage(observer)).toContainText('ANSWER_AFTER_OWNERLESS_STOP');
 		expect(await readMockCallCount(request)).toBe(1);

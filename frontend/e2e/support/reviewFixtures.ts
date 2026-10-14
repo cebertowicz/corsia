@@ -90,11 +90,7 @@ export async function selectThread(page: Page, doc: Doc, mode: Mode) {
 	else await expect(page.locator('.cm-content')).toContainText('Step 1:');
 }
 
-/** A proof run can bind every captured frame to its committed candidate without changing ordinary test output names. */
-export const shot = (page: Page, name: string, info: TestInfo) => {
-	const evidenceHead = process.env.CORSIA_E2E_EVIDENCE_HEAD;
-	return page.screenshot({ path: info.outputPath(`${evidenceHead ? `gate0-${evidenceHead}-` : ''}${name}.png`), animations: 'disabled' });
-};
+export const shot = (page: Page, name: string, info: TestInfo) => page.screenshot({ path: info.outputPath(`${name}.png`), animations: 'disabled' });
 
 /** A pointer at the element's centre lands on the element, not on whatever is drawn above it (named in the failure). */
 export const hitAtCentre = (locator: ReturnType<Page['locator']>) => locator.evaluate((el) => {

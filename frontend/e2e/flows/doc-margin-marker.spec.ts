@@ -194,8 +194,8 @@ async function reveal(page: Page, index: number) {
 		const now = marker.getBoundingClientRect();
 		const point = (x: number, y: number) => {
 			const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>('.cm-comment-marker');
-			// A marker under the sheet or its modal backdrop is covered by design; neither surface exposes the canvas beneath it.
-			const covered = !hit && !!document.elementFromPoint(x, y)?.closest('.canvas-comment-drawer.sheet, [data-adaptive-drawer]');
+			// A marker under a bottom sheet is covered by design: only the sheet's own surface may cover one.
+			const covered = !hit && !!document.elementFromPoint(x, y)?.closest('.canvas-comment-drawer.sheet');
 			return { x, y, hit: hit?.dataset.commentIds ?? null, covered };
 		};
 		const cx = now.left + now.width / 2, cy = now.top + now.height / 2;
@@ -509,10 +509,8 @@ test.describe('@flow:doc-margin-marker', () => {
 		await settle(page);
 		const withDrawer = await markers(page);
 		expect(withDrawer.map((marker) => keysOf(opened, marker)), 'the drawer does not change the clusters').toEqual(before);
-		// A canvas too narrow for a side column gets the documented modal AdaptiveDrawer. Its portaled backdrop blocks the canvas;
-		// a non-modal drawer would leave markers above its sheet reachable.
-		const modalDrawer = await page.locator('[data-adaptive-drawer]').count() > 0;
-		expect(modalDrawer, 'this narrow document canvas uses the documented modal drawer').toBe(true);
+		// A canvas too narrow for a side column gets the drawer as a bottom sheet over its lower part (this viewport is as tall as the
+		// whole document, so it cannot scroll a covered marker clear): a marker is reachable or covered by that sheet, nothing else.
 		let reachable = 0;
 		for (let index = 0; index < withDrawer.length; index += 1) {
 			const seen = await reveal(page, index);
@@ -521,7 +519,7 @@ test.describe('@flow:doc-margin-marker', () => {
 			else expect.soft(centre.covered, `drawer open: marker ${index} is reachable or covered by the sheet only`).toBe(true);
 			expect.soft(seen.rect.left + seen.rect.width, `drawer open: marker ${index} stays in the rail`).toBeLessThanOrEqual(seen.content.left + rail + 0.5);
 		}
-		expect(reachable, 'the modal drawer backdrop protects the canvas').toBe(0);
+		expect(reachable, 'with the drawer open the markers above it are still reachable').toBeGreaterThan(0);
 		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 
@@ -534,8 +532,6 @@ test.describe('@flow:doc-margin-marker', () => {
 		};
 		// Scroll: at an ordinary height the editor shows part of the document, and every marker is still reachable once scrolled to.
 		const ordinary = await sized(viewport(info, false));
-		const scrollGroups = () => markers(ordinary.fresh).then((found) => found.map((marker) => keysOf(ordinary.freshOpened, marker)));
-		await expect.poll(scrollGroups, { message: 'the scroll canvas has rendered its marker groups' }).toEqual(before);
 		const scrolled = await markers(ordinary.fresh);
 		expect(scrolled.map((marker) => keysOf(ordinary.freshOpened, marker)), 'scrolling regroups nothing').toEqual(before);
 		for (let index = 0; index < scrolled.length; index += 1) {

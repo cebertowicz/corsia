@@ -234,7 +234,6 @@
 	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
 	@media (any-pointer: coarse) {
 		@container doc-canvas (max-width: 600px) {
-			.document-header:has(:global(.review-bar.ask:not(.expanded))) .identity-details:has(.identity-age) { display: none; }
 			.document-header:has(:global(.rb-slot)) { align-items: center; }
 			.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: 44px; }
 		}
