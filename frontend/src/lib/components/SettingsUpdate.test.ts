@@ -94,4 +94,20 @@ describe('SettingsUpdate', () => {
 		details?.click();
 		expect(get(updateSurface)).toBe('sheet');
 	});
+
+	it('drops the failed pill once a restart has activated the staged update', () => {
+		const failed = { operation_id: 'update-1', kind: 'update', status: 'failed', failure_code: 'restart_pending', settled_at: '2026-10-14T01:33:58Z' } as const;
+		updateStatus.set(status({ operation: { ...failed } }));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+		expect(host.textContent).toContain("Update didn't start");
+		unmount(component);
+
+		updateStatus.set(status({ operation: { ...failed, activated_by_restart: true } }));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+		expect(host.textContent).not.toContain("Update didn't start");
+		expect(host.textContent).not.toContain('Try again');
+		expect(host.textContent).not.toContain('Installed');
+	});
 });

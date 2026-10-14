@@ -3,7 +3,7 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
 import { failureCopy, failureFromOperation } from './failureCopy';
-import { isFailedOperation, isInFlight, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
+import { isFailedOperation, isInFlight, isResolvedFailure, type ClientVerdict, type UpdateChanges, type UpdateOperation } from './model';
 import { markOutcomeSeen } from './outcome';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
 
@@ -166,7 +166,7 @@ function reconcileOperation(status: UpdateStatus): void {
 	stopStatusPolling();
 	stopVersionPolling();
 	dropProgressToast();
-	if (!operation || operation.outcome_seen_at) return;
+	if (!operation || operation.outcome_seen_at || isResolvedFailure(operation)) return;
 	if (operation.status === 'complete') void verifyComplete(operation);
 	else if (isFailedOperation(operation)) showTerminal(operation);
 }
