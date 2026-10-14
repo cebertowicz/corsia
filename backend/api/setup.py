@@ -7,6 +7,7 @@ exist. They are not a general unauthenticated provider or account API.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import platform
 import shutil
@@ -14,6 +15,7 @@ import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from infra import accounts, config
@@ -22,6 +24,7 @@ from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
+logger = logging.getLogger(__name__)
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
 _TAURI_ORIGINS = frozenset({"tauri:" + "//localhost", "http:" + "//tauri.localhost"})
@@ -118,7 +121,8 @@ def _seed_workspace_profile(name: str, email: str) -> None:
     """Use the CLI's existing profile-create-or-add-email behavior after account creation."""
     from infra.user_profile import add_profile_email, mac_timezone, write_user_profile
 
-    if not write_user_profile(config.WORKSPACE, name, mac_timezone(), email):
+    safe_name = "".join(character for character in name if character.isprintable())
+    if not write_user_profile(config.WORKSPACE, safe_name, mac_timezone(), email):
         add_profile_email(config.WORKSPACE, email)
 
 
@@ -185,9 +189,12 @@ async def first_account(request: Request) -> dict | Response:
         )
     except accounts.FirstAccountExists:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
-    except accounts.AccountError:
-        return Response(status_code=422)
-    await asyncio.to_thread(_seed_workspace_profile, body.name, body.email or "")
+    except accounts.AccountError as error:
+        return JSONResponse(status_code=422, content={"detail": str(error)})
+    try:
+        await asyncio.to_thread(_seed_workspace_profile, body.name, body.email or "")
+    except Exception as error:
+        logger.warning("Workspace profile seeding failed after first-account creation: %s", type(error).__name__)
     token, expires_at = await run_in_db(accounts.issue_token, user_id, kind="session", label="browser")
     user = await run_in_db(accounts.get_user, user_id)
     return {

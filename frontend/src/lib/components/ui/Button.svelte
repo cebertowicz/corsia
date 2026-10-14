@@ -3,9 +3,9 @@
 
 	interface Props {
 		/**
-		 * `pill` and `chip` are proposed, pending Product Experience and Steve: the chat canvas's own
-		 * action forms (the filled send button, the model chip). Colours are the accent roles. Only setup uses
-		 * them. Each is one rule block below, so a different decision is a change to this file alone.
+		 * `pill` and `chip` are approved setup-only variants. Their colours use the semantic accent roles.
+		 * Do not expand their usage beyond setup without a Product Experience decision. Each remains one
+		 * rule block below, so a future decision changes this file alone.
 		 */
 		variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'pill' | 'chip';
 		size?: 'sm' | 'md';
@@ -119,7 +119,7 @@
 		color: var(--text-primary);
 	}
 
-	/* Proposed (pending PX + Steve): the Fill and On-fill of the send button, as a pill that carries a label. */
+	/* Setup-only primary action: semantic Fill and On-fill roles. */
 	.btn.pill {
 		height: calc(var(--space-7) + var(--space-2)); padding: 0 var(--space-5);
 		border-radius: var(--radius-pill); border-color: transparent;
@@ -129,7 +129,7 @@
 	.btn.pill:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary)); }
 	.btn.pill:disabled { opacity: 0.3; }
 
-	/* Proposed (pending PX + Steve): the Text role, as the composer's model chip. No box. */
+	/* Setup-only secondary action: semantic Text role, without a box. */
 	.btn.chip {
 		background: transparent; border-color: transparent; color: var(--accent-text);
 		font-weight: var(--fw-semibold); padding: 0 var(--space-2); border-radius: var(--radius-sm);

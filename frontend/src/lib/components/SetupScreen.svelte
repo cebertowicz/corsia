@@ -49,6 +49,8 @@
 	const localReady = $derived(local?.state === 'ready');
 	const canFinish = $derived(anyReady || localReady);
 	const modelSize = $derived(status.model_size_gb ? `${status.model_size_gb} GB` : 'a local model');
+	const downloadModelLabel = $derived(status.model_name || 'local model');
+	const usernameError = $derived(username && !/^[a-z0-9_-]{1,32}$/.test(username) ? "Use 1–32 lowercase letters, numbers, '-' or '_'." : '');
 
 	async function readStatus() {
 		statusError = '';
@@ -61,7 +63,11 @@
 			folder = status.work_folder || folder;
 			if (status.has_users) { onExistingAccount(); return; }
 			if (status.apple_silicon === false || status.macos_supported === false || status.app_location === 'disk_image') page = 'hard-stop';
-			else { localWanted = status.local_eligible !== false; page = 'welcome'; }
+			else {
+				localWanted = status.local_eligible !== false
+					&& (status.free_disk_gb ?? Infinity) >= (status.model_size_gb ?? 0);
+				page = 'welcome';
+			}
 		} catch {
 			statusError = 'CORSIA couldn’t check this computer. Try again, or sign in if you already set it up.';
 			page = 'error';
@@ -85,7 +91,7 @@
 
 	async function createAccount() {
 		validateConfirmation();
-		if (!name.trim() || !username.trim() || password.length < 8 || confirmationError || accountBusy) return;
+		if (!name.trim() || !username.trim() || usernameError || password.length < 8 || confirmationError || accountBusy) return;
 		accountBusy = true; accountError = '';
 		try {
 			const response = await fetch('/api/setup/first-account', {
@@ -93,13 +99,18 @@
 				body: JSON.stringify({ name: name.trim(), username: username.trim(), password, email: email.trim() || null }),
 			});
 			if (response.status === 409) { onExistingAccount(); return; }
+			if (response.status === 422) {
+				const detail = (await response.json().catch(() => null))?.detail;
+				accountError = typeof detail === 'string' ? detail : 'Check the highlighted account details and try again.';
+				return;
+			}
 			if (!response.ok) throw new Error(`account ${response.status}`);
 			const result = await response.json();
 			onAccountCreated();
 			token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() });
 			await refreshSources();
 			page = 'models';
-		} catch { accountError = 'CORSIA couldn’t start. Try again, or choose another work folder.'; page = 'error'; }
+		} catch { accountError = 'CORSIA couldn’t start. Try again.'; page = 'error'; }
 		finally { accountBusy = false; password = ''; confirmation = ''; }
 	}
 
@@ -150,27 +161,27 @@
 				<p>Local models need more available memory. You can still finish setup with a signed-in model source.</p>
 			{:else if (status.free_disk_gb ?? Infinity) < (status.model_size_gb ?? 0)}
 				<p>Free up space for {modelSize}, then turn on the download.</p>
-				<label class="switch"><input type="checkbox" bind:checked={localWanted} disabled /> Download Qwen 3.8 now</label>
+				<label class="switch"><input type="checkbox" bind:checked={localWanted} disabled /> Download {downloadModelLabel} now</label>
 			{:else}
-				<label class="switch"><input type="checkbox" bind:checked={localWanted} /> Download Qwen 3.8 now</label>
+				<label class="switch"><input type="checkbox" bind:checked={localWanted} /> Download {downloadModelLabel} now</label>
 				<p>The download continues while you finish setup.</p>
 			{/if}
 		</div>
 	</SetupShell>
 {:else if page === 'account'}
-	<SetupShell {steps} {jobs} title="Create your account" primary={{ label: 'Continue', disabled: accountBusy || !name.trim() || !username.trim() || password.length < 8 || !!confirmationError, loading: accountBusy }} onPrimary={createAccount}>
+	<SetupShell {steps} {jobs} title="Create your account" primary={{ label: 'Continue', disabled: accountBusy || !name.trim() || !username.trim() || !!usernameError || password.length < 8 || !!confirmationError, loading: accountBusy }} onPrimary={createAccount}>
 		<form class="form" onsubmit={(event) => { event.preventDefault(); createAccount(); }}>
 			<Field variant="chip" layout="stacked" label="Name"><input autocomplete="name" bind:value={name} /></Field>
-			<Field variant="chip" layout="stacked" label="Username"><input autocomplete="username" autocapitalize="off" bind:value={username} /></Field>
+			<Field variant="chip" layout="stacked" label="Username" error={usernameError || undefined}><input autocomplete="username" autocapitalize="off" bind:value={username} /></Field>
 			<Field variant="chip" layout="stacked" label="Password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input type="password" autocomplete="new-password" bind:value={password} /></Field>
 			<Field variant="chip" layout="stacked" label="Confirm password" error={confirmationError}><input type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
 			<Field variant="chip" layout="stacked" label="Email (optional)"><input type="email" autocomplete="email" bind:value={email} /></Field>
-			<div class="folder"><span>Work folder</span><strong>{folder}</strong></div>
+			<div class="folder"><span>This computer</span><strong>{folder}</strong></div>
 			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
 		</form>
 	</SetupShell>
 {:else if page === 'error'}
-	<SetupShell {steps} {jobs} title="CORSIA couldn’t start" lede={statusError || accountError || 'Try again after checking your work folder.'} primary={{ label: 'Try again' }} onPrimary={page === 'error' && !get(token) ? readStatus : createAccount}>
+	<SetupShell {steps} {jobs} title="CORSIA couldn’t start" lede={statusError || accountError || 'Try again.'} primary={{ label: 'Try again' }} onPrimary={page === 'error' && !get(token) ? readStatus : createAccount}>
 		{#snippet secondary()}<Button variant="chip" onclick={() => page = 'account'}>Back</Button>{/snippet}
 	</SetupShell>
 {:else}

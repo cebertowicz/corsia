@@ -172,6 +172,38 @@ def test_first_account_issues_normal_browser_session(client, monkeypatch):
     assert seeded == [("First Person", "first@example.test")]
 
 
+def test_first_account_logs_profile_seed_failure_without_user_fields_and_still_issues_a_session(client, monkeypatch, caplog):
+    def fail_profile_seed(_name, _email):
+        raise RuntimeError("profile store unavailable")
+
+    monkeypatch.setattr(setup_api, "_seed_workspace_profile", fail_profile_seed)
+    response = _post(client, "/api/setup/first-account", {
+        "name": "First Person",
+        "username": "first",
+        "password": "[REDACTED]",
+        "email": "first@example.test",
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert accounts.resolve_token(body["token"]) == {
+        "id": "first", "name": "first", "token_kind": "session",
+    }
+    assert body["user"] == {"id": "first", "name": "first"}
+    assert "Workspace profile seeding failed after first-account creation: RuntimeError" in caplog.text
+    assert "First Person" not in caplog.text
+    assert "first@example.test" not in caplog.text
+
+
+def test_first_account_returns_safe_account_error_detail(client):
+    response = _post(client, "/api/setup/first-account", {
+        "name": "First Person", "username": "not valid", "password": "[REDACTED]",
+    })
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "username must be 1-32 characters of a-z, 0-9, '-' or '_'"}
+
+
 def test_first_account_rejects_the_client_only_folder_field(client):
     response = _post(client, "/api/setup/first-account", {
         "name": "First Person", "username": "first", "password": "correct horse battery staple", "folder": "~/corsia",
@@ -236,8 +268,8 @@ def test_profile_seeding_matches_the_cli_create_or_add_email_behavior(monkeypatc
         lambda workspace, name, timezone, email: writes.append((workspace, name, timezone, email)) or False,
     )
     monkeypatch.setattr(user_profile, "add_profile_email", lambda workspace, email: additions.append((workspace, email)))
-    setup_api._seed_workspace_profile("First Person", "first@example.test")
-    assert writes == [(tmp_path, "First Person", "America/Los_Angeles", "first@example.test")]
+    setup_api._seed_workspace_profile("First\nPerson\x00", "first@example.test")
+    assert writes == [(tmp_path, "FirstPerson", "America/Los_Angeles", "first@example.test")]
     assert additions == [(tmp_path, "first@example.test")]
 
 

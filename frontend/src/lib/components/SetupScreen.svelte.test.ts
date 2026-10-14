@@ -15,7 +15,7 @@ beforeEach(() => {
 	token.set(null); user.set(null); calls = [];
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 		const url = String(input); calls.push(url);
-		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_size_gb: 30, work_folder: '~/CORSIA' });
+		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
 		if (url === '/api/setup/local-download') return json({ in_progress: true });
 		return json({ sources: [] });
 	}));
@@ -40,6 +40,7 @@ describe('SetupScreen', () => {
 
 	it('starts the gated selected local download with Get started', async () => {
 		await settle();
+		expect(host.textContent).toContain('Download Example model now');
 		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
 		action?.click();
 		await settle();
@@ -47,15 +48,78 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Create your account');
 	});
 
-	it('shows the bootstrapped work folder without allowing it to change', async () => {
+	it('shows the bootstrapped computer location without allowing it to change', async () => {
 		await settle();
 		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
 		action?.click();
 		await settle();
-		expect(host.textContent).toContain('Work folder');
+		expect(host.textContent).toContain('This computer');
 		expect(host.textContent).toContain('~/CORSIA');
 		expect(host.textContent).not.toContain('Change');
 		expect(host.querySelector('[aria-label="Work folder"]')).toBeNull();
+		expect(host.textContent).not.toContain('work folder');
+	});
+
+	it('does not request a local download when free disk is below the selected model size', async () => {
+		if (component) await unmount(component);
+		calls = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, free_disk_gb: 20, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
+			if (url === '/api/setup/local-download') return json({ in_progress: true });
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+
+		await settle();
+		expect(host.textContent).toContain('Free up space for 30 GB');
+		const action = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'));
+		action?.click();
+		await settle();
+		expect(calls).not.toContain('/api/setup/local-download');
+		expect(host.textContent).toContain('Create your account');
+	});
+
+	it('validates usernames before submitting the account form', async () => {
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
+		username.value = 'Not valid';
+		username.dispatchEvent(new Event('input', { bubbles: true }));
+		await tick();
+
+		expect(host.textContent).toContain("Use 1–32 lowercase letters, numbers, '-' or '_'.");
+		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))).toHaveProperty('disabled', true);
+	});
+
+	it('keeps a safe server account error inline on the account form', async () => {
+		await settle();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/first-account') return json({ detail: 'username is already in use' }, 422);
+			if (url === '/api/setup/local-download') return json({ in_progress: true });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Example model', model_size_gb: 30, work_folder: '~/CORSIA' });
+			return json({ sources: [] });
+		}));
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		for (const [input, value] of [
+			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
+			[host.querySelector('input[autocomplete="username"]'), 'first'],
+			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
+		] as [HTMLInputElement, string][]) {
+			input.value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+		}
+		await tick();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
+		await settle();
+
+		expect(host.textContent).toContain('username is already in use');
+		expect(host.textContent).toContain('Create your account');
+		expect(host.textContent).not.toContain('CORSIA couldn’t start');
 	});
 
 });
