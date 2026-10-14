@@ -394,7 +394,7 @@
 			background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
 		}
 		.shell-top-pad {
-			height: env(safe-area-inset-top, 0px);
+			height: var(--safe-top);
 		}
 	}
 </style>

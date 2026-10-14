@@ -417,7 +417,7 @@
 <style>
 	.ps-scroll {
 		flex: 1; min-height: 0; overflow-y: auto;
-		padding-top: calc(var(--header-height, 60px) + env(safe-area-inset-top, 0px));
+		padding-top: var(--header-bottom);
 	}
 	.ps {
 		width: 100%; max-width: 600px; margin: 0 auto;

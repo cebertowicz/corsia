@@ -437,7 +437,7 @@
 	.thread-host-access {
 		--host-access-available-height: calc(
 			100dvh
-			- var(--header-height, 64px)
+			- var(--header-bottom)
 			- var(--input-bar-height, 100px)
 			- 24px
 		);
@@ -540,8 +540,7 @@
 		.thread-host-access {
 			--host-access-available-height: calc(
 				100dvh
-				- var(--header-height, 64px)
-				- env(safe-area-inset-top, 0px)
+				- var(--header-bottom)
 				- var(--input-bar-height, 100px)
 				- var(--kb-toolbar-inset, 0px)
 				- 16px

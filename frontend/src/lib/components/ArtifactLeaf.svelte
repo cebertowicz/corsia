@@ -335,7 +335,7 @@
 	.rail {
 		width: 36px; height: 100%; flex-shrink: 0; box-sizing: border-box;
 		display: flex; flex-direction: column; align-items: center; gap: 6px;
-		padding: calc(var(--header-height, 56px) + 12px) 0 12px;
+		padding: calc(var(--header-bottom) + 12px) 0 12px;
 		border: none; border-left: 1px solid var(--border-subtle);
 		background: var(--glass-thin); cursor: pointer;
 	}
@@ -357,15 +357,14 @@
 	.leaf {
 		height: 100%; display: flex; flex: 1; flex-direction: column; min-width: 0;
 		min-height: 0; overflow: hidden;
-		box-sizing: border-box; padding-top: var(--header-height, 56px);
+		box-sizing: border-box; padding-top: var(--header-bottom);
 		border-left: 1px solid var(--border-subtle);
 		background: var(--bg-primary);
 	}
 	/* Compact fills the canvas, so it owns no divider edge and the tab strip's
 	   role is taken over by the app header. */
 	.leaf.compact { flex: 1; border-left: none; }
-	/* The app header is taller by the top safe area at phone width (see Header.svelte), and sits over the canvas. */
-	@media (max-width: 768px) { .leaf { padding-top: calc(var(--header-height, 56px) + env(safe-area-inset-top, 0px)); } }
+	/* Header clearance is owned by --header-bottom. */
 	.leaf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 20px 20px; }
 	.leaf-body.document-canvas, .leaf-body.image-canvas { overflow: hidden; container: doc-canvas / inline-size; }
 	.leaf-body.document-canvas { position: relative; }

@@ -272,7 +272,7 @@
 	}
 	.activity {
 		width: min(780px, calc(100% - 40px)); margin: 0 auto;
-		padding: calc(var(--header-height) + var(--space-6)) 0 calc(var(--space-8) + env(safe-area-inset-bottom));
+		padding: calc(var(--header-bottom) + var(--space-6)) 0 calc(var(--space-8) + env(safe-area-inset-bottom));
 	}
 	.activity-title {
 		display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-5);
@@ -329,7 +329,7 @@
 		min-height: 40px; padding: var(--space-2) 0; color: var(--text-secondary); font-size: var(--text-caption);
 	}
 	@media (max-width: 620px) {
-		.activity { width: calc(100% - 28px); padding-top: calc(var(--header-height) + var(--space-4)); }
+		.activity { width: calc(100% - 28px); padding-top: calc(var(--header-bottom) + var(--space-4)); }
 		.activity-title { margin-bottom: var(--space-4); }
 		.activity-title h1 { font-size: var(--text-title2); }
 		.needs-you, .activity-work > h2 > .section-toggle, .all-projects, .activity-measures { min-height: 44px; }
