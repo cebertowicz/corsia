@@ -12,15 +12,14 @@
 <section class="block" id="setup-variants">
 	<header class="block-head">
 		<h2>Setup variants (proposed, pending PX + Steve)</h2>
-		<p>The chat canvas's own forms as primitive variants: the send button's fill as a pill, the model chip and the notice's Cancel as text, the composer chip as a field, the Update mark's dot as a status, and the shell's sidebar rows. Only setup uses them.</p>
+		<p>The chat canvas's own forms as primitive variants: the send button's fill as a pill, the model chip as a chip, the composer chip as a field, the Update mark's dot as a status, and the shell's sidebar rows. Only setup uses them.</p>
 	</header>
 	<div class="card">
-		<h3>Button: pill, link, text</h3>
+		<h3>Button: pill, chip</h3>
 		<div class="row">
 			<Button variant="pill">Pill</Button>
 			<Button variant="pill" disabled>Pill disabled</Button>
-			<Button variant="link">Link</Button>
-			<Button variant="text">Text</Button>
+			<Button variant="chip">Link</Button>
 			<Button variant="primary">Primary today</Button>
 		</div>
 		<h3>Field: chip</h3>
@@ -44,7 +43,7 @@
 		<div class="stack">
 			<CodeInput label="Code" bind:value={code} />
 			<CheckRow label="Keep CORSIA running when the window is closed" checked={false}>
-				{#snippet actions()}<Button variant="link" size="sm">Open Login Items</Button>{/snippet}
+				{#snippet actions()}<Button variant="chip" size="sm">Open Login Items</Button>{/snippet}
 			</CheckRow>
 			<CheckRow label="Keep CORSIA running when the window is closed" checked={true} />
 		</div>

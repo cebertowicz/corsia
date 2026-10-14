@@ -129,6 +129,13 @@
   --violet-bg: rgba(139, 92, 246, 0.10);
   --violet-line: rgba(139, 92, 246, 0.28);
   --violet-brand: #8b5cf6;
+  /* Proposed (pending Product Experience and Steve): the five accent roles. New code names these, never --violet*
+     or --accent. They are defined here from today's values so nothing changes until the brand source derives them. */
+  --accent-fill: var(--violet);
+  --accent-on-fill: #ffffff;
+  --accent-text: var(--violet-text, var(--violet));
+  --accent-line: var(--accent);
+  --accent-wash: var(--violet-bg);
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
   --teal-line: rgba(45, 212, 191, 0.28);
@@ -214,6 +221,13 @@
   --violet-text: #5b3fd0;
   --violet-bg: rgba(124, 92, 246, 0.08);
   --violet-line: rgba(124, 92, 246, 0.32);
+  /* Proposed (pending Product Experience and Steve): the five accent roles. New code names these, never --violet*
+     or --accent. They are defined here from today's values so nothing changes until the brand source derives them. */
+  --accent-fill: var(--violet);
+  --accent-on-fill: #ffffff;
+  --accent-text: var(--violet-text, var(--violet));
+  --accent-line: var(--accent);
+  --accent-wash: var(--violet-bg);
   --teal: #0d9488;
   --teal-bg: rgba(13, 148, 136, 0.08);
   --teal-line: rgba(13, 148, 136, 0.32);

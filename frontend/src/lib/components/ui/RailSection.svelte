@@ -28,7 +28,7 @@
 	.cap {
 		margin: 0; padding: 12px 14px 4px;
 		font-size: var(--text-caption); font-weight: var(--fw-bold); letter-spacing: var(--ls-cap);
-		text-transform: uppercase; color: color-mix(in srgb, var(--violet) 55%, var(--text-tertiary));
+		text-transform: uppercase; color: var(--text-tertiary);
 	}
 	.rows { display: flex; flex-direction: column; gap: 1px; padding: 2px 8px 8px; }
 </style>

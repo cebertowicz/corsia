@@ -67,9 +67,9 @@
 		text-align: center; text-transform: uppercase; font-family: inherit;
 		font-size: var(--text-title1); font-weight: var(--fw-semibold); color: var(--text-primary);
 		background: var(--glass-thin); border: 1px solid var(--border); border-radius: var(--radius-lg);
-		box-shadow: var(--glass-rim), var(--shadow-chip); caret-color: var(--accent);
+		box-shadow: var(--glass-rim), var(--shadow-chip); caret-color: var(--accent-line);
 		transition: border-color var(--dur-tight);
 	}
-	.box:focus { outline: none; border-color: var(--accent); box-shadow: var(--glass-rim), var(--shadow-chip), 0 0 0 3px var(--violet-bg); }
+	.box:focus { outline: none; border-color: var(--accent-line); box-shadow: var(--glass-rim), var(--shadow-chip), 0 0 0 3px var(--accent-wash); }
 	.box.invalid { border-color: var(--red-text); }
 </style>

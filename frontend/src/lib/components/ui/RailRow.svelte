@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 
 	/**
-	 * One row of the shell's sidebar: icon, label, and an optional second line, with the violet left bar and
+	 * One row of the shell's sidebar: icon, label, and an optional second line, with the accent left bar and
 	 * tint when it is the current one. Proposed (pending Product Experience and Steve): the markup and rules of
 	 * `RailScopedSection.svelte`'s `.scoped-item` (the "CORSIA" row), lifted into a component so setup can draw
 	 * the same sidebar. Only setup uses it.
@@ -66,17 +66,17 @@
 	button.row { cursor: pointer; }
 	button.row:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.row.todo { color: var(--text-tertiary); }
-	.row.current { background: var(--violet-bg); color: var(--text-primary); }
+	.row.current { background: var(--accent-wash); color: var(--text-primary); }
 	.row.current .lbl { font-weight: var(--fw-medium); }
 	.row.current::before {
 		content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px;
-		background: var(--accent); border-radius: 0 2px 2px 0;
+		background: var(--accent-line); border-radius: 0 2px 2px 0;
 	}
 	.lead { flex: none; width: 16px; height: 1.5em; display: flex; align-items: center; justify-content: center; }
 	.lead :global(svg) { flex: none; opacity: 0.85; }
-	.row.current .lead { color: var(--accent); }
+	.row.current .lead { color: var(--accent-line); }
 	.row.current .lead :global(svg) { opacity: 1; }
-	.row.done .lead, .row.busy .lead { color: var(--accent); }
+	.row.done .lead, .row.busy .lead { color: var(--accent-line); }
 	.reddot { width: calc(var(--space-1) * 2); height: calc(var(--space-1) * 2); border-radius: var(--radius-circle); background: var(--red); }
 	.spinner { animation: spin var(--dur-hero-plus) linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
@@ -87,5 +87,5 @@
 	.meta { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.2; }
 	.row.error .meta { color: var(--red-text); }
 	.hair { display: block; height: calc(var(--space-1) / 2); margin-top: var(--space-1); border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
-	.hair i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width var(--dur-standard) var(--ease-material); }
+	.hair i { display: block; height: 100%; background: var(--accent-line); border-radius: inherit; transition: width var(--dur-standard) var(--ease-material); }
 </style>

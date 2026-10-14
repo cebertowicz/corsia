@@ -28,9 +28,9 @@
 	.circle {
 		flex: none; width: var(--space-5); height: var(--space-5); border-radius: var(--radius-circle);
 		border: 1.5px solid var(--text-tertiary); display: flex; align-items: center; justify-content: center;
-		color: white; transition: background var(--dur-standard) var(--ease-material), border-color var(--dur-standard) var(--ease-material);
+		color: var(--accent-on-fill); transition: background var(--dur-standard) var(--ease-material), border-color var(--dur-standard) var(--ease-material);
 	}
-	.circle.on { background: var(--accent); border-color: var(--accent); }
+	.circle.on { background: var(--accent-fill); border-color: var(--accent-fill); }
 	.label { flex: 1; min-width: 0; font-size: var(--text-body); color: var(--text-primary); line-height: var(--lh-normal); }
 	.actions { flex: none; display: flex; align-items: center; gap: var(--space-2); }
 </style>
