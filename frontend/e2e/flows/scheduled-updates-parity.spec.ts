@@ -71,7 +71,7 @@ test.describe('@surface:settings scheduled updates parity', () => {
 			await page.getByRole('button', { name: 'Update', exact: true }).click();
 			const updateSheet = page.getByLabel('Update CORSIA');
 			await expect(updateSheet.getByText('Keep CORSIA up to date automatically')).toBeVisible();
-			await expect(updateSheet.getByText('CORSIA will be unavailable for about a minute.')).toBeVisible();
+			await expect(updateSheet.getByText('CORSIA will be unavailable — usually about a minute.')).toBeVisible();
 			if (cell.width === 393) {
 				await expect(page.locator('[data-adaptive-drawer]')).toBeVisible();
 				const geometry = await updateSheet.evaluate((panel) => {
@@ -102,33 +102,26 @@ test.describe('@surface:settings scheduled updates parity', () => {
 		}
 	});
 
-	test('records choice-sheet open and close motion for every dismiss path', async ({ page }) => {
-		const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
-		await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
-		await page.route('**/api/system/update-schedule', (route) => route.fulfill({ json: schedule }));
-		await openSystem(page, 'light', 1440);
+	for (const dismissPath of ['close', 'later', 'scrim', 'escape'] as const) {
+		test(`records choice-sheet open and close motion through ${dismissPath}`, async ({ page }) => {
+			const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
+			await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
+			await page.route('**/api/system/update-schedule', (route) => route.fulfill({ json: schedule }));
+			await openSystem(page, 'light', 1440);
 
-		const sheet = page.getByLabel('Update CORSIA');
-		const open = async () => {
-			await page.getByRole('button', { name: 'Update', exact: true }).click();
-			await expect(sheet).toBeVisible();
-		};
-		const closed = async () => expect(sheet).toBeHidden();
+			const sheet = page.getByLabel('Update CORSIA');
+			const open = async () => {
+				await page.getByRole('button', { name: 'Update', exact: true }).click();
+				await expect(sheet).toBeVisible();
+			};
+			const closed = async () => expect(sheet).toBeHidden();
 
-		await open();
-		await page.getByRole('button', { name: 'Close', exact: true }).click();
-		await closed();
-
-		await open();
-		await page.getByRole('button', { name: 'Later' }).click();
-		await closed();
-
-		await open();
-		await page.locator('.bg').click({ position: { x: 8, y: 8 } });
-		await closed();
-
-		await open();
-		await page.keyboard.press('Escape');
-		await closed();
-	});
+			await open();
+			if (dismissPath === 'close') await page.getByRole('button', { name: 'Close', exact: true }).click();
+			if (dismissPath === 'later') await page.getByRole('button', { name: 'Later' }).click();
+			if (dismissPath === 'scrim') await page.locator('.bg').click({ position: { x: 8, y: 8 } });
+			if (dismissPath === 'escape') await page.keyboard.press('Escape');
+			await closed();
+		});
+	}
 });

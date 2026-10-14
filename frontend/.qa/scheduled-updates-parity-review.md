@@ -41,18 +41,33 @@ Train-refresh impact check (2026-10-14): #623 moves outcome acknowledgement to t
 
 ## 2026-10-14 PE correction: final local evidence
 
-This section supersedes the capture-boundary note above for the final local correction. Candidate: this local commit atop `69e13da9`.
+This section supersedes the capture-boundary note above for the final local correction. Evidence was captured from the worktree based on `933df8ba` with the final duration-copy change applied.
+
+### Final frame inventory
+
+The final 16-frame inventory is at `frontend/test-results/flows-scheduled-updates-pa-14dbd--retry-and-drain-cue-matrix-chromium-desktop/`; Chromium-mobile has the same named inventory at `frontend/test-results/flows-scheduled-updates-pa-14dbd--retry-and-drain-cue-matrix-chromium-mobile/`. `file` verified the Chromium-desktop project's desktop-named frames at 1440×1000 and mobile-named frames at 393×852; Chromium-mobile's device-scaled counterparts are 3780×2625 and 1032×2237, respectively.
 
 | Changed state | Final desktop-light | Final desktop-dark | Final mobile-light | Final mobile-dark |
 | --- | --- | --- | --- | --- |
 | Settings, automatic updates off — no `Installs at …` claim | `settings-off-desktop-light.png` | `settings-off-desktop-dark.png` | `settings-off-mobile-light.png` | `settings-off-mobile-dark.png` |
 | Settings, automatic updates on — selected `03:30` time remains visible | `settings-on-desktop-light.png` | `settings-on-desktop-dark.png` | `settings-on-mobile-light.png` | `settings-on-mobile-dark.png` |
-| Choice sheet — drain paragraph plus all decision actions | `sheet-drain-cue-desktop-light.png` | `sheet-drain-cue-desktop-dark.png` | `sheet-drain-cue-mobile-light.png` | `sheet-drain-cue-mobile-dark.png` |
+| Choice sheet — one duration statement plus all decision actions | `sheet-drain-cue-desktop-light.png` | `sheet-drain-cue-desktop-dark.png` | `sheet-drain-cue-mobile-light.png` | `sheet-drain-cue-mobile-dark.png` |
 | Failed schedule save — retry toast visible while the selected time stays `03:30` | `retry-toast-desktop-light.png` | `retry-toast-desktop-dark.png` | `retry-toast-mobile-light.png` | `retry-toast-mobile-dark.png` |
 
-The final screenshots are in `frontend/test-results/flows-scheduled-updates-pa-14dbd--retry-and-drain-cue-matrix-chromium-desktop/`; `file` verified desktop frames at 1440×1000 and mobile frames at 393×852. Chromium-mobile produced the same 16 names in its sibling directory. The final fast path is the off/on Settings states, `sheet-drain-cue-mobile-dark.png`, and one retry frame; all were captured from the same run.
+The 393 choice surface is the existing bottom-anchored `AdaptiveDrawer` (`data-adaptive-drawer`), not the desktop `Modal`. Its one scroll container is the choice content; the action strip is sticky within it. The browser test asserts that the drain block has no internal clipping, has at least 8 px spare room inside the drawer panel, and that its Tonight/Update-now action strip is within the panel. The drawer header supplies Later. No animation primitive changed: desktop continues through `Modal` and 393 continues through `AdaptiveDrawer`.
 
-The 393 choice surface is the existing bottom-anchored `AdaptiveDrawer` (`data-adaptive-drawer`), not the desktop `Modal`. Its one scroll container is the choice content; the action strip is sticky within it. The browser test asserts that the drain block has no internal clipping, has at least 8 px spare room inside the drawer panel, and that its Tonight/Update-now action strip is within the panel. The drawer header supplies Later. No animation primitive changed: desktop continues through `Modal` and 393 continues through `AdaptiveDrawer`; the final videos record open and close by ×, Later, scrim, and Escape at `frontend/test-results/flows-scheduled-updates-pa-f7396-tion-for-every-dismiss-path-chromium-desktop/video.webm` and its chromium-mobile sibling.
+### Attributable open/close recordings
+
+Each recording below contains one `Update` opening followed by exactly the named close action; the test awaits both visible and hidden states. Desktop and mobile are separate recordings. The listed `00:00.000–…` span is the complete, inspectable path — there is no shared sequence or ambiguous second dismissal.
+
+| Close action | Desktop recording and inspection span | Mobile recording and inspection span |
+| --- | --- | --- |
+| × | `frontend/test-results/flows-scheduled-updates-pa-1c046--close-motion-through-close-chromium-desktop/video.webm` — `00:00.000–00:02.600` | `frontend/test-results/flows-scheduled-updates-pa-1c046--close-motion-through-close-chromium-mobile/video.webm` — `00:00.000–00:02.640` |
+| Later | `frontend/test-results/flows-scheduled-updates-pa-a4a2c--close-motion-through-later-chromium-desktop/video.webm` — `00:00.000–00:02.240` | `frontend/test-results/flows-scheduled-updates-pa-a4a2c--close-motion-through-later-chromium-mobile/video.webm` — `00:00.000–00:02.680` |
+| Scrim | `frontend/test-results/flows-scheduled-updates-pa-e284b--close-motion-through-scrim-chromium-desktop/video.webm` — `00:00.000–00:01.920` | `frontend/test-results/flows-scheduled-updates-pa-e284b--close-motion-through-scrim-chromium-mobile/video.webm` — `00:00.000–00:02.040` |
+| Escape | `frontend/test-results/flows-scheduled-updates-pa-02dd7-close-motion-through-escape-chromium-desktop/video.webm` — `00:00.000–00:01.640` | `frontend/test-results/flows-scheduled-updates-pa-02dd7-close-motion-through-escape-chromium-mobile/video.webm` — `00:00.000–00:01.960` |
+
+Run command: `CORSIA_ALLOW_HOME_WORKSPACE_IN_CI=1 CORSIA_E2E_MOCK=1 CORSIA_E2E_BACKEND_PORT=3417 CORSIA_E2E_FRONTEND_PORT=5279 bash scripts/e2e-local --grep 'scheduled updates parity'`. All ten desktop/mobile matrix and motion tests passed without retries.
 
 ### Design-review regression self-check
 
