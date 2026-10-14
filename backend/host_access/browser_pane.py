@@ -59,6 +59,7 @@ async def open_url(thread_id: str, url: str, connection_token: str | None = None
     return await PROCESS_OWNER.browser_sessions().run(
         thread_id, ("open", url), control_token=connection_token,
         session="new" if connection_token is None else "existing",
+        pane_navigation=connection_token is not None,
     )
 
 
@@ -75,7 +76,7 @@ async def go(thread_id: str, action: str, connection_token: str) -> str:
     if action not in HISTORY_ACTIONS:
         raise ValueError(f"unknown browser action: {action}")
     return await PROCESS_OWNER.browser_sessions().run(
-        thread_id, (action,), control_token=connection_token, session="existing",
+        thread_id, (action,), control_token=connection_token, session="existing", pane_navigation=True,
     )
 
 

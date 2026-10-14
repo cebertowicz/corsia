@@ -32,19 +32,27 @@ class PasswordEpisode:
 
 
 _panes: dict[str, set[str]] = {}
+_pane_reports: dict[str, dict[str, Callable[[dict], None]]] = {}
 _episodes: dict[str, PasswordEpisode] = {}
 # A completed password episode remains read-guarded until the document loader changes.
 _guarded_visits: dict[str, PasswordEpisode] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
 
 
-def pane_connected(thread_id: str, connection_token: str) -> None:
-    """Record a shared pane without granting it exclusive page control."""
+def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict], None] | None = None) -> None:
+    """Record a shared pane and its relay callback without granting exclusive page control."""
     _panes.setdefault(thread_id, set()).add(connection_token)
+    if report is not None:
+        _pane_reports.setdefault(thread_id, {})[connection_token] = report
 
 
 def pane_disconnected(thread_id: str, connection_token: str) -> None:
     """Forget one closed pane connection without changing another pane's presence."""
+    reports = _pane_reports.get(thread_id)
+    if reports is not None:
+        reports.pop(connection_token, None)
+        if not reports:
+            del _pane_reports[thread_id]
     connections = _panes.get(thread_id)
     if connections is None:
         return
@@ -150,7 +158,10 @@ def password_page(thread_id: str) -> bool:
 
 
 def _publish_password_page(thread_id: str, visible: bool) -> None:
-    state.broadcast_to_thread(thread_id, {"type": "browser_password_page", "thread_id": thread_id, "visible": visible})
+    message = {"type": "browser_password_page", "thread_id": thread_id, "visible": visible}
+    state.broadcast_to_thread(thread_id, message)
+    for report in _pane_reports.get(thread_id, {}).values():
+        report(message)
 
 
 def is_http_url(url: object) -> bool:

@@ -13,9 +13,9 @@ log = logging.getLogger(__name__)
 
 
 async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str | None,
-              timeout: float, show_window: bool | None, session: str) -> str:
-    """Guard and run one agent command through the session owner's one command path."""
-    _validate(thread_id, args, timeout, show_window)
+              timeout: float, show_window: bool | None, session: str, pane_navigation: bool = False) -> str:
+    """Guard commands while allowing the connected person to leave a password page."""
+    _validate(thread_id, args, timeout, show_window, pane_navigation)
     try:
         await asyncio.to_thread(browser_cli.check_local_mode, args)
     except identity.BrowserIdentityError as exc:
@@ -23,7 +23,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     await owner._pin_native()
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
     command = partial(_command, owner, runtime, lease_id)
-    if not (session == "new" and args[0] == "open"):
+    if not pane_navigation and not (session == "new" and args[0] == "open"):
         await browser_control.require_page_access(thread_id, partial(browser_cdp.password_probe, command), tuple(args))
     if browser_control.has_pane(thread_id):
         result = await browser_cdp.shared_action(command, args)
@@ -45,7 +45,8 @@ async def _command(owner: Any, runtime: Any, lease_id: str | None, args: Sequenc
     return result
 
 
-def _validate(thread_id: str, args: Sequence[str], timeout: float, show_window: bool | None) -> None:
+def _validate(thread_id: str, args: Sequence[str], timeout: float, show_window: bool | None,
+              pane_navigation: bool) -> None:
     if not isinstance(thread_id, str) or not thread_id:
         raise BrowserSessionError("browser command requires exact thread identity")
     invalid_preference = show_window is not None and not isinstance(show_window, bool)
@@ -53,3 +54,5 @@ def _validate(thread_id: str, args: Sequence[str], timeout: float, show_window: 
         raise BrowserSessionError("browser command is invalid")
     if args[0] in {"close", "quit", "exit"}:
         raise BrowserSessionError("browser close requires owned session teardown")
+    if pane_navigation and args[0] not in {"open", "back", "forward", "reload"}:
+        raise BrowserSessionError("pane navigation only permits page navigation")

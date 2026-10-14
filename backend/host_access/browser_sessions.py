@@ -62,11 +62,13 @@ class BrowserSessionOwner:
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
                   show_window: bool | None = None, control_token: str | None = None,
-                  session: SessionAdmission = "any") -> str:
+                  session: SessionAdmission = "any", pane_navigation: bool = False) -> str:
         """Run one command through the shared-browser command path."""
+        if pane_navigation and control_token is None:
+            raise BrowserSessionError("pane navigation requires a connected pane")
         from host_access.browser_session_commands import run
         return await run(self, thread_id, args, lease_id=lease_id, timeout=timeout,
-                         show_window=show_window, session=session)
+                         show_window=show_window, session=session, pane_navigation=pane_navigation)
 
     async def stream_port(self, thread_id: str) -> StreamPortResult:
         """Prepare an existing session's private stream through the same command path."""

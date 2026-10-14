@@ -82,7 +82,6 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
     """Proxy shared page frames and pane input for one authenticated connection."""
     connection_token = secrets.token_urlsafe(18)
 
-    browser_control.pane_connected(thread_id, connection_token)
     frames = PaneFrames()
     overflow = asyncio.Event()
 
@@ -90,6 +89,8 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         # A result landing after this relay exits fills a queue nobody sends; that is harmless.
         if not frames.control(message):
             overflow.set()
+
+    browser_control.pane_connected(thread_id, connection_token, report)
 
     async def send_control() -> None:
         report({
