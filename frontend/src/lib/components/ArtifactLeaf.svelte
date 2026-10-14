@@ -28,7 +28,6 @@
 	import {
 		abandonArtifactOpen, beginArtifactOpen, failArtifactOpen, markArtifactRendered,
 	} from '$lib/openTimingRuntime';
-
 	let { threadId, mode, escapeCloses = false, onEscapeClose, onOpenLightbox = () => {} }: {
 		threadId: string | null;
 		mode: 'rail' | 'expanded' | 'compact';
@@ -37,10 +36,8 @@
 		onEscapeClose?: () => void;
 		onOpenLightbox?: (url: string) => void;
 	} = $props();
-
 	const workspace = $derived(threadId ? ($threadWorkspaces[threadId] ?? emptyWorkspace()) : emptyWorkspace());
 	const activeTab = $derived(getActiveTab(workspace));
-
 	function targetForTab(t: ArtifactTab): DocViewerTarget {
 		if (t.kind !== 'document') throw new Error('Only document tabs have DocViewer targets');
 		return {
@@ -52,7 +49,6 @@
 			artifactId: t.artifactId,
 		};
 	}
-
 	// Every tab opens in the document viewer. A file the backend says is an image
 	// is switched to the image viewer for as long as this leaf is mounted; nothing
 	// about it is stored on the tab, so a file replaced by one of the other kind
@@ -68,7 +64,6 @@
 	const imageTarget = $derived(showsImage ? showable : null);
 	const activeStale = $derived(activeTab ? isTabChanged(activeTab) : false);
 	const activeViewState = $derived(threadId && activeTab ? tabViewState(threadId, activeTab.instanceId) : null);
-
 	let viewer = $state<DocViewer | undefined>(undefined);
 	let imageViewer = $state<ImageViewer | undefined>(undefined);
 	let leafEl = $state<HTMLElement | undefined>(undefined);
@@ -131,7 +126,6 @@
 		if (!imageOpen) return;
 		return pushBackLayer(() => { closeImage(); return true; });
 	});
-
 	// One timing sample per artifact this leaf actually brings on screen (#2280).
 	// Keyed on the tab instance, not on re-renders, so a reactive re-run can only
 	// ever report the same open once; leaving the leaf abandons what was pending.
@@ -149,7 +143,6 @@
 		// An already-loaded tab renders from memory: there is nothing to wait for.
 		if (tab.status === 'ready' || tab.status === 'readonly') markArtifactRendered(instanceId);
 	});
-
 	// A tab that saved rebaselines on the revision the server returned for its
 	// own write, which is what keeps the dot off the saving tab while the same
 	// document dots in every other thread that has it open.
@@ -163,7 +156,6 @@
 			if (revision && revision !== tab.loadedRevision) markTabSaved(tid, tab.instanceId, revision);
 		}
 	});
-
 	// A relocated document keeps editing where it now lives.
 	$effect(() => {
 		for (const tab of workspace.tabs) {
@@ -172,7 +164,6 @@
 			if (draft && draft.target.path !== tab.path) relocateDraftTarget(draft.target, tab.path);
 		}
 	});
-
 	function onLeafClick() {
 		if (threadId) setActiveSurface(threadId, 'artifact');
 	}

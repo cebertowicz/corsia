@@ -57,14 +57,12 @@ function newInstanceId(): string {
 	instanceCounter += 1;
 	return `tab-${Date.now().toString(36)}-${instanceCounter}`;
 }
-
 export function emptyWorkspace(): ThreadArtifactWorkspace {
 	return { tabs: [], activeTabId: null, visible: false, activeSurface: 'chat' };
 }
 export function tabKey(tab: Pick<ArtifactTab, 'instanceId'>): string {
 	return tab.instanceId;
 }
-
 /** A newer content revision exists than the one this tab last loaded. */
 export function isTabChanged(tab: ArtifactTab): boolean {
 	if (tab.kind !== 'document') return false;
