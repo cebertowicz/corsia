@@ -11,7 +11,12 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
+import statistics
 from threading import Thread
+import tempfile
+import time
+
+import websockets
 from uuid import uuid4
 
 import pytest
@@ -21,10 +26,10 @@ from host_access.browser_sessions import BrowserSessionOwner
 
 
 PLAIN = """<!doctype html><title>Plain fixture</title>
-<input id=user value=person><input id=agent><button id=agent-button>Do it</button><output id=result></output>
+<input id=user value=person><input id=agent><button id=agent-button>Do it</button><output id=result></output><output id=frame></output>
 <script>
 let pointer = null, clicks = 0;
-document.addEventListener('pointermove', event => pointer = [event.clientX, event.clientY]);
+document.addEventListener('pointermove', event => { pointer = [event.clientX, event.clientY]; document.querySelector('#frame').textContent = pointer.join(','); });
 document.querySelector('#agent-button').addEventListener('click', () => { clicks++; document.querySelector('#result').textContent = String(clicks); });
 </script>"""
 
@@ -33,10 +38,10 @@ document.querySelector('#agent-button').addEventListener('click', () => { clicks
 REACT = """<!doctype html><title>React fixture</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<div id=root></div>
+<div id=root></div><output id=frame></output>
 <script>
 let pointer = null;
-document.addEventListener('pointermove', event => pointer = [event.clientX, event.clientY]);
+document.addEventListener('pointermove', event => { pointer = [event.clientX, event.clientY]; document.querySelector('#frame').textContent = pointer.join(','); });
 window.addEventListener('load', () => {
   const h = React.createElement;
   function Fixture() {
@@ -129,4 +134,43 @@ async def test_shared_agent_actions_preserve_person_focus_caret_and_pointer(fixt
             assert after == {**before, "result": expected}
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+async def next_frame(stream) -> None:
+    while True:
+        message = await asyncio.wait_for(stream.recv(), timeout=5)
+        if '"type":"frame"' in message or '"type": "frame"' in message:
+            return
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_shared_pane_input_to_frame_latency_reports_distribution():
+    """Stage-one latency check: 15 visible pointer updates on the isolated shared-browser stack."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-latency-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-latency", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=True, session="new")).startswith("Error:")
+            port = await owner.stream_port(thread_id)
+            assert port.port is not None, port.error
+            async with websockets.connect(f"ws://127.0.0.1:{port.port}", max_size=None) as stream:
+                await stream.send('{"type":"screencast_start"}')
+                # agent-browser may not repaint a static page until it receives a visual command.
+                with tempfile.TemporaryDirectory() as folder:
+                    assert not (await owner.run(thread_id, ("screenshot", f"{folder}/initial.jpg"), session="existing")).startswith("Error:")
+                await next_frame(stream)
+                samples = []
+                for index in range(15):
+                    started = time.perf_counter_ns()
+                    await stream.send(f'{{"type":"input_mouse","eventType":"mouseMoved","x":{300 + index},"y":24,"button":"none","clickCount":0}}')
+                    await next_frame(stream)
+                    samples.append((time.perf_counter_ns() - started) / 1_000_000)
+        ordered = sorted(samples)
+        p95 = ordered[round((len(ordered) - 1) * .95)]
+        print(f"input_to_frame_ms samples={len(samples)} median={statistics.median(samples):.1f} p95={p95:.1f}")
+    finally:
         await owner.close_thread(thread_id)
