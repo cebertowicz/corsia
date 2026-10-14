@@ -23,10 +23,7 @@
 	import type { CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
 	type SurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
-	/**
-	 * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
-	 * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
-	 */
+	/** Image comments (DCOL-FR13.6): the thumbnail heads the list; tags and cards share number, colour, hover and selected-scroll state. */
 	export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
 	/**
 	 * A document's images with comments on parts of them (DCOL-FR13.6): each image's comments sit together in the drawer
