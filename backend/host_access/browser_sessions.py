@@ -21,8 +21,6 @@ logger = logging.getLogger(__name__)
 
 BROWSER_NAMESPACE = "corsia-prod"
 CommandResult: TypeAlias = browser_cli.CommandResult
-
-
 _EXECUTABLE_CHANGED = (
     "browser executable identity changed after CORSIA started using it; "
     "close the browser session with browser_close, then restart CORSIA to use the new build"
@@ -61,9 +59,9 @@ class BrowserSessionOwner:
 
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
-                  show_window: bool | None = None,
-                  bypass_user_control: bool = False) -> str:
-        """Run a stock CLI command through the exact opaque thread session."""
+                  show_window: bool | None = None, control_token: str | None = None,
+                  new_session_only: bool = False) -> str:
+        """Run a stock CLI command through the exact opaque thread session, as ``control_token``'s pane."""
         if not isinstance(thread_id, str) or not thread_id:
             raise BrowserSessionError("browser command requires exact thread identity")
         invalid_preference = show_window is not None and not isinstance(show_window, bool)
@@ -71,8 +69,7 @@ class BrowserSessionOwner:
             raise BrowserSessionError("browser command is invalid")
         if args[0] in {"close", "quit", "exit"}:
             raise BrowserSessionError("browser close requires owned session teardown")
-        if not bypass_user_control:
-            browser_control.refuse_agent_while_user_controls(thread_id)
+        browser_control.require_page_control(thread_id, control_token)
         try:
             await asyncio.to_thread(browser_cli.check_local_mode, args)
         except identity.BrowserIdentityError as exc:
@@ -80,8 +77,33 @@ class BrowserSessionOwner:
         # Preflight has no session effects and must not poison an existing binding.
         await self._pin_native()
         runtime = await self._admit(
-            thread_id, lease_id=lease_id, show_window=show_window,
+            thread_id, lease_id=lease_id, show_window=show_window, new_session_only=new_session_only,
         )
+        result, unfinished = await self._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
+        if result.timed_out and args[0] == "wait":
+            return browser_cli.WAIT_TIMED_OUT
+        rendered = self._model_result(result, runtime.record)
+        if args[0] == "open" and not unfinished and not rendered.startswith("Error:"):
+            browser_control.announce_browser_opened(thread_id)
+        return rendered
+
+    async def stream_port(self, thread_id: str) -> StreamPortResult:
+        """Prepare an existing session's private stream through the same command path."""
+        async with self._owner_lock:
+            runtime = self._sessions.get(thread_id)
+        if runtime is None:
+            return StreamPortResult()
+        try:
+            await self._pin_native()
+            return await prepare_stream_port(lambda args: self._run_admitted(
+                runtime, args, lease_id=runtime.record.lease_id, timeout=10.0,
+            ))
+        except (BrowserSessionError, BrowserSessionCleanupError, BrowserSetupError) as exc:
+            return StreamPortResult(error=str(exc))
+
+    async def _run_admitted(self, runtime: BrowserRuntime, args: Sequence[str], *,
+                            lease_id: str | None, timeout: float) -> tuple[CommandResult, bool]:
+        """Run one command in an admitted session; report whether it left the session unfinished."""
         self._active_commands += 1
         started = False
         try:
@@ -102,19 +124,15 @@ class BrowserSessionOwner:
                     raise
                 runtime.attempt = result
                 await self._observe_attempt(runtime)
-                unfinished = result.timed_out or result.completion == "interrupted"
-                if result.timed_out and args and args[0] == "wait":
-                    # A wait only polls the page, so its timeout says nothing about the session:
-                    # _observe_attempt proved the daemon alive and the client settled.
-                    return browser_cli.WAIT_TIMED_OUT
+                # A wait only polls the page, so its timeout says nothing about the session:
+                # _observe_attempt proved the daemon alive and the client settled.
+                wait_timed_out = result.timed_out and args[0] == "wait"
+                unfinished = (result.timed_out or result.completion == "interrupted") and not wait_timed_out
                 if unfinished:
                     runtime.record = replace(runtime.record, terminal_state="resetting")
             if unfinished:
                 await self._close_runtime(runtime)
-            rendered = self._model_result(result, runtime.record)
-            if args[0] == "open" and not unfinished and not rendered.startswith("Error:"):
-                browser_control.announce_browser_opened(thread_id)
-            return rendered
+            return result, unfinished
         except asyncio.CancelledError:
             if started:
                 await asyncio.shield(self._close_one(runtime))
@@ -124,19 +142,15 @@ class BrowserSessionOwner:
                                 isinstance(exc, BrowserSessionCleanupError) and runtime.record.terminal_state != "running"):
                 raise  # Admission rejection has no new session effects.
             async with runtime.command_lock:
-                if self._sessions.get(thread_id) is runtime:
+                if self._sessions.get(runtime.record.thread_id) is runtime:
                     raise await self._record_failure(runtime, exc) from exc
             raise
         finally:
             self._active_commands -= 1
 
-    async def stream_port(self, thread_id: str) -> StreamPortResult:
-        """Prepare a private stream through this session owner's lifecycle invariants."""
-        return await prepare_stream_port(self, thread_id)
-
 
     async def _admit(self, thread_id: str, *, lease_id: str | None,
-                     show_window: bool | None = None) -> BrowserRuntime:
+                     show_window: bool | None = None, new_session_only: bool = False) -> BrowserRuntime:
         async with self._owner_lock:
             if self._shutting_down or lease_id in self._closed_leases:
                 raise BrowserSessionError("browser session admission is closed")
@@ -146,6 +160,8 @@ class BrowserSessionOwner:
                     thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window),
                 ))
                 self._sessions[thread_id] = runtime
+            elif new_session_only:
+                raise BrowserSessionError("the browser is already open; take over in the pane to navigate it")
             if runtime.record.terminal_state != "running":
                 return runtime  # The serialized command path reports this responsibility.
             self._assert_admitted(runtime, lease_id)

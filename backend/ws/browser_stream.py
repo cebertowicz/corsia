@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import secrets
 
@@ -9,6 +10,8 @@ import websockets
 from fastapi import WebSocket, WebSocketDisconnect
 
 from host_access import browser_control, browser_pane
+from host_access.browser_session_state import BrowserSessionError
+from host_access.processes import ProcessOwnerError
 from infra.auth import authenticate
 from infra.database import get_db
 from infra.product_events import emit_product_event
@@ -38,9 +41,11 @@ async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
             await _relay(ws, stream, thread_id, user["id"])
     except WebSocketDisconnect:
         pass
-    except OSError:
-        await ws.send_json({"type": "browser_state", "state": "error", "reason": "browser stream connection failed"})
-        await ws.close()
+    except (OSError, websockets.exceptions.WebSocketException):
+        # The pane may already be gone; its own close handler then clears its control state.
+        with contextlib.suppress(Exception):
+            await ws.send_json({"type": "browser_state", "state": "error", "reason": "browser stream connection failed"})
+            await ws.close()
 
 
 async def _authenticate_pane_stream(ws: WebSocket) -> dict | None:
@@ -97,6 +102,8 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                 if browser_control.hand_back(thread_id, connection_token):
                     emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
                 await send_control()
+            elif kind == "navigate":
+                await pane.send_json(await _navigate(thread_id, connection_token, data.get("url")))
             elif (kind in {"input_mouse", "input_keyboard"}
                   and browser_control.holds_control(thread_id, connection_token)):
                 await stream.send(message)
@@ -116,3 +123,16 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
     finally:
         if browser_control.hand_back(thread_id, connection_token):
             emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
+
+
+async def _navigate(thread_id: str, connection_token: str, url: object) -> dict:
+    """Navigate only for the connection that holds control; the pane shows the outcome."""
+    if not browser_control.holds_control(thread_id, connection_token):
+        return {"type": "navigate_result", "error": "Take over to navigate"}
+    if not browser_control.is_http_url(url):
+        return {"type": "navigate_result", "error": "Browser URL must be http or https"}
+    try:
+        result = await browser_pane.open_url(thread_id, str(url), connection_token)
+    except (BrowserSessionError, ProcessOwnerError) as exc:
+        return {"type": "navigate_result", "error": str(exc)}
+    return {"type": "navigate_result", "error": result if result.startswith("Error:") else None}

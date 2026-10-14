@@ -45,6 +45,11 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await expect.poll(() => browserFrames.some((entry) => entry.includes('"type":"control"'))).toBe(true);
 		await expect(page.getByText('You have control. The agent waits')).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'browser-pane-control');
+		// Navigating while in control goes through the holding stream and keeps control.
+		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html?navigated`);
+		await page.getByRole('button', { name: 'Go' }).click();
+		await expect.poll(() => browserFrames.some((entry) => entry.includes('"type":"navigate_result"'))).toBe(true);
+		await expect(page.getByText('You have control. The agent waits')).toBeVisible();
 		await page.getByRole('button', { name: 'Hand back' }).click();
 		await expect(page.getByText('Agent is driving. Watch only')).toBeVisible();
 		await page.getByRole('button', { name: 'Close Browser' }).click();

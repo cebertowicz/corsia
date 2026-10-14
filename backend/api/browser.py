@@ -1,14 +1,12 @@
 """Authenticated browser-pane controls bound to an existing CORSIA thread."""
 from __future__ import annotations
 
-from urllib.parse import urlparse
-
 from fastapi import APIRouter, Header, HTTPException
 
 from infra.auth import authenticate
 from infra.database import get_db
 from infra.queries import get_thread_for_user
-from host_access import browser_pane
+from host_access import browser_control, browser_pane
 from host_access.browser_session_state import BrowserSessionError, BrowserSetupError
 from infra.product_events import emit_product_event
 
@@ -29,8 +27,7 @@ def _owned_thread(thread_id: str, authorization: str = "") -> dict:
 
 
 def _http_url(url: str) -> str:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if not browser_control.is_http_url(url):
         raise HTTPException(422, "Browser URL must be http or https")
     return url
 
@@ -41,7 +38,7 @@ async def open_url(
     url: str,
     authorization: str = Header(default=""),
 ):
-    """Navigate the owned thread's browser to an HTTP(S) URL."""
+    """Start the owned thread's browser at an HTTP(S) URL; an open browser navigates by stream."""
     user = _owned_thread(thread_id, authorization)
     try:
         result = await browser_pane.open_url(thread_id, _http_url(url))

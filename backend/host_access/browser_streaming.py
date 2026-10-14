@@ -1,15 +1,15 @@
-"""Prepare a browser session's private stream through its lifecycle owner."""
+"""Turn agent-browser's stream commands into a pane stream port."""
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Awaitable, Callable, Sequence
 
-from host_access.browser_session_state import (
-    BrowserSessionCleanupError,
-    BrowserSessionError,
-    BrowserSetupError,
-)
+from host_access.browser_cli import CommandResult
+
+# Runs one command through the session owner's command path, reporting whether it
+# left the session unfinished (the owner has then already reset it).
+RunCommand = Callable[[Sequence[str]], Awaitable[tuple[CommandResult, bool]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,40 +23,25 @@ class StreamPortResult:
         return self.port is None and self.error is None
 
 
-async def prepare_stream_port(owner: Any, thread_id: str) -> StreamPortResult:
-    """Use the owner's admission, native, observation, and command invariants."""
-    async with owner._owner_lock:
-        runtime = owner._sessions.get(thread_id)
-    if runtime is None:
-        return StreamPortResult()
-    try:
-        await owner._pin_native()
-        async with runtime.command_lock:
-            owner._assert_admitted(runtime, runtime.record.lease_id)
-            before = await owner._observe(runtime)
-            if runtime.record.binding is not None and not before.alive:
-                return StreamPortResult(error="browser daemon is not running")
-            if runtime.record.binding is None and not before.artifacts_absent:
-                return StreamPortResult(error="browser startup ownership is unresolved")
-            # The daemon may already stream (it can enable streaming at launch), and
-            # `stream enable` refuses a second enable, so read the status first.
-            status = await _stream_status(owner, runtime)
-            if status.no_session:
-                enabled = await owner._invoke(owner._session_argv(runtime, ("stream", "enable")), timeout=10.0)
-                if not _succeeded(enabled):
-                    return StreamPortResult(error="browser stream could not be enabled")
-                status = await _stream_status(owner, runtime)
-                if status.no_session:
-                    return StreamPortResult(error="browser stream has no port")
-            return status
-    except (BrowserSessionError, BrowserSessionCleanupError, BrowserSetupError) as exc:
-        return StreamPortResult(error=str(exc))
+async def prepare_stream_port(run: RunCommand) -> StreamPortResult:
+    """Reuse the daemon's stream, enabling it only when it is off."""
+    # The daemon may already stream (it can enable streaming at launch), and
+    # `stream enable` refuses a second enable, so read the status first.
+    status = await _stream_status(run)
+    if status.no_session:
+        enabled, unfinished = await run(("stream", "enable"))
+        if unfinished or not _succeeded(enabled):
+            return StreamPortResult(error="browser stream could not be enabled")
+        status = await _stream_status(run)
+        if status.no_session:
+            return StreamPortResult(error="browser stream has no port")
+    return status
 
 
-async def _stream_status(owner: Any, runtime: Any) -> StreamPortResult:
+async def _stream_status(run: RunCommand) -> StreamPortResult:
     """Read the live stream port; neither port nor error means streaming is off."""
-    result = await owner._invoke(owner._session_argv(runtime, ("stream", "status")), timeout=10.0)
-    if not _succeeded(result):
+    result, unfinished = await run(("stream", "status"))
+    if unfinished or not _succeeded(result):
         return StreamPortResult(error="browser stream status is unavailable")
     try:
         port = json.loads(result.stdout).get("data", {}).get("port")
@@ -65,5 +50,5 @@ async def _stream_status(owner: Any, runtime: Any) -> StreamPortResult:
     return StreamPortResult(port=port if isinstance(port, int) and port > 0 else None)
 
 
-def _succeeded(result: Any) -> bool:
+def _succeeded(result: CommandResult) -> bool:
     return result.completion == "exited" and not result.timed_out and result.returncode == 0

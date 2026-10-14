@@ -14,7 +14,7 @@
 	let width = $state(0);
 	let height = $state(0);
 	let image = $state<HTMLImageElement | null>(null);
-	let streaming = false;
+	let streaming = $state(false);
 	let opening = false;
 
 	function connect() {
@@ -29,7 +29,11 @@
 		};
 		next.onmessage = (event) => drawMessage(event.data);
 		next.onclose = () => {
-			if (socket === next) streaming = false;
+			if (socket !== next) return;
+			// The server releases control whenever this connection ends, so the pane must too.
+			if (streaming) status = 'Browser stream ended. Reconnect to watch';
+			streaming = false;
+			hasControl = false;
 		};
 	}
 
@@ -42,7 +46,11 @@
 		}
 		if (message.type === 'control' && typeof message.has_control === 'boolean') {
 			hasControl = message.has_control;
-			status = hasControl ? 'You have control. The agent waits' : 'Agent is driving. Watch only';
+			status = controlStatus();
+			return;
+		}
+		if (message.type === 'navigate_result') {
+			status = typeof message.error === 'string' ? `Browser could not open this URL: ${message.error}` : controlStatus();
 			return;
 		}
 		if (message.type === 'browser_state') {
@@ -102,7 +110,18 @@
 		if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: hasControl ? 'hand_back' : 'take_over' }));
 	}
 
+	function controlStatus() {
+		return hasControl ? 'You have control. The agent waits' : 'Agent is driving. Watch only';
+	}
+
 	async function go() {
+		// An open browser navigates only through the stream that holds control.
+		if (streaming) {
+			if (!hasControl || socket?.readyState !== WebSocket.OPEN) return;
+			status = 'Opening';
+			socket.send(JSON.stringify({ type: 'navigate', url }));
+			return;
+		}
 		opening = true;
 		try {
 			await openBrowserUrl(threadId, url, get(token) ?? '');
@@ -138,8 +157,12 @@
 <div class="browser-leaf">
 	<div class="toolbar">
 		<input aria-label="Browser address" bind:value={url} placeholder="http:// or https://" />
-		<button type="button" onclick={go}>Go</button>
-		<button type="button" onclick={toggleControl}>{hasControl ? 'Hand back' : 'Take over'}</button>
+		<button type="button" onclick={go} disabled={streaming && !hasControl}>Go</button>
+		{#if streaming}
+			<button type="button" onclick={toggleControl}>{hasControl ? 'Hand back' : 'Take over'}</button>
+		{:else}
+			<button type="button" onclick={connect}>Reconnect</button>
+		{/if}
 		<span>{status}</span>
 	</div>
 	<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
