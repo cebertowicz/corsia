@@ -14,6 +14,7 @@ from infra.config import FRONTEND_DIR
 from infra.product_events import emit_product_event
 from infra.request_timing import RequestTimingMiddleware
 from ws import websocket_endpoint
+from ws.browser_stream import browser_stream_endpoint
 from api.usage_rollup import refresh_on_request as refresh_usage_rollup
 from api import (
     auth_router,
@@ -56,6 +57,7 @@ from api import (
     skills_router,
     host_access_router,
     audit_reads_router,
+    browser_router,
     plans_router,
     plans_folded_router,
 )
@@ -149,6 +151,7 @@ app.include_router(delegation_model_router)
 app.include_router(skills_router)
 app.include_router(host_access_router)
 app.include_router(audit_reads_router)
+app.include_router(browser_router)
 app.include_router(plans_router)
 app.include_router(plans_folded_router)
 app.include_router(auth_router)
@@ -159,6 +162,7 @@ from eval.endpoint import router as eval_router  # noqa: E402
 app.include_router(eval_router)
 
 app.add_api_websocket_route("/ws", websocket_endpoint)
+app.add_api_websocket_route("/api/browser/{thread_id}/stream", browser_stream_endpoint)
 
 
 # Build-presence is checked per-request so a build finishing mid-run works

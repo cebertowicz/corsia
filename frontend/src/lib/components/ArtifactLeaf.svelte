@@ -5,6 +5,7 @@
 	import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
+	import BrowserLeaf from './BrowserLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
@@ -18,7 +19,7 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import {
 		threadWorkspaces, emptyWorkspace, getActiveTab, isTabChanged, type ArtifactTab,
-		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved,
+		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved, openBrowserPane,
 	} from '$lib/stores/artifactWorkspace';
 	import {
 		tabViewState, tabDocumentImage, recordTabDocumentPlace, recordTabImagePlace, openTabDocumentImage,
@@ -238,6 +239,9 @@
 		setLeafVisible(threadId, true);
 		setActiveSurface(threadId, 'artifact');
 	}
+	function openBrowser() {
+		if (threadId) openBrowserPane(threadId);
+	}
 	function collapse() {
 		if (!threadId) return;
 		const source = activeTab?.kind === 'subagent' ? activeTab : null;
@@ -264,6 +268,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="leaf" class:compact={mode === 'compact'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
 		{#if mode === 'expanded'}
+			<div class="leaf-actions"><button type="button" onclick={openBrowser}>Browser</button></div>
 			<ArtifactTabStrip
 				tabs={workspace.tabs}
 				activeKey={workspace.activeTabId}
@@ -273,8 +278,10 @@
 				onCollapse={collapse}
 			/>
 		{/if}
-		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} bind:this={leafBodyEl}>
-			{#if activeTab?.kind === 'subagent' && activeTab.threadId}
+		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
+			{#if activeTab?.kind === 'browser' && activeTab.threadId}
+				<BrowserLeaf threadId={activeTab.threadId} />
+				{:else if activeTab?.kind === 'subagent' && activeTab.threadId}
 				<SubagentConversationLeaf threadId={activeTab.threadId} {onOpenLightbox} />
 				{:else if activeTab?.kind === 'legacy-discussion' && activeTab.artifactId}
 					<LegacyPlanDiscussionLeaf artifactId={activeTab.artifactId} title={activeTab.title} />
@@ -351,6 +358,8 @@
 		background: var(--accent);
 	}
 
+	.leaf-actions { display: flex; justify-content: flex-end; padding: 4px 8px 0; background: var(--glass-thin); }
+	.leaf-actions button { color: var(--text-secondary); background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); font: inherit; cursor: pointer; padding: 3px 7px; }
 	.leaf {
 		height: 100%; display: flex; flex: 1; flex-direction: column; min-width: 0;
 		min-height: 0; overflow: hidden;
@@ -369,7 +378,8 @@
 	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
 	.doc-host { display: contents; }
 	.doc-host.covered { visibility: hidden; }
-	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
+	.leaf-body.image-canvas, .leaf-body.browser-canvas { overflow: hidden; display: flex; flex-direction: column; }
+	.leaf-body.browser-canvas { padding: 0; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
 	/* The document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
 	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; padding-top: 0; } }

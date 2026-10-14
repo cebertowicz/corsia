@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import replace
 import socket
@@ -44,21 +45,20 @@ class BrowserSessionOwner:
         self._native_lock = asyncio.Lock()
         self._owner_lock = asyncio.Lock()
         self._sessions: dict[str, BrowserRuntime] = {}
+        self._user_controlled: set[str] = set()
         self._closed_leases: set[str] = set()
         self._shutting_down = False
         self._active_commands = 0
-
     def live_count(self) -> int:
         """Count current responsibilities, including unresolved startup or close."""
         return len(self._sessions)
-
     def active_command_count(self) -> int:
         """Return admitted browser work that is running or queued."""
         return self._active_commands
-
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
-                  show_window: bool | None = None) -> str:
+                  show_window: bool | None = None,
+                  bypass_user_control: bool = False) -> str:
         """Run a stock CLI command through the exact opaque thread session."""
         if not isinstance(thread_id, str) or not thread_id:
             raise BrowserSessionError("browser command requires exact thread identity")
@@ -67,6 +67,11 @@ class BrowserSessionOwner:
             raise BrowserSessionError("browser command is invalid")
         if args[0] in {"close", "quit", "exit"}:
             raise BrowserSessionError("browser close requires owned session teardown")
+        if thread_id in self._user_controlled and not bypass_user_control:
+            raise BrowserSessionError(
+                "Error: the user has taken control of the browser in the CORSIA pane. "
+                "Wait for them to hand it back; do not retry in a loop."
+            )
         try:
             await asyncio.to_thread(browser_cli.check_local_mode, args)
         except identity.BrowserIdentityError as exc:
@@ -105,7 +110,11 @@ class BrowserSessionOwner:
                     runtime.record = replace(runtime.record, terminal_state="resetting")
             if unfinished:
                 await self._close_runtime(runtime)
-            return self._model_result(result, runtime.record)
+            rendered = self._model_result(result, runtime.record)
+            if args[0] == "open":
+                from infra import state
+                state.broadcast_to_thread(thread_id, {"type": "browser_started", "thread_id": thread_id})
+            return rendered
         except asyncio.CancelledError:
             if started:
                 await asyncio.shield(self._close_one(runtime))
@@ -120,8 +129,29 @@ class BrowserSessionOwner:
             raise
         finally:
             self._active_commands -= 1
-
-
+    async def set_user_control(self, thread_id: str, has_control: bool) -> None:
+        async with self._owner_lock:
+            if has_control:
+                self._user_controlled.add(thread_id)
+            else:
+                self._user_controlled.discard(thread_id)
+    def has_user_control(self, thread_id: str) -> bool:
+        return thread_id in self._user_controlled
+    async def stream_port(self, thread_id: str) -> int | None:
+        """Enable and return the private loopback stream port for a live session."""
+        runtime = self._sessions.get(thread_id)
+        if runtime is None:
+            return None
+        async with runtime.command_lock:
+            self._assert_admitted(runtime, runtime.record.lease_id)
+            await self._invoke(self._session_argv(runtime, ("stream", "enable")), timeout=10.0)
+            result = await self._invoke(self._session_argv(runtime, ("stream", "status")), timeout=10.0)
+            try:
+                payload = json.loads(result.stdout)
+                port = payload.get("data", {}).get("port")
+            except (AttributeError, TypeError, ValueError):
+                return None
+            return port if isinstance(port, int) and port > 0 else None
     async def _admit(self, thread_id: str, *, lease_id: str | None,
                      show_window: bool | None = None) -> BrowserRuntime:
         async with self._owner_lock:
@@ -146,7 +176,6 @@ class BrowserSessionOwner:
             if runtime.record.lease_id is None and lease_id is not None:
                 runtime.record = replace(runtime.record, lease_id=lease_id)
             return runtime
-
     def _assert_admitted(self, runtime: BrowserRuntime, lease_id: str | None) -> None:
         record = runtime.record
         if (self._shutting_down or self._sessions.get(record.thread_id) is not runtime
