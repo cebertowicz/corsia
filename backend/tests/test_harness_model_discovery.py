@@ -9,6 +9,76 @@ from pathlib import Path
 import pytest
 
 
+class _BytesReader:
+    """Minimal async byte reader matching the control-I/O owner's stream use."""
+
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    async def read(self, _limit: int = -1) -> bytes:
+        payload, self._payload = self._payload, b""
+        return payload
+
+
+class _ControlInput:
+    """Minimal stdin recorder matching the control-I/O owner's write and drain calls."""
+
+    def __init__(self, received):
+        self._received = received
+
+    def write(self, payload: bytes) -> None:
+        self._received(payload)
+
+    async def drain(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _PipeTransport:
+    """Minimal pipe transport matching the stream reader's final close."""
+
+    def close(self) -> None:
+        return None
+
+
+class _ControlTransport:
+    """Expose the one transport method the production stream reader uses."""
+
+    def get_pipe_transport(self, _fd: int) -> _PipeTransport:
+        return _PipeTransport()
+
+
+class _ControlProcess:
+    """In-memory process double matching the production control-I/O contract."""
+
+    def __init__(self, stdout: bytes, *, stderr: bytes = b"", received=None):
+        self.returncode = 0
+        self.stdin = _ControlInput(received or (lambda _payload: None))
+        self.stdout = _BytesReader(stdout)
+        self.stderr = _BytesReader(stderr)
+        self._transport = _ControlTransport()
+
+    async def _read_stream(self, fd: int) -> bytes:
+        return await (self.stderr if fd == 2 else self.stdout).read()
+
+    async def wait(self) -> int:
+        return self.returncode
+
+    async def communicate(self, payload: bytes | None = None) -> tuple[bytes, bytes]:
+        if payload is not None:
+            self.stdin.write(payload)
+            await self.stdin.drain()
+            self.stdin.close()
+        stdout, stderr = await asyncio.gather(self.stdout.read(), self.stderr.read())
+        await self.wait()
+        return stdout, stderr
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+
 @pytest.fixture
 def connections_db(tmp_path, monkeypatch):
     db_path = tmp_path / "connections.db"
@@ -596,15 +666,9 @@ async def test_claude_adapter_uses_stream_json_control_plane_without_a_turn(monk
     calls: list[tuple[tuple[str, ...], dict]] = []
     sent: list[dict] = []
 
-    class _Process:
+    class _Process(_ControlProcess):
         def __init__(self, kind: str):
-            self.kind = kind
-
-        returncode = 0
-
-        async def communicate(self, payload: bytes):
-            sent.extend(json.loads(line) for line in payload.decode().splitlines())
-            if self.kind == "context":
+            if kind == "context":
                 responses = [
                     {"type": "control_response", "response": {
                         "subtype": "success", "request_id": "corsia-set-model",
@@ -617,19 +681,23 @@ async def test_claude_adapter_uses_stream_json_control_plane_without_a_turn(monk
                         },
                     }},
                 ]
-                return (
-                    "".join(json.dumps(item) + "\n" for item in responses).encode(),
-                    b"",
-                )
-            response = {
-                "type": "control_response",
-                "response": {
-                    "subtype": "success",
-                    "request_id": "corsia-model-list",
-                    "response": _claude_payload(),
-                },
-            }
-            return (json.dumps(response).encode() + b"\n", b"")
+                stdout = "".join(json.dumps(item) + "\n" for item in responses).encode()
+            else:
+                response = {
+                    "type": "control_response",
+                    "response": {
+                        "subtype": "success",
+                        "request_id": "corsia-model-list",
+                        "response": _claude_payload(),
+                    },
+                }
+                stdout = json.dumps(response).encode() + b"\n"
+            super().__init__(
+                stdout,
+                received=lambda payload: sent.extend(
+                    json.loads(line) for line in payload.decode().splitlines()
+                ),
+            )
 
     async def _spawn(*cmd, **kwargs):
         calls.append((cmd, kwargs))
@@ -679,10 +747,8 @@ async def test_claude_adapter_reuses_an_unchanged_known_context_window(monkeypat
 
     calls = 0
 
-    class _Process:
-        returncode = 0
-
-        async def communicate(self, _payload: bytes):
+    class _Process(_ControlProcess):
+        def __init__(self):
             response = {
                 "type": "control_response",
                 "response": {
@@ -691,7 +757,7 @@ async def test_claude_adapter_reuses_an_unchanged_known_context_window(monkeypat
                     "response": _claude_payload(),
                 },
             }
-            return (json.dumps(response).encode() + b"\n", b"")
+            super().__init__(json.dumps(response).encode() + b"\n")
 
     async def _spawn(*_cmd, **_kwargs):
         nonlocal calls
@@ -723,13 +789,10 @@ def _context_probe_call(monkeypatch, responses: list[dict]):
     """
     import connections.harness_models as harness_models
 
-    class _Process:
-        returncode = 0
-
-        async def communicate(self, payload: bytes):
-            return (
+    class _Process(_ControlProcess):
+        def __init__(self):
+            super().__init__(
                 "".join(json.dumps(item) + "\n" for item in responses).encode(),
-                b"",
             )
 
     async def _spawn(*cmd, **kwargs):
@@ -1369,14 +1432,12 @@ async def test_claude_catalog_of_a_signed_out_cli_is_needs_auth_not_ready(monkey
     """A signed-out CLI still lists its static models; that must not read as ready."""
     from connections import claude_discovery, source_state
 
-    class _Process:
-        returncode = 0
-
-        async def communicate(self, _payload: bytes):
+    class _Process(_ControlProcess):
+        def __init__(self):
             response = {"type": "control_response", "response": {
                 "subtype": "success", "request_id": "corsia-model-list", "response": _claude_payload(),
             }}
-            return json.dumps(response).encode() + b"\n", b""
+            super().__init__(json.dumps(response).encode() + b"\n")
 
     async def _spawn(*_cmd, **_kwargs):
         return _Process()
