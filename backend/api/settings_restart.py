@@ -290,20 +290,19 @@ async def _launch_settings_restart(
     script_args: list[str],
     restart_log_path: Callable[[str], Path],
     *,
-    caller_token: str | Callable[[str], str] | None = None,
+    caller_token: str | None = None,
 ) -> object:
     """Launch the detached lifecycle process or compensate its failed handoff."""
     log_path = restart_log_path("restart.log")
     try:
         with log_path.open("w") as log_fh:
-            credential = caller_token(operation_id) if callable(caller_token) else caller_token
             return spawn_restart_lifecycle(
                 corsia_script,
                 script_args,
                 restart_env,
                 operation_id,
                 log_fh,
-                caller_credential=credential,
+                caller_credential=caller_token,
             )
     except (OSError, ValueError) as exc:
         from automation.restart import abort_restart_control
@@ -339,7 +338,7 @@ async def prelaunch_settings_restart(
     script_args: list[str],
     restart_log_path: Callable[[str], Path],
     *,
-    caller_token: str | Callable[[str], str],
+    caller_token: str | None,
     trigger: str | None = "manual", target_version: str | None = None,
 ) -> tuple[str, object]:
     """Hand Settings restart ownership from preparation through child launch."""
@@ -365,9 +364,10 @@ async def prelaunch_settings_restart(
                 operation_id, acquired_ids, corsia_script, restart_env
             )
             script_args = ["restart-prepared"]
-            if callable(caller_token):
+            if caller_token is None:
                 try:
-                    caller_token = caller_token(operation_id)
+                    from infra.accounts import issue_lifecycle_service_token
+                    caller_token = issue_lifecycle_service_token(user["id"], operation_id)
                 except asyncio.CancelledError as error:
                     await _compensate_cancelled_acquire(acquired_ids, error)
                     raise

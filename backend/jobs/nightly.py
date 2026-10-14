@@ -226,9 +226,16 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
         )
         if trigger is None:
             return None
+        from api.scheduled_update import launch_scheduled_update, scheduled_launch_blocker
+
+        blocker = await asyncio.to_thread(
+            scheduled_launch_blocker, schedule.get("owner_id")
+        )
+        if blocker is not None:
+            logger.error("nightly_job: scheduled update launch blocked: {}", blocker)
+            return None
         if trigger == "tonight" and not await asyncio.to_thread(claim_tonight, schedule):
             return None
-        from api.scheduled_update import launch_scheduled_update
 
         return await launch_scheduled_update(
             trigger,

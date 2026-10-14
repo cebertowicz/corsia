@@ -146,6 +146,28 @@ def get_drain_status(*, user_id: str | None = None) -> dict:
     }
 
 
+def get_drain_operation_status(operation_id: str) -> dict | None:
+    """Project one durable operation without replacing global drain status."""
+    from automation.self_restart import operation_by_id
+
+    operation = operation_by_id(operation_id)
+    if operation is None:
+        return None
+    return {
+        "operation_id": str(operation["id"]),
+        "status": operation["status"],
+        "phase": operation.get("phase"),
+        "error": operation.get("error"),
+        "kind": operation.get("kind"),
+        "trigger": operation.get("trigger"),
+        "target_version": operation.get("target_version"),
+        "drain_total": operation.get("drain_total"),
+        "failure_code": operation.get("failure_code"),
+        "failure_detail": operation.get("failure_detail"),
+        "conductor_told_at": operation.get("conductor_told_at"),
+    }
+
+
 def check_drain_ready() -> bool:
     """Return True when no active automated processes or user turns.
 

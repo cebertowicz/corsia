@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from infra.accounts import AccountError
 
 
 @pytest.mark.asyncio
@@ -92,8 +93,15 @@ async def test_update_room_check_failure_leaves_no_in_flight_operation(
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_token_mint_failure_releases_the_prepared_update_hold(isolated_db, monkeypatch):
+@pytest.mark.parametrize(
+    "raised_error",
+    [sqlite3.OperationalError("token store unavailable"), AccountError("account unavailable")],
+)
+async def test_lifecycle_token_mint_failure_releases_the_prepared_update_hold(
+    isolated_db, monkeypatch, raised_error
+):
     from api import settings_restart
+    from infra import accounts
     from infra.database import get_db
 
     monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
@@ -101,23 +109,28 @@ async def test_lifecycle_token_mint_failure_releases_the_prepared_update_hold(is
     drain = AsyncMock()
     monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
 
-    def mint(_operation_id: str) -> str:
-        raise sqlite3.OperationalError("token store unavailable")
+    def mint(_user_id: str, _operation_id: str) -> str:
+        raise raised_error
 
-    with pytest.raises(sqlite3.OperationalError):
+    monkeypatch.setattr(accounts, "issue_lifecycle_service_token", mint)
+
+    with pytest.raises(type(raised_error)):
         await settings_restart.prelaunch_settings_restart(
             {"id": "steve"}, "update", Path("/unused"), {}, ["restart"],
-            lambda name: Path(name), caller_token=mint,
+            lambda name: Path(name), caller_token=None,
         )
 
     connection = get_db()
     try:
-        statuses = [row[0] for row in connection.execute(
-            "SELECT status FROM self_restart_requests"
-        ).fetchall()]
+        rows = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT status, failure_code FROM self_restart_requests"
+            ).fetchall()
+        ]
     finally:
         connection.close()
-    assert statuses and all(status != "in_flight" for status in statuses)
+    assert rows == [{"status": "failed", "failure_code": None}]
     drain.assert_not_awaited()
 
 

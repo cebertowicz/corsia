@@ -5,15 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from infra.database import get_db, write_transaction
-from infra.settings import get_update_schedule, set_setting
+from infra.settings import get_update_schedule, parse_update_schedule_time, set_setting
 
 
 SCHEDULE_WINDOW = timedelta(hours=1)
 
 
 def _time_parts(value: str) -> tuple[int, int]:
-    hour, minute = (int(part) for part in value.split(":"))
-    return hour, minute
+    return parse_update_schedule_time(value)
 
 
 def next_local_time(now: datetime, value: str) -> datetime:
@@ -41,11 +40,9 @@ def update_schedule_patch(
         if not isinstance(value, str):
             raise ValueError("time must use HH:MM local time")
         try:
-            hour, minute = _time_parts(value)
+            parse_update_schedule_time(value)
         except ValueError as error:
             raise ValueError("time must use HH:MM local time") from error
-        if not 0 <= hour <= 23 or not 0 <= minute <= 59 or len(value) != 5:
-            raise ValueError("time must use HH:MM local time")
     with write_transaction(None, scope="update_schedule") as connection:
         current = get_update_schedule(db=connection, include_owner=True)
         if "automatic" in payload:

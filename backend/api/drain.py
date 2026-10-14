@@ -67,11 +67,16 @@ async def system_drain(
 
 
 @router.get("/drain")
-async def get_drain_status_route(token: str):
-    """Return only the authenticated caller's live drain state."""
-    from infra.drain import get_drain_status
-
+async def get_drain_status_route(token: str, operation_id: str | None = None):
+    """Return durable operation truth plus process-local readiness observations."""
     user = _require_user(token)
+    from infra.drain import get_drain_operation_status, get_drain_status
+
+    if operation_id:
+        status = get_drain_operation_status(operation_id)
+        if status is None:
+            raise HTTPException(404, "restart operation not found")
+        return status
     return get_drain_status(user_id=user["id"])
 
 
@@ -89,11 +94,12 @@ async def cancel_drain(token: str, operation_id: str):
 @router.post("/drain/ready")
 async def drain_ready(token: str, body: dict):
     """Advance one quiescent exact operation to process-restart ownership."""
+    _require_user(token)
+    from automation.restart import advance_restart_readiness, mark_restarting
+
     operation_id = str(body.get("operation_id") or "")
     if not operation_id:
         raise HTTPException(400, "operation_id is required")
-    _require_user(token)
-    from automation.restart import advance_restart_readiness, mark_restarting
     if not advance_restart_readiness(operation_id):
         raise HTTPException(409, "restart operation is not quiescent")
     if not mark_restarting(operation_id):
@@ -104,11 +110,12 @@ async def drain_ready(token: str, body: dict):
 @router.post("/drain/hard-cap")
 async def drain_hard_cap(token: str, body: dict):
     """Persist recovery and terminalize exact remaining Turns before force-stop."""
+    _require_user(token)
+    from automation.restart import enforce_restart_hard_cap, mark_restarting
+
     operation_id = str(body.get("operation_id") or "")
     if not operation_id:
         raise HTTPException(400, "operation_id is required")
-    _require_user(token)
-    from automation.restart import enforce_restart_hard_cap, mark_restarting
     try:
         outcome = await enforce_restart_hard_cap(operation_id)
     except RuntimeError as exc:

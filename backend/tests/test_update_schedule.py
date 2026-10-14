@@ -90,6 +90,40 @@ def test_editing_time_recomputes_a_pending_tonight_choice(isolated_db, old_time,
     assert datetime.fromisoformat(pending).astimezone(now.tzinfo).strftime("%H:%M") == new_time
 
 
+def test_update_schedule_rejects_noncanonical_time_without_persisting(isolated_db):
+    import asyncio
+
+    from api.system_admin import update_schedule
+    from automation.update_schedule import update_schedule_patch
+    from infra.settings import get_update_schedule
+
+    now = datetime(2026, 10, 14, 2, 0, tzinfo=timezone.utc)
+    update_schedule_patch({"time": "04:05"}, now=now, user_id="steve")
+
+    with pytest.raises(Exception) as raised:
+        asyncio.run(
+            update_schedule(
+                {"time": "1:000"},
+                user={"id": "steve", "token_kind": "session"},
+            )
+        )
+
+    assert getattr(raised.value, "status_code", None) == 400
+    assert get_update_schedule()["time"] == "04:05"
+
+
+def test_valid_schedule_time_round_trips_to_nightly_read(isolated_db):
+    from automation.update_schedule import due_trigger, update_schedule_patch
+    from infra.settings import get_update_schedule
+
+    now = datetime(2026, 10, 14, 4, 5, tzinfo=timezone.utc)
+    update_schedule_patch({"automatic": True, "time": "04:05"}, now=now, user_id="steve")
+
+    schedule = get_update_schedule(include_owner=True)
+    assert schedule["time"] == "04:05"
+    assert due_trigger(schedule, now=now, update_available=True, attempted_today=False) == "automatic"
+
+
 def test_turning_tonight_off_clears_the_pending_choice(isolated_db):
     from automation.update_schedule import update_schedule_patch
     from infra.settings import get_update_schedule
@@ -304,6 +338,7 @@ def _patch_scheduled_check(monkeypatch, launch):
     monkeypatch.setattr(update_schedule, "update_attempted_today", lambda **_kwargs: False)
     monkeypatch.setattr(update_schedule, "clear_tonight", lambda value: value)
     monkeypatch.setattr(update_schedule, "claim_tonight", lambda value: claimed.append(value) or True)
+    monkeypatch.setattr(scheduled_update, "scheduled_launch_blocker", lambda _user_id: None)
     monkeypatch.setattr(scheduled_update, "launch_scheduled_update", launch)
     return claimed
 
@@ -396,6 +431,7 @@ def test_tonight_cas_loss_does_not_launch(isolated_db, monkeypatch):
 
     monkeypatch.setattr(update_schedule, "claim_tonight", claim)
     monkeypatch.setattr(update_status, "update_status", status)
+    monkeypatch.setattr(scheduled_update, "scheduled_launch_blocker", lambda _user_id: None)
 
     async def launch(*_args):
         pytest.fail("must not launch after losing the Tonight compare-and-swap")
@@ -407,15 +443,74 @@ def test_tonight_cas_loss_does_not_launch(isolated_db, monkeypatch):
     assert get_update_schedule()["tonight_at"] != tick_schedule
 
 
-def test_prepare_failure_after_tonight_claim_does_not_retry_in_the_same_window(
-    isolated_db, monkeypatch
-):
+@pytest.mark.parametrize("blocker", ["owner_missing", "invalid_port", "in_flight"])
+def test_tonight_blocker_does_not_claim_or_launch(monkeypatch, blocker):
     import asyncio
     from types import SimpleNamespace
 
     from api import scheduled_update
     from automation import self_restart, update_schedule
-    from infra import update_status
+    from infra import accounts, db_async, settings, update_status
+    from jobs.nightly import _run_scheduled_update_if_due
+
+    schedule = {
+        "automatic": False,
+        "time": "03:00",
+        "tonight_at": "2026-10-14T03:00:00+00:00",
+        "owner_id": None if blocker == "owner_missing" else "steve",
+    }
+    claimed = []
+    launched = []
+
+    async def run_in_db(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    async def launch(*args):
+        launched.append(args)
+        return "c" * 32
+
+    monkeypatch.setattr(settings, "get_update_schedule", lambda **_kwargs: schedule)
+    monkeypatch.setattr(
+        update_status,
+        "update_status",
+        lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True, "target_version": "1.2.3"}),
+    )
+    monkeypatch.setattr(db_async, "run_in_db", run_in_db)
+    monkeypatch.setattr(update_schedule, "update_attempted_today", lambda **_kwargs: False)
+    monkeypatch.setattr(update_schedule, "clear_tonight", lambda value: value)
+    monkeypatch.setattr(update_schedule, "claim_tonight", lambda value: claimed.append(value) or True)
+    monkeypatch.setattr(scheduled_update, "launch_scheduled_update", launch)
+    monkeypatch.setattr(
+        accounts,
+        "get_user",
+        lambda _user_id: None if blocker == "owner_missing" else {"id": "steve"},
+    )
+    monkeypatch.setenv("BACKEND_PORT", "not-a-port" if blocker == "invalid_port" else "1957")
+    monkeypatch.setattr(
+        self_restart,
+        "in_flight_request",
+        lambda: {"id": "d" * 32} if blocker == "in_flight" else None,
+    )
+
+    now = datetime(2026, 10, 14, 3, 10, tzinfo=timezone.utc)
+    assert asyncio.run(_run_scheduled_update_if_due(now)) is None
+    assert claimed == []
+    assert launched == []
+    assert schedule["tonight_at"] == "2026-10-14T03:00:00+00:00"
+
+
+def test_prepare_failure_after_tonight_claim_does_not_retry_in_the_same_window(
+    isolated_db, monkeypatch
+):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from api import settings_restart
+    from automation import update_schedule
+    from fastapi import HTTPException
+    from infra import accounts, update_status
+    from infra.database import get_db
     from infra.settings import get_update_schedule
     from jobs.nightly import _run_scheduled_update_if_due
 
@@ -424,31 +519,41 @@ def test_prepare_failure_after_tonight_claim_does_not_retry_in_the_same_window(
     update_schedule.update_schedule_patch(
         {"tonight": True}, now=scheduled_at, user_id="steve"
     )
-    launches = []
-
+    monkeypatch.setenv("BACKEND_PORT", "1957")
+    monkeypatch.setattr(accounts, "get_user", lambda _user_id: {"id": "steve"})
     monkeypatch.setattr(
         update_status,
         "update_status",
         lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True, "target_version": "1.2.3"}),
     )
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
 
-    async def fail_after_acquire(trigger, target_version, user_id):
-        launches.append((trigger, target_version, user_id))
-        assert self_restart.try_acquire(
-            None, user_id, None, None, "update", kind="update", trigger=trigger
-        )
-        raise RuntimeError("prepare failed after operation acquisition")
+    def fail_prepare(*_args):
+        failure = HTTPException(409, "Update preparation failed")
+        setattr(failure, "update_failure_code", "build_failed")
+        raise failure
 
-    monkeypatch.setattr(
-        scheduled_update, "launch_scheduled_update", fail_after_acquire
-    )
+    monkeypatch.setattr(settings_restart, "_prepare_current_release", fail_prepare)
 
     assert asyncio.run(_run_scheduled_update_if_due(now)) is None
     assert get_update_schedule()["tonight_at"] is None
-    assert asyncio.run(
-        _run_scheduled_update_if_due(now + timedelta(minutes=5))
-    ) is None
-    assert launches == [("tonight", "1.2.3", "steve")]
+    connection = get_db()
+    try:
+        rows = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT status, failure_code FROM self_restart_requests"
+            ).fetchall()
+        ]
+    finally:
+        connection.close()
+    assert rows == [{"status": "failed", "failure_code": "build_failed"}]
+    assert asyncio.run(_run_scheduled_update_if_due(now + timedelta(minutes=5))) is None
+    connection = get_db()
+    try:
+        assert connection.execute("SELECT COUNT(*) FROM self_restart_requests").fetchone()[0] == 1
+    finally:
+        connection.close()
 
 
 def test_tonight_is_claimed_once_and_launches_its_update(monkeypatch):

@@ -561,7 +561,7 @@ curl() {
     case " $* " in
         *" -X DELETE "*) return 0 ;;
         *" -X POST "*) printf '%s\n200' "$START_PAYLOAD" ;;
-        *) printf '{"operation_id":"%s","status":"in_flight","phase":"steering"}' "$operation_id" ;;
+        *) printf '{"operation_id":"%s","status":"in_flight","phase":"holding","error":null,"kind":"restart","trigger":null,"target_version":null,"drain_total":null,"failure_code":null,"failure_detail":null,"conductor_told_at":null}' "$operation_id" ;;
     esac
 }
 drain_and_wait restart 9999

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 
@@ -36,6 +37,16 @@ UPDATE_SCHEDULE_DEFAULT = {
 }
 
 
+def parse_update_schedule_time(value: str) -> tuple[int, int]:
+    """Parse the one strict local HH:MM representation used by Update schedules."""
+    if not re.fullmatch(r"\d\d:\d\d", value):
+        raise ValueError("time must use HH:MM local time")
+    hour, minute = (int(part) for part in value.split(":"))
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError("time must use HH:MM local time")
+    return hour, minute
+
+
 def get_update_schedule(
     *, db: sqlite3.Connection | None = None, include_owner: bool = False
 ) -> dict:
@@ -44,15 +55,12 @@ def get_update_schedule(
     automatic = value.get("automatic") is True
     time = value.get("time")
     tonight_at = value.get("tonight_at")
-    if not isinstance(time, str) or len(time) != 5 or time[2] != ":":
+    try:
+        if not isinstance(time, str):
+            raise ValueError("time must use HH:MM local time")
+        parse_update_schedule_time(time)
+    except ValueError:
         time = UPDATE_SCHEDULE_DEFAULT["time"]
-    else:
-        try:
-            hour, minute = (int(part) for part in time.split(":"))
-        except ValueError:
-            hour, minute = -1, -1
-        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
-            time = UPDATE_SCHEDULE_DEFAULT["time"]
     if not isinstance(tonight_at, str):
         tonight_at = None
     schedule = {"automatic": automatic, "time": time, "tonight_at": tonight_at}

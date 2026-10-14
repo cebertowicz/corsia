@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -48,7 +47,7 @@ def _restart_log_path(name: str) -> Path:
 
 async def launch_update(
     user: dict,
-    caller_token: str | Callable[[str], str] | None,
+    caller_token: str | None,
     trigger: str,
     target_version: str | None,
     *,
@@ -68,12 +67,7 @@ async def launch_update(
     }
     if drain_max_wait is not None:
         restart_env["CORSIA_DRAIN_MAX_WAIT"] = str(drain_max_wait)
-    if caller_token is None:
-        from infra.accounts import issue_lifecycle_service_token
-
-        def caller_token(operation_id: str) -> str:
-            return issue_lifecycle_service_token(user["id"], operation_id)
-
+    # A scheduled run mints its service credential only after it acquires ownership.
     operation_id, process = await prelaunch_settings_restart(
         user,
         "update",

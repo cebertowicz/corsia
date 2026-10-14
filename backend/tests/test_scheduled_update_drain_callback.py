@@ -47,3 +47,31 @@ def test_drain_status_stays_scoped_to_the_authenticated_service_account(monkeypa
     with pytest.raises(HTTPException) as raised:
         asyncio.run(drain_api.get_drain_status_route("other-user-token"))
     assert raised.value.status_code == 401
+
+
+def test_drain_operation_status_projects_acquired_in_flight_operation(
+    isolated_db, monkeypatch
+) -> None:
+    """The shell confirmation route returns the durable operation projection."""
+    from api import drain as drain_api
+    from automation import self_restart
+
+    operation_id = self_restart.try_acquire(
+        None, "schedule-owner", None, None, "update", kind="update"
+    )
+    assert operation_id is not None
+    monkeypatch.setattr(
+        drain_api,
+        "authenticate",
+        lambda _token: {"id": "schedule-owner", "token_kind": "service"},
+    )
+
+    status = asyncio.run(
+        drain_api.get_drain_status_route("service-token", operation_id=operation_id)
+    )
+
+    assert status["operation_id"] == operation_id
+    assert status["status"] == "in_flight"
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(drain_api.get_drain_status_route("service-token", operation_id="f" * 32))
+    assert raised.value.status_code == 404
