@@ -195,6 +195,40 @@ async def _run_job_safely(*, include_corrections: bool = False) -> None:
         await _run_corrections_recording_safely()
 
 
+async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | None:
+    """Check the D7 system schedule without using the maintenance day claim."""
+    from automation import self_restart
+    from automation.update_schedule import clear_tonight, due_trigger, should_drop_tonight
+    from infra.db_async import run_in_db
+    from infra.settings import get_update_schedule
+    from infra.update_status import update_status
+
+    try:
+        local_now = now or datetime.now().astimezone()
+        schedule = await asyncio.to_thread(get_update_schedule)
+        if should_drop_tonight(schedule, now=local_now):
+            await asyncio.to_thread(clear_tonight, schedule)
+            return None
+        status = await asyncio.to_thread(update_status, False)
+        details = status.to_dict()
+        trigger = due_trigger(
+            schedule,
+            now=local_now,
+            update_available=details.get("available") is True,
+            attempted_today=await run_in_db(self_restart.update_attempted_today, now=local_now),
+        )
+        if trigger is None:
+            return None
+        if trigger == "tonight":
+            await asyncio.to_thread(clear_tonight, schedule)
+        from api.scheduled_update import launch_scheduled_update
+
+        return await launch_scheduled_update(trigger, details.get("target_version"))
+    except Exception:
+        logger.exception("nightly_job: scheduled update check or launch failed")
+        return None
+
+
 async def _run_corrections_recording_safely() -> None:
     """Drain corrections within their time budget without changing maintenance disposition."""
     try:
@@ -233,20 +267,29 @@ async def nightly_job_loop() -> None:
     pass yields to that in-flight drain rather than duplicating provider work.
     """
     manual_corrections_task: asyncio.Task[None] | None = None
+    nightly_corrections_task: asyncio.Task[None] | None = None
     await asyncio.sleep(STARTUP_DELAY)
     logger.info("nightly_job: loop started (checking every {}s)", CHECK_INTERVAL)
 
     try:
         while True:
             try:
+                await _run_scheduled_update_if_due()
                 if _should_run_nightly():
                     include_corrections = (
-                        manual_corrections_task is None or manual_corrections_task.done()
+                        (manual_corrections_task is None or manual_corrections_task.done())
+                        and (nightly_corrections_task is None or nightly_corrections_task.done())
                     )
                     logger.info("nightly_job: nightly trigger fired (02:00 window)")
-                    if not include_corrections:
-                        logger.info("nightly_job: skipping corrections; manual drain is running")
-                    await _run_job_safely(include_corrections=include_corrections)
+                    await _run_job_safely(include_corrections=False)
+                    if include_corrections:
+                        nightly_corrections_task = asyncio.create_task(
+                            _run_corrections_recording_safely(),
+                            name="nightly-corrections-recording",
+                        )
+                        nightly_corrections_task.add_done_callback(_log_manual_corrections_drain)
+                    else:
+                        logger.info("nightly_job: skipping corrections; another drain is running")
                 elif _should_run_on_idle():
                     logger.info("nightly_job: idle trigger fired ({}h+ idle)", IDLE_THRESHOLD_HOURS)
                     await _run_job_safely()
@@ -268,9 +311,10 @@ async def nightly_job_loop() -> None:
 
             await asyncio.sleep(CHECK_INTERVAL)
     finally:
-        if manual_corrections_task and not manual_corrections_task.done():
-            manual_corrections_task.cancel()
-            try:
-                await manual_corrections_task
-            except asyncio.CancelledError:
-                pass
+        for task in (manual_corrections_task, nightly_corrections_task):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass

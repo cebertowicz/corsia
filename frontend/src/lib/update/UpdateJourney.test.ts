@@ -99,7 +99,21 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).toContain("What's new");
 		expect(host.textContent).toContain('Faster startup');
 		expect(host.textContent).toContain('Later');
+		expect(host.textContent).toContain('Tonight at 3:00 AM');
+		expect(host.textContent).toContain('Keep CORSIA up to date automatically');
+		expect(host.textContent).not.toContain("Installs at 3:00 AM. You'll see what changed the next time you open CORSIA.");
 		expect(host.textContent).toContain('Update now');
+	});
+
+	it('hides Tonight when automatic updates are on', () => {
+		updateStatus.set(status({ schedule: { automatic: true, time: '03:00', tonight_at: null } }));
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+
+		expect(host.textContent).not.toContain('Tonight at 3:00 AM');
+		expect(host.textContent).toContain('Keep CORSIA up to date automatically');
+		expect(host.textContent).toContain("Installs at 3:00 AM. You'll see what changed the next time you open CORSIA.");
 	});
 
 	it('renders the four-step progress panel with the restarting-only note', () => {
@@ -201,11 +215,13 @@ describe('UpdateJourney', () => {
 		expect(host.querySelector('p.version')).toBeNull();
 	});
 
-	it('shows active pre-drain agent count in the decision sheet', () => {
+	it('shows one truthful duration statement and the active pre-drain agent count in the decision sheet', () => {
 		updateStatus.set(status({ agents_working: 2 }));
 		updateSurface.set('sheet');
 		component = mount(UpdateJourney, { target: host });
 		flushSync();
+		expect(host.querySelector('[data-update-drain] strong')?.textContent).toBe('CORSIA will be unavailable — usually about a minute.');
+		expect(host.textContent).not.toContain('Usually about 45 seconds.');
 		expect(host.textContent).toContain('2 agents are working');
 	});
 

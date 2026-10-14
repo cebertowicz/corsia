@@ -98,6 +98,16 @@ export function formatElapsed(totalSeconds: number): string {
 	return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+/** Format the configured 24-hour schedule value wherever a person sees it. */
+export function formatScheduleTime(value: string | null | undefined): string {
+	const matched = /^(\d{2}):(\d{2})$/.exec(value ?? '');
+	if (!matched) return '';
+	const hour = Number(matched[1]);
+	const minute = Number(matched[2]);
+	if (hour > 23 || minute > 59) return '';
+	return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
+}
+
 /** "today at 11:42 AM" for a same-day timestamp, otherwise "Oct 9, 4:15 PM". */
 export function formatInstalledAt(iso: string, nowMs: number): string {
 	const at = new Date(iso);

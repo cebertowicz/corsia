@@ -22,8 +22,7 @@ _RELEASE_FAILURE_NOTE = (
 )
 # Exit codes of `corsia prepare-redeploy`; any other nonzero exit is `prepare_failed`.
 _PREPARE_EXIT_CODES = {
-    41: "fetch_failed",
-    42: "build_failed",
+    41: "fetch_failed", 42: "build_failed",
     43: "index_locked",
     44: "checkout_detached",
     45: "checkout_dirty",
@@ -122,9 +121,13 @@ def _discard_prepared_release(
 
 
 async def _acquire_settings_restart(
-    user: dict,
+    user: dict | None,
     mode: str,
     acquired_ids: list[str],
+    *,
+    trigger: str | None = None,
+    target_version: str | None = None,
+    callback_hash: str | None = None,
 ) -> str:
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
@@ -134,13 +137,14 @@ async def _acquire_settings_restart(
     def _try_acquire() -> str | None:
         operation_id = self_restart.try_acquire(
             None,
-            user.get("id"),
+            user.get("id") if user else None,
             None,
             None,
             mode,
             kind="update" if mode == "update" else "restart",
-            trigger="manual" if mode == "update" else None,
-            target_version=cached_target_version() if mode == "update" else None,
+            trigger=trigger if mode == "update" else None,
+            target_version=(target_version or cached_target_version()) if mode == "update" else None,
+            callback_hash=callback_hash,
             changes=json.dumps(cached_changes()) if mode == "update" and cached_changes() else None,
         )
         if operation_id is not None:
@@ -330,7 +334,7 @@ async def _launch_settings_restart(
 
 
 async def prelaunch_settings_restart(
-    user: dict,
+    user: dict | None,
     mode: str,
     corsia_script: Path,
     restart_env: dict[str, str],
@@ -338,6 +342,9 @@ async def prelaunch_settings_restart(
     restart_log_path: Callable[[str], Path],
     *,
     caller_token: str,
+    trigger: str | None = "manual",
+    target_version: str | None = None,
+    callback_hash: str | None = None,
 ) -> tuple[str, object]:
     """Hand Settings restart ownership from preparation through child launch."""
     prepared = mode == "update"
@@ -346,7 +353,14 @@ async def prelaunch_settings_restart(
     try:
         acquired_ids: list[str] = []
         try:
-            operation_id = await _acquire_settings_restart(user, mode, acquired_ids)
+            operation_id = await _acquire_settings_restart(
+                user,
+                mode,
+                acquired_ids,
+                trigger=trigger,
+                target_version=target_version,
+                callback_hash=callback_hash,
+            )
         except asyncio.CancelledError as error:
             await _compensate_cancelled_acquire(
                 acquired_ids,

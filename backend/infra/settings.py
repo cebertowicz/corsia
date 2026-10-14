@@ -29,6 +29,33 @@ def get_setting(key: str, *, db: sqlite3.Connection | None = None) -> dict | Non
     return parsed if isinstance(parsed, dict) else None
 
 
+UPDATE_SCHEDULE_DEFAULT = {
+    "automatic": False,
+    "time": "03:00",
+    "tonight_at": None,
+}
+
+
+def get_update_schedule(*, db: sqlite3.Connection | None = None) -> dict:
+    """Return the validated system-owned scheduled-update preference."""
+    value = get_setting("update_schedule", db=db) or {}
+    automatic = value.get("automatic") is True
+    time = value.get("time")
+    tonight_at = value.get("tonight_at")
+    if not isinstance(time, str) or len(time) != 5 or time[2] != ":":
+        time = UPDATE_SCHEDULE_DEFAULT["time"]
+    else:
+        try:
+            hour, minute = (int(part) for part in time.split(":"))
+        except ValueError:
+            hour, minute = -1, -1
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            time = UPDATE_SCHEDULE_DEFAULT["time"]
+    if not isinstance(tonight_at, str):
+        tonight_at = None
+    return {"automatic": automatic, "time": time, "tonight_at": tonight_at}
+
+
 def set_setting(key: str, value: dict, *, db: sqlite3.Connection | None = None) -> None:
     """Upsert JSON in the named caller's transaction or a standalone owner."""
     with write_transaction(db, scope="set_setting") as connection:

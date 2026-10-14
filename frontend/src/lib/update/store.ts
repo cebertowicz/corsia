@@ -10,25 +10,9 @@ import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe
 const BASE = '';
 const POLL_MS = 1_000;
 
-export interface UpdateStatus {
-	branch: string | null;
-	current_sha: string | null;
-	remote_sha: string | null;
-	commits_behind: number | null;
-	available: boolean | null;
-	checked_at: number | null;
-	error: string | null;
-	current_version?: string | null;
-	target_version?: string | null;
-	changes?: UpdateChanges | null;
-	drain_cap_seconds?: number | null;
-	usual_seconds?: number | null;
-	agents_working?: number | null;
-	server_time?: string | null;
-	operation?: UpdateOperation | null;
-}
+import type { UpdateSchedule, UpdateStatus, UpdateSurface } from './types';
 
-export type UpdateSurface = 'closed' | 'sheet' | 'panel';
+export type { UpdateSchedule, UpdateStatus, UpdateSurface } from './types';
 
 export const updateStatus = writable<UpdateStatus | null>(null);
 export const updateSurface = writable<UpdateSurface>('closed');
@@ -211,7 +195,35 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 			usual_seconds: current?.usual_seconds ?? null,
 			agents_working: current?.agents_working ?? null,
 			operation: current?.operation ?? null,
+			schedule: current?.schedule ?? null,
 		}));
+	}
+}
+
+function showScheduleSaveError(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): void {
+	toasts.showAction("Couldn't save the schedule", {
+		label: 'Try again', run: () => { void saveUpdateSchedule(patch); },
+	});
+}
+
+export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): Promise<boolean> {
+	const authToken = get(token);
+	if (!authToken) {
+		showScheduleSaveError(patch);
+		return false;
+	}
+	try {
+		const response = await fetch(`${BASE}/api/system/update-schedule`, {
+			method: 'PUT', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify(patch), cache: 'no-store',
+		});
+		if (!response.ok) throw new Error(`Schedule save returned ${response.status}`);
+		const schedule = await response.json() as UpdateSchedule;
+		updateStatus.update((current) => current ? { ...current, schedule } : current);
+		return true;
+	} catch {
+		showScheduleSaveError(patch);
+		return false;
 	}
 }
 

@@ -332,6 +332,9 @@ async def system_update_status(
     result["usual_seconds"] = await run_in_db(self_restart.usual_update_seconds)
     result["agents_working"] = await run_in_db(active_turn_count)
     result["server_time"] = datetime.now(timezone.utc).isoformat()
+    from infra.settings import get_update_schedule
+
+    result["schedule"] = await asyncio.to_thread(get_update_schedule)
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:
         activated = await run_in_db(staged_update_activated, operation)
@@ -341,9 +344,23 @@ async def system_update_status(
     return result
 
 
+@router.put("/system/update-schedule")
+async def update_schedule(body: dict, user: dict = Depends(require_user)):
+    """Save the human-controlled local scheduled Update preference."""
+    require_human_user(user)
+    from automation.update_schedule import update_schedule_patch
+
+    try:
+        return await asyncio.to_thread(
+            update_schedule_patch, body, now=datetime.now().astimezone()
+        )
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+
+
 @router.post("/system/update-operations/{operation_id}/outcome-seen")
 async def system_update_outcome_seen(
-    operation_id: str, user: dict = Depends(require_user)
+    operation_id: str, user: dict = Depends(require_human_user)
 ):
     """Mark one settled Update's outcome as shown; the first client to do so wins."""
     from automation.update_outcome import mark_outcome_seen
