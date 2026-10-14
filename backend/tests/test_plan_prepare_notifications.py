@@ -244,23 +244,36 @@ async def test_prepare_batches_plans_by_authorized_user_and_dedupes_one_plan(
 
 
 @pytest.mark.asyncio
-async def test_harvest_raise_precedes_collection_and_emits_nothing(
+async def test_harvest_row_raise_after_its_writes_rolls_back_that_row_and_emits_nothing(
     db, ws_registry, monkeypatch,
 ):
     _plan_id, node_id = _seed_attachment(db, "parent-a", "child-a")
     socket = _FakeSocket()
     ws_registry._ws_user_clients["user-1"] = [socket]
+    transitions_before = _transition_events(db, node_id)
+    write_transition = delegation.service._transition
 
-    def fail_transition(*_args, **_kwargs):
+    def fail_after_transition(*args, **kwargs):
+        write_transition(*args, **kwargs)
         raise RuntimeError("harvest failed")
 
-    monkeypatch.setattr(delegation.service, "_transition", fail_transition)
-    with pytest.raises(RuntimeError, match="harvest failed"):
-        await _sweep(db, [_EarlySource(), HarvestSource()])
+    monkeypatch.setattr(delegation.service, "_transition", fail_after_transition)
+    # The row fails after writing its transition; only that row rolls back.
+    await _sweep(db, [_EarlySource(), HarvestSource()])
 
     assert socket.sent == []
     assert service.get_node(node_id, db=db).state == "active"
-    assert db.execute("SELECT COUNT(*) FROM continuation_triggers").fetchone()[0] == 0
+    assert _transition_events(db, node_id) == transitions_before
+    assert db.execute(
+        "SELECT COUNT(*) FROM continuation_triggers WHERE kind = ?", (HarvestSource.kind,),
+    ).fetchone()[0] == 0
+
+
+def _transition_events(db, node_id: str) -> int:
+    return db.execute(
+        "SELECT COUNT(*) FROM plan_node_events WHERE node_id = ? AND event = 'state_transition'",
+        (node_id,),
+    ).fetchone()[0]
 
 
 @pytest.mark.asyncio
