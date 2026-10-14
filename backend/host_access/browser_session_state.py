@@ -40,6 +40,7 @@ class BrowserRuntime:
     close_task: asyncio.Task[None] | None = None
     report: browser_reporting.CleanupNotice | None = None
     report_task: asyncio.Task[browser_reporting.CleanupNotice] | None = None
+    browser_opened_announced: bool = False
 
 
 class BrowserSessionError(RuntimeError):

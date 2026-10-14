@@ -149,8 +149,13 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                 task = asyncio.create_task(_navigate(thread_id, connection_token, data))
 
                 def publish_navigation(done: asyncio.Task) -> None:
-                    with contextlib.suppress(asyncio.CancelledError, Exception):
-                        reliable.put_nowait(json.dumps(done.result()))
+                    if done.cancelled():
+                        return
+                    try:
+                        result = done.result()
+                    except Exception as exc:
+                        result = {"type": "navigate_result", "error": str(exc)}
+                    reliable.put_nowait(json.dumps(result))
 
                 task.add_done_callback(publish_navigation)
             elif kind == "appearance":

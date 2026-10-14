@@ -74,6 +74,13 @@
 		if (message.type !== 'frame' || !message.metadata || typeof message.data !== 'string') return;
 		const metadata = message.metadata as Record<string, unknown>;
 		if (typeof metadata.deviceWidth !== 'number' || typeof metadata.deviceHeight !== 'number') return;
+		const requested = lastAppearance ? JSON.parse(lastAppearance) as { width?: number; height?: number } : null;
+		if (requested && (requested.width !== metadata.deviceWidth || requested.height !== metadata.deviceHeight)) {
+			// A viewport match can race browser startup. Only remember a size after its frame confirms it.
+			lastAppearance = '';
+			clearTimeout(fitTimer);
+			fitTimer = setTimeout(sendAppearance, 150);
+		}
 		width = metadata.deviceWidth;
 		height = metadata.deviceHeight;
 		framePipeline.offer({ data: message.data, width, height });

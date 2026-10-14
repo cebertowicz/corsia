@@ -313,7 +313,26 @@ async def test_browser_opened_is_announced_only_after_a_successful_shared_open(m
         0, result=(CommandResult(returncode, "", "failed"), False)))
     monkeypatch.setattr(browser_control, "announce_browser_opened", seen.append)
     await owner.run("thread-1", ("open", "https://example.test"))
+    await owner.run("thread-1", ("open", "https://example.test"))
     assert seen == announced
+
+
+@pytest.mark.asyncio
+async def test_new_shared_browser_session_announces_again(monkeypatch):
+    owner = BrowserSessionOwner(namespace="corsia-pane-test")
+    first = BrowserRuntime(BrowserSessionRecord("thread-1", "first", show_window=True))
+    second = BrowserRuntime(BrowserSessionRecord("thread-1", "second", show_window=True))
+    runtimes = iter((first, second))
+    seen = []
+    monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
+    monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=next(runtimes)))
+    monkeypatch.setattr(owner, "_run_admitted", lambda *_args, **_kwargs: asyncio.sleep(
+        0, result=(CommandResult(0, "", ""), False)))
+    monkeypatch.setattr(browser_control, "announce_browser_opened", seen.append)
+    await owner.run("thread-1", ("open", "https://example.test"))
+    await owner.run("thread-1", ("open", "https://example.test"), session="new")
+    assert seen == ["thread-1", "thread-1"]
 
 
 @pytest.mark.asyncio
