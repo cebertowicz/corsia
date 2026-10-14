@@ -118,6 +118,15 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
             elif kind in {"input_mouse", "input_keyboard"}:
                 await stream.send(message)
 
+    async def metadata_events() -> None:
+        async def emit(message: dict) -> None:
+            report(message)
+        try:
+            await browser_pane.watch_page_metadata(thread_id, connection_token, emit)
+        except (BrowserSessionError, ProcessOwnerError):
+            log.debug("browser pane metadata relay ended", exc_info=True)
+            await asyncio.Future()
+
     tasks: set[asyncio.Task] = set()
     try:
         await stream.send(json.dumps({"type": "screencast_start"}))
@@ -125,6 +134,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         tasks = {
             asyncio.create_task(from_stream()),
             asyncio.create_task(from_pane()),
+            asyncio.create_task(metadata_events()),
             asyncio.create_task(frames.send(pane.send_text)),
             asyncio.create_task(_close_on_overflow(pane, overflow)),
         }

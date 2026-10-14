@@ -1,14 +1,17 @@
 """Browser-pane operations on the composed browser session owner."""
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Awaitable, Callable
 
+from host_access import browser_cdp, browser_cli
 from host_access.browser_streaming import StreamPortResult
 from host_access.processes import PROCESS_OWNER
 
-__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "go", "match_pane", "open_url", "page_info", "repaint", "stream_port"]
+__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "go", "match_pane", "open_url", "page_info", "repaint", "stream_port", "watch_page_metadata"]
 
 HISTORY_ACTIONS = frozenset({"back", "forward", "reload"})
 
@@ -34,6 +37,17 @@ class PaneAppearance:
         if data.get("scheme") not in {"light", "dark"}:
             return None
         return cls(int(width), int(height), round(scale, 2), data["scheme"])
+
+
+async def watch_page_metadata(thread_id: str, connection_token: str, report: Callable[[dict], Awaitable[None]]) -> None:
+    """Forward CDP main-frame metadata changes for this connected shared pane."""
+    owner = PROCESS_OWNER.browser_sessions()
+    payload = await owner.run(thread_id, ("get", "cdp-url"), control_token=connection_token, session="existing")
+    endpoint = browser_cli.json_object(payload).get("data", {}).get("cdpUrl")
+    if not isinstance(endpoint, str) or not endpoint.startswith("ws"):
+        raise browser_cdp.BrowserSessionError("This page couldn't be checked")
+    page_endpoint = await asyncio.to_thread(browser_cdp._page_endpoint, endpoint)
+    await browser_cdp.watch_page_metadata(page_endpoint, report)
 
 
 async def stream_port(thread_id: str) -> StreamPortResult:

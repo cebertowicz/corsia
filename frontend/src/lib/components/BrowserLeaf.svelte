@@ -67,6 +67,11 @@
 		};
 	}
 
+	function applyPageMetadata(nextUrl: unknown, nextTitle: unknown) {
+		if (typeof nextUrl === 'string') url = nextUrl;
+		if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof nextTitle === 'string' ? nextTitle : null, url));
+	}
+
 	function drawMessage(raw: string) {
 		let message: Record<string, unknown>;
 		try {
@@ -79,11 +84,14 @@
 			if (!passwordPage) status = 'Agent can see the page again';
 			return;
 		}
+		if (message.type === 'browser_metadata') {
+			applyPageMetadata(message.url, message.title);
+			return;
+		}
 		if (message.type === 'navigate_result') {
 			if (typeof message.error === 'string') status = `Browser could not open this URL: ${message.error}`;
 			else {
-				if (typeof message.url === 'string') url = message.url;
-				if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof message.title === 'string' ? message.title : null, url));
+				applyPageMetadata(message.url, message.title);
 				status = 'Ready';
 			}
 			return;

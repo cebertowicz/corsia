@@ -70,6 +70,40 @@ async def password_probe(run: RunCommand, known_nodes: frozenset[int]) -> Passwo
         return PasswordProbe(loader, host, frozenset(visible))
 
 
+async def watch_page_metadata(endpoint: str, report: Callable[[dict], Awaitable[None]]) -> None:
+    """Report main-frame URL and title changes from CDP events until the pane closes."""
+    async with CdpClient(endpoint) as cdp:
+        await cdp.call("Page.enable")
+        await _report_page_metadata(cdp, report)
+        while True:
+            event = json.loads(await cdp.socket.recv())
+            method = event.get("method")
+            params = event.get("params")
+            if not isinstance(params, dict):
+                continue
+            if method == "Page.frameNavigated":
+                frame = params.get("frame")
+                if isinstance(frame, dict) and not frame.get("parentId"):
+                    await _report_page_metadata(cdp, report, frame.get("url"))
+            elif method in {"Page.navigatedWithinDocument", "Page.loadEventFired"}:
+                await _report_page_metadata(cdp, report)
+
+
+async def _report_page_metadata(cdp: CdpClient, report: Callable[[dict], Awaitable[None]], url: object = None) -> None:
+    """Read page metadata in direct response to a CDP navigation event, never by polling."""
+    if not isinstance(url, str):
+        tree = await cdp.call("Page.getFrameTree")
+        url = tree.get("frameTree", {}).get("frame", {}).get("url")
+    if not isinstance(url, str):
+        return
+    try:
+        title_result = await cdp.call("Runtime.evaluate", expression="document.title", returnByValue=True, silent=True)
+        title = title_result.get("result", {}).get("value")
+    except BrowserSessionError:
+        title = None
+    await report({"type": "browser_metadata", "url": url, "title": title if isinstance(title, str) else None})
+
+
 async def shared_action(run: RunCommand, args: Sequence[str]) -> str | None:
     """Perform a ref-resolved fill/type/click without moving the shared focus or pointer."""
     if len(args) < 2 or args[0] not in {"click", "fill", "type"}:

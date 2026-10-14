@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import BrowserLeaf from './BrowserLeaf.svelte';
 import { emit } from '$lib/ws/events';
+import { get } from 'svelte/store';
+import { openBrowserPane, threadWorkspaces } from '$lib/stores/artifactWorkspace';
 
 class FakeSocket {
 	static CONNECTING = 0;
@@ -53,6 +55,7 @@ function render() {
 
 beforeEach(() => {
 	FakeSocket.instances = [];
+	threadWorkspaces.set({});
 	vi.stubGlobal('WebSocket', FakeSocket);
 	vi.stubGlobal('PointerEvent', TestPointerEvent);
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
@@ -98,6 +101,15 @@ describe('BrowserLeaf navigation metadata', () => {
 		socket.receive({ type: 'navigate_result', error: null, url: 'https://accounts.example.co.uk/a/long/page', title: 'Example page' });
 		flushSync();
 		expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('example.co.uk · accounts · …page');
+	});
+
+	it('updates the address and tab when an agent-side navigation reaches the stream', () => {
+		openBrowserPane('thread');
+		const { socket } = render();
+		socket.receive({ type: 'browser_metadata', url: 'https://www.example.test/agent/open', title: 'Agent opened this' });
+		flushSync();
+		expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('example.test · www · …open');
+		expect(get(threadWorkspaces).thread.tabs.find((tab) => tab.kind === 'browser')?.title).toBe('Agent opened this');
 	});
 });
 
