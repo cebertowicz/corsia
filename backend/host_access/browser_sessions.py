@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import replace
 import socket
@@ -11,6 +10,7 @@ import time
 from typing import Sequence, TypeAlias
 
 from host_access import browser_cli, browser_control, browser_identity as identity, browser_reporting
+from host_access.browser_streaming import StreamPortResult, prepare_stream_port
 from host_access.browser_session_state import (
     BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
     BrowserSessionError as BrowserSessionError, BrowserSessionRecord,
@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 BROWSER_NAMESPACE = "corsia-prod"
 CommandResult: TypeAlias = browser_cli.CommandResult
+
+
 _EXECUTABLE_CHANGED = (
     "browser executable identity changed after CORSIA started using it; "
     "close the browser session with browser_close, then restart CORSIA to use the new build"
@@ -110,8 +112,8 @@ class BrowserSessionOwner:
             if unfinished:
                 await self._close_runtime(runtime)
             rendered = self._model_result(result, runtime.record)
-            if args[0] == "open":
-                browser_control.announce_browser_started(thread_id)
+            if args[0] == "open" and not unfinished and not rendered.startswith("Error:"):
+                browser_control.announce_browser_opened(thread_id)
             return rendered
         except asyncio.CancelledError:
             if started:
@@ -128,21 +130,10 @@ class BrowserSessionOwner:
         finally:
             self._active_commands -= 1
 
-    async def stream_port(self, thread_id: str) -> int | None:
-        """Enable and return the private loopback stream port for a live session."""
-        runtime = self._sessions.get(thread_id)
-        if runtime is None:
-            return None
-        async with runtime.command_lock:
-            self._assert_admitted(runtime, runtime.record.lease_id)
-            await self._invoke(self._session_argv(runtime, ("stream", "enable")), timeout=10.0)
-            result = await self._invoke(self._session_argv(runtime, ("stream", "status")), timeout=10.0)
-            try:
-                payload = json.loads(result.stdout)
-                port = payload.get("data", {}).get("port")
-            except (AttributeError, TypeError, ValueError):
-                return None
-            return port if isinstance(port, int) and port > 0 else None
+    async def stream_port(self, thread_id: str) -> StreamPortResult:
+        """Prepare a private stream through this session owner's lifecycle invariants."""
+        return await prepare_stream_port(self, thread_id)
+
 
     async def _admit(self, thread_id: str, *, lease_id: str | None,
                      show_window: bool | None = None) -> BrowserRuntime:

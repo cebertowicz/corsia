@@ -10,11 +10,12 @@ from infra.database import get_db
 from infra.queries import get_thread_for_user
 from host_access import browser_pane
 from host_access.browser_session_state import BrowserSessionError, BrowserSetupError
+from infra.product_events import emit_product_event
 
 router = APIRouter(prefix="/api/browser", tags=["browser"])
 
 
-def _owned_thread(thread_id: str, authorization: str = "") -> None:
+def _owned_thread(thread_id: str, authorization: str = "") -> dict:
     user = authenticate(authorization.removeprefix("Bearer "))
     if not user:
         raise HTTPException(401)
@@ -24,6 +25,7 @@ def _owned_thread(thread_id: str, authorization: str = "") -> None:
             raise HTTPException(404)
     finally:
         db.close()
+    return user
 
 
 def _http_url(url: str) -> str:
@@ -33,18 +35,6 @@ def _http_url(url: str) -> str:
     return url
 
 
-@router.post("/{thread_id}/control")
-async def set_control(
-    thread_id: str,
-    has_control: bool,
-    authorization: str = Header(default=""),
-):
-    """Transfer the owned thread's browser input authority to or from its user."""
-    _owned_thread(thread_id, authorization)
-    browser_pane.set_user_control(thread_id, has_control)
-    return {"has_control": has_control}
-
-
 @router.post("/{thread_id}/open")
 async def open_url(
     thread_id: str,
@@ -52,11 +42,12 @@ async def open_url(
     authorization: str = Header(default=""),
 ):
     """Navigate the owned thread's browser to an HTTP(S) URL."""
-    _owned_thread(thread_id, authorization)
+    user = _owned_thread(thread_id, authorization)
     try:
         result = await browser_pane.open_url(thread_id, _http_url(url))
     except (BrowserSessionError, BrowserSetupError) as exc:
         raise HTTPException(409, str(exc)) from exc
     if result.startswith("Error:"):
         raise HTTPException(409, result)
+    emit_product_event("browser_pane", "opened", thread_id=thread_id, user_id=user["id"])
     return {"opened": True}

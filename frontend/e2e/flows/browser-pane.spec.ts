@@ -11,7 +11,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		page.on('websocket', (socket) => {
 			browserSockets.push(socket.url());
 			socket.on('framereceived', (frame) => {
-				try { browserFrames.push(`${socket.url()}:${JSON.parse(String(frame.payload)).type}`); } catch { /* non-JSON frames are irrelevant */ }
+				try { browserFrames.push(`${socket.url()}:${String(frame.payload)}`); } catch { /* non-JSON frames are irrelevant */ }
 			});
 		});
 		await loginByUrl(page);
@@ -25,7 +25,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		const openResponse = await opened;
 		expect(openResponse.status(), await openResponse.text()).toBe(200);
 		await expect.poll(() => browserSockets.filter((url) => url.includes(`/api/browser/${threadId}/stream`)).length).toBeGreaterThanOrEqual(2);
-		await expect.poll(() => browserFrames.some((entry) => entry.endsWith(':frame')), { message: JSON.stringify(browserFrames) }).toBe(true);
+		await expect.poll(() => browserFrames.some((entry) => entry.includes('"type":"frame"')), { message: JSON.stringify(browserFrames) }).toBe(true);
 		const canvas = page.locator('canvas[aria-label="Shared browser"]');
 		await expect.poll(() => canvas.evaluate((node) => {
 			const canvas = node as HTMLCanvasElement;
@@ -42,6 +42,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await expect(page.getByRole('button', { name: 'Take over' })).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'browser-pane-watch-only');
 		await page.getByRole('button', { name: 'Take over' }).click();
+		await expect.poll(() => browserFrames.some((entry) => entry.includes('"type":"control"'))).toBe(true);
 		await expect(page.getByText('You have control. The agent waits')).toBeVisible();
 		await saveEvidenceScreenshot(page, testInfo, 'browser-pane-control');
 		await page.getByRole('button', { name: 'Hand back' }).click();
