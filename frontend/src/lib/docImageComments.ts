@@ -8,6 +8,18 @@ import type { DocComment } from '$lib/stores/docComments';
 /** One image of a document, by its markdown range. */
 export type ImageOccurrence = { from: number; to: number };
 
+/**
+ * Comments on an image (DCOL-FR13.6): its thumbnail heads the list, cards carry their tag's number and colour.
+ * `hoveredId` and `onHover` link each card with its mark on the image; the drawer scrolls to the selected card itself.
+ */
+export type ImageCommentSurface = { src: string; alt?: string; colorOf: (comment: DocComment) => string; onMovePin?: (id: string) => void; onOpen?: () => void; showThumbnail?: boolean; imageBounds?: () => DOMRect | null; hoveredId?: string | null; onHover?: (id: string | null) => void; picks?: number };
+
+/**
+ * A document's images with comments on parts of them (DCOL-FR13.6): each image's comments sit together in the drawer
+ * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
+ */
+export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
+
 /** A region comment with a place in the text: the image markdown it is anchored on. */
 function placed(comment: DocComment): ImageOccurrence | null {
 	return comment.region && !comment.orphaned && comment.from != null && comment.to != null ? { from: comment.from, to: comment.to } : null;
