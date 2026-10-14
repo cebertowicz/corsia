@@ -98,7 +98,7 @@ describe('DocCommentSurface suggestions', () => {
 		feedback.pendingCount = 2;
 		feedback.feedback = { open_count: 2, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] };
 		render({ state: { kind: 'list' }, comments: [suggestion], feedback });
-		const footer = () => host.querySelector<HTMLElement>('[data-doc-comments-drawer] > [data-drawer-unsent]');
+		const footer = () => host.querySelector<HTMLElement>('[data-doc-comments-drawer] [data-drawer-unsent]');
 		expect(footer()?.querySelector('[role="status"]')?.textContent).toBe('2 messages not sent yet · they go to Style when you leave.');
 		const owner = footer()!.querySelector<HTMLElement>('.drawer-footer-owner')!;
 		expect(owner.textContent).toBe('Style');
@@ -107,8 +107,8 @@ describe('DocCommentSurface suggestions', () => {
 		expect(button.textContent?.trim()).toBe('Send now');
 		button.click();
 		expect(send).toHaveBeenCalledOnce();
-		// The drawer's last child, after the scrolling list, so the list scrolls and the footer stays.
-		expect(host.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer());
+		// The measured footer wrapper is last, after the scrolling list, so the list scrolls and either footer stays pinned.
+		expect(host.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer()!.parentElement);
 
 		feedback.countdownNow = Date.parse('2026-10-11T22:00:00Z');
 		feedback.feedback = { open_count: 1, owner_label: null, grace_closes_at: '2026-10-11T22:04:00Z', undelivered_batches: [] };
@@ -124,6 +124,121 @@ describe('DocCommentSurface suggestions', () => {
 		expect(footer()).toBeNull();
 		await Promise.resolve();
 		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
+	});
+
+	it('moves orphan placement recovery into the comments drawer with its existing live-state wiring', () => {
+		const reload = vi.fn(() => true);
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: reload, orphanedCount: 1 } });
+		const footer = host.querySelector<HTMLElement>('[data-doc-comments-drawer] [data-drawer-placement]')!;
+		expect(footer.querySelector('[role="status"]')?.textContent).toBe("1 comment couldn't be placed");
+		const button = footer.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
+		button.click();
+		expect(reload).toHaveBeenCalledOnce();
+		expect(host.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer.parentElement);
+	});
+
+	it('restores focus to the orphan recovery action after a reload leaves the comment unplaced', async () => {
+		const reloading = writable(false);
+		const live = fromStore(reloading);
+		render({
+			state: { kind: 'list' },
+			comments: [{ ...suggestion, orphaned: true }],
+			get placementRecovery() { return { onReload: () => true, orphanedCount: 1, reloading: live.current }; },
+		});
+		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
+		button.focus();
+		button.click();
+		reloading.set(true); flushSync();
+		reloading.set(false); flushSync();
+		await tick();
+		expect(document.activeElement).toBe(host.querySelector('[aria-label="Reload comment placements"]'));
+	});
+
+	it('announces every failed placement retry even when the unplaced count does not change', async () => {
+		const reloading = writable(false);
+		const live = fromStore(reloading);
+		render({
+			state: { kind: 'list' },
+			comments: [{ ...suggestion, orphaned: true }],
+			get placementRecovery() { return { onReload: () => true, orphanedCount: 1, reloading: live.current }; },
+		});
+		const retry = async () => {
+			host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+			reloading.set(true); flushSync();
+			reloading.set(false); flushSync();
+			await tick();
+		};
+		await retry();
+		const first = host.querySelector('[data-drawer-placement] [role="status"]')!;
+		expect(first.textContent).toBe("1 comment still couldn't be placed");
+		await retry();
+		const second = host.querySelector('[data-drawer-placement] [role="status"]')!;
+		expect(second.textContent).toBe("1 comment still couldn't be placed");
+		expect(second).not.toBe(first);
+	});
+
+	it('shows a refused placement retry after the drawer closes and reopens', async () => {
+		const state = writable<{ kind: 'list' } | null>({ kind: 'list' });
+		const reloading = writable(false), reloadError = writable(false);
+		const liveState = fromStore(state), liveReloading = fromStore(reloading), liveReloadError = fromStore(reloadError);
+		render({
+			get state() { return liveState.current; },
+			comments: [{ ...suggestion, orphaned: true }],
+			get placementRecovery() { return { onReload: () => { reloading.set(true); return true; }, orphanedCount: 1, reloading: liveReloading.current, reloadError: liveReloadError.current }; },
+		});
+		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+		state.set(null); flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[data-doc-comments-drawer]')).toBeNull());
+		reloadError.set(true); reloading.set(false); state.set({ kind: 'list' }); flushSync();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("Couldn't reload comment placements");
+	});
+
+	it('keeps a successful placement announcement in the drawer after the recovery action is gone', async () => {
+		const reloading = writable(false);
+		const comments = writable([{ ...suggestion, orphaned: true }]);
+		const liveReloading = fromStore(reloading);
+		const liveComments = fromStore(comments);
+		render({
+			state: { kind: 'list' },
+			get comments() { return liveComments.current; },
+			get placementRecovery() { return { onReload: () => true, orphanedCount: liveComments.current.filter(comment => comment.orphaned && !comment.resolved).length, reloading: liveReloading.current }; },
+		});
+		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+		reloading.set(true); flushSync();
+		comments.set([]); flushSync();
+		reloading.set(false); flushSync();
+		await tick();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe('Comments placed');
+		expect(host.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
+		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
+	});
+
+	it('clears a successful placement announcement when a later refresh reports unplaced comments', async () => {
+		const reloading = writable(false);
+		const orphanedCount = writable(1);
+		const liveReloading = fromStore(reloading);
+		const liveOrphanedCount = fromStore(orphanedCount);
+		render({
+			state: { kind: 'list' },
+			get placementRecovery() { return { onReload: () => true, orphanedCount: liveOrphanedCount.current, reloading: liveReloading.current }; },
+		});
+		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+		reloading.set(true); flushSync();
+		orphanedCount.set(0); flushSync();
+		reloading.set(false); flushSync();
+		await tick();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe('Comments placed');
+		orphanedCount.set(2); flushSync();
+		await tick();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("2 comments couldn't be placed");
+	});
+
+	it('keeps a disconnected placement retry focusable and names its live status', () => {
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: vi.fn(), orphanedCount: 1, unavailable: true, connectionDescriptionId: 'live-connection-artifact' } });
+		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
+		expect(button.disabled).toBe(false);
+		expect(button.getAttribute('aria-disabled')).toBe('true');
+		expect(button.getAttribute('aria-describedby')).toBe('live-connection-artifact');
 	});
 
 	it('keeps the drawer while an image opened from a card covers it, then gives that card focus back', async () => {

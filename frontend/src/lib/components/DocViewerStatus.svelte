@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { tick } from 'svelte';
 	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
@@ -10,6 +9,7 @@
 	import { formatFreshness, type DocumentFreshness, shouldOfferVerification } from '$lib/docFreshness';
 	import type { CommentFeedback } from '$lib/api/docs';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
+	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 
 	let {
 		title = 'Document',
@@ -27,10 +27,6 @@
 		viewingThreadId = null,
 		reviewTargetKey = null,
 		onReload,
-		onReloadPlacements,
-		placementReloading = false,
-		placementReloadError = false,
-		liveConnection = null,
 		onOpenComments,
 		freshness,
 		onFeedbackChanged,
@@ -58,10 +54,6 @@
 		viewingThreadId?: string | null;
 		reviewTargetKey?: string | null;
 		onReload?: () => void;
-		onReloadPlacements?: () => boolean;
-		placementReloading?: boolean;
-		placementReloadError?: boolean;
-		liveConnection?: LiveDocumentSession['connection'] | null;
 		onOpenComments: (opener: HTMLElement) => void;
 		freshness: DocumentFreshness | null;
 		onFeedbackChanged?: () => void;
@@ -79,42 +71,19 @@
 	let verifying = $state(false);
 	let verificationError = $state('');
 	let verificationNotice = $state('');
-	let placementAnnouncement = $state('');
-	let placementReloadRequested = $state(false);
-	let placementReloadSeenBusy = $state(false);
-	let commentStatus = $state<HTMLButtonElement>();
 	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
 	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
-	const placementReloadVisible = $derived(Boolean(liveSession && orphanedCount && onReloadPlacements));
-	const placementReloadUnavailable = $derived(liveConnection === 'disconnected' || liveConnection === 'reconnecting');
-	const liveConnectionDescriptionId = $derived(liveSession ? `live-connection-${liveSession.artifactId}` : undefined);
+	// The live-status row renders the stable connection description for unavailable actions.
+	const connectionDescriptionId = $derived(liveConnectionDescriptionId(liveSession?.artifactId));
 	$effect(() => {
 		artifactId;
 		detailsOpen = false;
 		verificationError = '';
 		verificationNotice = '';
-		placementAnnouncement = '';
-		placementReloadRequested = false;
-		placementReloadSeenBusy = false;
 	});
-	$effect(() => {
-		if (!placementReloadRequested) return;
-		if (placementReloading) { placementReloadSeenBusy = true; return; }
-		if (!placementReloadSeenBusy) return;
-		placementReloadRequested = false;
-		placementReloadSeenBusy = false;
-		placementAnnouncement = placementReloadError ? "Couldn't reload comment placements" : orphanedCount ? `${placedPhrase(orphanedCount)}` : 'Comments placed';
-		if (!orphanedCount) void tick().then(() => commentStatus?.focus());
-	});
-	const placedPhrase = (count: number) => `${count} comment${count === 1 ? '' : 's'} still couldn't be placed`;
-	const unplacedPhrase = $derived(`${orphanedCount} comment${orphanedCount === 1 ? '' : 's'} couldn't be placed`);
-	function reloadPlacements(): void {
-		if (!placementReloadVisible || placementReloadUnavailable || placementReloading) return;
-		placementReloadRequested = onReloadPlacements?.() ?? false;
-	}
 
 	async function markVerified(): Promise<void> {
 		if (!onMarkVerified || verifying) return;
@@ -161,7 +130,7 @@
 		{#if presence}{@render presence()}{/if}
 		<span class="document-tools">
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
-			<CommentsPill class="doc-tool comment-status" bind:element={commentStatus} count={commentCount} {unsent} unplaced={orphanedCount}
+			<CommentsPill class="doc-tool comment-status" count={commentCount} {unsent} unplaced={orphanedCount}
 				loading={commentsLoading} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
 		</span>
@@ -186,15 +155,14 @@
 {/if}
 
 <DocLiveStatus session={liveSession} {openRefusal} {liveUnavailable} {tabText} {onReopen} {onRead}
-	connectionStatusId={liveConnectionDescriptionId} />
-<span class:sr-only={!verificationError && !placementAnnouncement} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || placementAnnouncement || staleAnnouncement}</span>
+	connectionStatusId={connectionDescriptionId} />
+<span class:sr-only={!verificationError} class:metadata-error={!!verificationError} role="status">{verificationError || verificationNotice || staleAnnouncement}</span>
 {#if readonly && ready}
 	<div class="readonly-note">Read-only — this file is owned by the system bootloader.</div>
 {/if}
 {#if commentCount || orphanedCount || artifactId || (stale && ready)}
 	<div class="document-status-row document-notices">
 		<span class="feedback-controls"><DocFeedbackStatus bind:this={feedbackStatus} {artifactId} {targetInstanceId} {onFeedbackChanged} withSend={false} /></span>
-		{#if orphanedCount && placementReloadVisible}{#if !placementAnnouncement}<span class="orphan-note">{unplacedPhrase}</span>{/if}<span class="orphan-reload"><Button size="sm" variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={placementReloadUnavailable || placementReloading} describedby={placementReloadUnavailable ? liveConnectionDescriptionId : undefined} onclick={reloadPlacements}>Place again</Button></span>{/if}
 	</div>
 {/if}
 </header>
@@ -242,14 +210,7 @@
 	.document-identity { justify-content: flex-end; }
 	.identity-details { display: none; }
 	.document-tools { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
-	/* The same action as the feedback row's Retry: the shared secondary button at its size. */
-	.orphan-reload { display: inline-flex; flex: none; }
-	.orphan-note { align-self: center; color: var(--text-secondary); font-size: var(--text-footnote); }
-	@media (any-pointer: coarse) {
-		.orphan-reload :global(> .btn) { min-height: 44px; }
-		.orphan-reload :global(> .btn::after) { inset: 0; }
-	}
-	.document-notices:not(:has(.undelivered:not(.idle), .orphan-reload)) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+	.document-notices:not(:has(.undelivered:not(.idle))) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 	.document-header :global(.doc-tool) { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-family: var(--font-sans); font-size: var(--text-footnote); font-weight: var(--fw-medium); white-space: nowrap; cursor: pointer; }
 	.document-header :global(.doc-tool:hover:not(:disabled)) { background: var(--bg-tertiary); color: var(--text-primary); }
 	.document-header :global(.doc-tool:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }

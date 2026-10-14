@@ -32,6 +32,7 @@
 		enrichDraftTarget, setDraftText, flushDraft,
 	} from '$lib/stores/docSaveQueue';
 	import { docSaveGhost } from '$lib/stores/docSaveGhost.svelte';
+	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
 	import DocPresenceStatus from './DocPresenceStatus.svelte';
@@ -117,7 +118,7 @@
 	$effect(() => syncActiveDocumentEditor({ target, draft: currentDraft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
-	const headerCommentStatus = $derived(commentSurfaceStatus(listedComments));
+	const commentStatus = $derived(commentSurfaceStatus(listedComments));
 	let scrollTarget = $state<CanvasScrollTarget | null>(null);
 	$effect(() => {
 		const fc = focusedComment;
@@ -310,14 +311,13 @@
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
 		readonly={readonly && !openRefusal}
-		{...headerCommentStatus}
+		commentCount={commentStatus.commentCount}
+		orphanedCount={commentStatus.orphanedCount}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
 		{onReload}
-		onReloadPlacements={loadedArtifactId ? () => reloadPlacements(loadedArtifactId!) : undefined}
-		{liveConnection}
 		onOpenComments={commentUI.openList}
 		{freshness}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
@@ -381,6 +381,7 @@
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		feedback={feedbackStatus?.feedback()}
+		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => reloadPlacements(loadedArtifactId) : undefined, orphanedCount: commentStatus.orphanedCount, reloading: commentStatus.placementReloading, reloadError: commentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveConnectionDescriptionId(liveSession?.artifactId) }}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
@@ -396,5 +397,4 @@
 		{covered}
 	/>
 </div>
-
 <!-- Styles are in DocViewer.css. -->
