@@ -83,16 +83,11 @@ def _validate_target(request: CCSpawnRequest) -> str:
 
 def _register_lineage(
     request: CCSpawnRequest,
-    db,
     *,
+    user_id: str,
     child_id: str,
     name: str,
-    working_dir: str | None,
-):
-    from subagents.harness_tool_bridge import build_tool_registry
-
-    tool_registry = build_tool_registry(working_dir)
-    user_id = _parent_user_id(request.parent_thread_id, db)
+) -> int:
     create_child_thread(
         user_id=user_id,
         parent_thread_id=request.parent_thread_id,
@@ -109,12 +104,18 @@ def _register_lineage(
         thread_id=child_id,
         user_id=user_id,
     )
-    epoch = int(
-        db.execute(
-            "SELECT runtime_context_epoch FROM threads WHERE id=?", (child_id,)
-        ).fetchone()["runtime_context_epoch"]
-    )
-    return tool_registry, epoch
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return int(
+            db.execute(
+                "SELECT runtime_context_epoch FROM threads WHERE id=?", (child_id,)
+            ).fetchone()["runtime_context_epoch"]
+        )
+    finally:
+        db.close()
+
 
 
 def _persist_seed(child_id: str, seed_text: str, delivery) -> None:
@@ -184,6 +185,7 @@ async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     """Create the durable child and its pre-start runtime context."""
     _check_live_cap()
     from connections.models import connection_available
+    from registry.cc_session import notify_cc_session, persist_cc_session
 
     if not connection_available("claude-code", db=db):
         raise ValueError("Claude Code connection is not available")
@@ -192,14 +194,19 @@ async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     cc_alias = _validate_target(request)
     child_id = str(uuid.uuid4())
     name = request.title or request.task[:60]
-    tool_registry, epoch = _register_lineage(
-        request, db, child_id=child_id, name=name, working_dir=working_dir,
-    )
-    from registry.service import register_cc_session
+    from subagents.harness_tool_bridge import build_tool_registry
 
-    register_cc_session(
+    tool_registry = build_tool_registry(working_dir)
+    user_id = _parent_user_id(request.parent_thread_id, db)
+    epoch = await run_in_db(
+        _register_lineage,
+        request, user_id=user_id, child_id=child_id, name=name,
+    )
+    _previous_id, session_row = await run_in_db(
+        persist_cc_session,
         child_id, child_id, title=name, cwd=working_dir,
     )
+    notify_cc_session(child_id, child_id, session_row)
     live, resolved_dir = await _build_live(
         request, db, child_id=child_id, name=name,
         working_dir=working_dir, cc_alias=cc_alias,

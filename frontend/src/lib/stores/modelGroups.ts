@@ -145,6 +145,13 @@ function checkInProgress(usage: VendorAccount['usage']): boolean {
 	return usage?.checking === true && !usage.check?.outcome && !usage.check?.error;
 }
 
+/** A limited status keeps a known reset visible when a recheck cannot verify it. */
+function limitedStatus(prefix: string, reset: string, resetWord: string, failed: boolean): string {
+	if (!reset) return failed ? "limited · couldn't verify" : prefix;
+	const status = `${prefix} · ${resetWord} ${reset}`;
+	return failed ? `${status} · couldn't verify` : status;
+}
+
 export function accountSpendingSegment(account: VendorAccount): UsageSegment | null {
 	const usage = account.usage;
 	const planSpent = usage?.windows.some((window) => !window.scope_model && reported(window)
@@ -239,9 +246,8 @@ export function accountSegments(account: VendorAccount): UsageSegment[] {
 	const usage = account.usage;
 	if (usage?.state === 'limited') {
 		if (checkInProgress(usage)) return [{ text: 'limited · checking', level: 'red' }];
-		if (usage.check?.error) return [{ text: "limited · couldn't verify", level: 'red' }];
 		const back = resetLabel(usage.resets_at, true);
-		return [{ text: back ? `limited · back ${back}` : 'limited', level: 'red' }];
+		return [{ text: limitedStatus('limited', back, 'back', Boolean(usage.check?.error)), level: 'red' }];
 	}
 	const spending = accountSpendingSegment(account);
 	if (spending) return [spending];
@@ -259,11 +265,10 @@ export function groupStatusSegments(group: ModelGroup, accounts: VendorAccount[]
 	if (group.state === 'limited') {
 		const usages = accounts.map((account) => account.usage);
 		if (usages.some(checkInProgress)) return [{ text: 'limited · checking', level: 'red' }];
-		if (usages.some((usage) => usage?.check?.error)) return [{ text: "limited · couldn't verify", level: 'red' }];
 		const back = resetLabel(group.resetsAt, true);
 		const severalAccounts = accounts.length > 1;
 		const prefix = severalAccounts ? `All ${accounts.length} accounts limited` : 'limited';
-		return [{ text: back ? `${prefix} · ${severalAccounts ? 'first back' : 'back'} ${back}` : prefix, level: 'red' }];
+		return [{ text: limitedStatus(prefix, back, severalAccounts ? 'first back' : 'back', usages.some((usage) => usage?.check?.error)), level: 'red' }];
 	}
 	return [{ text: group.state === 'signed_out' ? 'signed out' : 'unavailable', level: 'normal' }];
 }

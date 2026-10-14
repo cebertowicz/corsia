@@ -123,8 +123,8 @@ def test_first_terminal_wins_and_starts_one_fifo_successor() -> None:
         db.close()
 
 
-def test_finish_turn_work_is_independent_of_unrelated_history() -> None:
-    """Terminal CAS and successor admission must seek the exact Turn inputs."""
+def _finish_turn_progress_calls(history_rows: int) -> int:
+    """Run one terminal with its successor and count SQLite progress callbacks."""
     from infra.input_admission import accept_thread_input
     from infra.thread_driver import TerminalResult, finish_turn
 
@@ -141,13 +141,14 @@ def test_finish_turn_work_is_independent_of_unrelated_history() -> None:
             message_id="next-input",
             db=db,
         )
-        db.execute(
-            "WITH RECURSIVE history(value) AS ("
-            "SELECT 1 UNION ALL SELECT value + 1 FROM history WHERE value < 10000"
-            ") INSERT INTO messages (id,thread_id,role,content,created_at) "
-            "SELECT 'history-' || value,'thread-1','assistant','old','t0' "
-            "FROM history"
-        )
+        if history_rows:
+            db.execute(
+                "WITH RECURSIVE history(value) AS ("
+                f"SELECT 1 UNION ALL SELECT value + 1 FROM history WHERE value < {history_rows}"
+                ") INSERT INTO messages (id,thread_id,role,content,created_at) "
+                "SELECT 'history-' || value,'thread-1','assistant','old','t0' "
+                "FROM history"
+            )
         db.commit()
 
         progress_calls = 0
@@ -177,10 +178,22 @@ def test_finish_turn_work_is_independent_of_unrelated_history() -> None:
         assert db.execute(
             "SELECT active_turn_id FROM messages WHERE id='next-input'"
         ).fetchone()[0] == "turn-2"
-        assert progress_calls < 20
+        return progress_calls
     finally:
         db.set_progress_handler(None, 0)
         db.close()
+
+
+def test_finish_turn_work_is_independent_of_unrelated_history() -> None:
+    """Terminal CAS and successor admission must seek the exact Turn inputs."""
+    without_history = _finish_turn_progress_calls(0)
+    with_history = _finish_turn_progress_calls(10000)
+
+    # Ten thousand unrelated rows must not change the work by more than noise.
+    assert abs(with_history - without_history) <= 2
+    # The ceiling includes the restart-hold read (a schema probe plus an
+    # indexed status lookup on self_restart_requests) that every terminal makes.
+    assert with_history < 25
 
 
 def test_terminal_settles_an_unsettled_plan_dispatch_without_a_hold() -> None:

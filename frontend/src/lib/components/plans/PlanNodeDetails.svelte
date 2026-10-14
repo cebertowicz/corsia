@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { OperatorNode } from '$lib/api/plans';
+	import { renderMarkdown } from '$lib/markdown';
 	import { localDayClock } from '$lib/time';
+	import { indentVar } from './planIndent';
 	import { localizeInstants, nodeDisplayLabel } from './planDisplay';
 	import {
 		artifactCount, dollarLine, initiativeLine, isFinished, nextMove, ownDiffers, tokenLine,
@@ -10,11 +12,12 @@
 	let {
 		node,
 		id,
-		depth = node.depth,
+		indent = indentVar(node.depth, 0, 0),
 	}: {
 		node: OperatorNode;
 		id: string;
-		depth?: number;
+		/** The row's indent as a CSS length, so details sit directly under it (`planIndent`). */
+		indent?: string;
 	} = $props();
 
 	// One fact per line (shared/planning/plans-node-details-design-2026-09-24.md,
@@ -25,6 +28,13 @@
 	const tone = $derived(node.display.tone_key);
 	const causes = $derived(execution.causes.length > 1 ? execution.causes : []);
 	const showTries = $derived(execution.attempt_count > 0 || node.state === 'failed');
+	// A single recorded item identifies its executor and release without repeating the count.
+	// Keep a count only when it adds information: several tries, omitted history, or a failed task with no recorded try.
+	const showTryCount = $derived(
+		execution.attempt_count >= 2
+			|| execution.attempt_count > execution.attempts.length
+			|| (node.state === 'failed' && execution.attempts.length === 0),
+	);
 	const next = $derived(nextMove(execution.causes));
 	const showEvidence = $derived(isFinished(node) || execution.condition === 'review');
 	const staleEvidence = $derived(
@@ -54,7 +64,7 @@
 	<span class="word {tone}">{label}</span>{#if reason}<span class="reason">{' · '}{localizeInstants(reason, $localDayClock)}</span>{/if}
 {/snippet}
 
-<section {id} class="node-details" style={`--depth:${depth}`} aria-label={node.title + ' details'}>
+<section {id} class="node-details" style={`--indent:${indent}`} aria-label={node.title + ' details'}>
 	<p class="status"><span class="prefix">Status:</span> {@render statusLine()}</p>
 	{#if causes.length}
 		<div class="causes">
@@ -65,7 +75,7 @@
 	{/if}
 	{#if showTries}
 		<div class="tries">
-			<p><span class="prefix">Tries:</span> {execution.attempt_count}{#if execution.attempt_count > execution.attempts.length}{' '}(latest {execution.attempts.length} shown){/if}</p>
+			{#if showTryCount}<p><span class="prefix">Tries:</span> {execution.attempt_count}{#if execution.attempt_count > execution.attempts.length && execution.attempts.length > 0}{' '}(latest {execution.attempts.length} shown){/if}</p>{/if}
 			<ul>
 				{#each execution.attempts as attempt}
 					<li>Try {attempt.ordinal} · {attempt.executor.label} · {tryEnding(attempt.released_at, attempt.release_reason)}</li>
@@ -76,6 +86,13 @@
 
 	{#if next}
 		<p class="next"><span class="prefix">Next:</span> {next}</p>
+	{/if}
+
+	{#if node.assignee === 'user' && node.description}
+		<div class="person-instructions md-content">{@html renderMarkdown(node.description)}</div>
+	{/if}
+	{#if node.assignee === 'user' && node.waiting_on.length}
+		<p class="waiting-on"><span class="prefix">Waiting on this:</span> {node.waiting_on.join(', ')}</p>
 	{/if}
 
 	{#if showEvidence && node.evidence}
@@ -102,7 +119,7 @@
 <style>
 	.node-details {
 		display: flex; flex-direction: column; gap: var(--space-1);
-		margin: 0 var(--space-2) var(--space-2) calc(34px + var(--depth) * 22px);
+		margin: 0 var(--space-2) var(--space-2) calc(34px + var(--indent));
 		padding: var(--space-1) var(--space-2); border-left: 2px solid var(--border);
 		color: var(--text-secondary); font-size: var(--text-caption);
 	}
@@ -110,6 +127,13 @@
 	ul { padding-left: var(--space-3); }
 	.causes > .prefix { display: block; }
 	.evidence-note { margin-left: var(--space-3); }
+	.person-instructions { color: var(--text-primary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
+	.person-instructions :global(p) { margin-bottom: var(--space-1); }
+	.person-instructions :global(.code-block) { margin: var(--space-1) 0; }
+	/* Person steps need a touch-visible Copy affordance; chat keeps its hover behavior. */
+	.person-instructions :global(.copy-btn) { opacity: 1; }
+	/* Keep the command below the always-visible top-right Copy control. */
+	.person-instructions :global(.code-block pre) { padding-top: 34px; }
 	/* The line wraps only between its segments, so "3 follow-ups" and "5h 20m" never split. */
 	.segment { white-space: nowrap; }
 	.prefix, .note { color: var(--text-tertiary); }
@@ -119,6 +143,7 @@
 	.word.human-review { color: var(--amber); }
 	/* Lifecycle actions stay in the row menu; details are read-only facts. */
 	@media (max-width: 620px) {
-		.node-details { margin-left: calc(18px + var(--depth) * 12px); }
+		/* Match the title's icon and gap on touch as well as desktop. */
+		.node-details { margin-left: calc(34px + var(--indent)); }
 	}
 </style>

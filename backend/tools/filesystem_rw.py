@@ -17,7 +17,7 @@ from tools.file_write_completion import (
     announce_published_write,
     guidance_target,
     managed_write,
-    save_guided_write,
+    save_guided_write_and_announce,
 )
 from tools.filesystem_gate import _resolve_path_for_action
 from doceditor.live_tools import record_read_base, write_live
@@ -374,7 +374,7 @@ class WriteFileTool(Tool):
             }
             target = await asyncio.to_thread(guidance_target, file_path)
             if target is not None:
-                return await run_off_db(save_guided_write, file_path, content, target, kwargs, **write_args)
+                return await save_guided_write_and_announce(file_path, content, target, kwargs, **write_args)
             result = await write_live(file_path, kwargs, producer=self.name, content=content, description=description)
             if result is not None:
                 return result

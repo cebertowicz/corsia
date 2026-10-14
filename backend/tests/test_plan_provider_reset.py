@@ -230,6 +230,36 @@ async def test_busy_reset_wait_defers_to_generic_liveness(isolated_db):
     assert wake["deadline"] != _RESET
 
 
+@pytest.mark.parametrize("state", ["queued", "running", "stale"])
+def test_provider_reset_wake_is_stale_when_the_thread_already_starts_work(isolated_db, state):
+    thread_id = mk_session(f"provider-reset-{state}-work")
+    _start_selected_turn(thread_id, f"{state}-failed")
+    _terminal_error(
+        thread_id, f"{state}-failed", error=_PROVIDER_ERROR, clears_at=_RESET,
+    )
+    db = get_db()
+    accept_thread_input(
+        thread_id, role="user", content="continue", intent="apply_now",
+        message_id=f"{state}-next", db=db,
+    )
+    if state == "running":
+        batch = start_idle_turn(
+            thread_id, turn_id=f"{state}-next-turn", boot_epoch="provider-reset-test",
+            started_at="2099-01-01T11:30:00+00:00", db=db,
+        )
+        assert batch is not None
+    if state == "stale":
+        db.execute(
+            "UPDATE messages SET target_execution_epoch=target_execution_epoch+1 WHERE id=?",
+            (f"{state}-next",),
+        )
+    request = LivenessSource().due(_AFTER_RESET, db=db)[0]
+
+    assert LivenessSource().is_current(
+        thread_id, request.subject_id, request.transition, request.details, db=db,
+    ) is (state == "stale")
+
+
 def test_collected_generic_trigger_cannot_wake_before_new_provider_reset(isolated_db):
     thread_id = mk_session("provider-reset-collected")
     _start_selected_turn(thread_id, "collected-turn")

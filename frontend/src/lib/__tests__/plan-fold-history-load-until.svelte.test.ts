@@ -9,7 +9,7 @@ import { token } from '$lib/stores/auth';
 const item = (id: string): FoldedItem => ({
 	id, parent_id: null, kind: 'task', title: id, state: 'accepted', folded_at: '2026-09-01T00:00:00Z',
 	fold_bucket: 'done', display: { label_key: 'finished', tone_key: 'complete' },
-	folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false,
+	status_reason: null, folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false,
 });
 
 let cleanup: (() => void) | null = null;

@@ -109,6 +109,11 @@ class LivenessSource:
         wake = plan_liveness.row_to_wake(dict(row))
         if transition != _transition(wake):
             return False
+        if details.get("provider_reset_at"):
+            from infra.thread_input_rows import turn_starting_work_pending
+
+            if turn_starting_work_pending(db, thread_id):
+                return False
         return self.still_actionable(thread_id, details, db=db)
 
     def still_actionable(self, thread_id: str, details: dict, *, db) -> bool:

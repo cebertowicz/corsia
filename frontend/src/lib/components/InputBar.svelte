@@ -24,6 +24,7 @@
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
+	import { updateRestarting } from '$lib/update/store';
 
 		let { threadId = undefined, onSend, onTriggerWarm, onAutoCreateThread }: {
 			threadId?: string | null;
@@ -210,9 +211,7 @@
 		boundThreadId ? $subagentMeta.has(boundThreadId) : false,
 	);
 	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, $models));
-	const canSendToModel = $derived(
-		isSubagentThread || composerCanSend(activeThread, activeModel, $models),
-	);
+	const canSendToModel = $derived(!$updateRestarting && (isSubagentThread || composerCanSend(activeThread, activeModel, $models)));
 	const hasMessageToSend = $derived(inputText.trim().length > 0 || pendingAttachments.length > 0);
 
 	function handleSendButtonClick() {
@@ -264,13 +263,14 @@
 		}
 
 	function handlePaste(e: ClipboardEvent) {
+		if ($updateRestarting) return e.preventDefault();
 		const files = e.clipboardData?.files;
 		if (files && files.length > 0) {
 			e.preventDefault();
 			handleFileSelect(files);
 			return;
-			}
-			const text = e.clipboardData?.getData('text/plain');
+		}
+		const text = e.clipboardData?.getData('text/plain');
 		if (text === undefined) return;
 		e.preventDefault();
 		insertTextAtCaret(inputEl, text);

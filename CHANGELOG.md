@@ -3,6 +3,50 @@
 Shipped behavior, newest first. When a later entry changes an earlier design,
 the later entry describes the current behavior.
 
+## v2026.10.13 — Comments in a drawer, plans that mark your finished steps done, and steadier settings
+
+### Documents and Images
+
+- Document comments open in a drawer beside the document, and the review header is redesigned around what is waiting and the feedback you send.
+- Images get the same comments drawer, and their in-document lightbox is tidied.
+- Links written in a document open in the document canvas.
+- A document tab reopens at the place you left it.
+- A comment that cannot be posted now says so instead of staying on Posting.
+
+### Chat and Interface
+
+- Shared documents and review requests show in chat as flat attachment rows and compact chips, and an answered review shows your verdict at once.
+- The expanded account list in the model picker marks the account in use.
+- Pop-up notices stay clear of controls at the bottom of the screen.
+- The work summary capsule stays pinned just under the chat header, and drawers animate open and closed again.
+- Focus no longer lists messages queued between agents as waiting on you.
+- Archived projects no longer appear in the command palette.
+
+### Agents and Plans
+
+- An agent can mark a step assigned to you Done once it is really finished, instead of leaving it as Won't do, and any question it raised about that step leaves your queue.
+- A task started because its prerequisite finished now reaches its agent with the task's handoff description.
+- Deeply nested plan rows stay aligned and readable, hover chips no longer stick after a tap on a touch screen, and finished rows and the plan drawer animate open and closed (instantly under reduced motion).
+- Next lists ready work before work that is waiting, and a plan row's second line stays on one line.
+- A worker that moves to another account after a usage limit no longer triggers a false cannot-run notice.
+- Every agent now brings approvals as a review on the document or image itself.
+- Searching a single file returns its exact source lines, like a folder search.
+- Starting agents no longer holds up the rest of the app.
+- Failed checkpoints, refused resumes and background connection errors name what failed and why.
+
+### Providers
+
+- Saving a rollover or account change in Providers settings no longer leaves the page's switches unusable.
+- When a provider refuses work, each account in your rollover order is tried at most once before waiting for the reset, and a reset no longer starts a second turn on a busy thread.
+
+### Measurement
+
+- Measurement's usage totals start rebuilding when CORSIA starts, so the first visit after an update is faster.
+
+### Documentation
+
+- The README now leads with giving an agent a problem to own, with the measurement screenshots first.
+
 ## v2026.10.11 — Images you can review, keys in one place, and a sharper Measurement page
 
 ### Upgrading

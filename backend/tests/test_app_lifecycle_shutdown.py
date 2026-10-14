@@ -1673,3 +1673,100 @@ async def test_one_owner_failure_does_not_skip_other_teardown(
         "db_async",
         "db_pool",
     ]
+
+
+def _isolate_rollup_lifespan(monkeypatch) -> None:
+    """Keep rollup lifecycle checks free of unrelated startup-continuity tasks."""
+    from automation import restart_startup
+
+    _isolate_lifespan(monkeypatch)
+
+    async def startup_reconcile(_logger):
+        return SimpleNamespace(batches=[], settlements=[]), ()
+
+    monkeypatch.setattr(restart_startup, "run_startup_reconcile", startup_reconcile)
+    monkeypatch.setattr(restart_startup, "run_startup_drive", _noop)
+
+
+async def test_startup_rollup_refresh_does_not_delay_lifespan_yield(monkeypatch):
+    """The startup warm-up starts but never becomes a readiness dependency."""
+    from api import usage_rollup
+
+    _isolate_rollup_lifespan(monkeypatch)
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+    yielded = asyncio.Event()
+
+    async def refresh(_read, _write) -> None:
+        refresh_started.set()
+        await release_refresh.wait()
+
+    async def run_lifespan() -> None:
+        async with app_lifecycle.lifespan(FastAPI()):
+            yielded.set()
+            await release_refresh.wait()
+
+    monkeypatch.setattr(usage_rollup, "_refresh", refresh)
+    lifespan_task = asyncio.create_task(run_lifespan())
+    try:
+        await asyncio.wait_for(refresh_started.wait(), timeout=1.0)
+        await asyncio.wait_for(yielded.wait(), timeout=1.0)
+    finally:
+        release_refresh.set()
+        await asyncio.gather(lifespan_task, return_exceptions=True)
+
+
+async def test_startup_and_measurement_dependencies_share_one_rollup_refresh(monkeypatch):
+    """The boot trigger joins concurrent Measurement request triggers to one task."""
+    from api import usage_rollup
+
+    _isolate_rollup_lifespan(monkeypatch)
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+    calls = 0
+
+    async def refresh(_read, _write) -> None:
+        nonlocal calls
+        calls += 1
+        refresh_started.set()
+        await release_refresh.wait()
+
+    monkeypatch.setattr(usage_rollup, "_refresh", refresh)
+    try:
+        async with app_lifecycle.lifespan(FastAPI()):
+            await asyncio.wait_for(refresh_started.wait(), timeout=1.0)
+            startup_task = usage_rollup._refreshing[asyncio.get_running_loop()]
+            await asyncio.gather(*(usage_rollup.refresh_on_request() for _ in range(5)))
+            assert calls == 1
+            assert usage_rollup._refreshing[asyncio.get_running_loop()] is startup_task
+    finally:
+        release_refresh.set()
+        task = usage_rollup._refreshing.get(asyncio.get_running_loop())
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_shutdown_joins_rollup_refresh_before_database_pool_closes(monkeypatch):
+    """A cancelled warm-up cannot write after the database pool is closed."""
+    from api import usage_rollup
+
+    _isolate_rollup_lifespan(monkeypatch)
+    refresh_started = asyncio.Event()
+    events: list[str] = []
+
+    async def refresh(_read, _write) -> None:
+        refresh_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            events.append("refresh_finished" if "pool_closed" not in events else "write_after_pool")
+
+    monkeypatch.setattr(usage_rollup, "_refresh", refresh)
+    monkeypatch.setattr(app_lifecycle, "shutdown_pool", lambda: events.append("pool_closed"))
+
+    async def exercise() -> None:
+        async with app_lifecycle.lifespan(FastAPI()):
+            await refresh_started.wait()
+
+    await asyncio.wait_for(exercise(), timeout=1.0)
+    assert events == ["refresh_finished", "pool_closed"]

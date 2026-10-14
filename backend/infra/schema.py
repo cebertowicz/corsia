@@ -28,8 +28,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-
-SCHEMA_VERSION = 113
+SCHEMA_VERSION = 114
 SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -400,7 +399,9 @@ SCHEMA_SQL = f"""
         phase TEXT,
         cutoff_at TEXT,
         updated_at TEXT,
-        error TEXT
+        error TEXT,
+        kind TEXT, trigger TEXT, target_version TEXT, drain_total INTEGER, changes TEXT, outcome_seen_at TEXT,
+        failure_code TEXT, failure_detail TEXT, conductor_told_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_self_restart_requests_status
         ON self_restart_requests(status);
@@ -515,7 +516,6 @@ SCHEMA_SQL = f"""
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS reviewer_gate_state (
         pr_key       TEXT PRIMARY KEY,
         reviewed_sha TEXT NOT NULL

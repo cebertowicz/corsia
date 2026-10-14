@@ -156,11 +156,23 @@ describe('PlanTree row details disclosure', () => {
 			evidence: { evidence: 'Targeted proof passed', artifact_ids: ['proof'], requirements_revision: 2 },
 		}));
 		expect(lines()).toEqual(['status', 'tries', 'evidence', 'evidence-note', 'evidence-note']);
-		expect(line('status')).toBe('Status: Finished');
+		expect(line('status')).toBe('Status: Done');
 		expect(line('evidence')).toBe('Evidence: Targeted proof passed');
 		expect([...host.querySelectorAll('.evidence-note')].map((el) => squash(el.textContent)))
 			.toEqual(['Predates the latest requirements', '1 artifact linked']);
 		expect(host.textContent).not.toContain('Research agent');
+	});
+
+	it.each([
+		['accepted', 'complete', 'Done'],
+		['closed', 'closed', 'Won’t do'],
+		['failed', 'failed', 'Failed'],
+	] as const)('uses the row outcome word in the details for a %s task', async (state, tone, label) => {
+		await open(node({
+			id: `settled-${state}`, state,
+			display: { label_key: 'finished', tone_key: tone },
+		}));
+		expect(line('status')).toBe(`Status: ${label}`);
 	});
 
 	it('names who marked a finished step done beside its status', async () => {
@@ -168,7 +180,7 @@ describe('PlanTree row details disclosure', () => {
 			id: 'marked', state: 'accepted', status_reason: 'Marked by Infrastructure',
 			evidence: { evidence: 'You said the key is set', artifact_ids: [], requirements_revision: 1 },
 		}));
-		expect(line('status')).toBe('Status: Finished · Marked by Infrastructure');
+		expect(line('status')).toBe('Status: Done · Marked by Infrastructure');
 		expect(line('evidence')).toBe('Evidence: You said the key is set');
 	});
 
@@ -354,8 +366,8 @@ describe('PlanTree row details disclosure', () => {
 	});
 
 	it.each([
-		['active', 'running'], ['review_requested', 'review'], ['accepted', 'terminal'],
-	] as const)('keeps a single %s try and its executor reachable', async (state, condition) => {
+		['active', 'running'], ['review_requested', 'review'], ['accepted', 'terminal'], ['failed', 'terminal'],
+	] as const)('keeps a single %s try reachable without repeating its count', async (state, condition) => {
 		await open(node({
 			id: `one-${state}`, state,
 			execution: {
@@ -369,7 +381,52 @@ describe('PlanTree row details disclosure', () => {
 			},
 		}));
 		expect(line('status')).not.toContain('Research agent');
-		expect(line('tries')).toContain('Try 1 · Research agent · current');
+		expect(line('tries')).toBe('Try 1 · Research agent · current');
+		expect(line('tries')).not.toContain('Tries: 1');
+	});
+
+	it('shows the count when a task has two tries', async () => {
+		await open(node({
+			id: 'two-tries',
+			execution: {
+				condition: 'running', primary_reason: null, causes: [], selection: null, conflict: null,
+				attempt_count: 2, friction_count: 1,
+				attempts: [
+					{ id: 'try-2', ordinal: 2, executor: { thread_id: 'worker', label: 'Research agent' }, requirements_revision: 1, selected_at: 'later', released_at: null, release_reason: null },
+					{ id: 'try-1', ordinal: 1, executor: { thread_id: 'worker', label: 'Research agent' }, requirements_revision: 1, selected_at: 'earlier', released_at: 'later', release_reason: 'requirements_changed' },
+				],
+			},
+		}));
+		expect(line('tries')).toContain('Tries: 2');
+		expect(line('tries')).toContain('Try 1 · Research agent · requirements changed');
+		expect(line('tries')).toContain('Try 2 · Research agent · current');
+	});
+
+	it('states only the missing portion of a partially listed try history', async () => {
+		await open(node({
+			id: 'partially-listed-tries',
+			execution: {
+				condition: 'terminal', primary_reason: null, causes: [], selection: null, conflict: null,
+				attempt_count: 3, friction_count: 2,
+				attempts: [{
+					id: 'try-3', ordinal: 3, executor: { thread_id: 'worker', label: 'Research agent' },
+					requirements_revision: 1, selected_at: 'later', released_at: null, release_reason: null,
+				}],
+			},
+		}));
+		expect(line('tries')).toBe('Tries: 3 (latest 1 shown) Try 3 · Research agent · current');
+	});
+
+	it('retains a one-try count with no listed try without a nonsense latest-zero suffix', async () => {
+		await open(node({
+			id: 'unlisted-single-try',
+			execution: {
+				condition: 'terminal', primary_reason: null, causes: [], selection: null, conflict: null,
+				attempt_count: 1, friction_count: 0, attempts: [],
+			},
+		}));
+		expect(line('tries')).toBe('Tries: 1');
+		expect(line('tries')).not.toContain('latest 0 shown');
 	});
 
 	it('does not invent a subtree difference from unknown-only usage', async () => {
@@ -532,5 +589,25 @@ describe('PlanTree user task controls', () => {
 		expect(host.querySelector('.node-details > .next')?.textContent?.replace(/\s+/g, ' ').trim())
 			.toBe('Next: You');
 		expect(host.querySelector('.user-actions')).toBeNull();
+	});
+
+	it('passes the exact row indent to details at deep nested levels', async () => {
+		const nodes = Array.from({ length: 9 }, (_, depth) => node({
+			id: `depth-${depth}`,
+			parent_id: depth === 0 ? null : `depth-${depth - 1}`,
+			depth,
+			kind: depth === 8 ? 'task' : 'phase',
+			title: `Depth ${depth}`,
+		}));
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes, maxDepth: 9, expandBranchesByDefault: true }) });
+		flushSync();
+
+		for (const depth of [1, 3, 8]) {
+			const row = document.getElementById(`plan-row-depth-${depth}`)!;
+			(row.querySelector('.row-body') as HTMLButtonElement).click();
+			await settle();
+			const details = document.getElementById(`plan-node-details-depth-${depth}`)!;
+			expect(details.style.getPropertyValue('--indent')).toBe(row.style.getPropertyValue('--indent'));
+		}
 	});
 });

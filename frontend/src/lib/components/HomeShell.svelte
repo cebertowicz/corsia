@@ -18,6 +18,7 @@
 	} from '$lib/stores/artifactWorkspace';
 	import { docPickerTarget } from '$lib/stores/docPickerTarget';
 	import { toasts } from '$lib/stores/toast';
+	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
 
 	import Sidebar from './Sidebar.svelte';
 	import Header from './Header.svelte';
@@ -258,6 +259,7 @@
 		class:open={sidebarOpen}
 		class:pane-open={paneVisible}
 		bind:this={mainEl}
+		use:toastAnchorSurface
 		ontransitionstart={mainDrawer.onTransitionStart}
 		ontransitionend={mainDrawer.onTransitionEnd}
 		ontouchstart={mainDrawer.onTouchStart}

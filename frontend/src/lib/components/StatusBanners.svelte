@@ -4,6 +4,8 @@
 	import type { DrainStatus } from '$lib/stores/connection';
 	import { token } from '$lib/stores/auth';
 	import { reconnectNow } from '$lib/ws';
+	import { updateOperation } from '$lib/update/store';
+	import { holdsNewWork } from '$lib/update/model';
 
 	function blockingWork(status: Exclude<DrainStatus, null>): string {
 		const parts: string[] = [];
@@ -34,6 +36,8 @@
 		add(status.browserCommands, 'browser command');
 		return parts.join(', ');
 	}
+
+	$: updateOwnsDrain = holdsNewWork($updateOperation);
 
 	let drainRefreshTimer: ReturnType<typeof setInterval> | null = null;
 	async function refreshDrain(): Promise<void> {
@@ -70,7 +74,7 @@
 	</div>
 {/if}
 
-{#if $drainStatus?.active}
+{#if $drainStatus?.active && !updateOwnsDrain}
 	<div class="drain-banner">
 		<svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 		<span>

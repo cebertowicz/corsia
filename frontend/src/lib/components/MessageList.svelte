@@ -24,6 +24,7 @@
 	import { runHasMore, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { needsWakeRetry } from './pendingWakeRetry';
 	import { isHumanMessage } from './transcriptRowKinds';
+	import { toastStackHeight } from '$lib/stores/toastStack';
 
 	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
@@ -250,16 +251,13 @@
 			if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
 		});
 	}
-	// The composer's floater and the measured attention rail both grow the
-	// transcript's terminal reservation. If either grows while the user is at
-	// live edge, that edge moves below the viewport even though the user never
-	// scrolled. Re-pin only in that case: reading history keeps its position and
-	// may intentionally pass beneath the overlay.
+	// Re-pin a live-edge transcript when the composer or attention rail grows; preserve a reader's history position.
 	let wasPinnedBeforeLayoutChange = $state(true);
 	$effect(() => {
 		wasPinnedBeforeLayoutChange = userIsNearBottom;
 	});
 	$effect(() => observeLayoutGrowth(messagesEl, () => wasPinnedBeforeLayoutChange, followBottom));
+	$effect(() => { if ($toastStackHeight > 0 && userIsNearBottom) followBottom(); });
 	let savedBottomOffset = 0;
 	export function captureBottomOffset() {
 		if (!messagesEl) return;
@@ -281,6 +279,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="messages"
+	style:--toast-stack-height={`${$toastStackHeight}px`}
 	bind:this={messagesEl}
 	onscroll={onMessagesScroll}
 	onwheel={onWheel}
@@ -360,7 +359,7 @@
 		flex: 1; overflow-y: auto;
 		--sticky-top: calc(var(--header-height, 0px) + 8px);
 		--messages-lead: calc(var(--header-height) + 24px);
-		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
+		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px + var(--toast-stack-height, 0px));
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {
@@ -369,7 +368,7 @@
 			--messages-lead: var(--messages-pad-top, calc(var(--header-height) + 24px + env(safe-area-inset-top, 0px)));
 			padding-left: 12px;
 			padding-right: 12px;
-			padding-bottom: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px);
+			padding-bottom: calc(var(--input-bar-height, 100px) + var(--kb-toolbar-inset, 0px) + var(--empty-parallax-offset, 0px) + 16px + var(--toast-stack-height, 0px));
 			transform: translateY(var(--empty-parallax-offset, 0));
 		}
 	}

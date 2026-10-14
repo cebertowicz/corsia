@@ -48,6 +48,17 @@ def effective_policy(project_id: str | None, provider_key: str, *, db) -> dict:
     return _entry(provider_key, _row(None, provider_key, db=db), scope="workspace")
 
 
+def _provider_policy_entry(project_id: str | None, provider_key: str, *, db) -> dict:
+    """Build the public representation for one effective provider policy."""
+    policy = effective_policy(project_id, provider_key, db=db)
+    ordered = _in_saved_order(list_accounts(provider=provider_key, db=db), policy["order"])
+    return {
+        **policy,
+        "units": [{"id": account["id"], "label": account["name"], "enabled": account["id"] not in policy["disabled"]}
+                  for account in ordered],
+    }
+
+
 def _validate(provider_key: str, *, rollover, order, disabled, db) -> None:
     capability = capabilities(provider_key)
     if type(rollover) is not bool:
@@ -99,7 +110,7 @@ def set_policy(project_id: str | None, provider_key: str, *, rollover: bool, ord
         _upsert(project_id, provider_key, rollover=rollover, order=order, disabled=disabled,
                 revision=expected_revision + 1, db=connection)
         _refresh(project_id, provider_key, db=connection)
-        return effective_policy(project_id, provider_key, db=connection)
+        return _provider_policy_entry(project_id, provider_key, db=connection)
 
 
 def set_use_workspace(project_id: str, *, use_workspace: bool, expected_revision: int, db=None) -> dict:
@@ -138,11 +149,7 @@ def _in_saved_order(accounts: list[dict], order) -> list[dict]:
 def policy_payload(project_id: str | None, *, db) -> dict:
     providers = []
     for provider_key in VENDORS:
-        policy = effective_policy(project_id, provider_key, db=db)
-        ordered = _in_saved_order(list_accounts(provider=provider_key, db=db), policy["order"])
-        policy["units"] = [{"id": account["id"], "label": account["name"], "enabled": account["id"] not in policy["disabled"]}
-                           for account in ordered]
-        providers.append(policy)
+        providers.append(_provider_policy_entry(project_id, provider_key, db=db))
     payload: dict[str, object] = {"scope": "workspace" if project_id is None else "project", "providers": providers}
     if project_id is not None:
         override = db.execute("SELECT revision FROM project_policy_overrides WHERE project_id=?", (project_id,)).fetchone()

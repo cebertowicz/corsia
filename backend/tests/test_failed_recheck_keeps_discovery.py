@@ -5,6 +5,7 @@ process). Only the process itself is faked here; the recheck, the refresh owner,
 discovery commit and every reader are the real ones."""
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -101,6 +102,47 @@ async def test_a_usage_read_that_fails_alone_keeps_the_models(limited_added_acco
     reason, _projection, last_check = _read(claude)
     assert reason is None
     assert last_check and last_check["outcome"] == "unknown"
+
+
+async def test_an_added_claude_recheck_uses_its_scoped_usage_read_without_discovery(limited_added_account, monkeypatch):
+    from connections import claude_discovery, harness_models
+    from connections import harness_usage_check as checks
+    from connections.account_receipts import capture_receipt
+    from connections.vendor_accounts import get_account
+
+    claude = limited_added_account
+    account = get_account(claude.other, db=claude.db)
+    receipt = capture_receipt("claude-code", account_id=claude.other, db=claude.db)
+    calls = []
+
+    async def control(binary, frames, **kwargs):
+        calls.append((binary, frames, kwargs))
+        return _stream(_ok("corsia-usage", {
+            "rate_limits_available": True,
+            "rate_limits": {"five_hour": {"utilization": 100, "resets_at": RESET}},
+        }))
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("a usage recheck must not refresh discovery")
+
+    monkeypatch.setattr(claude_discovery, "run_claude_control", control)
+    monkeypatch.setattr(harness_models, "refresh_provider", forbidden)
+    monkeypatch.setattr(checks, "_binary_for", lambda _provider: asyncio.sleep(0, result="/synthetic/claude"))
+    checks._LAST_STARTED.clear()
+
+    await checks._check("claude-code", claude.other)
+
+    assert len(calls) == 1
+    binary, frames, kwargs = calls[0]
+    assert binary == "/synthetic/claude"
+    assert [frame["request_id"] for frame in frames] == ["corsia-usage", "corsia-usage-end"]
+    assert kwargs["operation"] == "get_usage"
+    assert kwargs["context"].account_id == claude.other
+    assert kwargs["context"].source_home == account["source_home"]
+    assert kwargs["context"].receipt == receipt
+    reason, projection, last_check = _read(claude)
+    assert reason is None and projection["usable"] is False
+    assert last_check and last_check["outcome"] == "limited"
 
 
 async def test_only_the_same_logins_last_good_discovery_survives_a_failed_run(claude):
