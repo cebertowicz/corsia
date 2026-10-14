@@ -19,7 +19,7 @@
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
 	import {
 		threadWorkspaces, emptyWorkspace, getActiveTab, isTabChanged, type ArtifactTab,
-		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved, openBrowserPane,
+		setActiveTab, setActiveSurface, setLeafVisible, applyTabLoadSignal, markTabSaved,
 	} from '$lib/stores/artifactWorkspace';
 	import {
 		tabViewState, tabDocumentImage, recordTabDocumentPlace, recordTabImagePlace, openTabDocumentImage,
@@ -239,9 +239,6 @@
 		setLeafVisible(threadId, true);
 		setActiveSurface(threadId, 'artifact');
 	}
-	function openBrowser() {
-		if (threadId) openBrowserPane(threadId);
-	}
 	function collapse() {
 		if (!threadId) return;
 		const source = activeTab?.kind === 'subagent' ? activeTab : null;
@@ -268,7 +265,6 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="leaf" class:compact={mode === 'compact'} bind:this={leafEl} onclick={onLeafClick} onkeydown={onLeafKeydown} oninput={onLeafInput}>
 		{#if mode === 'expanded'}
-			<div class="leaf-actions"><button type="button" onclick={openBrowser}>Browser</button></div>
 			<ArtifactTabStrip
 				tabs={workspace.tabs}
 				activeKey={workspace.activeTabId}
@@ -358,8 +354,6 @@
 		background: var(--accent);
 	}
 
-	.leaf-actions { display: flex; justify-content: flex-end; padding: 4px 8px 0; background: var(--glass-thin); }
-	.leaf-actions button { color: var(--text-secondary); background: none; border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); font: inherit; cursor: pointer; padding: 3px 7px; }
 	.leaf {
 		height: 100%; display: flex; flex: 1; flex-direction: column; min-width: 0;
 		min-height: 0; overflow: hidden;

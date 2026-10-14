@@ -16,7 +16,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		});
 		await loginByUrl(page);
 		await page.getByText(title).first().click();
-		await page.getByRole('button', { name: 'Browser', exact: true }).click();
+		await page.getByRole('button', { name: 'Open browser', exact: true }).click();
 		const address = page.getByRole('textbox', { name: 'Browser address' });
 		await expect(address).toBeVisible();
 		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html`);
@@ -47,7 +47,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await page.getByRole('button', { name: 'Hand back' }).click();
 		await expect(page.getByText('Agent is driving. Watch only')).toBeVisible();
 		await page.getByRole('button', { name: 'Close Browser' }).click();
-		await page.getByRole('button', { name: 'Browser', exact: true }).click();
+		await page.getByRole('button', { name: 'Open browser', exact: true }).click();
 		await expect(canvas).toBeVisible();
 	});
 });
