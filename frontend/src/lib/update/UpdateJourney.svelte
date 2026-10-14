@@ -84,15 +84,15 @@
 
 {#snippet decision()}
 	<section class="update-content decision">
-		<p class="version">{#if screen === 'notes'}{`Version ${targetVersion}${installedAt ? ` · installed ${installedAt}` : ''}`}{:else}Version {targetVersion}{#if $updateStatus?.current_version}{` · you're on ${$updateStatus.current_version}`}{/if}{/if}</p>
+		<p class="version">{#if screen === 'notes'}{installedAt ? `Installed ${installedAt}` : ''}{:else}Version {targetVersion}{#if $updateStatus?.current_version}{` · you're on ${$updateStatus.current_version}`}{/if}{/if}</p>
 		{#if notes?.changes?.headline}<p class="headline">{notes.changes.headline}</p>{/if}
 		{#if notes?.changes}
-			<h3>What's new</h3>
+			{#if screen !== 'notes'}<h3>What's new</h3>{/if}
 			<ul>{#each visibleChanges() as item}<li>{item}</li>{/each}</ul>
 			{#if totalChanges() > 3}<button class="show-all" onclick={() => showAll = !showAll}>{showAll ? 'Show fewer changes' : `Show all ${totalChanges()} changes`}<svg class="chevron" class:expanded={showAll} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>{/if}
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.drain_cap_seconds}
-			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{#if agentCount === 1}1 agent is working: it gets up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. If it is still mid-step, it is stopped and restarted when CORSIA is back.{:else}{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and restarted when CORSIA is back.{/if}</span>{/if}</div>
+			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{#if agentCount === 1}1 agent is working: it gets up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. If it is still mid-step, it is stopped and starts that step again once CORSIA is back.{:else}{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and start that step again once CORSIA is back.{/if}</span>{/if}</div>
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.usual_seconds != null}<p class="muted">Usually about {humanDuration($updateStatus.usual_seconds)}.</p>{/if}
 		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button></div>{/if}
@@ -102,7 +102,7 @@
 {#snippet progress()}
 	<section class="update-content progress" aria-live="polite">
 		<p class="version">Updating to {targetVersion}</p>
-		<ol class="steps">{#each UPDATE_STEPS as step, index}<li class:active={activeStep === index} class:done={activeStep > index} aria-current={activeStep === index ? 'step' : undefined}><span class="step-mark" aria-hidden="true">{#if activeStep > index}✓{:else if activeStep === index}<span class="spinner"></span>{/if}</span>{step}{#if activeStep > index}<span class="sr-only">, done</span>{/if}</li>{/each}</ol>
+		<ol class="steps">{#each UPDATE_STEPS as step, index}<li class:active={activeStep === index} class:done={activeStep > index} aria-current={activeStep === index ? 'step' : undefined}><span class="step-mark" aria-hidden="true">{#if activeStep > index}✓{:else if activeStep === index}<span class="spinner"></span>{/if}</span>{#if activeStep > index}<span aria-hidden="true">{step}</span><span class="sr-only">{step}, done</span>{:else}{step}{/if}</li>{/each}</ol>
 		{#if stepDetail(operation, $updateUnreachable)}<p class="step-detail">{stepDetail(operation, $updateUnreachable)}</p>{/if}
 		<div class="timing"><span>Elapsed <strong>{elapsed}</strong></span>{#if $updateStatus?.usual_seconds != null}<span>Usually about {humanDuration($updateStatus.usual_seconds)}</span>{/if}</div>
 		{#if activeStep === 2}<p class="muted">This page comes back on its own. Reloading now shows a connection error until it's back.</p>{/if}

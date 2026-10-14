@@ -18,6 +18,9 @@ from infra.config import RUNTIME_DIR
 
 SIGNAL_FILE = RUNTIME_DIR / "corsia-restart.signal"
 DRAIN_HARD_CAP = 300  # 5 minutes max drain time
+# How long scripts/corsia.d/runtime.sh lets agents reach a safe point before it enforces the hard cap. This, not
+# DRAIN_HARD_CAP, is the time an Update promises: the script's CORSIA_DRAIN_MAX_WAIT default must equal it.
+DRAIN_WAIT_SECONDS = 60
 _drain_admission_lock = threading.Lock()
 _turn_admissions = 0
 
@@ -129,7 +132,7 @@ def get_drain_status(*, user_id: str | None = None) -> dict:
         **counts,
         "blockingTurns": active_turn_blockers(user_id=user_id) if user_id is not None else active_turn_blockers(),
         "elapsed": round(elapsed),
-        "hard_cap_remaining": max(0, round(DRAIN_HARD_CAP - elapsed)),
+        "hard_cap_remaining": max(0, round(DRAIN_WAIT_SECONDS - elapsed)),
     }
 
 

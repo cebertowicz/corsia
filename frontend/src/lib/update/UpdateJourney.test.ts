@@ -88,7 +88,7 @@ describe('UpdateJourney', () => {
 
 		const steps = [...host.querySelectorAll('ol.steps li')];
 		expect(steps.map((step) => step.getAttribute('aria-current'))).toEqual([null, 'step', null, null]);
-		expect(steps[0].querySelector('.sr-only')?.textContent).toBe(', done');
+		expect(steps[0].querySelector('.sr-only')?.textContent).toBe('Getting the update, done');
 		expect(steps[1].querySelector('.sr-only')).toBeNull();
 	});
 
@@ -132,7 +132,9 @@ describe('UpdateJourney', () => {
 		component = mount(UpdateJourney, { target: host });
 		flushSync();
 		expect(host.textContent).toContain("What's new in 1.1.0");
-		expect(host.textContent).toContain('installed today at');
+		expect(host.textContent).toContain('Installed today at');
+		expect(host.textContent).not.toContain('Version 1.1.0');
+		expect(host.querySelector('.decision h3')).toBeNull();
 		expect(host.textContent).toContain('Faster startup');
 		expect(host.textContent).toContain('Done');
 		expect(host.textContent).not.toContain('Update now');
@@ -153,6 +155,16 @@ describe('UpdateJourney', () => {
 		flushSync();
 		expect(host.textContent).toContain('1 agent is working: it gets up to');
 		expect(host.textContent).not.toContain('1 agents');
+	});
+
+	it('promises a stopped agent a fresh start of its step, never a pickup where it left off', () => {
+		updateStatus.set(status({ agents_working: 2, drain_cap_seconds: 60 }));
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+		expect(host.textContent).toContain('they get up to a minute to reach a safe point');
+		expect(host.textContent).toContain('start that step again once CORSIA is back');
+		expect(host.textContent).not.toContain('left off');
 	});
 
 	it('offers a newer version instead of replaying an older failed operation', () => {

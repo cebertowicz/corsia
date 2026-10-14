@@ -70,15 +70,15 @@ describe('SettingsUpdate', () => {
 		expect(host.textContent).toContain('Updating to 1.1.0');
 	});
 
-	it('shows the completed target as the last update', () => {
+	it('does not repeat the installed version as a last update', () => {
 		updateStatus.set(status({
 			operation: { operation_id: 'update-1', status: 'complete', target_version: '1.1.0' },
 		}));
 		component = mount(SettingsUpdate, { target: host });
 		flushSync();
 
-		expect(host.textContent).toContain('Last update');
-		expect(host.textContent).toContain('Updated to 1.1.0');
+		expect(host.textContent).not.toContain('Last update');
+		expect(host.textContent).not.toContain('Updated to 1.1.0');
 	});
 
 	it('keeps the refusal reason and its Details action', () => {

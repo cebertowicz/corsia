@@ -171,7 +171,7 @@ def test_operation_projection_limits_logs_and_reports_live_blocking(tmp_path, mo
     assert project_update_operation(operation)["log_tail"] is None
 
 
-def test_update_status_route_reads_live_drain_cap(monkeypatch):
+def test_update_status_route_reads_the_wait_the_lifecycle_script_uses(monkeypatch):
     from api.system_admin import system_update_status
     from automation import self_restart
     from core.turn_core import active_turn_count
@@ -192,7 +192,7 @@ def test_update_status_route_reads_live_drain_cap(monkeypatch):
 
     monkeypatch.setattr(update_status, "update_status", lambda refresh: Status())
     monkeypatch.setattr(db_async, "run_in_db", run_in_db)
-    monkeypatch.setattr(drain, "DRAIN_HARD_CAP", 17)
+    monkeypatch.setattr(drain, "DRAIN_WAIT_SECONDS", 17)
 
     result = asyncio.run(system_update_status(user={}))
 
@@ -224,3 +224,37 @@ def test_settings_update_acquire_uses_cached_target_version(monkeypatch):
     assert captured[-1]["target_version"] == "1.2.3"
     assert asyncio.run(_acquire_settings_restart({"id": "user"}, "restart", [])) == "operation-id"
     assert captured[-1]["target_version"] is None
+
+
+def test_drain_wait_matches_the_lifecycle_script_default():
+    """The wait an Update promises is the wait the script enforces; one constant must not drift from the other."""
+    import re
+    from pathlib import Path
+
+    from infra import drain
+
+    script = (Path(__file__).resolve().parents[2] / "scripts" / "corsia.d" / "runtime.sh").read_text()
+    match = re.search(r'^CORSIA_DRAIN_MAX_WAIT="\$\{CORSIA_DRAIN_MAX_WAIT:-(\d+)\}"$', script, re.MULTILINE)
+    assert match, "runtime.sh no longer declares the CORSIA_DRAIN_MAX_WAIT default this test reads"
+    assert int(match.group(1)) == drain.DRAIN_WAIT_SECONDS
+
+
+def test_drain_status_counts_the_hard_cap_down_from_the_wait(monkeypatch):
+    import time
+
+    from automation import self_restart
+    from infra import drain
+
+    started = time.time() - 20
+    monkeypatch.setattr(
+        self_restart,
+        "in_flight_request",
+        lambda: {"id": "op", "phase": "draining", "reason": "update", "cutoff_at": None, "requested_at": "2026-10-13T00:00:00+00:00"},
+    )
+    monkeypatch.setattr(drain.state, "_drain", {"started_at": started}, raising=False)
+    monkeypatch.setattr(drain, "_active_work_counts", lambda: {})
+    monkeypatch.setattr(drain, "active_turn_blockers", lambda **_: [])
+
+    remaining = drain.get_drain_status()["hard_cap_remaining"]
+
+    assert remaining == drain.DRAIN_WAIT_SECONDS - 20

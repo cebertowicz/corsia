@@ -331,7 +331,7 @@ async def system_update_status(
 
     status = await asyncio.to_thread(update_status, refresh)
     result = status.to_dict()
-    result["drain_cap_seconds"] = drain.DRAIN_HARD_CAP
+    result["drain_cap_seconds"] = drain.DRAIN_WAIT_SECONDS
     result["usual_seconds"] = await run_in_db(self_restart.usual_update_seconds)
     result["agents_working"] = await run_in_db(active_turn_count)
     result["server_time"] = datetime.now(timezone.utc).isoformat()

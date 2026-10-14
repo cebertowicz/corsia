@@ -39,18 +39,14 @@
 	</div>
 </div>
 
-{#if completedVersion || refusal}
+{#if refusal}
 	<div class="service-row update-row last-update">
 		<span class="service-name">Last update</span>
 		<div class="version-state">
-			{#if completedVersion}
-				<span class="service-status">Updated to {completedVersion}</span>
-			{:else if refusal}
-				<span class="service-status">{refusal.body || refusal.headline}</span>
-				{#if operation?.conductor_told_at}<span class="conductor">⌁ Your workspace conductor has been told.</span>{/if}
-			{/if}
+			<span class="service-status">{refusal.body || refusal.headline}</span>
+			{#if operation?.conductor_told_at}<span class="conductor">⌁ Your workspace conductor has been told.</span>{/if}
 		</div>
-		{#if refusal}<div class="service-actions"><Button size="sm" onclick={openUpdateSheet}>Details</Button></div>{/if}
+		<div class="service-actions"><Button size="sm" onclick={openUpdateSheet}>Details</Button></div>
 	</div>
 {/if}
 
