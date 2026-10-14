@@ -4,8 +4,10 @@
 	import { toastClearance } from '$lib/stores/toastClearance';
 	import { toastStackHeight } from '$lib/stores/toastStack';
 	import { toastFit } from '$lib/stores/toastFit';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
+	import { get } from 'svelte/store';
 
 	let toastHeight = $state(0);
 
@@ -14,6 +16,20 @@
 		const reduced =
 			typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 		return { duration: reduced ? 0 : 200, easing: cubicOut };
+	}
+
+	/**
+	 * A toast fades and drops a few pixels as it leaves (--dur-tight, the mirror of
+	 * toast-in); reduced motion keeps the fade only. The leave is `global` so the
+	 * last toast also plays it when the whole stack goes.
+	 */
+	function toastLeave(_node: Element) {
+		const still = get(prefersReducedMotion);
+		return {
+			duration: 120,
+			easing: cubicOut,
+			css: (t: number) => `opacity: ${t};${still ? '' : ` transform: translateY(${(1 - t) * 8}px);`}`,
+		};
 	}
 
 	function measureToastHeight(node: HTMLElement) {
@@ -68,6 +84,7 @@
 				role={pinned ? (type === 'error' ? 'alert' : undefined) : 'status'}
 				data-fit="full"
 				animate:flip={flipParams()}
+				out:toastLeave|global
 				use:pinnedFit={fitParam(toast)}
 				onmouseenter={() => toasts.pause(toast.id, 'pointer')}
 				onmouseleave={() => toasts.resume(toast.id, 'pointer')}
@@ -216,6 +233,9 @@
 	   time, then the step text wrapped. */
 	.toast--pinned {
 		gap: var(--space-2);
+		/* The step text changes length (Stopping, Restarting, Resuming, Updated); holding the
+		   widest step's width keeps the toast from resizing, and its flip from stretching text. */
+		min-width: min(26rem, calc(var(--toast-column) - var(--space-7)));
 	}
 	.toast--pinned .toast-line {
 		flex: 0 0 auto;

@@ -17,9 +17,9 @@ from infra import state
 from infra.config import RUNTIME_DIR
 
 SIGNAL_FILE = RUNTIME_DIR / "corsia-restart.signal"
-DRAIN_HARD_CAP = 300  # 5 minutes max drain time
-# How long scripts/corsia.d/runtime.sh lets agents reach a safe point before it enforces the hard cap. This, not
-# DRAIN_HARD_CAP, is the time an Update promises: the script's CORSIA_DRAIN_MAX_WAIT default must equal it.
+# How long scripts/corsia.d/runtime.sh lets agents reach a safe point before it enforces the hard cap. It is the
+# time an Update promises: test_update_journey_status.py pins it to the script's CORSIA_DRAIN_MAX_WAIT default, and
+# an operator who overrides that variable gets a countdown that no longer matches what is enforced.
 DRAIN_WAIT_SECONDS = 60
 _drain_admission_lock = threading.Lock()
 _turn_admissions = 0

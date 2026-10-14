@@ -84,7 +84,11 @@
 
 {#snippet decision()}
 	<section class="update-content decision">
-		<p class="version">{#if screen === 'notes'}{installedAt ? `Installed ${installedAt}` : ''}{:else}Version {targetVersion}{#if $updateStatus?.current_version}{` · you're on ${$updateStatus.current_version}`}{/if}{/if}</p>
+		{#if screen !== 'notes'}
+			<p class="version">Version {targetVersion}{#if $updateStatus?.current_version}{` · you're on ${$updateStatus.current_version}`}{/if}</p>
+		{:else if installedAt}
+			<p class="version">Installed {installedAt}</p>
+		{/if}
 		{#if notes?.changes?.headline}<p class="headline">{notes.changes.headline}</p>{/if}
 		{#if notes?.changes}
 			{#if screen !== 'notes'}<h3>What's new</h3>{/if}
@@ -128,7 +132,7 @@
 	.update-content { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
 	.version { margin: 0; color: var(--text-tertiary); font-size: var(--text-footnote); } .headline { color: var(--text-primary); font-size: var(--text-callout); font-weight: var(--fw-semibold); }
 	h3 { margin: var(--space-5) 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); letter-spacing: .06em; text-transform: uppercase; }
-	ul { margin: 0; padding-left: var(--space-5); } li + li { margin-top: var(--space-1); } .show-all { margin-top: var(--space-2); padding: 0; }
+	ul { margin: 0; padding-left: var(--space-5); } .version + ul { margin-top: var(--space-3); } li + li { margin-top: var(--space-1); } .show-all { margin-top: var(--space-2); padding: 0; }
 	.cost { display: grid; gap: var(--space-2); margin-top: var(--space-5); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--violet-bg); } .cost strong { color: var(--text-primary); }
 	.muted { color: var(--text-tertiary); } .steps { display: grid; gap: var(--space-3); margin: var(--space-3) 0; padding: 0; list-style: none; }
 	.steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--text-tertiary); } .steps li.active { color: var(--text-primary); font-weight: var(--fw-semibold); } .steps li.done { color: var(--green-text); }

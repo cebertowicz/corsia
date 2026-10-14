@@ -133,11 +133,24 @@ describe('UpdateJourney', () => {
 		flushSync();
 		expect(host.textContent).toContain("What's new in 1.1.0");
 		expect(host.textContent).toContain('Installed today at');
+		expect(host.querySelector('p.version')?.textContent).toMatch(/^Installed today at/);
 		expect(host.textContent).not.toContain('Version 1.1.0');
 		expect(host.querySelector('.decision h3')).toBeNull();
 		expect(host.textContent).toContain('Faster startup');
 		expect(host.textContent).toContain('Done');
 		expect(host.textContent).not.toContain('Update now');
+	});
+
+	it('renders no empty version line when the install time is unknown', () => {
+		updateStatus.set(status({
+			available: false,
+			operation: { operation_id: 'update-1', kind: 'update', status: 'complete', target_version: '1.1.0', settled_at: null },
+		}));
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+		expect(host.textContent).toContain("What's new in 1.1.0");
+		expect(host.querySelector('p.version')).toBeNull();
 	});
 
 	it('shows active pre-drain agent count in the decision sheet', () => {

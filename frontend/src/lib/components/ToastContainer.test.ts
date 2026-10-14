@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { mount, tick, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toasts } from '$lib/stores/toast';
 import ToastContainer from './ToastContainer.svelte';
@@ -179,6 +179,7 @@ describe('ToastContainer pinned slot', () => {
 
 		toasts.show('Moved');
 		await tick();
+		await vi.advanceTimersByTimeAsync(300);
 		expect([...host.querySelectorAll('.toast-text')].map((el) => el.textContent)).toEqual([
 			'Moved',
 			'Restarting',
@@ -275,5 +276,47 @@ describe('ToastContainer fit', () => {
 		mountContainer();
 		await tick();
 		expect(host.querySelector<HTMLElement>('.toast')!.dataset.fit).toBe('full');
+	});
+});
+
+describe('ToastContainer leave', () => {
+	async function leaveKeyframes(reduced: boolean): Promise<Record<string, unknown>[]> {
+		const original = window.matchMedia;
+		window.matchMedia = ((query: string) => ({
+			matches: reduced && query.includes('prefers-reduced-motion'),
+			media: query,
+			addEventListener() {},
+			removeEventListener() {},
+			addListener() {},
+			removeListener() {},
+			dispatchEvent: () => false,
+		})) as unknown as typeof window.matchMedia;
+		const animate = vi.spyOn(Element.prototype, 'animate');
+		try {
+			toasts.show('Leaving');
+			component = mount(ToastContainer, { target: host });
+			flushSync();
+			animate.mockClear();
+			toasts.dismiss(get(toasts)[0].id);
+			flushSync();
+			await vi.advanceTimersByTimeAsync(10);
+			return animate.mock.calls.flatMap(([frames]) => frames as Record<string, unknown>[]);
+		} finally {
+			animate.mockRestore();
+			window.matchMedia = original;
+		}
+	}
+
+	it('fades and drops a leaving toast, the last one included', async () => {
+		const frames = await leaveKeyframes(false);
+		expect(frames.length).toBeGreaterThan(1);
+		expect(frames.some((frame) => 'opacity' in frame)).toBe(true);
+		expect(frames.some((frame) => String(frame.transform ?? '').includes('translateY'))).toBe(true);
+	});
+
+	it('only fades under reduced motion', async () => {
+		const frames = await leaveKeyframes(true);
+		expect(frames.some((frame) => 'opacity' in frame)).toBe(true);
+		expect(frames.some((frame) => 'transform' in frame)).toBe(false);
 	});
 });
