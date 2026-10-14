@@ -612,11 +612,10 @@ for (const theme of ['light', 'dark'] as const) {
 		await approve.click();
 		await expect(bar(page).locator('.rb-receipt')).toContainText('You approved this');
 
-		// Where the pane docks beside the canvas, the header keeps its place: no inset at all.
-		for (const width of [1440, 1920]) {
-			await page.setViewportSize({ width, height: 900 });
-			await expect(pane).not.toHaveClass(/\boverlay\b/);
-			await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), `${width} docked`).toBe('0px');
-		}
+		// At 1440 the expanded sidebar can leave a canvas below its combined split minimum, so it may rightly overlay.
+		// At 1920 the pane docks beside the canvas and the header keeps its place with no inset at all.
+		await page.setViewportSize({ width: 1920, height: 900 });
+		await expect(pane).not.toHaveClass(/\boverlay\b/);
+		await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), '1920 docked').toBe('0px');
 	});
 }
