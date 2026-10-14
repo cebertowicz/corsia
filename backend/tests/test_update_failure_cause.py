@@ -194,8 +194,46 @@ async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolate
 
 
 @pytest.mark.asyncio
+async def test_release_returns_while_the_conductor_notice_is_pending(isolated_db, monkeypatch):
+    """A failed update's release answer never waits on a conductor turn, and the notice follows the resume."""
+    from automation import restart, self_restart, update_failure_notice
+    from infra import drain
+
+    operation_id = self_restart.try_acquire(
+        None, "steve", None, None, "update", kind="update", trigger="manual"
+    )
+    assert operation_id is not None
+    order: list[str] = []
+    notice_started = asyncio.Event()
+    finish_notice = asyncio.Event()
+
+    async def slow_notice(_operation_id: str) -> None:
+        order.append("notice")
+        notice_started.set()
+        await finish_notice.wait()
+
+    monkeypatch.setattr(update_failure_notice, "tell_conductor_about_failed_update", slow_notice)
+    monkeypatch.setattr(drain, "cancel_drain_projection", lambda: order.append("clear"))
+    monkeypatch.setattr(
+        restart, "resume_threads_detached", lambda threads, *_args: order.append("resume")
+    )
+
+    released = await asyncio.wait_for(
+        restart.abort_restart_control(operation_id, error="build summary", failure_code="build_failed"),
+        timeout=5,
+    )
+    await asyncio.wait_for(notice_started.wait(), timeout=5)
+
+    assert released is True
+    assert order == ["clear", "resume", "notice"]
+    assert not finish_notice.is_set()
+    finish_notice.set()
+    await asyncio.gather(*tuple(restart._RESUME_TASKS))
+
+
+@pytest.mark.asyncio
 async def test_conductor_notice_failure_never_skips_resume(isolated_db, monkeypatch):
-    """The best-effort notice runs after the drain clear and the resume, and cannot undo them."""
+    """A notice that raises is logged on its own task and cannot undo the committed release or the resume."""
     from automation import restart, self_restart, update_failure_notice
     from infra import drain
 
@@ -217,6 +255,7 @@ async def test_conductor_notice_failure_never_skips_resume(isolated_db, monkeypa
     released = await restart.abort_restart_control(
         operation_id, error="build summary", failure_code="build_failed"
     )
+    await asyncio.gather(*tuple(restart._RESUME_TASKS), return_exceptions=True)
 
     assert released is True
     assert cleared == [True]

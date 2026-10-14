@@ -62,7 +62,6 @@
 			}
 			lifecycleProgress = 'Draining active work…';
 			const completed = await waitForSystemRestart(
-				mode,
 				before,
 				result.operation_id,
 				(message) => lifecycleProgress = message,

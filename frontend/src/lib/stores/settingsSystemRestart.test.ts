@@ -35,7 +35,7 @@ describe('waitForSystemRestart', () => {
 			return json({ status: 'failed', failure_code: 'build_failed', error: 'build summary' });
 		}));
 
-		const waiting = waitForSystemRestart('restart', before, 'operation-1');
+		const waiting = waitForSystemRestart(before, 'operation-1');
 		await vi.advanceTimersByTimeAsync(500);
 
 		await expect(waiting).resolves.toEqual({ ok: false, message: 'build summary' });
@@ -53,13 +53,13 @@ describe('waitForSystemRestart', () => {
 				})
 		)));
 
-		await expect(waitForSystemRestart('restart', before, 'operation-2')).resolves.toEqual({
+		await expect(waitForSystemRestart(before, 'operation-2')).resolves.toEqual({
 			ok: false,
 			message: 'restart control cancelled during steering',
 		});
 	});
 
-	it('keeps ordinary polling success on the existing strict predicate', async () => {
+	it('succeeds once the backend was replaced and its operation settled', async () => {
 		vi.useFakeTimers();
 		token.set('test-token');
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (
@@ -68,7 +68,7 @@ describe('waitForSystemRestart', () => {
 				: json(Date.now() >= 500 ? { status: 'complete' } : { status: 'in_flight', phase: 'restarting' })
 		)));
 
-		const waiting = waitForSystemRestart('restart', before, 'operation-strict');
+		const waiting = waitForSystemRestart(before, 'operation-strict');
 		await vi.advanceTimersByTimeAsync(500);
 
 		await expect(waiting).resolves.toEqual({ ok: true });
@@ -80,7 +80,7 @@ describe('waitForSystemRestart', () => {
 			String(input) === '/api/version' ? json(completedVersion) : new Response(null, { status: 404 })
 		)));
 
-		await expect(waitForSystemRestart('restart', before, 'missing-operation')).resolves.toEqual({
+		await expect(waitForSystemRestart(before, 'missing-operation')).resolves.toEqual({
 			ok: false,
 			message: 'Restart operation not found.',
 		});
@@ -96,12 +96,12 @@ describe('waitForSystemRestart', () => {
 				: json({ status: 'complete' })
 		)));
 
-		const waiting = waitForSystemRestart('restart', null, 'operation-missing-start');
+		const waiting = waitForSystemRestart(null, 'operation-missing-start');
 		await vi.advanceTimersByTimeAsync(500);
 		await expect(waiting).resolves.toEqual({ ok: true });
 	});
 
-	it('reports a terminal version mismatch after a ten-second settle', async () => {
+	it('does not judge version agreement itself: a replaced backend with a settled operation is success', async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(0);
 		token.set('test-token');
@@ -111,10 +111,10 @@ describe('waitForSystemRestart', () => {
 				: json({ status: 'complete' })
 		)));
 
-		const waiting = waitForSystemRestart('update', before, 'operation-mismatch');
-		await vi.advanceTimersByTimeAsync(10_000);
+		const waiting = waitForSystemRestart(before, 'operation-mismatch');
+		await vi.advanceTimersByTimeAsync(500);
 
-		await expect(waiting).resolves.toMatchObject({ ok: false, message: expect.stringContaining('frontend') });
+		await expect(waiting).resolves.toEqual({ ok: true });
 	});
 
 	it('continues after a five-second hung observation and accepts a later strict match', async () => {
@@ -130,7 +130,7 @@ describe('waitForSystemRestart', () => {
 			return Promise.resolve(String(input) === '/api/version' ? json(completedVersion) : json({ status: 'complete' }));
 		}));
 
-		const waiting = waitForSystemRestart('update', before, 'operation-hung-poll');
+		const waiting = waitForSystemRestart(before, 'operation-hung-poll');
 		await vi.advanceTimersByTimeAsync(5_500);
 
 		await expect(waiting).resolves.toEqual({ ok: true });
@@ -147,7 +147,7 @@ describe('waitForSystemRestart', () => {
 			return json(reads > 4 ? { status: 'complete' } : { status: 'in_flight', phase: 'restarting' });
 		}));
 
-		const waiting = waitForSystemRestart('update', before, 'operation-3');
+		const waiting = waitForSystemRestart(before, 'operation-3');
 		await vi.advanceTimersByTimeAsync(1_000);
 
 		await expect(waiting).resolves.toEqual({ ok: true });

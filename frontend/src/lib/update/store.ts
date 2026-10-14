@@ -1,15 +1,17 @@
 import { derived, get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
-import { readSystemVersion, restartSystem, type SystemVersionSnapshot } from '$lib/stores/settingsSystemRestart';
+import { restartSystem } from '$lib/stores/settingsSystemRestart';
 import {
 	failureCopy,
 	failureFromOperation,
 	isFailedOperation,
 	isInFlight,
+	type ClientVerdict,
 	type UpdateChanges,
 	type UpdateOperation,
 } from './model';
+import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
 import { hasId, releaseNotesFor, rememberApprovedNotes, rememberId, snapshotReleaseNotes } from './releaseNotes';
 
 export { releaseNotesFor };
@@ -43,7 +45,8 @@ export type UpdateSurface = 'closed' | 'sheet' | 'panel';
 export const updateStatus = writable<UpdateStatus | null>(null);
 export const updateSurface = writable<UpdateSurface>('closed');
 export const updateUnreachable = writable(false);
-export const updateFailureMessage = writable<string | null>(null);
+/** A problem this client found that no stored operation holds; it wins over the operation's own failure copy. */
+export const updateFailureVerdict = writable<ClientVerdict | null>(null);
 export const updateStarting = writable(false);
 /** Offset between this browser clock and the status response's server clock. */
 export const updateServerClockOffsetMs = writable(0);
@@ -74,31 +77,6 @@ function stopVersionPolling(): void {
 function pollStatusWhileRunning(): void {
 	if (pollTimer !== null || !get(updateInFlight)) return;
 	pollTimer = setInterval(() => { void loadUpdateStatus(); }, POLL_MS);
-}
-
-async function readVersionWithinFiveSeconds(): Promise<SystemVersionSnapshot | null> {
-	const controller = new AbortController();
-	let timer: ReturnType<typeof setTimeout> | null = null;
-	try {
-		const timeout = new Promise<null>((resolve) => {
-			timer = setTimeout(() => { controller.abort(); resolve(null); }, 5_000);
-		});
-		return await Promise.race([readSystemVersion(controller.signal), timeout]);
-	} finally {
-		if (timer !== null) clearTimeout(timer);
-	}
-}
-
-function versionHashesAgree(version: SystemVersionSnapshot | null): boolean {
-	const backend = version?.backend?.full_hash;
-	const frontend = version?.frontend?.full_hash;
-	const checkout = version?.backend?.current_head?.full_hash;
-	return Boolean(
-		backend && backend !== 'unknown'
-		&& frontend && frontend !== 'unknown'
-		&& frontend === backend
-		&& (!checkout || (checkout !== 'unknown' && checkout === backend)),
-	);
 }
 
 async function observeRecovery(): Promise<void> {
@@ -169,7 +147,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 			return;
 		}
 		rememberId(HANDLED_KEY, operation.operation_id, 'browser');
-		updateFailureMessage.set('The update finished, but the running versions do not match.');
+		updateFailureVerdict.set({ kind: 'version_mismatch', message: 'The page, the backend and the checkout are not on the same version.' });
 		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdateSheet } });
 	} finally {
 		terminalCheckRunning = false;
@@ -179,7 +157,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 function reconcileOperation(status: UpdateStatus): void {
 	const operation = status.operation ?? null;
 	if (isInFlight(operation)) {
-		updateFailureMessage.set(null);
+		updateFailureVerdict.set(null);
 		pollStatusWhileRunning();
 		return;
 	}
@@ -254,7 +232,8 @@ export function closeUpdateSurface(): void {
 
 /** Start the approved update lifecycle, then immediately adopt its durable record. */
 export async function startUpdate(): Promise<void> {
-	updateFailureMessage.set(null);
+	updateFailureVerdict.set(null);
+	const previousOperationId = get(updateStatus)?.operation?.operation_id;
 	rememberApprovedNotes(get(updateStatus));
 	updateStarting.set(true);
 	// The request answers only once the update is built; adopt the operation record meanwhile so the surface shows progress.
@@ -262,12 +241,14 @@ export async function startUpdate(): Promise<void> {
 	const result = await restartSystem('update').finally(() => { clearInterval(adopt); updateStarting.set(false); });
 	if (!result.ok) {
 		await loadUpdateStatus(true);
-		if (isFailedOperation(get(updateStatus)?.operation)) {
+		const latest = get(updateStatus)?.operation;
+		// Only a failure this request recorded is its outcome; an older failed row is history.
+		if (isFailedOperation(latest) && latest.operation_id !== previousOperationId) {
 			openUpdateSheet();
 			return;
 		}
 		const message = result.message ?? "Update didn't start.";
-		updateFailureMessage.set(message);
+		updateFailureVerdict.set({ kind: 'refused', message });
 		if (get(updateSurface) === 'closed') toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdateSheet } });
 		openUpdateSheet();
 		return;
@@ -291,7 +272,7 @@ export function resetUpdateStoreForTests(): void {
 	updateStatus.set(null);
 	updateSurface.set('closed');
 	updateUnreachable.set(false);
-	updateFailureMessage.set(null);
+	updateFailureVerdict.set(null);
 	updateStarting.set(false);
 	updateServerClockOffsetMs.set(0);
 }

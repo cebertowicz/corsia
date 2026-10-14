@@ -5,8 +5,8 @@
 	import { toasts } from '$lib/stores/toast';
 	import { Button, Modal } from '$lib/components/ui';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
-	import { UPDATE_STEPS, elapsedSeconds, failureCopy, failureFromOperation, formatElapsed, formatInstalledAt, humanDuration, isFailedOperation, isInFlight, stepDetail, stepIndex, stepMessage } from './model';
-	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, startUpdate, updateFailureMessage, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
+	import { UPDATE_STEPS, elapsedSeconds, failureCopy, failureFromOperation, failureFromVerdict, formatElapsed, formatInstalledAt, humanDuration, isFailedOperation, isInFlight, stepDetail, stepIndex, stepMessage } from './model';
+	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, startUpdate, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
 
 	let now = $state(Date.now());
 	let showAll = $state(false);
@@ -20,10 +20,11 @@
 	const completed = $derived(operation?.status === 'complete' && !superseded);
 	const running = $derived(isInFlight(operation));
 	const panel = $derived($updateSurface === 'panel' || running);
-	const failureDetail = $derived(operation ? failureFromOperation(operation) : null);
+	// A verdict the client reached itself wins over whatever the latest operation says.
+	const failureDetail = $derived($updateFailureVerdict ? failureFromVerdict($updateFailureVerdict) : operation ? failureFromOperation(operation) : null);
 	const failure = $derived(failureDetail ? failureCopy(failureDetail) : null);
 	const elapsed = $derived(formatElapsed(elapsedSeconds(operation, now, $updateServerClockOffsetMs)));
-	const liveScreen = $derived(failed || $updateFailureMessage ? 'failure' : panel ? 'panel' : completed ? 'notes' : 'sheet');
+	const liveScreen = $derived(failed || $updateFailureVerdict ? 'failure' : panel ? 'panel' : completed ? 'notes' : 'sheet');
 	// The surface keeps its last screen while it plays its closing motion.
 	let shownScreen: typeof liveScreen = 'sheet';
 	const screen = $derived.by(() => {
@@ -120,10 +121,10 @@
 
 {#snippet failurePanel()}
 	<section class="update-content failure">
-		<p class="headline">{failure?.headline ?? $updateFailureMessage ?? "The update didn't start."}</p>
+		<p class="headline">{failure?.headline ?? "The update didn't start."}</p>
 		{#if failure?.body}<p>{failure.body}</p>{/if}
-		{#if operation?.conductor_told_at}<p class="conductor"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5a3 3 0 0 1 0 6m2 3c1.8.5 3 2.1 3 4"/></svg>Your workspace conductor has been told.</p>{/if}
-		{#if detailLine(failureDetail?.summary) || failureDetail?.detail || operation?.log_tail}<details><summary>Details <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>{#if detailLine(failureDetail?.summary)}<pre>{detailLine(failureDetail?.summary)}</pre>{/if}{#if failureDetail?.detail}<pre>{failureDetail.detail}</pre>{/if}{#if operation?.log_tail}<pre>{operation.log_tail}</pre>{/if}</details>{/if}
+		{#if failureDetail?.conductorTold}<p class="conductor"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5a3 3 0 0 1 0 6m2 3c1.8.5 3 2.1 3 4"/></svg>Your workspace conductor has been told.</p>{/if}
+		{#if detailLine(failureDetail?.summary) || failureDetail?.detail || failureDetail?.log}<details><summary>Details <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>{#if detailLine(failureDetail?.summary)}<pre>{detailLine(failureDetail?.summary)}</pre>{/if}{#if failureDetail?.detail}<pre>{failureDetail.detail}</pre>{/if}{#if failureDetail?.log}<pre>{failureDetail.log}</pre>{/if}</details>{/if}
 		{#if $isMobile && failure?.retryLabel}<div class="mobile-actions"><Button loading={$updateStarting} onclick={retry}>{failure.retryLabel}</Button></div>{/if}
 	</section>
 {/snippet}

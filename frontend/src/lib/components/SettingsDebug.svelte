@@ -76,7 +76,7 @@
 				settingsError = result.message ?? 'Restart could not be started.';
 				return;
 			}
-			const completed = await waitForSystemRestart('restart', before, result.operation_id);
+			const completed = await waitForSystemRestart(before, result.operation_id);
 			if (!completed.ok) {
 				settingsError = completed.message ?? 'Restart did not finish.';
 				return;
