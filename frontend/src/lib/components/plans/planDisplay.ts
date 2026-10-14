@@ -262,7 +262,6 @@ const CHAT_WORDS: Record<ThreadPlanState, string> = {
 	needs_input: 'Needs input',
 	blocked_on_you: 'Blocked on you',
 	failed: 'Failed',
-	stuck: 'Stuck',
 	paused: 'Paused',
 	idle: 'Idle',
 };
