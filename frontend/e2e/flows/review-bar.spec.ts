@@ -60,6 +60,20 @@ function handOff(artifactId: string, fromThreadId: string, toThreadId: string): 
 	});
 }
 
+/** The live-placement path derives orphaning from the shown text; make every fixture comment's quote unavailable before the UI reads it. */
+function orphanComments(artifactId: string): void {
+	const state = process.env.CORSIA_E2E_STATE_DIR;
+	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The orphan fixture requires isolated E2E mock state');
+	execFileSync(python(), ['-c', [
+		'import sqlite3, sys',
+		'connection = sqlite3.connect(sys.argv[1])',
+		'changed = connection.execute("UPDATE doc_comments SET anchor_text=? WHERE artifact_id=?", ("Quote missing from the document.", sys.argv[2])).rowcount',
+		'assert changed == 22, changed',
+		'connection.commit()',
+		'connection.close()',
+	].join('\n'), path.join(state, 'corsia.db'), artifactId], { cwd: backendDir, encoding: 'utf8' });
+}
+
 const bar = (page: Page) => page.locator('.review-bar');
 /** The bar's geometry per surface: one compact row, a stacked bar with compact right-aligned buttons, or 44px touch buttons. */
 async function expectLayout(page: Page, mode: Mode) {
@@ -415,6 +429,37 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	expect((await bar(page).boundingBox())!.height).toBeGreaterThan(collapsedHeight);
 	await expectNameClearOfControls(page, doc.title);
 	await shot(page, 'long-name-expanded', info);
+});
+
+journey('keeps an orphan-heavy review ask compact without losing recovery', [
+	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
+	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
+], async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Review orphan-heavy ${mode} ${theme}`);
+	for (let index = 0; index < 22; index += 1) await comment(request, doc, `Unplaced comment ${index + 1}`, 1);
+	orphanComments(doc.artifactId);
+	raiseAsk(doc.threadId, doc.artifactId, 'Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
+	await open(page, doc, mode, theme);
+	const measurements = await page.locator('.doc').evaluate((root) => {
+		const firstLine = root.querySelector<HTMLElement>('.cm-line')!.getBoundingClientRect();
+		const capsule = root.querySelector<HTMLElement>('.rb-capsule')!.getBoundingClientRect();
+		return { firstBodyY: firstLine.top, capsuleHeight: capsule.height };
+	});
+	if (mode === 'phone') {
+		expect(measurements.firstBodyY, 'the first document line stays in the phone reading area').toBeLessThanOrEqual(240);
+		expect(measurements.capsuleHeight, 'the fixed review action bar stays compact').toBeLessThanOrEqual(64);
+		for (const button of await bar(page).locator('.rb-capsule .btn').all()) expect((await button.boundingBox())!.height, 'phone review action touch target').toBeGreaterThanOrEqual(44);
+		expect(bar(page).locator('.rb-ask')).toBeHidden();
+	}
+	expect(page.locator('.document-header [aria-label="Reload comment placements"]')).toHaveCount(0);
+	const comments = page.locator('.comment-status');
+	await comments.click();
+	const drawer = page.getByRole('region', { name: 'Document comments' });
+	const recovery = drawer.locator('[data-drawer-placement]');
+	await expect(recovery.getByRole('status')).toHaveText("22 comments couldn't be placed");
+	await expect(recovery.getByRole('button', { name: 'Reload comment placements' })).toBeVisible();
+	await shot(page, `orphan-heavy-${mode}-${theme}`, info);
+	test.info().annotations.push({ type: 'orphan-heavy-layout', description: JSON.stringify(measurements) });
 });
 
 /** The asker's name is cut in the middle with its last four characters kept, and its box stays off the header's controls. */

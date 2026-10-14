@@ -42,22 +42,10 @@ it('reports a successfully persisted disconnected copy and same-store reconnecti
 	expect(host.textContent).toContain('Disconnected · changes stay on this device');
 	session.reconnecting(); flushSync(); expect(host.textContent).toContain('Reconnecting…');
 });
-it('offers Reload comment placements only for live orphans and describes a disconnected control', () => {
-	const reload = vi.fn(() => true);
-	setup(); render({ orphanedCount: 2, onReloadPlacements: reload, liveConnection: 'connected' });
-	const control = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
-	expect(control.textContent?.trim()).toBe('Place again');
-	expect(control.disabled).toBe(false);
-	control.click(); expect(reload).toHaveBeenCalledOnce();
-
-	unmount(component!); component = null; host.remove();
-	setup(); session.disconnected(); render({ orphanedCount: 2, onReloadPlacements: reload, liveConnection: 'disconnected' });
-	const disabled = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
-	expect(disabled.disabled).toBe(false);
-	expect(disabled.getAttribute('aria-disabled')).toBe('true');
-	expect(disabled.getAttribute('aria-describedby')).toBe('live-connection-artifact');
-	disabled.focus(); expect(document.activeElement).toBe(disabled);
-	disabled.click(); expect(reload).toHaveBeenCalledOnce();
+it('keeps live orphan recovery out of the standing document header', () => {
+	setup(); render({ orphanedCount: 2 });
+	expect(host.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
+	expect(host.querySelector('.comment-status')?.getAttribute('aria-describedby')).toBeTruthy();
 });
 
 it('shows the approved settling row and offers reading and copying without a second write', async () => {

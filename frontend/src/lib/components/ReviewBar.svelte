@@ -343,6 +343,12 @@
 			.review-bar { min-height: var(--rb-hit); }
 			.review-bar.ask { min-height: 0; }
 			.rb-line { min-height: var(--rb-hit); }
+			/* A closed ask names the requester and keeps the full request behind its existing disclosure, so the reading starts above the fold. */
+			:global(.document-header) .review-bar.ask:not(.expanded) { grid-template-rows: var(--rb-hit); }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-line { display: flex; grid-column: auto; grid-row: auto; }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: none; }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-chev { margin-left: auto; }
 			/* The expanded ask and other askers end at the add-person icon's right edge, not the header's: that tool's 44 px target has a 12 px inner margin (`--space-3`), so the text has the same. */
 			:global(.document-header) .review-bar.ask .rb-ask-full, :global(.document-header) .review-bar.ask .rb-others { padding-right: var(--space-3); }
 			.review-bar.receipt, .review-bar.stale { min-height: var(--rb-hit); }
@@ -356,7 +362,8 @@
 			.rb-capsule.suppressed { transform: translateY(calc(100% + var(--space-3) + var(--safe-bottom))); pointer-events: none; visibility: hidden; transition-duration: calc(var(--dur-standard) * 0.7), 0s; transition-delay: 0s, calc(var(--dur-standard) * 0.7); }
 			.review-bar.ask .rb-capsule .rb-status { order: -1; flex: 1 0 100%; padding: 0 var(--space-2); }
 			.review-bar.ask .rb-capsule .rb-status:empty { display: none; }
-			.review-bar.ask .rb-capsule .rb-to { display: block; order: -1; flex: 1 0 100%; padding: 0 var(--space-2); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			/* The collapsed header already names the requester, so the capsule can reserve its only row for the two answer targets. */
+			.review-bar.ask .rb-capsule .rb-to { display: none; }
 			.rb-capsule .rb-actions { flex: 1 1 auto; margin-left: 0; }
 			.rb-capsule :global(.btn) { flex: 1 1 0; min-width: 0; min-height: var(--rb-hit); }
 			/* Request changes: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and Request changes right-aligned (PE B3). */

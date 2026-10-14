@@ -126,6 +126,25 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.activeElement).toBe(host.querySelector('[data-drawer-focus-home]'));
 	});
 
+	it('moves orphan placement recovery into the comments drawer with its existing live-state wiring', () => {
+		const reload = vi.fn(() => true);
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: reload } });
+		const footer = host.querySelector<HTMLElement>('[data-doc-comments-drawer] > [data-drawer-placement]')!;
+		expect(footer.querySelector('[role="status"]')?.textContent).toBe("1 comment couldn't be placed");
+		const button = footer.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
+		button.click();
+		expect(reload).toHaveBeenCalledOnce();
+		expect(host.querySelector('[data-doc-comments-drawer]')!.lastElementChild).toBe(footer);
+	});
+
+	it('keeps a disconnected placement retry focusable and names its live status', () => {
+		render({ state: { kind: 'list' }, comments: [{ ...suggestion, orphaned: true }], placementRecovery: { onReload: vi.fn(), unavailable: true, connectionDescriptionId: 'live-connection-artifact' } });
+		const button = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
+		expect(button.disabled).toBe(false);
+		expect(button.getAttribute('aria-disabled')).toBe('true');
+		expect(button.getAttribute('aria-describedby')).toBe('live-connection-artifact');
+	});
+
 	it('keeps the drawer while an image opened from a card covers it, then gives that card focus back', async () => {
 		const covering = writable(false);
 		const live = fromStore(covering);

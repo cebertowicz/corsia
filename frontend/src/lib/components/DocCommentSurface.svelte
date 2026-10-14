@@ -10,6 +10,7 @@
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import CommentList from './comments/CommentList.svelte';
+	import CommentPlacementRecovery, { type PlacementRecoveryProps } from './comments/CommentPlacementRecovery.svelte';
 	import ImageRegionThumb from './ImageRegionThumb.svelte';
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
@@ -32,7 +33,7 @@
 	 * under its thumbnail, and their cards carry their tag's number and colour. `src` is null for an image with no file.
 	 */
 	export type DocImageComments = { srcOf: (comment: DocComment) => string | null; colorOf: (comment: DocComment) => string; onOpen: (comment: DocComment, focus?: { id: string; move?: boolean }) => void };
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, covered = false, onDrawerShown }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, feedback = null, placementRecovery = {}, covered = false, onDrawerShown }: {
 		state: SurfaceState;
 		anchor: CommentAnchor | null;
 		/** The canvas the card stays inside. */
@@ -67,6 +68,8 @@
 		images?: DocImageComments | null;
 		/** The open document's batch: while it holds messages not sent yet the drawer ends in their Send now footer. */
 		feedback?: DocFeedback | null;
+		/** Re-resolves orphaned live comment ranges from the existing comments drawer. */
+		placementRecovery?: PlacementRecoveryProps;
 		/** An image opened from the document covers it, the drawer with it: the drawer stays open beneath, and gets its focus back after. */
 		covered?: boolean;
 		/** Whether the comment list's drawer is on screen, in either form: true from its mount until its outro has ended. */
@@ -339,6 +342,7 @@
 		</div>{/key}</div>
 	</div>
 	{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:drawerFooterHeight use:footerFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')}><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
+	<CommentPlacementRecovery {comments} {...placementRecovery} onFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')} />
 {/snippet}
 
 {#if surfaceState || sheet.closing}

@@ -143,20 +143,11 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.querySelector('[role="status"]')?.textContent).toBe('');
 	});
 
-	it('announces a refused placement reload in the existing polite status region and re-enables it', () => {
-		const reload = vi.fn(() => true);
-		const live = { artifactId: 'artifact', subscribe: () => () => {} } as any;
-		render(value(), undefined, { liveSession: live, orphanedCount: 1, onReloadPlacements: reload, placementReloading: false });
-		const control = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
-		// At rest the button says what it is for; the after state's announcement replaces that sentence.
-		expect(host.querySelector('.orphan-note')?.textContent).toBe("1 comment couldn't be placed");
-		control.click(); expect(reload).toHaveBeenCalledOnce();
-		component!.$set({ placementReloading: true }); flushSync();
-		component!.$set({ placementReloading: false, placementReloadError: true }); flushSync();
-		expect(host.querySelector('[role="status"]')?.textContent).toBe("Couldn't reload comment placements");
-		expect(host.querySelector('[role="status"]')?.classList.contains('sr-only')).toBe(false);
-		expect(host.querySelector('.orphan-note')).toBeNull();
-		expect(host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')?.disabled).toBe(false);
+	it('keeps an unplaced-comment indicator on the status pill while recovery moves to the comments drawer', () => {
+		render(value(), undefined, { orphanedCount: 1 });
+		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
+		expect(pill.getAttribute('aria-describedby')).toBeTruthy();
+		expect(host.querySelector('[aria-label="Reload comment placements"]')).toBeNull();
 	});
 
 	it('removes Mark verified when the parent replaces freshness after success', async () => {

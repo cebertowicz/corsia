@@ -316,8 +316,6 @@
 		reviewTargetKey={targetKey}
 		targetInstanceId={target?.instanceId ?? null}
 		{onReload}
-		onReloadPlacements={loadedArtifactId ? () => reloadPlacements(loadedArtifactId!) : undefined}
-		{liveConnection}
 		onOpenComments={commentUI.openList}
 		{freshness}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
@@ -381,6 +379,7 @@
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		feedback={feedbackStatus?.feedback()}
+		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => reloadPlacements(loadedArtifactId) : undefined, reloading: headerCommentStatus.placementReloading, reloadError: headerCommentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveSession ? `live-connection-${liveSession.artifactId}` : undefined }}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
