@@ -406,7 +406,6 @@ SCHEMA_SQL = f"""
     );
     CREATE INDEX IF NOT EXISTS idx_self_restart_requests_status ON self_restart_requests(status);
     CREATE INDEX IF NOT EXISTS idx_self_restart_requests_update_attempts ON self_restart_requests(kind, requested_at);
-
     {PLAN_LIVENESS_SCHEMA_SQL}
 
     {ARTIFACT_IDENTITY_SCHEMA_SQL}

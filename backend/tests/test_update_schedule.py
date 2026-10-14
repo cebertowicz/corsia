@@ -53,7 +53,7 @@ def _operation_table() -> sqlite3.Connection:
         "CREATE TABLE self_restart_requests ("
         "id TEXT PRIMARY KEY, requester_thread_id TEXT, requester_user TEXT, from_sha TEXT, "
         "branch TEXT, reason TEXT, kind TEXT, trigger TEXT, target_version TEXT, "
-        "callback_credential_hash TEXT, status TEXT, phase TEXT, requested_at TEXT, "
+        "callback_credential_hash TEXT, changes TEXT, outcome_seen_at TEXT, status TEXT, phase TEXT, requested_at TEXT, "
         "cutoff_at TEXT, updated_at TEXT, settled_at TEXT, deployed_sha TEXT, error TEXT, "
         "failure_code TEXT, failure_detail TEXT, overnight_outcome_claimed_at TEXT)"
     )
@@ -101,8 +101,8 @@ def test_callback_credential_is_operation_scoped_and_dead_at_terminal_state():
     assert self_restart.callback_credential_matches(second, second_credential, db=db)
 
 
-def test_overnight_outcome_is_claimed_once_across_devices():
-    from automation import self_restart
+def test_scheduled_outcome_is_marked_once_across_devices():
+    from automation.update_outcome import mark_outcome_seen
 
     db = _operation_table()
     now = datetime.now(timezone.utc).isoformat()
@@ -113,5 +113,5 @@ def test_overnight_outcome_is_claimed_once_across_devices():
     )
     db.commit()
 
-    assert self_restart.claim_overnight_outcome("a" * 32, db=db)
-    assert not self_restart.claim_overnight_outcome("a" * 32, db=db)
+    assert mark_outcome_seen("a" * 32, db=db) is True
+    assert mark_outcome_seen("a" * 32, db=db) is True

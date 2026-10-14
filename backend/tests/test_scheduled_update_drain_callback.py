@@ -52,12 +52,12 @@ def test_callback_credential_only_controls_its_exact_inflight_drain_operation(mo
         asyncio.run(drain_api.get_drain_status_route(callback, "b" * 32))
 
 
-def test_claim_overnight_outcome_requires_a_human_user() -> None:
+def test_outcome_seen_requires_an_authenticated_user() -> None:
     from api import system_admin
-    from infra.auth import require_human_user
+    from infra.auth import require_user
 
     route = next(
         candidate for candidate in system_admin.router.routes
-        if getattr(candidate, "path", None) == "/system/update-operation/{operation_id}/claim-overnight-outcome"
+        if getattr(candidate, "path", None) == "/system/update-operations/{operation_id}/outcome-seen"
     )
-    assert any(dependency.call is require_human_user for dependency in route.dependant.dependencies)
+    assert any(dependency.call is require_user for dependency in route.dependant.dependencies)

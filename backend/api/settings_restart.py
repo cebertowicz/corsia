@@ -22,8 +22,7 @@ _RELEASE_FAILURE_NOTE = (
 )
 # Exit codes of `corsia prepare-redeploy`; any other nonzero exit is `prepare_failed`.
 _PREPARE_EXIT_CODES = {
-    41: "fetch_failed",
-    42: "build_failed",
+    41: "fetch_failed", 42: "build_failed",
     43: "index_locked",
     44: "checkout_detached",
     45: "checkout_dirty",
@@ -36,7 +35,6 @@ def _update_log_path() -> Path:
     from infra.config import LOGS_DIR
 
     return LOGS_DIR / f"update-{uuid.uuid4().hex}.log"
-
 
 
 def _failure_summary(failure: BaseException) -> str:
@@ -333,7 +331,6 @@ async def _launch_settings_restart(
         if release_failed:
             detail += f" {_RELEASE_FAILURE_NOTE}"
         raise HTTPException(500, detail) from exc
-
 
 
 async def prelaunch_settings_restart(
