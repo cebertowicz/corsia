@@ -92,7 +92,7 @@
 			{#if totalChanges() > 3}<button class="show-all" onclick={() => showAll = !showAll}>{showAll ? 'Show fewer changes' : `Show all ${totalChanges()} changes`}<svg class="chevron" class:expanded={showAll} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>{/if}
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.drain_cap_seconds}
-			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and restarted when CORSIA is back.</span>{/if}</div>
+			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{#if agentCount === 1}1 agent is working: it gets up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. If it is still mid-step, it is stopped and restarted when CORSIA is back.{:else}{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and restarted when CORSIA is back.{/if}</span>{/if}</div>
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.usual_seconds != null}<p class="muted">Usually about {humanDuration($updateStatus.usual_seconds)}.</p>{/if}
 		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button variant="primary" onclick={updateNow}>Update now</Button></div>{/if}

@@ -129,6 +129,15 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).toContain('2 agents are working');
 	});
 
+	it('words a single working agent in the singular', () => {
+		updateStatus.set(status({ agents_working: 1 }));
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+		expect(host.textContent).toContain('1 agent is working: it gets up to');
+		expect(host.textContent).not.toContain('1 agents');
+	});
+
 	it('offers a newer version instead of replaying an older failed operation', () => {
 		updateStatus.set(status({
 			target_version: '1.2.0',
