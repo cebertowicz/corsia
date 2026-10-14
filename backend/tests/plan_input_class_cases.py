@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from functools import partial
 
-from plans import boundary_dispatch, delegate_attach, holds, service, status_cursor
+from plans import (
+    boundary_dispatch, delegate_attach, holds, service, status_cursor, system_user_steps,
+)
 from plans.boundary import PlanActor, mutate
 from plans.current import read_current_plan, read_current_status
 from tests.plan_ask_helpers import document_ask
@@ -817,4 +819,16 @@ _CASES = {
         "current.py",
         'INCLUDE_FOLDED_CURSOR.format(cut=str(cut["f"]).lower())',
     ): _folded_cursor_contradicted,
+    # --- plans/system_user_steps.py (system code, not the plan tool) ---
+    ("system_user_steps.py", '"open_user_step needs a non-empty key"'): lambda db, scene: partial(
+        system_user_steps.open_user_step, db, "root", key=" ", title="T",
+        description="D", provenance="test",
+    ),
+    (
+        "system_user_steps.py",
+        '"settle_user_step settles only a step open_user_step opened"',
+    ): lambda db, scene: partial(
+        system_user_steps.settle_user_step, db, scene.own,
+        evidence="E", provenance="test",
+    ),
 }
