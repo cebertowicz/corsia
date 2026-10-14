@@ -183,6 +183,7 @@ def test_observer_never_raises_or_retains_non_utf8_or_malformed_usage():
     for data in (
         b"\xff",
         b'{"response":{"request_id":"corsia-usage","subtype":"success","response":"private"}}',
+        b'{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":100,"resets_at":1e999}}}}}',
         b'{"response":{"request_id":"corsia-usage","subtype":[]}}',
         b"[]",
     ):

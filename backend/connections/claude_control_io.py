@@ -76,7 +76,7 @@ def _usage_verdict_category(response: object) -> str:
         from connections.claude_usage import usage_verdict
 
         verdict = usage_verdict(response).get("verdict")
-    except Exception:
+    except (AttributeError, ImportError, KeyError, OSError, OverflowError, RecursionError, TypeError, ValueError):
         return "unknown"
     return verdict if verdict in {"allowed", "limited", "unknown"} else "unknown"
 
@@ -102,7 +102,7 @@ def observe_control_reply(data: bytes, expected: dict[str, str], phase: ControlP
             _usage_verdict_category(response.get("response"))
             if subtype == "success" else "none"
         )
-    except Exception:
+    except (OSError, OverflowError, RecursionError, TypeError, UnicodeDecodeError, ValueError):
         return
 
 
