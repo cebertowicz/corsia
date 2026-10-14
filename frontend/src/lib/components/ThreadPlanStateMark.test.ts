@@ -262,18 +262,16 @@ describe('ThreadPlanStateMark', () => {
 		expect(host.querySelector<HTMLElement>('.plan-state')?.textContent).toBe('2 Failed');
 	});
 
-	it('renders Stuck as an accessible tertiary mark that opens the thread and hides the dot', () => {
+	it('shows the existing update dot for an overdue-only idle row', () => {
 		const onOpenThread = renderUpdate({
-			state: 'stuck', label_key: null, paused: false, attention_items: [],
-			stuck_overdue_waits: 1, has_update: true,
+			state: 'idle', label_key: null, paused: false, attention_items: [],
+			next_overdue_at: '2026-10-14T00:00:00+00:00', has_update: true,
 		});
-		const mark = host.querySelector<HTMLElement>('.plan-state.stuck')!;
-		expect(mark.textContent).toBe('Stuck');
-		expect(mark.getAttribute('aria-label')).toBe('Stuck · 1 wait past the deadline');
-		expect(mark.title).toBe('Stuck · 1 wait past the deadline');
-		expect(host.querySelector('.update-dot')).toBeNull();
-		mark.click();
-		mark.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		expect(host.querySelector('.plan-state:not(.update-dot)')).toBeNull();
+		const dot = host.querySelector<HTMLElement>('.update-dot')!;
+		expect(dot.getAttribute('aria-label')).toBe('Update since your last visit');
+		dot.click();
+		dot.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		expect(onOpenThread).toHaveBeenCalledTimes(2);
 	});
 

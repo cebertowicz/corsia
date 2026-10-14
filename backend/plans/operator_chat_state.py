@@ -188,7 +188,7 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
     Open plans use the operator envelope. Every row carries ``has_update`` and
     ``opened`` even without a plan; an absent row is idle, never opened, with no
     update. ``settled`` is the plan's not-paused, no-open-work fact, so the
-    client must also check its live turn truth. AS3 is owed > Failed > Stuck > dot.
+    client must also check its live turn truth. AS3 is owed > Failed > dot.
     """
     operator_projection._require_human(actor)
     ids = list(dict.fromkeys(thread_ids))
@@ -228,19 +228,12 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
         user_items = [*plan_items, *access_by_thread.get(str(plan_row["owner_id"]), [])]
         state, label_key = _plan_word(plan_row, plan, owed=bool(user_items))
         still = plan["display"].get("not_moving") if plan is not None else None
-        stuck = bool(
-            plan_row["state"] != "paused" and still is not None
-            and still["need_you"] == 0 and still["overdue_waits"] > 0
-        )
         # Your move outranks Failed; its list is whatever owed items were found.
         if state in _OWED_STATES:
             attention_items = user_items
         elif failed_by_plan.get(plan_id):
             state = "failed"
             attention_items = failed_by_plan[plan_id]
-        elif stuck:
-            state = "stuck"
-            attention_items = []
         else:
             attention_items = []
         states[plan_row["owner_id"]] = {
@@ -248,7 +241,6 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
             "label_key": label_key,
             "paused": plan_row["state"] == "paused",
             "attention_items": attention_items,
-            "stuck_overdue_waits": still["overdue_waits"] if stuck and still is not None else 0,
             "next_overdue_at": still["next_overdue_at"] if still is not None else None,
             "settled": bool(
                 plan_row["state"] != "paused" and not plan_row["has_open"]
@@ -275,7 +267,6 @@ def _add_planless_rows(
             "label_key": None,
             "paused": False,
             "attention_items": attention_items,
-            "stuck_overdue_waits": 0,
             "next_overdue_at": None,
             "settled": False,
         })
@@ -285,7 +276,6 @@ def _add_planless_rows(
             "label_key": None,
             "paused": False,
             "attention_items": [],
-            "stuck_overdue_waits": 0,
             "next_overdue_at": None,
             "settled": False,
         })

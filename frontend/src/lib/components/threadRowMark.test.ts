@@ -29,6 +29,13 @@ describe('slotThreeWord', () => {
 		expect(slotThreeWord({ ...idle, paused: true })).toBe('');
 	});
 
+	it('is empty for an overdue-only row', () => {
+		expect(slotThreeWord({
+		...idle,
+		next_overdue_at: '2026-10-14T00:00:00+00:00',
+	})).toBe('');
+	});
+
 	it('renders an owed word even when the server has no item details', () => {
 		expect(slotThreeWord({ ...idle, state: 'needs_input', attention_items: [] })).toBe('Needs input');
 		expect(slotThreeWord({ ...idle, state: 'blocked_on_you', attention_items: [] })).toBe('Blocked on you');

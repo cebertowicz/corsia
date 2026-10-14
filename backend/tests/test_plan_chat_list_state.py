@@ -296,7 +296,6 @@ def test_access_request_reaches_a_planless_thread_row(db):
         "label_key": None,
         "paused": False,
         "attention_items": [{"kind": "access", "title": "Inspect host", "node_id": None}],
-        "stuck_overdue_waits": 0,
         "next_overdue_at": None,
         "settled": False,
         "latest_update": None,
@@ -321,7 +320,6 @@ def test_child_plan_access_request_reaches_its_visible_thread_row(db):
         "label_key": None,
         "paused": False,
         "attention_items": [{"kind": "access", "title": "Inspect child host", "node_id": None}],
-        "stuck_overdue_waits": 0,
         "next_overdue_at": None,
         "settled": False,
         "latest_update": None,
@@ -546,24 +544,22 @@ def _deadline_wait(db, plan_id: str, actor: PlanActor, title: str, ends_at: str)
     }, actor=actor)
 
 
-def test_three_overdue_waits_read_stuck_without_attention_items(db):
+def test_overdue_waits_keep_the_normal_idle_word_without_attention_items(db):
     actor = _thread(db, "three-overdue")
     plan = _plan(db, "three-overdue")
     overdue = (datetime.now(UTC) - not_moving.OVERDUE_GRACE - timedelta(seconds=1)).isoformat()
     for number in range(3):
         _deadline_wait(db, plan.id, actor, f"Wait {number}", overdue)
-    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    _deadline_wait(db, plan.id, actor, "Wait later", future)
 
     state = _states(db, ["three-overdue"])["three-overdue"]
 
-    assert state["state"] == "stuck"
+    assert state["state"] == "idle"
     assert state["attention_items"] == []
-    assert state["stuck_overdue_waits"] == 3
-    assert state["next_overdue_at"] == (datetime.fromisoformat(future) + not_moving.OVERDUE_GRACE).isoformat()
+    assert "stuck_overdue_waits" not in state
+    assert state["next_overdue_at"] is None
 
 
-def test_owed_then_failed_outrank_stuck_and_paused_never_reads_stuck(db):
+def test_owed_then_failed_outrank_overdue_waits_and_owed_outranks_pause(db):
     actor = _thread(db, "stuck-precedence")
     plan = _plan(db, "stuck-precedence")
     overdue = (datetime.now(UTC) - not_moving.OVERDUE_GRACE - timedelta(seconds=1)).isoformat()
@@ -582,7 +578,7 @@ def test_owed_then_failed_outrank_stuck_and_paused_never_reads_stuck(db):
     plan_update(db, plan.id, "pause", {
         "expected_revision": service._plan_row(db, plan.id)["revision"],
     }, actor=HUMAN)
-    assert _states(db, ["stuck-precedence"])["stuck-precedence"]["state"] != "stuck"
+    assert _states(db, ["stuck-precedence"])["stuck-precedence"]["state"] == "blocked_on_you"
 
 
 def test_future_waits_stay_idle_and_name_the_next_overdue_read(db):
@@ -594,5 +590,4 @@ def test_future_waits_stay_idle_and_name_the_next_overdue_read(db):
     state = _states(db, ["future-waits"])["future-waits"]
 
     assert state["state"] == "idle"
-    assert state["stuck_overdue_waits"] == 0
     assert state["next_overdue_at"] == (datetime.fromisoformat(ends) + not_moving.OVERDUE_GRACE).isoformat()
