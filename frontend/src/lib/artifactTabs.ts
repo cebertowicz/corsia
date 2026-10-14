@@ -47,7 +47,7 @@ export type {
 
 let instanceCounter = 0;
 
-function newInstanceId(): string {
+export function newInstanceId(): string {
 	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
 		return crypto.randomUUID();
 	}

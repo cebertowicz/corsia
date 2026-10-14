@@ -35,9 +35,10 @@ async function openPicker(page: Page, title?: string) {
 	await page.locator('button.model-chip').click();
 	await expect(page.locator('.model-sheet')).toBeVisible();
 }
-async function capture(page: Page, id: string) {
+async function capture(page: Page, id: string, prepare?: () => Promise<void>) {
 	for (const [device, width, height] of [['desktop', 1440, 1000], ['phone', 390, 844]] as const) {
 		await page.setViewportSize({ width, height });
+		await prepare?.();
 		for (const theme of ['light', 'dark']) {
 			await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme);
 			const layout = await page.evaluate((scenario) => {
@@ -59,13 +60,43 @@ async function capture(page: Page, id: string) {
 					range.selectNodeContents(el);
 					return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size > 1;
 				}).map((el) => el.textContent);
-				return { clipped, overflows: sheet.scrollWidth > sheet.clientWidth, overlaps, gutterOffset, wrappedVendors };
+				// The current model's and the current account's checks share one gutter column, clear of the dot and order beside them.
+				const accountCheck = document.querySelector<HTMLElement>('.model-sheet .account-usage-row .check-glyph')?.getBoundingClientRect();
+				const modelCheck = document.querySelector<HTMLElement>('.model-sheet .model-list-item .check-glyph')?.getBoundingClientRect();
+				const checkColumnOffset = accountCheck && modelCheck ? Math.round(accountCheck.left - modelCheck.left) : 0;
+				const checkOverlaps = [...document.querySelectorAll<HTMLElement>('.model-sheet .check-glyph')].filter((check) => {
+					const next = check.parentElement!.querySelector<HTMLElement>('.model-status-dot, .order, .picker-label');
+					return next ? check.getBoundingClientRect().right > next.getBoundingClientRect().left : false;
+				}).length;
+				// The check sits on its row's first line, even when the row wraps its figures onto a second line.
+				const checkRowDrift = Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.model-sheet .check-glyph')].map((check) => {
+					const row = check.parentElement!;
+					const mark = row.querySelector<HTMLElement>('.model-status-dot, .order');
+					const label = row.querySelector<HTMLElement>('.picker-label, .model-list-name');
+					const text = label ? document.createTreeWalker(label, NodeFilter.SHOW_TEXT, { acceptNode: (node) => (node.textContent?.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) }).nextNode() : null;
+					const range = document.createRange();
+					if (text) { range.setStart(text, 0); range.setEnd(text, 1); }
+					const anchor = mark?.getBoundingClientRect() ?? (text ? range.getClientRects()[0] : undefined);
+					const box = check.getBoundingClientRect();
+					return anchor ? Math.abs((box.top + box.bottom) / 2 - (anchor.top + anchor.bottom) / 2) : Number.POSITIVE_INFINITY;
+				}));
+				// The chooser caret is a drawn chevron centred on its title line, not a text glyph riding the baseline.
+				const caretDrift = Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.model-sheet button.picker-account-title')].map((title) => {
+					const caret = title.querySelector('.chooser-caret svg')?.getBoundingClientRect();
+					const vendor = title.querySelector('.vendor')!.getBoundingClientRect();
+					return caret ? Math.abs((caret.top + caret.bottom) / 2 - (vendor.top + vendor.bottom) / 2) : Number.POSITIVE_INFINITY;
+				}));
+				return { clipped, overflows: sheet.scrollWidth > sheet.clientWidth, overlaps, gutterOffset, checkColumnOffset, checkOverlaps, checkRowDrift, caretDrift, wrappedVendors };
 			}, id);
 			expect(layout.clipped).toEqual([]);
 			if (device === 'phone') expect(layout.overflows).toBe(false);
 			expect(layout.overlaps).toEqual([]);
 			expect(layout.wrappedVendors).toEqual([]);
 			expect(layout.gutterOffset).toBe(0);
+			expect(layout.checkColumnOffset).toBe(0);
+			expect(layout.checkOverlaps).toBe(0);
+			expect(layout.checkRowDrift).toBeLessThanOrEqual(2);
+			expect(layout.caretDrift).toBeLessThanOrEqual(1);
 			if (shots) await page.screenshot({ path: `${shots}/${id}-${device}-${theme}.png`, scale: 'css', animations: 'disabled' });
 		}
 	}
@@ -141,6 +172,7 @@ test('renders approved M1–M8 model-first picker states with live-shaped compon
 	await show('M7-open', M7, true, async () => {
 		await expect(page.locator('section[aria-label="Claude Code"] .account-usage-row')).toHaveCount(3);
 	});
+	// Six-account recovery rendering is isolated below so existing M1–M8 evidence retains its own contract.
 	// Every vendor collapses alike: a rollover Claude account with a long label beside all-limited Codex.
 	const longClaude = account('claude-primary', 'FOMRRT1 · Friends of Montclair Railroad Trail', 'claude-code', usage(1, 60));
 	const codexLimitedA = account('codex-pro', 'person@example.test', 'codex', limited());
@@ -162,4 +194,47 @@ test('renders approved M1–M8 model-first picker states with live-shaped compon
 	const signedOut = base([], [codexA, codexB]);
 	signedOut.rows = [...models('claude-code', [claudeA], [entry(claudeA, true, { status: 'unavailable', status_reason: 'connection_unavailable' })]), ...models('codex', [codexA, codexB]), ...external(), ...local()];
 	await show('M8', signedOut);
+});
+
+test('renders six anonymous account recovery states in the actual picker', async ({ page }) => {
+	test.setTimeout(90_000);
+	let fixture = { rows: [] as unknown[], accounts: [] as unknown[] };
+	await routePicker(page, () => fixture);
+	const failedKnown = account('claude-known', 'Known reset — unusually long anonymous account label', 'claude-code', { ...limited(), check: { outcome: 'failed', error: 'usage unavailable' } });
+	const failedUnknown = account('claude-unknown', 'No reset — unusually long anonymous account label', 'claude-code', { ...limited(), resets_at: null, check: { outcome: 'failed', error: 'usage unavailable' } });
+	const checking = account('claude-checking', 'Checking account', 'claude-code', { ...limited(), checking: true });
+	const fresh = account('claude-fresh', 'Fresh allowed account', 'claude-code', usage(12, 62));
+	const freshCodex = account('codex-fresh', 'Fresh Codex account', 'codex', usage(28, 51));
+	const extraCodex = account('codex-extra', 'Extra Codex account', 'codex', usage(67, 79));
+	const claudeEntries = [
+		entry(failedKnown, true, { status: 'unavailable', status_reason: 'usage_limited', resets_at: at }),
+		entry(failedUnknown, false, { status: 'unavailable', status_reason: 'usage_limited', resets_at: null }),
+		entry(checking, false, { status: 'unavailable', status_reason: 'usage_limited', resets_at: at }),
+		entry(fresh),
+	];
+	fixture = {
+		rows: [...models('claude-code', [failedKnown, failedUnknown, checking, fresh], claudeEntries), ...models('codex', [freshCodex, extraCodex]), ...external(), ...local()],
+		accounts: [failedKnown, failedUnknown, checking, fresh, freshCodex, extraCodex],
+	};
+	await openPicker(page);
+	const claude = page.locator('section[aria-label="Claude Code"]');
+	const codex = page.locator('section[aria-label="Codex"]');
+	const figures = (name: string) => claude.locator('.account-usage-row', { hasText: name }).locator('.figures');
+	await claude.locator('button.picker-account-title').click();
+	await expect(claude.locator('.account-usage-row')).toHaveCount(4);
+	await expect(figures('Known reset — unusually long anonymous account label')).toContainText('back');
+	await expect(figures('Known reset — unusually long anonymous account label')).toContainText("couldn't verify");
+	await expect(figures('No reset — unusually long anonymous account label')).toContainText("couldn't verify");
+	await expect(figures('No reset — unusually long anonymous account label')).not.toContainText('back');
+	await expect(figures('Checking account')).toContainText('checking');
+	await expect(figures('Fresh allowed account')).toContainText('left');
+	await capture(page, 'M604-six-accounts');
+	await codex.locator('button.picker-account-title').click();
+	await expect(codex.locator('.account-usage-row')).toHaveCount(2);
+	await capture(page, 'M604-six-accounts-codex-scrolled', async () => {
+		await codex.scrollIntoViewIfNeeded();
+		if ((page.viewportSize()?.width ?? 0) <= 480) {
+			for (const row of await codex.locator('.account-usage-row .figures').all()) await expect(row).toBeInViewport();
+		}
+	});
 });

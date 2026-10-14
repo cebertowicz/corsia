@@ -5,6 +5,7 @@
 	import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
+	import BrowserLeaf from './BrowserLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
@@ -282,8 +283,10 @@
 				onCollapse={collapse}
 			/>
 		{/if}
-		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} bind:this={leafBodyEl}>
-			{#if activeTab?.kind === 'subagent' && activeTab.threadId}
+		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
+			{#if activeTab?.kind === 'browser' && activeTab.threadId}
+				<BrowserLeaf threadId={activeTab.threadId} />
+				{:else if activeTab?.kind === 'subagent' && activeTab.threadId}
 				<SubagentConversationLeaf threadId={activeTab.threadId} {onOpenLightbox} />
 				{:else if activeTab?.kind === 'legacy-discussion' && activeTab.artifactId}
 					<LegacyPlanDiscussionLeaf artifactId={activeTab.artifactId} title={activeTab.title} />
@@ -378,7 +381,8 @@
 	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
 	.doc-host { display: contents; }
 	.doc-host.covered { visibility: hidden; }
-	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
+	.leaf-body.image-canvas, .leaf-body.browser-canvas { overflow: hidden; display: flex; flex-direction: column; }
+	.leaf-body.browser-canvas { padding: 0; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
 	/* The document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
 	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; padding-top: 0; } }

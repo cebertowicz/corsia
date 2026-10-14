@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from plans import closure, node_settlement, operator_projection, service
+from plans import closure, folded_reads, node_settlement, operator_projection, service
 from plans.boundary import PlanActor
 from tests.plan_close_next_helpers import (
     HUMAN,
@@ -142,6 +142,46 @@ def test_a_decisions_review_row_stays_with_the_decision(db):
     assert row(db, raised["node_id"])["state"] == "review_requested"
 
 
+def test_marking_withdraws_the_questions_drafted_from_the_step(db):
+    from plans import decision_lifecycle, decision_projection, decisions
+
+    plan = owner_plan(db)
+    keys = task(db, plan.id, "Set the key", assignee="user")
+    common = {"actor": OWNER, "provenance": "test.mark_done", "db": db}
+    drafted = decisions.draft(
+        plan.id, source_node_id=keys.id, mutation_id="decision-draft",
+        title="Which key do we use?", context="Two keys are in play.",
+        tradeoff="One is scoped, one is broad.", recommendation="A",
+        rationale="Scoped is safer.", other_enabled=True,
+        options=[
+            {"id": "A", "label": "Scoped key", "detail": "Read only."},
+            {"id": "B", "label": "Broad key", "detail": "Read and write."},
+        ],
+        **common,
+    ).result["decision"]
+    reviewed = decisions.parent_review(
+        drafted["id"], expected_revision=drafted["revision"],
+        mutation_id="decision-review", **common,
+    ).result["decision"]
+    raised = decisions.raise_to_user(
+        reviewed["id"], expected_revision=reviewed["revision"],
+        mutation_id="decision-raise", **common,
+    ).result["decision"]
+
+    _mark(db, plan.id, keys.id)
+
+    assert row(db, keys.id)["state"] == "accepted"
+    assert decision_projection.read(raised["id"], db=db)["state"] == "invalidated"
+    reasons = [
+        json.loads(event["payload_json"])["reason"]
+        for event in db.execute(
+            "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='decision_invalidated'",
+            (raised["node_id"],),
+        ).fetchall()
+    ]
+    assert reasons == [decision_lifecycle.SOURCE_MARKED_DONE]
+
+
 def test_a_step_with_open_children_is_refused(db):
     plan = owner_plan(db)
     parent = service.add_node(
@@ -198,6 +238,22 @@ def test_the_row_says_which_agent_marked_it(db):
     nodes = _pane(db)
     assert nodes[keys.id]["status_reason"] == "Marked by Infrastructure"
     assert nodes[mine.id]["status_reason"] != "Marked by Infrastructure"
+
+
+def test_a_folded_row_says_which_agent_marked_it(db):
+    plan = owner_plan(db)
+    db.execute("UPDATE threads SET title='Infrastructure' WHERE id='owner'")
+    db.commit()
+    keys = task(db, plan.id, "Set the key", assignee="user")
+    task(db, plan.id, "Still open")
+
+    _mark(db, plan.id, keys.id)
+
+    page = folded_reads.read_folded(plan.id, actor=HUMAN, db=db)
+    items = {item["id"]: item for item in page["items"]}
+    assert items[keys.id]["status_reason"] == "Marked by Infrastructure"
+    path = folded_reads.read_path(plan.id, keys.id, actor=HUMAN, db=db)
+    assert path["node"]["status_reason"] == "Marked by Infrastructure"
 
 
 def test_a_row_the_user_marked_carries_no_marker(db):

@@ -48,9 +48,29 @@ html, body {
 body { max-width: 100vw; }
 #svelte { max-width: 100vw; overflow-x: hidden; }
 
+/* The opaque color the header's top edge is drawn over: the base of the desktop header's
+   --glass-thin top, and the color the phone header's gradient mixes from (Header.svelte).
+   The phone value is set in the max-width: 768px :root block below. */
+:root { --header-top-base: var(--bg-secondary); }
+
+/* Installed touch app only: iOS 27 samples this element's background-color for the status bar
+   (it ignores theme-color, gradients and pseudo-elements) instead of blurring over the header.
+   It is the opaque base of the header's top color and sits under the status bar, so the header
+   looks unchanged; z-index 0 keeps it beneath open sheets, since iOS reads its color, not its
+   pixels. */
+#status-bar-color { display: none; }
+@media (display-mode: standalone) and (pointer: coarse) {
+	#status-bar-color {
+		display: block; position: fixed; top: 0; left: 0; right: 0; height: 1px;
+		z-index: 0; pointer-events: none;
+		background-color: var(--header-top-base);
+	}
+}
+
 @media (max-width: 768px) {
 	html, body { background: var(--bg-primary); }
 	:root {
+		--header-top-base: var(--bg-primary);
 		--header-height: 64px;
 		--text-caption:  11px;
 		--text-footnote: 13px;

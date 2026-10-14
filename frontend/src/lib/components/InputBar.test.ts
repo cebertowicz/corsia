@@ -40,6 +40,7 @@ import { toasts } from '$lib/stores/toast';
 import { applyLifecycle, applyTerminal, _resetTurnStateForTests } from '$lib/ws/turnState';
 import { stopRequestedTurns } from '$lib/ws/send';
 import { clearAllContextUsage, setContextUsage } from '$lib/stores/contextUsageByThread';
+import { resetUpdateStoreForTests, updateStatus } from '$lib/update/store';
 
 const attachment = {
 	file_id: 'file-1',
@@ -59,6 +60,7 @@ beforeEach(() => {
 	});
 	vibrate.mockClear();
 	_resetTurnStateForTests();
+	resetUpdateStoreForTests();
 	token.set('token');
 	connectionState.set('connected');
 	activeThreadId.set(null);
@@ -90,6 +92,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	_resetTurnStateForTests();
+	resetUpdateStoreForTests();
 	if (component) unmount(component);
 	component = null;
 	host.remove();
@@ -547,6 +550,42 @@ describe('InputBar send and queue preparation', () => {
 		flushSync();
 
 		expect(component.getInputText()).toBe('');
+	});
+});
+
+describe('InputBar while CORSIA is restarting', () => {
+	it('preserves the draft and blocks Enter and paste until CORSIA returns', async () => {
+		activeThreadId.set('thread-1');
+		const onSend = vi.fn();
+		component = mount(InputBar, { target: host, props: { onSend } });
+		flushSync();
+		await component.setText('saved before restart');
+		let composer = host.querySelector<HTMLElement>('.composer')!;
+
+		updateStatus.set({
+			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
+			available: true, checked_at: 1, error: null,
+			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'restarting' },
+		});
+		flushSync();
+		composer = host.querySelector<HTMLElement>('.composer')!;
+
+		expect(composer.getAttribute('contenteditable')).toBe('false');
+		expect(composer.getAttribute('aria-disabled')).toBe('true');
+		const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+		const paste = new Event('paste', { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, 'clipboardData', {
+			value: { files: [], getData: () => 'new text' },
+		});
+		composer.dispatchEvent(enter);
+		composer.dispatchEvent(paste);
+		await Promise.resolve();
+
+		expect(paste.defaultPrevented).toBe(true);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+		expect(onSend).not.toHaveBeenCalled();
+		expect(component.getInputText()).toBe('saved before restart');
+		expect(composer.textContent).toBe('saved before restart');
 	});
 });
 

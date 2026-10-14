@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><style>
+button, input { position: fixed; left: 0; width: 100%; height: 50%; border: 0; box-sizing: border-box; background: rgb(240, 240, 240); }
+@media (prefers-color-scheme: dark) { button, input { background: rgb(30, 30, 30); } }
+</style></head><body style="margin:0">
+<button id="probe-button" style="top:0" onclick="this.style.background='rgb(0,200,0)'">Click me</button>
+<input id="probe-input" aria-label="Probe" style="top:50%" oninput="if (this.value === 'hi') this.style.background = 'rgb(0,0,200)'">
+<script>if (location.search === '?navigated') document.getElementById('probe-button').style.background = 'rgb(120,0,160)';</script>
+<script>
+if (new URLSearchParams(location.search).has('stress')) {
+ document.body.innerHTML = '<canvas id="animation"></canvas><div id="tiles"></div><label id="check"><input type="checkbox"> Checkbox</label><output id="hits">0</output>';
+ const style = document.createElement('style');
+ style.textContent = 'body{height:3000px;color:white;font:16px sans-serif}#animation{position:fixed;inset:0;width:100%;height:100%;z-index:-1}#tiles{position:fixed;top:40px;left:40px;display:grid;grid-template-columns:repeat(3,40px);gap:4px}#tiles button{position:static;width:40px;height:40px;background:#eee;color:#111}#check{position:fixed;top:190px;left:40px}#check input{position:static;width:20px;height:20px}#hits{position:fixed;top:230px;left:40px}';
+ document.head.append(style);
+ const target = new URLSearchParams(location.search).get('report');
+ let total = 0, downAt = 0, toggled = false;
+ const report = detail => { if (target) fetch(target, { method:'POST', mode:'no-cors', body:JSON.stringify({ total, scrollY, downAt, ...detail }) }); };
+ for (let i=0;i<9;i++) {
+  const tile=document.createElement('button'); tile.textContent=String(i); tile.dataset.tile=String(i);
+  document.querySelector('#tiles').append(tile);
+ }
+ document.addEventListener('mousedown', () => { toggled=!toggled; downAt=performance.now(); });
+ document.addEventListener('mouseup', event => report({ released:true, buttons:event.buttons }));
+ document.addEventListener('click', event => { if (event.target.closest('#tiles button, #check input')) { total++; document.querySelector('#hits').textContent=String(total); report({ hit:event.target.dataset.tile ?? 'checkbox' }); } });
+ window.addEventListener('scroll', () => report({ scrolling:true }));
+ const canvas=document.querySelector('#animation'); const context=canvas.getContext('2d');
+ function animate(now) {
+  if(canvas.width!==innerWidth || canvas.height!==innerHeight) { canvas.width=innerWidth; canvas.height=innerHeight; }
+  context.fillStyle=toggled?'rgb(180,50,40)':'rgb(20,40,80)'; context.fillRect(0,0,canvas.width,canvas.height);
+  const gradient=context.createLinearGradient(0,0,canvas.width,canvas.height); gradient.addColorStop(0,`hsl(${now/20%360} 80% 40%)`); gradient.addColorStop(1,`hsl(${(now/20+120)%360} 80% 40%)`);
+  context.fillStyle=gradient; context.fillRect(canvas.width*.6,0,canvas.width*.4,canvas.height);
+  context.fillStyle='white'; context.fillRect(canvas.width*.7,(now/3)%canvas.height,40,40);
+  requestAnimationFrame(animate);
+ }
+ requestAnimationFrame(animate);
+ report({ ready:true });
+}
+</script>
+</body></html>

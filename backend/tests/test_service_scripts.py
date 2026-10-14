@@ -335,7 +335,11 @@ curl() {
             printf '%s' '{"ok":true,"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
             ;;
         *)
-            printf '%s' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            if [[ " $* " == *" --write-out "* ]]; then
+                printf '%s\n200' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            else
+                printf '%s' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            fi
             ;;
     esac
 }
@@ -375,7 +379,11 @@ curl() {
         *)
             if [ -s "$OPERATION" ]; then
                 current="$(cat "$OPERATION")"
-                printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}' "$current"
+                if [[ " $* " == *" --write-out "* ]]; then
+                    printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}\n200' "$current"
+                else
+                    printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}' "$current"
+                fi
             else
                 printf '%s' '{"active":false,"activeProcesses":0}'
             fi
@@ -553,7 +561,7 @@ curl() {
     case " $* " in
         *" -X DELETE "*) return 0 ;;
         *" -X POST "*) printf '%s\n200' "$START_PAYLOAD" ;;
-        *) printf '{"operation_id":"%s","status":"in_flight","phase":"steering"}' "$operation_id" ;;
+        *) printf '{"operation_id":"%s","status":"in_flight","phase":"holding","error":null,"kind":"restart","trigger":null,"target_version":null,"drain_total":null,"failure_code":null,"failure_detail":null,"conductor_told_at":null}' "$operation_id" ;;
     esac
 }
 drain_and_wait restart 9999

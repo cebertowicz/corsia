@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 
@@ -27,6 +28,45 @@ def get_setting(key: str, *, db: sqlite3.Connection | None = None) -> dict | Non
     except (json.JSONDecodeError, TypeError):
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+UPDATE_SCHEDULE_DEFAULT = {
+    "automatic": False,
+    "time": "03:00",
+    "tonight_at": None,
+}
+
+
+def parse_update_schedule_time(value: str) -> tuple[int, int]:
+    """Parse the one strict local HH:MM representation used by Update schedules."""
+    if not re.fullmatch(r"\d\d:\d\d", value):
+        raise ValueError("time must use HH:MM local time")
+    hour, minute = (int(part) for part in value.split(":"))
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        raise ValueError("time must use HH:MM local time")
+    return hour, minute
+
+
+def get_update_schedule(
+    *, db: sqlite3.Connection | None = None, include_owner: bool = False
+) -> dict:
+    """Return the validated schedule, retaining its owner only for backend work."""
+    value = get_setting("update_schedule", db=db) or {}
+    automatic = value.get("automatic") is True
+    time = value.get("time")
+    tonight_at = value.get("tonight_at")
+    try:
+        if not isinstance(time, str):
+            raise ValueError("time must use HH:MM local time")
+        parse_update_schedule_time(time)
+    except ValueError:
+        time = UPDATE_SCHEDULE_DEFAULT["time"]
+    if not isinstance(tonight_at, str):
+        tonight_at = None
+    schedule = {"automatic": automatic, "time": time, "tonight_at": tonight_at}
+    if include_owner and isinstance(value.get("owner_id"), str):
+        schedule["owner_id"] = value["owner_id"]
+    return schedule
 
 
 def set_setting(key: str, value: dict, *, db: sqlite3.Connection | None = None) -> None:

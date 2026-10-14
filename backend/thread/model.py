@@ -101,6 +101,11 @@ async def _commit_and_apply(
             source_harness=preparation.source_harness,
             source_runtime_owner=owner,
             destination_target=preparation.destination_target,
+            operation_id=(
+                preparation.input_proof.operation_id
+                if preparation.input_proof is not None
+                else None
+            ),
             source_runtime_context_epoch=preparation.source_runtime_context_epoch,
             expected_context_usage_floor=preparation.source_context_usage_floor,
             preserve_claude_thread=(

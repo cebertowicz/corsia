@@ -8,6 +8,7 @@
 	import { measurementScopeTitle } from '$lib/stores/measurementScopeTitle';
 	import { canvasHeader } from '$lib/stores/canvasHeader';
 	import { haptic } from '$lib/haptic';
+	import { toastTopSurface } from '$lib/stores/toastTop';
 	import { openMeasurementFromThread } from '$lib/stores/measurementNavigation';
 	import type { View } from '$lib/homePaneConfig';
 
@@ -107,7 +108,7 @@
 	{/if}
 {/snippet}
 
-<header class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region>
+<header class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
 	<div class="h-zone h-left">
 		<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
 			<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
@@ -275,9 +276,9 @@
 		.shell-header::before {
 			background-image: linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--bg-primary) 70%, transparent) 0%,
-				color-mix(in srgb, var(--bg-primary) 45%, transparent) 50%,
-				color-mix(in srgb, var(--bg-primary) 15%, transparent) 80%,
+				color-mix(in srgb, var(--header-top-base) 70%, transparent) 0%,
+				color-mix(in srgb, var(--header-top-base) 45%, transparent) 50%,
+				color-mix(in srgb, var(--header-top-base) 15%, transparent) 80%,
 				transparent 100%
 			);
 		}

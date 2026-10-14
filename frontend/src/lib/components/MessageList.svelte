@@ -250,11 +250,7 @@
 			if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
 		});
 	}
-	// The composer's floater and the measured attention rail both grow the
-	// transcript's terminal reservation. If either grows while the user is at
-	// live edge, that edge moves below the viewport even though the user never
-	// scrolled. Re-pin only in that case: reading history keeps its position and
-	// may intentionally pass beneath the overlay.
+	// Re-pin a live-edge transcript when the composer or attention rail grows; preserve a reader's history position.
 	let wasPinnedBeforeLayoutChange = $state(true);
 	$effect(() => {
 		wasPinnedBeforeLayoutChange = userIsNearBottom;

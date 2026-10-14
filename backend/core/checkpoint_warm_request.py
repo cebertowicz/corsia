@@ -56,6 +56,34 @@ def build_warm_request(
     )
 
 
+def _no_live_handle_reason(prepared, context) -> str:
+    """Name why a required Claude Code fold was not a provider resume.
+
+    Mirrors ``runtime_truth._has_registered_provider``: an eager checkpoint the
+    provider registration has not adopted hides an otherwise registered session.
+    """
+    eager = context.eager_checkpoint_id
+    eager_state = (
+        "none" if eager is None
+        else "adopted" if context.registered_checkpoint_id == eager
+        else "pending"
+    )
+    registered = context.provider_registered
+    mode = str(getattr(prepared, "mode", None) or "none").lower()
+    return (
+        f"no_live_handle mode={mode} "
+        f"has_session={'yes' if registered and eager_state != 'pending' else 'no'} "
+        f"session_registered={'yes' if registered else 'no'} eager={eager_state}"
+    )
+
+
+def refuse_no_live_handle(thread_id: str, context, prepared) -> None:
+    """Log a refused warm capture with the provider-resume miss named."""
+    warm_capture_refused(
+        thread_id, context.target.harness, _no_live_handle_reason(prepared, context),
+    )
+
+
 def warm_capture_refused(thread_id: str, harness: str, reason: str) -> None:
     """Log the one reason a warm source was not captured, then return None."""
     logger.info(

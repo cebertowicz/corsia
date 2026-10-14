@@ -9,6 +9,7 @@ their plan -- one message, never to a thread that cannot read it.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 
@@ -68,8 +69,11 @@ def _revision(db, node_id: str) -> int:
     return int(service._node_row(db, node_id)["revision"])
 
 
-def _task(db, plan_id: str, title: str):
-    node = service.add_node(plan_id, kind="task", title=title, acceptance_criteria=f"{title} done", db=db)
+def _task(db, plan_id: str, title: str, *, description: str | None = None, actor_id: str | None = None):
+    node = service.add_node(
+        plan_id, kind="task", title=title, acceptance_criteria=f"{title} done",
+        description=description, actor_id=actor_id, provenance="test.cross_plan", db=db,
+    )
     db.commit()
     return node
 
@@ -173,6 +177,44 @@ def test_accepting_the_prerequisite_tells_the_dependent_owner_once_and_frees_it(
         "[CORSIA plan] Fix the dev test in Infrastructure's plan is done; Merge my PR can go."
     )
     assert _ready(db, merge.id)
+
+
+@pytest.mark.parametrize(("author", "carried"), [("infra", True), ("lane", False)])
+def test_a_prerequisite_wake_carries_a_selected_handoff_description_once_per_plan(db, author, carried):
+    infra = service.ensure_plan("thread", "infra", db=db)
+    fix = _task(db, infra.id, "Fix the dev test")
+    lane = service.ensure_plan("thread", "lane", db=db)
+    merge = _task(
+        db, lane.id, "Merge my PR", description="Merge after reading the release evidence.", actor_id=author,
+    )
+    follow_up = _task(db, lane.id, "Publish the release notes")
+    for dependent in (merge, follow_up):
+        _update(db, lane.id, "add_dependency", {
+            "node_id": dependent.id, "depends_on_node_id": fix.id,
+            "expected_revision": _revision(db, dependent.id),
+        }, actor=LANE)
+        admission.activate(
+            dependent.id, expected_revision=_revision(db, dependent.id), actor_id="lane",
+            provenance="test.cross_plan", db=db,
+        )
+    db.commit()
+
+    _submit(db, infra.id, fix.id)
+    _update(db, infra.id, "accept", {
+        "node_id": fix.id, "verification_result": "passed",
+        "expected_revision": _revision(db, fix.id),
+    }, actor=INFRA)
+
+    facts = [json.loads(row["content"].split("\n", 1)[1]) for row in _wakes(db)]
+    assert len(facts) == 2
+    expected = {
+        "node_id": merge.id, "text": "Merge after reading the release evidence.", "cut": False,
+    }
+    if carried:
+        assert facts[0]["selected_description"] == expected
+        assert "selected_description" not in facts[1]
+    else:
+        assert all("selected_description" not in fact for fact in facts)
 
 
 def test_a_failed_prerequisite_is_told_and_keeps_the_dependent_waiting_on_it(db):

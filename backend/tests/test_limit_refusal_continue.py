@@ -264,3 +264,28 @@ def test_a_continue_refused_on_the_next_account_walks_on(accounts, vendors, monk
         continue_message_id("t1"), continue_message_id(moved.successor.turn_id)}
     assert isinstance(terminal.successor, HeldAdmission)  # both accounts limited: held, no cycle
     assert _running(db, thread) == 0
+
+
+def test_refusal_chain_stops_after_one_continue_per_account(accounts, vendors, monkeypatch):
+    db, thread, first, _second, _ = _setup(accounts, vendors, monkeypatch, "codex", rollover=True)
+    _running_turn(db, thread)
+    moved = _refuse(db)  # A refused: the continue moves to B
+    assert isinstance(moved.successor, ClaimedBatch)
+    db.execute("UPDATE messages SET delivery_state='delivered' WHERE id=?", (continue_message_id("t1"),))
+    db.commit()
+    harness_usage.record_allowed(
+        provider="codex", receipt=receipt_of("codex", first["id"], db=db), source="reset", db=db,
+    )
+
+    back = _refuse(db, turn=moved.successor.turn_id)  # B refused, A reads usable again: the continue returns to A
+    assert isinstance(back.successor, ClaimedBatch)
+    db.execute("UPDATE messages SET delivery_state='delivered' WHERE id=?",
+               (continue_message_id(moved.successor.turn_id),))
+    db.commit()
+
+    terminal = _refuse(db, turn=back.successor.turn_id)  # A refused again: two continues for two accounts, stop
+
+    assert terminal.successor is None
+    assert {row["id"] for row in _continues(db, thread)} == {
+        continue_message_id("t1"), continue_message_id(moved.successor.turn_id)}
+    assert _running(db, thread) == 0

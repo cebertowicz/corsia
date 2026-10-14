@@ -8,6 +8,8 @@ than copying them.
 
 from __future__ import annotations
 
+import logging
+
 import plans.node_states as node_states
 import plans.notifications as notifications
 import plans.plan_wake as plan_wake
@@ -21,6 +23,9 @@ from plans.delegation import (
     _valid_structured_epoch,
     attachment_payload,
 )
+from infra.database import write_transaction
+
+logger = logging.getLogger(__name__)
 
 
 def _ready(node, payload, db) -> bool:
@@ -321,6 +326,22 @@ def _harvest(node, attachment, payload, child_event, db, reply: str = "") -> boo
     return accepted is not None
 
 
+def _harvest_row(node, db) -> bool:
+    """Harvest this attachment's return if it is ready and not yet harvested."""
+    epoch = _valid_structured_epoch(node, db)
+    if epoch is None:
+        return False
+    attachment, payload = epoch
+    if _harvested(node["id"], attachment["id"], db):
+        return False
+    if not _ready(node, payload, db):
+        return False
+    child_event = _latest_child_event(payload["child_plan_id"], db)
+    if child_event is None:
+        return False
+    return _harvest(node, attachment, payload, child_event, db)
+
+
 def harvest_ready_children(
     *,
     db,
@@ -354,21 +375,17 @@ def harvest_ready_children(
             params,
         ).fetchall()
         for node in rows:
-            epoch = _valid_structured_epoch(node, db)
-            if epoch is None:
+            # One row that raises rolls back alone and is logged; the other
+            # returns, and every other wake source on this clock, still run.
+            try:
+                with write_transaction(db, scope="harvest_row"):
+                    done = _harvest_row(node, db)
+            except Exception:
+                logger.exception("delegation harvest of node %s failed", node["id"])
                 continue
-            attachment, payload = epoch
-            if _harvested(node["id"], attachment["id"], db):
-                continue
-            if not _ready(node, payload, db):
-                continue
-            child_event = _latest_child_event(payload["child_plan_id"], db)
-            if child_event is None:
-                continue
-            if not _harvest(node, attachment, payload, child_event, db):
-                continue
-            harvested.append(node["id"])
-            changed.append(node["plan_id"])
+            if done:
+                harvested.append(node["id"])
+                changed.append(node["plan_id"])
     for plan_id in changed:
         if plan_id not in changed_plan_ids:
             changed_plan_ids.append(plan_id)

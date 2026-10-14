@@ -4,6 +4,7 @@ import { connectionState, connectionError } from '../stores/connection';
 import { ws, setWs } from './state';
 import { handleMessage } from './handlers';
 import './documentOpen';
+import './browserOpen';
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;

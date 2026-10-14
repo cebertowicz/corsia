@@ -286,7 +286,7 @@ def cmd_token_service(args: argparse.Namespace) -> int:
     users = accounts.list_users()
     if not users:
         raise SystemExit("No account exists yet. Run: corsia user add")
-    token, _ = accounts.issue_token(users[0]["id"], kind="service", label="lifecycle")
+    token = accounts.issue_service_token(users[0]["id"], "lifecycle")
     print(token)
     return 0
 
