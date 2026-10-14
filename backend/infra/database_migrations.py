@@ -169,6 +169,7 @@ from infra.migration_109_to_110_agent_use_restriction import migrate_109_to_110
 from infra.migration_110_to_111_token_plan_by_host import migrate_110_to_111
 from infra.migration_111_to_112_image_regions import migrate_111_to_112
 from infra.migration_112_to_113_retype_upload_images import migrate_112_to_113
+from infra.migration_113_to_114_update_operations import migrate_113_to_114
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -235,6 +236,15 @@ MigrationStep = Callable[[sqlite3.Connection], None]
 
 class MigrationError(RuntimeError):
     """A migration refused or failed; the database is unchanged."""
+
+
+class BackupRoomError(MigrationError):
+    """The backup reserve cannot fit, carrying the exact byte counts."""
+
+    def __init__(self, message: str, needed_bytes: int, free_bytes: int):
+        super().__init__(message)
+        self.needed_bytes = needed_bytes
+        self.free_bytes = free_bytes
 
 
 @dataclass(frozen=True)
@@ -757,6 +767,7 @@ MIGRATIONS[109] = migrate_109_to_110
 MIGRATIONS[110] = migrate_110_to_111
 MIGRATIONS[111] = migrate_111_to_112
 MIGRATIONS[112] = migrate_112_to_113
+MIGRATIONS[113] = migrate_113_to_114
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:
@@ -781,35 +792,48 @@ def _database_bytes(source: Path) -> int:
     return total
 
 
-def _require_backup_room(source: Path, from_version: int) -> None:
-    """Refuse before copying when the copy would leave the host without room.
-
-    A backup that fills the filesystem takes down the host, every other service
-    on it, and the database it was copying. Requiring a reserve *after* the copy
-    is what stops a crash-restart loop: each attempt is a fresh uncontested
-    lock winner, so nothing else limits how many copies get written.
-
-    Refusing does block startup, and that is the honest outcome here rather
-    than a new failure mode: migrating without a backup is not safe, and the
-    alternative is filling the disk. The message names both numbers so the
-    condition can be cleared by freeing space anywhere.
-
-    Raises:
-        MigrationError: The filesystem cannot hold the copy and keep the
-            reserve.
-    """
+def _backup_room_state(source: Path) -> tuple[int, int, list[Path]]:
+    """Share the preflight and migration room calculation so their decisions agree."""
     needed = _database_bytes(source)
     required = int(needed * _BACKUP_MIN_FREE_RATIO) + _BACKUP_FREE_FLOOR_BYTES
-    free = shutil.disk_usage(source.parent).free
-    if free < required:
-        raise MigrationError(
-            f"not enough free space for the pre-migration backup of schema "
-            f"v{from_version}: {free / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
-            f"required to copy a {needed / 1e9:.2f} GB database and keep a "
-            f"{_BACKUP_FREE_FLOOR_BYTES / 1e9:.2f} GB reserve. Free space, then "
-            f"start again; the database is unchanged. Superseded backups in "
-            f"{source.parent} are the usual place to reclaim it."
-        )
+    return required, shutil.disk_usage(source.parent).free, _pre_migration_backups(source)[:-1]
+
+
+def backup_room(source: Path) -> tuple[int, int]:
+    """Share preflight/migration available-room accounting without changing the filesystem."""
+    required, free, stale = _backup_room_state(source)
+    return required, free + sum(path.stat().st_size for path in stale)
+
+
+def _backup_room_error(
+    source: Path, from_version: int, required: int, available: int,
+) -> BackupRoomError:
+    """Describe a shared preflight or migration refusal with operator recovery steps."""
+    needed = _database_bytes(source)
+    return BackupRoomError(
+        f"not enough free space for the pre-migration backup of schema "
+        f"v{from_version}: {available / 1e9:.2f} GB free, {required / 1e9:.2f} GB "
+        f"required to copy a {needed / 1e9:.2f} GB database and keep a "
+        f"{_BACKUP_FREE_FLOOR_BYTES / 1e9:.2f} GB reserve. Free space, then "
+        f"start again; the database is unchanged. Superseded backups in "
+        f"{source.parent} are the usual place to reclaim it.",
+        required,
+        available,
+    )
+
+
+def require_backup_room(source: Path, from_version: int) -> tuple[int, int]:
+    """Refuse before copying when the backup and reserve cannot fit.
+
+    The reserve is required after the copy: a crash-restart attempt is a fresh,
+    uncontested lock winner, so nothing else limits how many copies it can
+    write. Refusing startup is the honest outcome because migrating without a
+    backup is unsafe.
+    """
+    required, available = backup_room(source)
+    if available < required:
+        raise _backup_room_error(source, from_version, required, available)
+    return required, available
 
 
 def _pre_migration_backups(source: Path) -> list[Path]:
@@ -861,36 +885,31 @@ def _prune_backups(source: Path, keep_path: Path | None) -> None:
 
 
 def _ensure_backup_room(source: Path, from_version: int) -> None:
-    """Run the room check, first freeing superseded backups when it fails.
+    """Prune oldest superseded backups, never the newest, before copying.
 
-    Deletes pre-migration backups oldest-first, never the newest, only while
-    the room check still fails, so an Update does not die on space that our own
-    stale backups hold. When room is still short with only the newest left, the
-    refusal is the room check's own.
+    Only backups credited by the shared preflight calculation are removed, and
+    only until the backup plus reserve fits. If even that cannot make room,
+    refusing is safer than migrating without a backup.
     """
-    try:
-        _require_backup_room(source, from_version)
+    required, free, stale = _backup_room_state(source)
+    available = free + sum(path.stat().st_size for path in stale)
+    if available < required:
+        raise _backup_room_error(source, from_version, required, available)
+    if free >= required:
         return
-    except MigrationError:
-        stale = _pre_migration_backups(source)[:-1]
-        if not stale:
-            raise
     removed: list[Path] = []
     reclaimed = 0
     for path in stale:
         reclaimed += path.stat().st_size
         path.unlink()
         removed.append(path)
-        try:
-            _require_backup_room(source, from_version)
+        if shutil.disk_usage(source.parent).free >= required:
             break
-        except MigrationError:
-            continue
     log.info(
         "Pruned %d pre-migration backup(s), reclaimed %d bytes (making room for the backup)",
         len(removed), reclaimed,
     )
-    _require_backup_room(source, from_version)
+    require_backup_room(source, from_version)
 
 
 def _write_backup(conn: sqlite3.Connection, from_version: int) -> Path | None:
@@ -1061,7 +1080,7 @@ def migrate_to_current(conn: sqlite3.Connection, target_version: int) -> Migrati
 
                 # The lock makes this the only backup within one boot. It cannot
                 # bound copies across boots: a crash-restart loop is a fresh
-                # uncontested winner every time, which is why `_require_backup_room`
+                # uncontested winner every time, which is why `require_backup_room`
                 # reserves space the copy may not consume.
                 backup_path = _write_backup(conn, locked_version)
                 log.info(

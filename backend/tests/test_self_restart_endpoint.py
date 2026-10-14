@@ -159,6 +159,13 @@ class TestSelfRestartEndpoint:
             "status": row["status"],
             "phase": row["phase"],
             "error": row["error"],
+            "kind": None,
+            "trigger": None,
+            "target_version": None,
+            "drain_total": None,
+            "failure_code": None,
+            "failure_detail": None,
+            "conductor_told_at": None,
         }
         assert global_response.status_code == 200
         assert global_response.json()["active"] is False

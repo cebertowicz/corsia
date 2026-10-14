@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+import os
 import threading
 import time
 
@@ -17,7 +18,10 @@ from infra import state
 from infra.config import RUNTIME_DIR
 
 SIGNAL_FILE = RUNTIME_DIR / "corsia-restart.signal"
-DRAIN_HARD_CAP = 300  # 5 minutes max drain time
+# How long scripts/corsia.d/runtime.sh lets agents reach a safe point before it enforces the hard cap. Both read
+# CORSIA_DRAIN_MAX_WAIT, so an operator override moves the enforced cap and the countdown together;
+# test_update_journey_status.py pins this default to the script's.
+DEFAULT_DRAIN_WAIT_SECONDS = 60
 _drain_admission_lock = threading.Lock()
 _turn_admissions = 0
 
@@ -33,6 +37,15 @@ _inherited_turn_admission: ContextVar[_TurnAdmission | None] = ContextVar(
     "inherited_turn_admission",
     default=None,
 )
+
+
+def drain_wait_seconds() -> int:
+    """The hard cap the shell enforces: CORSIA_DRAIN_MAX_WAIT, else the default."""
+    try:
+        seconds = int(os.environ.get("CORSIA_DRAIN_MAX_WAIT", ""))
+    except ValueError:
+        return DEFAULT_DRAIN_WAIT_SECONDS
+    return seconds if seconds >= 0 else DEFAULT_DRAIN_WAIT_SECONDS
 
 
 def _active_work_counts() -> dict[str, int]:
@@ -129,7 +142,7 @@ def get_drain_status(*, user_id: str | None = None) -> dict:
         **counts,
         "blockingTurns": active_turn_blockers(user_id=user_id) if user_id is not None else active_turn_blockers(),
         "elapsed": round(elapsed),
-        "hard_cap_remaining": max(0, round(DRAIN_HARD_CAP - elapsed)),
+        "hard_cap_remaining": max(0, round(drain_wait_seconds() - elapsed)),
     }
 
 
@@ -145,6 +158,13 @@ def get_drain_operation_status(operation_id: str) -> dict | None:
         "status": operation["status"],
         "phase": operation.get("phase"),
         "error": operation.get("error"),
+        "kind": operation.get("kind"),
+        "trigger": operation.get("trigger"),
+        "target_version": operation.get("target_version"),
+        "drain_total": operation.get("drain_total"),
+        "failure_code": operation.get("failure_code"),
+        "failure_detail": operation.get("failure_detail"),
+        "conductor_told_at": operation.get("conductor_told_at"),
     }
 
 
