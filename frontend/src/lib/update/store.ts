@@ -10,7 +10,7 @@ import {
 	type UpdateChanges,
 	type UpdateOperation,
 } from './model';
-import { releaseNotesFor, rememberId, snapshotReleaseNotes } from './releaseNotes';
+import { releaseNotesFor, rememberApprovedNotes, rememberId, snapshotReleaseNotes } from './releaseNotes';
 
 export { releaseNotesFor };
 export type { UpdateReleaseNotes } from './releaseNotes';
@@ -253,7 +253,7 @@ export function closeUpdateSurface(): void {
 /** Start the approved update lifecycle, then immediately adopt its durable record. */
 export async function startUpdate(): Promise<void> {
 	updateFailureMessage.set(null);
-	snapshotReleaseNotes(get(updateStatus) ?? {} as UpdateStatus);
+	rememberApprovedNotes(get(updateStatus));
 	updateStarting.set(true);
 	// The request answers only once the update is built; adopt the operation record meanwhile so the surface shows progress.
 	const adopt = setInterval(() => { void loadUpdateStatus(); }, POLL_MS);

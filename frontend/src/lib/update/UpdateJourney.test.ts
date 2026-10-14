@@ -75,6 +75,23 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).toContain("Reloading now shows a connection error until it's back.");
 	});
 
+	it('tells assistive technology which step is current and which are done', () => {
+		updateStatus.set(status({
+			operation: {
+				operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining',
+				drain_total: 2, blocking: 1, requested_at: new Date().toISOString(),
+			},
+		}));
+		updateSurface.set('panel');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+
+		const steps = [...host.querySelectorAll('ol.steps li')];
+		expect(steps.map((step) => step.getAttribute('aria-current'))).toEqual([null, 'step', null, null]);
+		expect(steps[0].querySelector('.sr-only')?.textContent).toBe(', done');
+		expect(steps[1].querySelector('.sr-only')).toBeNull();
+	});
+
 	it('labels every available and additional change, then expands every returned item', () => {
 		updateStatus.set(status({ changes: { kind: 'changelog', headline: null, items: ['One', 'Two', 'Three', 'Four', 'Five'], more: 2 } }));
 		updateSurface.set('sheet');

@@ -102,7 +102,7 @@
 {#snippet progress()}
 	<section class="update-content progress" aria-live="polite">
 		<p class="version">Updating to {targetVersion}</p>
-		<ol class="steps">{#each UPDATE_STEPS as step, index}<li class:active={activeStep === index} class:done={activeStep > index}><span class="step-mark" aria-hidden="true">{#if activeStep > index}✓{:else if activeStep === index}<span class="spinner"></span>{/if}</span>{step}</li>{/each}</ol>
+		<ol class="steps">{#each UPDATE_STEPS as step, index}<li class:active={activeStep === index} class:done={activeStep > index} aria-current={activeStep === index ? 'step' : undefined}><span class="step-mark" aria-hidden="true">{#if activeStep > index}✓{:else if activeStep === index}<span class="spinner"></span>{/if}</span>{step}{#if activeStep > index}<span class="sr-only">, done</span>{/if}</li>{/each}</ol>
 		{#if stepDetail(operation, $updateUnreachable)}<p class="step-detail">{stepDetail(operation, $updateUnreachable)}</p>{/if}
 		<div class="timing"><span>Elapsed <strong>{elapsed}</strong></span>{#if $updateStatus?.usual_seconds != null}<span>Usually about {humanDuration($updateStatus.usual_seconds)}</span>{/if}</div>
 		{#if activeStep === 2}<p class="muted">This page comes back on its own. Reloading now shows a connection error until it's back.</p>{/if}
@@ -133,6 +133,7 @@
 	.muted { color: var(--text-tertiary); } .steps { display: grid; gap: var(--space-3); margin: var(--space-3) 0; padding: 0; list-style: none; }
 	.steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--text-tertiary); } .steps li.active { color: var(--text-primary); font-weight: var(--fw-semibold); } .steps li.done { color: var(--green-text); }
 	.step-mark { width: 18px; height: 18px; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-circle); } .done .step-mark { border-color: transparent; }
+	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	.spinner { width: 10px; height: 10px; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); border-radius: var(--radius-circle); animation: spin .8s linear infinite; }
 	.step-detail { margin: var(--space-4) 0; } .timing { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text-tertiary); font-size: var(--text-footnote); } .timing strong { color: var(--text-primary); }
 	.conductor { display: flex; gap: var(--space-2); align-items: center; } details { border-top: 1px solid var(--border-subtle); margin-top: var(--space-4); padding-top: var(--space-3); } summary { cursor: pointer; color: var(--text-primary); } pre { max-height: 180px; overflow: auto; white-space: pre-wrap; color: var(--text-tertiary); font: var(--text-caption)/1.45 var(--font-mono, monospace); }

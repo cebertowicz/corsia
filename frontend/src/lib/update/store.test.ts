@@ -14,6 +14,7 @@ import {
 	updateSurface,
 	updateUnreachable,
 } from './store';
+import { rememberApprovedNotes } from './releaseNotes';
 
 const running = (phase: 'holding' | 'steering' | 'draining' | 'ready' | 'restarting' | 'resuming') => ({
 	branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1, available: true,
@@ -122,6 +123,46 @@ describe('update store', () => {
 		updateSurface.set('closed');
 		await loadUpdateStatus();
 		expect(get(toasts)).toEqual([]);
+	});
+
+	it('keeps the approved change list when the server has already stopped offering it by the time the operation is adopted', async () => {
+		const offered = { ...running('holding'), operation: undefined, changes: { kind: 'changelog', headline: null, items: ['One'], more: 0 } };
+		updateStatus.set(offered as never);
+		// The checkout already holds the update: the operation exists but no change list is offered any more.
+		const adopted = { ...running('draining'), available: false };
+		let release: (value: unknown) => void = () => {};
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (String(url).includes('/api/system/restart')) {
+				await new Promise((resolve) => { release = resolve; });
+				return { ok: true, json: async () => ({ ok: true }) };
+			}
+			return { ok: true, json: async () => adopted };
+		}));
+		const started = startUpdate();
+		await vi.advanceTimersByTimeAsync(1_100);
+		release(null);
+		await started;
+		const done = { ...adopted, operation: { ...adopted.operation, status: 'complete' } };
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => (String(url).startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => done })));
+		resetUpdateStoreForTests();
+		await loadUpdateStatus();
+		expect(releaseNotesFor(get(updateOperation), get(updateStatus))?.changes?.items).toEqual(['One']);
+	});
+
+	it('keeps the saved notes when a reloaded page adopts the running update without the offer', async () => {
+		const offered = { ...running('holding'), changes: { kind: 'changelog', headline: null, items: ['One'], more: 0 } };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => offered })));
+		await loadUpdateStatus();
+		resetUpdateStoreForTests();
+		rememberApprovedNotes(null);
+		const adopted = { ...running('draining'), available: false };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => adopted })));
+		await loadUpdateStatus();
+		const done = { ...adopted, operation: { ...adopted.operation, status: 'complete' } };
+		resetUpdateStoreForTests();
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => done })));
+		await loadUpdateStatus();
+		expect(releaseNotesFor(get(updateOperation), get(updateStatus))?.changes?.items).toEqual(['One']);
 	});
 
 	it('keeps the notes of an update reachable after it completes and the offer clears', async () => {

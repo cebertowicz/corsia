@@ -46,6 +46,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--toast-height',
 	'--toast-anchor-x',
 	'--toast-anchor-width',
+	// MessageList's `style:--toast-stack-height` (the toastStackHeight store): room kept above the composer for the toast stack.
+	'--toast-stack-height',
 ]);
 
 /**

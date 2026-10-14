@@ -28,12 +28,24 @@ export function rememberId(key: string, id: string): boolean {
 	return true;
 }
 
+// The server stops offering the change list once its checkout holds the update, which happens before the operation exists
+// for this client; the list the person approved is kept here until the operation's own snapshot is written.
+let approved: { targetVersion: string; changes: UpdateChanges } | null = null;
+
+export function rememberApprovedNotes(status: UpdateStatus | null): void {
+	approved = status?.target_version && status.changes ? { targetVersion: status.target_version, changes: status.changes } : null;
+}
+
 export function snapshotReleaseNotes(status: UpdateStatus): void {
 	const operation = status.operation;
 	const targetVersion = operation?.target_version ?? status.target_version;
 	if (!operation?.operation_id || !targetVersion) return;
+	const key = `${RELEASE_NOTES_KEY}${operation.operation_id}`;
+	const changes = status.changes ?? (approved?.targetVersion === targetVersion ? approved.changes : null);
 	try {
-		localStorage.setItem(`${RELEASE_NOTES_KEY}${operation.operation_id}`, JSON.stringify({ targetVersion, changes: status.changes ?? null }));
+		// A reloaded page holds neither the offer nor the remembered list; it must not blank what an earlier page saved.
+		if (!changes && JSON.parse(localStorage.getItem(key) ?? 'null')?.changes) return;
+		localStorage.setItem(key, JSON.stringify({ targetVersion, changes }));
 	} catch { /* release notes remain optional when storage is unavailable */ }
 }
 
