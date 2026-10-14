@@ -80,11 +80,9 @@ test.describe('@flow:browser-pane animated browser control', () => {
    if (mobile) {
     const session = await context.newCDPSession(page);
     const x = bounds.x + bounds.width * .5, y = bounds.y + Math.min(500, bounds.height - 40);
-    await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-    for (let i = 1; i <= 10; i++) {
-     await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - i * 20 }] });
-     await page.waitForTimeout(20);
-    }
+    // One 200px CDP touch move is a real drag and avoids Chromium collapsing synthetic intermediate moves.
+    await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+    await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - 200, id: 1 }] });
     await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await expect.poll(() => reports.at(-1)?.scrollY ?? 0).toBeGreaterThan(160);
     expect(reports.at(-1)!.scrollY).toBeLessThan(240);
