@@ -3,7 +3,7 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
-	import { clampPoint, LatestFramePipeline } from '$lib/browserPane';
+	import { clampPoint } from '$lib/browserPane';
 	import { BrowserPaneInput } from '$lib/browserPaneInput';
 	import { on } from '$lib/ws/events';
 	import { get } from 'svelte/store';
@@ -16,12 +16,13 @@
 	let url = $state('');
 	let width = $state(0);
 	let height = $state(0);
+	let image = $state<HTMLImageElement | null>(null);
 	let streaming = $state(false);
 	let opening = false;
 	let fitTimer: ReturnType<typeof setTimeout> | undefined;
 	let lastAppearance = '';
 	let activePointer: number | null = null;
-	const framePipeline = new LatestFramePipeline(drawFrame);
+	let decodeGeneration = 0;
 	const paneInput = new BrowserPaneInput(message => {
 		if (hasControl && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 	});
@@ -73,7 +74,16 @@
 		if (message.type !== 'frame' || !message.metadata || typeof message.data !== 'string') return;
 		const metadata = message.metadata as Record<string, unknown>;
 		if (typeof metadata.deviceWidth !== 'number' || typeof metadata.deviceHeight !== 'number') return;
-		framePipeline.offer({ data: message.data, width: metadata.deviceWidth, height: metadata.deviceHeight });
+		width = metadata.deviceWidth;
+		height = metadata.deviceHeight;
+		const generation = ++decodeGeneration;
+		const next = new Image();
+		next.src = `data:image/jpeg;base64,${message.data}`;
+		void next.decode().then(() => {
+			if (generation !== decodeGeneration) return;
+			image = next;
+			redraw();
+		}).catch(() => {});
 	}
 
 	// Where the page sits in the canvas: drawing and input share it, so a click lands where it is drawn.
@@ -83,10 +93,8 @@
 		return { bounds, scale, left: (bounds.width - width * scale) / 2, top: (bounds.height - height * scale) / 2 };
 	}
 
-	function drawFrame(bitmap: ImageBitmap, frame: { width: number; height: number }) {
-		if (!canvas || !frame.width || !frame.height) return;
-		width = frame.width;
-		height = frame.height;
+	function redraw() {
+		if (!canvas || !image || !width || !height) return;
 		const { bounds, scale, left, top } = placement();
 		const backingWidth = Math.round(bounds.width * devicePixelRatio);
 		const backingHeight = Math.round(bounds.height * devicePixelRatio);
@@ -101,12 +109,8 @@
 		// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
 		// top-left corner with blank space beside it, so draw only the page's part of the frame.
 		// Frame pixels per page pixel; above 1 on a high-density pane.
-		const density = Math.min(bitmap.width / frame.width, bitmap.height / frame.height);
-		context.drawImage(bitmap, 0, 0, frame.width * density, frame.height * density, left, top, frame.width * scale, frame.height * scale);
-	}
-
-	function redraw() {
-		framePipeline.redraw();
+		const density = Math.min(image.naturalWidth / width, image.naturalHeight / height);
+		context.drawImage(image, 0, 0, width * density, height * density, left, top, width * scale, height * scale);
 	}
 
 	// The page takes the pane's size, pixel density and CORSIA theme: it fills the pane sharply, never glaring.
@@ -220,7 +224,6 @@
 			unsubscribeTheme();
 			clearTimeout(fitTimer);
 			paneInput.dispose();
-			framePipeline.dispose();
 		};
 	});
 
