@@ -28,6 +28,11 @@
 		return fade(node, { duration: Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 });
 	}
 
+	function leadMotion(node: Element, _params: undefined, { direction }: { direction: 'in' | 'out' | 'both' }) {
+		const tight = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0;
+		return fade(node, { duration: direction === 'out' ? tight * 0.5 : tight });
+	}
+
 	function railMotion(node: Element) {
 		const duration = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-standard')) || 0;
 		return window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -39,7 +44,7 @@
 {#snippet inner()}
 	<span class="lead" aria-hidden="true">
 		{#key state}
-			<span class="lead-state" in:tokenFade out:tokenFade>
+			<span class="lead-state" in:leadMotion out:leadMotion>
 				{#if state === 'done'}
 					<svg class="done-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path pathLength="1" d="M5 12.5l4.5 4.5L19 7.5" /></svg>
 				{:else if state === 'busy'}

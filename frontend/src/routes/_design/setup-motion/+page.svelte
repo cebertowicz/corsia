@@ -6,6 +6,7 @@
 	let step = $state<StepState>('todo');
 	let jobState = $state<'busy' | 'done' | 'error'>('busy');
 	let jobCount = $state(0);
+	let removingJobs = $state(false);
 
 	const steps = $derived<SetupStep[]>([{ label: 'Motion step', icon: 'chip', state: step }]);
 	const jobs = $derived<SetupJob[]>(Array.from({ length: jobCount }, (_, index) => ({
@@ -24,7 +25,15 @@
 	}
 
 	function advanceJobCount() {
-		jobCount = jobCount === 0 ? 1 : jobCount === 1 ? 2 : 0;
+		if (jobCount === 0) {
+			jobCount = 1;
+			removingJobs = false;
+		} else if (jobCount === 1) {
+			jobCount = removingJobs ? 0 : 2;
+		} else {
+			jobCount = 1;
+			removingJobs = true;
+		}
 	}
 </script>
 

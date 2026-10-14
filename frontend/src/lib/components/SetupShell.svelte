@@ -19,6 +19,21 @@
 	}
 
 	const { steps, jobs = [], title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
+	let shownJobs = $state<SetupJob[]>(jobs);
+	let jobRegionOpen = $state(jobs.length > 0);
+
+	$effect(() => {
+		if (jobs.length > 0) {
+			shownJobs = jobs;
+			jobRegionOpen = true;
+		} else {
+			jobRegionOpen = false;
+		}
+	});
+
+	function clearClosingJobs() {
+		if (jobs.length === 0) shownJobs = [];
+	}
 
 	function jobHeightMotion(node: Element, _params: undefined, { direction }: { direction: 'in' | 'out' | 'both' }) {
 		const style = getComputedStyle(node);
@@ -28,6 +43,18 @@
 		return {
 			duration: direction === 'out' ? standard * 0.7 : standard,
 			css: (t: number) => `grid-template-rows: ${t}fr; opacity: ${t}`,
+		};
+	}
+
+	function jobRegionMotion(node: Element, _params: undefined, { direction }: { direction: 'in' | 'out' | 'both' }) {
+		const style = getComputedStyle(node);
+		const tight = Number.parseFloat(style.getPropertyValue('--dur-tight')) || 0;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return fade(node, { duration: tight });
+		const standard = Number.parseFloat(style.getPropertyValue('--dur-standard')) || 0;
+		const height = node.getBoundingClientRect().height;
+		return {
+			duration: direction === 'out' ? standard * 0.7 : standard,
+			css: (t: number) => `height: ${t * height}px; opacity: ${t}; overflow: hidden`,
 		};
 	}
 </script>
@@ -40,15 +67,17 @@
 				<RailRow label={step.label} iconName={step.icon} state={step.state} />
 			{/each}
 		</RailSection>
-		<div class="job-region" class:open={jobs.length > 0} aria-hidden={jobs.length === 0}>
-			<div class="job-region-inner">
-				<RailSection label="In the background">
-					{#each jobs as job (job.label)}
-						<div class="job-row" in:jobHeightMotion out:jobHeightMotion><div class="job-row-inner"><RailRow {...job} /></div></div>
-					{/each}
-				</RailSection>
+		{#if jobRegionOpen}
+			<div class="job-region" in:jobRegionMotion out:jobRegionMotion onoutroend={clearClosingJobs}>
+				<div class="job-region-inner">
+					<RailSection label="In the background">
+						{#each shownJobs as job (job.label)}
+							<div class="job-row" in:jobHeightMotion out:jobHeightMotion><div class="job-row-inner"><RailRow {...job} /></div></div>
+						{/each}
+					</RailSection>
+				</div>
 			</div>
-		</div>
+		{/if}
 	</aside>
 	<main class="pane">
 		<div class="drag" data-tauri-drag-region></div>
@@ -81,10 +110,8 @@
 	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
 	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
-	.job-region { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows calc(var(--dur-standard) * 0.7) var(--ease-snap), opacity calc(var(--dur-standard) * 0.7) var(--ease-snap); }
-	.job-region.open { grid-template-rows: 1fr; opacity: 1; transition-duration: var(--dur-standard); transition-timing-function: var(--ease-entrance); }
+	.job-region { overflow: hidden; }
 	.job-region-inner { min-height: 0; overflow: hidden; }
 	.job-row { min-height: 0; display: grid; grid-template-rows: 1fr; overflow: hidden; }
 	.job-row-inner { min-height: 0; overflow: hidden; }
-	@media (prefers-reduced-motion: reduce) { .job-region { transition: opacity var(--dur-tight) var(--ease-snap); } .job-region.open { grid-template-rows: 1fr; } }
 </style>

@@ -25,7 +25,8 @@ function sourcesFor(state: SetupState) {
 	}
 }
 
-async function serveSetupState(page: Page, state: SetupState) {
+async function serveSetupState(page: Page, state: SetupState | (() => SetupState)) {
+	const currentState = () => typeof state === 'function' ? state() : state;
 	await page.route('**/api/auth/status', async (route) => {
 		await route.fulfill({ json: { has_users: false } });
 	});
@@ -33,16 +34,16 @@ async function serveSetupState(page: Page, state: SetupState) {
 		await route.fulfill({ json: { apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, work_folder: '~/CORSIA' } });
 	});
 	await page.route('**/api/setup/local-download', async (route) => {
-		await route.fulfill({ json: { ok: true, in_progress: state === 'downloading' } });
+		await route.fulfill({ json: { ok: true, in_progress: currentState() === 'downloading' } });
 	});
 	await page.route('**/api/setup/first-account', async (route) => {
 		await route.fulfill({ json: { token: 'setup-evidence-token', user: { id: 'setup-evidence', name: 'First Person' } } });
 	});
 	await page.route('**/api/providers/sources/recheck', async (route) => {
-		await route.fulfill({ json: { sources: sourcesFor(state) } });
+		await route.fulfill({ json: { sources: sourcesFor(currentState()) } });
 	});
 	await page.route('**/api/providers/sources', async (route) => {
-		await route.fulfill({ json: { sources: sourcesFor(state) } });
+		await route.fulfill({ json: { sources: sourcesFor(currentState()) } });
 	});
 }
 
@@ -62,6 +63,7 @@ async function assertDoneChecksSettled(page: Page) {
 }
 
 async function openModelStep(page: Page) {
+	await page.addInitScript(() => localStorage.setItem('corsia_theme', 'auto'));
 	await page.goto('/');
 	await page.getByRole('button', { name: 'Get started' }).click();
 	await page.locator('input[autocomplete="name"]').fill('First Person');
@@ -107,19 +109,49 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 				await page.setViewportSize({ width, height });
 				await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
 				await openModelStep(page);
+				await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
 				await assertSetupState(page, state);
 				await page.screenshot({ path: testInfo.outputPath(`setup-model-${state}-${surface}.png`), animations: 'disabled', scale: 'css' });
 			}
 		}
 	});
 
+	test('records the setup model sequence from not installed through This computer ready', async ({ page }, testInfo) => {
+		let state: SetupState = 'not-installed';
+		await serveSetupState(page, () => state);
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+		await openModelStep(page);
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+		await assertSetupState(page, 'not-installed');
+		await page.screenshot({ path: testInfo.outputPath('setup-model-not-installed-light-1280x900.png'), scale: 'css' });
+
+		state = 'downloading';
+		await page.getByRole('button', { name: 'Check again' }).click();
+		await expect(page.getByText('This computer', { exact: true })).toBeVisible();
+		await assertSetupState(page, 'downloading');
+		await page.screenshot({ path: testInfo.outputPath('setup-model-this-computer-downloading-light-1280x900.png'), scale: 'css' });
+
+		state = 'ready';
+		await page.evaluate(async () => {
+			const events = await import('/src/lib/ws/events.ts');
+			events.emit('models_updated', {});
+		});
+		await assertSetupState(page, 'ready');
+		await page.screenshot({ path: testInfo.outputPath('setup-model-this-computer-ready-light-1280x900.png'), scale: 'css' });
+		await page.getByRole('button', { name: 'Start using CORSIA' }).click();
+		await expect(page.getByRole('heading', { name: 'Choose an AI model' })).not.toBeVisible();
+	});
+
 	test('records Get started moving the local download into the background rail', async ({ page }, testInfo) => {
 		await serveSetupState(page, 'downloading');
 		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.addInitScript(() => localStorage.setItem('corsia_theme', 'auto'));
 		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 		await page.goto('/');
 		await page.getByRole('button', { name: 'Get started' }).click();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		const job = page.locator('.job-row');
 		await waitForJobSettled(page, job);
 		await expect(job).toHaveCSS('opacity', '1');
