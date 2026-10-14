@@ -25,8 +25,8 @@ def _artifact_ids(value: object) -> list[str]:
 
 
 
-def _require_no_stop(db, node, *, paused_plan_binds: bool = True) -> None:
-    """Refuse review while a stop is in force on this work.
+def stop_reason(db, node, *, paused_plan_binds: bool = True) -> str | None:
+    """The stop in force on this work, or None when review may proceed.
 
     Requesting review is a state transition like any other, so a paused plan
     or a live hold must block it. Without this, `request_review` would settle
@@ -35,10 +35,14 @@ def _require_no_stop(db, node, *, paused_plan_binds: bool = True) -> None:
     refuses under exactly these conditions. A caller that has already ended
     the node's holds may set ``paused_plan_binds`` False, which skips only the
     paused-plan refusal; a live hold still refuses.
+
+    A system writer settling review for many items in one pass asks this
+    first and leaves stopped work open, so one stopped item never raises
+    through the pass (2026-10-14: a paused reviewer stalled every wake).
     """
     plan = service._plan_row(db, node["plan_id"])
     if paused_plan_binds and plan["state"] == "paused":
-        raise service.PlanError("review requires an active plan")
+        return "review requires an active plan"
     hold = db.execute(
         """SELECT kind FROM plan_node_holds
            WHERE node_id=? AND cleared_at IS NULL
@@ -46,10 +50,17 @@ def _require_no_stop(db, node, *, paused_plan_binds: bool = True) -> None:
         (node["id"],),
     ).fetchone()
     if hold is None:
-        return
+        return None
     if hold["kind"] == "blocked":
-        raise service.PlanError("review has unresolved blocking findings")
-    raise service.PlanError("review has an unresolved pause hold")
+        return "review has unresolved blocking findings"
+    return "review has an unresolved pause hold"
+
+
+def _require_no_stop(db, node, *, paused_plan_binds: bool = True) -> None:
+    """Refuse review while a stop is in force on this work (``stop_reason``)."""
+    reason = stop_reason(db, node, paused_plan_binds=paused_plan_binds)
+    if reason is not None:
+        raise service.PlanError(reason)
 
 
 def _bind_artifacts(

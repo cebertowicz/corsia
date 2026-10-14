@@ -577,3 +577,79 @@ async def test_a_direct_harvest_with_no_active_turn_row_still_works(monkeypatch)
         assert service.get_node(delegated.id, db=db).state == "review_requested"
     finally:
         db.close()
+
+
+
+def _pause(db, plan_id: str, state: str = "paused") -> None:
+    from plans import lifecycle
+
+    lifecycle.transition(
+        plan_id, state, actor_id="user:test", provenance="test",
+        expected_revision=service._plan_row(db, plan_id)["revision"], db=db,
+    )
+    db.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_paused_parent_collects_the_return_once_resumed(monkeypatch):
+    db = _db(monkeypatch)
+    try:
+        parent_plan, delegated, _plan, (leaf,) = _delegated(db, "Write the tests")
+        submit_review_evidence(leaf.id, db=db, actor_id="worker")
+        db.commit()
+        _pause(db, parent_plan.id)
+
+        await _sweep(db)
+        assert service.get_node(delegated.id, db=db).state == "active"
+        assert _wakes(db, "parent") == []
+
+        _pause(db, parent_plan.id, "active")
+        await _sweep(db)
+        assert service.get_node(delegated.id, db=db).state == "review_requested"
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_one_return_that_fails_to_harvest_does_not_hold_back_the_others(monkeypatch):
+    from plans import delegation_harvest
+
+    db = _db(monkeypatch)
+    try:
+        db.execute(
+            """INSERT INTO threads
+               (id,user_id,project_id,spawned_by,model,created_at,updated_at)
+               VALUES ('worker-2','user-1','project-1','parent','test/model','t','t')""",
+        )
+        parent_plan, first, _plan, (leaf,) = _delegated(db, "Write the tests")
+        second = service.add_node(
+            parent_plan.id, kind="task", title="Delegate more",
+            acceptance_criteria="Reviewed", spawn_kind="claude-code", db=db,
+        )
+        service.transition_node(second.id, "active", db=db)
+        other_plan = service.ensure_plan("thread", "worker-2", db=db)
+        mutations.attach_spawned_thread(second.id, "worker-2", db=db)
+        other_leaf = service.add_node(
+            other_plan.id, kind="task", title="Write docs", acceptance_criteria="Done", db=db,
+        )
+        service.transition_node(other_leaf.id, "active", actor_id="worker-2", db=db)
+        for step, actor in ((leaf, "worker"), (other_leaf, "worker-2")):
+            submit_review_evidence(step.id, db=db, actor_id=actor)
+        db.commit()
+        real = delegation_harvest._ready
+
+        def ready(node, payload, connection):
+            if node["id"] == first.id:
+                raise RuntimeError("injected harvest failure")
+            return real(node, payload, connection)
+
+        monkeypatch.setattr(delegation_harvest, "_ready", ready)
+        await _sweep(db)
+        assert service.get_node(first.id, db=db).state == "active"
+        assert service.get_node(second.id, db=db).state == "review_requested"
+
+        monkeypatch.setattr(delegation_harvest, "_ready", real)
+        await _sweep(db)
+        assert service.get_node(first.id, db=db).state == "review_requested"
+    finally:
+        db.close()
