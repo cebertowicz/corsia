@@ -8,7 +8,7 @@ from pathlib import Path
 from host_access.browser_streaming import StreamPortResult
 from host_access.processes import PROCESS_OWNER
 
-__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "go", "match_pane", "open_url", "repaint", "stream_port"]
+__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "go", "match_pane", "open_url", "page_info", "repaint", "stream_port"]
 
 HISTORY_ACTIONS = frozenset({"back", "forward", "reload"})
 
@@ -46,6 +46,14 @@ async def open_url(thread_id: str, url: str, connection_token: str | None = None
         thread_id, ("open", url), control_token=connection_token,
         session="new" if connection_token is None else "existing",
     )
+
+
+async def page_info(thread_id: str, connection_token: str) -> tuple[str | None, str | None]:
+    """Return the page URL and title for a pane label, without retaining either server-side."""
+    owner = PROCESS_OWNER.browser_sessions()
+    url = await owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing")
+    title = await owner.run(thread_id, ("get", "title"), control_token=connection_token, session="existing")
+    return (None if url.startswith("Error:") else url, None if title.startswith("Error:") else title)
 
 
 async def go(thread_id: str, action: str, connection_token: str) -> str:

@@ -325,11 +325,16 @@ async def test_navigate_accepts_an_authenticated_shared_pane(monkeypatch):
         opened.append((thread_id, action, token))
         return "ok"
 
+    async def page_info(_thread_id, _token):
+        return ("https://www.example.test/path", "Example page")
+
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
     monkeypatch.setattr(browser_stream.browser_pane, "go", go)
+    monkeypatch.setattr(browser_stream.browser_pane, "page_info", page_info)
     assert (await browser_stream._navigate("thread-1", "pane-1", {"url": "file:///etc/hosts"}))["error"]
     assert (await browser_stream._navigate("thread-1", "pane-1", {"action": "close"}))["error"] == "Unknown browser action"
-    assert (await browser_stream._navigate("thread-1", "pane-1", {"url": "https://example.test"}))["error"] is None
+    navigated = await browser_stream._navigate("thread-1", "pane-1", {"url": "https://example.test"})
+    assert navigated == {"type": "navigate_result", "error": None, "url": "https://www.example.test/path", "title": "Example page"}
     for action in ("back", "forward", "reload"):
         assert (await browser_stream._navigate("thread-1", "pane-1", {"action": action}))["error"] is None
     assert opened == [("thread-1", "https://example.test", "pane-1"), ("thread-1", "back", "pane-1"),

@@ -217,4 +217,10 @@ async def _navigate(thread_id: str, connection_token: str, data: dict) -> dict:
             result = await browser_pane.go(thread_id, action, connection_token)
     except (BrowserSessionError, ProcessOwnerError) as exc:
         return {"type": "navigate_result", "error": str(exc)}
-    return {"type": "navigate_result", "error": result if result.startswith("Error:") else None}
+    if result.startswith("Error:"):
+        return {"type": "navigate_result", "error": result}
+    try:
+        current_url, title = await browser_pane.page_info(thread_id, connection_token)
+    except (BrowserSessionError, ProcessOwnerError):
+        current_url, title = (str(url) if action is None else None), None
+    return {"type": "navigate_result", "error": None, "url": current_url, "title": title}
