@@ -35,6 +35,8 @@ describe('SetupScreen', () => {
 	it('reads only setup status before showing the Welcome decision', async () => {
 		await settle();
 		expect(host.textContent).toContain('Welcome to CORSIA');
+		const mark = host.querySelector('img[src="/icons/corsia-mark.svg"]');
+		expect(mark?.getAttribute('alt')).toBe('');
 		expect(calls).toEqual(['/api/setup/status']);
 	});
 
