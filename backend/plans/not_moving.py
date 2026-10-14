@@ -180,6 +180,15 @@ def _deadline(value: str) -> tuple[datetime, str] | None:
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc), value
 
 
+def is_overdue(cause: dict) -> bool:
+    """Whether a deadline wait is past its deadline by more than the grace.
+
+    Its wake is owed and has not come, so nothing is waiting on it any more.
+    """
+    found = _deadlines([cause])
+    return bool(found) and found[0][0] < _utcnow() - OVERDUE_GRACE
+
+
 def deadline_range(causes: list[dict]) -> tuple[str, str] | None:
     """Earliest/latest raw deadline strings ordered by the canonical instant."""
     found = _deadlines(causes)

@@ -365,14 +365,17 @@ def _stopped_open(db) -> list:
     return [row for row in wakes(db) if "child_stopped_open" in str(row["id"])]
 
 
-def test_f2_stays_quiet_while_the_worker_waits_on_its_own_watch(db):
+def test_f2_stays_quiet_while_the_worker_waits_on_its_own_watch(db, monkeypatch):
     """#2637: a worker parked on CI is waiting on the event, not on its parent.
 
     The production shape: its step waits on a watch, and a stray pending task
-    left in its plan still reads as ready work, so liveness is armed.
+    left in its plan still reads as ready work, so liveness is armed. The
+    watch is not yet due on the fixture's clock.
     """
-    from plans import watch_operations
-    from tests.child_parent_notice_helpers import DEADLINE, worker_actor
+    from plans import not_moving, watch_operations
+    from tests.child_parent_notice_helpers import DEADLINE, NOW, worker_actor
+
+    monkeypatch.setattr(not_moving, "_utcnow", lambda: NOW)
 
     _step, plan, node = delegated(db)
     service.transition_node(node.id, "active", actor_id="worker", db=db)
@@ -394,6 +397,37 @@ def test_f2_stays_quiet_while_the_worker_waits_on_its_own_watch(db):
     _complete("worker", db=db)
 
     assert _stopped_open(db) == []
+
+
+def test_f2_tells_the_parent_when_the_workers_watch_is_long_overdue(db, monkeypatch):
+    """#637: a watch past its deadline, never expired, waits on nothing.
+
+    The production shape: the expiry sweep was down, so the worker's deadline
+    watch stayed armed hours past its deadline and its Turn ended with work open.
+    """
+    from plans import not_moving, watch_operations
+    from tests.child_parent_notice_helpers import DEADLINE, worker_actor
+
+    _step, plan, node = delegated(db)
+    service.transition_node(node.id, "active", actor_id="worker", db=db)
+    watch_operations.arm(
+        plan.id,
+        {
+            "node_id": node.id,
+            "condition": {"type": "deadline", "value": DEADLINE},
+            "expected_revision": service.get_node(node.id, db=db).revision,
+        },
+        worker_actor(),
+        db,
+    )
+    service.add_node(plan.id, kind="task", title="Next", acceptance_criteria="d", db=db)
+    due = datetime.fromisoformat(DEADLINE.replace("Z", "+00:00"))
+    monkeypatch.setattr(not_moving, "_utcnow", lambda: due + not_moving.OVERDUE_GRACE * 2)
+    _worker_says(db, "Remaining fixes are still in progress.")
+
+    _complete("worker", db=db)
+
+    assert len(_stopped_open(db)) == 1
 
 
 def test_f2_stays_quiet_while_the_worker_is_blocked_on_someone_else(db):
