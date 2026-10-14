@@ -107,7 +107,8 @@ test.describe('@surface:settings scheduled updates parity', () => {
 		{ width: 393 as const, label: '393 mobile' },
 	]) {
 		for (const dismissPath of ['close', 'later', 'scrim', 'escape'] as const) {
-			test(`records ${viewport.label} choice-sheet open and close motion through ${dismissPath}`, async ({ page }) => {
+			test(`records ${viewport.label} choice-sheet open and close motion through ${dismissPath}`, async ({ page }, testInfo) => {
+				test.skip(testInfo.project.name.includes('mobile') !== (viewport.width === 393), 'each recording runs only in the project matching its asserted viewport');
 				const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
 				await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
 				await page.route('**/api/system/update-schedule', (route) => route.fulfill({ json: schedule }));
