@@ -16,7 +16,7 @@ def _git(cwd: Path, *args: str, env: dict | None = None) -> str:
     return result.stdout.strip()
 
 
-def _repo_with_remote(tmp_path: Path, branch: str) -> tuple[Path, Path]:
+def _repo_with_remote(tmp_path: Path, branch: str, date: str | None = None) -> tuple[Path, Path]:
     seed = tmp_path / "seed"
     remote = tmp_path / "origin.git"
     clone = tmp_path / "clone"
@@ -26,7 +26,7 @@ def _repo_with_remote(tmp_path: Path, branch: str) -> tuple[Path, Path]:
     _git(seed, "config", "user.name", "Test")
     (seed / "CHANGELOG.md").write_text("## v1.0.0 — First\n\n### Added\n- First item\n")
     _git(seed, "add", "CHANGELOG.md")
-    _git(seed, "commit", "-m", "initial")
+    _git(seed, "commit", "-m", "initial", env={**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else None)
     _git(seed, "tag", "v1.0.0")
     _git(seed, "remote", "add", "origin", str(remote))
     _git(seed, "push", "--tags", "origin", branch)
@@ -69,8 +69,8 @@ def test_published_details_parse_changelog_and_cap_items(tmp_path):
 def test_development_details_drop_merge_subjects_and_disambiguate_dates(tmp_path):
     from infra.update_changes import build_update_details
 
-    seed, clone = _repo_with_remote(tmp_path, "dev")
     date = "2026-10-13T12:00:00+0000"
+    seed, clone = _repo_with_remote(tmp_path, "dev", "2026-10-13T09:00:00+0000")
     env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
     (seed / "note.txt").write_text("next")
     _git(seed, "add", "note.txt")
@@ -169,6 +169,7 @@ def test_operation_projection_limits_logs_and_reports_live_blocking(tmp_path, mo
 def test_update_status_route_reads_live_drain_cap(monkeypatch):
     from api.system_admin import system_update_status
     from automation import self_restart
+    from core.turn_core import active_turn_count
     from infra import db_async, drain, update_status
 
     class Status:
@@ -180,6 +181,8 @@ def test_update_status_route_reads_live_drain_cap(monkeypatch):
             return None
         if function is self_restart.latest_update_operation:
             return None
+        if function is active_turn_count:
+            return 3
         raise AssertionError(f"unexpected database function: {function}")
 
     monkeypatch.setattr(update_status, "update_status", lambda refresh: Status())
@@ -190,6 +193,7 @@ def test_update_status_route_reads_live_drain_cap(monkeypatch):
 
     assert result["drain_cap_seconds"] == 17
     assert result["usual_seconds"] is None
+    assert result["agents_working"] == 3
     assert datetime.fromisoformat(result["server_time"]).tzinfo == timezone.utc
 
 

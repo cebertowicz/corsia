@@ -366,7 +366,7 @@ def claim_safe_boundary(
             return None
         from automation.self_restart import restart_holds_new_work
 
-        if restart_holds_new_work(db=connection):  # draining toward a restart: later input waits for it
+        if restart_holds_new_work(db=connection):  # draining toward a restart: queued input waits for it
             return None
         epoch = int(turn["execution_epoch"])
         model = str(turn["model"])

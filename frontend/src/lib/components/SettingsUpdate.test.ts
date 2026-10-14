@@ -42,7 +42,21 @@ describe('SettingsUpdate', () => {
 
 		expect(host.textContent).toContain('1.0.0');
 		expect(host.textContent).toContain('1.1.0 available');
+		expect(host.querySelector('.pill.active')?.textContent).toBe('1.1.0 available');
 		expect(host.textContent).toContain('Update');
+	});
+
+	it('uses StatePill and hides the available version while updating', () => {
+		updateStatus.set(status({
+			available: true, target_version: '1.1.0',
+			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining' },
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.querySelector('.pill.active')).toBeNull();
+		expect(host.textContent).not.toContain('1.1.0 available');
+		expect(host.textContent).toContain('Updating to 1.1.0');
 	});
 
 	it('shows the completed target as the last update', () => {

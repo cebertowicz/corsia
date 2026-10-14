@@ -9,6 +9,7 @@ import {
 	updateInFlight,
 	updateOperation,
 	updateStatus,
+	updateSurface,
 	updateUnreachable,
 } from './store';
 
@@ -80,6 +81,25 @@ describe('update store', () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => running('draining') })));
 		await loadUpdateStatus();
 		expect(get(toasts).some((toast) => toast.message === 'An update is ready to install.')).toBe(false);
+	});
+
+	it('dismisses the failure toast when Details opens and does not restore it on close', async () => {
+		const failed = {
+			...running('draining'),
+			operation: { operation_id: 'update-1', kind: 'update', status: 'failed', phase: 'draining', error: 'network stopped' },
+		};
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => failed })));
+
+		await loadUpdateStatus();
+		const toast = get(toasts).find((item) => item.pinned?.key === 'update');
+		expect(toast?.action?.label).toBe('Details');
+		await toasts.runAction(toast!.id);
+		expect(get(toasts)).toEqual([]);
+		expect(get(updateSurface)).toBe('sheet');
+
+		updateSurface.set('closed');
+		await loadUpdateStatus();
+		expect(get(toasts)).toEqual([]);
 	});
 
 	it('keeps the notes of an update reachable after it completes and the offer clears', async () => {

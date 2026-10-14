@@ -49,6 +49,7 @@ export interface UpdateOffer {
 /** A failure to show: a stored operation, or a verdict the client reached itself. */
 export interface UpdateFailure {
 	code: UpdateFailureCode | null;
+	phase: UpdatePhase | null;
 	detail: string | null;
 	summary: string | null;
 	conductorTold: boolean;
@@ -174,6 +175,7 @@ export function diskNumbers(detail: string | null | undefined): { neededGb: numb
 export function failureFromOperation(op: UpdateOperation): UpdateFailure {
 	return {
 		code: op.failure_code ?? null,
+		phase: op.phase ?? null,
 		detail: op.failure_detail ?? null,
 		summary: op.error ?? null,
 		conductorTold: Boolean(op.conductor_told_at),
@@ -254,14 +256,16 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
-		default:
+		default: {
+			const beforeRestart = failure.phase !== 'restarting' && failure.phase !== 'resuming';
 			return {
-				title: "The update didn't finish",
-				headline: failure.summary ?? 'The update ended before CORSIA could confirm it.',
-				body: '',
+				title: beforeRestart ? "Update didn't start" : "The update didn't finish",
+				headline: beforeRestart ? 'The update ended before CORSIA restarted.' : 'The update ended before CORSIA could confirm it.',
+				body: beforeRestart ? RAN_ON : '',
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
+		}
 	}
 }
 

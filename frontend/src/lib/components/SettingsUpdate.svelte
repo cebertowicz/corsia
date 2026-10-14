@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import StatePill from '$lib/components/ui/StatePill.svelte';
 	import { openUpdatePanel, openUpdateSheet, updateInFlight, updateOperation, updateStatus } from '$lib/update/store';
 	import { failureCopy, failureFromOperation, formatInstalledAt, isFailedOperation, stepMessage } from '$lib/update/model';
 
@@ -9,13 +10,14 @@
 	const completedVersion = $derived(operation?.status === 'complete' ? operation.target_version : null);
 	const currentVersion = $derived($updateStatus?.current_version ?? 'Unknown');
 	const targetVersion = $derived(operation?.target_version ?? $updateStatus?.target_version);
+	const showAvailable = $derived(!running && !refusal && $updateStatus?.available && targetVersion);
 	const installedAt = $derived(operation?.settled_at ? formatInstalledAt(operation.settled_at, Date.now()) : null);
 </script>
 
 <div class="service-row update-row">
 	<span class="service-name">Version</span>
 	<div class="version-state">
-		<span class="version-line"><span class="service-version">{currentVersion}</span>{#if refusal}<span class="pill pill--failure">Update didn't start</span>{:else if $updateStatus?.available && targetVersion}<span class="pill">{targetVersion} available</span>{/if}</span>
+		<span class="version-line"><span class="service-version">{currentVersion}</span>{#if refusal}<StatePill state="warning" size="sm" label="Update didn't start" />{:else if showAvailable}<StatePill state="active" size="sm" label={`${targetVersion} available`} />{/if}</span>
 		{#if running}
 			<span class="updating"><span class="spinner" aria-hidden="true"></span>Updating to {targetVersion ?? 'the latest version'}</span>
 			<span class="step">{stepMessage(operation, false)}</span>
@@ -57,8 +59,6 @@
 	.service-version { color: var(--text-primary); font-size: var(--text-footnote); }
 	.service-status, .step, .conductor { color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.updating { color: var(--text-primary); font-size: var(--text-footnote); display: inline-flex; align-items: center; gap: var(--space-1); }
-	.pill { width: fit-content; padding: 1px var(--space-2); border-radius: var(--radius-circle); background: var(--violet-bg); color: var(--violet-text, var(--violet)); font-size: var(--text-caption); }
-	.pill--failure { background: var(--amber-bg, color-mix(in srgb, var(--amber) 15%, transparent)); color: var(--amber-text, var(--amber)); }
 	.spinner { width: 12px; height: 12px; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); border-radius: var(--radius-circle); animation: spin 0.8s linear infinite; }
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
 	@keyframes spin { to { transform: rotate(360deg); } }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { failureCopy, holdsNewWork, type UpdateFailure, type UpdateOperation } from './model';
 
 const failure = (code: UpdateFailure['code']): UpdateFailure => ({
-	code, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
+	code, phase: null, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
 });
 
 describe('update model', () => {
@@ -16,8 +16,18 @@ describe('update model', () => {
 		expect(failureCopy(failure(code)).headline).toBe(headline);
 	});
 
-	it('uses the durable summary when no D3 code is available', () => {
-		expect(failureCopy(failure(null)).headline).toBe('Stored failure summary.');
+	it('keeps an unmapped failure reason out of the summary before restart', () => {
+		const copy = failureCopy(failure(null));
+		expect(copy.title).toBe("Update didn't start");
+		expect(copy.headline).toBe('The update ended before CORSIA restarted.');
+		expect(copy.body).toBe('CORSIA kept running and nothing was changed.');
+		expect(copy.headline).not.toContain('Stored failure summary.');
+	});
+
+	it('does not claim nothing changed after restart began', () => {
+		const copy = failureCopy({ ...failure(null), phase: 'restarting' });
+		expect(copy.title).toBe("The update didn't finish");
+		expect(copy.body).toBe('');
 	});
 
 	it('shows both disk figures and the action amount', () => {

@@ -58,7 +58,10 @@
 		deliveryState === 'queued' || deliveryState === 'sending',
 	);
 	const queuedForUpdate = $derived(
-		deliveryState === 'queued' && delivery?.label === 'Queued' && !activeTurnOwnsInput && holdsNewWork($updateOperation),
+		deliveryState === 'queued'
+			&& (delivery?.label === 'Queued' || delivery?.label === 'Sending when ready…')
+			&& !activeTurnOwnsInput
+			&& holdsNewWork($updateOperation),
 	);
 	const deliveryLabel = $derived(queuedForUpdate ? 'Sends after the update' : delivery?.label ?? null);
 	// Delivery status derives from the canonical projection.

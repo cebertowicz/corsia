@@ -20,7 +20,8 @@
 	const completed = $derived(operation?.status === 'complete' && !superseded);
 	const running = $derived(isInFlight(operation));
 	const panel = $derived($updateSurface === 'panel' || running);
-	const failure = $derived(operation ? failureCopy(failureFromOperation(operation)) : null);
+	const failureDetail = $derived(operation ? failureFromOperation(operation) : null);
+	const failure = $derived(failureDetail ? failureCopy(failureDetail) : null);
 	const elapsed = $derived(formatElapsed(elapsedSeconds(operation, now, $updateServerClockOffsetMs)));
 	const liveScreen = $derived(failed || $updateFailureMessage ? 'failure' : panel ? 'panel' : completed ? 'notes' : 'sheet');
 	// The surface keeps its last screen while it plays its closing motion.
@@ -34,7 +35,7 @@
 	const notes = $derived(releaseNotesFor(operation, $updateStatus));
 	const targetVersion = $derived(notes?.targetVersion ?? operation?.target_version ?? $updateStatus?.target_version ?? 'the latest version');
 	const heading = $derived(screen === 'failure' ? (failure?.title ?? "Update didn't start") : screen === 'panel' ? 'Updating CORSIA' : screen === 'notes' ? `What's new in ${targetVersion}` : 'Update CORSIA');
-	const agentCount = $derived($drainStatus?.activeTurns ?? 0);
+	const agentCount = $derived($drainStatus?.activeTurns ?? $updateStatus?.agents_working ?? 0);
 	const activeStep = $derived(stepIndex(operation, $updateUnreachable));
 
 	$effect(() => {
@@ -48,6 +49,9 @@
 	function updateNow(): void { void startUpdate(); }
 	function visibleChanges() { return showAll ? (notes?.changes?.items ?? []) : (notes?.changes?.items ?? []).slice(0, 3); }
 	function totalChanges() { return (notes?.changes?.items.length ?? 0) + (notes?.changes?.more ?? 0); }
+	function detailLine(value: string | null | undefined): string | null {
+		return value ? `${value.replace(/\.$/, '')}.` : null;
+	}
 </script>
 
 <!-- Each surface toggles at its own block so its closing motion plays: a parent block removing it would skip the outro. -->
@@ -85,7 +89,7 @@
 		{#if notes?.changes}
 			<h3>What's new</h3>
 			<ul>{#each visibleChanges() as item}<li>{item}</li>{/each}</ul>
-			{#if totalChanges() > 3}<button class="show-all" onclick={() => showAll = !showAll}>{showAll ? 'Show fewer changes' : `Show all ${totalChanges()} changes`}⌄</button>{/if}
+			{#if totalChanges() > 3}<button class="show-all" onclick={() => showAll = !showAll}>{showAll ? 'Show fewer changes' : `Show all ${totalChanges()} changes`}<svg class="chevron" class:expanded={showAll} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>{/if}
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.drain_cap_seconds}
 			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and restarted when CORSIA is back.</span>{/if}</div>
@@ -110,7 +114,7 @@
 		<p class="headline">{failure?.headline ?? $updateFailureMessage ?? "The update didn't start."}</p>
 		{#if failure?.body}<p>{failure.body}</p>{/if}
 		{#if operation?.conductor_told_at}<p class="conductor"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5a3 3 0 0 1 0 6m2 3c1.8.5 3 2.1 3 4"/></svg>Your workspace conductor has been told.</p>{/if}
-		{#if operation?.log_tail}<details><summary>Details⌄</summary><pre>{operation.log_tail}</pre></details>{/if}
+		{#if detailLine(failureDetail?.summary) || failureDetail?.detail || operation?.log_tail}<details><summary>Details <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>{#if detailLine(failureDetail?.summary)}<pre>{detailLine(failureDetail?.summary)}</pre>{/if}{#if failureDetail?.detail}<pre>{failureDetail.detail}</pre>{/if}{#if operation?.log_tail}<pre>{operation.log_tail}</pre>{/if}</details>{/if}
 		{#if $isMobile && failure?.retryLabel}<div class="mobile-actions"><Button onclick={retry}>{failure.retryLabel}</Button></div>{/if}
 	</section>
 {/snippet}
@@ -119,7 +123,7 @@
 	.update-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border-subtle); }
 	.update-head h2 { flex: 1; margin: 0; color: var(--text-primary); font-size: var(--text-body); }
 	.failure-head { border-bottom: 0; } .warning { width: 18px; stroke: var(--amber, var(--red)); fill: none; stroke-width: 2; }
-	.close, .show-all { border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; } .close { font-size: var(--text-title3); }
+	.close, .show-all { border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; } .close { font-size: var(--text-title3); } .show-all, summary { display: inline-flex; align-items: center; gap: var(--space-1); } .chevron { transition: transform var(--dur-tight); } .chevron.expanded, details[open] .chevron { transform: rotate(180deg); }
 	.update-foot { display: flex; justify-content: flex-end; gap: var(--space-2); width: 100%; }
 	.update-content { color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; }
 	.version { margin: 0; color: var(--text-tertiary); font-size: var(--text-footnote); } .headline { color: var(--text-primary); font-size: var(--text-callout); font-weight: var(--fw-semibold); }

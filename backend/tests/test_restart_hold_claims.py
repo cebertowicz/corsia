@@ -73,6 +73,10 @@ def test_turn_end_during_hold_starts_no_successor_for_a_queued_input(isolated_db
         assert db.execute(
             "SELECT COUNT(*) FROM active_turns WHERE id='must-not-start-successor'"
         ).fetchone()[0] == 0
+        # The held input runs right after the update: no idle fold is armed for this thread.
+        assert db.execute(
+            "SELECT idle_checkpoint_pending FROM active_turns WHERE id=?", (turn_id,),
+        ).fetchone()[0] == 0
     finally:
         db.close()
 
@@ -90,6 +94,8 @@ def test_safe_boundary_during_hold_claims_no_new_input_into_the_running_turn(iso
         assert _queued_state(db) == ("queued", None)
     finally:
         db.close()
+
+
 def test_abort_wakes_an_idle_thread_whose_input_waited_out_the_hold(isolated_db) -> None:
     """Aborting the restart resumes a thread whose Turn ended mid-drain with input still queued."""
     from core.turn_core import BOOT_EPOCH

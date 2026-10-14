@@ -33,6 +33,7 @@ export interface UpdateStatus {
 	changes?: UpdateChanges | null;
 	drain_cap_seconds?: number | null;
 	usual_seconds?: number | null;
+	agents_working?: number | null;
 	server_time?: string | null;
 	operation?: UpdateOperation | null;
 }
@@ -142,7 +143,7 @@ function showTerminal(operation: UpdateOperation): void {
 		const copy = failureCopy(failureFromOperation(operation));
 		toasts.pin('update', {
 			type: 'error', message: copy.title, detail: copy.toastLine ?? undefined,
-			action: { label: 'Details', run: openUpdateSheet, dismiss: false },
+			action: { label: 'Details', run: openUpdateSheet },
 		});
 	}
 }
@@ -167,7 +168,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 			return;
 		}
 		updateFailureMessage.set('The update finished, but the running versions do not match.');
-		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdateSheet, dismiss: false } });
+		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdateSheet } });
 	} finally {
 		terminalCheckRunning = false;
 	}
@@ -225,6 +226,7 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 			changes: current?.changes ?? null,
 			drain_cap_seconds: current?.drain_cap_seconds ?? null,
 			usual_seconds: current?.usual_seconds ?? null,
+			agents_working: current?.agents_working ?? null,
 			operation: current?.operation ?? null,
 		}));
 	}
@@ -260,7 +262,7 @@ export async function startUpdate(): Promise<void> {
 		}
 		const message = result.message ?? "Update didn't start.";
 		updateFailureMessage.set(message);
-		if (get(updateSurface) === 'closed') toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdateSheet, dismiss: false } });
+		if (get(updateSurface) === 'closed') toasts.pin('update', { type: 'error', message: "Update didn't start", detail: message, action: { label: 'Details', run: openUpdateSheet } });
 		openUpdateSheet();
 		return;
 	}

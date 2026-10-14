@@ -93,7 +93,7 @@ describe('UserMessageBubble — human message path', () => {
 	it.each([
 		['a requested queue', { metadata: { delivery_intent: 'queue_after_turn' } }, 'Sends after the update'],
 		['a checkpoint hold', { write_outcome: 'proved_no_write', delivery_error: 'checkpoint unavailable' }, 'Waiting for checkpoint'],
-		['an apply-now hold', {}, 'Sending when ready…'],
+		['an apply-now hold', {}, 'Sends after the update'],
 	])('changes only %s to the update delivery promise', (_name, message, expected) => {
 		activeThreadId.set('thread-update');
 		updateStatus.set({

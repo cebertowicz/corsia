@@ -324,6 +324,7 @@ async def system_update_status(
     completed — the UI must not present that as up to date.
     """
     from automation import self_restart
+    from core.turn_core import active_turn_count
     from infra import drain
     from infra.db_async import run_in_db
     from infra.update_status import update_status
@@ -332,6 +333,7 @@ async def system_update_status(
     result = status.to_dict()
     result["drain_cap_seconds"] = drain.DRAIN_HARD_CAP
     result["usual_seconds"] = await run_in_db(self_restart.usual_update_seconds)
+    result["agents_working"] = await run_in_db(active_turn_count)
     result["server_time"] = datetime.now(timezone.utc).isoformat()
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:

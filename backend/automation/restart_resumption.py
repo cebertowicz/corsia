@@ -30,13 +30,14 @@ def _log_resume_failure(task: asyncio.Task) -> None:
         logger.opt(exception=failure).error("restart resume failed after abort")
 
 
-def idle_threads_with_held_input(connection) -> tuple[str, ...]:
+def idle_threads_with_held_input(connection, thread_id: str | None = None) -> tuple[str, ...]:
     """Idle threads whose queued input waited out the hold (a Turn ended during steering)."""
     rows = connection.execute(
         "SELECT DISTINCT m.thread_id FROM messages AS m "
         "WHERE m.delivery_state='queued' AND m.input_order IS NOT NULL "
-        "AND m.active_turn_id IS NULL AND NOT EXISTS ("
+        "AND m.active_turn_id IS NULL AND (? IS NULL OR m.thread_id=?) AND NOT EXISTS ("
         "SELECT 1 FROM active_turns AS t WHERE t.thread_id=m.thread_id "
-        "AND t.status='running') ORDER BY m.thread_id"
+        "AND t.status='running') ORDER BY m.thread_id",
+        (thread_id, thread_id),
     ).fetchall()
     return tuple(str(row["thread_id"]) for row in rows)

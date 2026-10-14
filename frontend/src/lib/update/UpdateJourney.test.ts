@@ -75,26 +75,35 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).toContain("Reloading now shows a connection error until it's back.");
 	});
 
-	it('caps release notes and exposes the remaining changes', () => {
-		updateStatus.set(status({ changes: { kind: 'changelog', headline: null, items: ['One', 'Two', 'Three', 'Four'], more: 2 } }));
+	it('labels every available and additional change, then expands every returned item', () => {
+		updateStatus.set(status({ changes: { kind: 'changelog', headline: null, items: ['One', 'Two', 'Three', 'Four', 'Five'], more: 2 } }));
 		updateSurface.set('sheet');
 		component = mount(UpdateJourney, { target: host });
 		flushSync();
-		expect(host.textContent).toContain('Show all 6 changes');
+		const disclosure = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Show all'))!;
+		expect(disclosure.textContent).toContain('Show all 7 changes');
 		expect(host.textContent).not.toContain('Four');
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Show all'))?.click();
+		disclosure.click();
 		flushSync();
 		expect(host.textContent).toContain('Four');
+		expect(host.textContent).toContain('Five');
+		expect(disclosure.textContent).toContain('Show fewer changes');
+		expect(disclosure.querySelector('.chevron.expanded')).not.toBeNull();
 	});
 
-	it('renders refusal details only when the operation supplies them', () => {
-		updateStatus.set(status({ operation: { operation_id: 'update-1', status: 'failed', failure_code: 'disk_space', failure_detail: '{"needed_bytes":12000000000,"free_bytes":0}', conductor_told_at: '2026-10-13T00:00:00Z', log_tail: 'failure log' } }));
+	it('keeps an unmapped failure reason and log detail behind one SVG disclosure', () => {
+		updateStatus.set(status({ operation: { operation_id: 'update-1', status: 'failed', phase: 'draining', error: 'Raw failure reason.', failure_detail: '/tmp/update.log', conductor_told_at: '2026-10-13T00:00:00Z', log_tail: 'failure log' } }));
 		updateSurface.set('sheet');
 		component = mount(UpdateJourney, { target: host });
 		flushSync();
-		expect(host.textContent).toContain('Your workspace conductor has been told.');
-		expect(host.textContent).toContain('Details');
-		expect(host.textContent).toContain('failure log');
+		expect(host.textContent).toContain('The update ended before CORSIA restarted.');
+		expect(host.textContent).toContain('CORSIA kept running and nothing was changed.');
+		expect(host.querySelector('.failure > .headline')?.textContent).not.toContain('Raw failure reason');
+		const details = host.querySelector('details')!;
+		expect(details.querySelectorAll('summary svg.chevron')).toHaveLength(1);
+		expect(details.textContent).toContain('Raw failure reason.');
+		expect(details.textContent).toContain('/tmp/update.log');
+		expect(details.textContent).toContain('failure log');
 	});
 
 	it('shows a read-only what is new sheet for a completed update', () => {
@@ -110,6 +119,14 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).toContain('Faster startup');
 		expect(host.textContent).toContain('Done');
 		expect(host.textContent).not.toContain('Update now');
+	});
+
+	it('shows active pre-drain agent count in the decision sheet', () => {
+		updateStatus.set(status({ agents_working: 2 }));
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+		expect(host.textContent).toContain('2 agents are working');
 	});
 
 	it('offers a newer version instead of replaying an older failed operation', () => {
