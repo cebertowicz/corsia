@@ -22,7 +22,8 @@
 	let status = $state('Connecting to browser');
 	const presence = $derived([{ id: threadId, name: 'Agent', color: agentColor(threadId), detail: 'Agent is in this page' }]);
 	let url = $state('');
-	const shownAddress = $derived(addressFocused ? url : browserAddressLabel(url));
+	let addressText = $state('');
+	const shownAddress = $derived(addressFocused ? addressText : browserAddressLabel(url));
 	let width = $state(0);
 	let height = $state(0);
 	let image = $state<HTMLImageElement | null>(null);
@@ -219,17 +220,17 @@
 		return 'Ready';
 	}
 
-	async function go() {
+	async function go(targetUrl = url) {
 		// An open browser navigates only through the stream that holds control.
 		if (streaming) {
 			if (socket?.readyState !== WebSocket.OPEN) return;
 			status = 'Opening';
-			socket.send(JSON.stringify({ type: 'navigate', url }));
+			socket.send(JSON.stringify({ type: 'navigate', url: targetUrl }));
 			return;
 		}
 		opening = true;
 		try {
-			await openBrowserUrl(threadId, url, get(token) ?? '');
+			await openBrowserUrl(threadId, targetUrl, get(token) ?? '');
 			connect();
 		} catch (error) {
 			status = `Browser could not open this URL: ${error instanceof Error ? error.message : 'request failed'}`;
@@ -245,12 +246,19 @@
 
 	function submitAddress(event: SubmitEvent) {
 		event.preventDefault();
+		const targetUrl = addressText;
+		url = targetUrl;
 		addressFocused = false;
-		void go();
+		void go(targetUrl);
+	}
+
+	function focusAddress() {
+		addressText = url;
+		addressFocused = true;
 	}
 
 	function editAddress(event: Event) {
-		url = (event.currentTarget as HTMLInputElement).value;
+		addressText = (event.currentTarget as HTMLInputElement).value;
 	}
 
 	$effect(() => {
@@ -302,7 +310,7 @@
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" /></svg>
 		</button>
 		<div class="agent-seam"><AvatarStack people={presence} max={3} /></div>
-		<input aria-label="Browser address" value={shownAddress} placeholder="http:// or https://" onfocus={() => addressFocused = true} onblur={() => addressFocused = false} oninput={editAddress} />
+		<input aria-label="Browser address" value={shownAddress} placeholder="http:// or https://" onfocus={focusAddress} onblur={() => addressFocused = false} oninput={editAddress} />
 		<button type="submit" disabled={false}>Go</button>
 		{#if streaming}
 			<span>Shared with the agent</span>

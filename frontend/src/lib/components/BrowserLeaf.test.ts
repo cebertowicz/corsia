@@ -111,6 +111,17 @@ describe('BrowserLeaf navigation metadata', () => {
 		expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('example.test · www · …open');
 		expect(get(threadWorkspaces).thread.tabs.find((tab) => tab.kind === 'browser')?.title).toBe('Agent opened this');
 	});
+
+	it('submits exactly the URL typed after an agent navigation', () => {
+		const { socket } = render();
+		socket.receive({ type: 'browser_metadata', url: 'https://www.example.test/agent/open', title: 'Agent opened this' });
+		const input = host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!;
+		input.dispatchEvent(new FocusEvent('focus'));
+		input.value = 'https://next.example.test/person/page';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		host.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
+		expect(socket.sent.at(-1)).toEqual({ type: 'navigate', url: 'https://next.example.test/person/page' });
+	});
 });
 
 describe('BrowserLeaf reconnect', () => {
