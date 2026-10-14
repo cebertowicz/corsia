@@ -345,7 +345,8 @@
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-line { display: flex; grid-column: auto; grid-row: auto; }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { flex: 0 1 55%; max-width: 55%; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-who { max-width: 100%; }
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: block; flex: 1 1 0; min-width: 0; }
+			/* Centre the ask's text line within the touch row; its former block line box sat above the requester's centred content. */
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: flex; align-items: center; align-self: stretch; flex: 1 1 0; min-width: 0; }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-chev { margin-left: auto; }
 			/* The expanded ask and other askers end at the add-person icon's right edge, not the header's: that tool's 44 px target has a 12 px inner margin (`--space-3`), so the text has the same. */
 			:global(.document-header) .review-bar.ask .rb-ask-full, :global(.document-header) .review-bar.ask .rb-others { padding-right: var(--space-3); }
