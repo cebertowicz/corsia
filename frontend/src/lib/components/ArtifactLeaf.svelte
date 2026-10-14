@@ -84,7 +84,6 @@
 			if (documentRestore === controller) documentRestore = null;
 		});
 	}
-
 	// An image of the open document shown larger. Its tab's view state is the one record of it and its camera, so a
 	// tab switch keeps it with its tab. The document stays mounted beneath it, so closing it returns to the same live
 	// document; its comments are taken from that document each time it shows, never kept with the image.
@@ -114,11 +113,9 @@
 	});
 	$effect(() => () => documentRestore?.abort());
 	$effect(() => {
-		const activeInstanceId = activeTab?.instanceId;
-		if (restoringDocument !== null && restoringDocument.instanceId !== activeInstanceId) {
-			documentRestore?.abort();
-			restoringDocument = null;
-		}
+		if (restoringDocument === null || restoringDocument.instanceId === activeTab?.instanceId) return;
+		documentRestore?.abort();
+		restoringDocument = null;
 	});
 	$effect(() => {
 		if (!imageOpen || mode !== 'expanded') return;
