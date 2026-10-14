@@ -86,7 +86,7 @@ describe('SettingsUpdate', () => {
 		expect(host.textContent).not.toContain('Updated to 1.1.0');
 	});
 
-	it('keeps tonight in the Version pill and shows the plain automatic row', () => {
+	it('keeps tonight in the Version pill without claiming an automatic install', () => {
 		updateStatus.set(status({
 			available: true,
 			schedule: { automatic: false, time: '03:00', tonight_at: '2026-10-14T03:00:00Z' },
@@ -98,7 +98,15 @@ describe('SettingsUpdate', () => {
 		expect(host.textContent).not.toContain('Scheduled for tonight');
 		expect(host.textContent).toContain("Cancel tonight's update");
 		expect(host.textContent).toContain('Keep CORSIA up to date automatically');
-		expect(host.textContent).toContain('Installs at 3:00 AM.');
+		expect(host.textContent).not.toContain('Installs at 3:00 AM.');
+	});
+
+	it('shows the install time only while automatic updates are on', () => {
+		updateStatus.set(status({ schedule: { automatic: true, time: '03:30', tonight_at: null } }));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.textContent).toContain('Installs at 3:30 AM.');
 	});
 
 	it('re-enables the automatic control after a failed schedule save', async () => {

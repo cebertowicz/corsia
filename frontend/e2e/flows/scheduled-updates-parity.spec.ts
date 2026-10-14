@@ -2,6 +2,8 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
 import { TEST_SESSION_TOKEN, openSettings, saveEvidenceScreenshot } from '../support/corsia';
 
+test.use({ video: 'on' });
+
 type Schedule = { automatic: boolean; time: string; tonight_at: string | null };
 
 function updateStatus(schedule: Schedule) {
@@ -27,13 +29,19 @@ async function openSystem(page: Page, theme: 'dark' | 'light', width: number) {
 async function captureSettings(page: Page, testInfo: TestInfo, theme: 'dark' | 'light', width: number, schedule: Schedule, name: string) {
 	await openSystem(page, theme, width);
 	await expect(page.getByText('Keep CORSIA up to date automatically')).toBeVisible();
-	await expect(page.getByText(`Installs at ${schedule.time === '03:30' ? '3:30' : '3:00'} AM.`)).toBeVisible();
-	if (schedule.automatic) await expect(page.getByLabel('Automatic update time')).toHaveValue(schedule.time);
+	const installCopy = page.getByText(`Installs at ${schedule.time === '03:30' ? '3:30' : '3:00'} AM.`);
+	if (schedule.automatic) {
+		await expect(installCopy).toBeVisible();
+		await expect(page.getByLabel('Automatic update time')).toHaveValue(schedule.time);
+	} else {
+		await expect(installCopy).toHaveCount(0);
+	}
 	await saveEvidenceScreenshot(page, testInfo, name);
 }
 
 test.describe('@surface:settings scheduled updates parity', () => {
 	test('captures the approved settings, sheet, retry, and drain-cue matrix', async ({ page }, testInfo) => {
+		test.setTimeout(60_000);
 		let schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
 		let rejectScheduleSave = false;
 		await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
@@ -44,38 +52,83 @@ test.describe('@surface:settings scheduled updates parity', () => {
 			return route.fulfill({ json: schedule });
 		});
 
+		const cells: Array<{ theme: 'dark' | 'light'; width: 1440 | 393; suffix: string }> = [
+			{ theme: 'light', width: 1440, suffix: 'desktop-light' },
+			{ theme: 'dark', width: 1440, suffix: 'desktop-dark' },
+			{ theme: 'light', width: 393, suffix: 'mobile-light' },
+			{ theme: 'dark', width: 393, suffix: 'mobile-dark' },
+		];
+
 		schedule = { automatic: false, time: '03:00', tonight_at: null };
-		await captureSettings(page, testInfo, 'dark', 1440, schedule, 'settings-off-desktop-dark');
-		await captureSettings(page, testInfo, 'light', 393, schedule, 'settings-off-mobile-light');
+		for (const cell of cells) await captureSettings(page, testInfo, cell.theme, cell.width, schedule, `settings-off-${cell.suffix}`);
 
 		schedule = { automatic: true, time: '03:30', tonight_at: null };
-		await captureSettings(page, testInfo, 'light', 1440, schedule, 'settings-on-desktop-light');
-		await captureSettings(page, testInfo, 'dark', 393, schedule, 'settings-on-mobile-dark');
+		for (const cell of cells) await captureSettings(page, testInfo, cell.theme, cell.width, schedule, `settings-on-${cell.suffix}`);
 
 		schedule = { automatic: false, time: '03:00', tonight_at: null };
-		await openSystem(page, 'dark', 1440);
-		await page.getByRole('button', { name: 'Update', exact: true }).click();
-		const updateSheet = page.getByLabel('Update CORSIA');
-		await expect(updateSheet.getByText('Keep CORSIA up to date automatically')).toBeVisible();
-		await expect(updateSheet.getByText('CORSIA will be unavailable for about a minute.')).toBeVisible();
-		await saveEvidenceScreenshot(page, testInfo, 'sheet-drain-cue-desktop-dark');
+		for (const cell of cells) {
+			await openSystem(page, cell.theme, cell.width);
+			await page.getByRole('button', { name: 'Update', exact: true }).click();
+			const updateSheet = page.getByLabel('Update CORSIA');
+			await expect(updateSheet.getByText('Keep CORSIA up to date automatically')).toBeVisible();
+			await expect(updateSheet.getByText('CORSIA will be unavailable for about a minute.')).toBeVisible();
+			if (cell.width === 393) {
+				await expect(page.locator('[data-adaptive-drawer]')).toBeVisible();
+				const geometry = await updateSheet.evaluate((panel) => {
+					const drain = panel.querySelector<HTMLElement>('[data-update-drain]')!;
+					const actions = panel.querySelector<HTMLElement>('[data-update-mobile-actions]')!;
+					const panelBox = panel.getBoundingClientRect();
+					const drainBox = drain.getBoundingClientRect();
+					const actionsBox = actions.getBoundingClientRect();
+					return {
+						drainFits: drain.scrollHeight <= drain.clientHeight && drainBox.top >= panelBox.top && drainBox.bottom <= panelBox.bottom - 8,
+						actionsReachable: actionsBox.top >= panelBox.top && actionsBox.bottom <= panelBox.bottom,
+					};
+				});
+				expect(geometry).toEqual({ drainFits: true, actionsReachable: true });
+			}
+			await saveEvidenceScreenshot(page, testInfo, `sheet-drain-cue-${cell.suffix}`);
+		}
 
-		await openSystem(page, 'light', 393);
-		await page.getByRole('button', { name: 'Update', exact: true }).click();
-		const mobileUpdateSheet = page.getByLabel('Update CORSIA');
-		await expect(mobileUpdateSheet.getByText('Keep CORSIA up to date automatically')).toBeVisible();
-		await expect(mobileUpdateSheet.getByText('CORSIA will be unavailable for about a minute.')).toBeVisible();
-		await saveEvidenceScreenshot(page, testInfo, 'sheet-drain-cue-mobile-light');
-
+		schedule = { automatic: true, time: '03:30', tonight_at: null };
 		rejectScheduleSave = true;
-		await openSystem(page, 'light', 1440);
-		await page.getByRole('button', { name: 'Automatically install updates overnight' }).click();
-		await expect(page.getByText("Couldn't save the schedule")).toBeVisible();
-		await saveEvidenceScreenshot(page, testInfo, 'retry-toast-desktop-light');
+		for (const cell of cells) {
+			await openSystem(page, cell.theme, cell.width);
+			await expect(page.getByLabel('Automatic update time')).toHaveValue('03:30');
+			await page.getByRole('button', { name: 'Automatically install updates overnight' }).click();
+			await expect(page.getByText("Couldn't save the schedule")).toBeVisible();
+			await expect(page.getByLabel('Automatic update time')).toHaveValue('03:30');
+			await saveEvidenceScreenshot(page, testInfo, `retry-toast-${cell.suffix}`);
+		}
+	});
 
-		await openSystem(page, 'dark', 393);
-		await page.getByRole('button', { name: 'Automatically install updates overnight' }).click();
-		await expect(page.getByText("Couldn't save the schedule")).toBeVisible();
-		await saveEvidenceScreenshot(page, testInfo, 'retry-toast-mobile-dark');
+	test('records choice-sheet open and close motion for every dismiss path', async ({ page }) => {
+		const schedule: Schedule = { automatic: false, time: '03:00', tonight_at: null };
+		await page.route('**/api/system/update-status*', (route) => route.fulfill({ json: updateStatus(schedule) }));
+		await page.route('**/api/system/update-schedule', (route) => route.fulfill({ json: schedule }));
+		await openSystem(page, 'light', 1440);
+
+		const sheet = page.getByLabel('Update CORSIA');
+		const open = async () => {
+			await page.getByRole('button', { name: 'Update', exact: true }).click();
+			await expect(sheet).toBeVisible();
+		};
+		const closed = async () => expect(sheet).toBeHidden();
+
+		await open();
+		await page.getByRole('button', { name: 'Close', exact: true }).click();
+		await closed();
+
+		await open();
+		await page.getByRole('button', { name: 'Later' }).click();
+		await closed();
+
+		await open();
+		await page.locator('.bg').click({ position: { x: 8, y: 8 } });
+		await closed();
+
+		await open();
+		await page.keyboard.press('Escape');
+		await closed();
 	});
 });

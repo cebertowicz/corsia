@@ -101,7 +101,7 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).toContain('Later');
 		expect(host.textContent).toContain('Tonight at 3:00 AM');
 		expect(host.textContent).toContain('Keep CORSIA up to date automatically');
-		expect(host.textContent).toContain("Installs at 3:00 AM. You'll see what changed the next time you open CORSIA.");
+		expect(host.textContent).not.toContain("Installs at 3:00 AM. You'll see what changed the next time you open CORSIA.");
 		expect(host.textContent).toContain('Update now');
 	});
 
@@ -113,6 +113,7 @@ describe('UpdateJourney', () => {
 
 		expect(host.textContent).not.toContain('Tonight at 3:00 AM');
 		expect(host.textContent).toContain('Keep CORSIA up to date automatically');
+		expect(host.textContent).toContain("Installs at 3:00 AM. You'll see what changed the next time you open CORSIA.");
 	});
 
 	it('renders the four-step progress panel with the restarting-only note', () => {

@@ -55,7 +55,7 @@
 </div>
 
 <div class="automatic-row">
-	<div class="automatic-copy"><span>Keep CORSIA up to date automatically</span><span class="service-status">Installs at {formatScheduleTime(schedule.time)}.</span></div>
+	<div class="automatic-copy"><span>Keep CORSIA up to date automatically</span>{#if schedule.automatic}<span class="service-status">Installs at {formatScheduleTime(schedule.time)}.</span>{/if}</div>
 	<div class="service-actions">
 		{#if schedule.automatic}<input aria-label="Automatic update time" class="time-field" type="time" value={schedule.time} disabled={scheduleSaving} onchange={(event) => void saveSchedule({ time: event.currentTarget.value })} />{/if}
 		<Toggle checked={schedule.automatic} onchange={(next) => void saveSchedule({ automatic: next })} ariaLabel="Automatically install updates overnight" disabled={scheduleSaving} />
