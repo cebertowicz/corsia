@@ -115,16 +115,18 @@ async def test_navigation_requests_serialize_and_deliver_results_in_order(monkey
 
 
 @pytest.mark.asyncio
-async def test_relay_exit_cancels_running_navigation(monkeypatch):
-    started, cancelled = asyncio.Event(), asyncio.Event()
+async def test_relay_exit_keeps_running_navigation_alive(monkeypatch):
+    started, release, finished, cancelled = (asyncio.Event() for _ in range(4))
 
     async def open_url(*_args):
         started.set()
         try:
-            await asyncio.Future()
+            await release.wait()
         except asyncio.CancelledError:
             cancelled.set()
             raise
+        finished.set()
+        return "ok"
 
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
 
@@ -142,7 +144,12 @@ async def test_relay_exit_cancels_running_navigation(monkeypatch):
     try:
         with pytest.raises(WebSocketDisconnect):
             await asyncio.wait_for(browser_stream._relay(pane, FakeStream(), "thread", "user"), 1)
-        assert cancelled.is_set()
+        navigation = browser_stream._navigators["thread"]
+        assert not cancelled.is_set()
+        release.set()
+        await asyncio.wait_for(finished.wait(), 1)
+        await asyncio.wait_for(navigation, 1)
+        assert not cancelled.is_set()
     finally:
         browser_control._control_holders.clear()
 

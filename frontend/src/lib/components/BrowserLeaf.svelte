@@ -143,7 +143,7 @@
 	function sendMouse(event: PointerEvent) {
 		if (!hasControl || socket?.readyState !== WebSocket.OPEN || !width || !height) return;
 		if (!event.isPrimary) return;
-		const point = coordinates(event, activePointer !== null || event.type !== 'pointermove');
+		const point = coordinates(event, event.type !== 'pointerdown' && (event.type !== 'pointermove' || activePointer !== null));
 		if (!point) return;
 		if (event.pointerType === 'touch') event.preventDefault();
 		if (event.type === 'pointerdown') {

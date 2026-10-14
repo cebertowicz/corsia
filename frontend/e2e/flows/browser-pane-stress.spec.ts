@@ -4,7 +4,7 @@ import { createSession, loginByUrl } from '../support/corsia';
 
 test.use({ video: 'on' });
 
-test.describe('@flow:browser-pane animated browser control', () => {
+test.describe('@flow:browser-pane @stress animated browser control', () => {
 
  test('delivers tile clicks and touch scrolling during animation', async ({ page, request, context }, testInfo) => {
   test.setTimeout(90_000);
@@ -21,7 +21,8 @@ test.describe('@flow:browser-pane animated browser control', () => {
   try {
    // Keep real touch enabled and enter the browser through the phone's own controls.
    if (mobile) await page.setViewportSize({ width: 393, height: 851 });
-   const title = `pane-stress-${Date.now()}`;
+   const pageStamp = `${testInfo.project.name}-${Date.now()}`;
+   const title = `pane-stress-${pageStamp}`;
    const threadId = await createSession(request, title);
    page.on('websocket', socket => {
     if (!socket.url().includes(`/api/browser/${threadId}/stream`)) return;
@@ -101,7 +102,7 @@ test.describe('@flow:browser-pane animated browser control', () => {
     const measurement = await canvas.evaluate(() => (window as unknown as { paneMeasurement: { samples: number[]; blank: number; ticks: number } }).paneMeasurement);
     const sorted = measurement.samples.slice(0,30).sort((a,b) => a-b);
     const elapsed = (Date.now() - firstTime) / 1000;
-    await testInfo.attach('pane-measurements', { body: JSON.stringify({ ...measurement, p50: sorted[14], p95: sorted[28], fps: (frameCount-firstFrame)/elapsed, bytesPerFrame: (frameBytes-firstBytes)/(frameCount-firstFrame), clicks: reports.at(-1)?.total, build: process.env.CORSIA_PANE_BUILD, remoteWidth, remoteHeight, started }), contentType: 'application/json' });
+    await testInfo.attach('pane-measurements', { body: JSON.stringify({ pageStamp, ...measurement, p50: sorted[14], p95: sorted[28], fps: (frameCount-firstFrame)/elapsed, bytesPerFrame: (frameBytes-firstBytes)/(frameCount-firstFrame), clicks: reports.at(-1)?.total, build: process.env.CORSIA_PANE_BUILD, remoteWidth, remoteHeight, started }), contentType: 'application/json' });
     expect(measurement.blank).toBe(0);
     const releases = reports.filter(report => report.released).length;
     await page.mouse.move(bounds.x + 20, bounds.y + bounds.height - 20);
@@ -110,7 +111,7 @@ test.describe('@flow:browser-pane animated browser control', () => {
     await page.mouse.up();
     await expect.poll(() => reports.filter(report => report.released).length).toBe(releases + 1);
    }
-   await page.screenshot({ path: testInfo.outputPath('pane-proof.png') });
+   await page.screenshot({ path: testInfo.outputPath(`pane-proof-${pageStamp}.png`) });
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
  });
 });

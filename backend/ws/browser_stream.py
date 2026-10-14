@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections import deque
 import json
 import logging
 import secrets
@@ -82,9 +83,8 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
     connection_token = secrets.token_urlsafe(18)
 
     frames = PaneFrames()
-    navigation_tasks: set[asyncio.Task] = set()
-    navigation_lock = asyncio.Lock()
     overflow = asyncio.Event()
+    _navigation_relays[connection_token] = (frames, overflow)
 
     async def send_control() -> None:
         if not frames.control({
@@ -100,8 +100,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                 return
 
     from_pane = _receive_pane_messages(
-        pane, stream, frames, thread_id, user_id, connection_token,
-        navigation_tasks, navigation_lock, overflow, send_control,
+        pane, stream, frames, thread_id, user_id, connection_token, overflow, send_control,
     )
 
     tasks: set[asyncio.Task] = set()
@@ -121,10 +120,12 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         for task in done:
             task.result()
     finally:
-        for task in tasks | navigation_tasks:
+        for task in tasks:
             if not task.done():
                 task.cancel()
-        await asyncio.gather(*tasks, *navigation_tasks, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
+        # A navigation that outlives this relay has nowhere safe to report.
+        _navigation_relays.pop(connection_token, None)
         # A closed connection's size must never land after a newer pane's.
         if (queued := _latest_appearance.get(thread_id)) and queued[0] == connection_token:
             del _latest_appearance[thread_id]
@@ -134,10 +135,9 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
 
 async def _receive_pane_messages(
     pane: WebSocket, stream, frames: PaneFrames, thread_id: str, user_id: str,
-    connection_token: str, navigation_tasks: set[asyncio.Task], navigation_lock: asyncio.Lock,
-    overflow: asyncio.Event, send_control,
+    connection_token: str, overflow: asyncio.Event, send_control,
 ) -> None:
-    """Receive pane controls while navigation runs in a serialized child task."""
+    """Receive pane controls while module-owned page commands continue after relay exit."""
     while True:
         message = await pane.receive_text()
         try:
@@ -151,9 +151,7 @@ async def _receive_pane_messages(
                 emit_product_event("browser_pane", kind, thread_id=thread_id, user_id=user_id)
             await send_control()
         elif kind == "navigate":
-            _start_navigation(
-                data, frames, thread_id, connection_token, navigation_tasks, navigation_lock, overflow,
-            )
+            _request_navigation(data, thread_id, connection_token)
         elif kind == "appearance":
             _request_match(thread_id, connection_token, data)
         elif (kind in {"input_mouse", "input_keyboard"}
@@ -161,31 +159,41 @@ async def _receive_pane_messages(
             await stream.send(message)
 
 
-def _start_navigation(
-    request: dict, frames: PaneFrames, thread_id: str, connection_token: str,
-    navigation_tasks: set[asyncio.Task], navigation_lock: asyncio.Lock, overflow: asyncio.Event,
-) -> None:
-    """Start one navigation that serializes with other page commands and reports one safe result."""
-    async def navigate() -> dict:
-        async with navigation_lock:
-            return await _navigate(thread_id, connection_token, request)
+# A page command must outlive any individual pane relay: cancelling an admitted command
+# closes its shared browser session. Like appearance matching, each thread owns one runner.
+_navigation_requests: dict[str, deque[tuple[dict, str]]] = {}
+_navigators: dict[str, asyncio.Task] = {}
+_navigation_relays: dict[str, tuple[PaneFrames, asyncio.Event]] = {}
 
-    task = asyncio.create_task(navigate())
-    navigation_tasks.add(task)
 
-    def publish_navigation(done: asyncio.Task) -> None:
-        navigation_tasks.discard(done)
-        if done.cancelled():
-            return
-        try:
-            result = done.result()
-        except Exception:
-            log.exception("browser pane navigation failed")
-            result = {"type": "navigate_result", "error": "Browser navigation failed"}
-        if not frames.control(result):
-            overflow.set()
+def _request_navigation(request: dict, thread_id: str, connection_token: str) -> None:
+    """Queue one ordered navigation for the thread without making its relay own the task."""
+    _navigation_requests.setdefault(thread_id, deque()).append((request, connection_token))
+    if (navigator := _navigators.get(thread_id)) is None or navigator.done():
+        navigator = _navigators[thread_id] = asyncio.create_task(_run_navigation_queue(thread_id))
+        navigator.add_done_callback(
+            lambda done: _navigators.pop(thread_id) if _navigators.get(thread_id) is done else None,
+        )
 
-    task.add_done_callback(publish_navigation)
+
+async def _run_navigation_queue(thread_id: str) -> None:
+    """Run queued page commands in order; a departed relay simply loses its result."""
+    requests = _navigation_requests.setdefault(thread_id, deque())
+    try:
+        while requests:
+            request, connection_token = requests.popleft()
+            try:
+                result = await _navigate(thread_id, connection_token, request)
+            except Exception:
+                log.exception("browser pane navigation failed")
+                result = {"type": "navigate_result", "error": "Browser navigation failed"}
+            if (relay := _navigation_relays.get(connection_token)) is not None:
+                frames, overflow = relay
+                if not frames.control(result):
+                    overflow.set()
+    finally:
+        if _navigation_requests.get(thread_id) is requests:
+            _navigation_requests.pop(thread_id)
 
 
 async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
