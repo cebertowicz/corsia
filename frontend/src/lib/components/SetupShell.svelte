@@ -84,7 +84,7 @@
 	.job-region { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows calc(var(--dur-standard) * 0.7) var(--ease-snap), opacity calc(var(--dur-standard) * 0.7) var(--ease-snap); }
 	.job-region.open { grid-template-rows: 1fr; opacity: 1; transition-duration: var(--dur-standard); transition-timing-function: var(--ease-entrance); }
 	.job-region-inner { min-height: 0; overflow: hidden; }
-	.job-row { min-height: 0; display: grid; grid-template-rows: 0fr; opacity: 0; overflow: hidden; }
+	.job-row { min-height: 0; display: grid; grid-template-rows: 1fr; overflow: hidden; }
 	.job-row-inner { min-height: 0; overflow: hidden; }
 	@media (prefers-reduced-motion: reduce) { .job-region { transition: opacity var(--dur-tight) var(--ease-snap); } .job-region.open { grid-template-rows: 1fr; } }
 </style>

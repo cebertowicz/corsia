@@ -68,6 +68,9 @@ async function assertSetupState(page: Page, state: SetupState) {
 	await expect(start).toBeDisabled();
 	if (state === 'downloading') {
 		await expect(page.getByText('Downloading in the background')).toBeVisible();
+		const job = page.locator('.job-row');
+		await expect(job).toHaveCSS('opacity', '1');
+		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
 		await expect(page.getByLabel('Setup progress').getByText('42%', { exact: true })).toBeVisible();
 	} else if (state === 'failed') {
 		await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
@@ -92,6 +95,31 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 				await page.screenshot({ path: testInfo.outputPath(`setup-model-${state}-${surface}.png`), animations: 'disabled', scale: 'css' });
 			}
 		}
+	});
+
+	test('records Get started moving the local download into the background rail', async ({ page }, testInfo) => {
+		await serveSetupState(page, 'downloading');
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+		await page.goto('/');
+		await page.getByRole('button', { name: 'Get started' }).click();
+		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+		const job = page.locator('.job-row');
+		await expect(job).toHaveCSS('opacity', '1');
+		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
+		await expect(job.getByText('Qwen 3.8', { exact: true })).toBeVisible();
+		await page.screenshot({ path: testInfo.outputPath('setup-model-get-started-background-job-light-1280x900.png'), scale: 'css' });
+	});
+
+	test('captures a settled visible job row with animations enabled', async ({ page }, testInfo) => {
+		await serveSetupState(page, 'downloading');
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+		await openModelStep(page);
+		const job = page.locator('.job-row');
+		await expect(job).toHaveCSS('opacity', '1');
+		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
+		await page.screenshot({ path: testInfo.outputPath('setup-model-downloading-settled-light-1280x900.png'), scale: 'css' });
 	});
 
 	test('records the job-rail entrance and button press in normal and reduced motion', async ({ page }) => {

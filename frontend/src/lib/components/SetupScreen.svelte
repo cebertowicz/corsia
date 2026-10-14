@@ -29,6 +29,7 @@
 	let sources = $state<ModelSource[]>([]);
 	let sourceError = $state('');
 	let localStartError = $state('');
+	let localDownloadPending = $state(false);
 	let localSetupBusy = $state(false);
 	let keyOpen = $state(false);
 	let providerName = $state('anthropic');
@@ -42,7 +43,7 @@
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
-	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage));
+	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
 	const localJob = $derived<SetupJob | undefined>(
 		localDownloading
 			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: local?.download_percent == null ? 'Downloading' : `${local.download_percent}%`, progress: localProgress }
@@ -99,7 +100,8 @@
 
 	async function beginSetup() {
 		try {
-			if (!await startLocalDownload()) localStartError = 'The local model download couldn’t start.';
+			if (await startLocalDownload()) localDownloadPending = localWanted;
+			else localStartError = 'The local model download couldn’t start.';
 		} catch {
 			localStartError = 'The local model download couldn’t start.';
 		}
@@ -139,8 +141,17 @@
 	async function refreshSources() {
 		const current = get(token);
 		if (!current) return;
-		try { sources = await recheckSources(current); sourceError = ''; }
-		catch { try { sources = await fetchSources(current); sourceError = ''; } catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; } }
+		try {
+			sources = await recheckSources(current);
+			localDownloadPending = false;
+			sourceError = '';
+		} catch {
+			try {
+				sources = await fetchSources(current);
+				localDownloadPending = false;
+				sourceError = '';
+			} catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
+		}
 	}
 
 	async function signIn(source: ModelSource) {

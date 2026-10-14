@@ -64,6 +64,9 @@ describe('SetupScreen', () => {
 		await settle();
 		expect(calls).toContain('/api/setup/local-download');
 		expect(host.textContent).toContain('Create your account');
+		expect(host.textContent).toContain('In the background');
+		expect(host.textContent).toContain('Example model');
+		expect(host.textContent).toContain('Downloading');
 	});
 
 	it('shows the bootstrapped work folder without allowing it to change', async () => {
