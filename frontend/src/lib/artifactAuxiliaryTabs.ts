@@ -1,11 +1,28 @@
 import type {
 	ArtifactTab,
+	OpenBrowserInput,
 	OpenLegacyDiscussionInput,
 	OpenSubagentInput,
 	ThreadArtifactWorkspace,
 } from './artifactTabTypes';
 
 type InstanceIdFactory = () => string;
+
+/** Adds a browser pane without changing the tab the user is viewing. */
+export function openBrowserTab(
+	ws: ThreadArtifactWorkspace,
+	input: OpenBrowserInput,
+	newInstanceId: InstanceIdFactory,
+	activate = true,
+): ThreadArtifactWorkspace {
+	const existing = ws.tabs.findIndex((tab) => tab.kind === 'browser' && tab.threadId === input.threadId);
+	if (existing >= 0) return activate ? { ...ws, activeTabId: ws.tabs[existing].instanceId, visible: true, activeSurface: 'artifact' } : ws;
+	const tab: ArtifactTab = { kind: 'browser', instanceId: newInstanceId(), artifactId: null,
+		path: `browser:${input.threadId}`, title: input.title ?? 'Browser', threadId: input.threadId,
+		loadedRevision: null, latestRevision: null, status: 'ready' };
+	return { ...ws, tabs: [...ws.tabs, tab], activeTabId: activate || !ws.activeTabId ? tab.instanceId : ws.activeTabId,
+		visible: activate ? true : ws.visible, activeSurface: activate ? 'artifact' : ws.activeSurface };
+}
 
 /** Adds or selects a child conversation in the existing artifact leaf. */
 export function openSubagentTab(
