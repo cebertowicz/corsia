@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { failureCopy, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
+import { failureCopy, formatScheduleTime, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
 
 const failure = (code: UpdateFailure['code']): UpdateFailure => ({
 	code, phase: null, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
 });
 
 describe('update model', () => {
+	it('formats every configured schedule time in 12-hour time', () => {
+		expect(formatScheduleTime('03:00')).toBe('3:00 AM');
+		expect(formatScheduleTime('15:05')).toBe('3:05 PM');
+		expect(formatScheduleTime('00:00')).toBe('12:00 AM');
+	});
+
 	it('words the safe-point count for one agent in the singular', () => {
 		const op = { operation_id: 'u', kind: 'update', status: 'in_flight', phase: 'draining', drain_total: 1, blocking: 1, hard_cap_remaining: 299 } as UpdateOperation;
 		expect(stepDetail(op, false)).toBe('0 of 1 agent is at a safe point. Stopping the rest in 4:59.');

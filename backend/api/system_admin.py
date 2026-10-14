@@ -354,7 +354,7 @@ async def update_schedule(body: dict, user: dict = Depends(require_user)):
 
 @router.post("/system/update-operation/{operation_id}/claim-overnight-outcome")
 async def claim_overnight_outcome(
-    operation_id: str, user: dict = Depends(require_user)
+    operation_id: str, user: dict = Depends(require_human_user)
 ):
     """Reserve the one scheduled completion toast for this device."""
     if len(operation_id) != 32 or any(char not in "0123456789abcdef" for char in operation_id):

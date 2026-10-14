@@ -80,15 +80,16 @@ async def system_drain(
 
 @router.get("/drain")
 async def get_drain_status_route(token: str, operation_id: str | None = None):
-    """Return durable operation truth plus process-local readiness observations."""
-    user = _require_user(token)
+    """Return the caller's status, or an exact callback-owned operation's status."""
     from infra.drain import get_drain_operation_status, get_drain_status
 
     if operation_id:
+        await _require_lifecycle_callback(token, operation_id)
         status = get_drain_operation_status(operation_id)
         if status is None:
             raise HTTPException(404, "restart operation not found")
         return status
+    user = _require_user(token)
     return get_drain_status(user_id=user["id"])
 
 

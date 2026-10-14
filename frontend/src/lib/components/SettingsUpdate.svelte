@@ -2,7 +2,7 @@
 	import { Button, Toggle } from '$lib/components/ui';
 	import StatePill from '$lib/components/ui/StatePill.svelte';
 	import { openUpdatePanel, openUpdateSheet, saveUpdateSchedule, updateInFlight, updateOperation, updateStatus } from '$lib/update/store';
-	import { failureCopy, failureFromOperation, formatInstalledAt, isFailedOperation, stepMessage } from '$lib/update/model';
+	import { failureCopy, failureFromOperation, formatInstalledAt, formatScheduleTime, isFailedOperation, stepMessage } from '$lib/update/model';
 
 	const operation = $derived($updateOperation);
 	const running = $derived($updateInFlight);
@@ -19,23 +19,25 @@
 	const schedule = $derived($updateStatus?.schedule ?? { automatic: false, time: '03:00', tonight_at: null });
 	const scheduledTonight = $derived(Boolean(schedule.tonight_at));
 	let scheduleSaving = $state(false);
-	async function saveSchedule(patch: { automatic?: boolean; time?: string; tonight?: boolean }): Promise<void> {
+	async function saveSchedule(patch: { automatic?: boolean; time?: string; tonight?: boolean }): Promise<boolean> {
 		scheduleSaving = true;
-		await saveUpdateSchedule(patch);
-		scheduleSaving = false;
+		try {
+			return await saveUpdateSchedule(patch);
+		} finally {
+			scheduleSaving = false;
+		}
 	}
 </script>
 
 <div class="service-row update-row">
 	<span class="service-name">Version</span>
 	<div class="version-state">
-		<span class="version-line"><span class="service-version">{currentVersion}</span>{#if refusal}<StatePill state="warning" size="sm" label="Update didn't start" />{:else if showAvailable}<StatePill state="active" size="sm" label={`${targetVersion} available`} />{/if}</span>
+		<span class="version-line">{#if scheduledTonight}<StatePill state="active" size="sm" label={`${currentVersion} · ${formatScheduleTime(schedule.time)} tonight`} />{:else}<span class="service-version">{currentVersion}</span>{#if refusal}<StatePill state="warning" size="sm" label="Update didn't start" />{:else if showAvailable}<StatePill state="active" size="sm" label={`${targetVersion} available`} />{/if}{/if}</span>
 		{#if running}
 			<span class="updating"><span class="spinner" aria-hidden="true"></span>Updating to {targetVersion ?? 'the latest version'}</span>
 			<span class="step">{stepMessage(operation, false)}</span>
 		{/if}
 		{#if installedAt}<span class="installed">Installed {installedAt}</span>{/if}
-		{#if scheduledTonight}<span class="installed">Scheduled for tonight at {schedule.time}</span>{/if}
 	</div>
 	<div class="service-actions">
 		{#if running}
@@ -44,18 +46,17 @@
 			<Button size="sm" onclick={openUpdateSheet}>{refusal.retryLabel}</Button>
 		{:else if $updateStatus?.available && scheduledTonight}
 			<Button variant="primary" size="sm" onclick={openUpdateSheet}>Update now</Button>
-			<Button size="sm" disabled={scheduleSaving} onclick={() => void saveSchedule({ tonight: false })}>Cancel</Button>
+			<Button size="sm" disabled={scheduleSaving} onclick={() => void saveSchedule({ tonight: false })}>Cancel tonight's update</Button>
 		{:else if $updateStatus?.available}
 			<Button variant="primary" size="sm" onclick={openUpdateSheet}>Update</Button>
 		{/if}
 	</div>
 </div>
 
-<div class="service-row automatic-row">
-	<span class="service-name">Automatic</span>
-	<div class="version-state"><span class="service-status">{schedule.automatic ? `Install updates at ${schedule.time}.` : 'Install updates overnight.'}</span></div>
+<div class="automatic-row">
+	<div class="automatic-copy"><span>Keep CORSIA up to date automatically</span><span class="service-status">Installs at {formatScheduleTime(schedule.time)}.</span></div>
 	<div class="service-actions">
-		{#if schedule.automatic}<label class="time-field">Time <input aria-label="Automatic update time" type="time" value={schedule.time} disabled={scheduleSaving} onchange={(event) => void saveSchedule({ time: event.currentTarget.value })} /></label>{/if}
+		{#if schedule.automatic}<input aria-label="Automatic update time" class="time-field" type="time" value={schedule.time} disabled={scheduleSaving} onchange={(event) => void saveSchedule({ time: event.currentTarget.value })} />{/if}
 		<Toggle checked={schedule.automatic} onchange={(next) => void saveSchedule({ automatic: next })} ariaLabel="Automatically install updates overnight" disabled={scheduleSaving} />
 	</div>
 </div>
@@ -82,8 +83,9 @@
 	.updating { color: var(--text-primary); font-size: var(--text-footnote); display: inline-flex; align-items: center; gap: var(--space-1); }
 	.spinner { width: 12px; height: 12px; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); border-radius: var(--radius-circle); animation: spin 0.8s linear infinite; }
 	.service-actions { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
-	.time-field { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--text-tertiary); font-size: var(--text-footnote); }
-	.time-field input { border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); background: var(--bg-primary); color: var(--text-primary); font: inherit; padding: var(--space-1); }
+	.automatic-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); }
+	.automatic-copy { display: grid; gap: var(--space-1); color: var(--text-primary); font-size: var(--text-subhead); }
+	.time-field { border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); background: var(--bg-primary); color: var(--text-primary); font: inherit; padding: var(--space-1); }
 	@keyframes spin { to { transform: rotate(360deg); } }
-	@media (max-width: 768px) { .service-row { flex-wrap: wrap; gap: var(--space-2); } .service-actions { width: 100%; margin-left: 0; } }
+	@media (max-width: 768px) { .service-row, .automatic-row { flex-wrap: wrap; gap: var(--space-2); } .service-actions { width: 100%; margin-left: 0; justify-content: flex-end; } .automatic-row .service-actions { width: auto; margin-left: auto; } .automatic-copy { flex: 1; min-width: min(250px, 100%); } }
 </style>

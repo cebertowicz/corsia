@@ -1,8 +1,10 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { get } from 'svelte/store';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SettingsUpdate from './SettingsUpdate.svelte';
+import { token } from '$lib/stores/auth';
+import { toasts } from '$lib/stores/toast';
 import {
 	resetUpdateStoreForTests,
 	updateStatus,
@@ -31,7 +33,10 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	for (const toast of get(toasts)) toasts.dismiss(toast.id);
 	resetUpdateStoreForTests();
+	token.set(null);
+	vi.unstubAllGlobals();
 });
 
 describe('SettingsUpdate', () => {
@@ -79,6 +84,35 @@ describe('SettingsUpdate', () => {
 
 		expect(host.textContent).not.toContain('Last update');
 		expect(host.textContent).not.toContain('Updated to 1.1.0');
+	});
+
+	it('keeps tonight in the Version pill and shows the plain automatic row', () => {
+		updateStatus.set(status({
+			available: true,
+			schedule: { automatic: false, time: '03:00', tonight_at: '2026-10-14T03:00:00Z' },
+		}));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		expect(host.textContent).toContain('1.0.0 · 3:00 AM tonight');
+		expect(host.textContent).not.toContain('Scheduled for tonight');
+		expect(host.textContent).toContain("Cancel tonight's update");
+		expect(host.textContent).toContain('Keep CORSIA up to date automatically');
+		expect(host.textContent).toContain('Installs at 3:00 AM.');
+	});
+
+	it('re-enables the automatic control after a failed schedule save', async () => {
+		token.set('test-token');
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500 })));
+		updateStatus.set(status({ schedule: { automatic: false, time: '03:00', tonight_at: null } }));
+		component = mount(SettingsUpdate, { target: host });
+		flushSync();
+
+		const toggle = host.querySelector<HTMLButtonElement>('[aria-label="Automatically install updates overnight"]');
+		toggle?.click();
+		await vi.waitFor(() => expect(toggle?.disabled).toBe(false));
+
+		expect(get(toasts).some((toast) => toast.message === "Couldn't save the schedule")).toBe(true);
 	});
 
 	it('keeps the refusal reason and its Details action', () => {

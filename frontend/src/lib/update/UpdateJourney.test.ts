@@ -87,7 +87,20 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).toContain("What's new");
 		expect(host.textContent).toContain('Faster startup');
 		expect(host.textContent).toContain('Later');
+		expect(host.textContent).toContain('Tonight at 3:00 AM');
+		expect(host.textContent).toContain('Keep CORSIA up to date automatically');
+		expect(host.textContent).toContain("Installs at 3:00 AM. You'll see what changed the next time you open CORSIA.");
 		expect(host.textContent).toContain('Update now');
+	});
+
+	it('hides Tonight when automatic updates are on', () => {
+		updateStatus.set(status({ schedule: { automatic: true, time: '03:00', tonight_at: null } }));
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+
+		expect(host.textContent).not.toContain('Tonight at 3:00 AM');
+		expect(host.textContent).toContain('Keep CORSIA up to date automatically');
 	});
 
 	it('renders the four-step progress panel with the restarting-only note', () => {

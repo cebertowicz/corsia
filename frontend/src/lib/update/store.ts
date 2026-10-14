@@ -2,12 +2,7 @@ import { derived, get, writable } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { readSystemVersion, restartSystem, type SystemVersionSnapshot } from '$lib/stores/settingsSystemRestart';
-import {
-	isFailedOperation,
-	isInFlight,
-	type UpdateChanges,
-	type UpdateOperation,
-} from './model';
+import { isFailedOperation, isInFlight, type UpdateOperation } from './model';
 import { hasId, releaseNotesFor, rememberApprovedNotes, rememberId, snapshotReleaseNotes } from './releaseNotes';
 import { presentUpdateTerminal } from './terminal';
 
@@ -19,28 +14,9 @@ const POLL_MS = 1_000;
 const HANDLED_KEY = 'corsia:update:handled-operation-ids';
 const NOTICED_KEY = 'corsia:update:noticed-target-versions';
 
-export interface UpdateSchedule { automatic: boolean; time: string; tonight_at: string | null; }
+import type { UpdateSchedule, UpdateStatus, UpdateSurface } from './types';
 
-export interface UpdateStatus {
-	branch: string | null;
-	current_sha: string | null;
-	remote_sha: string | null;
-	commits_behind: number | null;
-	available: boolean | null;
-	checked_at: number | null;
-	error: string | null;
-	current_version?: string | null;
-	target_version?: string | null;
-	changes?: UpdateChanges | null;
-	drain_cap_seconds?: number | null;
-	usual_seconds?: number | null;
-	agents_working?: number | null;
-	server_time?: string | null;
-	operation?: UpdateOperation | null;
-	schedule?: UpdateSchedule | null;
-}
-
-export type UpdateSurface = 'closed' | 'sheet' | 'panel';
+export type { UpdateSchedule, UpdateStatus, UpdateSurface } from './types';
 
 export const updateStatus = writable<UpdateStatus | null>(null);
 export const updateSurface = writable<UpdateSurface>('closed');
@@ -225,17 +201,31 @@ export async function loadUpdateStatus(refresh = false): Promise<void> {
 	}
 }
 
+function showScheduleSaveError(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): void {
+	toasts.showAction("Couldn't save the schedule", {
+		label: 'Try again', run: () => { void saveUpdateSchedule(patch); },
+	});
+}
+
 export async function saveUpdateSchedule(patch: Partial<Pick<UpdateSchedule, 'automatic' | 'time'>> & { tonight?: boolean }): Promise<boolean> {
 	const authToken = get(token);
-	if (!authToken) return false;
-	const response = await fetch(`${BASE}/api/system/update-schedule`, {
-		method: 'PUT', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify(patch), cache: 'no-store',
-	});
-	if (!response.ok) return false;
-	const schedule = await response.json() as UpdateSchedule;
-	updateStatus.update((current) => current ? { ...current, schedule } : current);
-	return true;
+	if (!authToken) {
+		showScheduleSaveError(patch);
+		return false;
+	}
+	try {
+		const response = await fetch(`${BASE}/api/system/update-schedule`, {
+			method: 'PUT', headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify(patch), cache: 'no-store',
+		});
+		if (!response.ok) throw new Error(`Schedule save returned ${response.status}`);
+		const schedule = await response.json() as UpdateSchedule;
+		updateStatus.update((current) => current ? { ...current, schedule } : current);
+		return true;
+	} catch {
+		showScheduleSaveError(patch);
+		return false;
+	}
 }
 
 /** Open the one update surface at its decision or last-terminal state. */

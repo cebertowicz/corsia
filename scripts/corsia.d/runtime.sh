@@ -341,7 +341,7 @@ drain_and_wait() {
         waited=$(( $(runtime_epoch_seconds) - started_at ))
         [ "$waited" -lt "$max_wait" ] || break
         local status
-        if ! status=$(curl -sf --max-time 5 "$drain_url" 2>/dev/null); then
+        if ! status=$(curl -sf --max-time 5 "${drain_url}&operation_id=${operation_id}" 2>/dev/null); then
             warn "Could not read drain status"
             cancel_failed_drain "$drain_url" "$operation_id" || :
             return 1

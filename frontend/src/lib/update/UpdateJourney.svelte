@@ -3,9 +3,9 @@
 	import { isMobile } from '$lib/stores/viewport';
 	import { drainStatus } from '$lib/stores/connection';
 	import { toasts } from '$lib/stores/toast';
-	import { Button, Modal } from '$lib/components/ui';
+	import { Button, Modal, Toggle } from '$lib/components/ui';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
-	import { UPDATE_STEPS, elapsedSeconds, failureCopy, failureFromOperation, formatElapsed, formatInstalledAt, humanDuration, isFailedOperation, isInFlight, stepDetail, stepIndex, stepMessage } from './model';
+	import { UPDATE_STEPS, elapsedSeconds, failureCopy, failureFromOperation, formatElapsed, formatInstalledAt, formatScheduleTime, humanDuration, isFailedOperation, isInFlight, stepDetail, stepIndex, stepMessage } from './model';
 	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, saveUpdateSchedule, startUpdate, updateFailureMessage, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
 
 	let now = $state(Date.now());
@@ -37,6 +37,7 @@
 	const heading = $derived(screen === 'failure' ? (failure?.title ?? "Update didn't start") : screen === 'panel' ? 'Updating CORSIA' : screen === 'notes' ? `What's new in ${targetVersion}` : 'Update CORSIA');
 	const agentCount = $derived($drainStatus?.activeTurns ?? $updateStatus?.agents_working ?? 0);
 	const activeStep = $derived(stepIndex(operation, $updateUnreachable));
+	const schedule = $derived($updateStatus?.schedule ?? { automatic: false, time: '03:00', tonight_at: null });
 
 	// Closing the progress toast hides it for the rest of that operation; the Updated and failure toasts are pinned elsewhere and always show.
 	let hiddenProgressFor: string | null = $state(null);
@@ -55,7 +56,7 @@
 	async function tonight(): Promise<void> {
 		if (!await saveUpdateSchedule({ tonight: true })) return;
 		closeUpdateSurface();
-		toasts.showAction(`Scheduled for tonight at ${$updateStatus?.schedule?.time ?? '03:00'}.`, {
+		toasts.showAction(`Update scheduled for ${formatScheduleTime(schedule.time)} tonight.`, {
 			label: 'Undo', run: () => { void saveUpdateSchedule({ tonight: false }); },
 		});
 	}
@@ -87,7 +88,7 @@
 
 {#snippet modalFoot()}
 	<div class="update-foot">
-		{#if screen === 'sheet'}<Button variant="ghost" onclick={close}>Later</Button><Button variant="ghost" onclick={() => void tonight()}>Tonight</Button><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button>
+		{#if screen === 'sheet'}<Button variant="ghost" onclick={close}>Later</Button>{#if !schedule.automatic}<Button variant="secondary" onclick={() => void tonight()}>Tonight at {formatScheduleTime(schedule.time)}</Button>{/if}<Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button>
 		{:else if screen === 'panel'}<Button variant="ghost" onclick={close}>Hide</Button>
 		{:else if screen === 'notes'}<Button variant="primary" onclick={close}>Done</Button>
 		{:else}{#if failure?.retryLabel}<Button loading={$updateStarting} onclick={retry}>{failure.retryLabel}</Button>{/if}<Button variant="primary" onclick={close}>Close</Button>{/if}
@@ -111,7 +112,8 @@
 			<div class="cost"><strong>CORSIA will be unavailable for about a minute.</strong>{#if agentCount > 0}<span>{#if agentCount === 1}1 agent is working: it gets up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. If it is still mid-step, it is stopped and starts that step again once CORSIA is back.{:else}{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and start that step again once CORSIA is back.{/if}</span>{/if}</div>
 		{/if}
 		{#if screen === 'sheet' && $updateStatus?.usual_seconds != null}<p class="muted">Usually about {humanDuration($updateStatus.usual_seconds)}.</p>{/if}
-		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions"><Button variant="ghost" onclick={() => void tonight()}>Tonight</Button><Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button></div>{/if}
+		{#if screen === 'sheet'}<div class="automatic-choice"><div><span>Keep CORSIA up to date automatically</span><span>Installs at {formatScheduleTime(schedule.time)}. You'll see what changed the next time you open CORSIA.</span></div><Toggle checked={schedule.automatic} onchange={(next) => void saveUpdateSchedule({ automatic: next })} ariaLabel="Keep CORSIA up to date automatically" /></div>{/if}
+		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions">{#if !schedule.automatic}<Button variant="secondary" onclick={() => void tonight()}>Tonight at {formatScheduleTime(schedule.time)}</Button>{/if}<Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button></div>{/if}
 	</section>
 {/snippet}
 
@@ -146,6 +148,7 @@
 	h3 { margin: var(--space-5) 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); letter-spacing: .06em; text-transform: uppercase; }
 	ul { margin: 0; padding-left: var(--space-5); } .version + ul { margin-top: var(--space-3); } li + li { margin-top: var(--space-1); } .show-all { margin-top: var(--space-2); padding: 0; }
 	.cost { display: grid; gap: var(--space-2); margin-top: var(--space-5); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--violet-bg); } .cost strong { color: var(--text-primary); }
+	.automatic-choice { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); color: var(--text-primary); } .automatic-choice div { display: grid; gap: var(--space-1); } .automatic-choice div span:last-child { color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.muted { color: var(--text-tertiary); } .steps { display: grid; gap: var(--space-3); margin: var(--space-3) 0; padding: 0; list-style: none; }
 	.steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--text-tertiary); } .steps li.active { color: var(--text-primary); font-weight: var(--fw-semibold); } .steps li.done { color: var(--green-text); }
 	.step-mark { width: 18px; height: 18px; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: var(--radius-circle); } .done .step-mark { border-color: transparent; }
@@ -153,5 +156,5 @@
 	.spinner { width: 10px; height: 10px; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); border-radius: var(--radius-circle); animation: spin .8s linear infinite; }
 	.step-detail { margin: var(--space-4) 0; } .timing { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text-tertiary); font-size: var(--text-footnote); } .timing strong { color: var(--text-primary); }
 	.conductor { display: flex; gap: var(--space-2); align-items: center; } details { border-top: 1px solid var(--border-subtle); margin-top: var(--space-4); padding-top: var(--space-3); } summary { cursor: pointer; color: var(--text-primary); } pre { max-height: 180px; overflow: auto; white-space: pre-wrap; color: var(--text-tertiary); font: var(--text-caption)/1.45 var(--font-mono, monospace); }
-	.mobile-actions { display: flex; justify-content: flex-end; margin-top: var(--space-5); } @keyframes spin { to { transform: rotate(360deg); } } @media (max-width: 768px) { .update-content { padding: 0 0 var(--space-5); } }
+	.mobile-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); } @keyframes spin { to { transform: rotate(360deg); } } @media (max-width: 768px) { .update-content { padding: 0 0 var(--space-5); } }
 </style>

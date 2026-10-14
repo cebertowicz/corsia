@@ -32,7 +32,7 @@ export async function presentUpdateTerminal({
 			});
 			return;
 		}
-		if (!rememberId(handledKey, operation.operation_id)) return;
+		if (!rememberId(handledKey, operation.operation_id, 'browser')) return;
 		toasts.pin('update', {
 			type: 'success', message: `Updated to ${version}`,
 			action: { label: "See what's new", run: onDetails },

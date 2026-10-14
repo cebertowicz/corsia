@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import subprocess
 import uuid
 from collections.abc import Callable
@@ -13,6 +12,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from api.restart_shell import spawn_restart_lifecycle
+from api.settings_restart_output import clean_update_output, terminal_update_summary
 from api.update_preflight import check_update_backup_room as _check_update_backup_room
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
@@ -31,12 +31,7 @@ def _update_log_path() -> Path:
     return LOGS_DIR / f"update-{uuid.uuid4().hex}.log"
 
 
-def _clean_update_output(value: str | bytes | None) -> str:
-    if not value:
-        return ""
-    if isinstance(value, bytes):
-        value = value.decode(errors="replace")
-    return re.sub(r"\x1b\[[0-9;]*m", "", value)
+_clean_update_output = clean_update_output
 
 
 def _failure_summary(failure: BaseException) -> str:
@@ -48,25 +43,7 @@ def _failure_detail(failure: BaseException) -> str | None:
     return json.dumps({"log_path": str(log_path)}) if log_path else None
 
 
-def _terminal_update_summary(
-    stdout: str | bytes | None, stderr: str | bytes | None
-) -> str:
-    """Project noisy command output to one bounded terminal failure."""
-    clean_stdout = _clean_update_output(stdout)
-    clean_stderr = _clean_update_output(stderr)
-    stderr_lines = [line.strip() for line in clean_stderr.splitlines() if line.strip()]
-    stdout_lines = [line.strip() for line in clean_stdout.splitlines() if line.strip()]
-
-    for line in stderr_lines:
-        if re.match(r"^(?:error|fatal):", line, re.IGNORECASE):
-            return line[:300]
-    for line in reversed(stdout_lines):
-        if line.startswith("❌") or "Redeploy refused:" in line:
-            return line.removeprefix("❌").strip()[:300]
-    fallback = stderr_lines[-1:] or stdout_lines[-1:]
-    if fallback:
-        return fallback[0][:300]
-    return "the pull, dependency check, or frontend build failed"
+_terminal_update_summary = terminal_update_summary
 
 
 def _prepare_current_release(corsia_script: Path, restart_env: dict[str, str]) -> None:
