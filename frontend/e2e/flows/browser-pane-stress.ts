@@ -49,8 +49,9 @@ test.describe('@flow:browser-pane animated browser control', () => {
    const canvas = page.locator('canvas[aria-label="Shared browser"]');
    await page.emulateMedia({ colorScheme: 'dark' });
    await expect.poll(() => reports.some(report => report.ready)).toBe(true);
-   await expect.poll(async () => Math.abs(remoteWidth - (await canvas.boundingBox())!.width)).toBeLessThan(2);
-   await expect.poll(() => frameCount).toBeGreaterThan(2);
+   // Startup is reported separately; compare input latency once each pane is drawing.
+   await expect.poll(async () => Math.abs(remoteWidth - (await canvas.boundingBox())!.width), { timeout: 30_000 }).toBeLessThan(2);
+   await expect.poll(() => frameCount, { timeout: 30_000 }).toBeGreaterThan(2);
    await page.getByRole('button', { name: 'Take over', exact: true }).click();
    await expect(page.getByText('You have control. The agent waits')).toBeVisible();
    await canvas.evaluate((node, sampleTarget) => {
