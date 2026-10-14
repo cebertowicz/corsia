@@ -209,8 +209,6 @@ export interface ThreadPlanStateEntry {
 	has_update?: boolean;
 	/** The user has opened the thread, so Mark read/unread has a record to write. */
 	opened?: boolean;
-	/** The earliest instant another wait in a still plan may become overdue; null without one. */
-	next_overdue_at?: string | null;
 	/** Plan fact: finished work, nothing open, not paused (AS16). The row also checks activity and higher marks. */
 	settled?: boolean;
 }

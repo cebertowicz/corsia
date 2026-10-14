@@ -227,7 +227,6 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
         plan_items = _plan_attention_items(plan) if plan is not None else []
         user_items = [*plan_items, *access_by_thread.get(str(plan_row["owner_id"]), [])]
         state, label_key = _plan_word(plan_row, plan, owed=bool(user_items))
-        still = plan["display"].get("not_moving") if plan is not None else None
         # Your move outranks Failed; its list is whatever owed items were found.
         if state in _OWED_STATES:
             attention_items = user_items
@@ -241,7 +240,6 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
             "label_key": label_key,
             "paused": plan_row["state"] == "paused",
             "attention_items": attention_items,
-            "next_overdue_at": still["next_overdue_at"] if still is not None else None,
             "settled": bool(
                 plan_row["state"] != "paused" and not plan_row["has_open"]
                 and plan_row["has_finished"]
@@ -267,7 +265,6 @@ def _add_planless_rows(
             "label_key": None,
             "paused": False,
             "attention_items": attention_items,
-            "next_overdue_at": None,
             "settled": False,
         })
     for thread_id in seen:
@@ -276,6 +273,5 @@ def _add_planless_rows(
             "label_key": None,
             "paused": False,
             "attention_items": [],
-            "next_overdue_at": None,
             "settled": False,
         })

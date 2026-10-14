@@ -262,10 +262,9 @@ describe('ThreadPlanStateMark', () => {
 		expect(host.querySelector<HTMLElement>('.plan-state')?.textContent).toBe('2 Failed');
 	});
 
-	it('shows the existing update dot for an overdue-only idle row', () => {
+	it('shows the existing update dot for an idle row', () => {
 		const onOpenThread = renderUpdate({
-			state: 'idle', label_key: null, paused: false, attention_items: [],
-			next_overdue_at: '2026-10-14T00:00:00+00:00', has_update: true,
+			state: 'idle', label_key: null, paused: false, attention_items: [], has_update: true,
 		});
 		expect(host.querySelector('.plan-state:not(.update-dot)')).toBeNull();
 		const dot = host.querySelector<HTMLElement>('.update-dot')!;

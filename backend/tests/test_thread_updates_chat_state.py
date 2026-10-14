@@ -39,7 +39,6 @@ def test_a_planless_explicit_send_reaches_its_row_as_idle_with_the_update(db):
         "label_key": None,
         "paused": False,
         "attention_items": [],
-        "next_overdue_at": None,
         "settled": False,
         "latest_update": {
             "id": 1,

@@ -296,7 +296,6 @@ def test_access_request_reaches_a_planless_thread_row(db):
         "label_key": None,
         "paused": False,
         "attention_items": [{"kind": "access", "title": "Inspect host", "node_id": None}],
-        "next_overdue_at": None,
         "settled": False,
         "latest_update": None,
         "has_update": False,
@@ -320,7 +319,6 @@ def test_child_plan_access_request_reaches_its_visible_thread_row(db):
         "label_key": None,
         "paused": False,
         "attention_items": [{"kind": "access", "title": "Inspect child host", "node_id": None}],
-        "next_overdue_at": None,
         "settled": False,
         "latest_update": None,
         "has_update": False,
@@ -556,7 +554,7 @@ def test_overdue_waits_keep_the_normal_idle_word_without_attention_items(db):
     assert state["state"] == "idle"
     assert state["attention_items"] == []
     assert "stuck_overdue_waits" not in state
-    assert state["next_overdue_at"] is None
+    assert "next_overdue_at" not in state
 
 
 def test_owed_then_failed_outrank_overdue_waits_and_owed_outranks_pause(db):
@@ -581,7 +579,7 @@ def test_owed_then_failed_outrank_overdue_waits_and_owed_outranks_pause(db):
     assert _states(db, ["stuck-precedence"])["stuck-precedence"]["state"] == "blocked_on_you"
 
 
-def test_future_waits_stay_idle_and_name_the_next_overdue_read(db):
+def test_future_waits_stay_idle_without_a_chat_list_timer_field(db):
     actor = _thread(db, "future-waits")
     plan = _plan(db, "future-waits")
     ends = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
@@ -590,4 +588,4 @@ def test_future_waits_stay_idle_and_name_the_next_overdue_read(db):
     state = _states(db, ["future-waits"])["future-waits"]
 
     assert state["state"] == "idle"
-    assert state["next_overdue_at"] == (datetime.fromisoformat(ends) + not_moving.OVERDUE_GRACE).isoformat()
+    assert "next_overdue_at" not in state

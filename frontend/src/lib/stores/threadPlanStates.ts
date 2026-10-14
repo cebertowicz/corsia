@@ -5,9 +5,7 @@
  * One batched read covers the listed threads. It is refreshed for the threads a
  * `plans_changed`, `thread_updates_changed` or `host_access_changed` nudge
  * names (the update dot's seen state, an access request), and in full on
- * reconnect and on sign-in. Nothing re-reads on a timer except the one set for
- * the next overdue wait, which re-reads only the threads whose wait came due.
- * A failed read keeps the last reading, and the next
+ * reconnect and on sign-in. A failed read keeps the last reading, and the next
  * trigger retries.
  */
 import { get, writable } from 'svelte/store';
@@ -24,40 +22,8 @@ let seq = 0;
 /** The newest read that has written each thread, so a slow older read never overwrites it. */
 const appliedSeq = new Map<string, number>();
 let stopAmbient: (() => void) | null = null;
-let overdueTimer: ReturnType<typeof setTimeout> | null = null;
 /** Under the server's per-read cap, and short enough for any URL limit. */
 const CHUNK = 100;
-const MIN_OVERDUE_RELOAD_MS = 5_000;
-const MAX_TIMEOUT_MS = 2_147_483_647;
-
-function scheduleNextOverdue(states: Record<string, ThreadPlanStateEntry>): void {
-	if (overdueTimer !== null) clearTimeout(overdueTimer);
-	overdueTimer = null;
-	let armedFor: string | null = null;
-	let next = Number.POSITIVE_INFINITY;
-	for (const [id, entry] of Object.entries(states)) {
-		const at = listed.has(id) && entry.next_overdue_at ? Date.parse(entry.next_overdue_at) : Number.NaN;
-		if (at < next) {
-			armedFor = id;
-			next = at;
-		}
-	}
-	if (armedFor === null) return;
-	const armed = armedFor;
-	const delay = Math.min(MAX_TIMEOUT_MS, Math.max(MIN_OVERDUE_RELOAD_MS, next - Date.now()));
-	overdueTimer = setTimeout(() => {
-		overdueTimer = null;
-		const cutoff = Math.max(next, Date.now());
-		const due = Object.entries(states)
-			.filter(([id, entry]) => listed.has(id) && typeof entry.next_overdue_at === 'string'
-				&& Date.parse(entry.next_overdue_at) <= cutoff)
-			.map(([id]) => id);
-		// Nothing listed is due only when the armed thread left the list; its read re-arms the timer.
-		void load(due.length > 0 ? due : [armed]);
-	}, delay);
-}
-
-threadPlanStates.subscribe(scheduleNextOverdue);
 
 async function load(ids: string[]): Promise<void> {
 	for (let start = 0; start < ids.length; start += CHUNK) {
@@ -143,8 +109,6 @@ export function reloadThreadPlanStates(threadIds: string[]): void {
 export function stopThreadPlanStates(): void {
 	stopAmbient?.();
 	stopAmbient = null;
-	if (overdueTimer !== null) clearTimeout(overdueTimer);
-	overdueTimer = null;
 	listed = new Set();
 }
 
