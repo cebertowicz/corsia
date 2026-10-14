@@ -7,7 +7,6 @@ import sqlite3
 
 _COLUMNS = (
     ("callback_credential_hash", "TEXT"),
-    ("overnight_outcome_claimed_at", "TEXT"),
 )
 
 

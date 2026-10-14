@@ -42,7 +42,7 @@ def test_scheduled_update_migration_preserves_existing_operation_rows():
     migrate_114_to_115(db)
 
     columns = {row[1] for row in db.execute("PRAGMA table_info(self_restart_requests)")}
-    assert {"callback_credential_hash", "overnight_outcome_claimed_at"} <= columns
+    assert "callback_credential_hash" in columns
     assert db.execute("SELECT status FROM self_restart_requests WHERE id='legacy'").fetchone()[0] == "complete"
 
 
@@ -55,7 +55,7 @@ def _operation_table() -> sqlite3.Connection:
         "branch TEXT, reason TEXT, kind TEXT, trigger TEXT, target_version TEXT, "
         "callback_credential_hash TEXT, changes TEXT, outcome_seen_at TEXT, status TEXT, phase TEXT, requested_at TEXT, "
         "cutoff_at TEXT, updated_at TEXT, settled_at TEXT, deployed_sha TEXT, error TEXT, "
-        "failure_code TEXT, failure_detail TEXT, overnight_outcome_claimed_at TEXT)"
+        "failure_code TEXT, failure_detail TEXT)"
     )
     return db
 
