@@ -113,7 +113,7 @@
 </div>
 
 <style>
-	.browser-leaf { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--surface-base, #111); }
+	.browser-leaf { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-primary); }
 	.toolbar { display: flex; gap: .5rem; align-items: center; padding: .5rem; font-size: .8rem; }
 	.toolbar input { flex: 1; }
 	canvas { flex: 1; min-height: 0; width: 100%; outline: none; }
