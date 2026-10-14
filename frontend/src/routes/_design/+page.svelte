@@ -3,6 +3,7 @@
 	import MaterialShowcase from './MaterialShowcase.svelte'; import CommentsShowcase from './CommentsShowcase.svelte';
 
 	import AttentionDockShowcase from './AttentionDockShowcase.svelte';
+	import SetupVariantsShowcase from './SetupVariantsShowcase.svelte';
 
 	/**
 	 * `?frame=attention-dock` renders that showcase and nothing else, so its own
@@ -422,6 +423,7 @@
 		</div>
 	</section>
 
+	<SetupVariantsShowcase />
 	<MaterialShowcase />
 	<CommentsShowcase />
 	<!-- ── The one attention dock (PLANS-AC34) ── -->

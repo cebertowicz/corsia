@@ -2,7 +2,12 @@
 	import type { Snippet } from 'svelte';
 
 	interface Props {
-		variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+		/**
+		 * `pill`, `link` and `text` are proposed, pending Product Experience and Steve: the chat canvas's own
+		 * action forms (the filled send button, the violet model chip, the underlined Cancel). Only setup uses
+		 * them. Each is one rule block below, so a different decision is a change to this file alone.
+		 */
+		variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'pill' | 'link' | 'text';
 		size?: 'sm' | 'md';
 		type?: 'button' | 'submit';
 		disabled?: boolean;
@@ -113,6 +118,31 @@
 		background: var(--bg-tertiary);
 		color: var(--text-primary);
 	}
+
+	/* Proposed (pending PX + Steve): the filled violet of the send button, as a pill that carries a label. */
+	.btn.pill {
+		height: calc(var(--space-7) + var(--space-2)); padding: 0 var(--space-5);
+		border-radius: var(--radius-pill); border-color: transparent;
+		background: var(--violet); color: white;
+		font-size: var(--text-callout); font-weight: var(--fw-semibold);
+	}
+	.btn.pill:hover:not(:disabled) { background: color-mix(in srgb, var(--violet) 88%, white); }
+	.btn.pill:disabled { opacity: 0.3; }
+
+	/* Proposed (pending PX + Steve): violet text, as the composer's model chip. No box. */
+	.btn.link {
+		background: transparent; border-color: transparent; color: var(--violet-text, var(--violet));
+		font-weight: var(--fw-semibold); padding: 0 var(--space-2); border-radius: var(--radius-sm);
+	}
+	.btn.link:hover:not(:disabled) { background: var(--violet-bg); }
+
+	/* Proposed (pending PX + Steve): underlined text, as Cancel in the download notice. No box. */
+	.btn.text {
+		background: transparent; border-color: transparent; color: var(--text-primary);
+		font-weight: var(--fw-semibold); padding: 0 var(--space-2); border-radius: var(--radius-sm);
+		text-decoration: underline; text-underline-offset: 3px;
+	}
+	.btn.text:hover:not(:disabled) { background: var(--bg-hover); }
 
 	.spinner {
 		display: inline-block;
