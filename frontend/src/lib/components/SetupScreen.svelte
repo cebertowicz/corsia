@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { Button, Field, ListRow, Message, StatePill } from '$lib/components/ui';
+	import { Button, Field, ListRow, Message, StatePill, Toggle } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
 	import { token, user } from '$lib/stores/auth';
 	import { fetchSources, recheckSources, sourceIsReady, type ModelSource } from '$lib/conductorSources';
@@ -33,14 +33,14 @@
 	let savingKey = $state(false);
 
 	const steps = $derived<SetupStep[]>([
-		{ label: 'Welcome', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
-		{ label: 'Your account', state: page === 'account' ? 'current' : page === 'models' ? 'done' : 'todo' },
-		{ label: 'AI model', state: page === 'models' ? 'current' : 'todo' },
+		{ label: 'Welcome', icon: 'check', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
+		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' ? 'done' : 'todo' },
+		{ label: 'AI model', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
 	const jobs = $derived<SetupJob[]>([
-		...(local?.setup_downloading || local?.setup_stage ? [{ label: local.name || 'Local model', state: 'busy' as const, meta: local.download_percent == null ? 'Downloading' : `${local.download_percent}%`, progress: localProgress }] : []),
+		...(local?.setup_downloading || local?.setup_stage ? [{ label: status.model_name || local.name || 'Local model', state: 'busy' as const, meta: local.download_percent == null ? 'Downloading' : `${local.download_percent}%`, progress: localProgress }] : []),
 		...(page === 'account' && accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const, meta: 'Preparing your account' }] : []),
 		...(page === 'error' ? [{ label: 'Starting CORSIA', state: 'error' as const, meta: 'Couldn’t start' }] : []),
 		...(page === 'models' ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
@@ -155,16 +155,18 @@
 		{#snippet secondary()}<Button variant="chip" onclick={readStatus}>Check again</Button>{/snippet}
 	</SetupShell>
 {:else if page === 'welcome'}
-	<SetupShell {steps} title="Welcome to CORSIA" lede={status.local_eligible === false ? 'This computer can’t run a local model. You can connect Claude Code, Codex, or an API key in the next step.' : `This computer can run ${modelSize}.`} primary={{ label: 'Get started' }} onPrimary={beginSetup}>
+	<SetupShell {steps} title="Welcome to CORSIA" mark lede="CORSIA runs AI agents that work on your projects with you." primary={{ label: 'Get started' }} onPrimary={beginSetup}>
 		<div class="welcome-copy">
 			{#if status.local_eligible === false}
-				<p>Local models need more available memory. You can still finish setup with a signed-in model source.</p>
+				<p>This computer can’t run a local model. You can connect Claude Code, Codex, or an API key in the next step.</p>
 			{:else if (status.free_disk_gb ?? Infinity) < (status.model_size_gb ?? 0)}
-				<p>Free up space for {modelSize}, then turn on the download.</p>
-				<label class="switch"><input type="checkbox" bind:checked={localWanted} disabled /> Download {downloadModelLabel} now</label>
+				<p>Needs {modelSize} free; {status.free_disk_gb} GB is free.</p>
+				<Button variant="chip" onclick={readStatus}>Free up space, then check again</Button>
 			{:else}
-				<label class="switch"><input type="checkbox" bind:checked={localWanted} /> Download {downloadModelLabel} now</label>
-				<p>The download continues while you finish setup.</p>
+				<div class="download-choice">
+					<div class="switch"><Toggle checked={localWanted} onchange={(next) => localWanted = next} ariaLabel={`Download ${downloadModelLabel} now`} /><span>Download {downloadModelLabel} now</span></div>
+					<span class="local-meta">{modelSize} · runs on this computer</span>
+				</div>
 			{/if}
 		</div>
 	</SetupShell>
@@ -176,7 +178,7 @@
 			<Field variant="chip" layout="stacked" label="Password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input type="password" autocomplete="new-password" bind:value={password} /></Field>
 			<Field variant="chip" layout="stacked" label="Confirm password" error={confirmationError}><input type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
 			<Field variant="chip" layout="stacked" label="Email (optional)"><input type="email" autocomplete="email" bind:value={email} /></Field>
-			<div class="folder"><span>This computer</span><strong>{folder}</strong></div>
+			<div class="folder"><span>Work folder</span><strong>{folder}</strong></div>
 			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
 		</form>
 	</SetupShell>
@@ -185,13 +187,14 @@
 		{#snippet secondary()}<Button variant="chip" onclick={() => page = 'account'}>Back</Button>{/snippet}
 	</SetupShell>
 {:else}
-	<SetupShell {steps} {jobs} title="Choose an AI model" lede="Your agents need one model source. You can add more later in Settings." primary={{ label: 'Start using CORSIA', disabled: !canFinish }} onPrimary={onFinished}>
+	<SetupShell {steps} {jobs} title="Choose an AI model" lede="Your agents need at least one. You can add more later in Settings." primary={{ label: 'Start using CORSIA', disabled: !canFinish, note: 'Ready when the download finishes. You can close this window; CORSIA keeps going.' }} onPrimary={onFinished}>
 		<div class="sources">
 			{#each sources as source (source.source)}
-				<ListRow name={source.source === 'omlx' ? 'This computer' : source.name} meta={[source.reason || (source.source === 'omlx' ? `Local model · ${modelSize}` : 'Use your subscription')]} centered>
+				<ListRow name={source.source === 'omlx' ? 'This computer' : source.name} meta={[source.setup_downloading && source.source === 'omlx' ? 'Downloading in the background' : source.reason || (source.source === 'omlx' ? `Local model · ${modelSize}` : 'Use your subscription')]} centered>
 					{#snippet actions()}
 						{#if sourceIsReady(source)}<StatePill look="dot" state="success" label="Ready" />
-						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" onclick={async () => { await startLocalDownload(); await refreshSources(); }}>{source.setup_downloading ? 'Downloading' : 'Download'}</Button>
+						{:else if source.source === 'omlx' && source.setup_downloading}<StatePill look="dot" state="loading" label="Downloading" />
+						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" onclick={async () => { await startLocalDownload(); await refreshSources(); }}>Download</Button>
 						{:else}<Button variant="chip" size="sm" onclick={() => signIn(source)}>{source.state === 'not_installed' ? 'Install' : 'Sign in'}</Button>{/if}
 					{/snippet}
 				</ListRow>
@@ -214,5 +217,8 @@
 	.folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
 	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
 	.welcome-copy p { margin: 0; }
+	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); }
 	.switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); }
+	.local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }
+	.sources { align-items: flex-start; }
 </style>

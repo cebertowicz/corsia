@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { Button, Field, Message } from '$lib/components/ui';
+	import { Button, Field, ListRow, Message } from '$lib/components/ui';
 	import ConfirmDialog from '../ConfirmDialog.svelte';
 	import OverageSwitch from './OverageSwitch.svelte';
 	import AccountUsageRow from './AccountUsageRow.svelte';
@@ -268,15 +268,15 @@
 						}} />
 					</Field>
 				{:else}
-					<div class="account-main">
-						<div class="account-copy">
+					<ListRow>
+						{#snippet children()}
 							<AccountUsageRow {account} />
 							<div class="account-meta">
 								<span>{stateLabel(account)}</span>
 								{#if account.is_default}<span>Workspace account</span>{/if}
 							</div>
-						</div>
-						<div class="account-actions">
+						{/snippet}
+						{#snippet actions()}<div class="account-actions">
 							{#if account.state === 'signed_out' && (!signIn || signIn.status === 'refused')}
 								<Button size="sm" variant="primary" loading={!!pending[account.id]} onclick={() => startSignin(account.id)}>Sign in</Button>
 							{/if}
@@ -286,7 +286,8 @@
 								</button>
 							{/if}
 						</div>
-					</div>
+					{/snippet}
+					</ListRow>
 					{#if account.state !== 'removed'}<OverageSwitch {account} inline />{/if}
 					<AccountBillingRow {account} />
 					{#if account.state !== 'removed' && menuId === account.id}
@@ -358,8 +359,8 @@
 	.account-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: var(--text-footnote); font-weight: 600; }
 	.account { position: relative; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); outline: none; }
 	.account:focus { box-shadow: 0 0 0 3px var(--violet-bg); border-radius: var(--radius-xs); }
-	.account-main { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
-	.account-copy { min-width: 0; }
+	.account :global(.row-main) { align-items: start; }
+	.account :global(.row-copy) { min-width: 0; }
 	/* The action cluster keeps its natural width; the name/meta column absorbs
 	   the squeeze (it has min-width: 0 and breaks inside words). Without this
 	   a long meta line starved the cluster and the overflow button wrapped. */

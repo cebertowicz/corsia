@@ -1,18 +1,16 @@
 <script lang="ts">
-	import { Button, CheckRow, CodeInput, Field, RailRow, RailSection, StatePill } from '$lib/components/ui';
+	import { Button, Field, RailRow, RailSection, StatePill } from '$lib/components/ui';
 
 	/**
-	 * The setup screens' primitive variants. Proposed, pending Product Experience and Steve: only the setup
-	 * screens (`/_design/setup`) use them, and no other surface changes. Each is one rule block in its own
-	 * primitive, so a different decision is a one-file change.
+	 * The setup screens' approved primitive variants. They are setup-only until Product Experience approves a
+	 * shared rollout.
 	 */
-	let code = $state('4F');
 </script>
 
 <section class="block" id="setup-variants">
 	<header class="block-head">
-		<h2>Setup variants (proposed, pending PX + Steve)</h2>
-		<p>The chat canvas's own forms as primitive variants: the send button's fill as a pill, the model chip as a chip, the composer chip as a field, the Update mark's dot as a status, and the shell's sidebar rows. Only setup uses them.</p>
+		<h2>Setup variants</h2>
+		<p>Approved setup-only forms: the send button's fill as a pill, the model chip as a chip, the composer chip as a field, the Update mark's dot as a status, and the shell's sidebar rows.</p>
 	</header>
 	<div class="card">
 		<h3>Button: pill, chip</h3>
@@ -39,15 +37,7 @@
 			<StatePill look="dot" state="loaded" label="Loaded" />
 			<StatePill look="dot" state="idle" label="Idle" />
 		</div>
-		<h3>CodeInput and CheckRow</h3>
-		<div class="stack">
-			<CodeInput label="Code" bind:value={code} />
-			<CheckRow label="Keep CORSIA running when the window is closed" checked={false}>
-				{#snippet actions()}<Button variant="chip" size="sm">Open Login Items</Button>{/snippet}
-			</CheckRow>
-			<CheckRow label="Keep CORSIA running when the window is closed" checked={true} />
-		</div>
-		<h3>RailSection and RailRow</h3>
+			<h3>RailSection and RailRow</h3>
 		<div class="rail">
 			<RailSection label="Setup" first>
 				<RailRow label="Done" state="done" onclick={() => {}} />

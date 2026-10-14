@@ -141,7 +141,7 @@
 		font-size: var(--text-footnote); color: var(--red);
 	}
 
-	/* Proposed (pending PX + Steve): the composer chip's look for a text control or a select. */
+	/* Approved for setup-only use: the composer chip's look for a text control or a select. A shared rollout needs a Product Experience decision. */
 	.field.chip { border-bottom: 0; padding: 0; grid-template-columns: 1fr; grid-template-areas: 'label' 'control' 'msg'; gap: var(--space-1); }
 	.field.chip .t { display: none; }
 	.field.chip .l { font-size: var(--text-footnote); color: var(--text-secondary); padding-left: var(--space-1); }

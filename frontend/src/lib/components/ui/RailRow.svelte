@@ -3,9 +3,8 @@
 
 	/**
 	 * One row of the shell's sidebar: icon, label, and an optional second line, with the accent left bar and
-	 * tint when it is the current one. Proposed (pending Product Experience and Steve): the markup and rules of
-	 * `RailScopedSection.svelte`'s `.scoped-item` (the "CORSIA" row), lifted into a component so setup can draw
-	 * the same sidebar. Only setup uses it.
+	 * tint when it is the current one. Approved for setup; it mirrors the existing sidebar rail without changing
+	 * shared sidebar behavior. Any new shared use needs a Product Experience decision.
 	 *
 	 * `state` is what the row stands for: `current` is the selected row, `idle` is a row you can pick (a list
 	 * of choices), `todo` is not reached yet, `done`
@@ -22,10 +21,12 @@
 		progress?: number;
 		/** The row's own icon, for `current` and `todo`. */
 		icon?: Snippet;
+		/** The approved setup-step icon when a custom snippet is unnecessary. */
+		iconName?: 'check' | 'person' | 'chip';
 		onclick?: () => void;
 	}
 
-	const { label, state = 'todo', meta, progress, icon, onclick }: Props = $props();
+	const { label, state = 'todo', meta, progress, icon, iconName, onclick }: Props = $props();
 	const interactive = $derived(!!onclick && state !== 'todo' && state !== 'current');
 </script>
 
@@ -39,6 +40,12 @@
 			<i class="reddot"></i>
 		{:else if icon}
 			{@render icon()}
+		{:else if iconName === 'check'}
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+		{:else if iconName === 'person'}
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="3" /><path d="M5.5 20c.7-3.5 3-5.5 6.5-5.5s5.8 2 6.5 5.5" /></svg>
+		{:else if iconName === 'chip'}
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" /><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M18 9h4M2 15h4M18 15h4" /></svg>
 		{/if}
 	</span>
 	<span class="copy">

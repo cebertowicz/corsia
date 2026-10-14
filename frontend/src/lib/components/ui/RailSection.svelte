@@ -3,24 +3,31 @@
 
 	/**
 	 * A section of the shell's sidebar: the small caps label over a stack of `RailRow`s, with the hairline
-	 * the sidebar draws between its sections. Proposed (pending Product Experience and Steve): the shell
-	 * sidebar's own markup, drawn from Sidebar.svelte's `.rail-scope` and `RailScopedSection.svelte`'s
-	 * `.scoped`, lifted into a component so setup can draw the same sidebar. Only setup uses it.
+	 * the sidebar draws between its sections. Approved for setup and for extracting existing sidebar structure
+	 * without a visual change; any new shared use needs a Product Experience decision.
 	 */
 	interface Props {
 		label: string;
+		/** Existing sidebar layouts reuse their exact markup without a visual change. */
+		layout?: 'setup' | 'sidebar-nav' | 'sidebar-scoped';
 		/** The first section has no hairline above it. */
 		first?: boolean;
 		children: Snippet;
 	}
 
-	const { label, first = false, children }: Props = $props();
+	const { label, layout = 'setup', first = false, children }: Props = $props();
 </script>
 
-<section class="rail-section" class:first aria-label={label}>
-	<h2 class="cap">{label}</h2>
-	<div class="rows">{@render children()}</div>
-</section>
+{#if layout === 'sidebar-nav'}
+	<nav class="rail-nav" aria-label={label}>{@render children()}</nav>
+{:else if layout === 'sidebar-scoped'}
+	<nav class="scoped" aria-label={label}>{@render children()}</nav>
+{:else}
+	<section class="rail-section" class:first aria-label={label}>
+		<h2 class="cap">{label}</h2>
+		<div class="rows">{@render children()}</div>
+	</section>
+{/if}
 
 <style>
 	.rail-section { border-top: 1px solid var(--border-subtle); }

@@ -16,13 +16,13 @@
 	import SidebarThreadList from './SidebarThreadList.svelte';
 	import SidebarContextMenu from './SidebarContextMenu.svelte';
 	import RailScopedSection from './RailScopedSection.svelte';
+	import { RailSection } from '$lib/components/ui';
 	import { measurementRailHref, openMeasurementFromRail } from '$lib/stores/measurementNavigation';
 	import type { View } from '$lib/homePaneConfig';
 	import NewChatFab from './NewChatFab.svelte';
 	import SidebarAttentionList from './SidebarAttentionList.svelte';
 	import { projects, loadProjects } from '$lib/stores/projects';
 	import { updateStatus } from '$lib/stores/settings';
-
 	const updateAvailable = $derived($updateStatus?.available === true);
 
 	let projectNames = $derived(Object.fromEntries($projects.map((p) => [p.id, p.name])));
@@ -197,7 +197,7 @@
 >
 	<div class="shell-top-pad" data-tauri-drag-region></div>
 
-	<nav class="rail-nav" aria-label="Global">
+	<RailSection label="Global" layout="sidebar-nav">
 		<button
 			class="rail-link press-tint"
 			class:active={activeView === 'activity'}
@@ -221,7 +221,7 @@
 				<svg class="update-icon" role="img" aria-label="Update available" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
 			{/if}
 		</button>
-	</nav>
+	</RailSection>
 
 	<div class="sidebar-scroll">
 		<div class="rail-scope">
@@ -338,7 +338,7 @@
 		height: 0;
 	}
 
-	.rail-nav {
+	:global(.rail-nav) {
 		display: flex; flex-direction: column; gap: 1px; flex-shrink: 0;
 		padding: 8px 8px 4px;
 	}
