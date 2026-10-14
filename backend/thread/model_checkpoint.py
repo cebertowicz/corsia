@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import cast
+from dataclasses import dataclass
 from uuid import uuid4
 
 from core.checkpoint_resume import CheckpointAdmission
@@ -176,13 +175,11 @@ def _target_cold_admission(
 ) -> CheckpointAdmission:
     from core.checkpoint_render import build_cold_checkpoint_admission
     from infra.database import get_db
-    from llm.resolution import ExecutionTarget
 
     context = read_switch_checkpoint_context(request)
-    destination = cast(ExecutionTarget, context.destination_target)
     db = get_db()
     try:
-        admission = build_cold_checkpoint_admission(
+        return build_cold_checkpoint_admission(
             checkpoint_id=checkpoint_id,
             thread_id=request.thread_id,
             trigger="model_switch",
@@ -197,26 +194,6 @@ def _target_cold_admission(
             binary=context.destination_binary,
             mcp_config=context.destination_mcp_config,
             db=db,
-        )
-        from connections.vendor_accounts import VENDORS
-
-        if destination.harness not in VENDORS:
-            return admission
-        from connections.account_policy import turn_account
-
-        account_id, _reason = turn_account(
-            destination.harness,
-            thread_id=request.thread_id,
-            model=destination.catalog_id,
-            db=db,
-        )
-        return replace(
-            admission,
-            provider_request=replace(
-                admission.provider_request,
-                vendor_account_id=account_id,
-                vendor_account_bound=True,
-            ),
         )
     finally:
         db.close()

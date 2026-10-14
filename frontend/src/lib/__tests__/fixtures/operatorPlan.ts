@@ -74,7 +74,6 @@ export function operatorNode(over: Partial<OperatorNode> = {}): OperatorNode {
 		kind: 'task',
 		title: 'Task',
 		description: null,
-		waiting_on: [],
 		acceptance_criteria: 'DOD',
 		state,
 		unmet_dependencies: [],

@@ -37,7 +37,7 @@ async function settle() {
 const item = (id: string, over: Partial<FoldedItem> = {}): FoldedItem => ({
 	id, parent_id: null, kind: 'task', title: id, state: 'accepted', folded_at: '2026-09-01T00:00:00Z',
 	fold_bucket: 'done', display: { label_key: 'finished', tone_key: 'complete' },
-	status_reason: null, folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false, ...over,
+	folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false, ...over,
 });
 
 const reply = (status: number, body: unknown) => ({ ok: status === 200, status, json: async () => body, headers: { get: () => null } });
@@ -111,20 +111,11 @@ describe('PlanTree — a level\'s folded history', () => {
 		expect(String(fetcher.mock.calls[1][0])).toContain('cursor=c1');
 	});
 
-	it('keeps a cold page pending on Show while a request is on its way', async () => {
+	it('says it is loading while a page is on its way', async () => {
 		vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
 		mountTree(root(3, 3));
 		await press('Show 3');
-		expect(host.querySelector('button[aria-busy="true"]')?.textContent).toContain('Show 3');
-		expect(host.querySelector('[role="status"]')).toBeNull();
-	});
-
-	it('re-enables Show when a cold history request rejects unexpectedly', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection dropped')));
-		mountTree(root(3, 3));
-		await press('Show 3');
-		expect(host.querySelector('button[aria-busy="true"]')).toBeNull();
-		expect([...host.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Show 3')?.disabled).toBe(false);
+		expect(host.querySelector('[role="status"]')?.textContent).toBe('Loading…');
 	});
 
 	it('says it could not load, and Retry reads the same page again', async () => {
@@ -155,20 +146,5 @@ describe('PlanTree — a level\'s folded history', () => {
 		mountTree(root(1, 1));
 		await press('Show 1');
 		expect(titles()).toContain('Wrote the guide');
-	});
-
-	it('says why a fetched Won’t do row was not done, as an open one does', async () => {
-		const wontDo = item('Old 0', {
-			title: 'Retire the draft', state: 'closed', fold_bucket: 'closed',
-			status_reason: 'No longer needed', display: { label_key: 'finished', tone_key: 'closed' },
-		});
-		vi.stubGlobal('fetch', vi.fn(async () => page([wontDo], null)));
-		mountTree([{ parent_id: null, done: 0, failed: 0, closed: 1, more: 1 }]);
-		await press('Show 1');
-		expect(host.textContent).toContain('Won’t do · No longer needed');
-		// A narrow pane cuts the reason, never when it settled: the moment sits outside the clipped text.
-		const subline = host.querySelector('.tree-row:not(.fold-row) .row-subline');
-		expect(subline?.querySelector('.subline-text')?.textContent).toBe('Won’t do · No longer needed');
-		expect(subline?.querySelector('.subline-moment')?.textContent).toMatch(/^ · \S/);
 	});
 });

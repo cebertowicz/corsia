@@ -113,9 +113,6 @@
 		font-size: var(--text-footnote); font-weight: var(--fw-medium); cursor: pointer;
 		padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs);
 	}
-	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
-	@media (hover: hover) {
-		.drill-back:hover { background: var(--bg-hover); color: var(--text-primary); }
-	}
+	.drill-back:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.drill-title { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 </style>

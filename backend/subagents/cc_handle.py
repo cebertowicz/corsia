@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 from infra.context_receipts import (
     ContextReceiptIdentity,
     producer_handle_fingerprint as opaque_handle_fingerprint,
@@ -17,9 +15,6 @@ from subagents.cc_context_types import (
 from subagents.cc_runtime_errors import CCPreparedDestinationStale
 from subagents.cc_runtime_helpers import _proc_is_alive
 from subagents.cc_runtime_state import Broadcast, _LIVE, _Live
-
-
-log = logging.getLogger(__name__)
 
 
 async def steer_restart_pending(
@@ -128,34 +123,20 @@ async def retire_if_current(
     *,
     expected_owner,
     broadcast: Broadcast | None = None,
-    operation_id: str | None = None,
-    keep_resume_handle: bool = False,
 ) -> bool:
     """Retire only the exact CC owner captured before a context commit."""
     from subagents.cc_shutdown import retire_live, retire_provider_session
 
     async with _LIVE.lock(session_id):
         live = _LIVE.get(session_id)
-        if live is None:
-            if expected_owner is not None:
-                log.info(
-                    "model switch source runtime branch=owner_gone thread_id=%s operation_id=%s",
-                    session_id, operation_id or "unknown",
-                )
-            if not keep_resume_handle:
-                await run_in_db(retire_provider_session, session_id)
+        if expected_owner is None:
+            if live is not None:
+                return False
+            await run_in_db(retire_provider_session, session_id)
             return True
-        if expected_owner is None or live_handle_fingerprint(session_id, live) != expected_owner:
-            log.warning(
-                "model switch source runtime branch=owner_changed thread_id=%s operation_id=%s",
-                session_id, operation_id or "unknown",
-            )
+        if live is None or live_handle_fingerprint(session_id, live) != expected_owner:
             return False
         if not await retire_live(session_id, broadcast):
-            log.warning(
-                "model switch source runtime branch=retire_failed thread_id=%s operation_id=%s",
-                session_id, operation_id or "unknown",
-            )
             return False
         await run_in_db(retire_provider_session, session_id)
         return True

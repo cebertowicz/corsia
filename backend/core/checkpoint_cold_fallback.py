@@ -33,11 +33,8 @@ def cold_correction_available(request: ProviderCheckpointRequest) -> bool:
 
 async def build_cold_request(
     request: ProviderCheckpointRequest,
-    reason: str = "warm_fork_over_window",
 ) -> ProviderCheckpointRequest:
     """Build the cold request this caller would have built with no warm source.
-
-    ``reason`` is the refused warm fork's own token, logged as the cause.
 
     Raises whatever the cold builder raises, including ColdFoldInputTooLarge
     when no cold fold is possible either; that is a terminal failure for the
@@ -55,7 +52,9 @@ async def build_cold_request(
     if cold.warm_source is not None or cold.cold_source is None:
         raise ValueError("cold correction did not produce a cold source")
     await run_in_db(adopt_cold, request.checkpoint_id)
-    warm_capture_refused(request.thread_id, request.target.harness, reason)
+    warm_capture_refused(
+        request.thread_id, request.target.harness, "warm_fork_over_window",
+    )
     # The usage callback is already frozen against this checkpoint id; keep the
     # single-owner binding rather than rebinding a second one.
     return replace(cold, on_usage=request.on_usage, same_model_cold=None,
@@ -69,11 +68,10 @@ async def invoke_with_cold_correction(request, cancel_event, invoke):
     """Run one pressure invocation, correcting an unusable warm fork to cold."""
     try:
         return await invoke(request, cancel_event)
-    except WarmForkUnusable as refusal:
+    except WarmForkUnusable:
         if not cold_correction_available(request):
             raise
-        reason = refusal.reason
     if cancel_event.is_set():
         raise asyncio.CancelledError
-    cold = await build_cold_request(request, reason)
+    cold = await build_cold_request(request)
     return await invoke(cold, cancel_event)

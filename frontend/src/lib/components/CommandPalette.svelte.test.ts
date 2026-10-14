@@ -36,7 +36,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	_setProjectsForTests([
 		{ id: 'project-alpha', name: 'Alpha', status: 'active', accent_color: null },
-		{ id: 'project-archived', name: 'Archived Atlas', status: 'archived', accent_color: null },
+		{ id: 'project-beta', name: 'Beta', status: 'active', accent_color: null },
 	]);
 	threads.set([
 		{
@@ -69,19 +69,6 @@ describe('CommandPalette query results', () => {
 		expect(host.textContent).not.toContain('New project');
 		expect(host.textContent).toContain('No matching projects.');
 		expect(host.textContent).toContain('No matching conversations.');
-	});
-
-	it('hides archived projects in empty and matching-query results', () => {
-		renderPalette();
-
-		expect(host.textContent).toContain('Alpha');
-		expect(host.textContent).not.toContain('Archived');
-		expect(host.textContent).not.toContain('Archived Atlas');
-
-		typeQuery('atlas');
-
-		expect(host.textContent).not.toContain('Archived');
-		expect(host.textContent).not.toContain('Archived Atlas');
 	});
 
 	it('highlights the first visible match and Enter invokes that match', () => {

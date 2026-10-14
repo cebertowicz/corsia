@@ -79,9 +79,6 @@ def _present_node(
         "kind": node["kind"],
         "title": node["title"],
         "description": node["description"],
-        # A person step names only this plan's open dependents; cross-plan
-        # dependents remain private to their plan owner.
-        "waiting_on": node["dependent_titles"] if node["assignee"] == "user" else [],
         "acceptance_criteria": node["acceptance_criteria"],
         "state": node["state"],
         "unmet_dependencies": list(node["unmet_dependencies"]),

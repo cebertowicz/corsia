@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import uuid
@@ -277,61 +276,6 @@ async def test_managed_notice_failure_preserves_receipt_and_lineage(
         assert _context_rows(db, thread_id, label) == []
     finally:
         db.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("name", "initial", "expected"), [("write_file", None, "after write"), ("edit_file", "before", "after"), ("multi_edit", "alpha beta", "alpha delta")],
-)
-async def test_guided_writes_nudge_once_and_keep_guidance_receipt(file_scope, monkeypatch, name, initial, expected):
-    """Guided saves notify open tabs without returning the raw write receipt."""
-    from registry import service
-    from registry.durable_writes import write_text
-
-    workspace, project_root, thread_id, db = file_scope
-    target = project_root / "shared" / "planning" / f"guided-nudge-{name}.md"
-    if initial is not None:
-        write_text(target, initial, thread_id=thread_id, project_id="project-alpha", workspace=workspace, description="Guide", update_trigger="When the guide changes")
-    _configure_source(db, thread_id, target, workspace)
-    notifications = []
-
-    def notify_changed(artifact):
-        asyncio.get_running_loop()
-        notifications.append(artifact)
-
-    monkeypatch.setattr(service, "notify_changed", notify_changed)
-
-    result, _invocation_id, _provider_call_id = await _execute_registered_file_tool(
-        workspace=workspace, thread_id=thread_id, name=name, arguments=_managed_arguments(name, target),
-    )
-    receipt = json.loads(result.delivery.content)
-
-    assert target.read_text(encoding="utf-8") == expected
-    assert receipt["registry_managed"] is True
-    # The caller returns history-decorated text, not the raw announced receipt.
-    assert receipt["guidance_history"]
-    assert notifications == [receipt["artifact"]]
-
-
-@pytest.mark.asyncio
-async def test_guided_write_without_registry_receipt_does_not_nudge(file_scope, monkeypatch):
-    """An ungoverned guided write still has no artifact to announce."""
-    from registry import service
-    from tools.filesystem_rw import WriteFileTool
-
-    workspace, project_root, _thread_id, _db = file_scope
-    target = project_root / "shared" / "planning" / "unmanaged-guided-nudge.md"
-    notifications = []
-    monkeypatch.setattr(service, "notify_changed", notifications.append)
-
-    result = await WriteFileTool(workspace=workspace).execute(
-        path=str(target), content="after write", description="Guide", update_trigger="When the guide changes",
-        reason="Exercise guidance writes", evidence="test",
-    )
-
-    assert target.read_text(encoding="utf-8") == "after write"
-    assert "registry_managed" not in result
-    assert notifications == []
 
 
 @pytest.mark.asyncio

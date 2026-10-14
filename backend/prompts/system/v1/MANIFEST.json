@@ -19,10 +19,10 @@
       "sha256": "2ac0f6a1e66262f6c6e8272d48f236edee50fe95b5999fafed16dbb5daabc7a3"
     },
     {
-      "bytes": 2679,
+      "bytes": 2586,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "8747eed7647a956d9a17522b3f26348494c6aad64220c33fc2addda6574b6779"
+      "sha256": "c5955b8f2b17a076b16594e95244f129905a63ffe3419756f575af87cf511972"
     },
     {
       "bytes": 862,
@@ -69,10 +69,10 @@
       "sha256": "9df2a5a0dde7b703026ee62c360aa0ff5b40225008ddfed546061ac26fff1b07"
     },
     {
-      "bytes": 9673,
+      "bytes": 9599,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/COORDINATION-CORE.md",
-      "sha256": "38e1a4e1b87b1dd38764ea60ac18223e663e70f8408a9691da1745ae8e1db2e4"
+      "sha256": "948c4bcf77a8969b64b5db95f3668fc53027e99e5ddc0421eb36506be444fbd9"
     },
     {
       "bytes": 740,
@@ -108,7 +108,7 @@
       "bytes": 6130,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "dd34f75f4c80a209ecba6c729fe9275dd57b90237da0e31bde9ff191a7df5e02"
+      "sha256": "40d4517b51ab0b8a58e8b3d58dd66da0ad35de3bc5c12d87bdfd67e868ee08e7"
     },
     {
       "bytes": 3582,
@@ -195,10 +195,10 @@
       "sha256": "f49824603ef17cac31076d3d065c2f4e22893c0bef898c779c8e7d41644b54e8"
     },
     {
-      "bytes": 8397,
+      "bytes": 8295,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "7afb88fca148ee4de5a20ca386ae90f8162f010931ed0c0e97d2714294f34e61"
+      "sha256": "b7d237a45b937baefd968198d9d9333ef74b71d997a780e6218ad2bc189b1e78"
     },
     {
       "bytes": 2766,

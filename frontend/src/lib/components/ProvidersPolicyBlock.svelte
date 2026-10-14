@@ -28,23 +28,17 @@
 	async function toggleScope(useWorkspace: boolean) {
 		if (!projectId || !policy || busy) return;
 		busy = true;
-		try {
-			const result = await saveUseWorkspace(projectId, useWorkspace, policy.override_revision ?? 0);
-			if (result.ok) policy = result.value; else error = result.error;
-		} finally {
-			busy = false;
-		}
+		const result = await saveUseWorkspace(projectId, useWorkspace, policy.override_revision ?? 0);
+		if (result.ok) policy = result.value; else error = result.error;
+		busy = false;
 	}
 	async function save(entry: ProviderEntry, patch: Partial<ProviderEntry>) {
 		if (busy) return;
 		busy = true; error = '';
-		try {
-			const result = await saveProviderPolicy({ ...entry, ...patch }, projectId);
-			if (result.ok && policy) policy = { ...policy, providers: policy.providers.map((item) => item.provider_key === entry.provider_key ? result.value : item) };
-			else if (!result.ok) error = result.error;
-		} finally {
-			busy = false;
-		}
+		const result = await saveProviderPolicy({ ...entry, ...patch }, projectId);
+		if (result.ok && policy) policy = { ...policy, providers: policy.providers.map((item) => item.provider_key === entry.provider_key ? result.value : item) };
+		else if (!result.ok) error = result.error;
+		busy = false;
 	}
 	function providerName(provider: ProviderEntry) {
 		return provider.provider_key === 'claude-code' ? 'Claude Code' : 'Codex';

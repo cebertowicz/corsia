@@ -294,11 +294,7 @@ async def test_recovery_task_failure_is_observed(isolated_db, monkeypatch, recor
     await asyncio.wait([recovery._TASK])
     await asyncio.sleep(0)
 
-    assert any(
-        r.record["exception"] is not None
-        and "scan boom" in str(r.record["exception"].value)
-        for r in records
-    )
+    assert any("scan boom" in str(r.record["message"]) for r in records)
 
 
 def test_scheduling_without_a_known_loop_is_not_silent(monkeypatch, records) -> None:

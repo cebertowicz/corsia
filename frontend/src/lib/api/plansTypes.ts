@@ -205,8 +205,6 @@ export interface OperatorNode {
 	kind: string;
 	title: string;
 	description: string | null;
-	/** Open steps in this plan that this user-assigned step releases. */
-	waiting_on: string[];
 	acceptance_criteria: string;
 	state: string;
 	/** Prerequisites not yet accepted; empty unless the node is open. */

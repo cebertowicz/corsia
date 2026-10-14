@@ -37,7 +37,7 @@ async function settle() {
 const item = (id: string, over: Partial<FoldedItem> = {}): FoldedItem => ({
 	id, parent_id: null, kind: 'task', title: id, state: 'accepted', folded_at: '2026-09-01T00:00:00Z',
 	fold_bucket: 'done', display: { label_key: 'finished', tone_key: 'complete' },
-	status_reason: null, folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false, ...over,
+	folds: { done: 0, failed: 0, closed: 0 }, has_folded_children: false, ...over,
 });
 
 const reply = (status: number, body: unknown) => ({ ok: status === 200, status, json: async () => body, headers: { get: () => null } });

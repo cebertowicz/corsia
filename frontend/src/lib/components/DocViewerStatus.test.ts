@@ -117,9 +117,6 @@ describe('DocViewerStatus freshness metadata', () => {
 		[value({ state: 'overdue' }), true],
 		[value({ state: 'never_verified', verified_at: null, age_days: null }), true],
 	])('shows Mark verified only for eligible freshness states', (freshness, visible) => {
-		// Pinned so the 'current' row stays outside the seven-day window whatever today's date is.
-		vi.useFakeTimers();
-		vi.setSystemTime(new Date('2026-09-30T12:00:00Z'));
 		render(freshness);
 		expect(host.textContent?.includes('Mark verified')).toBe(visible);
 	});

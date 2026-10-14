@@ -28,15 +28,6 @@ export function restoreWorkspace(
 		// Auxiliary conversations and legacy discussion identities are scoped to
 		// the authenticated browser session and never restored across accounts.
 		if (entry.kind === 'legacy-discussion' || entry.kind === 'subagent') continue;
-		if (entry.kind === 'browser' && typeof entry.threadId === 'string') {
-			tabs.push({
-				kind: 'browser',
-				instanceId: typeof entry.instanceId === 'string' ? entry.instanceId : newInstanceId(),
-				artifactId: null, path: `browser:${entry.threadId}`, title: 'Browser',
-				threadId: entry.threadId, loadedRevision: null, latestRevision: null, status: 'ready',
-			});
-			continue;
-		}
 		if (typeof entry.path !== 'string') continue;
 		const artifactId = typeof entry.artifactId === 'string' ? entry.artifactId : null;
 		if (tabs.some((tab) => sameDocument(tab, artifactId, entry.path))) continue;

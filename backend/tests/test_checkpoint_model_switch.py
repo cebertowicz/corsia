@@ -404,8 +404,7 @@ def test_target_cold_preserves_unavailable_source_model(monkeypatch) -> None:
     )
     context = SimpleNamespace(
         source_target=None,
-        # A non-harness destination: this audit-identity test binds no vendor account.
-        destination_target=SimpleNamespace(harness="external", catalog_id="codex/target"),
+        destination_target=object(),
         boundary=object(),
         previous=None,
         projection=object(),

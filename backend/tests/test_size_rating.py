@@ -54,11 +54,11 @@ def _nodes(db, owner, count, *, accepted_at=ACCEPTED_AT, evidence=False):
     return ids
 
 
-def _presence_visit(db, thread_id, day="2026-09-22"):
+def _presence_visit(db, thread_id):
     db.execute(
         "INSERT INTO presence_visits (user_id,surface,thread_id,entered_at,exited_at,seconds,sessions,exit_reason) "
-        "VALUES ('steve','chat',?,?,?,720,1,'hidden')",
-        (thread_id, f"{day}T10:00:00Z", f"{day}T10:12:00Z"),
+        "VALUES ('steve','chat',?,'2026-09-22T10:00:00Z','2026-09-22T10:12:00Z',720,1,'hidden')",
+        (thread_id,),
     )
 
 
@@ -90,10 +90,10 @@ def _table_state(db):
             db.execute("SELECT COALESCE(SUM(n),0) FROM outcome_event_counters").fetchone()[0])
 
 
-async def _size_rows(project="all", agent="none", grain="weeks"):
+async def _size_rows(project="all", agent="none"):
     from api.measurement import measurement_series
 
-    result = await measurement_series("estimated_human_hours_per_active_hour", project=project, agent=agent, grain=grain, timezone_name="UTC", user=USER)
+    result = await measurement_series("estimated_human_hours_per_active_hour", project=project, agent=agent, grain="weeks", timezone_name="UTC", user=USER)
     return result["rows"]
 
 
@@ -435,8 +435,8 @@ async def test_an_unrecorded_rater_version_does_not_break_comparability(isolated
 
 
 @pytest.mark.asyncio
-async def test_a_change_of_rater_version_across_weeks_keeps_every_week_comparable(isolated_db):
-    """Who rated is served as coverage: a range rated by two recorded versions still compares."""
+async def test_comparability_across_weeks_follows_the_rating_method_not_the_recorded_version(isolated_db):
+    """An unrecorded version in one week matches a recorded one in another; two recorded versions differ."""
     second = "2026-09-28"
     db = _db()
     try:
@@ -461,13 +461,12 @@ async def test_a_change_of_rater_version_across_weeks_keeps_every_week_comparabl
         db.close()
     rows = await _size_rows()
     for week in (WEEK, second):
-        assert (_week(rows, week)["comparable"], _week(rows, week)["size"]["comparable_reason"]) == (True, None)
-    assert len({(item["rater_version"]) for week in (WEEK, second) for item in _week(rows, week)["size"]["profiles"]}) == 2
+        assert (_week(rows, week)["comparable"], _week(rows, week)["size"]["comparable_reason"]) == (False, "profile_changes_in_range")
 
 
 @pytest.mark.asyncio
-async def test_the_headline_window_pools_every_period_across_raters(isolated_db, monkeypatch):
-    """Weeks rated by different raters stay comparable, and the window the card names is pooled whole."""
+async def test_the_headline_window_pools_every_period_even_when_none_is_comparable(isolated_db, monkeypatch):
+    """Mixed rating methods mark each week not comparable; the window the card names is still pooled whole."""
     from datetime import datetime, timezone
 
     from api.measurement import measurement_series
@@ -492,7 +491,7 @@ async def test_the_headline_window_pools_every_period_across_raters(isolated_db,
         db.close()
     served = await measurement_series("estimated_human_hours_per_active_hour", project="all", agent="none", grain="weeks",
                                       timezone_name="UTC", user=USER)
-    assert [row["comparable"] for row in served["rows"] if row["period"] in (WEEK, second)] == [True, True]
+    assert [row["comparable"] for row in served["rows"] if row["period"] in (WEEK, second)] == [False, False]
     latest = served["windows"]["estimated_human_hours_per_active_hour"]["latest"]
     # The rate divides by presence time, so the window starts at the first presence week.
     assert (latest["n"], latest["from"], latest["to"]) == (40, WEEK, "2026-10-04")
@@ -533,7 +532,7 @@ async def test_the_rate_never_divides_work_from_before_presence_by_later_time(is
 
 
 @pytest.mark.asyncio
-async def test_a_week_rated_by_two_raters_stays_comparable_and_serves_both_profiles(isolated_db):
+async def test_only_a_real_change_in_rating_method_is_not_comparable(isolated_db):
     db = _db()
     try:
         _thread(db, "root")
@@ -545,13 +544,13 @@ async def test_a_week_rated_by_two_raters_stays_comparable_and_serves_both_profi
     finally:
         db.close()
     row = _week(await _size_rows())
-    assert row["comparable"] is True
-    assert row["size"]["comparable_reason"] is None
+    assert row["comparable"] is False
+    assert row["size"]["comparable_reason"] == "mixed_profiles"
     assert len(row["size"]["profiles"]) == 2
 
 
 @pytest.mark.asyncio
-async def test_two_recorded_rater_versions_in_one_week_stay_comparable(isolated_db):
+async def test_two_recorded_rater_versions_in_one_week_are_not_comparable(isolated_db):
     db = _db()
     try:
         _thread(db, "root")
@@ -563,8 +562,8 @@ async def test_two_recorded_rater_versions_in_one_week_stay_comparable(isolated_
     finally:
         db.close()
     row = _week(await _size_rows())
-    assert row["comparable"] is True
-    assert row["size"]["comparable_reason"] is None
+    assert row["comparable"] is False
+    assert row["size"]["comparable_reason"] == "mixed_profiles"
 
 
 @pytest.mark.parametrize("grain, early, first, accepted_early, accepted_first", [
@@ -608,6 +607,21 @@ async def test_the_rated_series_starts_at_its_first_observed_period_and_keeps_th
     assert rows[("estimated_human_hours_per_active_hour", first)]["partial"] is True
 
 
+def test_same_method_reads_the_rater_version_by_key_name_not_position(monkeypatch):
+    from api import measurement_size
+
+    # With the version key moved off the end, a positional read would treat the
+    # rubric as the version and the version as part of the method.
+    keys = ("rater_version", "method", "method_version", "rubric_version", "rubric_sha256", "rater")
+    monkeypatch.setattr(measurement_size, "PROFILE_KEYS", keys)
+    unknown = measurement_size.UNKNOWN_VERSION
+    base = ("m", "1", "1.3p", SHA, "r")
+    recorded = ("2026-10-01", *base)
+    assert measurement_size._same_method({recorded, (unknown, *base)}) is True
+    assert measurement_size._same_method({recorded, ("2026-10-05", *base)}) is False
+    assert measurement_size._same_method({recorded, ("2026-10-01", "m", "2", "1.3p", SHA, "r")}) is False
+
+
 @pytest.mark.asyncio
 async def test_author_declared_size_counts_without_a_fact_and_never_replaces_one(isolated_db):
     db = _db()
@@ -629,8 +643,8 @@ async def test_author_declared_size_counts_without_a_fact_and_never_replaces_one
     assert size["estimated_hours"] == pytest.approx(48)
     assert size["basis"]["author_declared"] == 20
     assert size["basis"]["accepted_scope_proxy"] == 1
-    # Declared and rater-imported sizes are both served as coverage; the week still compares.
-    assert size["comparable_reason"] is None
+    # Declared and rater-imported sizes are different methods, so the week is not comparable.
+    assert size["comparable_reason"] == "mixed_profiles"
     assert {profile["method"] for profile in size["profiles"]} == {"author_declared", "offline_proxy"}
 
 
@@ -649,30 +663,3 @@ async def test_a_week_sized_only_by_declarations_names_its_method_and_stays_comp
     row = _week(await _size_rows())
     assert row["comparable"] is True
     assert [(item["method"], item["outcomes"]) for item in row["size"]["profiles"]] == [("author_declared", 20)]
-
-
-@pytest.mark.asyncio
-async def test_a_days_range_from_rated_to_declared_sizes_serves_every_day_as_comparable(isolated_db, monkeypatch):
-    """New outcomes carry only the size their author declared; that must not break the range rated before them."""
-    from datetime import datetime, timezone
-
-    monkeypatch.setattr("core.measurement_scope._now", lambda: datetime(2026, 9, 25, 12, tzinfo=timezone.utc))
-    db = _db()
-    try:
-        _thread(db, "rated")
-        _thread(db, "declared")
-        rated = _nodes(db, "rated", 20, accepted_at="2026-09-22T12:00:00Z")
-        declared = _nodes(db, "declared", 20, accepted_at="2026-09-23T12:00:00Z")
-        _presence_visit(db, "rated", "2026-09-22")
-        _presence_visit(db, "declared", "2026-09-23")
-        _import(db, _rows(db, rated, "M"))
-        db.executemany("UPDATE plan_nodes SET size='M' WHERE id=?", [(node_id,) for node_id in declared])
-        db.commit()
-    finally:
-        db.close()
-
-    rows = await _size_rows(grain="days")
-    with_figure = [row for row in rows if row["value"] is not None]
-    assert {row["period"] for row in with_figure} == {"2026-09-22", "2026-09-23"}
-    assert [(row["comparable"], row["size"]["comparable_reason"]) for row in with_figure] == [(True, None)] * 2
-    assert {item["method"] for row in with_figure for item in row["size"]["profiles"]} == {"author_declared", "offline_proxy"}

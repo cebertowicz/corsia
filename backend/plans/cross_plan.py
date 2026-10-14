@@ -183,23 +183,20 @@ def _tell(connection, prerequisite, dependents, *, outcome: str, actor_id, prove
         executor_labels({owner_id}, db=connection).get(owner_id, "Untitled thread")
         if owner_id else "the project"
     )
-    reconciled: dict[tuple[str, str], admission.Reconciled] = {}
+    reconciled: set[str] = set()
     for dependent in dependents:
         plan_id, recipient = str(dependent["plan_id"]), str(dependent["owner_id"])
-        key = plan_id, recipient
-        if key not in reconciled:
+        if plan_id not in reconciled:
+            reconciled.add(plan_id)
             # The owner hears this outcome below, with what is now current, so
             # it is the causing executor here and gets one message, not two.
-            reconciled[key] = admission.reconcile_plan(
+            admission.reconcile_plan(
                 plan_id, actor_id=actor_id, provenance=provenance,
                 causing_executor=recipient, db=connection,
             )
-            handoff = plan_wake.selected_fact(connection, reconciled[key], recipient)
-        else:
-            handoff = {}
         _notify(
             connection, recipient=recipient, plan_id=plan_id, dependent=dependent,
-            prerequisite=prerequisite, owner=owner, outcome=outcome, **handoff,
+            prerequisite=prerequisite, owner=owner, outcome=outcome,
         )
 
 
@@ -237,7 +234,7 @@ def _tell_own_plan(connection, prerequisite, dependents) -> None:
 
 
 def _notify(
-    db, *, recipient: str, plan_id: str, dependent, prerequisite, owner: str, outcome: str, **handoff,
+    db, *, recipient: str, plan_id: str, dependent, prerequisite, owner: str, outcome: str,
 ) -> str | None:
     """Tell a dependent's owner a task it waits on in another plan settled or left.
 
@@ -264,6 +261,6 @@ def _notify(
         plan_id=plan_id,
         content=plan_wake.with_next(
             db, plan_id, recipient, line,
-            prerequisite={"node_id": str(prerequisite["id"]), "outcome": outcome}, **handoff,
+            prerequisite={"node_id": str(prerequisite["id"]), "outcome": outcome},
         ),
     )

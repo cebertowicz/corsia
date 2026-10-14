@@ -4,7 +4,6 @@ import PlanTree from '$lib/components/plans/PlanTree.svelte';
 import type { OperatorNode } from '$lib/api/plans';
 import { node } from './fixtures/planTreeNode';
 import { withFolds } from './fixtures/planFolds';
-import rowFaceSource from '$lib/components/plans/PlanRowFace.svelte?raw';
 
 /**
  * Owner decision, 2026-09-16: a plan row is one line. The icon carries status and the
@@ -61,7 +60,7 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		expect(row('Done step').textContent).not.toContain('Agent');
 		// Status stays available to assistive technology without a visible subline.
 		expect(row('Running step').querySelector('.row-status')?.textContent).toBe('Working');
-		expect(row('Done step').querySelector('.state-icon')?.getAttribute('title')).toBe('Done');
+		expect(row('Done step').querySelector('.state-icon')?.getAttribute('title')).toBe('Finished');
 	});
 
 	it('names a specific wait cause under the title', () => {
@@ -155,21 +154,6 @@ describe('PlanRowFace — one line unless something specific needs saying', () =
 		// The subline is a flex row, so its text needs its own block for the ellipsis to show.
 		expect(row('Delegated step').querySelector('.row-subline .subline-text')?.textContent)
 			.toBe("Round 2 · The delegated child needs your input: Can't open mockups.md");
-	});
-});
-
-describe('PlanRowFace — an open row keeps its full title visible', () => {
-	it('wraps an open title in its existing title slot while a closed row truncates', () => {
-		const title = 'Hand off the migration verification and evidence review to the delegated worker';
-		render([node({ id: 'delegated', title })]);
-		const titleEl = row(title).querySelector('.row-title') as HTMLElement;
-		expect(titleEl.classList.contains('details-open')).toBe(false);
-		(row(title).querySelector('.row-body') as HTMLButtonElement).click();
-		flushSync();
-		expect(titleEl.classList.contains('details-open')).toBe(true);
-		expect(rowFaceSource).toMatch(/\.row-title\.details-open[\s\S]*flex:\s*1\s+1\s+0/);
-		expect(rowFaceSource).toMatch(/\.row-title\.details-open[\s\S]*white-space:\s*normal/);
-		expect(host.querySelector('.node-details')?.textContent).not.toContain(title);
 	});
 });
 

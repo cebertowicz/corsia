@@ -16,7 +16,6 @@
 //   even after its path changes.
 
 import {
-	openBrowserTab as openAuxiliaryBrowserTab,
 	openLegacyDiscussionTab as openAuxiliaryDiscussionTab,
 	openSubagentTab as openAuxiliarySubagentTab,
 } from './artifactAuxiliaryTabs';
@@ -26,7 +25,6 @@ import type {
 	DuplicateMergeGuard,
 	ImageViewportPlace,
 	OpenArtifactInput,
-	OpenBrowserInput,
 	OpenLegacyDiscussionInput,
 	OpenSubagentInput,
 	RevisionCheck,
@@ -40,7 +38,6 @@ export type {
 	DuplicateMergeGuard,
 	ImageViewportPlace,
 	OpenArtifactInput,
-	OpenBrowserInput,
 	OpenLegacyDiscussionInput,
 	OpenSubagentInput,
 	RevisionCheck,
@@ -61,6 +58,7 @@ function newInstanceId(): string {
 export function emptyWorkspace(): ThreadArtifactWorkspace {
 	return { tabs: [], activeTabId: null, visible: false, activeSurface: 'chat' };
 }
+
 export function tabKey(tab: Pick<ArtifactTab, 'instanceId'>): string {
 	return tab.instanceId;
 }
@@ -79,6 +77,7 @@ export function getActiveTab(ws: ThreadArtifactWorkspace): ArtifactTab | null {
 export function hasChangedTab(ws: ThreadArtifactWorkspace): boolean {
 	return ws.tabs.some(isTabChanged);
 }
+
 /** Same document? Artifact identity decides once known; path is the fallback. */
 function sameArtifact(tab: ArtifactTab, artifactId: string | null | undefined, path: string): boolean {
 	if (tab.kind !== 'document') return false;
@@ -121,11 +120,6 @@ export function openTab(ws: ThreadArtifactWorkspace, input: OpenArtifactInput): 
 		visible: true,
 		activeSurface: 'artifact',
 	};
-}
-
-/** Adds the browser tab for an explicit opener or background browser event. */
-export function openBrowserTab(ws: ThreadArtifactWorkspace, input: OpenBrowserInput, activate = true): ThreadArtifactWorkspace {
-	return openAuxiliaryBrowserTab(ws, input, newInstanceId, activate);
 }
 
 /** Adds or selects a child conversation in the existing artifact leaf. */

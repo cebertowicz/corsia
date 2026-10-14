@@ -4,19 +4,17 @@
 	import PlanHistoryDetails from './PlanHistoryDetails.svelte';
 	import PlanNodeDetails from './PlanNodeDetails.svelte';
 
-	let { node, id, planId, fromHistory, indent }: {
+	let { node, id, planId, fromHistory }: {
 		node: OperatorNode;
 		id: string;
 		planId: string;
 		/** The row came from the history route (`foldHistory`); a listed row never reads. */
 		fromHistory: boolean;
-		/** The row's indent as a CSS length: the details sit directly under it (`planIndent`). */
-		indent: string;
 	} = $props();
 </script>
 
 {#if fromHistory}
-	<PlanHistoryDetails {node} {planId} {id} {indent} />
+	<PlanHistoryDetails {node} {planId} {id} />
 {:else}
-	<PlanNodeDetails {node} {id} {indent} />
+	<PlanNodeDetails {node} {id} />
 {/if}

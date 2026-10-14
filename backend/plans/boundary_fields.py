@@ -10,11 +10,6 @@ import plans.service as service
 #: is owned by `plans.errors`.
 PlanInputError = service.PlanInputError
 
-USER_STEP_TRIED_MARKER = "Already tried:"
-USER_STEP_DESCRIPTION_REFUSAL = (
-    "user steps need instructions with 'Already tried: …'; add what you tried"
-)
-
 _CREATE = {
     "kind",
     "title",
@@ -269,20 +264,6 @@ def _require_revision(params: dict) -> None:
         )
 
 
-def _user_step_description(params: dict[str, Any]) -> None:
-    """Require a person-facing how-to and the agent's attempted route."""
-    if params.get("kind", "task") != "task" or params.get("assignee") != "user":
-        return
-    description = params.get("description")
-    if (
-        not isinstance(description, str)
-        or not description.strip()
-        or USER_STEP_TRIED_MARKER.casefold() not in description.casefold()
-        or not description.casefold().split(USER_STEP_TRIED_MARKER.casefold(), 1)[1].strip()
-    ):
-        raise PlanInputError(USER_STEP_DESCRIPTION_REFUSAL)
-
-
 def node_fields(
     params: dict[str, Any], *, workflow_version: str | None = None,
     include_before: bool = True,
@@ -292,7 +273,6 @@ def node_fields(
     ``workflow_version`` is resolved by the server from the named workflow
     skill, never read from caller params.
     """
-    _user_step_description(params)
     return {
         "kind": params.get("kind", "task"),
         "title": text(params, "title"),
