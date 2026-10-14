@@ -5,6 +5,8 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export const settingsActiveSection = writable<SettingsSection>('providers');
 export const settingsOpenRequest = writable(0);
+/** The thread a deep link to Settings came from; Back returns there instead of to Activity. */
+export const settingsReturnThread = writable<string | null>(null);
 /** An element inside the opened section (its `data-settings-anchor`) to bring into view once, then cleared. */
 export const settingsAnchorRequest = writable<string | null>(null);
 /** The harness connection or cloud provider whose Providers card should open expanded and scroll into view. */

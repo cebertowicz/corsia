@@ -7,5 +7,6 @@ export { default as IconButton } from './IconButton.svelte';
 export { default as Message } from './Message.svelte';
 export { default as Modal } from './Modal.svelte';
 export { default as Section } from './Section.svelte';
+export { default as Spinner } from './Spinner.svelte';
 export { default as StatePill } from './StatePill.svelte';
 export { default as Toggle } from './Toggle.svelte';

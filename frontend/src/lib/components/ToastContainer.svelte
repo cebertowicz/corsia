@@ -9,6 +9,7 @@
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
 	import { get } from 'svelte/store';
+	import Spinner from '$lib/components/ui/Spinner.svelte';
 
 	let toastHeight = $state(0);
 
@@ -69,6 +70,20 @@
 		if (param === null) return {};
 		return toastFit(node, param);
 	}
+
+	/** A toast that is itself one control: the notice, or the minimized progress pill. */
+	function onPress(toast: Toast): (() => void) | null {
+		if (toast.pinned?.compact) return () => toast.pinned?.onExpand?.();
+		if (toast.button) return () => void toasts.runAction(toast.id);
+		return null;
+	}
+
+	function pressKey(event: KeyboardEvent, press: () => void) {
+		if (event.target !== event.currentTarget) return;
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		press();
+	}
 </script>
 
 {#if $toasts.length > 0}
@@ -85,9 +100,16 @@
 		{#each $toasts as toast (toast.id)}
 			{@const type = toast.type ?? 'info'}
 			{@const pinned = toast.pinned}
+			{@const press = onPress(toast)}
+			<!-- The role and tabindex apply together, only when the whole toast is one control (the notice or the minimized pill). -->
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 			<div
-				class="toast toast--{type}{pinned ? ' toast--pinned' : ''}"
-				role={pinned ? (type === 'error' ? 'alert' : undefined) : 'status'}
+				class="toast toast--{type}{pinned ? ' toast--pinned' : ''}{pinned?.compact ? ' toast--compact' : ''}{toast.button ? ' toast--button' : ''}{pinned?.detail ? ' toast--multi' : ''}"
+				role={press ? 'button' : pinned ? (type === 'error' ? 'alert' : undefined) : 'status'}
+				tabindex={press ? 0 : undefined}
+				aria-label={pinned?.compact ? pinned.expandLabel : undefined}
+				onclick={press ?? undefined}
+				onkeydown={press ? (event) => pressKey(event, press) : undefined}
 				data-fit="full"
 				animate:flip={flipParams()}
 				out:toastLeave|global
@@ -103,10 +125,10 @@
 				}}
 			>
 				{#if type === 'progress'}
-					<span class="toast-icon toast-spinner" aria-hidden="true"></span>
+					<Spinner />
 				{:else if type === 'success'}
 					<svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="8 12.5 11 15.5 16 9"/></svg>
-				{:else if type === 'info' && pinned}
+				{:else if type === 'info' && (pinned || toast.button)}
 					<svg class="toast-icon toast-icon--update" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16V8M8 12l4-4 4 4"/></svg>
 				{:else if type === 'error'}
 					<svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -118,16 +140,18 @@
 						<span class="toast-time" aria-hidden="true">{pinned.time}</span>
 					{/if}
 				</span>
-				{#if toast.action}
+				{#if toast.action && !press}
 					<button class="toast-action" onclick={() => void toasts.runAction(toast.id)}>
 						{toast.action.label}
 					</button>
 				{/if}
-				<button
-					class="toast-close"
-					onclick={() => { pinned?.onClose?.(); toasts.dismiss(toast.id); }}
-					aria-label={pinned?.closeLabel ?? 'Dismiss'}
-					title={pinned?.closeLabel}>×</button>
+				{#if !press}
+					<button
+						class="toast-close"
+						onclick={() => { pinned?.onClose?.(); if (pinned?.closeIcon !== 'minimize') toasts.dismiss(toast.id); }}
+						aria-label={pinned?.closeLabel ?? 'Dismiss'}
+						title={pinned?.closeLabel}>{#if pinned?.closeIcon === 'minimize'}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>{:else}×{/if}</button>
+				{/if}
 			</div>
 		{/each}
 	</div>
@@ -165,8 +189,10 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-		padding: 10px 16px;
-		border-radius: var(--radius-sm);
+		min-height: 44px;
+		padding: var(--space-2) var(--space-4);
+		/* Every toast is a pill with the floating controls' rim and elevation; the fill stays opaque so text under it never shows through. */
+		border-radius: var(--radius-pill);
 		font-size: var(--text-subhead);
 		font-weight: 500;
 		max-width: calc(100vw - 32px);
@@ -174,21 +200,16 @@
 		white-space: normal;
 		overflow-wrap: anywhere;
 		pointer-events: all;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+		box-shadow: var(--glass-elevation-1), var(--glass-rim);
 		animation: toast-in var(--dur-standard) ease;
 	}
 
 	.toast--info,
-	.toast--progress {
-		background: var(--bg-secondary);
-		color: var(--text-primary);
-		border: 1px solid var(--border-subtle);
-	}
-
+	.toast--progress,
 	.toast--success {
 		background: var(--bg-secondary);
 		color: var(--text-primary);
-		border: 1px solid var(--border-subtle);
+		border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 	}
 	.toast--success .toast-icon { color: var(--green-text); }
 
@@ -206,14 +227,22 @@
 		color: var(--violet-text, var(--violet));
 	}
 
-	.toast-spinner {
-		width: 14px;
-		height: 14px;
-		box-sizing: border-box;
-		border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
-		border-top-color: var(--accent);
-		border-radius: 50%;
-		animation: toast-spin 0.8s linear infinite;
+	/* A toast with a body: one inset clears the rounded ends, the mark sits on the title line, and Details and close centre on the text block. */
+	.toast--multi { padding-inline: var(--space-5); }
+	.toast--multi .toast-icon { align-self: flex-start; margin-top: 3px; }
+
+	/* The notice is one button: its text is centred in the whole pill, with no View and no close. */
+	.toast--button { cursor: pointer; justify-content: center; text-align: center; }
+	.toast--button .toast-line { flex: 0 1 auto; }
+	.toast--button:focus-visible,
+	.toast--compact:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; }
+
+	/* Minimized progress: the mark and its word in a fab-height pill that is one tap target. */
+	.toast--pinned.toast--compact {
+		min-width: 0;
+		align-self: center;
+		cursor: pointer;
+		font-size: var(--text-footnote);
 	}
 
 	.toast-line {
@@ -305,23 +334,19 @@
 			align-self: stretch;
 			max-width: none;
 			/* The 44px close button is the trailing edge; the line keeps its room. */
-			padding-right: 0;
+			padding-right: var(--space-1);
 		}
+		.toast--pinned.toast--compact { align-self: center; padding-right: var(--space-4); }
 		.toast-action { min-height: 44px; }
 		.toast-close { width: 44px; height: 44px; }
 	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.toast-container { transition: none; }
-		.toast-spinner { animation-duration: 2.4s; }
 	}
 
 	@keyframes toast-in {
 		from { opacity: 0; transform: translateY(8px); }
 		to { opacity: 1; transform: translateY(0); }
-	}
-
-	@keyframes toast-spin {
-		to { transform: rotate(360deg); }
 	}
 </style>

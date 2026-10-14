@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button, Field, IconButton, Message, Modal, Section, StatePill } from '$lib/components/ui';
+	import { Button, Field, IconButton, Message, Modal, Section, Spinner, StatePill } from '$lib/components/ui';
 	import MaterialShowcase from './MaterialShowcase.svelte'; import CommentsShowcase from './CommentsShowcase.svelte';
 
 	import AttentionDockShowcase from './AttentionDockShowcase.svelte';
@@ -382,6 +382,20 @@
 				{/snippet}
 				<input type="text" placeholder="optional" />
 			</Field>
+		</div>
+	</section>
+
+	<section class="block">
+		<header class="block-head">
+			<h2>Spinner</h2>
+			<p>The in-progress ring used by toasts, the update journey and Settings rows. Decorative; pair it with text that says what is happening.</p>
+		</header>
+		<div class="card">
+			<div class="row">
+				<Spinner />
+				<Spinner size={12} />
+				<Spinner size={18} />
+			</div>
 		</div>
 	</section>
 

@@ -91,21 +91,78 @@ function mountContainer() {
 }
 
 describe('ToastContainer pinned slot', () => {
-	it('shows a spinner, the caller close label and the action on progress', () => {
+	it('shows the shared spinner and a minimize chevron on progress, with no action', () => {
 		toasts.pin('update', {
 			type: 'progress',
-			message: 'Stopping agents · 2 of 3 safe',
+			message: 'Pausing agents \u00b7 2 of 3',
 			time: '0:18',
-			closeLabel: 'Hide progress',
-			action: { label: 'Details', run: vi.fn() },
+			closeIcon: 'minimize',
+			closeLabel: 'Minimize progress',
 		});
 		mountContainer();
 
-		expect(host.querySelector('.toast-spinner')).toBeTruthy();
+		expect(host.querySelector('.toast .spinner')).toBeTruthy();
 		const close = host.querySelector<HTMLButtonElement>('.toast-close')!;
-		expect(close.getAttribute('aria-label')).toBe('Hide progress');
-		expect(close.title).toBe('Hide progress');
-		expect(host.querySelector('.toast-action')?.textContent?.trim()).toBe('Details');
+		expect(close.getAttribute('aria-label')).toBe('Minimize progress');
+		expect(close.title).toBe('Minimize progress');
+		expect(close.querySelector('svg')).toBeTruthy();
+		expect(close.textContent?.trim()).toBe('');
+		expect(host.querySelector('.toast-action')).toBeNull();
+	});
+
+	it('keeps the same toast when minimize is pressed, and calls the minimize handler', async () => {
+		const onClose = vi.fn();
+		toasts.pin('update', { type: 'progress', message: 'Restarting CORSIA', closeIcon: 'minimize', closeLabel: 'Minimize progress', onClose });
+		mountContainer();
+		const toast = host.querySelector('.toast')!;
+
+		host.querySelector<HTMLButtonElement>('.toast-close')!.click();
+		await tick();
+
+		expect(onClose).toHaveBeenCalledOnce();
+		expect(get(toasts)).toHaveLength(1);
+		expect(host.querySelector('.toast')).toBe(toast);
+	});
+
+	it('shrinks to one pill button that expands on press and on Enter', async () => {
+		const onExpand = vi.fn();
+		toasts.pin('update', { type: 'progress', message: 'Updating', compact: true, expandLabel: 'Show update progress', onExpand });
+		mountContainer();
+
+		const pill = host.querySelector<HTMLElement>('.toast--compact')!;
+		expect(pill.getAttribute('role')).toBe('button');
+		expect(pill.getAttribute('aria-label')).toBe('Show update progress');
+		expect(pill.textContent?.trim()).toBe('Updating');
+		expect(pill.querySelector('.spinner')).toBeTruthy();
+		expect(pill.querySelector('.toast-close, .toast-action, .toast-time')).toBeNull();
+
+		pill.click();
+		pill.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		expect(onExpand).toHaveBeenCalledTimes(2);
+	});
+
+	it('renders the notice as one button with no separate action or close', async () => {
+		const run = vi.fn();
+		toasts.showButton('Update ready. Open Updates', run);
+		mountContainer();
+
+		const notice = host.querySelector<HTMLElement>('.toast--button')!;
+		expect(notice.getAttribute('role')).toBe('button');
+		expect(notice.textContent?.trim()).toBe('Update ready. Open Updates');
+		expect(notice.querySelector('.toast-action, .toast-close')).toBeNull();
+
+		notice.click();
+		await tick();
+		expect(run).toHaveBeenCalledOnce();
+		expect(get(toasts)).toHaveLength(0);
+	});
+
+	it('gives a toast with a body one inset class so the mark, text and controls align', () => {
+		toasts.pin('update', { type: 'error', message: "Update didn't start", detail: 'Needs 12 GB more free space', action: { label: 'Details', run: vi.fn() } });
+		mountContainer();
+
+		expect(host.querySelector('.toast--multi')).toBeTruthy();
+		expect(host.querySelector('.toast--multi .toast-detail')?.textContent).toBe('Needs 12 GB more free space');
 	});
 
 	it('keeps the ticking time out of the live region', () => {

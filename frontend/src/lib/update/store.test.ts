@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
+import { activeThreadId } from '$lib/stores/threads';
+import { settingsActiveSection, settingsAnchorRequest, settingsOpenRequest, settingsReturnThread } from '$lib/stores/settingsNavigation';
 import {
 	loadUpdateStatus,
 	resetUpdateStoreForTests,
@@ -11,8 +13,8 @@ import {
 	updateInFlight,
 	updateOperation,
 	updateStarting,
+	updateProgressMinimized,
 	updateStatus,
-	updateSurface,
 	updateUnreachable,
 } from './store';
 
@@ -96,6 +98,7 @@ describe('update store', () => {
 			}
 			return { ok: true, json: async () => running('holding') };
 		}));
+		const opened = get(settingsOpenRequest);
 		const started = startUpdate();
 		expect(get(updateStarting)).toBe(true);
 		await vi.advanceTimersByTimeAsync(1_100);
@@ -104,7 +107,8 @@ describe('update store', () => {
 		release(null);
 		await started;
 		expect(get(updateStarting)).toBe(false);
-		expect(get(updateSurface)).toBe('panel');
+		// Progress is the pinned toast alone: starting opens no sheet, panel or Settings.
+		expect(get(settingsOpenRequest)).toBe(opened);
 	});
 
 	it.each(['holding', 'steering', 'draining', 'ready', 'restarting', 'resuming'] as const)(
@@ -144,16 +148,34 @@ describe('update store', () => {
 		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
 		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
 		await loadUpdateStatus();
-		expect(get(toasts).some((toast) => toast.message === 'An update is ready to install.')).toBe(true);
+		const notice = get(toasts).find((toast) => toast.message === 'Update ready. Open Updates');
+		expect(notice?.button).toBe(true);
+		expect(notice?.pinned).toBeUndefined();
+	});
+
+	it('opens Settings at the Updates card from the notice and remembers the chat to return to', async () => {
+		const settled = { ...running('resuming'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '2026.10.12', settled_at: '2026-10-12T22:00:00Z' } };
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/api/version') ? { ok: false } : { ok: true, json: async () => settled })));
+		activeThreadId.set('thread-1');
+		const opened = get(settingsOpenRequest);
+		await loadUpdateStatus();
+		const notice = get(toasts).find((toast) => toast.button)!;
+		await toasts.runAction(notice.id);
+		expect(get(settingsActiveSection)).toBe('system');
+		expect(get(settingsAnchorRequest)).toBe('update');
+		expect(get(settingsOpenRequest)).toBe(opened + 1);
+		expect(get(settingsReturnThread)).toBe('thread-1');
+		expect(get(toasts).some((toast) => toast.button)).toBe(false);
+		activeThreadId.set(null);
 	});
 
 	it('does not announce a version while an update is already running', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => running('draining') })));
 		await loadUpdateStatus();
-		expect(get(toasts).some((toast) => toast.message === 'An update is ready to install.')).toBe(false);
+		expect(get(toasts).some((toast) => toast.message === 'Update ready. Open Updates')).toBe(false);
 	});
 
-	it('dismisses the failure toast when Details opens and does not restore it on close', async () => {
+	it('dismisses the failure toast when Details opens the Updates card and does not restore it', async () => {
 		const failed = {
 			...running('draining'),
 			operation: { operation_id: 'update-1', kind: 'update', status: 'failed', phase: 'draining', error: 'network stopped' },
@@ -165,9 +187,8 @@ describe('update store', () => {
 		expect(toast?.action?.label).toBe('Details');
 		await toasts.runAction(toast!.id);
 		expect(get(toasts)).toEqual([]);
-		expect(get(updateSurface)).toBe('sheet');
+		expect(get(settingsAnchorRequest)).toBe('update');
 
-		updateSurface.set('closed');
 		await loadUpdateStatus();
 		expect(get(toasts)).toEqual([]);
 	});
@@ -274,10 +295,10 @@ describe('update store', () => {
 		await startUpdate();
 		expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/system/update-operations/update-0/outcome-seen')).toBe(true);
 		expect(get(updateFailureVerdict)).toEqual({ kind: 'refused', message: 'A restart is already in flight.' });
-		expect(get(updateSurface)).toBe('sheet');
+		expect(pinned()[0]).toMatchObject({ message: "Update didn't start", type: 'error', action: { label: 'Details' } });
 	});
 
-	it('opens the failed operation this request recorded instead of a verdict', async () => {
+	it('leaves the failed operation this request recorded to its own toast instead of a verdict', async () => {
 		const before = { ...running('holding'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', settled_at: '2026-10-01T00:00:00Z' } };
 		const recorded = { ...running('holding'), operation: { operation_id: 'update-1', kind: 'update', status: 'failed', failure_code: 'disk_space', settled_at: '2026-10-13T22:00:00Z' } };
 		let statusReads = 0;
@@ -316,5 +337,43 @@ describe('update store', () => {
 		await tabA.store.loadUpdateStatus();
 		await tabB.store.loadUpdateStatus();
 		for (const tab of [tabA, tabB]) expect(get(tab.toasts).filter((toast) => toast.type === 'error' || toast.pinned?.key === 'update')).toEqual([]);
+	});
+
+	describe('outcome toasts', () => {
+		it.each([
+			['a manual release update', {}, 'Updated to 2026.10.13', "What's new"],
+			['an update that ran tonight', { trigger: 'tonight' }, 'Updated overnight to 2026.10.13', "What's new"],
+			['an automatic update', { trigger: 'automatic' }, 'Updated overnight to 2026.10.13', "What's new"],
+			['a development build', { changes: { kind: 'commits', headline: null, items: ['Tidy'], more: 0 } }, 'Updated to 2026.10.13', 'See changes'],
+		])('words %s', async (_name, extra, message, label) => {
+			const { fetchMock } = backend({ status: completed(extra) });
+			vi.stubGlobal('fetch', fetchMock);
+			await loadUpdateStatus();
+			await vi.advanceTimersByTimeAsync(10);
+			expect(pinned()[0]).toMatchObject({ message, type: 'success', action: { label } });
+		});
+
+		it('opens the Updates card from the success toast', async () => {
+			const { fetchMock } = backend({ status: completed() });
+			vi.stubGlobal('fetch', fetchMock);
+			await loadUpdateStatus();
+			await vi.advanceTimersByTimeAsync(10);
+			await toasts.runAction(pinned()[0].id);
+			expect(get(settingsAnchorRequest)).toBe('update');
+		});
+	});
+
+	it('forgets a minimized progress toast once the operation settles', async () => {
+		const state = { status: running('draining') as unknown };
+		const { fetchMock } = backend(state);
+		vi.stubGlobal('fetch', fetchMock);
+		await loadUpdateStatus();
+		updateProgressMinimized.set(true);
+		await loadUpdateStatus();
+		expect(get(updateProgressMinimized)).toBe(true);
+
+		state.status = completed({ outcome_seen_at: '2026-10-13T22:05:00Z' });
+		await loadUpdateStatus();
+		expect(get(updateProgressMinimized)).toBe(false);
 	});
 });

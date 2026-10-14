@@ -24,5 +24,3 @@ export interface UpdateStatus {
 	operation?: UpdateOperation | null;
 	schedule?: UpdateSchedule | null;
 }
-
-export type UpdateSurface = 'closed' | 'sheet' | 'panel';
