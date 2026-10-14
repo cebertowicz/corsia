@@ -150,7 +150,6 @@ class BrowserSessionOwner:
         finally:
             self._active_commands -= 1
 
-
     async def _admit(self, thread_id: str, *, lease_id: str | None,
                      show_window: bool | None = None, session: SessionAdmission = "any") -> BrowserRuntime:
         async with self._owner_lock:
@@ -160,9 +159,7 @@ class BrowserSessionOwner:
             if runtime is None and session == "existing":
                 raise BrowserSessionError("the browser is no longer open")
             if runtime is None:
-                runtime = BrowserRuntime(BrowserSessionRecord(
-                    thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window),
-                ))
+                runtime = BrowserRuntime(BrowserSessionRecord(thread_id, secrets.token_urlsafe(12), lease_id, bool(show_window)))
                 self._sessions[thread_id] = runtime
             elif session == "new":
                 raise BrowserSessionError("the browser is already open; take over in the pane to navigate it")
