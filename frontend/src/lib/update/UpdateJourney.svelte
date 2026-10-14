@@ -6,7 +6,8 @@
 	import { Button, Modal, Toggle } from '$lib/components/ui';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import { UPDATE_STEPS, elapsedSeconds, failureCopy, failureFromOperation, failureFromVerdict, formatElapsed, formatInstalledAt, formatScheduleTime, humanDuration, isFailedOperation, isInFlight, stepDetail, stepIndex, stepMessage } from './model';
-	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, saveUpdateSchedule, startUpdate, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
+	import { closeUpdateSurface, openUpdatePanel, releaseNotesFor, retryUpdate, startUpdate, updateFailureVerdict, updateInFlight, updateOperation, updateServerClockOffsetMs, updateStarting, updateStatus, updateSurface, updateUnreachable } from './store';
+	import { saveUpdateSchedule } from './store';
 
 	let now = $state(Date.now());
 	let showAll = $state(false);
