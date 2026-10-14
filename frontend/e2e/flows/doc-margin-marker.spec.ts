@@ -535,6 +535,8 @@ test.describe('@flow:doc-margin-marker', () => {
 		};
 		// Scroll: at an ordinary height the editor shows part of the document, and every marker is still reachable once scrolled to.
 		const ordinary = await sized(viewport(info, false));
+		const scrollGroups = () => markers(ordinary.fresh).then((found) => found.map((marker) => keysOf(ordinary.freshOpened, marker)));
+		await expect.poll(scrollGroups, { message: 'the scroll canvas has rendered its marker groups' }).toEqual(before);
 		const scrolled = await markers(ordinary.fresh);
 		expect(scrolled.map((marker) => keysOf(ordinary.freshOpened, marker)), 'scrolling regroups nothing').toEqual(before);
 		for (let index = 0; index < scrolled.length; index += 1) {
