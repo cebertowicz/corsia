@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from infra.database import get_db, write_transaction
+from infra.database import get_db
 from infra.settings import get_update_schedule, set_setting
 
 
@@ -113,16 +113,3 @@ def update_attempted_today(*, now: datetime | None = None, db=None) -> bool:
     finally:
         if db is None:
             connection.close()
-
-
-def claim_overnight_outcome(operation_id: str, *, db=None) -> bool:
-    """Atomically reserve one scheduled completion toast across all devices."""
-    now = datetime.now(timezone.utc).isoformat()
-    with write_transaction(db, scope="restart_operation") as connection:
-        cur = connection.execute(
-            "UPDATE self_restart_requests SET overnight_outcome_claimed_at=?,updated_at=? "
-            "WHERE id=? AND kind='update' AND trigger IN ('tonight','automatic') "
-            "AND status='complete' AND overnight_outcome_claimed_at IS NULL",
-            (now, now, operation_id),
-        )
-        return cur.rowcount == 1
