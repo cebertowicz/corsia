@@ -3,12 +3,9 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { restartSystem } from '$lib/stores/settingsSystemRestart';
 import {
-	failureCopy,
-	failureFromOperation,
 	isFailedOperation,
 	isInFlight,
 	type ClientVerdict,
-	type UpdateChanges,
 	type UpdateOperation,
 } from './model';
 import { readVersionWithinFiveSeconds, versionHashesAgree } from './versionProbe';
