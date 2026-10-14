@@ -63,7 +63,7 @@ async def password_probe(run: RunCommand, known_nodes: frozenset[int]) -> Passwo
         document = await cdp.call("DOM.getDocument", depth=-1, pierce=True)
         root = _int(document.get("root", {}).get("nodeId"))
         nodes = await cdp.call("DOM.querySelectorAll", nodeId=root, selector="input[type=password],input[autocomplete=current-password],input[autocomplete=new-password]")
-        current = {_int(node) for node in nodes.get("nodeIds", [])}
+        current = {await _backend_node_id(cdp, _int(node)) for node in nodes.get("nodeIds", [])}
         visible = {node for node in current | set(known_nodes) if await _visible(cdp, node)}
         return PasswordProbe(loader, host, frozenset(visible))
 
@@ -140,6 +140,11 @@ async def _box_matches(cdp: CdpClient, node: int, expected: dict) -> bool:
     x, y = border[0], border[1]
     width, height = border[2] - x, border[5] - y
     return all(abs(actual - expected[key]) <= 1 for actual, key in ((x, "x"), (y, "y"), (width, "width"), (height, "height")))
+
+
+async def _backend_node_id(cdp: CdpClient, node_id: int) -> int:
+    description = await cdp.call("DOM.describeNode", nodeId=node_id, depth=0, pierce=True)
+    return _int(description.get("node", {}).get("backendNodeId"))
 
 
 async def _visible(cdp: CdpClient, node: int) -> bool:

@@ -24,7 +24,7 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     runtime = await owner._admit(thread_id, lease_id=lease_id, show_window=show_window, session=session)
     command = partial(_command, owner, runtime, lease_id)
     if not (session == "new" and args[0] == "open"):
-        await browser_control.require_page_access(thread_id, partial(browser_cdp.password_probe, command))
+        await browser_control.require_page_access(thread_id, partial(browser_cdp.password_probe, command), tuple(args))
     if browser_control.has_pane(thread_id):
         result = await browser_cdp.shared_action(command, args)
         if result is not None:

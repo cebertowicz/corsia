@@ -18,10 +18,12 @@ from ws import browser_stream
 def _no_browser_guard_state():
     browser_control._panes.clear()
     browser_control._episodes.clear()
+    browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
     yield
     browser_control._panes.clear()
     browser_control._episodes.clear()
+    browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
 
 
@@ -142,11 +144,10 @@ def test_pane_presence_is_not_exclusive_control():
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_shared_pane_does_not_refuse_agent_commands_for_presence(monkeypatch):
     browser_control.pane_connected("thread-1", "pane-1")
     assert browser_control.has_pane("thread-1")
-    return
+    owner = BrowserSessionOwner(namespace="corsia-pane-test")
 
     def past_the_gate(_args):
         raise RuntimeError("past the control gate")

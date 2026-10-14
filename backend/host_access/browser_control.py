@@ -33,6 +33,8 @@ class PasswordEpisode:
 
 _panes: dict[str, set[str]] = {}
 _episodes: dict[str, PasswordEpisode] = {}
+# A completed password episode remains read-guarded until the document loader changes.
+_guarded_visits: dict[str, PasswordEpisode] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -56,8 +58,8 @@ def has_pane(thread_id: str) -> bool:
     return bool(_panes.get(thread_id))
 
 
-async def require_page_access(thread_id: str, probe: Probe) -> None:
-    """Run the one password probe and reject every agent command on a guarded page."""
+async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...]) -> None:
+    """Run one probe and enforce the password-page and per-visit read guards."""
     lock = _probe_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:
         prior = _episodes.get(thread_id)
@@ -68,8 +70,18 @@ async def require_page_access(thread_id: str, probe: Probe) -> None:
             if isinstance(exc, BrowserSessionError) and str(exc) == PASSWORD_CHECK_FAILED:
                 raise
             raise BrowserSessionError(PASSWORD_CHECK_FAILED) from exc
-        episode = _episode_for(thread_id, result, prior)
+        guarded = _guarded_visits.get(thread_id)
+        if guarded is not None and guarded.visit != result.visit:
+            _guarded_visits.pop(thread_id, None)
+            guarded = None
+        if prior is not None and prior.visit != result.visit:
+            await _settle_episode(thread_id, prior)
+            _episodes.pop(thread_id, None)
+            _publish_password_page(thread_id, False)
+            prior = None
         if result.visible_nodes:
+            episode = _episode_for(thread_id, result, prior)
+            _guarded_visits[thread_id] = episode
             await _open_episode(thread_id, episode)
             _publish_password_page(thread_id, True)
             ending = " Post nothing in chat." if has_pane(thread_id) else " If you reply, use one short line; don't restate the task or say you made it."
@@ -78,6 +90,8 @@ async def require_page_access(thread_id: str, probe: Probe) -> None:
             await _settle_episode(thread_id, prior)
             _episodes.pop(thread_id, None)
             _publish_password_page(thread_id, False)
+        if guarded is not None:
+            _refuse_password_read(guarded, args)
 
 
 def _episode_for(thread_id: str, result: PasswordProbe, prior: PasswordEpisode | None) -> PasswordEpisode:
@@ -115,6 +129,19 @@ async def _settle_episode(thread_id: str, episode: PasswordEpisode) -> None:
                                 provenance="browser.password_guard")
     finally:
         db.close()
+
+
+def _refuse_password_read(episode: PasswordEpisode, args: tuple[str, ...]) -> None:
+    """Keep a password visit's DOM reads unavailable after its field is hidden."""
+    if args and args[0] == "eval":
+        raise BrowserSessionError(PASSWORD_PAGE)
+    if len(args) >= 3 and args[0] == "get" and args[1] in {"value", "attr"}:
+        try:
+            node = int(args[2])
+        except ValueError:
+            return
+        if node in episode.seen_nodes:
+            raise BrowserSessionError(PASSWORD_PAGE)
 
 
 def password_page(thread_id: str) -> bool:
