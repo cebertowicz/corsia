@@ -512,6 +512,7 @@ test.describe('@flow:doc-margin-marker', () => {
 		// A canvas too narrow for a side column gets the documented modal AdaptiveDrawer. Its portaled backdrop blocks the canvas;
 		// a non-modal drawer would leave markers above its sheet reachable.
 		const modalDrawer = await page.locator('[data-adaptive-drawer]').count() > 0;
+		expect(modalDrawer, 'the phone viewport uses the modal drawer; desktop uses the side drawer').toBe(info.project.name === 'chromium-mobile');
 		let reachable = 0;
 		for (let index = 0; index < withDrawer.length; index += 1) {
 			const seen = await reveal(page, index);

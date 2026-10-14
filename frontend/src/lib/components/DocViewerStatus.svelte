@@ -221,7 +221,6 @@
 	.document-header :global(.doc-tool[aria-disabled='true']) { opacity: 0.65; cursor: not-allowed; }
 	@container doc-canvas (max-width: 600px) {
 		.identity-details:has(.identity-age) { display: flex; }
-		.document-header:has(:global(.review-bar.ask:not(.expanded))) .identity-details:has(.identity-age) { display: none; }
 		.document-title { display: none; }
 		.document-header :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
 	}
@@ -236,6 +235,7 @@
 	.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: var(--space-7); }
 	@media (any-pointer: coarse) {
 		@container doc-canvas (max-width: 600px) {
+			.document-header:has(:global(.review-bar.ask:not(.expanded))) .identity-details:has(.identity-age) { display: none; }
 			.document-header:has(:global(.rb-slot)) { align-items: center; }
 			.document-header:has(:global(.rb-slot)) :global(.doc-tool) { min-height: 44px; }
 		}

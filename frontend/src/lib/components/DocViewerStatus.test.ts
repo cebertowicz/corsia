@@ -67,7 +67,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(details?.getAttribute('aria-expanded')).toBe('true');
 	});
 
-	it('marks unsent feedback on the open-thread pill without restoring Send to the header', () => {
+	it('names unsent feedback in the comment pill while Send stays in the drawer', () => {
 		render(value(), undefined, { commentCount: 2 });
 		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', grace_closes_at: '2026-10-11T22:32:00Z', undelivered_batches: [] });
 		flushSync();
@@ -81,7 +81,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.textContent).not.toContain('Sending to');
 	});
 
-	it('counts open threads on the pill with their unit, and no dot once nothing waits to be sent', () => {
+	it('updates the comment-pill count and unsent indicator as feedback changes', () => {
 		render(value(), undefined, { commentCount: 1 });
 		const pill = host.querySelector('.comment-status')!;
 		expect(pill.querySelector('.count')!.textContent).toBe('1');
@@ -155,7 +155,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.querySelector<HTMLButtonElement>('.comment-status')!.getAttribute('aria-label')).toBe(expected);
 	});
 
-	it('keeps an unplaced-comment indicator on the status pill while recovery moves to the comments drawer', () => {
+	it('describes unplaced comments from the status pill while retry remains in the drawer', () => {
 		render(value(), undefined, { orphanedCount: 1 });
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
 		expect(pill.getAttribute('aria-describedby')).toBeTruthy();

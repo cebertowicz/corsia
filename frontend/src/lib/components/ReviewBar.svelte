@@ -363,7 +363,7 @@
 			/* Request changes: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and Request changes right-aligned (PE B3). */
 			.rb-capsule .rb-note { flex: 1 0 100%; min-height: var(--rb-hit); max-height: calc(4lh + 2 * var(--space-2)); padding: var(--space-2); font-size: var(--text-input); line-height: var(--lh-normal); }
 			.review-bar.noting .rb-capsule .rb-actions { flex: 1 0 100%; justify-content: flex-end; }
-			.review-bar.noting .rb-capsule :global(.btn) { flex: 0 0 auto; min-width: max-content; }
+			.review-bar.noting .rb-capsule .rb-actions :global(.btn) { flex: 0 0 auto; min-width: max-content; }
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

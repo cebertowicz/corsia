@@ -517,7 +517,7 @@ for (const theme of ['light', 'dark'] as const) {
 	test(`@surface:review-bar the header and its ask stay clear of the overlaid plan pane (1280 ${theme})`, async ({ page, request }, info) => {
 		test.skip(info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
 		// A 21-character asker: the title plus the five-character suffix that keeps it unique.
-		const doc = await seed(request, `Overlay 1280 ${theme === 'light' ? 'lt' : 'dk'}`);
+		const doc = await seed(request, `Overlay 1280 ${theme === 'light' ? 'lt' : 'dk'}`, { sharedAsOf: '2026-09-12' });
 		expect(doc.title).toHaveLength(21);
 		raiseAsk(doc.threadId, doc.artifactId, 'Is the rollout plan right?');
 		await page.setViewportSize({ width: 1280, height: 900 });
@@ -531,6 +531,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await loginByUrl(page, { waitForComposer: false });
 		await selectThread(page, doc, 'default');
 		await expect(bar(page)).toContainText('Is the rollout plan right?');
+		await expect(page.locator('.identity-age'), 'a narrow fine-pointer canvas keeps document identity visible').toBeVisible();
 		const pane = page.locator('.pane');
 		await expect(pane).toHaveClass(/\boverlay\b/);
 		await expect(pane).not.toHaveClass(/\bcollapsed\b/);

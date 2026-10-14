@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { Button } from '../ui';
-	import { drawerFooterHeight, footerFocusHome } from '$lib/docCommentDrawer';
+	import { footerFocusHome } from '$lib/docCommentDrawer';
 
 	export type PlacementRecoveryProps = {
 		onReload?: () => boolean;
@@ -47,7 +47,7 @@
 </script>
 
 {#if (orphanedCount || announcement) && onReload}
-	<div class="drawer-placement" data-drawer-placement bind:this={placementFooter} use:drawerFooterHeight use:footerFocusHome={onFocusHome}>
+	<div class="drawer-placement" data-drawer-placement bind:this={placementFooter} use:footerFocusHome={onFocusHome}>
 		<p role="status">{announcement || unplacedPhrase}</p>
 		{#if orphanedCount}<Button size="sm" variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={unavailable || reloading} describedby={unavailable ? connectionDescriptionId : undefined} onclick={reload} loading={reloading}>Place again</Button>{/if}
 	</div>
