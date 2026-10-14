@@ -82,6 +82,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
     """Proxy frames and accept input only from this connection's control holder."""
     connection_token = secrets.token_urlsafe(18)
 
+    browser_control.pane_connected(thread_id, connection_token)
     frames = PaneFrames()
     overflow = asyncio.Event()
 
@@ -110,26 +111,17 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
             except (TypeError, ValueError):
                 continue
             kind = data.get("type") if isinstance(data, dict) else None
-            if kind == "take_over":
-                if browser_control.take_control(thread_id, connection_token):
-                    emit_product_event("browser_pane", "take_over", thread_id=thread_id, user_id=user_id)
-                await send_control()
-            elif kind == "hand_back":
-                if browser_control.hand_back(thread_id, connection_token):
-                    emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
-                await send_control()
-            elif kind == "navigate":
+            if kind == "navigate":
                 _request_navigate(thread_id, connection_token, data, report)
             elif kind == "appearance":
                 _request_match(thread_id, connection_token, data)
-            elif (kind in {"input_mouse", "input_keyboard"}
-                  and browser_control.holds_control(thread_id, connection_token)):
+            elif kind in {"input_mouse", "input_keyboard"}:
                 await stream.send(message)
 
     tasks: set[asyncio.Task] = set()
     try:
         await stream.send(json.dumps({"type": "screencast_start"}))
-        await send_control()
+        # Shared panes have no control-holder state.
         tasks = {
             asyncio.create_task(from_stream()),
             asyncio.create_task(from_pane()),
@@ -150,8 +142,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         # A closed connection's size must never land after a newer pane's.
         if (queued := _latest_appearance.get(thread_id)) and queued[0] == connection_token:
             del _latest_appearance[thread_id]
-        if browser_control.hand_back(thread_id, connection_token):
-            emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
+        browser_control.pane_disconnected(thread_id, connection_token)
 
 
 async def _close_on_overflow(pane: WebSocket, overflow: asyncio.Event) -> None:
@@ -213,9 +204,7 @@ async def _run_pending(thread_id: str) -> None:
 
 
 async def _navigate(thread_id: str, connection_token: str, data: dict) -> dict:
-    """Open a URL, or go back, forward or reload, only for the connection that holds control."""
-    if not browser_control.holds_control(thread_id, connection_token):
-        return {"type": "navigate_result", "error": "Take over to navigate"}
+    """Open a URL, or go back, forward or reload from an authenticated pane connection."""
     action, url = data.get("action"), data.get("url")
     if action is None and not browser_control.is_http_url(url):
         return {"type": "navigate_result", "error": "Browser URL must be http or https"}

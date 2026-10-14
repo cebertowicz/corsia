@@ -63,31 +63,10 @@ class BrowserSessionOwner:
                   lease_id: str | None = None, timeout: float = 30.0,
                   show_window: bool | None = None, control_token: str | None = None,
                   session: SessionAdmission = "any") -> str:
-        """Run a stock CLI command through the exact opaque thread session, as ``control_token``'s pane."""
-        if not isinstance(thread_id, str) or not thread_id:
-            raise BrowserSessionError("browser command requires exact thread identity")
-        invalid_preference = show_window is not None and not isinstance(show_window, bool)
-        if not args or not all(isinstance(arg, str) and arg for arg in args) or timeout <= 0 or invalid_preference:
-            raise BrowserSessionError("browser command is invalid")
-        if args[0] in {"close", "quit", "exit"}:
-            raise BrowserSessionError("browser close requires owned session teardown")
-        browser_control.require_page_control(thread_id, control_token)
-        try:
-            await asyncio.to_thread(browser_cli.check_local_mode, args)
-        except identity.BrowserIdentityError as exc:
-            raise BrowserSetupError(str(exc)) from exc
-        # Preflight has no session effects and must not poison an existing binding.
-        await self._pin_native()
-        runtime = await self._admit(
-            thread_id, lease_id=lease_id, show_window=show_window, session=session,
-        )
-        result, unfinished = await self._run_admitted(runtime, args, lease_id=lease_id, timeout=timeout)
-        if result.timed_out and args[0] == "wait":
-            return browser_cli.WAIT_TIMED_OUT
-        rendered = self._model_result(result, runtime.record)
-        if args[0] == "open" and runtime.record.show_window and not unfinished and not rendered.startswith("Error:"):
-            browser_control.announce_browser_opened(thread_id)
-        return rendered
+        """Run one command through the shared-browser command path."""
+        from host_access.browser_session_commands import run
+        return await run(self, thread_id, args, lease_id=lease_id, timeout=timeout,
+                         show_window=show_window, session=session)
 
     async def stream_port(self, thread_id: str) -> StreamPortResult:
         """Prepare an existing session's private stream through the same command path."""

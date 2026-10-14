@@ -15,10 +15,14 @@ from ws import browser_stream
 
 
 @pytest.fixture(autouse=True)
-def _no_control_holders():
-    browser_control._control_holders.clear()
+def _no_browser_guard_state():
+    browser_control._panes.clear()
+    browser_control._episodes.clear()
+    browser_control._probe_locks.clear()
     yield
-    browser_control._control_holders.clear()
+    browser_control._panes.clear()
+    browser_control._episodes.clear()
+    browser_control._probe_locks.clear()
 
 
 class FakePane:
@@ -110,22 +114,11 @@ async def test_stream_does_not_close_a_pane_that_left_before_auth():
 
 
 @pytest.mark.asyncio
-async def test_relay_drops_input_without_control_and_forwards_only_allowed_input():
+async def test_relay_forwards_person_input_without_a_turn_handoff():
     pane = FakePane([
-        json.dumps({"type": "input_mouse"}),
-        json.dumps({"type": "unexpected"}),
-    ])
-    stream = FakeStream()
-    with pytest.raises(WebSocketDisconnect):
-        await browser_stream._relay(pane, stream, "thread-1", "user-1")
-    assert stream.sent == [json.dumps({"type": "screencast_start"})]
-
-    pane = FakePane([
-        json.dumps({"type": "take_over"}),
         json.dumps({"type": "input_mouse", "x": 1}),
         json.dumps({"type": "input_keyboard", "key": "a"}),
         json.dumps({"type": "unexpected"}),
-        json.dumps({"type": "hand_back"}),
     ])
     stream = FakeStream()
     with pytest.raises(WebSocketDisconnect):
@@ -135,18 +128,21 @@ async def test_relay_drops_input_without_control_and_forwards_only_allowed_input
         json.dumps({"type": "input_mouse", "x": 1}),
         json.dumps({"type": "input_keyboard", "key": "a"}),
     ]
-    browser_control.require_page_control("thread-1")
+    assert not browser_control.has_pane("thread-1")
 
 
-def test_control_belongs_to_its_connection_and_releases_on_end():
-    assert browser_control.take_control("thread-1", "first")
-    assert not browser_control.hand_back("thread-1", "second")
-    assert browser_control.holds_control("thread-1", "first")
-    assert browser_control.hand_back("thread-1", "first")
-    browser_control.require_page_control("thread-1")
+def test_pane_presence_is_not_exclusive_control():
+    browser_control.pane_connected("thread-1", "first")
+    browser_control.pane_connected("thread-1", "second")
+    assert browser_control.has_pane("thread-1")
+    browser_control.pane_disconnected("thread-1", "first")
+    assert browser_control.has_pane("thread-1")
+    browser_control.pane_disconnected("thread-1", "second")
+    assert not browser_control.has_pane("thread-1")
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="superseded by shared browser password guard")
 async def test_page_commands_run_only_for_the_control_holder(monkeypatch):
     owner = BrowserSessionOwner(namespace="corsia-pane-test")
     browser_control.take_control("thread-1", "pane-1")
@@ -286,6 +282,7 @@ async def test_a_newer_pane_size_supersedes_an_older_connections(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="shared panes do not block agent cleanup")
 async def test_agent_close_waits_while_the_user_controls(monkeypatch):
     closed = []
     monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "close_browser", lambda thread_id: closed.append(thread_id))
@@ -312,12 +309,13 @@ async def test_browser_opened_is_announced_after_every_successful_shared_open(mo
     monkeypatch.setattr(owner, "_run_admitted", lambda *_args, **_kwargs: asyncio.sleep(
         0, result=(CommandResult(returncode, "", "failed"), False)))
     monkeypatch.setattr(browser_control, "announce_browser_opened", seen.append)
-    await owner.run("thread-1", ("open", "https://example.test"))
-    await owner.run("thread-1", ("open", "https://example.test"))
+    await owner.run("thread-1", ("open", "https://example.test"), session="new")
+    await owner.run("thread-1", ("open", "https://example.test"), session="new")
     assert seen == announced
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="shared panes navigate without a control holder")
 async def test_navigate_requires_this_connections_control(monkeypatch):
     opened = []
 
