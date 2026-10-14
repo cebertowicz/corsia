@@ -24,18 +24,19 @@ describe('pane pointer input', () => {
   expect(send.mock.calls[2][0]).toMatchObject({ x: 50, y: 60, button: 'left' });
   expect(send.mock.calls[3][0]).toMatchObject({ x: 100, y: 80 });
  });
- it('accumulates touch scroll distances in page pixels with flat wheel coordinates', () => {
+ it('sends each touch wheel delta in page pixels without waiting for a paint', () => {
   const send = vi.fn(); const input = new BrowserPaneInput(send);
   input.press(pointer(), { x: 40, y: 400 });
   input.move(pointer('touch', 170), { x: 40, y: 340 }, .5);
   input.move(pointer('touch', 130), { x: 40, y: 260 }, .5);
-  expect(send).not.toHaveBeenCalled();
-  paint();
-  expect(send).toHaveBeenCalledExactlyOnceWith({ type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 260, deltaX: 0, deltaY: 140 });
+  expect(send.mock.calls.map(([message]) => message)).toEqual([
+   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 340, deltaX: 0, deltaY: 60 },
+   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 260, deltaX: 0, deltaY: 80 },
+  ]);
   input.move(pointer('touch', 110), { x: 40, y: 220 }, .5);
   input.release(pointer('touch', 110), { x: 40, y: 220 });
-  expect(send.mock.calls[1][0]).toMatchObject({ eventType: 'mouseWheel', deltaY: 40 });
-  paint(); expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls[2][0]).toMatchObject({ eventType: 'mouseWheel', deltaY: 40 });
+  paint(); expect(send).toHaveBeenCalledTimes(3);
  });
  it('turns a stationary touch into a click and cancellation into no click', () => {
   const send = vi.fn(); const input = new BrowserPaneInput(send);

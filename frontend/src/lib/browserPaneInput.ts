@@ -3,13 +3,11 @@ import { AnimationFrameCoalescer, type PanePoint } from './browserPane';
 type MouseInput = { type: 'input_mouse'; eventType: string; x: number; y: number; button?: string; clickCount?: number; deltaX?: number; deltaY?: number };
 type PointerPosition = { pointerId: number; pointerType: string; clientX: number; clientY: number };
 
-/** Mouse positions replace each other; touch wheel distances accumulate before a paint. */
+/** Mouse positions replace each other; touch wheel deltas preserve every drag movement. */
 export class BrowserPaneInput {
 	private pressed: number | null = null;
 	private touch: { start: PointerPosition; last: PointerPosition; point: PanePoint; dragging: boolean } | null = null;
-	private wheel: { point: PanePoint; deltaX: number; deltaY: number } | null = null;
 	private moves = new AnimationFrameCoalescer<PanePoint>(point => this.mouse('mouseMoved', point));
-	private wheels = new AnimationFrameCoalescer<boolean>(() => this.flushWheel());
 
 	constructor(private send: (message: MouseInput) => void) {}
 
@@ -40,8 +38,7 @@ export class BrowserPaneInput {
 		if (!touch.dragging) return;
 		const deltaX = (touch.last.clientX - event.clientX) / scale;
 		const deltaY = (touch.last.clientY - event.clientY) / scale;
-		this.wheel = { point, deltaX: (this.wheel?.deltaX ?? 0) + deltaX, deltaY: (this.wheel?.deltaY ?? 0) + deltaY };
-		this.wheels.push(true);
+		this.send({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX, deltaY });
 		touch.last = event;
 	}
 
@@ -50,8 +47,6 @@ export class BrowserPaneInput {
 		const touch = this.touch;
 		if (event.pointerType === 'touch') {
 			if (!touch || event.pointerId !== touch.start.pointerId) return;
-			this.wheels.cancel();
-			this.flushWheel();
 			if (!touch.dragging && !cancelled) {
 				this.mouse('mouseMoved', touch.point);
 				this.mouse('mousePressed', touch.point);
@@ -64,18 +59,10 @@ export class BrowserPaneInput {
 		}
 	}
 
-	private flushWheel(): void {
-		if (!this.wheel) return;
-		const { point, deltaX, deltaY } = this.wheel;
-		this.wheel = null;
-		this.send({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX, deltaY });
-	}
 
 	dispose(): void {
 		this.moves.cancel();
-		this.wheels.cancel();
 		this.pressed = null;
 		this.touch = null;
-		this.wheel = null;
 	}
 }
