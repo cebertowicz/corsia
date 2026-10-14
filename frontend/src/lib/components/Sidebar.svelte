@@ -16,7 +16,6 @@
 	import SidebarThreadList from './SidebarThreadList.svelte';
 	import SidebarContextMenu from './SidebarContextMenu.svelte';
 	import RailScopedSection from './RailScopedSection.svelte';
-	import { RailSection } from '$lib/components/ui';
 	import { measurementRailHref, openMeasurementFromRail } from '$lib/stores/measurementNavigation';
 	import type { View } from '$lib/homePaneConfig';
 	import NewChatFab from './NewChatFab.svelte';
@@ -197,7 +196,7 @@
 >
 	<div class="shell-top-pad" data-tauri-drag-region></div>
 
-	<RailSection label="Global" layout="sidebar-nav">
+	<nav class="rail-nav" aria-label="Global">
 		<button
 			class="rail-link press-tint"
 			class:active={activeView === 'activity'}
@@ -221,7 +220,7 @@
 				<svg class="update-icon" role="img" aria-label="Update available" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
 			{/if}
 		</button>
-	</RailSection>
+	</nav>
 
 	<div class="sidebar-scroll">
 		<div class="rail-scope">

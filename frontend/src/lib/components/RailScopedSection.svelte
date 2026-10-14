@@ -11,7 +11,6 @@
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
 	import type { View } from '$lib/homePaneConfig';
-	import { RailSection } from '$lib/components/ui';
 
 	type MenuKind = 'agent' | 'conductor';
 
@@ -157,7 +156,7 @@
 	}
 </script>
 
-<RailSection label="Agents" layout="sidebar-scoped">
+<nav class="scoped" aria-label="Agents">
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
@@ -285,10 +284,10 @@
 			{/if}
 		</button>
 	{/if}
-</RailSection>
+</nav>
 
 <style>
-	:global(.scoped) {
+	.scoped {
 		display: flex; flex-direction: column; gap: 1px;
 		padding: 6px 8px 8px;
 		margin: 0 0 2px;

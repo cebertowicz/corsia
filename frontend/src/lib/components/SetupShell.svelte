@@ -1,8 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { Button, RailRow, RailSection } from '$lib/components/ui';
 
-	export type SetupStep = { label: string; icon: 'check' | 'person' | 'chip'; state: 'current' | 'todo' | 'done' };
+	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip'; state: 'current' | 'todo' | 'done' };
 	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number };
 
 	interface Props {
@@ -18,6 +19,10 @@
 	}
 
 	const { steps, jobs = [], title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
+
+	function tokenFade(node: Element) {
+		return fade(node, { duration: Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 });
+	}
 </script>
 
 <div class="setup-shell">
@@ -28,13 +33,15 @@
 				<RailRow label={step.label} iconName={step.icon} state={step.state} />
 			{/each}
 		</RailSection>
-		{#if jobs.length}
-			<RailSection label="In the background">
-				{#each jobs as job (job.label)}
-					<RailRow {...job} />
-				{/each}
-			</RailSection>
-		{/if}
+		<div class="job-region" class:open={jobs.length > 0} aria-hidden={jobs.length === 0}>
+			<div class="job-region-inner">
+				<RailSection label="In the background">
+					{#each jobs as job (job.label)}
+						<div class="job-row" in:tokenFade out:tokenFade><RailRow {...job} /></div>
+					{/each}
+				</RailSection>
+			</div>
+		</div>
 	</aside>
 	<main class="pane">
 		<div class="drag" data-tauri-drag-region></div>
@@ -67,4 +74,9 @@
 	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
 	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
+	.job-region { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows calc(var(--dur-standard) * 0.7) var(--ease-snap), opacity calc(var(--dur-standard) * 0.7) var(--ease-snap); }
+	.job-region.open { grid-template-rows: 1fr; opacity: 1; transition-duration: var(--dur-standard); transition-timing-function: var(--ease-entrance); }
+	.job-region-inner { min-height: 0; overflow: hidden; }
+	.job-row { min-height: 0; }
+	@media (prefers-reduced-motion: reduce) { .job-region { transition: opacity var(--dur-tight) var(--ease-snap); } .job-region.open { grid-template-rows: 1fr; } }
 </style>
