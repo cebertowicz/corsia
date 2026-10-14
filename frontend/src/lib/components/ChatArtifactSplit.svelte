@@ -38,6 +38,10 @@
 
 	let splitEl = $state<HTMLDivElement | undefined>(undefined);
 	let canvasWidth = $state(0);
+	// A pick changes the artifact at once, but the sheet remains mounted until
+	// AdaptiveDrawer's one canonical outro lifecycle finishes.
+	let tabSheetMounted = $state(false);
+	let tabSheetOpen = $state(false);
 
 	$effect(() => {
 		const el = splitEl;
@@ -84,6 +88,14 @@
 
 	// The sheet only makes sense over a full-canvas artifact.
 	$effect(() => { if (!artifactFullCanvas) artifactTabSheetOpen.set(false); });
+	$effect(() => {
+		if ($artifactTabSheetOpen && artifactFullCanvas) {
+			tabSheetMounted = true;
+			tabSheetOpen = true;
+		} else if (tabSheetMounted) {
+			tabSheetOpen = false;
+		}
+	});
 
 	// While the artifact owns the canvas it holds a back layer, so hardware Back
 	// returns to chat instead of leaving the app. Tabs are never closed by Back.
@@ -116,6 +128,13 @@
 	}
 	function selectFromSheet(instanceId: string) {
 		if (threadId) setActiveTab(threadId, instanceId);
+	}
+	function closeTabSheet() {
+		tabSheetOpen = false;
+		artifactTabSheetOpen.set(false);
+	}
+	function finishTabSheetClose() {
+		if (!tabSheetOpen) tabSheetMounted = false;
 	}
 	async function closeFromSheet(instanceId: string) {
 		if (!threadId) return;
@@ -159,13 +178,15 @@
 	{/if}
 </div>
 
-{#if $artifactTabSheetOpen && artifactFullCanvas}
+{#if tabSheetMounted && artifactFullCanvas}
 	<ArtifactTabSheet
 		tabs={workspace.tabs}
 		activeKey={workspace.activeTabId}
+		open={tabSheetOpen}
 		onSelect={selectFromSheet}
 		onClose={closeFromSheet}
-		onCloseSheet={() => artifactTabSheetOpen.set(false)}
+		onCloseSheet={closeTabSheet}
+		onClosed={finishTabSheetClose}
 	/>
 {/if}
 

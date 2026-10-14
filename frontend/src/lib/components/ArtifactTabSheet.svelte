@@ -12,12 +12,15 @@
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import { isTabChanged, type ArtifactTab } from '$lib/stores/artifactWorkspace';
 
-	let { tabs, activeKey, onSelect, onClose, onCloseSheet }: {
+	let { tabs, activeKey, onSelect, onClose, onCloseSheet, open = true, onClosed = () => {} }: {
 		tabs: ArtifactTab[];
 		activeKey: string | null;
 		onSelect: (instanceId: string) => void;
 		onClose: (instanceId: string) => void;
 		onCloseSheet: () => void;
+		/** The host keeps this mounted through the shared drawer outro. */
+		open?: boolean;
+		onClosed?: () => void;
 	} = $props();
 
 	function pick(instanceId: string) {
@@ -26,7 +29,7 @@
 	}
 </script>
 
-<AdaptiveDrawer ariaLabel="Open side panel items" heading="Open items" onClose={onCloseSheet}>
+<AdaptiveDrawer ariaLabel="Open side panel items" heading="Open items" {open} onClose={onCloseSheet} {onClosed}>
 	<ul class="sheet-list">
 		{#each tabs as t (t.instanceId)}
 			<li class="sheet-row" class:active={t.instanceId === activeKey}>
