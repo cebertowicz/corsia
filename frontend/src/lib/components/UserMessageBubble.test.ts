@@ -8,6 +8,7 @@ import { activeModelId, models, type Model } from '$lib/stores/models';
 import { WAITING_FOR_MODEL } from '$lib/messageDeliveryCopy';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
 import { formatTime } from '$lib/time';
+import { resetUpdateStoreForTests, updateStatus } from '$lib/update/store';
 
 function humanMsg(overrides: Record<string, unknown> = {}) {
 	return {
@@ -47,6 +48,7 @@ beforeEach(() => {
 	activeThreadId.set(null);
 	messages.set([]);
 	_resetTurnStateForTests();
+	resetUpdateStoreForTests();
 });
 
 afterEach(() => {
@@ -57,6 +59,7 @@ afterEach(() => {
 	activeThreadId.set(null);
 	messages.set([]);
 	_resetTurnStateForTests();
+	resetUpdateStoreForTests();
 	vi.unstubAllGlobals();
 });
 
@@ -87,6 +90,23 @@ describe('UserMessageBubble — human message path', () => {
 		expect(wrapper.querySelector('.delivery-status.sending')).toBeNull();
 		expect(wrapper.querySelector('.delivery-failed-mark')).toBeNull();
 	});
+	it.each([
+		['a requested queue', { metadata: { delivery_intent: 'queue_after_turn' } }, 'Sends after the update'],
+		['a checkpoint hold', { write_outcome: 'proved_no_write', delivery_error: 'checkpoint unavailable' }, 'Waiting for checkpoint'],
+		['an apply-now hold', {}, 'Sends after the update'],
+	])('changes only %s to the update delivery promise', (_name, message, expected) => {
+		activeThreadId.set('thread-update');
+		updateStatus.set({
+			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
+			available: true, checked_at: 1, error: null,
+			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'draining' },
+		});
+		const wrapper = render(humanMsg({
+			thread_id: 'thread-update', delivery_state: 'queued', ...message,
+		}));
+		expect(wrapper.textContent).toContain(expected);
+	});
+
 	it('renders the message content', () => {
 		const wrapper = render(humanMsg());
 		expect(wrapper.querySelector('.bubble-content')?.textContent).toBe('hello from a human');

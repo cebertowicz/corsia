@@ -14,6 +14,26 @@ function viewportBottomOccupancy(node: HTMLElement): number {
 	return Math.max(0, window.innerHeight - Math.max(0, top));
 }
 
+/**
+ * Occupancy of a band whose own box is larger than what it shows (the chat
+ * attention stack reserves a shadow gutter even when empty): measured from the
+ * highest child that has a box, so an empty band clears nothing. A child's own
+ * top padding is room it keeps clear (the dock's), so the measure starts at its
+ * content edge and the stack sits one clearance above whatever shows.
+ */
+function childrenBottomOccupancy(node: HTMLElement): number {
+	let top = Infinity;
+	for (const child of Array.from(node.children)) {
+		const rect = child.getBoundingClientRect();
+		if (rect.height <= 0) continue;
+		const style = getComputedStyle(child);
+		const inset = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.paddingTop) || 0);
+		top = Math.min(top, rect.top + inset);
+	}
+	if (top === Infinity || top >= window.innerHeight) return 0;
+	return Math.max(0, window.innerHeight - Math.max(0, top));
+}
+
 export interface ToastClearanceRegistrationOptions {
 	measure?: ToastClearanceMeasurement;
 }
@@ -40,11 +60,16 @@ export function createToastClearanceStore() {
 		registrations.set(node, { clearance: 0, observer, update });
 		observer?.observe(node);
 		window.addEventListener('resize', update);
+		// A phone keyboard moves the composer without resizing it or the window.
+		window.visualViewport?.addEventListener('resize', update);
+		window.visualViewport?.addEventListener('scroll', update);
 		update();
 
 		return () => {
 			observer?.disconnect();
 			window.removeEventListener('resize', update);
+			window.visualViewport?.removeEventListener('resize', update);
+			window.visualViewport?.removeEventListener('scroll', update);
 			registrations.delete(node);
 			publish();
 		};
@@ -61,5 +86,12 @@ export const toastClearance = createToastClearanceStore();
 export function toastClearanceSurface(node: HTMLElement) {
 	return {
 		destroy: toastClearance.register(node),
+	};
+}
+
+/** For a band that holds the surfaces above the composer (the attention stack). */
+export function toastClearanceBand(node: HTMLElement) {
+	return {
+		destroy: toastClearance.register(node, { measure: () => childrenBottomOccupancy(node) }),
 	};
 }

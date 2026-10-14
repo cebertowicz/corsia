@@ -11,6 +11,7 @@ import { setWs, subscribedThreads } from './state';
 import { handleMessage } from './handlers';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { on } from './events';
+import { resetUpdateStoreForTests, updateOperation } from '../update/store';
 import { stopRequestedTurns } from './send';
 import {
 	_resetTurnStateForTests,
@@ -32,6 +33,19 @@ beforeEach(() => {
 });
 
 describe('drain status', () => {
+	it('reads the update operation when a drain frame arrives, so a second device sees an update started elsewhere', async () => {
+		token.set('t');
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+			available: true, operation: { operation_id: 'u1', kind: 'update', status: 'in_flight', phase: 'draining' },
+		})));
+		vi.stubGlobal('fetch', fetchMock);
+		handleSystemDraining({ draining: true, reason: 'update' });
+		await vi.waitFor(() => expect(get(updateOperation)?.phase).toBe('draining'));
+		expect(String((fetchMock.mock.calls as unknown[][])[0][0])).toContain('/api/system/update-status');
+		vi.unstubAllGlobals();
+		resetUpdateStoreForTests();
+	});
+
 	it('retains the exact active turn blocker for restart UX', () => {
 		handleSystemDraining({
 			draining: true,
@@ -129,7 +143,8 @@ describe('drain status', () => {
 			ok: true,
 			json: async () => ({ active: false }),
 		});
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+		const drainReads = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/api/system/drain'));
+		await vi.waitFor(() => expect(drainReads()).toHaveLength(1));
 		await Promise.resolve();
 
 		expect(get(drainStatus)?.blockingTurns[0]?.threadId).toBe('thread-newer');

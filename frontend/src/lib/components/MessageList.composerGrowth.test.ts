@@ -23,6 +23,7 @@ import { token } from '$lib/stores/auth';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
 import MessageList from '$lib/components/MessageList.svelte';
 import InputBar from '$lib/components/InputBar.svelte';
+import { toastStackHeight } from '$lib/stores/toastStack';
 
 const THREAD_ID = 'composer-growth-thread';
 const VIEWPORT = 500;
@@ -186,6 +187,7 @@ beforeEach(() => {
 		},
 	]);
 	_resetTurnStateForTests();
+	toastStackHeight.set(0);
 });
 
 afterEach(() => {
@@ -197,7 +199,23 @@ afterEach(() => {
 	activeThreadId.set(null);
 	messages.set([]);
 	_resetTurnStateForTests();
+	toastStackHeight.set(0);
 	vi.unstubAllGlobals();
+});
+
+describe('MessageList terminal clearance', () => {
+	it('reserves the toast stack and stays at the live edge when it grows', async () => {
+		const panel = mountTranscriptWithoutComposer();
+		const writes = recordScrollWrites(panel.scroller);
+
+		toastStackHeight.set(64);
+		await tick();
+		flushSync();
+		runFrames();
+
+		expect(panel.scroller.style.getPropertyValue('--toast-stack-height')).toBe('64px');
+		expect(writes).toEqual([CONTENT]);
+	});
 });
 
 describe('a keystroke that grows the composer', () => {

@@ -23,7 +23,7 @@ def test_startup_adds_review_requests_preserving_existing_state(tmp_path):
         db.commit()
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        assert SCHEMA_VERSION == 113
+        assert SCHEMA_VERSION == 114
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert db.execute("SELECT title FROM threads WHERE id='keep'").fetchone()[0] == "Kept"
         columns = {r[1] for r in db.execute("PRAGMA table_info(doc_review_requests)")}
