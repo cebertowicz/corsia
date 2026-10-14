@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 test.use({ video: 'on' });
 
@@ -46,6 +46,15 @@ async function serveSetupState(page: Page, state: SetupState) {
 	});
 }
 
+async function waitForJobSettled(page: Page, job: Locator) {
+	const duration = await job.evaluate((element) => {
+		const token = getComputedStyle(element).getPropertyValue('--dur-standard').trim();
+		const value = Number.parseFloat(token) || 0;
+		return value * (token.endsWith('ms') ? 2 : 2_000);
+	});
+	await page.waitForTimeout(duration);
+}
+
 async function openModelStep(page: Page) {
 	await page.goto('/');
 	await page.getByRole('button', { name: 'Get started' }).click();
@@ -69,6 +78,7 @@ async function assertSetupState(page: Page, state: SetupState) {
 	if (state === 'downloading') {
 		await expect(page.getByText('Downloading in the background')).toBeVisible();
 		const job = page.locator('.job-row');
+		await waitForJobSettled(page, job);
 		await expect(job).toHaveCSS('opacity', '1');
 		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
 		await expect(page.getByLabel('Setup progress').getByText('42%', { exact: true })).toBeVisible();
@@ -105,6 +115,7 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.getByRole('button', { name: 'Get started' }).click();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
 		const job = page.locator('.job-row');
+		await waitForJobSettled(page, job);
 		await expect(job).toHaveCSS('opacity', '1');
 		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
 		await expect(job.getByText('Qwen 3.8', { exact: true })).toBeVisible();
@@ -117,6 +128,7 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 		await openModelStep(page);
 		const job = page.locator('.job-row');
+		await waitForJobSettled(page, job);
 		await expect(job).toHaveCSS('opacity', '1');
 		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
 		await page.screenshot({ path: testInfo.outputPath('setup-model-downloading-settled-light-1280x900.png'), scale: 'css' });
