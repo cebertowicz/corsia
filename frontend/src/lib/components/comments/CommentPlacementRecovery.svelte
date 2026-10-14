@@ -56,7 +56,7 @@
 {/if}
 
 <style>
-	.drawer-placement { container: drawer-footer / inline-size; flex: none; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
+	.drawer-placement { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
 	.drawer-placement p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 	.drawer-placement :global(.btn) { flex: none; }
 	@media (max-width: 420px) { .drawer-placement { gap: var(--space-1); padding-inline: var(--space-2); } }

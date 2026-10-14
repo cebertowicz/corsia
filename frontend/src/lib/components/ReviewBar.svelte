@@ -4,6 +4,7 @@
 	import { cubicIn } from 'svelte/easing';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { Avatar, Button } from '$lib/components/ui';
+	import MiddleName from '$lib/components/MiddleName.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import { on } from '$lib/ws';
 	import { createReviewBarState, DRAFT_OPEN } from '$lib/reviewBarState.svelte';
@@ -208,7 +209,7 @@
 				<button type="button" class="rb-line" aria-expanded={expanded} aria-label={label} title={ask} onclick={() => (expanded = !expanded)}>
 					<span class="rb-lead">
 						<Avatar name={asker} color={agentColor(read?.asker?.id ?? asker)} hidden />
-						<span class="rb-who"><strong>{asker}</strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
+						<span class="rb-who"><strong><MiddleName name={asker} /></strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
 					</span>
 					<span class="rb-ask">{ask}</span>
 					<svg class="rb-icon rb-chev" aria-hidden="true" viewBox="0 0 16 16"><path d="M4 6.5l4 4 4-4" /></svg>
@@ -265,9 +266,13 @@
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* The avatar and name; it lays nothing out itself except in the narrow header below. */
 	.rb-lead { display: contents; }
-	/* The requester takes its natural width up to the header cap; only its tail may truncate, leaving the ask the remaining one-line space. */
+	/* The requester takes its natural width up to the header cap, leaving the ask the remaining one-line space. */
 	.rb-who { flex: 0 1 auto; display: flex; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.rb-who strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-semibold); }
+	@media (any-pointer: coarse) {
+		.rb-who :global(.name) { display: block; overflow: hidden; text-overflow: ellipsis; }
+		.rb-who :global(.name-head), .rb-who :global(.name-tail) { display: inline; overflow: visible; }
+	}
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
 	.rb-ask { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }

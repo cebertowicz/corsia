@@ -42,9 +42,11 @@ it('reports a successfully persisted disconnected copy and same-store reconnecti
 	expect(host.textContent).toContain('Disconnected · changes stay on this device');
 	session.reconnecting(); flushSync(); expect(host.textContent).toContain('Reconnecting…');
 });
-it('describes live orphan recovery from the document status pill', () => {
+it('names live unplaced comments once on the document status pill', () => {
 	setup(); render({ orphanedCount: 2 });
-	expect(host.querySelector('.comment-status')?.getAttribute('aria-describedby')).toBeTruthy();
+	const pill = host.querySelector('.comment-status')!;
+	expect(pill.getAttribute('aria-label')).toBe("0 open threads, 2 comments couldn't be placed");
+	expect(pill.getAttribute('aria-describedby')).toBeNull();
 });
 
 it('shows the approved settling row and offers reading and copying without a second write', async () => {

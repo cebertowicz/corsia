@@ -71,13 +71,12 @@
 	let verifying = $state(false);
 	let verificationError = $state('');
 	let verificationNotice = $state('');
-	let commentStatus = $state<HTMLButtonElement>();
 	// The unsent comments, for the pill's dot and accessible summary; the batch itself is the one source.
 	const unsent = $derived(feedbackStatus?.controller().pendingCount ?? 0);
 	// A live region only announces a change, so the stale state needs text that appears when it starts.
 	const staleAnnouncement = $derived(stale && ready ? 'File changed since you opened it. Reload to see the latest.' : '');
 	const freshnessPresentation = $derived(freshness ? formatFreshness(freshness) : null);
-	// The live connection description is shared by document-status and drawer controls.
+	// The live-status row renders the stable connection description for unavailable actions.
 	const connectionDescriptionId = $derived(liveConnectionDescriptionId(liveSession?.artifactId));
 	$effect(() => {
 		artifactId;
@@ -131,7 +130,7 @@
 		{#if presence}{@render presence()}{/if}
 		<span class="document-tools">
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
-			<CommentsPill class="doc-tool comment-status" bind:element={commentStatus} count={commentCount} {unsent} unplaced={orphanedCount}
+			<CommentsPill class="doc-tool comment-status" count={commentCount} {unsent} unplaced={orphanedCount}
 				loading={commentsLoading} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
 			{#if artifactId}<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />{/if}
 		</span>

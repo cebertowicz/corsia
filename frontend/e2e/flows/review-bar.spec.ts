@@ -339,8 +339,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await expect(filters).toHaveAttribute('aria-label', 'Filter comments: Resolved');
 	await expect(filters).toHaveAttribute('aria-expanded', 'false');
 	await shot(page, 'drawer-touch', info);
-	const closeBox = (await close.boundingBox())!;
-	await page.touchscreen.tap(closeBox.x + closeBox.width / 2, closeBox.y + closeBox.height / 2);
+	await close.click();
 	await expect(drawer).toBeHidden();
 });
 
@@ -509,12 +508,12 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	test.info().annotations.push({ type: 'orphan-heavy-layout', description: JSON.stringify(measurements) });
 });
 
-/** The requester uses normal end truncation, never the old middle-name split, and its box stays off the header controls. */
+/** The requester keeps its distinguishing suffix while its prefix truncates, and its box stays off the header controls. */
 async function expectNameClearOfControls(page: Page, title: string) {
 	const name = bar(page).locator('.rb-who strong');
 	await expect(name).toHaveText(title);
-	await expect(name.locator('.name-tail')).toHaveCount(0);
-	expect(await name.evaluate((element) => getComputedStyle(element).textOverflow), 'the requester uses end truncation when needed').toBe('ellipsis');
+	await expect(name.locator('.name-tail')).toHaveText(title.slice(-4));
+	expect(await name.evaluate((element) => getComputedStyle(element).textOverflow), 'the requester truncates within its constrained header space').toBe('ellipsis');
 	const boxes = await page.evaluate(() => {
 		const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, label: (el.getAttribute('aria-label') ?? el.className ?? '').toString().slice(0, 40) }; };
 		return {

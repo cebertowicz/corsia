@@ -148,17 +148,20 @@ describe('DocViewerStatus freshness metadata', () => {
 		['unplaced only', { commentCount: 2, orphanedCount: 2 }, null, "2 open threads, 2 comments couldn't be placed"],
 		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] }, '2 open threads, 3 messages not sent yet'],
 		['neither', { commentCount: 2 }, null, '2 open threads'],
-	])('names %s comment status without relying on dots alone', (_state, props, feedback, expected) => {
+	])('names %s comment status once', (_state, props, feedback, expected) => {
 		render(value(), undefined, props);
 		if (feedback) component!.sync('artifact-1', feedback);
 		flushSync();
-		expect(host.querySelector<HTMLButtonElement>('.comment-status')!.getAttribute('aria-label')).toBe(expected);
+		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
+		expect(pill.getAttribute('aria-label')).toBe(expected);
+		expect(pill.getAttribute('aria-describedby')).toBeNull();
 	});
 
-	it('describes unplaced comments from the status pill while retry remains in the drawer', () => {
+	it('names unplaced comments from the status pill', () => {
 		render(value(), undefined, { orphanedCount: 1 });
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
-		expect(pill.getAttribute('aria-describedby')).toBeTruthy();
+		expect(pill.getAttribute('aria-label')).toBe("0 open threads, 1 comment couldn't be placed");
+		expect(pill.getAttribute('aria-describedby')).toBeNull();
 	});
 
 	it('removes Mark verified when the parent replaces freshness after success', async () => {
@@ -226,7 +229,7 @@ describe('DocViewerStatus toolbar', () => {
 		const dot = button.querySelector('.unplaced-dot')!;
 		expect(dot.parentElement?.classList.contains('icon-anchor')).toBe(true);
 		expect(dot.parentElement?.querySelector('svg.tool-icon')).not.toBeNull();
-		expect(button.getAttribute('aria-describedby')).toBe(button.querySelector('.sr-only')?.id);
-		expect(button.querySelector('.sr-only')?.id).toMatch(/^unplaced-/);
+		expect(button.getAttribute('aria-label')).toBe("2 open threads, 1 comment couldn't be placed");
+		expect(button.getAttribute('aria-describedby')).toBeNull();
 	});
 });

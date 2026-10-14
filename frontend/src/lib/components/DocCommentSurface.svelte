@@ -334,7 +334,7 @@
 	</div>
 	<div class="drawer-footers" use:drawerFooterHeight>
 		{#if unsentText}<div class="drawer-unsent" data-drawer-unsent use:footerFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')}><p role="status">{unsentText.before}<span class="drawer-footer-owner" title={unsentText.owner}>{unsentText.owner}</span>{unsentText.after}</p><Button size="sm" onclick={() => void feedback?.send()} loading={feedback?.sending}>Send now</Button></div>{/if}
-		<CommentPlacementRecovery {...placementRecovery} orphanedCount={placementRecovery.orphanedCount} onFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')} />
+		<CommentPlacementRecovery {...placementRecovery} onFocusHome={() => drawer?.querySelector<HTMLElement>('[data-drawer-focus-home]')} />
 	</div>
 {/snippet}
 
@@ -376,6 +376,7 @@
 	.drawer-empty-action:hover { text-decoration: underline; }
 	/* The one measured wrapper owns the drawer's pinned-footer height, including either or both child footers. */
 	.drawer-footers { flex: none; }
+	.drawer-footers > :not(:last-child) { border-radius: 0; }
 	.drawer-unsent { container: drawer-footer / inline-size; display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border-subtle); border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px); background: var(--bg-secondary); }
 	.drawer-unsent p { flex: 1; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
 	/* A long owner name is cut only where the footer is too narrow to hold it on one line of the sentence. */

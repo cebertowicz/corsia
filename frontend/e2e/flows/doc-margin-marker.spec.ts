@@ -521,8 +521,7 @@ test.describe('@flow:doc-margin-marker', () => {
 			else expect.soft(centre.covered, `drawer open: marker ${index} is reachable or covered by the sheet only`).toBe(true);
 			expect.soft(seen.rect.left + seen.rect.width, `drawer open: marker ${index} stays in the rail`).toBeLessThanOrEqual(seen.content.left + rail + 0.5);
 		}
-		if (modalDrawer) expect(reachable, 'the modal drawer backdrop protects the canvas').toBe(0);
-		else expect(reachable, 'with a non-modal drawer open the markers above it are still reachable').toBeGreaterThan(0);
+		expect(reachable, 'the modal drawer backdrop protects the canvas').toBe(0);
 		await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 		await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 
