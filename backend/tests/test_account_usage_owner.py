@@ -148,6 +148,34 @@ class _Process:
 
     def __init__(self, response: dict | None = None, *, error: str = ""):
         self.response, self.error, self.killed = response, error, False
+        self.stdin = self.stdout = self._transport = self
+        self._stdout_read = False
+
+    def write(self, _payload):
+        pass
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        pass
+
+    def get_pipe_transport(self, _fd):
+        return self
+
+    async def read(self, _limit=-1):
+        if self.error == "timeout":
+            raise asyncio.TimeoutError
+        if self._stdout_read:
+            return b""
+        self._stdout_read = True
+        return b"" if self.response is None else (json.dumps(self.response) + "\n").encode()
+
+    async def _read_stream(self, _fd):
+        return self.error.encode()
+
+    async def wait(self):
+        return self.returncode
 
     async def communicate(self, _payload: bytes = b""):
         if self.error == "timeout":
