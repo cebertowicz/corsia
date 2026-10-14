@@ -64,7 +64,15 @@ def test_safehouse_subprocess_env_strips_control_and_provider_secrets(
     assert "CORSIA_API_TOKEN" not in env
     assert "CORSIA_PROCESS_OWNER_MARKER" not in env
     assert env["TOKENIZERS_PARALLELISM"] == "false"
-    assert env["AGENT_BROWSER_ARGS"] == "--no-sandbox"
+    assert env["AGENT_BROWSER_ARGS"] == "--no-sandbox,--disable-backgrounding-occluded-windows,--disable-renderer-backgrounding,--disable-background-timer-throttling"
+
+
+def test_safehouse_env_merges_browser_rendering_flags_without_duplicates(monkeypatch) -> None:
+    from tools.shell_environment import safehouse_subprocess_env
+
+    monkeypatch.setenv("AGENT_BROWSER_ARGS", "--no-sandbox,--custom")
+    env = safehouse_subprocess_env("thread-1")
+    assert env["AGENT_BROWSER_ARGS"] == "--no-sandbox,--custom,--disable-backgrounding-occluded-windows,--disable-renderer-backgrounding,--disable-background-timer-throttling"
 
 
 def test_external_agent_argv_strips_browser_import_settings(tmp_path, monkeypatch) -> None:

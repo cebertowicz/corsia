@@ -88,7 +88,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         await reliable.put(json.dumps({
             "type": "control",
             "has_control": browser_control.holds_control(thread_id, connection_token),
-        }))
+        }, separators=(",", ":")))
 
     async def send_latest() -> None:
         """Keep control/status ordered while replacing frames a slow pane cannot yet see."""
@@ -155,7 +155,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                         result = done.result()
                     except Exception as exc:
                         result = {"type": "navigate_result", "error": str(exc)}
-                    reliable.put_nowait(json.dumps(result))
+                    reliable.put_nowait(json.dumps(result, separators=(",", ":")))
 
                 task.add_done_callback(publish_navigation)
             elif kind == "appearance":
