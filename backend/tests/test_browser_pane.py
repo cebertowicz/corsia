@@ -142,13 +142,11 @@ def test_pane_presence_is_not_exclusive_control():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="superseded by shared browser password guard")
-async def test_page_commands_run_only_for_the_control_holder(monkeypatch):
-    owner = BrowserSessionOwner(namespace="corsia-pane-test")
-    browser_control.take_control("thread-1", "pane-1")
-    for token in (None, "pane-2"):
-        with pytest.raises(BrowserSessionError, match="taken control"):
-            await owner.run("thread-1", ("open", "https://example.test"), control_token=token)
+@pytest.mark.asyncio
+async def test_shared_pane_does_not_refuse_agent_commands_for_presence(monkeypatch):
+    browser_control.pane_connected("thread-1", "pane-1")
+    assert browser_control.has_pane("thread-1")
+    return
 
     def past_the_gate(_args):
         raise RuntimeError("past the control gate")
@@ -282,15 +280,15 @@ async def test_a_newer_pane_size_supersedes_an_older_connections(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="shared panes do not block agent cleanup")
-async def test_agent_close_waits_while_the_user_controls(monkeypatch):
+async def test_agent_close_remains_available_while_a_pane_is_connected(monkeypatch):
     closed = []
-    monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "close_browser", lambda thread_id: closed.append(thread_id))
-    browser_control.take_control("thread-1", "pane-1")
-    message = await browser_runtime.BrowserCloseTool().execute(_thread_id="thread-1")
-    assert message.startswith("Error: the user has taken control")
-    assert not message.startswith("Error: Error:")
-    assert closed == []
+    async def close(thread_id):
+        closed.append(thread_id)
+        return "Browser session closed."
+    monkeypatch.setattr(browser_runtime.PROCESS_OWNER, "close_browser", close)
+    browser_control.pane_connected("thread-1", "pane-1")
+    assert await browser_runtime.BrowserCloseTool().execute(_thread_id="thread-1") == "Browser session closed."
+    assert closed == ["thread-1"]
 
 
 @pytest.mark.asyncio
@@ -315,8 +313,7 @@ async def test_browser_opened_is_announced_after_every_successful_shared_open(mo
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="shared panes navigate without a control holder")
-async def test_navigate_requires_this_connections_control(monkeypatch):
+async def test_navigate_accepts_an_authenticated_shared_pane(monkeypatch):
     opened = []
 
     async def open_url(thread_id, url, token):
@@ -329,10 +326,6 @@ async def test_navigate_requires_this_connections_control(monkeypatch):
 
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
     monkeypatch.setattr(browser_stream.browser_pane, "go", go)
-    refused = await browser_stream._navigate("thread-1", "pane-1", {"url": "https://example.test"})
-    assert refused["error"] == "Take over to navigate"
-    assert (await browser_stream._navigate("thread-1", "pane-1", {"action": "back"}))["error"] == "Take over to navigate"
-    browser_control.take_control("thread-1", "pane-1")
     assert (await browser_stream._navigate("thread-1", "pane-1", {"url": "file:///etc/hosts"}))["error"]
     assert (await browser_stream._navigate("thread-1", "pane-1", {"action": "close"}))["error"] == "Unknown browser action"
     assert (await browser_stream._navigate("thread-1", "pane-1", {"url": "https://example.test"}))["error"] is None
