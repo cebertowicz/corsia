@@ -27,7 +27,14 @@
 		if (hasControl && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
 	});
 
+	function resetPointer() {
+		paneInput.reset();
+		if (activePointer !== null && canvas?.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
+		activePointer = null;
+	}
+
 	function connect() {
+		resetPointer();
 		socket?.close();
 		const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const next = new WebSocket(`${protocol}//${location.host}/api/browser/${threadId}/stream`);
@@ -46,6 +53,7 @@
 			if (streaming) status = 'Browser stream ended. Reconnect to watch';
 			streaming = false;
 			hasControl = false;
+			resetPointer();
 		};
 	}
 
@@ -58,6 +66,7 @@
 		}
 		if (message.type === 'control' && typeof message.has_control === 'boolean') {
 			hasControl = message.has_control;
+			if (!hasControl) resetPointer();
 			status = controlStatus();
 			return;
 		}

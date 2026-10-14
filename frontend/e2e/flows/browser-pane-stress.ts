@@ -2,9 +2,9 @@ import { expect, test } from '@playwright/test';
 import { createServer } from 'node:http';
 import { createSession, loginByUrl } from '../support/corsia';
 
-test.use({ video: 'on' });
-
 test.describe('@flow:browser-pane animated browser control', () => {
+ test.use({ video: 'on' });
+
  test('delivers tile clicks and touch scrolling during animation', async ({ page, request, context }, testInfo) => {
   test.setTimeout(90_000);
   const mobile = testInfo.project.name.includes('mobile');
@@ -34,12 +34,7 @@ test.describe('@flow:browser-pane animated browser control', () => {
    await loginByUrl(page);
    if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
    await page.getByText(title).first().click();
-   await page.evaluate(build => {
-    const stamp = document.createElement('div');
-    stamp.textContent = `Pane build: ${build}`;
-    stamp.style.cssText = 'position:fixed;top:2px;right:2px;z-index:9999;background:#111;color:white;font:11px monospace;pointer-events:none';
-    document.body.append(stamp);
-   }, process.env.CORSIA_PANE_BUILD ?? 'unknown');
+
    if (mobile) await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
    await page.getByRole('button', { name: 'Open browser', exact: true }).click();
    if (mobile) await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();

@@ -60,9 +60,13 @@ export class BrowserPaneInput {
 	}
 
 
-	dispose(): void {
+	reset(): void {
 		this.moves.cancel();
 		this.pressed = null;
 		this.touch = null;
+	}
+
+	dispose(): void {
+		this.reset();
 	}
 }

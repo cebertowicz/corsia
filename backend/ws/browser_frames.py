@@ -10,24 +10,30 @@ from typing import Awaitable, Callable
 class PaneFrames:
     """Only a frame that has not started sending may be replaced by a newer frame."""
 
+    _MAX_RELIABLE = 64
+
     def __init__(self) -> None:
         self._reliable: deque[str] = deque()
         self._frame: str | None = None
         self._ready = asyncio.Event()
 
-    def offer(self, message: str) -> None:
+    def offer(self, message: str) -> bool:
         try:
             parsed = json.loads(message)
         except (TypeError, ValueError):
             parsed = None
         if isinstance(parsed, dict) and parsed.get("type") == "frame":
             self._frame = message
+        elif len(self._reliable) >= self._MAX_RELIABLE:
+            return False
         else:
             self._reliable.append(message)
         self._ready.set()
+        return True
 
     def control(self, message: dict) -> None:
-        self.offer(json.dumps(message, separators=(",", ":")))
+        if not self.offer(json.dumps(message, separators=(",", ":"))):
+            raise RuntimeError("pane control queue overflow")
 
     async def send(self, send_text: Callable[[str], Awaitable[None]]) -> None:
         while True:

@@ -38,6 +38,13 @@ describe('pane pointer input', () => {
   expect(send.mock.calls[2][0]).toMatchObject({ eventType: 'mouseWheel', deltaY: 40 });
   paint(); expect(send).toHaveBeenCalledTimes(3);
  });
+ it('resets a held pointer so the next press is delivered', () => {
+  const send = vi.fn(); const input = new BrowserPaneInput(send);
+  input.press(pointer('mouse'), { x: 10, y: 20 });
+  input.reset();
+  input.press({ ...pointer('mouse'), pointerId: 2 }, { x: 30, y: 40 });
+  expect(send.mock.calls.map(([message]) => message.eventType)).toEqual(['mouseMoved','mousePressed','mouseMoved','mousePressed']);
+ });
  it('turns a stationary touch into a click and cancellation into no click', () => {
   const send = vi.fn(); const input = new BrowserPaneInput(send);
   input.press(pointer(), { x: 20, y: 200 });

@@ -85,7 +85,7 @@ class BrowserSessionOwner:
         if result.timed_out and args[0] == "wait":
             return browser_cli.WAIT_TIMED_OUT
         rendered = self._model_result(result, runtime.record)
-        if runtime.should_announce_opened(args[0], unfinished, rendered):
+        if runtime.claim_opened_announcement(args[0], unfinished, rendered):
             browser_control.announce_browser_opened(thread_id)
         return rendered
 

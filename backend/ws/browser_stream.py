@@ -8,6 +8,7 @@ import logging
 import secrets
 
 from fastapi import WebSocket, WebSocketDisconnect
+import websockets
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_control, browser_pane
@@ -18,7 +19,6 @@ from infra.database import get_db
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from ws.browser_frames import PaneFrames
-from ws.browser_source import BrowserStreamSource
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
         await ws.close()
         return
     try:
-        async with BrowserStreamSource(f"ws://127.0.0.1:{outcome.port}") as stream:
+        async with websockets.connect(f"ws://127.0.0.1:{outcome.port}", max_size=None, close_timeout=1) as stream:
             await _relay(ws, stream, thread_id, user["id"])
     except WebSocketDisconnect:
         pass
@@ -82,6 +82,8 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
     connection_token = secrets.token_urlsafe(18)
 
     frames = PaneFrames()
+    navigation_tasks: set[asyncio.Task] = set()
+    navigation_lock = asyncio.Lock()
 
     async def send_control() -> None:
         frames.control({
@@ -91,49 +93,19 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
 
     async def from_stream() -> None:
         async for message in stream:
-            frames.offer(message)
+            if not frames.offer(message):
+                await pane.close(code=1013)
+                return
 
-    async def from_pane() -> None:
-        while True:
-            message = await pane.receive_text()
-            try:
-                data = json.loads(message)
-            except (TypeError, ValueError):
-                continue
-            kind = data.get("type") if isinstance(data, dict) else None
-            if kind == "take_over":
-                if browser_control.take_control(thread_id, connection_token):
-                    emit_product_event("browser_pane", "take_over", thread_id=thread_id, user_id=user_id)
-                await send_control()
-            elif kind == "hand_back":
-                if browser_control.hand_back(thread_id, connection_token):
-                    emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
-                await send_control()
-            elif kind == "navigate":
-                # Navigation can take seconds; keep accepting control input while it runs.
-                task = asyncio.create_task(_navigate(thread_id, connection_token, data))
-
-                def publish_navigation(done: asyncio.Task) -> None:
-                    if done.cancelled():
-                        return
-                    try:
-                        result = done.result()
-                    except Exception as exc:
-                        result = {"type": "navigate_result", "error": str(exc)}
-                    frames.control(result)
-
-                task.add_done_callback(publish_navigation)
-            elif kind == "appearance":
-                _request_match(thread_id, connection_token, data)
-            elif (kind in {"input_mouse", "input_keyboard"}
-                  and browser_control.holds_control(thread_id, connection_token)):
-                await stream.send(message)
+    from_pane = _receive_pane_messages(
+        pane, stream, frames, thread_id, user_id, connection_token, navigation_tasks, navigation_lock, send_control,
+    )
 
     tasks: set[asyncio.Task] = set()
     try:
         await stream.send(json.dumps({"type": "screencast_start"}))
         await send_control()
-        tasks = {asyncio.create_task(from_stream()), asyncio.create_task(from_pane()), asyncio.create_task(frames.send(pane.send_text))}
+        tasks = {asyncio.create_task(from_stream()), asyncio.create_task(from_pane), asyncio.create_task(frames.send(pane.send_text))}
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in pending:
             task.cancel()
@@ -141,15 +113,66 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         for task in done:
             task.result()
     finally:
-        for task in tasks:
+        for task in tasks | navigation_tasks:
             if not task.done():
                 task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks, *navigation_tasks, return_exceptions=True)
         # A closed connection's size must never land after a newer pane's.
         if (queued := _latest_appearance.get(thread_id)) and queued[0] == connection_token:
             del _latest_appearance[thread_id]
         if browser_control.hand_back(thread_id, connection_token):
             emit_product_event("browser_pane", "hand_back", thread_id=thread_id, user_id=user_id)
+
+
+async def _receive_pane_messages(
+    pane: WebSocket, stream, frames: PaneFrames, thread_id: str, user_id: str,
+    connection_token: str, navigation_tasks: set[asyncio.Task], navigation_lock: asyncio.Lock, send_control,
+) -> None:
+    """Receive pane controls while navigation runs in a serialized child task."""
+    while True:
+        message = await pane.receive_text()
+        try:
+            data = json.loads(message)
+        except (TypeError, ValueError):
+            continue
+        kind = data.get("type") if isinstance(data, dict) else None
+        if kind in {"take_over", "hand_back"}:
+            changed = (browser_control.take_control if kind == "take_over" else browser_control.hand_back)(thread_id, connection_token)
+            if changed:
+                emit_product_event("browser_pane", kind, thread_id=thread_id, user_id=user_id)
+            await send_control()
+        elif kind == "navigate":
+            _start_navigation(data, frames, thread_id, connection_token, navigation_tasks, navigation_lock)
+        elif kind == "appearance":
+            _request_match(thread_id, connection_token, data)
+        elif (kind in {"input_mouse", "input_keyboard"}
+              and browser_control.holds_control(thread_id, connection_token)):
+            await stream.send(message)
+
+
+def _start_navigation(
+    request: dict, frames: PaneFrames, thread_id: str, connection_token: str,
+    navigation_tasks: set[asyncio.Task], navigation_lock: asyncio.Lock,
+) -> None:
+    """Start one navigation that serializes with other page commands and reports one safe result."""
+    async def navigate() -> dict:
+        async with navigation_lock:
+            return await _navigate(thread_id, connection_token, request)
+
+    task = asyncio.create_task(navigate())
+    navigation_tasks.add(task)
+
+    def publish_navigation(done: asyncio.Task) -> None:
+        navigation_tasks.discard(done)
+        if done.cancelled():
+            return
+        try:
+            frames.control(done.result())
+        except Exception:
+            log.exception("browser pane navigation failed")
+            frames.control({"type": "navigate_result", "error": "Browser navigation failed"})
+
+    task.add_done_callback(publish_navigation)
 
 
 # Matching waits behind any running page command, so it runs beside each input loop. Per thread,

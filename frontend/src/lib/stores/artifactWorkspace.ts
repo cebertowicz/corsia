@@ -159,10 +159,10 @@ export function openAgentDocumentTab(threadId: string, input: OpenArtifactInput)
 }
 
 /** Opens a browser pane. An agent reveal foregrounds a new tab but never steals an existing one. */
-export function openBrowserPane(threadId: string, background = false): void {
+export function openBrowserPane(threadId: string, agentOpened = false): void {
 	mutate(threadId, (ws) => {
 		const alreadyOpen = ws.tabs.some((tab) => tab.kind === 'browser' && tab.threadId === threadId);
-		return openBrowserTab(ws, { threadId }, newInstanceId, !background || !alreadyOpen);
+		return openBrowserTab(ws, { threadId }, newInstanceId, !agentOpened || !alreadyOpen);
 	});
 }
 

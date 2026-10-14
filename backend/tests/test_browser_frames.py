@@ -46,6 +46,14 @@ async def test_slow_writer_replaces_pending_frames_without_dropping_control():
             await writer
 
 
+def test_reliable_queue_reports_overflow_without_dropping_a_message():
+    frames = PaneFrames()
+    for index in range(frames._MAX_RELIABLE):
+        assert frames.offer(json.dumps({"type": "status", "index": index}))
+    assert not frames.offer('{"type":"status","index":64}')
+    assert len(frames._reliable) == frames._MAX_RELIABLE
+
+
 @pytest.mark.asyncio
 async def test_idle_writer_wakes_for_next_reliable_message():
     frames = PaneFrames()
