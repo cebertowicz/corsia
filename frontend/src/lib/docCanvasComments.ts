@@ -57,9 +57,9 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 }
 
 /**
- * What the viewer header shows about the listed comments: how many threads are open, how many lost their text, and the
- * live placement reload state. Its pill names open threads only. The orphaned count is the list's 'Text changed' group,
- * so a resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design.
+ * Shared comment state for the document surface: the header receives open-thread and orphaned counts; the drawer's
+ * placement recovery also receives the live reload state. The orphaned count is the list's 'Text changed' group, so a
+ * resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design.
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
 	return {

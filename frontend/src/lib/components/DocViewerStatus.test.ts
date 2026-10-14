@@ -67,7 +67,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(details?.getAttribute('aria-expanded')).toBe('true');
 	});
 
-	it('marks unsent feedback on the open-thread pill without restoring Send to the header', () => {
+	it('names unsent feedback in the comment pill while Send stays in the drawer', () => {
 		render(value(), undefined, { commentCount: 2 });
 		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', grace_closes_at: '2026-10-11T22:32:00Z', undelivered_batches: [] });
 		flushSync();
@@ -81,7 +81,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.textContent).not.toContain('Sending to');
 	});
 
-	it('counts open threads on the pill with their unit, and no dot once nothing waits to be sent', () => {
+	it('updates the comment-pill count and unsent indicator as feedback changes', () => {
 		render(value(), undefined, { commentCount: 1 });
 		const pill = host.querySelector('.comment-status')!;
 		expect(pill.querySelector('.count')!.textContent).toBe('1');
@@ -143,20 +143,23 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.querySelector('[role="status"]')?.textContent).toBe('');
 	});
 
-	it('announces a refused placement reload in the existing polite status region and re-enables it', () => {
-		const reload = vi.fn(() => true);
-		const live = { artifactId: 'artifact', subscribe: () => () => {} } as any;
-		render(value(), undefined, { liveSession: live, orphanedCount: 1, onReloadPlacements: reload, placementReloading: false });
-		const control = host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!;
-		// At rest the button says what it is for; the after state's announcement replaces that sentence.
-		expect(host.querySelector('.orphan-note')?.textContent).toBe("1 comment couldn't be placed");
-		control.click(); expect(reload).toHaveBeenCalledOnce();
-		component!.$set({ placementReloading: true }); flushSync();
-		component!.$set({ placementReloading: false, placementReloadError: true }); flushSync();
-		expect(host.querySelector('[role="status"]')?.textContent).toBe("Couldn't reload comment placements");
-		expect(host.querySelector('[role="status"]')?.classList.contains('sr-only')).toBe(false);
-		expect(host.querySelector('.orphan-note')).toBeNull();
-		expect(host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')?.disabled).toBe(false);
+	it.each([
+		['unplaced and unsent', { commentCount: 2, orphanedCount: 2 }, { open_count: 3, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] }, "2 open threads, 2 comments couldn't be placed, 3 messages not sent yet"],
+		['unplaced only', { commentCount: 2, orphanedCount: 2 }, null, "2 open threads, 2 comments couldn't be placed"],
+		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] }, '2 open threads, 3 messages not sent yet'],
+		['neither', { commentCount: 2 }, null, '2 open threads'],
+	])('names %s comment status once', (_state, props, feedback, expected) => {
+		render(value(), undefined, props);
+		if (feedback) component!.sync('artifact-1', feedback);
+		flushSync();
+		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
+		expect(pill.getAttribute('aria-label')).toBe(expected);
+	});
+
+	it('names unplaced comments from the status pill', () => {
+		render(value(), undefined, { orphanedCount: 1 });
+		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
+		expect(pill.getAttribute('aria-label')).toBe("0 open threads, 1 comment couldn't be placed");
 	});
 
 	it('removes Mark verified when the parent replaces freshness after success', async () => {
@@ -224,7 +227,6 @@ describe('DocViewerStatus toolbar', () => {
 		const dot = button.querySelector('.unplaced-dot')!;
 		expect(dot.parentElement?.classList.contains('icon-anchor')).toBe(true);
 		expect(dot.parentElement?.querySelector('svg.tool-icon')).not.toBeNull();
-		expect(button.getAttribute('aria-describedby')).toBe(button.querySelector('.sr-only')?.id);
-		expect(button.querySelector('.sr-only')?.id).toMatch(/^unplaced-/);
+		expect(button.getAttribute('aria-label')).toBe("2 open threads, 1 comment couldn't be placed");
 	});
 });
