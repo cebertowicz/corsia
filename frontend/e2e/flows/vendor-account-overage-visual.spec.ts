@@ -108,7 +108,7 @@ test.describe('@surface:providers accounts live in settings modal', () => {
 			await row.getByRole('button', { name: 'More actions for Work · work@example.test' }).click();
 			await expect(row.getByRole('menu')).toBeVisible();
 			await row.scrollIntoViewIfNeeded();
-			await page.screenshot({ path: testInfo.outputPath(`accounts-signed-out-menu-${colorScheme}-800x600.png`), fullPage: false, animations: 'disabled', scale: 'css' });
+			await page.screenshot({ path: testInfo.outputPath(`accounts-signed-out-menu-head-${colorScheme}-800x600.png`), fullPage: false, animations: 'disabled', scale: 'css' });
 		}
 		expect(writes).toEqual([]);
 	});

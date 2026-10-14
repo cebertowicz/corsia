@@ -20,8 +20,15 @@
 
 	const { steps, jobs = [], title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
 
-	function tokenFade(node: Element) {
-		return fade(node, { duration: Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 });
+	function jobHeightMotion(node: Element, _params: undefined, { direction }: { direction: 'in' | 'out' | 'both' }) {
+		const style = getComputedStyle(node);
+		const tight = Number.parseFloat(style.getPropertyValue('--dur-tight')) || 0;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return fade(node, { duration: tight });
+		const standard = Number.parseFloat(style.getPropertyValue('--dur-standard')) || 0;
+		return {
+			duration: direction === 'out' ? standard * 0.7 : standard,
+			css: (t: number) => `grid-template-rows: ${t}fr; opacity: ${t}`,
+		};
 	}
 </script>
 
@@ -37,7 +44,7 @@
 			<div class="job-region-inner">
 				<RailSection label="In the background">
 					{#each jobs as job (job.label)}
-						<div class="job-row" in:tokenFade out:tokenFade><RailRow {...job} /></div>
+						<div class="job-row" in:jobHeightMotion out:jobHeightMotion><div class="job-row-inner"><RailRow {...job} /></div></div>
 					{/each}
 				</RailSection>
 			</div>
@@ -77,6 +84,7 @@
 	.job-region { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows calc(var(--dur-standard) * 0.7) var(--ease-snap), opacity calc(var(--dur-standard) * 0.7) var(--ease-snap); }
 	.job-region.open { grid-template-rows: 1fr; opacity: 1; transition-duration: var(--dur-standard); transition-timing-function: var(--ease-entrance); }
 	.job-region-inner { min-height: 0; overflow: hidden; }
-	.job-row { min-height: 0; }
+	.job-row { min-height: 0; display: grid; grid-template-rows: 0fr; opacity: 0; overflow: hidden; }
+	.job-row-inner { min-height: 0; overflow: hidden; }
 	@media (prefers-reduced-motion: reduce) { .job-region { transition: opacity var(--dur-tight) var(--ease-snap); } .job-region.open { grid-template-rows: 1fr; } }
 </style>

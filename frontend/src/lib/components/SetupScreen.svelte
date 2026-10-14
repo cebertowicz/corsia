@@ -42,16 +42,21 @@
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
+	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage));
+	const localJob = $derived<SetupJob | undefined>(
+		localDownloading
+			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: local?.download_percent == null ? 'Downloading' : `${local.download_percent}%`, progress: localProgress }
+			: local?.setup_error || localStartError
+				? { label: status.model_name || local?.name || 'Local model', state: 'error', meta: 'Couldn’t download' }
+				: undefined,
+	);
+	const canFinish = $derived(sources.some(sourceIsReady));
 	const jobs = $derived<SetupJob[]>([
-		...(local?.setup_downloading || local?.setup_stage ? [{ label: status.model_name || local.name || 'Local model', state: 'busy' as const, meta: local.download_percent == null ? 'Downloading' : `${local.download_percent}%`, progress: localProgress }] : []),
+		...(localJob ? [localJob] : []),
 		...(page === 'account' && accountBusy ? [{ label: 'Starting CORSIA', state: 'busy' as const, meta: 'Preparing your account' }] : []),
 		...(page === 'error' ? [{ label: 'Starting CORSIA', state: 'error' as const, meta: 'Couldn’t start' }] : []),
 		...(page === 'models' && canFinish && !localDownloading ? [{ label: 'Starting CORSIA', state: 'done' as const, meta: 'Ready' }] : []),
 	]);
-	const anyReady = $derived(sources.some(sourceIsReady));
-	const localReady = $derived(local?.state === 'ready');
-	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage));
-	const canFinish = $derived(anyReady || localReady || localDownloading);
 	const finishNote = $derived(
 		localStartError || local?.setup_error
 			? 'The local model couldn’t start. Try again, or choose another source.'
@@ -243,7 +248,7 @@
 						{#if sourceIsReady(source)}<StatePill look="dot" state="success" label="Ready" />
 						{:else if source.source === 'omlx' && localDownloading}<StatePill look="dot" state="loading" label="Downloading" />
 						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" loading={localSetupBusy} disabled={localSetupBusy} onclick={retryLocalDownload}>{source.setup_error || localStartError ? 'Try again' : 'Download'}</Button>
-						{:else if source.state === 'not_installed'}<StatePill look="dot" state="error" label="Install required" />
+						{:else if source.state === 'not_installed'}<StatePill look="dot" state="idle" label="Not installed" /><Button variant="chip" size="sm" onclick={refreshSources}>Check again</Button>
 						{:else}<Button variant="chip" size="sm" onclick={() => signIn(source)}>Sign in</Button>{/if}
 					{/snippet}
 				</ListRow>
@@ -254,7 +259,7 @@
 					<input type="password" aria-label="API key" placeholder="Paste your key" bind:value={apiKey} />
 					<Button variant="chip" size="sm" onclick={saveApiKey} disabled={!apiKey.trim() || savingKey}>{savingKey ? 'Saving…' : 'Save'}</Button>
 				</Field>
-			{:else}<Button variant="chip" size="sm" onclick={() => keyOpen = true}>Use an API key instead</Button>{/if}
+			{:else}<div class="api-key-action"><Button variant="chip" size="sm" onclick={() => keyOpen = true}>Use an API key instead</Button></div>{/if}
 			{#if sourceError}<Message variant="err">{sourceError}</Message>{/if}
 		</div>
 	</SetupShell>
@@ -263,11 +268,12 @@
 <style>
 	.form { display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(var(--space-8) * 8); }
 	.folder { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-7); color: var(--text-secondary); font-size: var(--text-subhead); }
+	.folder span { flex: none; white-space: nowrap; }
 	.folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
 	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
 	.welcome-copy p { margin: 0; }
 	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); }
 	.switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); }
 	.local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }
-	.sources { align-items: flex-start; }
+	.api-key-action { align-self: flex-start; }
 </style>

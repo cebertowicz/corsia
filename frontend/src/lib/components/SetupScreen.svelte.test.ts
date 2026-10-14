@@ -175,8 +175,42 @@ describe('SetupScreen', () => {
 		expect(text).toContain('Claude Code');
 		expect(text).toContain('Codex');
 		expect(text).toContain('Downloading in the background');
-		expect(text).not.toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
-		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', false);
+		expect(text).toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
+		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
+	});
+
+	it('enables Start only when a source is ready beside a local download', async () => {
+		if (component) await unmount(component);
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30 });
+			if (url === '/api/setup/local-download') return json({ in_progress: true });
+			if (url === '/api/setup/first-account') return json({ token: '[REDACTED]', user: { id: 'setup-user', name: 'First Person' } });
+			if (url === '/api/providers/sources/recheck') return json({ sources: [
+				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'downloading', download_percent: 42 },
+				{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ state: 'ready' }] },
+			] });
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		for (const [input, value] of [
+			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
+			[host.querySelector('input[autocomplete="username"]'), 'first'],
+			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
+		] as [HTMLInputElement, string][]) {
+			input.value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+		}
+		await tick();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
+		await settle();
+
+		expect(host.textContent).toContain('Downloading in the background');
+		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', false);
 	});
 });
