@@ -1,10 +1,12 @@
 """CDP operations used by the single owned browser-session command path."""
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Sequence
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
+from urllib.request import urlopen
 
 import websockets
 
@@ -94,25 +96,46 @@ async def _endpoint(run: RunCommand) -> str:
     result = await run(("get", "cdp-url"), 10)
     payload = browser_cli.json_object(result.stdout)
     data = payload.get("data")
-    endpoint = data.get("result") if isinstance(data, dict) else None
+    endpoint = data.get("cdpUrl") if isinstance(data, dict) else None
     if result.returncode or not isinstance(endpoint, str) or not endpoint.startswith("ws"):
         raise BrowserSessionError("This page couldn't be checked")
-    return endpoint
+    return await asyncio.to_thread(_page_endpoint, endpoint)
+
+
+def _page_endpoint(browser_endpoint: str) -> str:
+    """Resolve agent-browser's browser-level endpoint to its current page target."""
+    parsed = urlparse(browser_endpoint)
+    listing = urlunparse(("http", parsed.netloc, "/json/list", "", "", ""))
+    try:
+        with urlopen(listing, timeout=3) as response:  # nosec B310 - loopback CDP endpoint from agent-browser
+            targets = json.load(response)
+    except (OSError, ValueError) as exc:
+        raise BrowserSessionError("This page couldn't be checked") from exc
+    if not isinstance(targets, list):
+        raise BrowserSessionError("This page couldn't be checked")
+    for target in targets:
+        if not isinstance(target, dict) or target.get("type") != "page":
+            continue
+        endpoint = target.get("webSocketDebuggerUrl")
+        if isinstance(endpoint, str) and endpoint.startswith("ws"):
+            return endpoint
+    raise BrowserSessionError("This page couldn't be checked")
 
 
 async def _box(run: RunCommand, selector: str) -> dict | None:
     result = await run(("get", "box", selector), 10)
     payload = browser_cli.json_object(result.stdout)
     data = payload.get("data")
-    box = data.get("result") if isinstance(data, dict) else None
+    # agent-browser 0.31 exposes box geometry directly in data (older verified builds used data.result).
+    box = data.get("result", data) if isinstance(data, dict) else None
     if not isinstance(box, dict) or not all(isinstance(box.get(key), (int, float)) for key in ("x", "y", "width", "height")):
         return None
     return box
 
 
 async def _node_for_box(cdp: CdpClient, box: dict) -> int | None:
-    location = await cdp.call("DOM.getNodeForLocation", x=box["x"] + box["width"] / 2,
-                              y=box["y"] + box["height"] / 2, includeUserAgentShadowDOM=False,
+    location = await cdp.call("DOM.getNodeForLocation", x=round(box["x"] + box["width"] / 2),
+                              y=round(box["y"] + box["height"] / 2), includeUserAgentShadowDOM=False,
                               ignorePointerEventsNone=True)
     node = _int(location.get("backendNodeId"))
     return node if await _matching_box(cdp, node, box) else None
