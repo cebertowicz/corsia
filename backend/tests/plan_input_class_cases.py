@@ -824,4 +824,11 @@ _CASES = {
         system_user_steps.open_user_step, db, "root", key=" ", title="T",
         description="D", provenance="test",
     ),
+    (
+        "system_user_steps.py",
+        '"settle_user_step settles only a step open_user_step opened"',
+    ): lambda db, scene: partial(
+        system_user_steps.settle_user_step, db, scene.own,
+        evidence="E", provenance="test",
+    ),
 }

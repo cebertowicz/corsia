@@ -235,7 +235,22 @@ def test_an_empty_key_is_refused(db):
         public.open_user_step(db, "owner", key=" ", title=TITLE, description=DESCRIPTION, provenance=PROVENANCE)
 
 
-def test_the_agent_cannot_see_its_own_ask_in_the_step(db):
+def test_settle_refuses_a_step_the_system_did_not_open(db):
+    """An agent's own task, or a person step an agent asked for, is never settled by the system."""
+    plan = owner_plan(db)
+    mine = task(db, plan.id, "Read the page")
+    asked = service.add_node(
+        plan.id, kind="task", title="Sign the form", acceptance_criteria="Signed",
+        assignee="user", actor_id=OWNER.audit_id, provenance="test", db=db,
+    )
+    db.commit()
+    for node_id in (mine.id, asked.id):
+        with pytest.raises(service.PlanInputError):
+            _settle(db, node_id)
+        assert row(db, node_id)["state"] not in {"done", "accepted"}
+
+
+def test_every_event_on_the_step_is_system_attributed(db):
     """The step reads as the system's, never the agent's: no agent actor anywhere on it."""
     plan = owner_plan(db)
     mine = task(db, plan.id, "Read the page")

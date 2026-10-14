@@ -11,8 +11,10 @@ agent's selected task, if any, gains a dependency on the step, so the plan
 carries the wait: settling or closing the step wakes that task through the
 dependency path, and a paused plan stays paused until resume.
 
-Settling is the person's Mark done, observed by the system, through the same
-writer (``plans.user_settle.settle``): open rows beneath settle first, the
+Settling accepts only a step this module opened (its ``OPENED`` event), so it
+can never mark an agent's own work done. Such a step has no parent, which is
+why the owner's top-level transition notice always reaches the agent. It is
+the person's Mark done, observed by the system, through the same writer (``plans.user_settle.settle``): open rows beneath settle first, the
 step's stops end, and questions drafted from it are withdrawn. It never
 refuses on a pause or hold, the person's own pause included, because the
 person has done the step. A step already settled, closed or archived is left
@@ -79,6 +81,12 @@ def settle_user_step(db, node_id: str, *, evidence: str, provenance: str) -> boo
 
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
+        opened = connection.execute(
+            "SELECT 1 FROM plan_node_events WHERE node_id=? AND event=? LIMIT 1",
+            (node_id, OPENED),
+        ).fetchone()
+        if opened is None:
+            raise errors.PlanInputError("settle_user_step settles only a step open_user_step opened")
         if node["archived_at"] is not None or node["state"] in service._TERMINAL_STATES:
             return False
         user_settle.settle(
