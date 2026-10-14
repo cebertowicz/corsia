@@ -12,7 +12,6 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from api.restart_compensation import (
-    claim_scheduled_choice as _claim_scheduled_choice,
     compensate_cancelled_acquire as _compensate_cancelled_acquire,
     compensate_preparation_failure as _compensate_preparation_failure,
     failure_detail as _failure_detail,
@@ -120,9 +119,14 @@ def _discard_prepared_release(
 
 
 async def _acquire_settings_restart(
-    user: dict | None, mode: str, acquired_ids: list[str], *,
-    trigger: str | None = None, target_version: str | None = None,
-) -> str:
+    user: dict | None,
+    mode: str,
+    acquired_ids: list[str],
+    *,
+    trigger: str | None = None,
+    target_version: str | None = None,
+    claim: Callable[[object], bool] | None = None,
+) -> str | None:
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
     from infra.db_async import run_in_db
@@ -141,13 +145,14 @@ async def _acquire_settings_restart(
             trigger=trigger if mode == "update" else None,
             target_version=version if mode == "update" else None,
             changes=json.dumps(changes) if changes else None,
+            claim=claim,
         )
         if operation_id is not None:
             acquired_ids.append(operation_id)
         return operation_id
 
     operation_id = await run_in_db(_try_acquire)
-    if operation_id is None:
+    if operation_id is None and claim is None:
         raise HTTPException(409, "A restart is already in flight.")
     return operation_id
 
@@ -291,16 +296,11 @@ async def prelaunch_settings_restart(
     restart_log_path: Callable[[str], Path],
     *,
     caller_token: str | None,
-    claim_hook: Callable[[], bool] | None = None,
-    trigger: str | None = "manual", target_version: str | None = None,
+    trigger: str | None = "manual",
+    target_version: str | None = None,
+    claim: Callable[[object], bool] | None = None,
 ) -> tuple[str, object] | None:
-    """Hand Settings restart ownership from acquisition through child launch.
-
-    Scheduled Tonight transition matrix: acquire refused -> choice stays set and
-    no row exists; acquired then claim false -> cancel the row and do not
-    launch; acquired then preparation fails -> consume the choice and retain a
-    failed row; acquired then launch succeeds -> consume the choice once.
-    """
+    """Hand Settings restart ownership from acquisition through child launch."""
     prepared = mode == "update"
     if prepared:
         await _UPDATE_REQUEST_LOCK.acquire()
@@ -308,15 +308,18 @@ async def prelaunch_settings_restart(
         acquired_ids: list[str] = []
         try:
             operation_id = await _acquire_settings_restart(
-                user, mode, acquired_ids, trigger=trigger, target_version=target_version
+                user,
+                mode,
+                acquired_ids,
+                trigger=trigger,
+                target_version=target_version,
+                claim=claim,
             )
         except asyncio.CancelledError as error:
             await _compensate_cancelled_acquire(acquired_ids, error)
             raise
 
-        if claim_hook is not None and not await _claim_scheduled_choice(
-            operation_id, acquired_ids, claim_hook
-        ):
+        if operation_id is None:
             return None
 
         if prepared:

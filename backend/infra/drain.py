@@ -18,10 +18,9 @@ from infra import state
 from infra.config import RUNTIME_DIR
 
 SIGNAL_FILE = RUNTIME_DIR / "corsia-restart.signal"
-# How long scripts/corsia.d/runtime.sh lets agents reach a safe point before it enforces the hard cap. Both read
-# CORSIA_DRAIN_MAX_WAIT, so an operator override moves the enforced cap and the countdown together;
-# test_update_journey_status.py pins this default to the script's.
+# How long scripts/corsia.d/runtime.sh lets agents reach a safe point before it enforces the hard cap.
 DEFAULT_DRAIN_WAIT_SECONDS = 60
+MAX_DRAIN_WAIT_SECONDS = 1800
 _drain_admission_lock = threading.Lock()
 _turn_admissions = 0
 
@@ -40,12 +39,21 @@ _inherited_turn_admission: ContextVar[_TurnAdmission | None] = ContextVar(
 
 
 def drain_wait_seconds() -> int:
-    """The hard cap the shell enforces: CORSIA_DRAIN_MAX_WAIT, else the default."""
+    """Return the shared shell/backend drain cap, bounded to the approved maximum."""
     try:
         seconds = int(os.environ.get("CORSIA_DRAIN_MAX_WAIT", ""))
     except ValueError:
         return DEFAULT_DRAIN_WAIT_SECONDS
-    return seconds if seconds >= 0 else DEFAULT_DRAIN_WAIT_SECONDS
+    if seconds < 0:
+        return DEFAULT_DRAIN_WAIT_SECONDS
+    if seconds > MAX_DRAIN_WAIT_SECONDS:
+        logger.warning(
+            "CORSIA_DRAIN_MAX_WAIT capped at {} seconds (was {})",
+            MAX_DRAIN_WAIT_SECONDS,
+            seconds,
+        )
+        return MAX_DRAIN_WAIT_SECONDS
+    return seconds
 
 
 def _active_work_counts() -> dict[str, int]:

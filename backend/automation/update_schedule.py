@@ -1,8 +1,13 @@
-"""System-owned scheduled Update policy; the nightly loop owns its execution."""
+"""System-owned scheduled Update policy and nightly tick lifecycle."""
 
 from __future__ import annotations
 
+import asyncio
+import os
 from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from loguru import logger
 
 from infra.database import get_db, write_transaction
 from infra.settings import get_update_schedule, parse_update_schedule_time, set_setting
@@ -94,17 +99,17 @@ def possible_trigger(
 
 
 def should_drop_tonight(schedule: dict, *, now: datetime) -> bool:
-    """Return whether the one-hour Tonight window has expired silently."""
+    """Return whether D7 retires a Tonight choice after its window passes."""
     due_at = _tonight_due_at(schedule, now)
     return due_at is not None and due_at + SCHEDULE_WINDOW <= now
 
 
-def claim_tonight(schedule: dict) -> bool:
+def claim_tonight(schedule: dict, *, db=None) -> bool:
     """Atomically consume the exact Tonight choice read by this tick."""
     expected = schedule.get("tonight_at")
     if expected is None:
         return False
-    with write_transaction(None, scope="update_schedule") as connection:
+    with write_transaction(db, scope="update_schedule") as connection:
         current = get_update_schedule(db=connection, include_owner=True)
         if current.get("tonight_at") != expected:
             return False
@@ -113,10 +118,19 @@ def claim_tonight(schedule: dict) -> bool:
         return True
 
 
-def clear_tonight(schedule: dict) -> dict:
-    """Drop an expired Tonight choice only if this tick still owns it."""
-    claim_tonight(schedule)
-    return get_update_schedule()
+def disable_missing_owner_schedule(schedule: dict, *, db=None) -> bool:
+    """Clear an exact schedule snapshot when its account no longer exists."""
+    with write_transaction(db, scope="update_schedule") as connection:
+        current = get_update_schedule(db=connection, include_owner=True)
+        if (
+            current.get("tonight_at") != schedule.get("tonight_at")
+            or current.get("owner_id") != schedule.get("owner_id")
+        ):
+            return False
+        current["tonight_at"] = None
+        current["automatic"] = False
+        set_setting("update_schedule", current, db=connection)
+        return True
 
 
 def update_attempted_today(*, now: datetime | None = None, db=None) -> bool:
@@ -134,3 +148,58 @@ def update_attempted_today(*, now: datetime | None = None, db=None) -> bool:
     finally:
         if db is None:
             connection.close()
+
+
+async def run_scheduled_tick(now: datetime | None = None) -> str | None:
+    """Apply D7 once: each due scheduled exit changes exactly its stated state."""
+    from api.system_admin import launch_update
+    from infra.accounts import get_user
+    from infra.db_async import run_in_db
+    from infra.settings import get_update_schedule
+    from infra.update_status import update_status
+
+    local_now = now or datetime.now().astimezone()
+    schedule = await asyncio.to_thread(get_update_schedule, include_owner=True)
+    if should_drop_tonight(schedule, now=local_now):
+        await run_in_db(claim_tonight, schedule)
+        return None
+    attempted_today = await run_in_db(update_attempted_today, now=local_now)
+    trigger = possible_trigger(schedule, now=local_now, attempted_today=attempted_today)
+    if trigger is None:
+        return None
+    try:
+        details = (await asyncio.to_thread(update_status, False)).to_dict()
+    except Exception:
+        logger.exception("scheduled update check failed")
+        return None
+    available = details.get("available")
+    if available is False:
+        if trigger == "tonight":
+            await run_in_db(claim_tonight, schedule)
+        return None
+    if available is None:
+        return None
+
+    owner_id = schedule.get("owner_id")
+    user = await run_in_db(get_user, owner_id) if owner_id else None
+    if user is None:
+        if await run_in_db(disable_missing_owner_schedule, schedule):
+            logger.warning("scheduled update disabled because its owner account is missing")
+        return None
+    port = os.environ.get("BACKEND_PORT", "")
+    if not port.isdigit():
+        logger.error("scheduled update cannot launch: BACKEND_PORT is not a port number")
+        return None
+
+    def claim(connection: Any) -> bool:
+        return trigger != "tonight" or claim_tonight(schedule, db=connection)
+
+    launched = await launch_update(
+        user,
+        None,
+        trigger,
+        details.get("target_version"),
+        port=int(port),
+        claim=claim,
+    )
+    return launched[0] if launched is not None else None

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
 
 
 def failure_detail(failure: BaseException) -> str | None:
@@ -59,30 +58,3 @@ async def compensate_preparation_failure(
     else:
         if not released:
             failure.add_note("Restart preparation compensation lost exact ownership.")
-
-
-async def claim_scheduled_choice(
-    operation_id: str,
-    acquired_ids: list[str],
-    claim_hook: Callable[[], bool],
-) -> bool:
-    """Claim Tonight only after the durable operation exists or compensate it."""
-    from infra.db_async import run_in_db
-
-    try:
-        claimed = await run_in_db(claim_hook)
-    except asyncio.CancelledError as error:
-        await compensate_cancelled_acquire(acquired_ids, error)
-        raise
-    except BaseException as error:
-        await compensate_preparation_failure(operation_id, error)
-        raise
-    if not claimed:
-        from automation.restart import abort_restart_control
-
-        await abort_restart_control(
-            operation_id,
-            error="scheduled update choice changed before launch",
-            cancelled=True,
-        )
-    return claimed

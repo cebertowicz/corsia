@@ -264,6 +264,10 @@ drain_and_wait() {
             return 1
             ;;
     esac
+    if [ "$max_wait" -gt 1800 ]; then
+        warn "Drain timeout capped at 1800 seconds (was $max_wait)"
+        max_wait=1800
+    fi
 
     local operation_id="${CORSIA_RESTART_OPERATION_ID:-}"
     local compatibility_handoff="${3:-}" handoff_status

@@ -194,45 +194,13 @@ async def _run_job_safely() -> None:
 
 
 async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | None:
-    """Check the D7 system schedule without using the maintenance day claim."""
-    from automation.update_schedule import (
-        clear_tonight,
-        possible_trigger,
-        should_drop_tonight,
-        update_attempted_today,
-    )
-    from infra.db_async import run_in_db
-    from infra.settings import get_update_schedule
-    from infra.update_status import update_status
+    """Run the D7 scheduled-tick owner and log an unexpected lifecycle failure."""
+    from automation.update_schedule import run_scheduled_tick
 
     try:
-        local_now = now or datetime.now().astimezone()
-        schedule = await asyncio.to_thread(get_update_schedule, include_owner=True)
-        if should_drop_tonight(schedule, now=local_now):
-            await asyncio.to_thread(clear_tonight, schedule)
-            return None
-        attempted_today = await run_in_db(update_attempted_today, now=local_now)
-        if possible_trigger(schedule, now=local_now, attempted_today=attempted_today) is None:
-            return None
-        status = await asyncio.to_thread(update_status, False)
-        details = status.to_dict()
-        trigger = possible_trigger(
-            schedule,
-            now=local_now,
-            update_available=details.get("available") is True,
-            attempted_today=attempted_today,
-        )
-        if trigger is None:
-            return None
-        from api.scheduled_update import launch_scheduled_update
-
-        return await launch_scheduled_update(
-            trigger,
-            details.get("target_version"),
-            schedule,
-        )
+        return await run_scheduled_tick(now)
     except Exception:
-        logger.exception("nightly_job: scheduled update check or launch failed")
+        logger.exception("nightly_job: scheduled update tick failed")
         return None
 
 

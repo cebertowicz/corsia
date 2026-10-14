@@ -53,8 +53,7 @@ async def launch_update(
     target_version: str | None,
     *,
     port: int,
-    drain_max_wait: int | None = None,
-    claim_hook: Callable[[], bool] | None = None,
+    claim: Callable[[object], bool] | None = None,
 ) -> tuple[str, object] | None:
     """Launch the one Settings Update lifecycle from any approved trigger."""
     if trigger not in {"manual", "tonight", "automatic"}:
@@ -67,8 +66,9 @@ async def launch_update(
         "BACKEND_PORT": str(port),
         "CORSIA_RESTART_BACKEND_PORT": str(port),
     }
-    if drain_max_wait is not None:
-        restart_env["CORSIA_DRAIN_MAX_WAIT"] = str(drain_max_wait)
+    from infra.drain import drain_wait_seconds
+
+    restart_env["CORSIA_DRAIN_MAX_WAIT"] = str(drain_wait_seconds())
     # A scheduled run mints its service credential only after it acquires ownership.
     prelaunch = await prelaunch_settings_restart(
         user,
@@ -78,7 +78,7 @@ async def launch_update(
         ["restart"],
         _restart_log_path,
         caller_token=caller_token,
-        claim_hook=claim_hook,
+        claim=claim,
         trigger=trigger,
         target_version=target_version,
     )
@@ -129,10 +129,13 @@ async def system_restart(
             port=port,
         )
     else:
+        from infra.drain import drain_wait_seconds
+
         restart_env = {
             **os.environ,
             "BACKEND_PORT": str(port),
             "CORSIA_RESTART_BACKEND_PORT": str(port),
+            "CORSIA_DRAIN_MAX_WAIT": str(drain_wait_seconds()),
         }
         operation_id, process = await prelaunch_settings_restart(
             user,

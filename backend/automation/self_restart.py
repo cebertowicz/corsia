@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from statistics import median
 import uuid
@@ -189,6 +190,7 @@ def try_acquire(
     target_version: str | None = None,
     changes: str | None = None,
     operation_id: str | None = None,
+    claim: Callable[[object], bool] | None = None,
     db=None,
     _target_phase: str = "holding",
 ) -> str | None:
@@ -223,6 +225,8 @@ def try_acquire(
         if connection.execute(
             "SELECT 1 FROM self_restart_requests WHERE id=?", (operation_id,)
         ).fetchone() is not None:
+            return None
+        if claim is not None and not claim(connection):
             return None
         connection.execute(
             "INSERT INTO self_restart_requests "
@@ -379,17 +383,10 @@ def clear_stale_in_flight(
     """Close only legacy pre-lifecycle rows; operational holds are never auto-released."""
     cutoff = (_now() - timedelta(seconds=IN_FLIGHT_TTL_SECONDS)).isoformat()
     with write_transaction(db, scope="restart_operation") as connection:
-        rows = connection.execute(
-            "SELECT id FROM self_restart_requests WHERE status='in_flight' "
-            "AND phase IS NULL AND requested_at < ?",
-            (cutoff,),
-        ).fetchall()
         cur = connection.execute(
             "UPDATE self_restart_requests SET status='superseded',settled_at=?,"
             "updated_at=?,deployed_sha=? WHERE status='in_flight' AND phase IS NULL "
             "AND requested_at < ?",
             (_now_iso(), _now_iso(), deployed_sha, cutoff),
         )
-        for row in rows:
-            revoke_lifecycle_token_for_terminal_operation(connection, row["id"])
         return cur.rowcount
