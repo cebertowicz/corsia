@@ -143,6 +143,18 @@ describe('DocViewerStatus freshness metadata', () => {
 		expect(host.querySelector('[role="status"]')?.textContent).toBe('');
 	});
 
+	it.each([
+		['unplaced and unsent', { commentCount: 2, orphanedCount: 2 }, { open_count: 3, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] }, "2 open threads, 2 comments couldn't be placed, 3 messages not sent yet"],
+		['unplaced only', { commentCount: 2, orphanedCount: 2 }, null, "2 open threads, 2 comments couldn't be placed"],
+		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', grace_closes_at: null, undelivered_batches: [] }, '2 open threads, 3 messages not sent yet'],
+		['neither', { commentCount: 2 }, null, '2 open threads'],
+	])('names %s comment status without relying on dots alone', (_state, props, feedback, expected) => {
+		render(value(), undefined, props);
+		if (feedback) component!.sync('artifact-1', feedback);
+		flushSync();
+		expect(host.querySelector<HTMLButtonElement>('.comment-status')!.getAttribute('aria-label')).toBe(expected);
+	});
+
 	it('keeps an unplaced-comment indicator on the status pill while recovery moves to the comments drawer', () => {
 		render(value(), undefined, { orphanedCount: 1 });
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;

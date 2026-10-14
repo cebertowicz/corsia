@@ -144,6 +144,14 @@ journey('approve a plain ask from the reading', ALL, async ({ page, request, inf
 	await expect(bar(page)).toContainText('Is the rollout plan right?');
 	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 	await expectLayout(page, mode);
+	if (mode === 'phone') {
+		const leadAsk = bar(page).locator('.rb-ask');
+		const requester = bar(page).locator('.rb-who');
+		await expect(leadAsk).toBeVisible();
+		await expect(leadAsk).toHaveText('Is the rollout plan right?');
+		await expect(requester).toHaveText(`${doc.title}:`);
+		expect(await requester.evaluate((element) => element.scrollWidth <= element.clientWidth), 'the short ask leaves its requester untruncated').toBe(true);
+	}
 	await shot(page, 'ask', info);
 	await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
 	const receipt = bar(page).locator('.rb-receipt');
@@ -453,7 +461,13 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 		expect(measurements.firstBodyY, 'the first document line stays in the phone reading area').toBeLessThanOrEqual(150);
 		expect(measurements.capsuleHeight, 'the fixed review action bar stays compact').toBeLessThanOrEqual(64);
 		for (const button of await bar(page).locator('.rb-capsule .btn').all()) expect((await button.boundingBox())!.height, 'phone review action touch target').toBeGreaterThanOrEqual(44);
-		await expect(bar(page).locator('.rb-ask')).toBeHidden();
+		const leadAsk = bar(page).locator('.rb-ask');
+		const requester = bar(page).locator('.rb-who');
+		await expect(leadAsk).toBeVisible();
+		await expect(leadAsk).toHaveText('Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
+		await expect(requester).toHaveText(`${doc.title}:`);
+		expect(await requester.evaluate((element) => element.scrollWidth <= element.clientWidth), 'the long ask leaves its requester untruncated').toBe(true);
+		expect(await leadAsk.evaluate((element) => element.scrollWidth > element.clientWidth && getComputedStyle(element).textOverflow === 'ellipsis'), 'the long ask end-ellipsizes in the lead row').toBe(true);
 	}
 	await shot(page, `orphan-heavy-reading-${mode}-${theme}`, info);
 	if (mode === 'phone') {
@@ -476,11 +490,12 @@ journey('keeps an orphan-heavy review ask compact without losing recovery', [
 	test.info().annotations.push({ type: 'orphan-heavy-layout', description: JSON.stringify(measurements) });
 });
 
-/** The asker's name is cut in the middle with its last four characters kept, and its box stays off the header's controls. */
+/** The requester uses normal end truncation, never the old middle-name split, and its box stays off the header controls. */
 async function expectNameClearOfControls(page: Page, title: string) {
-	const name = bar(page).locator('.rb-who .name');
-	await expect(name.locator('.name-tail')).toHaveText(title.slice(-4));
-	expect(await name.locator('.name-head').evaluate((el) => el.scrollWidth > el.clientWidth), 'the name is truncated, not wrapped or clipped').toBe(true);
+	const name = bar(page).locator('.rb-who strong');
+	await expect(name).toHaveText(title);
+	await expect(name.locator('.name-tail')).toHaveCount(0);
+	expect(await name.evaluate((element) => getComputedStyle(element).textOverflow), 'the requester uses end truncation when needed').toBe('ellipsis');
 	const boxes = await page.evaluate(() => {
 		const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, label: (el.getAttribute('aria-label') ?? el.className ?? '').toString().slice(0, 40) }; };
 		return {

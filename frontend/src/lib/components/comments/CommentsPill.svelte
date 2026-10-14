@@ -20,9 +20,9 @@
 
 	const uid = $props.id();
 	const unplacedId = `unplaced-${uid}`;
-	// Threads name the pill; messages name the unsent delivery state.
-	const label = $derived(`${count} open thread${count === 1 ? '' : 's'}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
+	// Threads, unplaced comments, and unsent messages each contribute their already-visible status to the pill name.
 	const unplacedPhrase = $derived(`${unplaced} comment${unplaced === 1 ? '' : 's'} couldn't be placed`);
+	const label = $derived(`${count} open thread${count === 1 ? '' : 's'}${unplaced ? `, ${unplacedPhrase}` : ''}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
 </script>
 
 <button type="button" class={look} {...data} bind:this={element} aria-expanded={expanded} {disabled}

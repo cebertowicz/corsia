@@ -4,7 +4,6 @@
 	import { cubicIn } from 'svelte/easing';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { Avatar, Button } from '$lib/components/ui';
-	import MiddleName from './MiddleName.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import { on } from '$lib/ws';
 	import { createReviewBarState, DRAFT_OPEN } from '$lib/reviewBarState.svelte';
@@ -209,7 +208,7 @@
 				<button type="button" class="rb-line" aria-expanded={expanded} aria-label={label} title={ask} onclick={() => (expanded = !expanded)}>
 					<span class="rb-lead">
 						<Avatar name={asker} color={agentColor(read?.asker?.id ?? asker)} hidden />
-						<span class="rb-who"><strong><MiddleName name={asker} /></strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
+						<span class="rb-who"><strong>{asker}</strong>{#if others.length}<span class="rb-plus" aria-hidden="true">+{others.length}</span>{/if}:</span>
 					</span>
 					<span class="rb-ask">{ask}</span>
 					<svg class="rb-icon rb-chev" aria-hidden="true" viewBox="0 0 16 16"><path d="M4 6.5l4 4 4-4" /></svg>
@@ -266,9 +265,9 @@
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* The avatar and name; it lays nothing out itself except in the narrow header below. */
 	.rb-lead { display: contents; }
-	/* A long name shrinks to its head and tail instead of pushing the ask and the header's controls out of the row. */
-	.rb-who { flex: 0 1 auto; display: flex; min-width: 0; max-width: 55%; white-space: nowrap; }
-	.rb-who strong { display: flex; min-width: 0; font-weight: var(--fw-semibold); }
+	/* The requester takes its natural width up to the header cap; only its tail may truncate, leaving the ask the remaining one-line space. */
+	.rb-who { flex: 0 1 auto; display: flex; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.rb-who strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-semibold); }
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
 	.rb-ask { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }
@@ -339,11 +338,12 @@
 			.review-bar { min-height: var(--rb-hit); }
 			.review-bar.ask { min-height: 0; }
 			.rb-line { min-height: var(--rb-hit); }
-			/* A closed ask names the requester and keeps the full request behind its existing disclosure, so the reading starts above the fold. */
+			/* A closed ask keeps its existing requester/ask markup in one 44px line: the requester has a bounded natural width and the ask end-ellipsizes in the remaining space. */
 			:global(.document-header) .review-bar.ask:not(.expanded) { grid-template-rows: var(--rb-hit); }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-line { display: flex; grid-column: auto; grid-row: auto; }
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
-			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: none; }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-lead { flex: 0 1 55%; max-width: 55%; display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--rb-hit); }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-who { max-width: 100%; }
+			:global(.document-header) .review-bar.ask:not(.expanded) .rb-ask { display: block; flex: 1 1 0; min-width: 0; }
 			:global(.document-header) .review-bar.ask:not(.expanded) .rb-chev { margin-left: auto; }
 			/* The expanded ask and other askers end at the add-person icon's right edge, not the header's: that tool's 44 px target has a 12 px inner margin (`--space-3`), so the text has the same. */
 			:global(.document-header) .review-bar.ask .rb-ask-full, :global(.document-header) .review-bar.ask .rb-others { padding-right: var(--space-3); }
