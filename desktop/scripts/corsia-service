@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+resources="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+state_dir="${CORSIA_STATE_DIR:-$HOME/Library/Application Support/CORSIA}"
+mkdir -p "$state_dir/logs"
+export PYTHONNOUSERSITE=1
+export PYTHONDONTWRITEBYTECODE=1
+login_path="$(PYTHONPATH="$resources/backend" "$resources/python/bin/python3" -c 'from cli_location import login_shell_path; print(login_shell_path() or "")' 2>/dev/null || true)"
+base_path="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export CORSIA_SERVICE_PATH="${login_path:+$login_path:}$base_path"
+export PATH="$CORSIA_SERVICE_PATH"
+export PYTHONPATH="$resources/python/backend-packages"
+export CORSIA_STATE_DIR="$state_dir"
+exec >>"$state_dir/logs/service.log" 2>&1
+exec "$resources/python/bin/python3" -m uvicorn main:app --app-dir "$resources/backend" "$@"
