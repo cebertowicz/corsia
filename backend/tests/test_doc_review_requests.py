@@ -352,3 +352,66 @@ def test_two_reviewers_settle_independently_and_no_findings_comment_counts(revie
     assert reviews.outcome(db, stored(db, second["id"])) == "open"
     add_comment(db, aid, author_id="second", submit=True)
     assert reviews.outcome(db, stored(db, second["id"])) == "commented"
+
+
+def _stop_review(db, node_id, stop):
+    from plans import holds, lifecycle, service
+    node = public.get_node(node_id, db=db)
+    if stop == "paused plan":
+        lifecycle.transition(
+            node.plan_id, "paused", actor_id="user:test", provenance="test",
+            expected_revision=service._plan_row(db, node.plan_id)["revision"], db=db,
+        )
+    else:
+        holds.pause(
+            node_id, "Not now", expected_revision=node.revision,
+            actor_id="user:test", provenance="test", db=db,
+        )
+    db.commit()
+
+
+@pytest.mark.parametrize("stop", ["paused plan", "paused step"])
+def test_a_stopped_reviewers_comments_reach_the_owner_and_the_review_waits(review_env, stop):
+    # 2026-10-14: comments coming due for a reviewer whose plan was paused
+    # raised through the delivery pass and stalled every wake source on it.
+    from doceditor import review_requests as reviews
+    db, aid = review_env
+    result = request(db, aid)
+    _stop_review(db, result["node_id"], stop)
+    before = public.get_node(result["node_id"], db=db).state
+    add_comment(db, aid, author_id="reviewer")
+
+    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
+    db.commit()
+
+    assert batches(db)[0]["state"] == "delivered"
+    assert reviews.outcome(db, stored(db, result["id"])) == "commented"
+    assert public.get_node(result["node_id"], db=db).state == before
+    assert db.execute(
+        "SELECT COUNT(*) FROM plan_node_events WHERE node_id=? AND new_state='accepted'",
+        (result["node_id"],),
+    ).fetchone()[0] == 0
+
+
+def test_one_batch_that_fails_to_close_does_not_hold_back_the_others(review_env, monkeypatch):
+    db, aid = review_env
+    other = seed_document(db, "owner", name="Spec.md")
+    add_comment(db, aid, author_id="reviewer")
+    add_comment(db, other, author_id="reviewer")
+    failing = next(b["id"] for b in batches(db) if b["artifact_id"] == aid)
+    real = feedback_batches.close_batch
+
+    def close_batch(connection, batch_id, reason):
+        if batch_id == failing:
+            raise RuntimeError("injected close failure")
+        return real(connection, batch_id, reason)
+
+    monkeypatch.setattr(feedback_batches, "close_batch", close_batch)
+    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
+    db.commit()
+
+    states = {b["artifact_id"]: b["state"] for b in batches(db)}
+    assert states == {aid: "open", other: "delivered"}
+    monkeypatch.setattr(feedback_batches, "close_batch", real)
+    feedback_batches.close_due("9999-01-01T00:00:00+00:00", db=db)
+    assert {b["state"] for b in batches(db)} == {"delivered"}

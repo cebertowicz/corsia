@@ -30,6 +30,12 @@ def settle_review_node(db, node_id: str, *, evidence: str, provenance: str) -> N
         node = service._node_row(connection, node_id)
         if node["state"] in service._TERMINAL_STATES:
             return
+        if review_evidence.stop_reason(connection, node) is not None:
+            # A paused plan or a held step stays as the user left it: the
+            # comments are already delivered, and the review settles once its
+            # owner resumes (pause contract S26). Raising here would roll back
+            # the delivery pass for every other document.
+            return
         if node["state"] == "pending":
             # A rejection's revision starts pending; comments delivered before the
             # reviewer picks it up still answer the review. Activate, submit and
