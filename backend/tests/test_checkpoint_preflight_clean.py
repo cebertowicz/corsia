@@ -558,6 +558,7 @@ async def test_external_initial_boundary_uses_bound_turn_and_refreshes_on_adopti
         installed_checkpoint=None,
         registered_checkpoint_id=None,
         eager_checkpoint_id=None,
+        provider_registered=False,
         binary=None,
         reasoning_effort=None,
         warm_boundary=SimpleNamespace(tool_call_id="completed-tool"),

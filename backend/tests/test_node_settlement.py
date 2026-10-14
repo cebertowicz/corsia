@@ -70,7 +70,9 @@ SETTLING = {
 #: Operations that make no claim about the question: they position or extend it.
 STRUCTURAL = {
     "reorder": {"order_key": 0},
-    "split": {"title": "Split part", "acceptance_criteria": "Split DOD"},
+    # The sibling inherits the decision's user assignee, so it is a person step.
+    "split": {"title": "Split part", "acceptance_criteria": "Split DOD",
+              "description": "Answer the split part.\n\nAlready tried: the agent cannot decide it."},
 }
 
 

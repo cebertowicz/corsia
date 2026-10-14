@@ -66,7 +66,7 @@ const EMPTY_AMOUNT: OperatorCostAmount = {
 export function foldedNode(item: FoldedItem, depth: number, parentId: string | null): OperatorNode {
 	return {
 		id: item.id, parent_id: parentId, depth, kind: item.kind, title: item.title,
-		description: null, acceptance_criteria: '', state: item.state,
+		description: null, waiting_on: [], acceptance_criteria: '', state: item.state,
 		unmet_dependencies: [], held_by: null, assignee: null,
 		revision: 0, requirements_revision: 0, commitment_id: '',
 		updated_at: item.folded_at, last_transition_at: item.folded_at, folded: true, requires_user_action: false,
@@ -75,7 +75,7 @@ export function foldedNode(item: FoldedItem, depth: number, parentId: string | n
 			condition: 'terminal', primary_reason: null, causes: [], selection: null, conflict: null,
 			attempt_count: 0, friction_count: 0, attempts: [],
 		},
-		display: item.display, status_reason: null, evidence: null, commitment_cost: null,
+		display: item.display, status_reason: item.status_reason, evidence: null, commitment_cost: null,
 		node_cost: { own: EMPTY_AMOUNT, rolled: EMPTY_AMOUNT }, initiative: null,
 		branch_progress: null, scheduled_until: null, attention_path: [], completion: null,
 		child: null, review: null, user_actions: [], discussion_artifact_id: null, artifacts: [],

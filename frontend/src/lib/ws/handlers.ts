@@ -32,7 +32,7 @@ import { recoverInput } from './turnState';
 import { acceptThreadModelTruth } from '../stores/models';
 import { handleCheckpointChanged } from './checkpointInvalidation';
 import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
-
+import { openBrowserPane } from '../stores/artifactWorkspace';
 import { threadSwitchFields } from './threadSwitchFields';
 import { FORWARDED_TYPES } from './forwardedTypes';
 
@@ -152,11 +152,13 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			emit('subagent_closed', data);
 			break;
 
+		case 'browser_started':
+			if (typeof data.thread_id === 'string') openBrowserPane(data.thread_id, true);
+			break;
 		case 'session_created':
 			if (data.session) upsertVisibleThread(data.session);
 			emit('session_created', data);
 			break;
-
 		case 'plans_changed':
 			// Invalidation nudge only: consumers re-read through the HTTP reads
 			// that own plan truth (plan pane, chat-list plan state, attention).
@@ -171,11 +173,9 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			// state and never trusts lease fields carried by this frame.
 			emit('host_access_changed', data);
 			break;
-
 		case 'ping':
 			resetHeartbeat();
 			break;
-
 		case 'auth_ok':
 			handleAuthOk(data, resetHeartbeat, isCurrentOwner);
 			break;

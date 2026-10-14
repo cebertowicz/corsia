@@ -228,7 +228,8 @@ def test_g11_an_agent_with_no_parent_still_assigns_the_user(db):
     boundary.mutate(
         plan.id, "add",
         {"kind": "task", "title": "Sign off", "acceptance_criteria": "signed",
-         "assignee": "user"},
+         "assignee": "user",
+         "description": "Sign the release off.\n\nAlready tried: only the user can sign."},
         actor=PlanActor("grandparent", "user-1", "project-1"),
         provenance="tool.plans", mutation_id="root-user", db=db,
     )

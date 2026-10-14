@@ -56,8 +56,8 @@ FACT_KEYS = (
     "rubric_version", "rubric_sha256", "rater", "rater_version", "basis", "size_class",
 )
 PROFILE_KEYS = ("method", "method_version", "rubric_version", "rubric_sha256", "rater", "rater_version")
-# A declared size has no rater or rubric; it is its own profile so a week or range that
-# mixes it with imported ratings is not served as comparable.
+# A declared size has no rater or rubric; it is its own profile, served beside imported
+# ratings as coverage. A change of profile never makes a period or range not comparable.
 AUTHOR_DECLARED_PROFILE = (BASIS_AUTHOR_DECLARED, *("none",) * (len(PROFILE_KEYS) - 1))
 
 # The latest delivered evidence for a node: a valid JSON plan event whose

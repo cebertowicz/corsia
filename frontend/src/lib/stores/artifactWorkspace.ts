@@ -1,8 +1,8 @@
 import { writable, get } from 'svelte/store';
 import {
-	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, openTab,
+	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, openBrowserTab, openTab,
 	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus,
-	type OpenArtifactInput, openLegacyDiscussionTab, type OpenLegacyDiscussionInput,
+	type OpenArtifactInput, type OpenBrowserInput, openLegacyDiscussionTab, type OpenLegacyDiscussionInput,
 	openSubagentTab, type OpenSubagentInput, type RevisionCheck, type TabLoadSignal,
 	type ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
@@ -15,7 +15,7 @@ export {
 	emptyWorkspace, tabKey, getActiveTab, isTabChanged, hasChangedTab,
 } from '$lib/artifactTabs';
 export type {
-	ArtifactTab, ArtifactTabStatus, OpenArtifactInput, OpenLegacyDiscussionInput, OpenSubagentInput, RevisionCheck, TabLoadSignal,
+	ArtifactTab, ArtifactTabStatus, OpenArtifactInput, OpenBrowserInput, OpenLegacyDiscussionInput, OpenSubagentInput, RevisionCheck, TabLoadSignal,
 	ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
 
@@ -155,6 +155,11 @@ export function openArtifactTab(threadId: string, input: OpenArtifactInput): voi
 /** Applies an agent request without overriding the user's chosen canvas surface. */
 export function openAgentDocumentTab(threadId: string, input: OpenArtifactInput): void {
 	mutate(threadId, (ws) => ({ ...openTab(ws, input), activeSurface: ws.activeSurface }));
+}
+
+/** Opens a browser pane, optionally preserving the tab the user is viewing. */
+export function openBrowserPane(threadId: string, background = false): void {
+	mutate(threadId, (ws) => openBrowserTab(ws, { threadId }, !background));
 }
 
 /** Opens a canonical child conversation beside its still-mounted parent. */
