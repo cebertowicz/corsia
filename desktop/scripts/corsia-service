@@ -6,6 +6,7 @@ state_dir="${CORSIA_STATE_DIR:-$HOME/Library/Application Support/CORSIA}"
 mkdir -p "$state_dir/logs"
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1
+export CORSIA_DESKTOP_BUNDLE=1
 login_path="$(PYTHONPATH="$resources/backend" "$resources/python/bin/python3" -c 'from cli_location import login_shell_path; print(login_shell_path() or "")' 2>/dev/null || true)"
 base_path="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export CORSIA_SERVICE_PATH="${login_path:+$login_path:}$base_path"

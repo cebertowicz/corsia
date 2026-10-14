@@ -32,9 +32,15 @@ fetch_verified() {
 [ "$(uname -s)" = "Darwin" ] || fail "macOS is required"
 [ "$(uname -m)" = "arm64" ] || fail "Apple silicon is required"
 command -v npm >/dev/null || fail "npm is required"
-short_sha="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
-app_version="${CORSIA_APP_VERSION:-0.0.0-dev.$short_sha}"
+build_number="$(git -C "$ROOT" rev-list --count HEAD)"
+app_version="${CORSIA_APP_VERSION:-0.1.0-dev.$build_number}"
+macos_short_version="${CORSIA_MACOS_SHORT_VERSION:-0.1.0}"
+# CFBundleVersion is an integer-only build sequence, deliberately separate
+# from the prerelease marketing version (for example, 0.1.0-dev.N).
+macos_bundle_version="${CORSIA_MACOS_BUNDLE_VERSION:-1.0.$build_number}"
 [[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || fail "invalid app version: $app_version"
+[[ "$macos_short_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "invalid macOS short version: $macos_short_version"
+[[ "$macos_bundle_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "invalid macOS bundle version: $macos_bundle_version"
 "$ROOT/desktop/scripts/install-rust-toolchain.sh"
 export RUSTUP_HOME="$ROOT/desktop/.rust-toolchain/rustup"
 export CARGO_HOME="$ROOT/desktop/.rust-toolchain/cargo"
@@ -59,7 +65,7 @@ rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$B
 (
   cd "$ROOT/frontend"
   npm ci
-  CORSIA_BUILD_OUTPUT="$BUNDLE_ROOT/frontend" npm run build
+  CORSIA_BUILD_OUTPUT="$BUNDLE_ROOT/frontend/dist" npm run build
 )
 install -m 0755 "$ROOT/desktop/scripts/corsia" "$BUNDLE_ROOT/bin/corsia"
 install -m 0755 "$ROOT/desktop/scripts/corsia-service" "$BUNDLE_ROOT/bin/corsia-service"
@@ -67,12 +73,13 @@ install -m 0755 "$ROOT/desktop/scripts/omlx" "$BUNDLE_ROOT/bin/omlx"
 
 (
   cd "$ROOT/desktop/src-tauri"
-  "$ROOT/frontend/node_modules/.bin/tauri" build --target aarch64-apple-darwin --bundles app --config "{\"version\":\"$app_version\"}"
+  "$ROOT/frontend/node_modules/.bin/tauri" build --target aarch64-apple-darwin --bundles app --config "{\"version\":\"$app_version\",\"bundle\":{\"macOS\":{\"bundleVersion\":\"$macos_bundle_version\"}}}"
 )
 readonly APP="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/CORSIA.app"
 readonly DMG_DIR="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
 readonly DMG="$DMG_DIR/CORSIA-unsigned-aarch64.dmg"
 [ -d "$APP" ] || fail "Tauri did not produce $APP"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $macos_short_version" "$APP/Contents/Info.plist"
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
   rm -f "$DMG"

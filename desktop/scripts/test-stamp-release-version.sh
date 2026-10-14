@@ -14,15 +14,17 @@ cp "$root/desktop/scripts/stamp-release-version.sh" "$temp/desktop/scripts/"
 
 (
   cd "$temp"
-  desktop/scripts/stamp-release-version.sh v2026.1014.0
-  node -e 'const fs=require("fs"); for (const path of ["desktop/src-tauri/tauri.conf.json", "frontend/package.json"]) { if (JSON.parse(fs.readFileSync(path)).version !== "2026.1014.0") process.exit(1); }'
-  grep -Fx 'version = "2026.1014.0"' desktop/src-tauri/Cargo.toml
+  desktop/scripts/stamp-release-version.sh v0.1.0
+  node -e 'const fs=require("fs"); for (const path of ["desktop/src-tauri/tauri.conf.json", "frontend/package.json"]) { if (JSON.parse(fs.readFileSync(path)).version !== "0.1.0") process.exit(1); }'
+  grep -Fx 'version = "0.1.0"' desktop/src-tauri/Cargo.toml
 )
 
-if (
-  cd "$temp"
-  desktop/scripts/stamp-release-version.sh v2026.10.14
-); then
-  echo "invalid release version unexpectedly succeeded" >&2
-  exit 1
-fi
+for invalid_tag in v2026.10.14 v0.1.0-dev.1 v1.0.0; do
+  if (
+    cd "$temp"
+    desktop/scripts/stamp-release-version.sh "$invalid_tag"
+  ); then
+    echo "invalid release version unexpectedly succeeded: $invalid_tag" >&2
+    exit 1
+  fi
+done

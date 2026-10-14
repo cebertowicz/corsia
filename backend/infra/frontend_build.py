@@ -21,7 +21,9 @@ _CORSIA_SCRIPT = _SERVING_ROOT / "scripts" / "corsia"
 
 def ensure_frontend_built() -> None:
     """Require frontend assets paired to this checkout before lifespan proceeds."""
-    if not FRONTEND_ROOT.is_dir():
+    # Desktop bundles carry one immutable frontend release, so they must not
+    # invoke the checkout-only release owner that is absent from app resources.
+    if os.environ.get("CORSIA_DESKTOP_BUNDLE") == "1" or not FRONTEND_ROOT.is_dir():
         return
 
     env = os.environ.copy()

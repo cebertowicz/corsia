@@ -160,6 +160,31 @@ fn service_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    match app.path().resource_dir() {
+        Ok(path) => Ok(path),
+        Err(path_error) => {
+            // `resource_dir` is the canonical Tauri path. Fall back to the
+            // app-bundle-relative location when macOS cannot resolve the
+            // extracted bundle through its path APIs.
+            let executable = env::current_exe()
+                .map_err(|error| format!("could not resolve the app executable: {error}"))?;
+            let resources = executable
+                .parent()
+                .and_then(|macos| macos.parent())
+                .map(|contents| contents.join("Resources"))
+                .filter(|path| path.is_dir())
+                .ok_or_else(|| {
+                    format!(
+                        "could not resolve bundled resources through Tauri ({path_error}) or from executable {}",
+                        executable.display()
+                    )
+                })?;
+            Ok(resources)
+        }
+    }
+}
+
 fn wait_for_service(service: &AppServiceState, port: u16) -> Result<(), String> {
     let deadline = Instant::now() + HEALTH_TIMEOUT;
     loop {
@@ -223,12 +248,7 @@ fn start_service(
             }
         }
         stop_child(&mut state);
-        let launcher = app
-            .path()
-            .resource_dir()
-            .map_err(|error| format!("could not resolve bundled resources: {error}"))?
-            .join("bin")
-            .join("corsia-service");
+        let launcher = bundled_resource_dir(app)?.join("bin").join("corsia-service");
         state.child = Some(
             Command::new(launcher)
                 .args(["--host", "127.0.0.1", "--port", &port.to_string()])
@@ -385,7 +405,17 @@ fn sync_window_chrome(window: &tauri::WebviewWindow) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::default().build())
+        // The backend owns persistent service logs under CORSIA_STATE_DIR. Keep
+        // native diagnostics on stdout so an existing macOS app-log path cannot
+        // prevent the packaged app from starting before the service does.
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .clear_targets()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
@@ -434,9 +464,32 @@ pub fn run() {
                     sync_window_chrome(&window);
                 }
             }
-            // The default window loads the static startup shell. Its sole
-            // responsibility is to invoke start_local_service and navigate
-            // only after the bundled local service passes /api/health.
+            // The default window loads the static startup shell while Tauri
+            // owns the first service launch. Retrying after a visible failure
+            // stays available through start_local_service.
+            let app_handle = app.handle().clone();
+            thread::spawn(move || {
+                let service = app_handle.state::<AppServiceState>();
+                match start_service(&app_handle, &service) {
+                    Ok(startup) => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            if let Err(error) =
+                                window.eval(format!("window.location.replace('{}');", startup.url))
+                            {
+                                log::error!(
+                                    "could not navigate to the local CORSIA service: {error}"
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("bundled CORSIA service did not start: {error}");
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.eval("window.__corsiaShowServiceFailure?.();");
+                        }
+                    }
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
