@@ -340,22 +340,8 @@ drain_and_wait() {
     while :; do
         waited=$(( $(runtime_epoch_seconds) - started_at ))
         [ "$waited" -lt "$max_wait" ] || break
-        local status status_output status_http_status
-        if ! status_output=$(curl -sS --max-time 5 --write-out $'\n%{http_code}' \
-            "$drain_url" 2>/dev/null); then
-            warn "Could not read drain status"
-            cancel_failed_drain "$drain_url" "$operation_id" || :
-            return 1
-        fi
-        if [[ "$status_output" != *$'\n'* ]]; then
-            warn "Drain status response was malformed"
-            cancel_failed_drain "$drain_url" "$operation_id" || :
-            return 1
-        fi
-        status_http_status="${status_output##*$'\n'}"
-        status="${status_output%$'\n'*}"
-
-        if [ "$status_http_status" != "200" ]; then
+        local status
+        if ! status=$(curl -sf --max-time 5 "$drain_url" 2>/dev/null); then
             warn "Could not read drain status"
             cancel_failed_drain "$drain_url" "$operation_id" || :
             return 1
@@ -497,24 +483,11 @@ if payload.get("ok") is not True or payload.get("operation_id") != expected:
     done
 
     warn "Drain timed out; enforcing hard cap"
-    local hard_cap_response hard_cap_forced hard_cap_output hard_cap_http_status
-    if ! hard_cap_output=$(curl -sS --max-time 30 --write-out $'\n%{http_code}' \
+    local hard_cap_response hard_cap_forced
+    if ! hard_cap_response=$(curl -sf --max-time 30 \
         -X POST "$hard_cap_url" \
         -H "Content-Type: application/json" \
         -d "{\"operation_id\":\"$operation_id\"}" 2>/dev/null); then
-        warn "Could not enforce drain hard cap; cancelling restart"
-        cancel_failed_drain "$drain_url" "$operation_id" || :
-        return 1
-    fi
-    if [[ "$hard_cap_output" != *$'\n'* ]]; then
-        warn "Drain hard-cap response was malformed"
-        cancel_failed_drain "$drain_url" "$operation_id" || :
-        return 1
-    fi
-    hard_cap_http_status="${hard_cap_output##*$'\n'}"
-    hard_cap_response="${hard_cap_output%$'\n'*}"
-
-    if [ "$hard_cap_http_status" != "200" ]; then
         warn "Could not enforce drain hard cap; cancelling restart"
         cancel_failed_drain "$drain_url" "$operation_id" || :
         return 1

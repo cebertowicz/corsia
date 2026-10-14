@@ -11,6 +11,12 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from api.restart_compensation import (
+    claim_scheduled_choice as _claim_scheduled_choice,
+    compensate_cancelled_acquire as _compensate_cancelled_acquire,
+    compensate_preparation_failure as _compensate_preparation_failure,
+    failure_detail as _failure_detail,
+)
 from api.restart_shell import spawn_restart_lifecycle
 from api.update_preflight import check_update_backup_room as _check_update_backup_room
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
@@ -37,14 +43,6 @@ def _update_log_path() -> Path:
 
     return LOGS_DIR / f"update-{uuid.uuid4().hex}.log"
 
-
-def _failure_summary(failure: BaseException) -> str:
-    return str(getattr(failure, "detail", failure))[:500]
-
-
-def _failure_detail(failure: BaseException) -> str | None:
-    log_path = getattr(failure, "update_log_path", None)
-    return json.dumps({"log_path": str(log_path)}) if log_path else None
 
 
 def _with_failure_code(failure: HTTPException, code: str) -> HTTPException:
@@ -171,52 +169,6 @@ async def _begin_settings_drain(operation_id: str, mode: str) -> None:
         ) from exc
 
 
-async def _compensate_cancelled_acquire(
-    acquired_ids: list[str],
-    cancellation: asyncio.CancelledError,
-) -> None:
-    """Compensate committed ownership without replacing the caller cancellation."""
-    if acquired_ids:
-        from automation.restart import abort_restart_control
-
-        try:
-            await abort_restart_control(
-                acquired_ids[0],
-                error="settings restart cancelled before launch",
-                cancelled=True,
-                failure_code="drain_cancelled",
-            )
-        except Exception as error:
-            cancellation.add_note(f"Restart cancellation compensation failed: {error}")
-        except asyncio.CancelledError:
-            cancellation.add_note("Restart cancellation compensation was interrupted.")
-
-
-async def _compensate_preparation_failure(
-    operation_id: str,
-    failure: BaseException,
-    *,
-    failure_code: str | None = None,
-    failure_detail: str | None = None,
-) -> None:
-    """Release the exact reservation without replacing its preparation failure."""
-    from automation.restart import abort_restart_control
-
-    try:
-        released = await abort_restart_control(
-            operation_id,
-            error=_failure_summary(failure),
-            failure_code=failure_code,
-            failure_detail=failure_detail,
-        )
-    except asyncio.CancelledError:
-        failure.add_note("Restart preparation compensation was interrupted.")
-    except Exception as error:
-        failure.add_note(f"Restart preparation compensation failed: {error}")
-    else:
-        if not released:
-            failure.add_note("Restart preparation compensation lost exact ownership.")
-
 
 async def _await_preparation(task: asyncio.Task[None]) -> None:
     """Await one owned preparation worker before propagating caller cancellation."""
@@ -339,9 +291,16 @@ async def prelaunch_settings_restart(
     restart_log_path: Callable[[str], Path],
     *,
     caller_token: str | None,
+    claim_hook: Callable[[], bool] | None = None,
     trigger: str | None = "manual", target_version: str | None = None,
-) -> tuple[str, object]:
-    """Hand Settings restart ownership from preparation through child launch."""
+) -> tuple[str, object] | None:
+    """Hand Settings restart ownership from acquisition through child launch.
+
+    Scheduled Tonight transition matrix: acquire refused -> choice stays set and
+    no row exists; acquired then claim false -> abort/release the row and do not
+    launch; acquired then preparation fails -> consume the choice and retain a
+    failed row; acquired then launch succeeds -> consume the choice once.
+    """
     prepared = mode == "update"
     if prepared:
         await _UPDATE_REQUEST_LOCK.acquire()
@@ -352,11 +311,13 @@ async def prelaunch_settings_restart(
                 user, mode, acquired_ids, trigger=trigger, target_version=target_version
             )
         except asyncio.CancelledError as error:
-            await _compensate_cancelled_acquire(
-                acquired_ids,
-                error,
-            )
+            await _compensate_cancelled_acquire(acquired_ids, error)
             raise
+
+        if claim_hook is not None and not await _claim_scheduled_choice(
+            operation_id, acquired_ids, claim_hook
+        ):
+            return None
 
         if prepared:
             await _check_room_or_compensate(operation_id, acquired_ids)
@@ -367,7 +328,9 @@ async def prelaunch_settings_restart(
             if caller_token is None:
                 try:
                     from infra.accounts import issue_lifecycle_service_token
-                    caller_token = issue_lifecycle_service_token(user["id"], operation_id)
+                    from infra.db_async import run_in_db
+
+                    caller_token = await run_in_db(issue_lifecycle_service_token, user["id"], operation_id)
                 except asyncio.CancelledError as error:
                     await _compensate_cancelled_acquire(acquired_ids, error)
                     raise
@@ -378,10 +341,7 @@ async def prelaunch_settings_restart(
         try:
             await _begin_settings_drain(operation_id, mode)
         except asyncio.CancelledError as error:
-            await _compensate_cancelled_acquire(
-                acquired_ids,
-                error,
-            )
+            await _compensate_cancelled_acquire(acquired_ids, error)
             raise
 
         restart_env["CORSIA_RESTART_OPERATION_ID"] = operation_id

@@ -11,13 +11,9 @@ from infra.settings import get_update_schedule, parse_update_schedule_time, set_
 SCHEDULE_WINDOW = timedelta(hours=1)
 
 
-def _time_parts(value: str) -> tuple[int, int]:
-    return parse_update_schedule_time(value)
-
-
 def next_local_time(now: datetime, value: str) -> datetime:
     """Return the next local occurrence of a validated HH:MM preference."""
-    hour, minute = _time_parts(value)
+    hour, minute = parse_update_schedule_time(value)
     candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if candidate <= now:
         candidate += timedelta(days=1)
@@ -77,30 +73,22 @@ def _tonight_due_at(schedule: dict, now: datetime) -> datetime | None:
     if tonight_at is None:
         return None
     scheduled_night = tonight_at.astimezone(now.tzinfo)
-    hour, minute = _time_parts(schedule["time"])
+    hour, minute = parse_update_schedule_time(schedule["time"])
     return scheduled_night.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
-def due_trigger(
-    schedule: dict,
-    *,
-    now: datetime,
-    update_available: bool,
-    attempted_today: bool,
+def possible_trigger(
+    schedule: dict, *, now: datetime, attempted_today: bool, update_available: bool | None = None
 ) -> str | None:
-    """Return the one due trigger after the tick has fetched update status."""
-    candidate = possible_trigger(schedule, now=now, attempted_today=attempted_today)
-    return candidate if update_available else None
-
-
-def possible_trigger(schedule: dict, *, now: datetime, attempted_today: bool) -> str | None:
-    """Return a due trigger from local state before a remote status fetch."""
+    """Return the one due trigger, optionally after the remote status check."""
+    if update_available is False:
+        return None
     tonight_due_at = _tonight_due_at(schedule, now)
     if tonight_due_at is not None and tonight_due_at <= now < tonight_due_at + SCHEDULE_WINDOW:
         return "tonight"
     if not schedule.get("automatic") or attempted_today:
         return None
-    hour, minute = _time_parts(schedule["time"])
+    hour, minute = parse_update_schedule_time(schedule["time"])
     due_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     return "automatic" if due_at <= now < due_at + SCHEDULE_WINDOW else None
 

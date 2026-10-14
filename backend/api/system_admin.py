@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timezone
 import os
 from pathlib import Path
@@ -53,7 +54,8 @@ async def launch_update(
     *,
     port: int,
     drain_max_wait: int | None = None,
-) -> tuple[str, object]:
+    claim_hook: Callable[[], bool] | None = None,
+) -> tuple[str, object] | None:
     """Launch the one Settings Update lifecycle from any approved trigger."""
     if trigger not in {"manual", "tonight", "automatic"}:
         raise ValueError("update trigger is invalid")
@@ -68,7 +70,7 @@ async def launch_update(
     if drain_max_wait is not None:
         restart_env["CORSIA_DRAIN_MAX_WAIT"] = str(drain_max_wait)
     # A scheduled run mints its service credential only after it acquires ownership.
-    operation_id, process = await prelaunch_settings_restart(
+    prelaunch = await prelaunch_settings_restart(
         user,
         "update",
         corsia_script,
@@ -76,9 +78,13 @@ async def launch_update(
         ["restart"],
         _restart_log_path,
         caller_token=caller_token,
+        claim_hook=claim_hook,
         trigger=trigger,
         target_version=target_version,
     )
+    if prelaunch is None:
+        return None
+    operation_id, process = prelaunch
     await _monitor_restart_process(process, operation_id)
     return operation_id, process
 

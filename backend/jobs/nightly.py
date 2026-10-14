@@ -196,9 +196,7 @@ async def _run_job_safely() -> None:
 async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | None:
     """Check the D7 system schedule without using the maintenance day claim."""
     from automation.update_schedule import (
-        claim_tonight,
         clear_tonight,
-        due_trigger,
         possible_trigger,
         should_drop_tonight,
         update_attempted_today,
@@ -218,7 +216,7 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
             return None
         status = await asyncio.to_thread(update_status, False)
         details = status.to_dict()
-        trigger = due_trigger(
+        trigger = possible_trigger(
             schedule,
             now=local_now,
             update_available=details.get("available") is True,
@@ -226,21 +224,12 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
         )
         if trigger is None:
             return None
-        from api.scheduled_update import launch_scheduled_update, scheduled_launch_blocker
-
-        blocker = await asyncio.to_thread(
-            scheduled_launch_blocker, schedule.get("owner_id")
-        )
-        if blocker is not None:
-            logger.error("nightly_job: scheduled update launch blocked: {}", blocker)
-            return None
-        if trigger == "tonight" and not await asyncio.to_thread(claim_tonight, schedule):
-            return None
+        from api.scheduled_update import launch_scheduled_update
 
         return await launch_scheduled_update(
             trigger,
             details.get("target_version"),
-            schedule.get("owner_id"),
+            schedule,
         )
     except Exception:
         logger.exception("nightly_job: scheduled update check or launch failed")
