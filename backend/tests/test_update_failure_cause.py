@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from infra.accounts import AccountError
 
 
 @pytest.mark.asyncio
@@ -87,6 +89,48 @@ async def test_update_room_check_failure_leaves_no_in_flight_operation(
     assert rows
     assert all(row["status"] != "in_flight" for row in rows)
     prepare.assert_not_awaited()
+    drain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raised_error",
+    [sqlite3.OperationalError("token store unavailable"), AccountError("account unavailable")],
+)
+async def test_lifecycle_token_mint_failure_releases_the_prepared_update_hold(
+    isolated_db, monkeypatch, raised_error
+):
+    from api import settings_restart
+    from infra import accounts
+    from infra.database import get_db
+
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", AsyncMock())
+    drain = AsyncMock()
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", drain)
+
+    def mint(_user_id: str, _operation_id: str) -> str:
+        raise raised_error
+
+    monkeypatch.setattr(accounts, "issue_lifecycle_service_token", mint)
+
+    with pytest.raises(type(raised_error)):
+        await settings_restart.prelaunch_settings_restart(
+            {"id": "steve"}, "update", Path("/unused"), {}, ["restart"],
+            lambda name: Path(name), caller_token=None,
+        )
+
+    connection = get_db()
+    try:
+        rows = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT status, failure_code FROM self_restart_requests"
+            ).fetchall()
+        ]
+    finally:
+        connection.close()
+    assert rows == [{"status": "failed", "failure_code": None}]
     drain.assert_not_awaited()
 
 
@@ -191,6 +235,36 @@ async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolate
     finally:
         connection.close()
     assert told_at is None
+
+
+@pytest.mark.asyncio
+async def test_scheduled_lapse_skips_unavailable_workspace_conductor(isolated_db, monkeypatch):
+    """A missing conductor logs the skip and cannot undo a cleared schedule."""
+    from automation import update_failure_notice
+    from core import agent_roster_queries
+    from events import delivery
+
+    warnings = []
+    monkeypatch.setattr(
+        agent_roster_queries,
+        "workspace_conductor_contact",
+        lambda _user, _db: (None, "no workspace conductor"),
+    )
+    monkeypatch.setattr(delivery, "deliver_to_thread", AsyncMock())
+    monkeypatch.setattr(
+        update_failure_notice.logger,
+        "warning",
+        lambda message, *args: warnings.append(message.format(*args)),
+    )
+
+    await update_failure_notice.tell_conductor_about_scheduled_lapse(
+        "missing",
+        "Tonight's scheduled update did not run.",
+        delivery_id="scheduled-update-lapsed:test",
+    )
+
+    assert warnings == ["scheduled update conductor notice skipped: no workspace conductor"]
+    delivery.deliver_to_thread.assert_not_awaited()
 
 
 @pytest.mark.asyncio

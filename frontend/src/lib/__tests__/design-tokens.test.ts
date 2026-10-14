@@ -40,14 +40,11 @@ const RUNTIME_PROVIDED = new Set([
 	'--doc-rail',
 	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
 	'--region-color',
-	// ToastContainer's `style:--toast-clearance` (the toastClearance store), `style:--toast-height`, and the column it
-	// centres on (`style:--toast-anchor-x` and `--toast-anchor-width`, from the toastAnchor store).
-	'--toast-clearance',
-	'--toast-height',
+	// ToastContainer's `style:--toast-top` (the toastTop store: the lowest edge of the header and status banners), and the
+	// column it centres on (`style:--toast-anchor-x` and `--toast-anchor-width`, from the toastAnchor store).
+	'--toast-top',
 	'--toast-anchor-x',
 	'--toast-anchor-width',
-	// MessageList's `style:--toast-stack-height` (the toastStackHeight store): room kept above the composer for the toast stack.
-	'--toast-stack-height',
 ]);
 
 /**

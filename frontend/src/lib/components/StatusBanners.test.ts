@@ -172,4 +172,15 @@ describe('StatusBanners', () => {
 		expect(host.querySelector('.security-banner code')?.textContent).toBe(report);
 		expect(host.textContent).not.toContain('workspace/security');
 	});
+
+	it('keeps every banner inside the strip that sits below the header', () => {
+		connectionState.set('error');
+		securityAlert.set({ date: '2026-10-14', vulns: 1, errors: 0, report: 'report.md' });
+		component = mount(StatusBanners, { target: host });
+		flushSync();
+
+		const strip = host.querySelector('.status-banners');
+		expect(strip).not.toBeNull();
+		expect(strip!.querySelectorAll('.security-banner, .connection-banner')).toHaveLength(2);
+	});
 });

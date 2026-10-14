@@ -78,7 +78,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 	if (failure.client?.kind === 'version_mismatch') {
 		return {
 			title: "The update didn't finish",
-			headline: 'The update finished, but the running versions do not match.',
+			headline: 'The update finished, but CORSIA still shows the old version.',
 			body: failure.client.message,
 			toastLine: null,
 			retryLabel: null,
@@ -129,23 +129,23 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 				retryLabel: 'Try again',
 			};
 		case 'drain_failed':
-			return stopped("Couldn't bring your agents to a safe stopping point.", KEPT_VERSION);
+			return stopped("Your agents didn't reach a safe stopping point in time.", KEPT_VERSION);
 		case 'update_timed_out':
 			return stopped('The update took too long to download and build.', KEPT_VERSION);
 		case 'prepare_failed':
 			return stopped("Couldn't prepare the update.", KEPT_VERSION);
 		case 'index_locked':
 			return refusal(
-				"Another Git process is holding this install's lock.",
-				`Wait for it to finish, or remove the stale lock file in the install's .git folder. ${RAN_ON}`,
-				'Try again after clearing it',
+				"Another program is using CORSIA's files.",
+				`Wait for it to finish, then try again. If it doesn't clear, ask your workspace conductor to remove the leftover lock. ${RAN_ON}`,
+				'Try again',
 			);
 		case 'checkout_detached':
-			return refusal("This install isn't on a branch.", `CORSIA can only update an install that is on a branch. ${RAN_ON}`, null);
+			return refusal("This copy of CORSIA can't update itself because it isn't set up to follow updates.", `Ask your workspace conductor to switch it back. ${RAN_ON}`, null);
 		case 'checkout_dirty':
-			return refusal("This install has changes that aren't committed.", `Commit or discard them, then try again. ${RAN_ON}`, 'Try again after cleaning up');
+			return refusal('This copy of CORSIA has local changes.', `Save or discard them, then try again. ${RAN_ON}`, 'Try again');
 		case 'restart_pending':
-			return { ...refusal('An update is already downloaded and waiting for a restart.', `Restart CORSIA to finish it. ${KEPT_VERSION}`, 'Restart now'), retryAction: 'restart' };
+			return { ...refusal('An update is ready and waiting for a restart.', `Restart CORSIA to finish it. ${KEPT_VERSION}`, 'Restart now'), retryAction: 'restart' };
 		default:
 			// A terminal row carries no phase, so nothing here can say how far the update got.
 			return {

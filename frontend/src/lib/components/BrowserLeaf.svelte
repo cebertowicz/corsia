@@ -3,8 +3,11 @@
 	import { openBrowserUrl } from '$lib/api/browser';
 	import { token } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
+	import { clampPoint } from '$lib/browserPane';
+	import { BrowserPaneInput } from '$lib/browserPaneInput';
 	import { on } from '$lib/ws/events';
 	import { get } from 'svelte/store';
+	import { untrack } from 'svelte';
 
 	let { threadId }: { threadId: string } = $props();
 	let canvas: HTMLCanvasElement;
@@ -18,11 +21,27 @@
 	let streaming = $state(false);
 	let opening = false;
 	let fitTimer: ReturnType<typeof setTimeout> | undefined;
+	let lastAppearance = '';
+	let activePointer: number | null = null;
+	let decodeGeneration = 0;
+	let decodeWarned = false;
+	let drawnArea = '';
+	const paneInput = new BrowserPaneInput(message => {
+		if (hasControl && socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+	});
+
+	function resetPointer() {
+		paneInput.reset();
+		if (activePointer !== null && canvas?.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
+		activePointer = null;
+	}
 
 	function connect() {
+		resetPointer();
 		socket?.close();
 		const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const next = new WebSocket(`${protocol}//${location.host}/api/browser/${threadId}/stream`);
+		lastAppearance = '';
 		socket = next;
 		// A connecting socket counts as streaming, so browser_opened never races a second one.
 		streaming = true;
@@ -30,13 +49,14 @@
 			next.send(JSON.stringify({ token: get(token) ?? '' }));
 			sendAppearance();
 		};
-		next.onmessage = (event) => drawMessage(event.data);
+		next.onmessage = (event) => { if (socket === next) drawMessage(event.data); };
 		next.onclose = () => {
 			if (socket !== next) return;
 			// The server releases control whenever this connection ends, so the pane must too.
 			if (streaming) status = 'Browser stream ended. Reconnect to watch';
 			streaming = false;
 			hasControl = false;
+			resetPointer();
 		};
 	}
 
@@ -49,6 +69,7 @@
 		}
 		if (message.type === 'control' && typeof message.has_control === 'boolean') {
 			hasControl = message.has_control;
+			if (!hasControl) resetPointer();
 			status = controlStatus();
 			return;
 		}
@@ -67,9 +88,18 @@
 		if (typeof metadata.deviceWidth !== 'number' || typeof metadata.deviceHeight !== 'number') return;
 		width = metadata.deviceWidth;
 		height = metadata.deviceHeight;
-		image = new Image();
-		image.onload = redraw;
-		image.src = `data:image/jpeg;base64,${message.data}`;
+		const generation = ++decodeGeneration;
+		const next = new Image();
+		next.src = `data:image/jpeg;base64,${message.data}`;
+		void next.decode().then(() => {
+			if (generation !== decodeGeneration) return;
+			image = next;
+			redraw();
+		}, (error) => {
+			// An undecodable frame keeps the last good picture; a drawing failure is not caught here.
+			if (!decodeWarned) console.warn('Browser pane could not decode a frame', error);
+			decodeWarned = true;
+		});
 	}
 
 	// Where the page sits in the canvas: drawing and input share it, so a click lands where it is drawn.
@@ -82,11 +112,24 @@
 	function redraw() {
 		if (!canvas || !image || !width || !height) return;
 		const { bounds, scale, left, top } = placement();
-		canvas.width = bounds.width * devicePixelRatio;
-		canvas.height = bounds.height * devicePixelRatio;
+		const backingWidth = Math.round(bounds.width * devicePixelRatio);
+		const backingHeight = Math.round(bounds.height * devicePixelRatio);
+		// Changing a canvas backing store clears it; leave the current picture intact for ordinary frames.
+		if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+			canvas.width = backingWidth;
+			canvas.height = backingHeight;
+		}
 		const context = canvas.getContext('2d');
 		if (!context) return;
-		context.scale(devicePixelRatio, devicePixelRatio);
+		// A new page size moves the letterbox even when the pane keeps its size: clear the whole backing
+		// store so no strip of the earlier picture survives beside the new one.
+		const area = `${left},${top},${width * scale},${height * scale}`;
+		if (area !== drawnArea) {
+			context.setTransform(1, 0, 0, 1, 0, 0);
+			context.clearRect(0, 0, canvas.width, canvas.height);
+			drawnArea = area;
+		}
+		context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
 		// Chrome can keep capturing at an older, smaller size: the frame then holds the page shrunk into its
 		// top-left corner with blank space beside it, so draw only the page's part of the frame.
 		// Frame pixels per page pixel; above 1 on a high-density pane.
@@ -99,27 +142,38 @@
 		if (!canvas || socket?.readyState !== WebSocket.OPEN) return;
 		const bounds = canvas.getBoundingClientRect();
 		if (bounds.width < 1 || bounds.height < 1) return;
-		socket.send(JSON.stringify({
-			type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height),
-			scale: devicePixelRatio, scheme: get(theme),
-		}));
+		const appearance = { type: 'appearance', width: Math.round(bounds.width), height: Math.round(bounds.height), scale: devicePixelRatio, scheme: get(theme) };
+		const key = JSON.stringify(appearance);
+		if (key === lastAppearance) return;
+		lastAppearance = key;
+		socket.send(key);
 	}
 
-	function coordinates(event: PointerEvent | WheelEvent) {
+	function coordinates(event: PointerEvent | WheelEvent, clamp = false) {
 		const { bounds, scale, left, top } = placement();
-		const x = (event.clientX - bounds.left - left) / scale;
-		const y = (event.clientY - bounds.top - top) / scale;
-		return x >= 0 && y >= 0 && x <= width && y <= height ? { x, y } : null;
+		const point = { x: (event.clientX - bounds.left - left) / scale, y: (event.clientY - bounds.top - top) / scale };
+		return clamp ? clampPoint(point, width, height) : point.x >= 0 && point.y >= 0 && point.x <= width && point.y <= height ? point : null;
 	}
 
 	function sendMouse(event: PointerEvent) {
 		if (!hasControl || socket?.readyState !== WebSocket.OPEN || !width || !height) return;
-		if (event.type === 'pointerdown') canvas.focus();
-		const point = coordinates(event);
+		if (!event.isPrimary) return;
+		const point = coordinates(event, event.type !== 'pointerdown' && (event.type !== 'pointermove' || activePointer !== null));
 		if (!point) return;
-		const eventType = event.type === 'pointerdown' ? 'mousePressed' : event.type === 'pointerup' ? 'mouseReleased' : 'mouseMoved';
-		const button = eventType === 'mouseMoved' && !(event.buttons & 1) ? 'none' : 'left';
-		socket.send(JSON.stringify({ type: 'input_mouse', eventType, ...point, button, clickCount: eventType === 'mouseMoved' ? 0 : 1 }));
+		if (event.pointerType === 'touch') event.preventDefault();
+		if (event.type === 'pointerdown') {
+			canvas.focus();
+			activePointer = event.pointerId;
+			canvas.setPointerCapture(event.pointerId);
+			// Move before pressing because Chrome may use the last cursor position for a press.
+			paneInput.press(event, point);
+		} else if (event.type === 'pointermove') {
+			paneInput.move(event, point, placement().scale);
+		} else {
+			paneInput.release(event, point, event.type === 'pointercancel');
+			if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+			activePointer = null;
+		}
 	}
 
 	function sendWheel(event: WheelEvent) {
@@ -188,11 +242,13 @@
 		});
 		const unsubscribeTheme = theme.subscribe(() => sendAppearance());
 		observer.observe(canvas);
-		redraw();
+		// Untracked, so a new frame does not rebuild the observer and cancel a pending fit or pointer move.
+		untrack(redraw);
 		return () => {
 			observer.disconnect();
 			unsubscribeTheme();
 			clearTimeout(fitTimer);
+			paneInput.dispose();
 		};
 	});
 
@@ -229,15 +285,17 @@
 		{/if}
 		<span>{status}</span>
 	</form>
-	<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+	<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
 </div>
 
 <style>
 	.browser-leaf { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-primary); }
-	.toolbar { display: flex; gap: .5rem; align-items: center; padding: .5rem; font-size: .8rem; }
+	.toolbar { display: flex; flex-shrink: 0; gap: .5rem; align-items: center; padding: .5rem; font-size: .8rem; }
+	.toolbar span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.toolbar button { flex-shrink: 0; white-space: nowrap; }
 	.toolbar input { flex: 1; min-width: 0; }
 	.toolbar .icon { display: inline-flex; padding: 2px; border: 0; background: none; color: var(--text-secondary); cursor: pointer; }
 	.toolbar .icon:disabled { color: var(--text-tertiary); cursor: default; }
 	.toolbar .icon svg { width: 16px; height: 16px; }
-	canvas { flex: 1; min-height: 0; width: 100%; outline: none; }
+	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; }
 </style>

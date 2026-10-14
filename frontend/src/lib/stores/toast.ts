@@ -15,6 +15,13 @@ export interface PinnedToastState {
 	detail?: string;
 	/** Accessible name and tooltip for the close button; defaults to "Dismiss". */
 	closeLabel?: string;
+	/** `minimize` draws a chevron: the close button shrinks the toast to a pill instead of removing it. */
+	closeIcon?: 'x' | 'minimize';
+	/** A minimized toast: the mark and its message in one pill that is a single tap target running `onExpand`. */
+	compact?: boolean;
+	/** Accessible name of the minimized pill. */
+	expandLabel?: string;
+	onExpand?: () => void;
 	/** A ticking segment shown after the message, dropped first when the line does not fit. */
 	time?: string;
 	/** Runs when the person closes this toast with its close button, never when the app unpins or replaces it. */
@@ -27,6 +34,8 @@ export interface Toast {
 	type?: ToastType;
 	duration?: number;
 	action?: ToastAction;
+	/** The whole toast is one button running `action`; its message is the button's label. */
+	button?: boolean;
 	pinned?: PinnedToastState;
 }
 
@@ -42,6 +51,10 @@ export interface PinnedToastSpec {
 	type: ToastType;
 	action?: ToastAction;
 	closeLabel?: string;
+	closeIcon?: 'x' | 'minimize';
+	compact?: boolean;
+	expandLabel?: string;
+	onExpand?: () => void;
 	time?: string;
 	onClose?: () => void;
 	/** Lifetime of a `success` or `info` outcome in ms. Default 8000. */
@@ -120,6 +133,11 @@ function createToastStore() {
 		);
 	}
 
+	/** A notice that is one button: the message is its label and the whole toast runs `run`, so it has no separate action or close. */
+	function showButton(message: string, run: ToastAction['run']) {
+		return addOrdinary({ id: newId(), message, type: 'info', duration: ACTION_MS, action: { label: message, run }, button: true }, ACTION_MS);
+	}
+
 	/**
 	 * Show, update in place, or replace with an outcome the toast owned by `key`.
 	 * The same key always keeps one element; a different key takes over the slot.
@@ -136,7 +154,10 @@ function createToastStore() {
 			type: spec.type,
 			duration,
 			action: spec.action,
-			pinned: { key, detail: spec.detail, closeLabel: spec.closeLabel, time: spec.time, onClose: spec.onClose },
+			pinned: {
+				key, detail: spec.detail, closeLabel: spec.closeLabel, closeIcon: spec.closeIcon, compact: spec.compact,
+				expandLabel: spec.expandLabel, onExpand: spec.onExpand, time: spec.time, onClose: spec.onClose,
+			},
 		};
 		store.update((items) => [...items.filter((item) => !item.pinned), toast]);
 		if (duration === undefined) clearTimer(id);
@@ -192,6 +213,7 @@ function createToastStore() {
 		subscribe: store.subscribe,
 		show,
 		showAction,
+		showButton,
 		pin,
 		unpin,
 		dismiss,

@@ -264,6 +264,10 @@ drain_and_wait() {
             return 1
             ;;
     esac
+    if [ "$max_wait" -gt 1800 ]; then
+        warn "Drain timeout capped at 1800 seconds (was $max_wait)"
+        max_wait=1800
+    fi
 
     local operation_id="${CORSIA_RESTART_OPERATION_ID:-}"
     local compatibility_handoff="${3:-}" handoff_status
@@ -454,6 +458,7 @@ if json.load(sys.stdin) != {"detail": "restart operation is not quiescent"}:
                 sleep 2
                 continue
             fi
+
             if [ "$ready_http_status" != "200" ]; then
                 warn "Could not mark drain ready"
                 cancel_failed_drain "$drain_url" "$operation_id" || :
@@ -483,7 +488,8 @@ if payload.get("ok") is not True or payload.get("operation_id") != expected:
 
     warn "Drain timed out; enforcing hard cap"
     local hard_cap_response hard_cap_forced
-    if ! hard_cap_response=$(curl -sf --max-time 30 -X POST "$hard_cap_url" \
+    if ! hard_cap_response=$(curl -sf --max-time 30 \
+        -X POST "$hard_cap_url" \
         -H "Content-Type: application/json" \
         -d "{\"operation_id\":\"$operation_id\"}" 2>/dev/null); then
         warn "Could not enforce drain hard cap; cancelling restart"
