@@ -6,12 +6,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 import uuid
 
-from automation.restart_callbacks import (
-    callback_credential_hash,
-    callback_credential_matches,
-    mint_callback_credential,
-)
-from automation.update_schedule import update_attempted_today
+from automation.restart_tokens import revoke_lifecycle_token_for_terminal_operation
 from infra.database import get_db, write_transaction
 
 IN_FLIGHT_TTL_SECONDS = 600
@@ -193,7 +188,6 @@ def try_acquire(
     kind: str | None = None,
     trigger: str | None = None,
     target_version: str | None = None,
-    callback_hash: str | None = None,
     changes: str | None = None,
     operation_id: str | None = None,
     db=None,
@@ -234,8 +228,8 @@ def try_acquire(
         connection.execute(
             "INSERT INTO self_restart_requests "
             "(id,requester_thread_id,requester_user,from_sha,branch,reason,"
-            "kind,trigger,target_version,callback_credential_hash,changes,status,phase,requested_at,cutoff_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,'in_flight',?,?,?,?)",
+            "kind,trigger,target_version,changes,status,phase,requested_at,cutoff_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,'in_flight',?,?,?,?)",
             (
                 operation_id,
                 requester_thread_id,
@@ -246,7 +240,6 @@ def try_acquire(
                 kind,
                 trigger,
                 target_version,
-                callback_hash,
                 changes,
                 _target_phase,
                 now,
@@ -334,11 +327,14 @@ def complete_operation(
     with write_transaction(db, scope="restart_operation") as connection:
         cur = connection.execute(
             "UPDATE self_restart_requests SET status='complete',phase=NULL,"
-            "settled_at=?,updated_at=?,deployed_sha=?,error=NULL,callback_credential_hash=NULL "
+            "settled_at=?,updated_at=?,deployed_sha=?,error=NULL "
             "WHERE id=? AND status='in_flight' AND phase='resuming'",
             (_now_iso(), _now_iso(), deployed_sha, operation_id),
         )
-        return cur.rowcount == 1
+        settled = cur.rowcount == 1
+        if settled:
+            revoke_lifecycle_token_for_terminal_operation(connection, operation_id)
+        return settled
 
 
 def abort_operation(
@@ -356,7 +352,7 @@ def abort_operation(
         placeholders = ",".join("?" for _phase in ABORTABLE_PHASES)
         cur = connection.execute(
             "UPDATE self_restart_requests SET status=?,phase=NULL,settled_at=?,"
-            "updated_at=?,error=?,failure_code=?,failure_detail=?,callback_credential_hash=NULL "
+            "updated_at=?,error=?,failure_code=?,failure_detail=? "
             "WHERE id=? AND status='in_flight' "
             f"AND phase IN ({placeholders})",
             (
@@ -370,7 +366,10 @@ def abort_operation(
                 *sorted(ABORTABLE_PHASES),
             ),
         )
-        return cur.rowcount == 1
+        settled = cur.rowcount == 1
+        if settled:
+            revoke_lifecycle_token_for_terminal_operation(connection, operation_id)
+        return settled
 
 
 def clear_stale_in_flight(
@@ -381,10 +380,17 @@ def clear_stale_in_flight(
     """Close only legacy pre-lifecycle rows; operational holds are never auto-released."""
     cutoff = (_now() - timedelta(seconds=IN_FLIGHT_TTL_SECONDS)).isoformat()
     with write_transaction(db, scope="restart_operation") as connection:
+        rows = connection.execute(
+            "SELECT id FROM self_restart_requests WHERE status='in_flight' "
+            "AND phase IS NULL AND requested_at < ?",
+            (cutoff,),
+        ).fetchall()
         cur = connection.execute(
             "UPDATE self_restart_requests SET status='superseded',settled_at=?,"
-            "updated_at=?,deployed_sha=?,callback_credential_hash=NULL WHERE status='in_flight' AND phase IS NULL "
+            "updated_at=?,deployed_sha=? WHERE status='in_flight' AND phase IS NULL "
             "AND requested_at < ?",
             (_now_iso(), _now_iso(), deployed_sha, cutoff),
         )
+        for row in rows:
+            revoke_lifecycle_token_for_terminal_operation(connection, row["id"])
         return cur.rowcount

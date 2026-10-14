@@ -17,8 +17,8 @@
 	const targetVersion = $derived(operation?.target_version ?? $updateStatus?.target_version);
 	const showAvailable = $derived(!running && !refusal && $updateStatus?.available && targetVersion);
 	const installedAt = $derived(operation?.status === 'complete' && operation.settled_at ? formatInstalledAt(operation.settled_at, Date.now()) : null);
-	const schedule = $derived($updateStatus?.schedule ?? { automatic: false, time: '03:00', tonight_at: null });
-	const scheduledTonight = $derived(Boolean(schedule.tonight_at));
+	const schedule = $derived($updateStatus?.schedule);
+	const scheduledTonight = $derived(Boolean(schedule?.tonight_at));
 	let scheduleSaving = $state(false);
 	async function saveSchedule(patch: { automatic?: boolean; time?: string; tonight?: boolean }): Promise<boolean> {
 		scheduleSaving = true;
@@ -33,7 +33,7 @@
 <div class="service-row update-row">
 	<span class="service-name">Version</span>
 	<div class="version-state">
-		<span class="version-line">{#if scheduledTonight}<StatePill state="active" size="sm" label={`${currentVersion} · ${formatScheduleTime(schedule.time)} tonight`} />{:else}<span class="service-version">{currentVersion}</span>{#if refusal}<StatePill state="warning" size="sm" label={refusal.title} />{:else if showAvailable}<StatePill state="active" size="sm" label={`${targetVersion} available`} />{/if}{/if}</span>
+		<span class="version-line">{#if scheduledTonight}<StatePill state="active" size="sm" label={`${currentVersion} · ${formatScheduleTime(schedule?.time ?? '')} tonight`} />{:else}<span class="service-version">{currentVersion}</span>{#if refusal}<StatePill state="warning" size="sm" label={refusal.title} />{:else if showAvailable}<StatePill state="active" size="sm" label={`${targetVersion} available`} />{/if}{/if}</span>
 		{#if running}
 			<span class="updating"><span class="spinner" aria-hidden="true"></span>Updating to {targetVersion ?? 'the latest version'}</span>
 			<span class="step">{stepMessage(operation, false)}</span>
@@ -55,10 +55,10 @@
 </div>
 
 <div class="automatic-row">
-	<div class="automatic-copy"><span>Keep CORSIA up to date automatically</span>{#if schedule.automatic}<span class="service-status">Installs at {formatScheduleTime(schedule.time)}.</span>{/if}</div>
+	<div class="automatic-copy"><span>Keep CORSIA up to date automatically</span>{#if schedule?.automatic}<span class="service-status">Installs at {formatScheduleTime(schedule?.time ?? '')}.</span>{/if}</div>
 	<div class="service-actions">
-		{#if schedule.automatic}<input aria-label="Automatic update time" class="time-field" type="time" value={schedule.time} disabled={scheduleSaving} onchange={(event) => void saveSchedule({ time: event.currentTarget.value })} />{/if}
-		<Toggle checked={schedule.automatic} onchange={(next) => void saveSchedule({ automatic: next })} ariaLabel="Automatically install updates overnight" disabled={scheduleSaving} />
+		{#if schedule?.automatic}<input aria-label="Automatic update time" class="time-field" type="time" value={schedule?.time ?? ''} disabled={scheduleSaving} onchange={(event) => void saveSchedule({ time: event.currentTarget.value })} />{/if}
+		<Toggle checked={schedule?.automatic ?? false} onchange={(next) => void saveSchedule({ automatic: next })} ariaLabel="Automatically install updates overnight" disabled={scheduleSaving} />
 	</div>
 </div>
 

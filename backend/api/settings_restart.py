@@ -16,13 +16,12 @@ from api.update_preflight import check_update_backup_room as _check_update_backu
 from infra.update_prepare_output import clean_update_output, terminal_update_summary
 
 _UPDATE_REQUEST_LOCK = asyncio.Lock()
-_RELEASE_FAILURE_NOTE = (
-    "Restart control could not be released automatically; "
-    "the active operation may still be holding ingress."
-)
+_RELEASE_FAILURE_NOTE = ("Restart control could not be released automatically; "
+                         "the active operation may still be holding ingress.")
 # Exit codes of `corsia prepare-redeploy`; any other nonzero exit is `prepare_failed`.
 _PREPARE_EXIT_CODES = {
-    41: "fetch_failed", 42: "build_failed",
+    41: "fetch_failed",
+    42: "build_failed",
     43: "index_locked",
     44: "checkout_detached",
     45: "checkout_dirty",
@@ -127,7 +126,6 @@ async def _acquire_settings_restart(
     *,
     trigger: str | None = None,
     target_version: str | None = None,
-    callback_hash: str | None = None,
 ) -> str:
     """Acquire one Settings restart while retaining a committed ID on cancellation."""
     from automation import self_restart
@@ -144,7 +142,6 @@ async def _acquire_settings_restart(
             kind="update" if mode == "update" else "restart",
             trigger=trigger if mode == "update" else None,
             target_version=(target_version or cached_target_version()) if mode == "update" else None,
-            callback_hash=callback_hash,
             changes=json.dumps(cached_changes()) if mode == "update" and cached_changes() else None,
         )
         if operation_id is not None:
@@ -293,7 +290,7 @@ async def _launch_settings_restart(
     script_args: list[str],
     restart_log_path: Callable[[str], Path],
     *,
-    caller_token: str | None = None,
+    caller_token: str | Callable[[str], str] | None = None,
 ) -> object:
     """Launch the detached lifecycle process or compensate its failed handoff."""
     log_path = restart_log_path("restart.log")
@@ -305,7 +302,11 @@ async def _launch_settings_restart(
                 restart_env,
                 operation_id,
                 log_fh,
-                caller_credential=caller_token,
+                caller_credential=(
+                    caller_token(operation_id)
+                    if callable(caller_token)
+                    else caller_token
+                ),
             )
     except (OSError, ValueError) as exc:
         from automation.restart import abort_restart_control
@@ -341,10 +342,9 @@ async def prelaunch_settings_restart(
     script_args: list[str],
     restart_log_path: Callable[[str], Path],
     *,
-    caller_token: str,
+    caller_token: str | Callable[[str], str],
     trigger: str | None = "manual",
     target_version: str | None = None,
-    callback_hash: str | None = None,
 ) -> tuple[str, object]:
     """Hand Settings restart ownership from preparation through child launch."""
     prepared = mode == "update"
@@ -359,7 +359,6 @@ async def prelaunch_settings_restart(
                 acquired_ids,
                 trigger=trigger,
                 target_version=target_version,
-                callback_hash=callback_hash,
             )
         except asyncio.CancelledError as error:
             await _compensate_cancelled_acquire(

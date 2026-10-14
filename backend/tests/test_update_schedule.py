@@ -16,6 +16,41 @@ def test_tonight_is_due_only_inside_its_one_hour_window():
     assert should_drop_tonight(schedule, now=now + timedelta(minutes=30))
 
 
+def test_tonight_always_uses_the_current_schedule_minute():
+    from automation.update_schedule import due_trigger
+
+    schedule = {
+        "automatic": False,
+        "time": "04:00",
+        "tonight_at": "2026-10-14T03:00:00+00:00",
+    }
+    at_old_minute = datetime(2026, 10, 14, 3, 10, tzinfo=timezone.utc)
+    at_new_minute = datetime(2026, 10, 14, 4, 10, tzinfo=timezone.utc)
+
+    assert due_trigger(schedule, now=at_old_minute, update_available=True, attempted_today=False) is None
+    assert due_trigger(schedule, now=at_new_minute, update_available=True, attempted_today=False) == "tonight"
+
+
+def test_clear_tonight_keeps_a_patch_written_after_the_tick_read(isolated_db):
+    from automation.update_schedule import clear_tonight, update_schedule_patch
+    from infra.settings import get_update_schedule
+
+    now = datetime(2026, 10, 14, 2, 30, tzinfo=timezone.utc)
+    update_schedule_patch({"tonight": True}, now=now, user_id="steve")
+    tick_schedule = get_update_schedule(include_owner=True)
+    update_schedule_patch(
+        {"automatic": True, "time": "04:00"}, now=now, user_id="steve"
+    )
+
+    clear_tonight(tick_schedule)
+
+    assert get_update_schedule() == {
+        "automatic": True,
+        "time": "04:00",
+        "tonight_at": None,
+    }
+
+
 def test_automatic_runs_once_in_its_local_hour_after_no_update_attempt():
     from automation.update_schedule import due_trigger
 
@@ -54,8 +89,10 @@ def test_scheduled_update_migration_preserves_existing_operation_rows():
     migrate_114_to_115(db)
 
     columns = {row[1] for row in db.execute("PRAGMA table_info(self_restart_requests)")}
-    assert "callback_credential_hash" in columns
+    assert "callback_credential_hash" not in columns
     assert db.execute("SELECT status FROM self_restart_requests WHERE id='legacy'").fetchone()[0] == "complete"
+    indexes = {row[1] for row in db.execute("PRAGMA index_list(self_restart_requests)")}
+    assert "idx_self_restart_requests_update_attempts" in indexes
 
 
 def _operation_table() -> sqlite3.Connection:
@@ -65,16 +102,20 @@ def _operation_table() -> sqlite3.Connection:
         "CREATE TABLE self_restart_requests ("
         "id TEXT PRIMARY KEY, requester_thread_id TEXT, requester_user TEXT, from_sha TEXT, "
         "branch TEXT, reason TEXT, kind TEXT, trigger TEXT, target_version TEXT, "
-        "callback_credential_hash TEXT, changes TEXT, outcome_seen_at TEXT, status TEXT, phase TEXT, requested_at TEXT, "
+        "changes TEXT, outcome_seen_at TEXT, status TEXT, phase TEXT, requested_at TEXT, "
         "cutoff_at TEXT, updated_at TEXT, settled_at TEXT, deployed_sha TEXT, error TEXT, "
         "failure_code TEXT, failure_detail TEXT)"
     )
+    db.execute("CREATE TABLE users (id TEXT PRIMARY KEY)")
+    db.execute(
+        "CREATE TABLE auth_tokens (token_hash TEXT PRIMARY KEY, user_id TEXT, kind TEXT, "
+        "label TEXT, created_at TEXT, expires_at TEXT)"
+    )
+    db.execute("INSERT INTO users (id) VALUES ('steve')")
     return db
 
 
 def test_attempted_today_uses_local_update_acquisition_date():
-    from automation import self_restart
-
     db = _operation_table()
     local_now = datetime(2026, 10, 14, 3, 15, tzinfo=timezone.utc)
     db.execute(
@@ -83,34 +124,48 @@ def test_attempted_today_uses_local_update_acquisition_date():
     )
     db.commit()
 
-    assert self_restart.update_attempted_today(now=local_now, db=db)
-    assert not self_restart.update_attempted_today(now=local_now + timedelta(days=1), db=db)
+    from automation.update_schedule import update_attempted_today
+
+    assert update_attempted_today(now=local_now, db=db)
+    assert not update_attempted_today(now=local_now + timedelta(days=1), db=db)
 
 
-def test_callback_credential_is_operation_scoped_and_dead_at_terminal_state():
+def test_lifecycle_service_tokens_are_revoked_at_every_terminal_path():
     from automation import self_restart
+    from infra import accounts
 
     db = _operation_table()
-    credential = self_restart.mint_callback_credential()
-    first = self_restart.try_acquire(
-        None, None, None, None, "update", kind="update", trigger="tonight",
-        callback_hash=self_restart.callback_credential_hash(credential), db=db,
-    )
-    assert first is not None
-    assert self_restart.callback_credential_matches(first, credential, db=db)
-    assert not self_restart.callback_credential_matches("f" * 32, credential, db=db)
 
-    assert self_restart.abort_operation(first, error="cancelled", cancelled=True, db=db)
-    assert not self_restart.callback_credential_matches(first, credential, db=db)
+    def acquire() -> tuple[str, str]:
+        operation_id = self_restart.try_acquire(
+            None, "steve", None, None, "update", kind="update", db=db
+        )
+        assert operation_id is not None
+        return operation_id, accounts.issue_lifecycle_service_token("steve", operation_id)
 
-    second_credential = self_restart.mint_callback_credential()
-    second = self_restart.try_acquire(
-        None, None, None, None, "update", kind="update", trigger="automatic",
-        callback_hash=self_restart.callback_credential_hash(second_credential), db=db,
+    completed, completed_token = acquire()
+    assert self_restart.transition_operation(completed, expected="holding", target="resuming", db=db)
+    assert self_restart.complete_operation(completed, db=db)
+    assert accounts.resolve_token(completed_token, db=db) is None
+
+    failed, failed_token = acquire()
+    assert self_restart.abort_operation(failed, error="expired", failure_code="credential_expired", db=db)
+    assert accounts.resolve_token(failed_token, db=db) is None
+
+    cancelled, cancelled_token = acquire()
+    assert self_restart.abort_operation(cancelled, error="cancelled", cancelled=True, db=db)
+    assert accounts.resolve_token(cancelled_token, db=db) is None
+
+    abandoned, abandoned_token = acquire()
+    db.execute(
+        "UPDATE self_restart_requests SET phase=NULL, requested_at=? WHERE id=?",
+        ((datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(), abandoned),
     )
-    assert second is not None
-    assert not self_restart.callback_credential_matches(second, credential, db=db)
-    assert self_restart.callback_credential_matches(second, second_credential, db=db)
+    db.commit()
+    assert self_restart.clear_stale_in_flight(db=db) == 1
+    assert accounts.resolve_token(abandoned_token, db=db) is None
+    stored = db.execute("SELECT * FROM self_restart_requests WHERE id=?", (abandoned,)).fetchone()
+    assert abandoned_token not in " ".join(str(value) for value in stored)
 
 
 def test_scheduled_outcome_is_marked_once_across_devices():
@@ -133,23 +188,28 @@ def _patch_scheduled_check(monkeypatch, launch):
     from types import SimpleNamespace
 
     from api import scheduled_update
-    from automation import self_restart, update_schedule
+    from automation import update_schedule
     from infra import db_async, settings, update_status
 
     cleared = []
-    schedule = {"automatic": False, "time": "03:00", "tonight_at": "2026-10-14T03:00:00+00:00"}
+    schedule = {
+        "automatic": False,
+        "time": "03:00",
+        "tonight_at": "2026-10-14T03:00:00+00:00",
+        "owner_id": "steve",
+    }
 
     async def run_in_db(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    monkeypatch.setattr(settings, "get_update_schedule", lambda: schedule)
+    monkeypatch.setattr(settings, "get_update_schedule", lambda **_kwargs: schedule)
     monkeypatch.setattr(
         update_status,
         "update_status",
         lambda _refresh: SimpleNamespace(to_dict=lambda: {"available": True, "target_version": "1.2.3"}),
     )
     monkeypatch.setattr(db_async, "run_in_db", run_in_db)
-    monkeypatch.setattr(self_restart, "update_attempted_today", lambda **_kwargs: False)
+    monkeypatch.setattr(update_schedule, "update_attempted_today", lambda **_kwargs: False)
     monkeypatch.setattr(update_schedule, "clear_tonight", lambda value: cleared.append(value) or value)
     monkeypatch.setattr(scheduled_update, "launch_scheduled_update", launch)
     return cleared
@@ -162,15 +222,15 @@ def test_tonight_is_claimed_once_and_launches_its_update(monkeypatch):
 
     launched = []
 
-    async def launch(trigger, target_version):
-        launched.append((trigger, target_version))
+    async def launch(trigger, target_version, user_id):
+        launched.append((trigger, target_version, user_id))
         return "c" * 32
 
     cleared = _patch_scheduled_check(monkeypatch, launch)
     now = datetime(2026, 10, 14, 3, 10, tzinfo=timezone.utc)
 
     assert asyncio.run(_run_scheduled_update_if_due(now)) == "c" * 32
-    assert launched == [("tonight", "1.2.3")]
+    assert launched == [("tonight", "1.2.3", "steve")]
     assert len(cleared) == 1
 
 
@@ -181,7 +241,7 @@ def test_scheduled_launch_failure_is_logged_not_swallowed(monkeypatch):
 
     from jobs.nightly import _run_scheduled_update_if_due
 
-    async def launch(_trigger, _target_version):
+    async def launch(_trigger, _target_version, _user_id):
         raise RuntimeError("scheduled update cannot launch: BACKEND_PORT is not a port number")
 
     cleared = _patch_scheduled_check(monkeypatch, launch)
@@ -193,5 +253,5 @@ def test_scheduled_launch_failure_is_logged_not_swallowed(monkeypatch):
     finally:
         logger.remove(sink)
 
-    assert len(cleared) == 1
+    assert len(cleared) == 0
     assert any("BACKEND_PORT is not a port number" in message for message in messages)

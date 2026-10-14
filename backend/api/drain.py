@@ -19,15 +19,8 @@ def _require_user(token: str) -> dict:
 
 
 async def _require_lifecycle_callback(token: str, operation_id: str) -> None:
-    """Authorize a normal caller or this scheduled operation's shell only."""
-    if authenticate(token):
-        return
-    from automation import self_restart
-    from infra.db_async import run_in_db
-
-    if await run_in_db(self_restart.callback_credential_matches, operation_id, token):
-        return
-    raise HTTPException(401)
+    """Authorize a lifecycle caller with the ordinary account-token path."""
+    _require_user(token)
 
 
 @router.post("/drain")
@@ -79,18 +72,42 @@ async def system_drain(
 
 
 @router.get("/drain")
-async def get_drain_status_route(token: str, operation_id: str | None = None):
-    """Return the caller's status, or an exact callback-owned operation's status."""
-    from infra.drain import get_drain_operation_status, get_drain_status
+async def get_drain_status_route(token: str):
+    """Return only the authenticated caller's live drain state."""
+    from infra.drain import get_drain_status
 
-    if operation_id:
-        await _require_lifecycle_callback(token, operation_id)
-        status = get_drain_operation_status(operation_id)
-        if status is None:
-            raise HTTPException(404, "restart operation not found")
-        return status
     user = _require_user(token)
     return get_drain_status(user_id=user["id"])
+
+
+@router.post("/drain/credential-expired")
+async def credential_expired(token: str, body: dict):
+    """Terminalize only the operation whose expired service token reported itself."""
+    operation_id = str(body.get("operation_id") or "")
+    if not operation_id:
+        raise HTTPException(400, "operation_id is required")
+    from automation import self_restart
+    from automation.restart import abort_restart_control
+    from infra.accounts import expired_lifecycle_service_token_matches
+    from infra.db_async import run_in_db
+
+    operation = await run_in_db(self_restart.operation_by_id, operation_id)
+    if operation is None or not operation.get("requester_user"):
+        raise HTTPException(401)
+    if not await run_in_db(
+        expired_lifecycle_service_token_matches,
+        operation["requester_user"],
+        operation_id,
+        token,
+    ):
+        raise HTTPException(401)
+    if not await abort_restart_control(
+        operation_id,
+        error="lifecycle service credential expired",
+        failure_code="credential_expired",
+    ):
+        raise HTTPException(409, "restart operation changed before credential failure")
+    return {"ok": True, "operation_id": operation_id, "failure_code": "credential_expired"}
 
 
 @router.delete("/drain")

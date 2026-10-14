@@ -89,7 +89,7 @@ describe('UpdateJourney', () => {
 	});
 
 	it('renders the decision sheet with release notes and the S3 actions', () => {
-		updateStatus.set(status());
+		updateStatus.set(status({ schedule: { automatic: false, time: '03:00', tonight_at: null } }));
 		updateSurface.set('sheet');
 		component = mount(UpdateJourney, { target: host });
 		flushSync();

@@ -1,45 +1,32 @@
-"""Nightly-loop entry point for the ordinary Update lifecycle."""
+"""Nightly trigger for the ordinary Settings Update lifecycle."""
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
-
-from api.settings_restart import prelaunch_settings_restart
-from automation.restart_callbacks import callback_credential_hash, mint_callback_credential
 
 
-async def launch_scheduled_update(trigger: str, target_version: str | None) -> str:
-    """Run the approved Update lifecycle from the nightly loop without a human token."""
+async def launch_scheduled_update(
+    trigger: str, target_version: str | None, user_id: str | None
+) -> str:
+    """Run Settings Update as the account that set the active schedule choice."""
     if trigger not in {"tonight", "automatic"}:
         raise ValueError("scheduled update trigger is invalid")
+    if not user_id:
+        raise RuntimeError("scheduled update has no account owner")
     port = os.environ.get("BACKEND_PORT", "")
     if not port.isdigit():
         raise RuntimeError("scheduled update cannot launch: BACKEND_PORT is not a port number")
-    from infra.config import LOGS_DIR
+    from api.system_admin import launch_update
+    from infra.accounts import get_user
 
-    credential = mint_callback_credential()
-    restart_env = {
-        **os.environ,
-        "BACKEND_PORT": port,
-        "CORSIA_RESTART_BACKEND_PORT": port,
-    }
-    corsia_script = Path(__file__).parent.parent.parent / "scripts" / "corsia"
-
-    def restart_log_path(name: str) -> Path:
-        LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        return LOGS_DIR / name
-
-    operation_id, _process = await prelaunch_settings_restart(
+    user = get_user(user_id)
+    if user is None:
+        raise RuntimeError(f"scheduled update account no longer exists: {user_id}")
+    operation_id, _process = await launch_update(
+        user,
         None,
-        "update",
-        corsia_script,
-        restart_env,
-        ["restart"],
-        restart_log_path,
-        caller_token=credential,
-        trigger=trigger,
-        target_version=target_version,
-        callback_hash=callback_credential_hash(credential),
+        trigger,
+        target_version,
+        port=int(port),
     )
     return operation_id

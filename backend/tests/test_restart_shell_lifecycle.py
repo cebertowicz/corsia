@@ -343,15 +343,15 @@ def test_drain_poll_accepts_the_real_operation_status_payload(
     tmp_path: Path,
     isolated_db,
 ) -> None:
-    """The shell's poll parser reads the payload the operation route really returns."""
+    """The shell's poll parser reads the real caller-scoped drain payload."""
     import json
 
     from automation import self_restart
-    from infra.drain import get_drain_operation_status
+    from infra.drain import get_drain_status
 
-    operation_id = self_restart.try_acquire(None, None, None, None, "update", kind="update")
+    operation_id = self_restart.try_acquire(None, "steve", None, None, "update", kind="update")
     assert operation_id is not None
-    payload = json.dumps(get_drain_operation_status(operation_id))
+    payload = json.dumps(get_drain_status(user_id="steve"))
     trace = tmp_path / "curl.log"
     result = _run_bash(
         """
@@ -383,7 +383,7 @@ drain_and_wait restart 9999
     assert not any("-X DELETE" in call for call in calls)
 
     assert self_restart.abort_operation(operation_id, error="stopped", failure_code="build_failed")
-    settled = get_drain_operation_status(operation_id)
+    settled = get_drain_status(user_id="steve")
     assert settled["active"] is False
     assert settled["activeProcesses"] == 0
 

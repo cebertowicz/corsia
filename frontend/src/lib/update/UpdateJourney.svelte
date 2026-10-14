@@ -40,7 +40,7 @@
 	const heading = $derived(screen === 'failure' ? (failure?.title ?? "Update didn't start") : screen === 'panel' ? 'Updating CORSIA' : screen === 'notes' ? `What's new in ${targetVersion}` : 'Update CORSIA');
 	const agentCount = $derived($drainStatus?.activeTurns ?? $updateStatus?.agents_working ?? 0);
 	const activeStep = $derived(stepIndex(operation, $updateUnreachable));
-	const schedule = $derived($updateStatus?.schedule ?? { automatic: false, time: '03:00', tonight_at: null });
+	const schedule = $derived($updateStatus?.schedule);
 
 	// Closing the progress toast hides it for the rest of that operation; the Updated and failure toasts are pinned elsewhere and always show.
 	let hiddenProgressFor: string | null = $state(null);
@@ -63,7 +63,7 @@
 	async function tonight(): Promise<void> {
 		if (!await saveUpdateSchedule({ tonight: true })) return;
 		closeUpdateSurface();
-		toasts.showAction(`Update scheduled for ${formatScheduleTime(schedule.time)} tonight.`, {
+		toasts.showAction(`Update scheduled for ${formatScheduleTime(schedule?.time ?? '')} tonight.`, {
 			label: 'Undo', run: () => { void saveUpdateSchedule({ tonight: false }); },
 		});
 	}
@@ -95,7 +95,7 @@
 
 {#snippet modalFoot()}
 	<div class="update-foot">
-		{#if screen === 'sheet'}<Button variant="ghost" onclick={close}>Later</Button>{#if !schedule.automatic}<Button variant="secondary" onclick={() => void tonight()}>Tonight at {formatScheduleTime(schedule.time)}</Button>{/if}<Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button>
+		{#if screen === 'sheet'}<Button variant="ghost" onclick={close}>Later</Button>{#if schedule && !schedule.automatic}<Button variant="secondary" onclick={() => void tonight()}>Tonight at {formatScheduleTime(schedule.time)}</Button>{/if}<Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button>
 		{:else if screen === 'panel'}<Button variant="ghost" onclick={close}>Hide</Button>
 		{:else if screen === 'notes'}<Button variant="primary" onclick={close}>Done</Button>
 		{:else}{#if failure?.retryLabel}<Button loading={$updateStarting} onclick={retry}>{failure.retryLabel}</Button>{/if}<Button variant="primary" onclick={close}>Close</Button>{/if}
@@ -118,8 +118,8 @@
 		{#if screen === 'sheet' && $updateStatus?.drain_cap_seconds}
 			<div class="cost" data-update-drain><strong>CORSIA will be unavailable — usually about a minute.</strong>{#if agentCount > 0}<span>{#if agentCount === 1}1 agent is working: it gets up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. If it is still mid-step, it is stopped and starts that step again once CORSIA is back.{:else}{agentCount} agents are working: they get up to {humanDuration($updateStatus.drain_cap_seconds)} to reach a safe point. Any still mid-step are stopped and start that step again once CORSIA is back.{/if}</span>{/if}</div>
 		{/if}
-		{#if screen === 'sheet'}<div class="automatic-choice"><div><span>Keep CORSIA up to date automatically</span>{#if schedule.automatic}<span>Installs at {formatScheduleTime(schedule.time)}. You'll see what changed the next time you open CORSIA.</span>{/if}</div><Toggle checked={schedule.automatic} onchange={(next) => void saveUpdateSchedule({ automatic: next })} ariaLabel="Keep CORSIA up to date automatically" /></div>{/if}
-		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions" data-update-mobile-actions>{#if !schedule.automatic}<Button variant="secondary" onclick={() => void tonight()}>Tonight at {formatScheduleTime(schedule.time)}</Button>{/if}<Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button></div>{/if}
+		{#if screen === 'sheet' && schedule}<div class="automatic-choice"><div><span>Keep CORSIA up to date automatically</span>{#if schedule.automatic}<span>Installs at {formatScheduleTime(schedule.time)}. You'll see what changed the next time you open CORSIA.</span>{/if}</div><Toggle checked={schedule.automatic} onchange={(next) => void saveUpdateSchedule({ automatic: next })} ariaLabel="Keep CORSIA up to date automatically" /></div>{/if}
+		{#if screen === 'sheet' && $isMobile}<div class="mobile-actions" data-update-mobile-actions>{#if schedule && !schedule.automatic}<Button variant="secondary" onclick={() => void tonight()}>Tonight at {formatScheduleTime(schedule.time)}</Button>{/if}<Button variant="primary" loading={$updateStarting} onclick={updateNow}>Update now</Button></div>{/if}
 	</section>
 {/snippet}
 

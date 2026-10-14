@@ -142,7 +142,7 @@ def _should_run_on_idle() -> bool:
     return _is_system_idle(threshold_hours=IDLE_THRESHOLD_HOURS)
 
 
-async def _run_job_safely(*, include_corrections: bool = False) -> None:
+async def _run_job_safely() -> None:
     """Run the daily retention sweep once, recording a terminal disposition.
 
     The terminal record is written in ``finally`` so that a failed sweep still
@@ -188,24 +188,27 @@ async def _run_job_safely(*, include_corrections: bool = False) -> None:
                 status,
                 rec_err,
             )
-    # Second step, after the terminal record: it shares today's claim, and its
-    # failure can never change the retention status already written.
+    # Second step, after the terminal record: its failure cannot change the
+    # retention status already written.
     await _reap_worktrees_safely()
-    if include_corrections:
-        await _run_corrections_recording_safely()
 
 
 async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | None:
     """Check the D7 system schedule without using the maintenance day claim."""
     from automation import self_restart
-    from automation.update_schedule import clear_tonight, due_trigger, should_drop_tonight
+    from automation.update_schedule import (
+        clear_tonight,
+        due_trigger,
+        should_drop_tonight,
+        update_attempted_today,
+    )
     from infra.db_async import run_in_db
     from infra.settings import get_update_schedule
     from infra.update_status import update_status
 
     try:
         local_now = now or datetime.now().astimezone()
-        schedule = await asyncio.to_thread(get_update_schedule)
+        schedule = await asyncio.to_thread(get_update_schedule, include_owner=True)
         if should_drop_tonight(schedule, now=local_now):
             await asyncio.to_thread(clear_tonight, schedule)
             return None
@@ -215,15 +218,20 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
             schedule,
             now=local_now,
             update_available=details.get("available") is True,
-            attempted_today=await run_in_db(self_restart.update_attempted_today, now=local_now),
+            attempted_today=await run_in_db(update_attempted_today, now=local_now),
         )
         if trigger is None:
             return None
-        if trigger == "tonight":
-            await asyncio.to_thread(clear_tonight, schedule)
         from api.scheduled_update import launch_scheduled_update
 
-        return await launch_scheduled_update(trigger, details.get("target_version"))
+        operation_id = await launch_scheduled_update(
+            trigger,
+            details.get("target_version"),
+            schedule.get("owner_id"),
+        )
+        if trigger == "tonight":
+            await asyncio.to_thread(clear_tonight, schedule)
+        return operation_id
     except Exception:
         logger.exception("nightly_job: scheduled update check or launch failed")
         return None
@@ -281,7 +289,7 @@ async def nightly_job_loop() -> None:
                         and (nightly_corrections_task is None or nightly_corrections_task.done())
                     )
                     logger.info("nightly_job: nightly trigger fired (02:00 window)")
-                    await _run_job_safely(include_corrections=False)
+                    await _run_job_safely()
                     if include_corrections:
                         nightly_corrections_task = asyncio.create_task(
                             _run_corrections_recording_safely(),

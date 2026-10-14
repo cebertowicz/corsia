@@ -36,8 +36,10 @@ UPDATE_SCHEDULE_DEFAULT = {
 }
 
 
-def get_update_schedule(*, db: sqlite3.Connection | None = None) -> dict:
-    """Return the validated system-owned scheduled-update preference."""
+def get_update_schedule(
+    *, db: sqlite3.Connection | None = None, include_owner: bool = False
+) -> dict:
+    """Return the validated schedule, retaining its owner only for backend work."""
     value = get_setting("update_schedule", db=db) or {}
     automatic = value.get("automatic") is True
     time = value.get("time")
@@ -53,7 +55,10 @@ def get_update_schedule(*, db: sqlite3.Connection | None = None) -> dict:
             time = UPDATE_SCHEDULE_DEFAULT["time"]
     if not isinstance(tonight_at, str):
         tonight_at = None
-    return {"automatic": automatic, "time": time, "tonight_at": tonight_at}
+    schedule = {"automatic": automatic, "time": time, "tonight_at": tonight_at}
+    if include_owner and isinstance(value.get("owner_id"), str):
+        schedule["owner_id"] = value["owner_id"]
+    return schedule
 
 
 def set_setting(key: str, value: dict, *, db: sqlite3.Connection | None = None) -> None:

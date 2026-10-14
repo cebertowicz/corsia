@@ -127,7 +127,7 @@ def _asgi_response(sent: list[dict]) -> tuple[int, dict]:
 @pytest.mark.integration
 class TestSelfRestartEndpoint:
 
-    def test_drain_operation_lookup_projects_a_terminal_durable_row(
+    def test_drain_get_ignores_operation_lookup_and_stays_caller_scoped(
         self, isolated_db
     ):
         from automation import self_restart
@@ -154,24 +154,12 @@ class TestSelfRestartEndpoint:
         )[0]
         assert row["error"] == error[:500]
         assert exact_response.status_code == 200
-        assert exact_response.json() == {
-            "active": False,
-            "activeProcesses": 0,
-            "operation_id": row["id"],
-            "status": row["status"],
-            "phase": row["phase"],
-            "error": row["error"],
-            "kind": None,
-            "trigger": None,
-            "target_version": None,
-            "drain_total": None,
-            "failure_code": None,
-            "failure_detail": None,
-            "conductor_told_at": None,
-        }
         assert global_response.status_code == 200
+        assert exact_response.json() == global_response.json()
         assert global_response.json()["active"] is False
         assert "status" not in global_response.json()
+        assert row["id"] not in global_response.text
+        assert row["error"] not in global_response.text
 
     def test_drain_commits_the_callers_exact_operation_id(self, isolated_db):
         from infra import db_async

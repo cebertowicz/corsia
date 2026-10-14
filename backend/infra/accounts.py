@@ -241,6 +241,41 @@ def check_password(
     return {"id": row["id"], "name": row["id"]}
 
 
+def lifecycle_token_label(operation_id: str) -> str:
+    """Build the server-owned label for one lifecycle operation."""
+    return f"lifecycle:{operation_id}"
+
+
+def issue_service_token(user_id: str, label: str) -> str:
+    """Mint one short-lived lifecycle credential for an explicit account."""
+    token, _expires_at = issue_token(user_id, kind="service", label=label)
+    return token
+
+
+def issue_lifecycle_service_token(user_id: str, operation_id: str) -> str:
+    """Mint the one-hour drain credential for one server-created operation."""
+    return issue_service_token(user_id, lifecycle_token_label(operation_id))
+
+
+def revoke_lifecycle_service_token(
+    user_id: str, operation_id: str, *, db: sqlite3.Connection | None = None
+) -> int:
+    """Revoke the service credential attached to one settled lifecycle operation."""
+    return revoke_label(user_id, lifecycle_token_label(operation_id), db=db)
+
+
+def expired_lifecycle_service_token_matches(
+    user_id: str, operation_id: str, token: str, *, db: sqlite3.Connection | None = None
+) -> bool:
+    """Accept an expired operation token only to record its terminal failure."""
+    row = _db(db).execute(
+        "SELECT 1 FROM auth_tokens WHERE token_hash=? AND user_id=? AND kind='service' "
+        "AND label=? AND expires_at IS NOT NULL AND expires_at <= ?",
+        (token_digest(token), user_id, lifecycle_token_label(operation_id), utc_now_iso()),
+    ).fetchone()
+    return row is not None
+
+
 def issue_token(
     user_id: str,
     *,

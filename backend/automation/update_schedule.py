@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from infra.database import get_db
+from infra.database import get_db, write_transaction
 from infra.settings import get_update_schedule, set_setting
 
 
@@ -25,16 +25,17 @@ def next_local_time(now: datetime, value: str) -> datetime:
     return candidate
 
 
-def update_schedule_patch(payload: dict, *, now: datetime) -> dict:
+def update_schedule_patch(
+    payload: dict, *, now: datetime, user_id: str | None = None
+) -> dict:
     """Validate and persist an approved partial schedule update."""
     allowed = {"automatic", "time", "tonight"}
     if not payload or any(key not in allowed for key in payload):
         raise ValueError("automatic, time, or tonight is required")
-    current = get_update_schedule()
-    if "automatic" in payload:
-        if not isinstance(payload["automatic"], bool):
-            raise ValueError("automatic must be a boolean")
-        current["automatic"] = payload["automatic"]
+    if "automatic" in payload and not isinstance(payload["automatic"], bool):
+        raise ValueError("automatic must be a boolean")
+    if "tonight" in payload and not isinstance(payload["tonight"], bool):
+        raise ValueError("tonight must be a boolean")
     if "time" in payload:
         value = payload["time"]
         if not isinstance(value, str):
@@ -45,16 +46,22 @@ def update_schedule_patch(payload: dict, *, now: datetime) -> dict:
             raise ValueError("time must use HH:MM local time") from error
         if not 0 <= hour <= 23 or not 0 <= minute <= 59 or len(value) != 5:
             raise ValueError("time must use HH:MM local time")
-        current["time"] = value
-    if "tonight" in payload:
-        if not isinstance(payload["tonight"], bool):
-            raise ValueError("tonight must be a boolean")
-        current["tonight_at"] = (
-            next_local_time(now, current["time"]).astimezone().isoformat()
-            if payload["tonight"] else None
-        )
-    set_setting("update_schedule", current)
-    return current
+    with write_transaction(None, scope="update_schedule") as connection:
+        current = get_update_schedule(db=connection, include_owner=True)
+        if "automatic" in payload:
+            current["automatic"] = payload["automatic"]
+        if "time" in payload:
+            current["time"] = payload["time"]
+        if "tonight" in payload:
+            current["tonight_at"] = (
+                next_local_time(now, current["time"]).astimezone().isoformat()
+                if payload["tonight"] else None
+            )
+        if user_id is not None and ({"automatic", "tonight"} & payload.keys()):
+            current["owner_id"] = user_id
+        set_setting("update_schedule", current, db=connection)
+        result = {key: current[key] for key in ("automatic", "time", "tonight_at")}
+    return result
 
 
 def _parse(value: str | None) -> datetime | None:
@@ -74,7 +81,9 @@ def due_trigger(
     """Return the one schedule trigger due at this tick, without launching it."""
     tonight_at = _parse(schedule.get("tonight_at"))
     if tonight_at is not None:
-        due_at = tonight_at.astimezone(now.tzinfo)
+        scheduled_night = tonight_at.astimezone(now.tzinfo)
+        hour, minute = _time_parts(schedule["time"])
+        due_at = scheduled_night.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if due_at <= now < due_at + SCHEDULE_WINDOW:
             return "tonight" if update_available else None
     if not schedule.get("automatic") or not update_available or attempted_today:
@@ -89,16 +98,25 @@ def due_trigger(
 def should_drop_tonight(schedule: dict, *, now: datetime) -> bool:
     """Return whether the one-hour Tonight window has expired silently."""
     tonight_at = _parse(schedule.get("tonight_at"))
-    return tonight_at is not None and tonight_at.astimezone(now.tzinfo) + SCHEDULE_WINDOW <= now
+    if tonight_at is None:
+        return False
+    scheduled_night = tonight_at.astimezone(now.tzinfo)
+    hour, minute = _time_parts(schedule["time"])
+    due_at = scheduled_night.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return due_at + SCHEDULE_WINDOW <= now
 
 
 def clear_tonight(schedule: dict) -> dict:
-    """Clear the one-shot schedule after it is claimed or expires."""
-    if schedule.get("tonight_at") is None:
+    """Clear Tonight only if the tick still owns the value it read."""
+    expected = schedule.get("tonight_at")
+    if expected is None:
         return schedule
-    updated = {**schedule, "tonight_at": None}
-    set_setting("update_schedule", updated)
-    return updated
+    with write_transaction(None, scope="update_schedule") as connection:
+        current = get_update_schedule(db=connection, include_owner=True)
+        if current.get("tonight_at") == expected:
+            current["tonight_at"] = None
+            set_setting("update_schedule", current, db=connection)
+        return get_update_schedule(db=connection)
 
 
 def update_attempted_today(*, now: datetime | None = None, db=None) -> bool:

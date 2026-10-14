@@ -248,6 +248,17 @@ current_drain_url() {
         "$port" "to""ken" "$CORSIA_TOKEN"
 }
 
+record_credential_expired() {
+    local drain_url="$1" operation_id="$2"
+    local drain_base="${drain_url%%\?*}" drain_query="${drain_url#*\?}"
+    warn "Lifecycle credential expired; recording credential_expired"
+    curl -sS --max-time 5 -X POST \
+        "${drain_base}/credential-expired?${drain_query}" \
+        -H "Content-Type: application/json" \
+        -d "{\"operation_id\":\"$operation_id\"}" > /dev/null 2>&1 || \
+        warn "Could not record credential_expired"
+}
+
 drain_and_wait() {
     local reason="${1:-restart}"
     local port="${2:-$BACKEND_PORT}"
@@ -340,8 +351,27 @@ drain_and_wait() {
     while :; do
         waited=$(( $(runtime_epoch_seconds) - started_at ))
         [ "$waited" -lt "$max_wait" ] || break
-        local status
-        if ! status=$(curl -sf --max-time 5 "${drain_url}&operation_id=${operation_id}" 2>/dev/null); then
+        local status status_output status_http_status
+        if ! status_output=$(curl -sS --max-time 5 --write-out $'\n%{http_code}' \
+            "$drain_url" 2>/dev/null); then
+            warn "Could not read drain status"
+            cancel_failed_drain "$drain_url" "$operation_id" || :
+            return 1
+        fi
+        if [[ "$status_output" == *$'\n'* ]]; then
+            status_http_status="${status_output##*$'\n'}"
+            status="${status_output%$'\n'*}"
+        else
+            # The HTTP client always writes a status line; this fallback keeps
+            # embedded lifecycle callers that provide only a JSON payload compatible.
+            status_http_status="200"
+            status="$status_output"
+        fi
+        if [ "$status_http_status" = "401" ]; then
+            record_credential_expired "$drain_url" "$operation_id"
+            return 1
+        fi
+        if [ "$status_http_status" != "200" ]; then
             warn "Could not read drain status"
             cancel_failed_drain "$drain_url" "$operation_id" || :
             return 1
@@ -454,6 +484,10 @@ if json.load(sys.stdin) != {"detail": "restart operation is not quiescent"}:
                 sleep 2
                 continue
             fi
+            if [ "$ready_http_status" = "401" ]; then
+                record_credential_expired "$drain_url" "$operation_id"
+                return 1
+            fi
             if [ "$ready_http_status" != "200" ]; then
                 warn "Could not mark drain ready"
                 cancel_failed_drain "$drain_url" "$operation_id" || :
@@ -482,10 +516,27 @@ if payload.get("ok") is not True or payload.get("operation_id") != expected:
     done
 
     warn "Drain timed out; enforcing hard cap"
-    local hard_cap_response hard_cap_forced
-    if ! hard_cap_response=$(curl -sf --max-time 30 -X POST "$hard_cap_url" \
+    local hard_cap_response hard_cap_forced hard_cap_output hard_cap_http_status
+    if ! hard_cap_output=$(curl -sS --max-time 30 --write-out $'\n%{http_code}' \
+        -X POST "$hard_cap_url" \
         -H "Content-Type: application/json" \
         -d "{\"operation_id\":\"$operation_id\"}" 2>/dev/null); then
+        warn "Could not enforce drain hard cap; cancelling restart"
+        cancel_failed_drain "$drain_url" "$operation_id" || :
+        return 1
+    fi
+    if [[ "$hard_cap_output" != *$'\n'* ]]; then
+        warn "Drain hard-cap response was malformed"
+        cancel_failed_drain "$drain_url" "$operation_id" || :
+        return 1
+    fi
+    hard_cap_http_status="${hard_cap_output##*$'\n'}"
+    hard_cap_response="${hard_cap_output%$'\n'*}"
+    if [ "$hard_cap_http_status" = "401" ]; then
+        record_credential_expired "$drain_url" "$operation_id"
+        return 1
+    fi
+    if [ "$hard_cap_http_status" != "200" ]; then
         warn "Could not enforce drain hard cap; cancelling restart"
         cancel_failed_drain "$drain_url" "$operation_id" || :
         return 1
