@@ -46,15 +46,21 @@ export interface UpdateOffer {
 	changes: UpdateChanges | null;
 }
 
+/** A problem the client itself found, which no stored operation holds. */
+export interface ClientVerdict {
+	/** `version_mismatch`: a completed update whose running versions disagree; `refused`: a start the server turned away. */
+	kind: 'version_mismatch' | 'refused';
+	message: string;
+}
+
 /** A failure to show: a stored operation, or a verdict the client reached itself. */
 export interface UpdateFailure {
 	code: UpdateFailureCode | null;
-	phase: UpdatePhase | null;
 	detail: string | null;
 	summary: string | null;
 	conductorTold: boolean;
-	/** Set when the client, not the operation, found the problem. */
-	clientMessage?: string;
+	/** Set when the client, not the operation, found the problem; it wins over the operation's own copy. */
+	client?: ClientVerdict;
 	log: string | null;
 }
 
@@ -185,12 +191,15 @@ export function diskNumbers(detail: string | null | undefined): { neededGb: numb
 export function failureFromOperation(op: UpdateOperation): UpdateFailure {
 	return {
 		code: op.failure_code ?? null,
-		phase: op.phase ?? null,
 		detail: op.failure_detail ?? null,
 		summary: op.error ?? null,
 		conductorTold: Boolean(op.conductor_told_at),
 		log: op.log_tail ?? null,
 	};
+}
+
+export function failureFromVerdict(client: ClientVerdict): UpdateFailure {
+	return { code: null, detail: null, summary: null, conductorTold: false, log: null, client };
 }
 
 export interface FailureCopy {
@@ -206,7 +215,10 @@ export interface FailureCopy {
 	retryLabel: string | null;
 }
 
+// Only where nothing was touched: the disk check and a download that never advanced the checkout.
 const RAN_ON = 'CORSIA kept running and nothing was changed.';
+// The checkout may already hold the new version, so this claims only what is certain.
+const KEPT_VERSION = 'CORSIA is still running the version it had.';
 
 function diskCopy(detail: string | null): FailureCopy {
 	const disk = diskNumbers(detail);
@@ -222,13 +234,22 @@ function diskCopy(detail: string | null): FailureCopy {
 
 /** One plain sentence per failure code; the stored summary when there is no code. */
 export function failureCopy(failure: UpdateFailure): FailureCopy {
-	if (failure.clientMessage) {
+	if (failure.client?.kind === 'version_mismatch') {
 		return {
 			title: "The update didn't finish",
 			headline: 'The update finished, but the running versions do not match.',
-			body: failure.clientMessage,
+			body: failure.client.message,
 			toastLine: null,
 			retryLabel: null,
+		};
+	}
+	if (failure.client) {
+		return {
+			title: "Update didn't start",
+			headline: failure.client.message,
+			body: '',
+			toastLine: null,
+			retryLabel: 'Try again',
 		};
 	}
 	switch (failure.code) {
@@ -246,7 +267,7 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return {
 				title: "Update didn't start",
 				headline: "Couldn't build the update.",
-				body: RAN_ON,
+				body: KEPT_VERSION,
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
@@ -262,20 +283,19 @@ export function failureCopy(failure: UpdateFailure): FailureCopy {
 			return {
 				title: 'Update cancelled',
 				headline: 'The update was cancelled before CORSIA restarted.',
-				body: RAN_ON,
+				body: KEPT_VERSION,
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
-		default: {
-			const beforeRestart = failure.phase !== 'restarting' && failure.phase !== 'resuming';
+		default:
+			// A terminal row carries no phase, so nothing here can say how far the update got.
 			return {
-				title: beforeRestart ? "Update didn't start" : "The update didn't finish",
-				headline: beforeRestart ? 'The update ended before CORSIA restarted.' : 'The update ended before CORSIA could confirm it.',
-				body: beforeRestart ? RAN_ON : '',
+				title: "Update didn't finish",
+				headline: 'The update stopped before it finished.',
+				body: '',
 				toastLine: null,
 				retryLabel: 'Try again',
 			};
-		}
 	}
 }
 

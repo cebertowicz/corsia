@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from loguru import logger
@@ -55,3 +56,16 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
         await run_in_db(self_restart.mark_conductor_told, operation_id)
     else:
         logger.warning("update failure conductor notice could not be delivered")
+
+
+def tell_conductor_detached(operation_id: str, tasks: set[asyncio.Task]) -> None:
+    """Send the notice without holding the release caller open on a conductor turn."""
+    task = asyncio.create_task(tell_conductor_about_failed_update(operation_id))
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    task.add_done_callback(_log_notice_failure)
+
+
+def _log_notice_failure(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.opt(exception=task.exception()).error("update failure conductor notice failed")

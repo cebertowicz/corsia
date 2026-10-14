@@ -48,8 +48,9 @@ function registerConnectionRefresh(options: HomeLifecycleOptions): () => void {
 		interval = setInterval(() => {
 			options.pollSystem();
 			options.loadSettings();
-			// The update store owns operation polling. Availability is read on connect
-			// and a durable in-flight operation starts its own bounded observation.
+			// Cheap cached read: the backend only contacts the remote once per its
+			// own TTL, so this tick never drives fetch frequency.
+			options.loadUpdateStatus();
 		}, 30000);
 	});
 	return () => {

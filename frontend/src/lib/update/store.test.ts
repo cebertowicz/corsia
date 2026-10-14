@@ -8,6 +8,7 @@ import {
 	resetUpdateStoreForTests,
 	saveUpdateSchedule,
 	startUpdate,
+	updateFailureVerdict,
 	updateInFlight,
 	updateOperation,
 	updateStarting,
@@ -232,5 +233,33 @@ describe('update store', () => {
 		await vi.advanceTimersByTimeAsync(15_000);
 		expect(get(toasts).filter((toast) => toast.pinned?.key === 'update')).toHaveLength(0);
 		expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/version'))).toBe(false);
+	});
+
+	it('records a refusal as its own verdict while an older failed operation is the latest row', async () => {
+		const older = { ...running('holding'), operation: { operation_id: 'update-0', kind: 'update', status: 'failed', failure_code: 'fetch_failed', settled_at: '2026-10-01T00:00:00Z' } };
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => (
+			String(url).includes('/api/system/restart')
+				? { ok: false, json: async () => ({ detail: 'A restart is already in flight.' }) }
+				: { ok: true, json: async () => older }
+		)));
+		await loadUpdateStatus();
+		await startUpdate();
+		expect(get(updateFailureVerdict)).toEqual({ kind: 'refused', message: 'A restart is already in flight.' });
+		expect(get(updateSurface)).toBe('sheet');
+	});
+
+	it('opens the failed operation this request recorded instead of a verdict', async () => {
+		const before = { ...running('holding'), operation: { operation_id: 'update-0', kind: 'update', status: 'complete', settled_at: '2026-10-01T00:00:00Z' } };
+		const recorded = { ...running('holding'), operation: { operation_id: 'update-1', kind: 'update', status: 'failed', failure_code: 'disk_space', settled_at: '2026-10-13T22:00:00Z' } };
+		let statusReads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+			if (String(url).includes('/api/system/restart')) return { ok: false, json: async () => ({ detail: 'Not enough disk space.' }) };
+			statusReads += 1;
+			return { ok: true, json: async () => (statusReads === 1 ? before : recorded) };
+		}));
+		await loadUpdateStatus();
+		await startUpdate();
+		expect(get(updateFailureVerdict)).toBeNull();
+		expect(get(updateOperation)?.operation_id).toBe('update-1');
 	});
 });

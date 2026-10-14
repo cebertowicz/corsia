@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { failureCopy, formatScheduleTime, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
+import { failureCopy, failureFromVerdict, formatScheduleTime, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
 
 const failure = (code: UpdateFailure['code']): UpdateFailure => ({
-	code, phase: null, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
+	code, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
 });
 
 describe('update model', () => {
@@ -28,18 +28,32 @@ describe('update model', () => {
 		expect(failureCopy(failure(code)).headline).toBe(headline);
 	});
 
-	it('keeps an unmapped failure reason out of the summary before restart', () => {
+	it('keeps an unmapped failure reason out of the summary and claims nothing about how far the update got', () => {
 		const copy = failureCopy(failure(null));
-		expect(copy.title).toBe("Update didn't start");
-		expect(copy.headline).toBe('The update ended before CORSIA restarted.');
-		expect(copy.body).toBe('CORSIA kept running and nothing was changed.');
+		expect(copy.title).toBe("Update didn't finish");
+		expect(copy.headline).toBe('The update stopped before it finished.');
+		expect(copy.body).toBe('');
+		expect(copy.retryLabel).toBe('Try again');
 		expect(copy.headline).not.toContain('Stored failure summary.');
 	});
 
-	it('does not claim nothing changed after restart began', () => {
-		const copy = failureCopy({ ...failure(null), phase: 'restarting' });
-		expect(copy.title).toBe("The update didn't finish");
-		expect(copy.body).toBe('');
+	it('claims nothing was changed only where nothing was touched', () => {
+		const untouched = ['disk_space', 'fetch_failed'] as const;
+		const touched = ['build_failed', 'drain_cancelled', 'launch_failed', null] as const;
+		for (const code of untouched) expect(failureCopy(failure(code)).body).toContain('nothing was changed');
+		for (const code of touched) expect(failureCopy(failure(code)).body).not.toContain('nothing was changed');
+		expect(failureCopy(failure('build_failed')).body).toBe('CORSIA is still running the version it had.');
+	});
+
+	it('gives a client verdict its own copy, never the operation copy', () => {
+		const mismatch = failureCopy({ ...failure(null), client: { kind: 'version_mismatch', message: 'Versions differ.' } });
+		expect(mismatch.title).toBe("The update didn't finish");
+		expect(mismatch.headline).toBe('The update finished, but the running versions do not match.');
+		expect(mismatch.body).toBe('Versions differ.');
+		const refused = failureCopy(failureFromVerdict({ kind: 'refused', message: 'A restart is already in flight.' }));
+		expect(refused.title).toBe("Update didn't start");
+		expect(refused.headline).toBe('A restart is already in flight.');
+		expect(refused.headline).not.toContain('versions do not match');
 	});
 
 	it('shows both disk figures and the action amount', () => {

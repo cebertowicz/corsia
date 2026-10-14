@@ -7,6 +7,7 @@ import { toasts } from '$lib/stores/toast';
 import UpdateJourney from './UpdateJourney.svelte';
 import {
 	resetUpdateStoreForTests,
+	updateFailureVerdict,
 	updateStatus,
 	updateSurface,
 	updateUnreachable,
@@ -162,8 +163,8 @@ describe('UpdateJourney', () => {
 		updateSurface.set('sheet');
 		component = mount(UpdateJourney, { target: host });
 		flushSync();
-		expect(host.textContent).toContain('The update ended before CORSIA restarted.');
-		expect(host.textContent).toContain('CORSIA kept running and nothing was changed.');
+		expect(host.textContent).toContain('The update stopped before it finished.');
+		expect(host.textContent).not.toContain('nothing was changed');
 		expect(host.querySelector('.failure > .headline')?.textContent).not.toContain('Raw failure reason');
 		const details = host.querySelector('details')!;
 		expect(details.querySelectorAll('summary svg.chevron')).toHaveLength(1);
@@ -240,5 +241,34 @@ describe('UpdateJourney', () => {
 		expect(host.textContent).toContain('Update CORSIA');
 		expect(host.textContent).toContain('Update now');
 		expect(host.textContent).not.toContain("Update didn't start");
+	});
+
+	it('shows a version mismatch verdict over the completed operation that holds none', () => {
+		updateStatus.set(status({
+			available: false,
+			operation: { operation_id: 'update-1', kind: 'update', status: 'complete', target_version: '1.1.0', settled_at: new Date().toISOString() },
+		}));
+		updateFailureVerdict.set({ kind: 'version_mismatch', message: 'The page, the backend and the checkout are not on the same version.' });
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+		expect(host.querySelector('.failure > .headline')?.textContent).toBe('The update finished, but the running versions do not match.');
+		expect(host.textContent).toContain('not on the same version');
+		expect(host.textContent).not.toContain('nothing was changed');
+		expect(host.textContent).not.toContain('Try again');
+	});
+
+	it('shows a refusal with the server message over an older operation that holds no failure', () => {
+		updateStatus.set(status({
+			operation: { operation_id: 'update-0', kind: 'update', status: 'complete', target_version: '1.0.0', settled_at: '2026-10-01T00:00:00Z', conductor_told_at: '2026-10-01T00:00:00Z' },
+		}));
+		updateFailureVerdict.set({ kind: 'refused', message: 'A restart is already in flight.' });
+		updateSurface.set('sheet');
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+		expect(host.querySelector('.failure > .headline')?.textContent).toBe('A restart is already in flight.');
+		expect(host.textContent).not.toContain('The update ended before CORSIA restarted');
+		expect(host.textContent).not.toContain('nothing was changed');
+		expect(host.textContent).not.toContain('conductor has been told');
 	});
 });

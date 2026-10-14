@@ -32,7 +32,7 @@
 <div class="service-row update-row">
 	<span class="service-name">Version</span>
 	<div class="version-state">
-		<span class="version-line">{#if scheduledTonight}<StatePill state="active" size="sm" label={`${currentVersion} · ${formatScheduleTime(schedule.time)} tonight`} />{:else}<span class="service-version">{currentVersion}</span>{#if refusal}<StatePill state="warning" size="sm" label="Update didn't start" />{:else if showAvailable}<StatePill state="active" size="sm" label={`${targetVersion} available`} />{/if}{/if}</span>
+		<span class="version-line">{#if scheduledTonight}<StatePill state="active" size="sm" label={`${currentVersion} · ${formatScheduleTime(schedule.time)} tonight`} />{:else}<span class="service-version">{currentVersion}</span>{#if refusal}<StatePill state="warning" size="sm" label={refusal.title} />{:else if showAvailable}<StatePill state="active" size="sm" label={`${targetVersion} available`} />{/if}{/if}</span>
 		{#if running}
 			<span class="updating"><span class="spinner" aria-hidden="true"></span>Updating to {targetVersion ?? 'the latest version'}</span>
 			<span class="step">{stepMessage(operation, false)}</span>
