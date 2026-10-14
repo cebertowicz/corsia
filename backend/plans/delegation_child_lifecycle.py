@@ -105,15 +105,12 @@ def _waits_elsewhere(connection, plan) -> bool:
     Such a worker waits on that event or owner, not on its parent, and the
     parent already hears the wait through the child-watch and child-blocker
     digests. Other ready work left in its plan does not change that (#2637).
-    A deadline wait past its deadline waits on nothing: its wake is owed and
-    has not come, so the parent hears even when the expiry sweep is down (#637).
     """
-    from plans import not_moving, projections
+    from plans import projections
 
     _actionable, projected = projections.actionable_leaves(connection, plan)
     return any(
-        (cause["kind"] == "waiting" and not not_moving.is_overdue(cause))
-        or (cause.get("placed") and cause["kind"] == "blocked")
+        cause["kind"] == "waiting" or (cause.get("placed") and cause["kind"] == "blocked")
         for projection in projected.values()
         for cause in projection["causes"]
     )
