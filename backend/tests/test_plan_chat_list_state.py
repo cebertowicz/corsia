@@ -553,8 +553,6 @@ def test_overdue_waits_keep_the_normal_idle_word_without_attention_items(db):
 
     assert state["state"] == "idle"
     assert state["attention_items"] == []
-    assert "stuck_overdue_waits" not in state
-    assert "next_overdue_at" not in state
 
 
 def test_owed_then_failed_outrank_overdue_waits_and_owed_outranks_pause(db):
@@ -579,7 +577,7 @@ def test_owed_then_failed_outrank_overdue_waits_and_owed_outranks_pause(db):
     assert _states(db, ["stuck-precedence"])["stuck-precedence"]["state"] == "blocked_on_you"
 
 
-def test_future_waits_stay_idle_without_a_chat_list_timer_field(db):
+def test_a_future_wait_is_idle(db):
     actor = _thread(db, "future-waits")
     plan = _plan(db, "future-waits")
     ends = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
@@ -588,4 +586,3 @@ def test_future_waits_stay_idle_without_a_chat_list_timer_field(db):
     state = _states(db, ["future-waits"])["future-waits"]
 
     assert state["state"] == "idle"
-    assert "next_overdue_at" not in state

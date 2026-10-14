@@ -179,6 +179,4 @@ describe('threadPlanStates', () => {
 		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a'], ['a']]);
 		expect(get(threadPlanStates).a?.has_update).toBe(true);
 	});
-
-
 });
