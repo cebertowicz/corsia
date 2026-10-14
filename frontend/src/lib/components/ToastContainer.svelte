@@ -4,6 +4,7 @@
 	import { toastClearance } from '$lib/stores/toastClearance';
 	import { toastStackHeight } from '$lib/stores/toastStack';
 	import { toastFit } from '$lib/stores/toastFit';
+	import { cssVar, ms } from '$lib/popoverMotion';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { flip } from 'svelte/animate';
 	import { cubicOut } from 'svelte/easing';
@@ -11,25 +12,30 @@
 
 	let toastHeight = $state(0);
 
-	/** The upper toast glides into the freed place when the one below it goes. */
+	/** Until when a toast is fading out; the toast above waits for that before it glides into the freed place. */
+	let leavingUntil = 0;
+	const leaveMs = () => ms('--dur-standard') * 0.7;
+
+	/** The upper toast glides into the freed place when the one below it goes, after that one has faded. */
 	function flipParams() {
 		const reduced =
 			typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-		return { duration: reduced ? 0 : 200, easing: cubicOut };
+		const waiting = !reduced && Date.now() < leavingUntil;
+		return { duration: reduced ? 0 : ms('--dur-standard'), delay: waiting ? leaveMs() : 0, easing: cubicOut };
 	}
 
 	/**
-	 * A toast fades and drops a few pixels as it leaves (--dur-tight, the mirror of
-	 * toast-in); reduced motion keeps the fade only. The leave is `global` so the
-	 * last toast also plays it when the whole stack goes.
+	 * A toast fades and drops a few pixels as it leaves, at 70% of its entrance (motion.md); reduced
+	 * motion keeps the fade only. The leave is `global` so the last toast also plays it when the whole
+	 * stack goes.
 	 */
-	function toastLeave(_node: Element) {
-		const still = get(prefersReducedMotion);
-		return {
-			duration: 120,
-			easing: cubicOut,
-			css: (t: number) => `opacity: ${t};${still ? '' : ` transform: translateY(${(1 - t) * 8}px);`}`,
-		};
+	function toastLeave(node: HTMLElement) {
+		const duration = leaveMs();
+		leavingUntil = Date.now() + duration;
+		const from = get(prefersReducedMotion) ? { opacity: 1 } : { opacity: 1, transform: 'none' };
+		const to = get(prefersReducedMotion) ? { opacity: 0 } : { opacity: 0, transform: 'translateY(8px)' };
+		node.animate([from, to], { duration, easing: cssVar('--ease-snap') || 'ease-out', fill: 'forwards' });
+		return { duration };
 	}
 
 	function measureToastHeight(node: HTMLElement) {
@@ -119,7 +125,7 @@
 				{/if}
 				<button
 					class="toast-close"
-					onclick={() => toasts.dismiss(toast.id)}
+					onclick={() => { pinned?.onClose?.(); toasts.dismiss(toast.id); }}
 					aria-label={pinned?.closeLabel ?? 'Dismiss'}
 					title={pinned?.closeLabel}>×</button>
 			</div>

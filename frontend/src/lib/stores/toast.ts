@@ -19,6 +19,8 @@ export interface PinnedToastState {
 	closeLabel?: string;
 	/** A ticking segment shown after the message, dropped first when the line does not fit. */
 	time?: string;
+	/** Runs when the person closes this toast with its close button, never when the app unpins or replaces it. */
+	onClose?: () => void;
 }
 
 export interface Toast {
@@ -43,6 +45,7 @@ export interface PinnedToastSpec {
 	action?: ToastAction;
 	closeLabel?: string;
 	time?: string;
+	onClose?: () => void;
 	/** Lifetime of a `success` or `info` outcome in ms. Default 8000. */
 	duration?: number;
 }
@@ -135,7 +138,7 @@ function createToastStore() {
 			type: spec.type,
 			duration,
 			action: spec.action,
-			pinned: { key, detail: spec.detail, closeLabel: spec.closeLabel, time: spec.time },
+			pinned: { key, detail: spec.detail, closeLabel: spec.closeLabel, time: spec.time, onClose: spec.onClose },
 		};
 		store.update((items) => [...items.filter((item) => !item.pinned), toast]);
 		if (duration === undefined) clearTimer(id);

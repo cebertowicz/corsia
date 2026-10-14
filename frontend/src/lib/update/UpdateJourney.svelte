@@ -38,10 +38,15 @@
 	const agentCount = $derived($drainStatus?.activeTurns ?? $updateStatus?.agents_working ?? 0);
 	const activeStep = $derived(stepIndex(operation, $updateUnreachable));
 
+	// Closing the progress toast hides it for the rest of that operation; the Updated and failure toasts are pinned elsewhere and always show.
+	let hiddenProgressFor: string | null = $state(null);
+
 	$effect(() => {
 		if (!running) return;
 		if ($updateSurface === 'panel') { toasts.unpin('update'); return; }
-		toasts.pin('update', { type: 'progress', message: stepMessage(operation, $updateUnreachable), time: elapsed, closeLabel: 'Hide progress', action: { label: 'Details', run: openUpdatePanel } });
+		const operationId = operation?.operation_id ?? 'starting';
+		if (hiddenProgressFor === operationId) { toasts.unpin('update'); return; }
+		toasts.pin('update', { onClose: () => { hiddenProgressFor = operationId; }, type: 'progress', message: stepMessage(operation, $updateUnreachable), time: elapsed, closeLabel: 'Hide progress', action: { label: 'Details', run: openUpdatePanel } });
 	});
 
 	function close(): void { closeUpdateSurface(); }

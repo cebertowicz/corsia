@@ -280,6 +280,8 @@ describe('ToastContainer fit', () => {
 });
 
 describe('ToastContainer leave', () => {
+	let leaveOptions: KeyframeAnimationOptions | undefined;
+
 	async function leaveKeyframes(reduced: boolean): Promise<Record<string, unknown>[]> {
 		const original = window.matchMedia;
 		window.matchMedia = ((query: string) => ({
@@ -300,12 +302,27 @@ describe('ToastContainer leave', () => {
 			toasts.dismiss(get(toasts)[0].id);
 			flushSync();
 			await vi.advanceTimersByTimeAsync(10);
+			leaveOptions = animate.mock.calls.map(([, opts]) => opts as KeyframeAnimationOptions).find((opts) => opts?.fill === 'forwards');
 			return animate.mock.calls.flatMap(([frames]) => frames as Record<string, unknown>[]);
 		} finally {
 			animate.mockRestore();
 			window.matchMedia = original;
 		}
 	}
+
+	it('leaves at 70% of the standard duration on the snap easing, both read from the tokens', async () => {
+		const root = document.documentElement.style;
+		root.setProperty('--dur-standard', '200ms');
+		root.setProperty('--ease-snap', 'cubic-bezier(0.2, 0, 0, 1)');
+		try {
+			await leaveKeyframes(false);
+			expect(leaveOptions?.duration).toBe(140);
+			expect(leaveOptions?.easing).toBe('cubic-bezier(0.2, 0, 0, 1)');
+		} finally {
+			root.removeProperty('--dur-standard');
+			root.removeProperty('--ease-snap');
+		}
+	});
 
 	it('fades and drops a leaving toast, the last one included', async () => {
 		const frames = await leaveKeyframes(false);

@@ -1,6 +1,9 @@
+import { get } from 'svelte/store';
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import ToastContainer from '$lib/components/ToastContainer.svelte';
+import { toasts } from '$lib/stores/toast';
 import UpdateJourney from './UpdateJourney.svelte';
 import {
 	resetUpdateStoreForTests,
@@ -40,6 +43,39 @@ afterEach(() => {
 });
 
 describe('UpdateJourney', () => {
+	it('keeps the progress toast closed for the rest of its operation, and still shows what settles it', async () => {
+		const running = (phase: string) => status({ available: false, operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase, requested_at: new Date().toISOString() } });
+		const progress = () => get(toasts).filter((toast) => toast.pinned?.key === 'update' && toast.type === 'progress');
+		updateStatus.set(running('draining'));
+		updateSurface.set('closed');
+		const toastHost = document.createElement('div');
+		document.body.appendChild(toastHost);
+		const container = mount(ToastContainer, { target: toastHost });
+		component = mount(UpdateJourney, { target: host });
+		flushSync();
+		expect(progress()).toHaveLength(1);
+
+		toastHost.querySelector<HTMLButtonElement>('.toast-close')!.click();
+		flushSync();
+		await vi.advanceTimersByTimeAsync(3_000);
+		expect(progress()).toHaveLength(0);
+
+		updateStatus.set(running('restarting'));
+		flushSync();
+		await vi.advanceTimersByTimeAsync(3_000);
+		expect(progress()).toHaveLength(0);
+
+		updateStatus.set(status({ available: false, operation: { operation_id: 'update-1', kind: 'update', status: 'complete', target_version: '1.1.0', settled_at: new Date().toISOString() } }));
+		toasts.pin('update', { type: 'success', message: 'Updated to 1.1.0' });
+		flushSync();
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(get(toasts).some((toast) => toast.message === 'Updated to 1.1.0')).toBe(true);
+
+		unmount(container);
+		toastHost.remove();
+		for (const toast of get(toasts)) toasts.dismiss(toast.id);
+	});
+
 	it('renders the decision sheet with release notes and the S3 actions', () => {
 		updateStatus.set(status());
 		updateSurface.set('sheet');
