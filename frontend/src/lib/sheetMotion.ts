@@ -6,9 +6,7 @@ import { cubicOut } from 'svelte/easing';
  * outro to end, so the backdrop's fade plays out before the drawer is unmounted.
  */
 export function sheetFly(reduced: boolean, holdMs = 0) {
-	// `fly` otherwise interpolates opacity from zero. A sheet is material, not a
-	// second fade: keep it opaque while the backdrop alone crossfades.
-	return reduced ? { y: 0, opacity: 1, duration: holdMs } : { y: 72, opacity: 1, duration: 260, easing: cubicOut };
+	return reduced ? { y: 0, opacity: 1, duration: holdMs } : { y: 72, duration: 260, easing: cubicOut };
 }
 
 /** How far a downward drag must go to dismiss: about a quarter of the sheet, held between 96 and 180 px. */
