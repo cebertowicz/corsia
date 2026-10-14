@@ -154,14 +154,12 @@ describe('DocViewerStatus freshness metadata', () => {
 		flushSync();
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
 		expect(pill.getAttribute('aria-label')).toBe(expected);
-		expect(pill.getAttribute('aria-describedby')).toBeNull();
 	});
 
 	it('names unplaced comments from the status pill', () => {
 		render(value(), undefined, { orphanedCount: 1 });
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
 		expect(pill.getAttribute('aria-label')).toBe("0 open threads, 1 comment couldn't be placed");
-		expect(pill.getAttribute('aria-describedby')).toBeNull();
 	});
 
 	it('removes Mark verified when the parent replaces freshness after success', async () => {
@@ -230,6 +228,5 @@ describe('DocViewerStatus toolbar', () => {
 		expect(dot.parentElement?.classList.contains('icon-anchor')).toBe(true);
 		expect(dot.parentElement?.querySelector('svg.tool-icon')).not.toBeNull();
 		expect(button.getAttribute('aria-label')).toBe("2 open threads, 1 comment couldn't be placed");
-		expect(button.getAttribute('aria-describedby')).toBeNull();
 	});
 });

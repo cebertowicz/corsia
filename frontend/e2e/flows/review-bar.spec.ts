@@ -313,11 +313,10 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	for (const target of targets) expect((await target.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
 	// A real tap opens the menu, selects a filter, and leaves every drawer control reachable.
 	const openFilter = drawer.getByRole('button', { name: 'Filter comments: Open', exact: true });
-	const box = (await openFilter.boundingBox())!;
-	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+	// Locator tap scrolls the current phone-sheet control into view and targets its live centre.
+	await openFilter.tap();
 	await expect(openFilter).toHaveAttribute('aria-expanded', 'true');
-	// Close the menu before tapping another drawer control; the menu intentionally owns its overlay.
-	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+	await openFilter.tap();
 	await expect(openFilter).toHaveAttribute('aria-expanded', 'false');
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);

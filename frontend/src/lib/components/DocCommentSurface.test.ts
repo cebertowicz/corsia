@@ -177,6 +177,22 @@ describe('DocCommentSurface suggestions', () => {
 		expect(second).not.toBe(first);
 	});
 
+	it('shows a refused placement retry after the drawer closes and reopens', async () => {
+		const state = writable<{ kind: 'list' } | null>({ kind: 'list' });
+		const reloading = writable(false), reloadError = writable(false);
+		const liveState = fromStore(state), liveReloading = fromStore(reloading), liveReloadError = fromStore(reloadError);
+		render({
+			get state() { return liveState.current; },
+			comments: [{ ...suggestion, orphaned: true }],
+			get placementRecovery() { return { onReload: () => { reloading.set(true); return true; }, orphanedCount: 1, reloading: liveReloading.current, reloadError: liveReloadError.current }; },
+		});
+		host.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
+		state.set(null); flushSync();
+		await vi.waitFor(() => expect(host.querySelector('[data-doc-comments-drawer]')).toBeNull());
+		reloadError.set(true); reloading.set(false); state.set({ kind: 'list' }); flushSync();
+		expect(host.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("Couldn't reload comment placements");
+	});
+
 	it('keeps a successful placement announcement in the drawer after the recovery action is gone', async () => {
 		const reloading = writable(false);
 		const comments = writable([{ ...suggestion, orphaned: true }]);

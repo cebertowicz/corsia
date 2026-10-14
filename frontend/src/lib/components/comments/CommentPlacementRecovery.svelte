@@ -15,6 +15,8 @@
 		onFocusHome: () => HTMLElement | undefined;
 	} = $props();
 	const unplacedPhrase = $derived(`${orphanedCount} comment${orphanedCount === 1 ? '' : 's'} couldn't be placed`);
+	// A refusal is stored with the comments, so it remains visible when the drawer is closed and reopened.
+	const recoveryText = $derived(reloadError ? "Couldn't reload comment placements" : announcement || unplacedPhrase);
 	let requested = $state(false);
 	let sawBusy = $state(false);
 	let announcement = $state('');
@@ -50,7 +52,7 @@
 
 {#if (orphanedCount || announcement) && onReload}
 	<div class="drawer-placement" data-drawer-placement bind:this={placementFooter} use:footerFocusHome={onFocusHome}>
-		{#key announcementVersion}<p role="status">{announcement || unplacedPhrase}</p>{/key}
+		{#key `${announcementVersion}:${reloadError}`}<p role="status">{recoveryText}</p>{/key}
 		{#if orphanedCount}<Button size="sm" variant="secondary" ariaLabel="Reload comment placements" ariaDisabled={unavailable || reloading} describedby={unavailable ? connectionDescriptionId : undefined} onclick={reload} loading={reloading}>Place again</Button>{/if}
 	</div>
 {/if}

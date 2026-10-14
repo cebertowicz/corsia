@@ -269,7 +269,7 @@
 	/* The requester takes its natural width up to the header cap, leaving the ask the remaining one-line space. */
 	.rb-who { flex: 0 1 auto; display: flex; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.rb-who strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-semibold); }
-	/* MiddleName owns its head/tail truncation; this parent keeps only the flex constraint. */
+	/* This wrapper constrains the name; MiddleName owns its head/tail truncation within it. */
 	.rb-plus { margin-left: var(--space-1); color: var(--text-secondary); font-weight: var(--fw-semibold); }
 	.rb-ask { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 	.rb-chev { color: var(--text-tertiary); transition: transform var(--dur-tight) var(--ease-snap); }
