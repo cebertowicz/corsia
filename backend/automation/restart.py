@@ -269,11 +269,13 @@ async def _release_and_resume(
     )
     if threads is None:
         return False
-    await tell_conductor_about_failed_update(operation_id)
     drain.cancel_drain_projection()
     resume_threads_detached(threads, drive_thread, _RESUME_TASKS)
+    try:  # best effort and last: the release and the resume never depend on it
+        await tell_conductor_about_failed_update(operation_id)
+    except Exception:
+        logger.exception("update failure conductor notice failed for {}", operation_id)
     return True
-
 
 
 def _release_restart_control(

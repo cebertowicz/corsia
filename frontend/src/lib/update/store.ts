@@ -10,7 +10,7 @@ import {
 	type UpdateChanges,
 	type UpdateOperation,
 } from './model';
-import { releaseNotesFor, rememberApprovedNotes, rememberId, snapshotReleaseNotes } from './releaseNotes';
+import { hasId, releaseNotesFor, rememberApprovedNotes, rememberId, snapshotReleaseNotes } from './releaseNotes';
 
 export { releaseNotesFor };
 export type { UpdateReleaseNotes } from './releaseNotes';
@@ -130,7 +130,7 @@ function showNotice(status: UpdateStatus): void {
 }
 
 function showTerminal(operation: UpdateOperation): void {
-	if (!rememberId(HANDLED_KEY, operation.operation_id)) return;
+	if (!rememberId(HANDLED_KEY, operation.operation_id, 'browser')) return;
 	if (operation.status === 'complete') {
 		const version = operation.target_version ?? get(updateStatus)?.target_version ?? 'the latest version';
 		toasts.pin('update', {
@@ -168,6 +168,7 @@ async function verifyComplete(operation: UpdateOperation): Promise<void> {
 			setTimeout(() => { void loadUpdateStatus(); }, POLL_MS);
 			return;
 		}
+		rememberId(HANDLED_KEY, operation.operation_id, 'browser');
 		updateFailureMessage.set('The update finished, but the running versions do not match.');
 		toasts.pin('update', { type: 'error', message: "The update didn't finish", action: { label: 'Details', run: openUpdateSheet } });
 	} finally {
@@ -184,8 +185,9 @@ function reconcileOperation(status: UpdateStatus): void {
 	}
 	stopStatusPolling();
 	stopVersionPolling();
-	if (operation?.status === 'complete') void verifyComplete(operation);
-	else if (operation && isFailedOperation(operation)) showTerminal(operation);
+	if (operation?.status === 'complete') {
+		if (!hasId(HANDLED_KEY, operation.operation_id, 'browser')) void verifyComplete(operation);
+	} else if (operation && isFailedOperation(operation)) showTerminal(operation);
 }
 
 /** Read the durable operation projection and start polling only while it is active. */

@@ -8,23 +8,35 @@ export interface UpdateReleaseNotes {
 	changes: UpdateChanges | null;
 }
 
-function savedIds(key: string): Set<string> {
-	if (typeof sessionStorage === 'undefined') return new Set();
+type IdScope = 'tab' | 'browser';
+
+function idStorage(scope: IdScope): Storage | undefined {
+	return scope === 'browser'
+		? (typeof localStorage === 'undefined' ? undefined : localStorage)
+		: (typeof sessionStorage === 'undefined' ? undefined : sessionStorage);
+}
+
+function savedIds(key: string, scope: IdScope): Set<string> {
+	const storage = idStorage(scope);
+	if (!storage) return new Set();
 	try {
-		const value = JSON.parse(sessionStorage.getItem(key) ?? '[]');
+		const value = JSON.parse(storage.getItem(key) ?? '[]');
 		return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []);
 	} catch {
 		return new Set();
 	}
 }
 
-export function rememberId(key: string, id: string): boolean {
-	const ids = savedIds(key);
+export function hasId(key: string, id: string, scope: IdScope = 'tab'): boolean {
+	return savedIds(key, scope).has(id);
+}
+
+/** Record an id and report whether it was new; `browser` scope is shared by every tab. */
+export function rememberId(key: string, id: string, scope: IdScope = 'tab'): boolean {
+	const ids = savedIds(key, scope);
 	if (ids.has(id)) return false;
 	ids.add(id);
-	if (typeof sessionStorage !== 'undefined') {
-		try { sessionStorage.setItem(key, JSON.stringify([...ids].slice(-50))); } catch { /* storage is optional */ }
-	}
+	try { idStorage(scope)?.setItem(key, JSON.stringify([...ids].slice(-50))); } catch { /* storage is optional */ }
 	return true;
 }
 

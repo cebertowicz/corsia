@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 import re
 import subprocess
 
+from loguru import logger
+
 
 Git = Callable[[list[str]], str]
 _GIT_ERRORS = (RuntimeError, OSError, subprocess.SubprocessError)
@@ -103,7 +105,8 @@ def _development_details(git: Git, branch: str) -> UpdateDetails:
         target_version = target_date.strftime("%Y.%m.%d.%H%M")
     try:
         subjects = git(["log", "--format=%s", f"HEAD..origin/{branch}"]).splitlines()
-    except Exception:
+    except Exception as error:
+        logger.warning("update commit log unavailable: {}", type(error).__name__)
         return UpdateDetails(current_version, target_version, None)
     subjects = [subject for subject in subjects if not subject.startswith("Merge ")]
     return UpdateDetails(
@@ -128,5 +131,6 @@ def build_update_details(available: bool | None, branch: str | None, git: Git) -
         return UpdateDetails(_current_version_only(git, branch) if available is False else None, None, None)
     try:
         return _published_details(git, branch) if branch == "main" else _development_details(git, branch)
-    except Exception:
+    except Exception as error:
+        logger.warning("update details unavailable: {}", type(error).__name__)
         return UpdateDetails(None, None, None)

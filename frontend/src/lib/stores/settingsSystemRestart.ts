@@ -236,28 +236,9 @@ async function observeSystemRestartWithin(
 	}
 }
 
+/** Update failure copy lives in `lib/update/model.ts`; a plain restart shows its stored summary. */
 function restartFailureMessage(status: SystemRestartStatus | null | undefined): string {
-	if (status?.failure_code === 'disk_space') {
-		try {
-			const detail = JSON.parse(status.failure_detail ?? '{}');
-			const needed = Math.round(Number(detail.needed_bytes) / 1e9);
-			const free = Math.round(Number(detail.free_bytes) / 1e9);
-			if (Number.isFinite(needed) && Number.isFinite(free)) {
-				return `Needs ${needed} GB free; this Mac has ${free} GB.`;
-			}
-		} catch {
-			// The durable summary remains the safe fallback for malformed legacy detail.
-		}
-	}
-	const messages: Record<string, string> = {
-		fetch_failed: 'Could not download the update. CORSIA is still running.',
-		build_failed: 'Could not build the update. CORSIA is still running.',
-		launch_failed: 'Could not start the restart. CORSIA is still running.',
-		drain_cancelled: 'Update cancelled before restart.',
-	};
-	return (status?.failure_code && messages[status.failure_code])
-		?? status?.error
-		?? 'Restart operation ended before a replacement was verified.';
+	return status?.error ?? 'Restart operation ended before a replacement was verified.';
 }
 
 export async function waitForSystemRestart(
