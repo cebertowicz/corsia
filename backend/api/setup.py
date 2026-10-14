@@ -7,6 +7,7 @@ exist. They are not a general unauthenticated provider or account API.
 from __future__ import annotations
 
 import asyncio
+import os
 import platform
 import shutil
 import sys
@@ -17,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from infra import accounts, config
 from infra.db_async import run_in_db
-from infra.default_port import DEFAULT_BACKEND_PORT
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
 
@@ -39,17 +39,23 @@ class FirstAccountRequest(BaseModel):
     email: str | None = Field(default=None, max_length=320)
 
 
+def _own_backend_port(request: Request) -> int | None:
+    """Resolve the one port this backend process is serving, never a caller's value."""
+    server = request.scope.get("server")
+    if server and isinstance(server[1], int):
+        return server[1]
+    configured = os.environ.get("BACKEND_PORT", "")
+    return int(configured) if configured.isdigit() and 1 <= int(configured) <= 65535 else None
+
+
 def _loopback_host(request: Request) -> bool:
-    """Require an exact literal loopback Host with CORSIA's backend port."""
+    """Require a literal loopback Host for this backend process's bound port."""
+    own_port = _own_backend_port(request)
     host = request.headers.get("host")
-    if host is None:
+    if own_port is None or host is None:
         return False
     name, separator, port = host.rpartition(":")
-    return (
-        bool(separator)
-        and name in _LOOPBACK_HOSTS
-        and port == str(DEFAULT_BACKEND_PORT)
-    )
+    return bool(separator) and name in _LOOPBACK_HOSTS and port == str(own_port)
 
 
 def _trusted_request(request: Request) -> bool:
@@ -69,8 +75,11 @@ def _trusted_json_post(request: Request) -> bool:
         # Browsers attach Sec-Fetch-* metadata; a missing Origin is reserved
         # for a direct non-browser client that has already passed Host + JSON.
         return not any(name in request.headers for name in ("sec-fetch-mode", "sec-fetch-site"))
+    own_port = _own_backend_port(request)
+    if own_port is None:
+        return False
     allowed_origins = {
-        *("http:" + f"//{host}:{DEFAULT_BACKEND_PORT}" for host in _LOOPBACK_HOSTS),
+        *("http:" + f"//{host}:{own_port}" for host in _LOOPBACK_HOSTS),
         *_TAURI_ORIGINS,
     }
     return origin in allowed_origins

@@ -10,8 +10,8 @@ export default defineConfig(() => {
 	const backendUrl = readBackendUrl(process.env);
 	const proxy = backendUrl
 		? {
-				'/api': { target: backendUrl, ws: true },
-				'/ws': { target: backendUrl.replace(/^http/, 'ws'), ws: true },
+				'/api': { target: backendUrl, ws: true, changeOrigin: true, headers: { origin: backendUrl } },
+				'/ws': { target: backendUrl.replace(/^http/, 'ws'), ws: true, changeOrigin: true },
 			}
 		: undefined;
 

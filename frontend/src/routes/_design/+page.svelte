@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { Button, Field, IconButton, Message, Modal, Section, StatePill } from '$lib/components/ui';
 	import MaterialShowcase from './MaterialShowcase.svelte'; import CommentsShowcase from './CommentsShowcase.svelte';
-
-	import AttentionDockShowcase from './AttentionDockShowcase.svelte';
-	import SetupVariantsShowcase from './SetupVariantsShowcase.svelte';
+	import AttentionDockShowcase from './AttentionDockShowcase.svelte'; import SetupVariantsShowcase from './SetupVariantsShowcase.svelte';
 
 	/**
 	 * `?frame=attention-dock` renders that showcase and nothing else, so its own

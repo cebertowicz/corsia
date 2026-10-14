@@ -6,6 +6,8 @@
 	import { KEYS_SIGNED_OUT } from '$lib/stores/keys';
 	import { Button } from '$lib/components/ui';
 
+	interface Props { onNoAccount?: () => void; }
+	const { onNoAccount } = $props<Props>();
 	type Phase = 'checking' | 'no-account' | 'form';
 
 	let phase = $state<Phase>('checking');
@@ -21,6 +23,7 @@
 			if (!res.ok) throw new Error(`status check failed (${res.status})`);
 			const data = await res.json();
 			phase = data.has_users ? 'form' : 'no-account';
+			if (!data.has_users) onNoAccount?.();
 		} catch {
 			// Can't tell whether an account exists; fail open to the form so a
 			// reachable login endpoint still lets the user try to sign in.

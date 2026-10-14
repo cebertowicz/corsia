@@ -2,6 +2,7 @@
 	import { fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import LoginScreen from './LoginScreen.svelte';
+	import SetupScreen from './SetupScreen.svelte';
 	import HomeShell from './HomeShell.svelte';
 	import HomeOverlays from './HomeOverlays.svelte';
 	import type ChatPanel from './ChatPanel.svelte';
@@ -83,11 +84,20 @@
 	} = $props();
 
 	const easeOutQuint = cubicOut;
+	let setupMode = $state<'login' | 'flow'>('login');
 </script>
 
-{#if !isAuthenticated}
+{#if setupMode === 'flow'}
 	<div class="auth-gate" out:fade={{ duration: 320, easing: easeOutQuint }}>
-		<LoginScreen />
+		<SetupScreen
+			onExistingAccount={() => setupMode = 'login'}
+			onAccountCreated={() => setupMode = 'flow'}
+			onFinished={() => setupMode = 'login'}
+		/>
+	</div>
+{:else if !isAuthenticated}
+	<div class="auth-gate" out:fade={{ duration: 320, easing: easeOutQuint }}>
+		<LoginScreen onNoAccount={() => setupMode = 'flow'} />
 	</div>
 {:else}
 	<HomeShell

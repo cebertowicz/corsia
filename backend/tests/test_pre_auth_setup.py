@@ -64,6 +64,21 @@ def test_refuses_wrong_host_without_detail(client, path):
     assert response.content == b""
 
 
+def test_refuses_loopback_host_for_a_different_port_without_detail(client):
+    response = client.get("/api/setup/status", headers={"Host": f"127.0.0.1:{DEFAULT_BACKEND_PORT + 1}"})
+    assert response.status_code == 403
+    assert response.content == b""
+
+
+def test_accepts_loopback_host_for_its_own_nondefault_port(no_users):
+    port = 43123
+    app = FastAPI()
+    app.include_router(setup_api.router)
+    with TestClient(app, base_url=f"http://127.0.0.1:{port}", client=("127.0.0.1", 50101)) as nondefault_client:
+        response = nondefault_client.get("/api/setup/status", headers={"Host": f"127.0.0.1:{port}"})
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize("forwarded", ["X-Forwarded-For", "Tailscale-User-Login"])
 @pytest.mark.parametrize("path", ["/api/setup/status", "/api/setup/local-download", "/api/setup/first-account"])
 def test_refuses_forwarded_requests_without_detail(client, path, forwarded):

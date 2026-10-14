@@ -30,8 +30,8 @@ function setInputValue(input: HTMLInputElement, value: string) {
 	input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-function mountScreen() {
-	component = mount(LoginScreen, { target: host });
+function mountScreen(props: { onNoAccount?: () => void } = {}) {
+	component = mount(LoginScreen, { target: host, props });
 	flushSync();
 }
 
@@ -63,6 +63,13 @@ describe('LoginScreen', () => {
 		await vi.waitFor(() => expect(host.textContent).toContain('corsia user add'));
 		expect(usernameField()).toBeNull();
 		expect(host.textContent).toContain('Check again');
+	});
+
+	it('notifies its host when no account exists', async () => {
+		const onNoAccount = vi.fn();
+		vi.stubGlobal('fetch', vi.fn(async () => statusResponse(false)));
+		mountScreen({ onNoAccount });
+		await vi.waitFor(() => expect(onNoAccount).toHaveBeenCalledOnce());
 	});
 
 	it('re-checks status when Check again is clicked and shows the form once an account exists', async () => {
