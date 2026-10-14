@@ -358,15 +358,13 @@ drain_and_wait() {
             cancel_failed_drain "$drain_url" "$operation_id" || :
             return 1
         fi
-        if [[ "$status_output" == *$'\n'* ]]; then
-            status_http_status="${status_output##*$'\n'}"
-            status="${status_output%$'\n'*}"
-        else
-            # The HTTP client always writes a status line; this fallback keeps
-            # embedded lifecycle callers that provide only a JSON payload compatible.
-            status_http_status="200"
-            status="$status_output"
+        if [[ "$status_output" != *$'\n'* ]]; then
+            warn "Drain status response was malformed"
+            cancel_failed_drain "$drain_url" "$operation_id" || :
+            return 1
         fi
+        status_http_status="${status_output##*$'\n'}"
+        status="${status_output%$'\n'*}"
         if [ "$status_http_status" = "401" ]; then
             record_credential_expired "$drain_url" "$operation_id"
             return 1

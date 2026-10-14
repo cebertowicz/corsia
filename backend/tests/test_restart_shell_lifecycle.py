@@ -108,7 +108,7 @@ curl() {
         *" -X DELETE "*) return 0 ;;
         *" -X POST "*"/api/system/drain/hard-cap?"*) return 22 ;;
         *)
-            printf '{"active":true,"phase":"steering","activeProcesses":0,"operation_id":"%s"}' "$OPERATION_ID"
+            printf '{"active":true,"phase":"steering","activeProcesses":0,"operation_id":"%s"}\n200' "$OPERATION_ID"
             ;;
     esac
 }
@@ -168,7 +168,7 @@ curl() {
             ;;
         *" -X DELETE "*) return 0 ;;
         *)
-            printf '{"active":true,"activeProcesses":0,"phase":"steering","operation_id":"%s"}' "$operation_id"
+            printf '{"active":true,"activeProcesses":0,"phase":"steering","operation_id":"%s"}\n200' "$operation_id"
             ;;
     esac
 }
@@ -224,7 +224,7 @@ curl() {
             if [ "$(cat "$READY_ATTEMPTS")" -gt 0 ]; then
                 phase=draining
             fi
-            printf '{"active":true,"activeProcesses":0,"phase":"%s","operation_id":"%s"}' "$phase" "$OPERATION_ID"
+            printf '{"active":true,"activeProcesses":0,"phase":"%s","operation_id":"%s"}\n200' "$phase" "$OPERATION_ID"
             ;;
     esac
 }
@@ -270,7 +270,7 @@ curl() {
             ;;
         *" -X DELETE "*) return 0 ;;
         *)
-            printf '{"active":true,"activeProcesses":0,"phase":"draining","operation_id":"%s"}' "$OPERATION_ID"
+            printf '{"active":true,"activeProcesses":0,"phase":"draining","operation_id":"%s"}\n200' "$OPERATION_ID"
             ;;
     esac
 }
@@ -319,7 +319,7 @@ curl() {
             ;;
         *" -X DELETE "*) return 0 ;;
         *)
-            printf '{"active":true,"phase":"steering","activeProcesses":0,"operation_id":"%s"}' "$OPERATION_ID"
+            printf '{"active":true,"phase":"steering","activeProcesses":0,"operation_id":"%s"}\n200' "$OPERATION_ID"
             ;;
     esac
 }
@@ -369,7 +369,7 @@ curl() {
             printf '{"ok":true,"operation_id":"%s"}\\n200' "$OPERATION_ID"
             ;;
         *" -X DELETE "*) return 0 ;;
-        *) printf '%s' "$PAYLOAD" ;;
+        *) printf '%s\n200' "$PAYLOAD" ;;
     esac
 }
 drain_and_wait restart 9999

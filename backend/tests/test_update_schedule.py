@@ -168,6 +168,67 @@ def test_lifecycle_service_tokens_are_revoked_at_every_terminal_path():
     assert abandoned_token not in " ".join(str(value) for value in stored)
 
 
+def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
+    isolated_db, monkeypatch, tmp_path
+):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from api import restart_shell, scheduled_update, settings_restart, system_admin
+    from infra import accounts, product_events
+    from infra.database import get_db
+
+    restart_log = tmp_path / "restart.log"
+    emitted_events = []
+    minted_tokens = []
+    issue_token = accounts.issue_lifecycle_service_token
+
+    def capture_token(user_id, operation_id):
+        token = issue_token(user_id, operation_id)
+        minted_tokens.append(token)
+        return token
+
+    class Process:
+        def poll(self):
+            return None
+
+    def fake_popen(_command, *, stdout, **_kwargs):
+        stdout.write("detached lifecycle started\n")
+        stdout.flush()
+        return Process()
+
+    monkeypatch.setenv("BACKEND_PORT", "1957")
+    monkeypatch.setattr(accounts, "issue_lifecycle_service_token", capture_token)
+    monkeypatch.setattr(
+        product_events,
+        "emit_product_event",
+        lambda *args, **kwargs: emitted_events.append((args, kwargs)),
+    )
+    monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_prepare_owned_release", AsyncMock())
+    monkeypatch.setattr(settings_restart, "_begin_settings_drain", AsyncMock())
+    monkeypatch.setattr(system_admin, "_restart_log_path", lambda _name: restart_log)
+    monkeypatch.setattr(restart_shell.subprocess, "Popen", fake_popen)
+
+    operation_id = asyncio.run(
+        scheduled_update.launch_scheduled_update("automatic", "1.2.3", "steve")
+    )
+
+    assert len(minted_tokens) == 1
+    token = minted_tokens[0]
+    connection = get_db()
+    try:
+        row = connection.execute(
+            "SELECT * FROM self_restart_requests WHERE id=?", (operation_id,)
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row is not None
+    assert token not in " ".join(str(value) for value in row)
+    assert token not in repr(emitted_events)
+    assert token.encode() not in restart_log.read_bytes()
+
+
 def test_scheduled_outcome_is_marked_once_across_devices():
     from automation.update_outcome import mark_outcome_seen
 

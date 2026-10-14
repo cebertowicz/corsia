@@ -6,7 +6,7 @@ import sqlite3
 
 
 def migrate_114_to_115(conn: sqlite3.Connection) -> None:
-    """Add scheduled-update fields without changing historical operations."""
+    """Index scheduled-update attempts without changing historical operations."""
     if conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='self_restart_requests'"
     ).fetchone() is None:

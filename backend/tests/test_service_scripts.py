@@ -247,7 +247,7 @@ curl() {
             printf '{"ok":true,"active":true,"activeProcesses":0,"operation_id":"%s","reason":"%s"}\n200' "$current" "$reason"
             ;;
         *)
-            printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}' "$current"
+            printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}\n200' "$current"
             ;;
     esac
 }
@@ -335,7 +335,11 @@ curl() {
             printf '%s' '{"ok":true,"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
             ;;
         *)
-            printf '%s' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            if [[ " $* " == *" --write-out "* ]]; then
+                printf '%s\n200' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            else
+                printf '%s' '{"active":true,"activeProcesses":0,"operation_id":"01234567-89a","reason":"update"}'
+            fi
             ;;
     esac
 }
@@ -375,7 +379,11 @@ curl() {
         *)
             if [ -s "$OPERATION" ]; then
                 current="$(cat "$OPERATION")"
-                printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}' "$current"
+                if [[ " $* " == *" --write-out "* ]]; then
+                    printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}\n200' "$current"
+                else
+                    printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}' "$current"
+                fi
             else
                 printf '%s' '{"active":false,"activeProcesses":0}'
             fi
@@ -488,7 +496,7 @@ curl() {
             return 28
             ;;
         *)
-            printf '%s' '{"active":true,"activeProcesses":0,"operation_id":"op-owned"}'
+            printf '%s\n200' '{"active":true,"activeProcesses":0,"operation_id":"op-owned"}'
             ;;
     esac
 }
@@ -633,7 +641,7 @@ curl() {
         *" -X POST "*"/api/system/drain?"*)
             printf '{"ok":true,"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
-        *) printf '%s' "${STATUS_PAYLOAD/__OPERATION_ID__/$operation_id}" ;;
+        *) printf '%s\n200' "${STATUS_PAYLOAD/__OPERATION_ID__/$operation_id}" ;;
     esac
 }
 drain_and_wait restart 9999
@@ -673,7 +681,7 @@ curl() {
         *" -X POST "*"/api/system/drain?"*)
             printf '{"ok":true,"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
-        *) printf '%s' "$STATUS_PAYLOAD" ;;
+        *) printf '%s\n200' "$STATUS_PAYLOAD" ;;
     esac
 }
 drain_and_wait restart 9999
@@ -700,13 +708,13 @@ curl() {
     printf '%s\\n' "$*" >> "$CURL_TRACE"
     case " $* " in
         *" -X POST "*"/api/system/drain/hard-cap?"*)
-            printf '{"ok":true,"force_stop_ready":true,"operation_id":"%s"}' "$operation_id"
+            printf '{"ok":true,"force_stop_ready":true,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *" -X POST "*"/api/system/drain?"*)
             printf '{"ok":true,"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *)
-            printf '{"active":true,"activeProcesses":1,"operation_id":"%s"}' "$operation_id"
+            printf '{"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
     esac
 }
@@ -741,13 +749,13 @@ curl() {
     printf '%s\n' "$*" >> "$CURL_TRACE"
     case " $* " in
         *" -X POST "*"/api/system/drain/hard-cap?"*)
-            printf '{"ok":true,"force_stop_ready":true,"operation_id":"%s"}' "$operation_id"
+            printf '{"ok":true,"force_stop_ready":true,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *" -X POST "*"/api/system/drain?"*)
             printf '{"ok":true,"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *)
-            printf '{"active":true,"activeProcesses":1,"operation_id":"%s"}' "$operation_id"
+            printf '{"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
     esac
 }
@@ -775,13 +783,13 @@ curl() {
     printf '%s\n' "$*" >> "$CURL_TRACE"
     case " $* " in
         *" -X POST "*"/api/system/drain/hard-cap?"*)
-            printf '{"ok":true,"force_stop_ready":true,"operation_id":"%s"}' "$operation_id"
+            printf '{"ok":true,"force_stop_ready":true,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *" -X POST "*"/api/system/drain?"*)
             printf '{"ok":true,"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *)
-            printf '{"active":true,"activeProcesses":5,"operation_id":"%s","activeTurns":2,"ownedProcessGroups":1,"browserCommands":2,"blockingTurns":[{"threadId":"thread-815f581e","title":"Inspect Batch 2 history/tool storage"},{"threadId":"thread-other","title":"Other turn"}]}' "$operation_id"
+            printf '{"active":true,"activeProcesses":5,"operation_id":"%s","activeTurns":2,"ownedProcessGroups":1,"browserCommands":2,"blockingTurns":[{"threadId":"thread-815f581e","title":"Inspect Batch 2 history/tool storage"},{"threadId":"thread-other","title":"Other turn"}]}\n200' "$operation_id"
             ;;
     esac
 }
@@ -822,12 +830,12 @@ def test_drain_poll_treats_blocker_text_as_data(tmp_path: Path) -> None:
 curl() {
     case " $* " in
         *" -X POST "*"/api/system/drain/hard-cap?"*)
-            printf '{"ok":true,"force_stop_ready":true,"operation_id":"%s"}' "$operation_id"
+            printf '{"ok":true,"force_stop_ready":true,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *" -X POST "*"/api/system/drain?"*)
             printf '{"ok":true,"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
-        *) printf '%s' "${STATUS_PAYLOAD/__OPERATION_ID__/$operation_id}" ;;
+        *) printf '%s\n200' "${STATUS_PAYLOAD/__OPERATION_ID__/$operation_id}" ;;
     esac
 }
 sleep() { :; }
@@ -887,7 +895,7 @@ curl() {
             printf '{"ok":true,"active":true,"activeProcesses":0,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *)
-            printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}' "$operation_id"
+            printf '{"active":true,"activeProcesses":0,"operation_id":"%s"}\n200' "$operation_id"
             ;;
     esac
 }
@@ -912,13 +920,13 @@ curl() {
     printf '%s\\n' "$*" >> "$CURL_TRACE"
     case " $* " in
         *" -X POST "*"/api/system/drain/hard-cap?"*)
-            printf '{"ok":true,"force_stop_ready":false,"operation_id":"%s"}' "$operation_id"
+            printf '{"ok":true,"force_stop_ready":false,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *" -X POST "*"/api/system/drain?"*)
             printf '{"ok":true,"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
         *)
-            printf '{"active":true,"activeProcesses":1,"operation_id":"%s"}' "$operation_id"
+            printf '{"active":true,"activeProcesses":1,"operation_id":"%s"}\n200' "$operation_id"
             ;;
     esac
 }
