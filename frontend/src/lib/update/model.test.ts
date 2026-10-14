@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { failureCopy, failureFromVerdict } from './failureCopy';
-import { formatScheduleTime, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
+import { currentOperation, formatScheduleTime, holdsNewWork, stepDetail, type UpdateFailure, type UpdateOperation } from './model';
 
 const failure = (code: UpdateFailure['code']): UpdateFailure => ({
 	code, detail: null, summary: 'Stored failure summary.', conductorTold: false, log: null,
@@ -100,5 +100,26 @@ describe('update model', () => {
 		expect(holdsNewWork(operation)).toBe(false);
 		expect(holdsNewWork({ ...operation, phase: 'draining' })).toBe(true);
 		expect(holdsNewWork({ ...operation, kind: 'restart', phase: 'draining' })).toBe(false);
+	});
+
+	describe('currentOperation', () => {
+		const failed = (extra: Partial<UpdateOperation> = {}): UpdateOperation => ({
+			operation_id: 'u1', kind: 'update', status: 'failed', failure_code: 'restart_pending', settled_at: '2026-10-13T22:00:00Z', ...extra,
+		});
+
+		it('keeps a failed update current until a restart has activated it', () => {
+			expect(currentOperation(failed(), null)?.operation_id).toBe('u1');
+			expect(currentOperation(failed({ activated_by_restart: false }), null)?.operation_id).toBe('u1');
+		});
+
+		it('treats a staged update that a restart activated as history', () => {
+			expect(currentOperation(failed({ activated_by_restart: true }), null)).toBeNull();
+		});
+
+		it('still shows every other failure and a running operation', () => {
+			expect(currentOperation(failed({ failure_code: 'build_failed' }), null)?.failure_code).toBe('build_failed');
+			const running: UpdateOperation = { operation_id: 'u2', kind: 'update', status: 'in_flight', phase: 'draining' };
+			expect(currentOperation(running, null)).toBe(running);
+		});
 	});
 });

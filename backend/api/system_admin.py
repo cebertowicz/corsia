@@ -319,6 +319,7 @@ async def system_update_status(
     completed — the UI must not present that as up to date.
     """
     from automation import self_restart
+    from automation.update_outcome import staged_update_activated
     from core.turn_core import active_turn_count
     from infra import drain
     from infra.db_async import run_in_db
@@ -336,7 +337,10 @@ async def system_update_status(
     result["schedule"] = await asyncio.to_thread(get_update_schedule)
     operation = await run_in_db(self_restart.latest_update_operation)
     if operation is not None:
-        result["operation"] = await run_in_db(project_update_operation, operation)
+        activated = await run_in_db(staged_update_activated, operation)
+        result["operation"] = await run_in_db(
+            lambda: project_update_operation(operation, activated_by_restart=activated)
+        )
     return result
 
 
