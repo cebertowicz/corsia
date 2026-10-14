@@ -58,7 +58,7 @@
 		-webkit-backdrop-filter: var(--glass-blur-soft); backdrop-filter: var(--glass-blur-soft);
 	}
 	.lightbox-close {
-		position: absolute; top: env(safe-area-inset-top, 12px); right: 12px;
+		position: absolute; top: var(--safe-top, 12px); right: 12px;
 		margin-top: 12px;
 		background: rgba(255,255,255,0.15); border: none; border-radius: var(--radius-circle);
 		width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
