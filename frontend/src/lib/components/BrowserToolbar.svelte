@@ -70,7 +70,7 @@
 	/* The address leads with the registrable domain, so ending the clip on the right keeps the domain whole. */
 	.address input { flex: 1; min-width: 0; background: none; border: none; outline: none; font: inherit; font-size: var(--text-subhead); color: var(--text-primary); text-overflow: ellipsis; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-		/* Phone width: the nav buttons take the 44px tap target and the address field matches their height. */
+	/* Phone width: the nav buttons take the 44px tap target and the address field matches their height. */
 	@media (max-width: 768px) {
 		/* An absent agent takes no room, so the address field gets the whole row. */
 		.agent-seam { max-width: 0; overflow: hidden; margin-left: -6px; transition: opacity 160ms ease, max-width 160ms ease, margin-left 160ms ease, visibility 0s linear 160ms; }
