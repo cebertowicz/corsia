@@ -345,6 +345,23 @@ def test_child_self_test_mismatch_refuses_to_serve(monkeypatch, tmp_path):
     assert sent == [{"error": "error:AssetError", "kind": "deterministic"}]
 
 
+def test_child_marks_a_load_time_rss_breach_deterministic(self_test_asset, monkeypatch):
+    from types import SimpleNamespace
+
+    from core import corrections_child
+
+    sent = []
+    connection = SimpleNamespace(send=sent.append, poll=lambda _timeout: False)
+    original_connect = socket.socket.connect
+    monkeypatch.setattr(corrections_child, "_peak_rss_bytes", lambda: corrections_child.RSS_LIMIT_BYTES + 1)
+    try:
+        corrections_child._child_main(connection, str(self_test_asset / "manifest.json"))
+    finally:
+        setattr(socket.socket, "connect", original_connect)
+
+    assert sent == [{"error": "rss", "kind": "deterministic"}]
+
+
 class _FakeSession:
     instances: list = []
 

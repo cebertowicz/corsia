@@ -71,6 +71,7 @@ async def classify(
     """Classify using only ``manifest``; selection and version retry belong to the caller."""
     outages: list[str] = []
     failures: list[str] = []
+    consecutive_load_exits = 0
     worker.call_seconds = 0.0
     while len(outages) < attempts_per_kind and len(failures) < attempts_per_kind:
         child = await _child_for(worker, manifest, child_factory)
@@ -82,12 +83,17 @@ async def classify(
             reason = str(error)
             logger.warning("corrections classifier did not load {}: {}", manifest.version, error)
             await drop_child(worker)
+            if error.kind == "transient" and reason == "load child_exited":
+                consecutive_load_exits += 1
+                if consecutive_load_exits == 2:
+                    error = ClassifierUnavailable(reason, kind="deterministic")
             if error.kind == "deterministic":
                 worker.failed_versions[manifest.version] = reason
                 record_version_state(worker, manifest.version, "failed", reason)
                 return ClassificationOutcome("version_failed", reason, manifest.version)
             outages.append(reason)
             continue
+        consecutive_load_exits = 0
         call_started = clock()
         try:
             result = await asyncio.to_thread(child.classify, list(candidate.context), candidate.content)
