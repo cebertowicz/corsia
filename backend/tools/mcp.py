@@ -26,6 +26,8 @@ class MCPToolWrapper(Tool):
                  *, config: dict | None = None, auth=None):
         config = config or {}
         self._session = session
+        self.mcp_server_name = server_name
+        self.mcp_server_config = config
         self._original_name = tool_def.name
         self._name = public_name(server_name, tool_def.name, config)
         self._auth = auth
@@ -214,6 +216,7 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
     complete allowlisted set atomically, without replacing built-ins.
     """
     errors = {}
+    registry.mcp_server_configs = dict(mcp_servers)
     from tools.catalog import TOOL_CATALOG
 
     for name, config in mcp_servers.items():
@@ -231,6 +234,9 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
             logger.info("MCP server '{}': connected, {} tools registered", name, len(wrappers))
         except Exception as error:
             errors[name] = safe_error(error)
+            registry.mcp_server_states = {
+                **getattr(registry, "mcp_server_states", {}), name: errors[name],
+            }
             logger.error("MCP server '{}': {}", name, errors[name])
             if connection:
                 await connection.close()

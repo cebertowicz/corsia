@@ -70,7 +70,9 @@ def _source_artifacts(prefix_info, messages, frozen_tools):
 def _context_usage(messages, source_payload, prefix_info, source_artifacts, *, model=None):
     from core.context_admission import fixed_prefix_section_tokens
     from core.destination_fit import partition_destination_sections
+    from core.loaded_tool_usage import loaded_tool_tokens
     from core.token_estimation import _estimate_messages_tokens
+    from tools.mcp_runtime import tool_server_index
 
     sections = prefix_info["source_section_tokens"]
     system_tokens = fixed_prefix_section_tokens(sections)
@@ -109,6 +111,7 @@ def _context_usage(messages, source_payload, prefix_info, source_artifacts, *, m
         "utilization": round(total_used / model_context, 3) if model_context > 0 else 0,
         "was_trimmed": prefix_info["was_trimmed"],
         "history_messages": prefix_info["history_messages"],
+        "loaded_tool_tokens": loaded_tool_tokens(messages, tool_server_index(), model=model),
         "snapshot_id": prefix_info["snapshot_id"],
         "context_snapshot": prefix_info["effective_context_snapshot"],
         "continuity_mode": prefix_info["continuity_mode"],

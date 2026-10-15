@@ -10,6 +10,8 @@ export interface ContextUsage {
 	system_tokens: number;
 	tool_def_tokens: number;
 	history_tokens: number;
+	/** Estimated tool definitions loaded during this prefix epoch, attributed by app. */
+	loaded_tool_tokens?: Array<{ server: string; display_name?: string; tokens: number }>;
 	user_tokens: number;
 	context_source_tokens?: number;
 	total_used: number | null;
