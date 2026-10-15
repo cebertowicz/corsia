@@ -83,7 +83,13 @@ def require_session_write(session, provider: str) -> str | None:
     account = getattr(session, "vendor_account_id", None) if bound else None
     db = get_db()
     try:
+        # The chosen-account re-check guards a live thread continuation from being
+        # retargeted mid-thread. An operation session (checkpoint or detached) was
+        # already admitted through the operation owner for its explicit account and
+        # carries the requester's thread id only for attribution, so it is not a
+        # thread continuation and is exempt from this re-check.
         if (bound and thread_id and turn_id is None and not getattr(session, "checkpoint_id", None)
+                and getattr(session, "vendor_operation_kind", None) not in ("checkpoint", "detached")
                 and chosen_account_id(thread_id, provider, db=db) != account):
             raise AccountAdmissionError("account_session_mismatch")
         row = get_account(account, db=db) if account is not None else None
