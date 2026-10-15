@@ -2,7 +2,8 @@
 
 A script prints one JSON object per line, ``{"series": "<key>", "value": <number>}``,
 for series it registered. The runner reads that stdout as data, never as
-instructions, and owns every write. The script holds no credential and no API.
+instructions, and owns every write. The script runs in the owner's own shell
+sandbox envelope, the one its ``bash`` gets, and receives nothing beyond it.
 
 Routing is deliberately small:
 
