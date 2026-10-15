@@ -21,7 +21,6 @@ from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
 from infra.settings import (
     delete_agent_default,
-    get_corrections_checker_model,
     get_feature_flags,
     get_host_access_auto_approve,
     get_host_access_reviewer_fallback,
@@ -38,15 +37,6 @@ _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
     "host_access_auto_approve",
     "host_access_reviewer_fallback",
 })
-
-
-def _ready_public_litellm_models() -> set[str]:
-    """Exact transports usable by an unattended native checker."""
-    from llm.account_catalog import effective_status
-    from llm.model_status import get_model_status_rows
-
-    return {str(row["litellm_model"]) for row in get_model_status_rows()
-            if effective_status(row)[0] == "ready" and row.get("litellm_model")}
 
 
 @router.get("/health")
@@ -133,18 +123,22 @@ def _settings_snapshot() -> dict:
     from infra.database import get_db
     from tools.browser import browser_available
 
+    from jobs.corrections_realtime import state_snapshot as corrections_classifier_state
+
     db = get_db()
     try:
         context_rows = [
             row.to_dict() for row in workspace_context_files(config.WORKSPACE, db=db)
         ]
         live_bulletins = bulletins.live_preferences(db)
+        corrections_classifier = corrections_classifier_state(db)
     finally:
         db.close()
+
     return {
         "workspace_context_files": context_rows,
         "host_access_auto_approve": get_host_access_auto_approve(),
-        "corrections_checker_model": get_corrections_checker_model(),
+        "corrections_classifier": corrections_classifier,
         "host_access_reviewer_fallback": get_host_access_reviewer_fallback(),
         "features": _features_snapshot(flags),
         "capabilities": {"browser_automation": browser_available()},
@@ -173,21 +167,6 @@ def _save_exact_model_defaults(body: dict) -> dict:
                 raise HTTPException(400, error)
             save_agent_defaults({"host_access_reviewer_model": reviewer_model})
             updated["host_access_reviewer_model"] = reviewer_model
-    if "corrections_checker_model" in body:
-        checker_model = body["corrections_checker_model"]
-        if checker_model is not None and (
-            not isinstance(checker_model, str)
-            or checker_model not in _ready_public_litellm_models()
-        ):
-            raise HTTPException(
-                400,
-                "Corrections checker must be an exact ready public catalog LiteLLM model or null",
-            )
-        from llm.endpoint_policy import endpoint_agent_use
-        if checker_model is not None and endpoint_agent_use(checker_model) == "interactive_only":
-            raise HTTPException(400, "Corrections checker cannot use an interactive-only endpoint model")
-        save_agent_defaults({"corrections_checker_model": checker_model})
-        updated["corrections_checker_model"] = checker_model
     return updated
 
 
@@ -234,17 +213,13 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
             "Core Agent model settings have been removed. Choose a model for each thread.",
         )
 
-    if (
-        _HUMAN_ONLY_HOST_ACCESS_SETTINGS.intersection(body)
-        or "live_bulletins" in body
-        or "corrections_checker_model" in body
-    ):
+    if _HUMAN_ONLY_HOST_ACCESS_SETTINGS.intersection(body) or "live_bulletins" in body:
         require_human_user(user)
     if "host_access_reviewer_model" in body and not _conductor_sets_reviewer(user, body):
         require_human_user(user)
 
     updated = {}
-    if "host_access_reviewer_model" in body or "corrections_checker_model" in body:
+    if "host_access_reviewer_model" in body:
         updated.update(await run_in_db(_save_exact_model_defaults, body))
 
     if "host_access_auto_approve" in body:
@@ -279,16 +254,6 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
         updated["features"] = await _save_features(body["features"])
 
     return {"ok": True, **updated}
-
-
-@router.post("/settings/corrections/record")
-async def request_corrections_recording(user: dict = Depends(require_user)):
-    """Queue one bounded manual fill batch on the existing background loop."""
-    require_human_user(user)
-    from jobs.corrections_recording import request_manual_corrections_recording
-
-    await run_in_db(request_manual_corrections_recording)
-    return {"ok": True, "scheduled": True}
 
 
 def _network_setup() -> str | None:

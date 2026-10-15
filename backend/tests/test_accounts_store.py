@@ -6,6 +6,12 @@ mean something, so stubbing it would only prove the stub works.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import os
 import sqlite3
 import sys
@@ -15,7 +21,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from infra import accounts  # noqa: E402
+from infra import accounts, token_admin  # noqa: E402
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL  # noqa: E402
 from infra.passwords import (  # noqa: E402
     MIN_PASSWORD_LENGTH,
@@ -109,7 +115,7 @@ class TestAccounts:
         assert "newcomer" in [u["id"] for u in accounts.list_users()]
 
     def test_first_account_creates_corsia_agent(self, isolated_db):
-        from infra.conductor import WORKSPACE_SCOPE, get_conductor
+        from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
         from infra.database import get_db
 
         db = get_db()
@@ -125,7 +131,7 @@ class TestAccounts:
         assert accounts.create_user("newcomer", GOOD_PASSWORD) == "newcomer"
         db = get_db()
         try:
-            conductor_id = get_conductor(WORKSPACE_SCOPE, db=db)
+            conductor_id = get_corsia_agent(db=db)
             row = db.execute(
                 "SELECT user_id,title,project_id,model FROM threads WHERE id=?",
                 (conductor_id,),
@@ -144,7 +150,7 @@ class TestAccounts:
     ):
         from core.workspace_scaffolding import scaffold_workspace
         from infra import config
-        from infra.conductor import WORKSPACE_SCOPE, get_conductor
+        from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
         from infra.database import get_db
         from infra.platform_paths import WorkspaceSelection
         from infra.settings import get_setting
@@ -172,7 +178,7 @@ class TestAccounts:
             db.commit()
 
             accounts.create_user("newcomer", GOOD_PASSWORD, db=db)
-            conductor = get_conductor(WORKSPACE_SCOPE, db=db)
+            conductor = get_corsia_agent(db=db)
             shared_index = workspace / "shared" / "INDEX.md"
             artifact = service.find_file_identity(str(shared_index), db=db)
 
@@ -194,7 +200,7 @@ class TestAccounts:
             db.close()
 
     def test_later_account_preserves_workspace_conductor_owner(self, isolated_db):
-        from infra.conductor import WORKSPACE_SCOPE, get_conductor
+        from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
         from infra.database import get_db
 
         db = get_db()
@@ -208,9 +214,9 @@ class TestAccounts:
             db.close()
 
         first = accounts.create_user("first", GOOD_PASSWORD)
-        conductor_id = get_conductor(WORKSPACE_SCOPE)
+        conductor_id = get_corsia_agent()
         assert accounts.create_user("second", GOOD_PASSWORD) == "second"
-        assert get_conductor(WORKSPACE_SCOPE) == conductor_id
+        assert get_corsia_agent() == conductor_id
         assert first == "first"
 
     def test_created_name_is_normalized(self, isolated_db):
@@ -365,7 +371,7 @@ class TestTokens:
         )
         db.commit()
         accounts.issue_token("newcomer", kind="api")
-        remaining = accounts.list_tokens("newcomer")
+        remaining = token_admin.list_tokens("newcomer")
         assert len(remaining) == 1
         assert remaining[0]["kind"] == "api"
         assert accounts.resolve_token(stale) is None
@@ -373,22 +379,22 @@ class TestTokens:
     def test_revoke_one_token(self, isolated_db):
         accounts.create_user("newcomer", GOOD_PASSWORD)
         minted, _ = accounts.issue_token("newcomer", kind="api")
-        assert accounts.revoke_token(minted) is True
+        assert token_admin.revoke_token(minted) is True
         assert accounts.resolve_token(minted) is None
-        assert accounts.revoke_token(minted) is False
+        assert token_admin.revoke_token(minted) is False
 
     def test_revoke_by_label_leaves_other_labels(self, isolated_db):
         accounts.create_user("newcomer", GOOD_PASSWORD)
         doomed, _ = accounts.issue_token("newcomer", kind="api", label="old")
         kept, _ = accounts.issue_token("newcomer", kind="api", label="keep")
-        assert accounts.revoke_label("newcomer", "old") == 1
+        assert token_admin.revoke_label("newcomer", "old") == 1
         assert accounts.resolve_token(doomed) is None
         assert accounts.resolve_token(kept) is not None
 
     def test_list_tokens_never_returns_a_value(self, isolated_db):
         accounts.create_user("newcomer", GOOD_PASSWORD)
         minted, _ = accounts.issue_token("newcomer", kind="api", label="cli")
-        listed = accounts.list_tokens("newcomer")
+        listed = token_admin.list_tokens("newcomer")
         assert [row["label"] for row in listed] == ["cli"]
         assert minted not in str(listed)
         assert not any("hash" in key for row in listed for key in row)
@@ -456,7 +462,7 @@ class TestAccountsMigration:
         from infra.migration_25_to_26_accounts import migrate_25_to_26
         from infra.schema import SCHEMA_VERSION
 
-        assert SCHEMA_VERSION == 117
+        assert SCHEMA_VERSION == 118
         assert MIGRATIONS[25] is migrate_25_to_26
 
     def test_migrated_shape_matches_a_freshly_created_one(self, tmp_path):

@@ -14,8 +14,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from infra.time import utc_now_iso
-
 _TEMPORARY_FAMILY_SQL = """
     WITH RECURSIVE family(id, depth, path) AS (
         SELECT id, 0, json_array(id) FROM threads WHERE id = ?
@@ -68,7 +66,6 @@ def _delete_one_thread_rows(
     from infra.presence import delete_thread_presence
     from infra.thread_updates import delete_thread_updates
     from infra.thread_driver import delete_thread_turns
-    from automation import schedules
     from plans import public
     from registry import models as registry_models
     from registry.ownership import rehome_on_thread_end
@@ -78,7 +75,6 @@ def _delete_one_thread_rows(
     # No schedule outlives its owner: a script schedule would otherwise keep
     # claiming runs for a thread that no longer exists, and its row would
     # block the thread's own deletion.
-    schedules.retire_for_thread(thread_id, utc_now_iso(), db=db)
     db.execute("DELETE FROM automation_schedules WHERE thread_id = ?", (thread_id,))
     delete_thread_checkpoints(db, thread_id)
     delete_thread_continuity(db, thread_id)

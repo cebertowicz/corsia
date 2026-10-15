@@ -40,19 +40,14 @@ class CoordinationScope(TypedDict):
     project_name: NotRequired[str]
 
 
-def get_conductor(scope: str = WORKSPACE_SCOPE, db=None) -> str | None:
-    """Return the designated thread id for a scope, or None.
-
-    ``scope`` is ``'workspace'`` (the CORSIA agent) or a project id (its
-    conductor). An unknown project id reads as None (no designation) — GET is
-    not a validation surface.
-    """
-    if scope == WORKSPACE_SCOPE:
-        return get_corsia_agent(db=db)
+def get_project_conductor(project_id: str, db=None) -> str | None:
+    """Return a project's conductor, or None when the project is unknown/unassigned."""
+    if project_id == WORKSPACE_SCOPE:
+        raise ValueError("workspace scope has a CORSIA agent, not a project conductor")
     _db = db or get_db()
     try:
         row = _db.execute(
-            "SELECT conductor_thread_id FROM projects WHERE id = ?", (scope,)
+            "SELECT conductor_thread_id FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
         return row["conductor_thread_id"] if row else None
     finally:
@@ -146,18 +141,17 @@ def human_conductor_model(db=None) -> str | None:
     return canonical
 
 
-def ensure_scope_conductor(
-    scope: str,
+def ensure_project_conductor(
+    project_id: str,
     user_id: str,
     *,
     model: str | None,
     db=None,
 ) -> str | None:
-    """Create and designate a thread when a scope lacks one.
+    """Create and designate a project's conductor when it lacks one.
 
-    The workspace scope's thread is the CORSIA agent; a project scope's is its
-    conductor. Existing openable designations are preserved. Unknown project
-    scopes return ``None`` so callers can keep using ``set_conductor`` as the
+    Existing openable designations are preserved. Unknown project scopes return
+    ``None`` so callers can keep using ``set_project_conductor`` as the
     validation surface for explicit re-designation. ``user_id`` names the
     account that owns the created thread; every caller must resolve one,
     because a scope without an owner to create for is a caller error, not a
@@ -166,18 +160,18 @@ def ensure_scope_conductor(
     user chooses a model, so only a caller with no one waiting on it passes
     ``None``.
     """
-    if scope == WORKSPACE_SCOPE:
-        return ensure_corsia_agent(user_id, model=model, db=db)
+    if project_id == WORKSPACE_SCOPE:
+        raise ValueError("workspace scope has a CORSIA agent, not a project conductor")
     _db = db or get_db()
     try:
-        with write_transaction(_db, scope="ensure_scope_conductor") as conn:
-            existing = get_conductor(scope, db=conn)
+        with write_transaction(_db, scope="ensure_project_conductor") as conn:
+            existing = get_project_conductor(project_id, db=conn)
             if existing and thread_is_openable(existing, db=conn):
                 return existing
 
             row = conn.execute(
                 "SELECT id FROM projects WHERE id = ?",
-                (scope,),
+                (project_id,),
             ).fetchone()
             if row is None:
                 return None
@@ -189,15 +183,15 @@ def ensure_scope_conductor(
                 project_id=row["id"],
                 db=conn,
             )
-            if not set_conductor(scope, session["id"], db=conn):
-                raise RuntimeError(f"unknown conductor scope: {scope!r}")
+            if not set_project_conductor(project_id, session["id"], db=conn):
+                raise RuntimeError(f"unknown project conductor scope: {project_id!r}")
             return session["id"]
     finally:
         if not db:
             _db.close()
 
 
-def backfill_scope_conductors(db=None) -> list[tuple[str, str]]:
+def backfill_coordination_scopes(db=None) -> list[tuple[str, str]]:
     """Heal scopes that predate creation-time designations, once per install.
 
     The CORSIA agent is owned by the install's first account. Each healed
@@ -216,7 +210,7 @@ def backfill_scope_conductors(db=None) -> list[tuple[str, str]]:
     _db = db or get_db()
     try:
         healed: list[tuple[str, str]] = []
-        with write_transaction(_db, scope="conductor_backfill") as conn:
+        with write_transaction(_db, scope="coordination_backfill") as conn:
             first_user = conn.execute(
                 "SELECT id FROM users ORDER BY created_at, id LIMIT 1"
             ).fetchone()
@@ -243,7 +237,7 @@ def backfill_scope_conductors(db=None) -> list[tuple[str, str]]:
                     "WHERE t.project_id = ? ORDER BY t.created_at, t.id LIMIT 1",
                     (row["id"],),
                 ).fetchone()
-                thread_id = ensure_scope_conductor(
+                thread_id = ensure_project_conductor(
                     row["id"],
                     owner["user_id"] if owner else first_user["id"],
                     model=None,
@@ -275,15 +269,10 @@ def bump_context_epochs(db, thread_ids, now: str) -> tuple[str, ...]:
     return invalidated
 
 
-def set_conductor(scope: str, thread_id: str | None, db=None) -> bool:
-    """Designate (or clear, with None) a scope's coordinating thread.
-
-    The workspace scope designates the CORSIA agent. Returns False when
-    ``scope`` names a project that doesn't exist — callers decide whether
-    that's a 400 or an exception. The workspace scope always exists.
-    """
-    if scope == WORKSPACE_SCOPE:
-        return set_corsia_agent(thread_id, db=db)
+def set_project_conductor(project_id: str, thread_id: str | None, db=None) -> bool:
+    """Designate (or clear) a project's conductor; return False for an unknown project."""
+    if project_id == WORKSPACE_SCOPE:
+        raise ValueError("workspace scope has a CORSIA agent, not a project conductor")
     if db is not None and db.in_transaction:
         # The prior designation and both epoch invalidations are one serialized
         # state transition. A caller-owned SQLite transaction may still be
@@ -294,7 +283,7 @@ def set_conductor(scope: str, thread_id: str | None, db=None) -> bool:
         now = datetime.now(timezone.utc).isoformat()
         row = _db.execute(
             "SELECT conductor_thread_id FROM projects WHERE id = ?",
-            (scope,),
+            (project_id,),
         ).fetchone()
         if row is None:
             return False
@@ -304,7 +293,21 @@ def set_conductor(scope: str, thread_id: str | None, db=None) -> bool:
         _db.execute(
             "UPDATE projects SET conductor_thread_id = ?, updated_at = ? "
             "WHERE id = ?",
-            (thread_id, now, scope),
+            (thread_id, now, project_id),
         )
         bump_context_epochs(_db, (previous, thread_id), now)
         return True
+
+
+def get_scope_coordinator(scope: str, db=None) -> str | None:
+    """Return the CORSIA agent for workspace or the conductor for a project."""
+    if scope == WORKSPACE_SCOPE:
+        return get_corsia_agent(db=db)
+    return get_project_conductor(scope, db=db)
+
+
+def set_scope_coordinator(scope: str, thread_id: str | None, db=None) -> bool:
+    """Set the CORSIA agent for workspace or a conductor for a project."""
+    if scope == WORKSPACE_SCOPE:
+        return set_corsia_agent(thread_id, db=db)
+    return set_project_conductor(scope, thread_id, db=db)

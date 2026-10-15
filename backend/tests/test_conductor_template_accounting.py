@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 from types import SimpleNamespace
 
@@ -51,7 +57,7 @@ def test_next_turn_preview_keeps_conductor_attribution_counted(
     tmp_path,
 ):
     from core.context_preview import build_next_turn_context_preview
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.database import get_db
     from llm.resolution import ExecutionTarget
 
@@ -94,7 +100,7 @@ def test_next_turn_preview_keeps_conductor_attribution_counted(
             ),
         )
         db.commit()
-        assert set_conductor("workspace", "workspace-conductor", db=db) is True
+        assert set_corsia_agent("workspace-conductor", db=db) is True
         thread_row = db.execute(
             "SELECT * FROM threads WHERE id='workspace-conductor'"
         ).fetchone()

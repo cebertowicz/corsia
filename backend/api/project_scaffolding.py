@@ -322,7 +322,7 @@ def initialize_project(
     ``user_id`` is the account the project's conductor thread belongs to; a
     project is created with its conductor, so there is no caller without one.
     ``conductor_model`` is that thread's selector; each caller states it
-    (``infra.conductor.ensure_scope_conductor``).
+    (``infra.conductor.ensure_project_conductor``).
     """
     transition = (
         repo_policy_transition(active_process_count=_active_owned_process_count)
@@ -420,8 +420,8 @@ def _initialize_project(
             if policy is not None:
                 register_prepared_repo_policy(policy, db=db)
             _write_doc_roots(db, project_id, doc_roots)
-            from infra.conductor import ensure_scope_conductor
-            ensure_scope_conductor(project_id, user_id, model=conductor_model, db=db)
+            from infra.conductor import ensure_project_conductor
+            ensure_project_conductor(project_id, user_id, model=conductor_model, db=db)
             enforce_scaffold_ownership(config.WORKSPACE, project_id, db=db)
             if linked_identity is not None:
                 require_source_entry(linked_identity)

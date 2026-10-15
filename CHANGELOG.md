@@ -80,7 +80,7 @@ Released 2026-10-11.
 - The page gains a dollars-per-hour-of-work measure for agents and models, plus dollars per task and a model's share of spend.
 - Each headline names the dates it pooled and counts only that window; the cost line counts local records and classifies by the model that actually ran.
 - Attention is measured from when you were actually present, and minutes between your messages count across your whole message stream.
-- Tasks are sized by the effort a person would need, and corrections you make in messages are recorded and checked independently.
+- Tasks are sized by the effort a person would need, and corrections you make in messages are recorded and checked independently once the local corrections classifier is installed (setup support: #704).
 - Biggest changes ranks only the page's own measures; cards are square, tables fit a phone, and the phone scroller starts below the header.
 - The page loads faster by reading costs and outcomes once per refresh.
 

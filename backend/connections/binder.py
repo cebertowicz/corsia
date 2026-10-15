@@ -294,12 +294,12 @@ def ensure_designation_rule(
     *, connector: str, fact: str, value: str, precedence: int = 100,
     designation: str = "workspace", db=None,
 ) -> Rule | None:
-    """Create (once) a rule that routes to a scope's conductor and follows it.
+    """Create (once) a rule that routes to a scope coordinator and follows it.
 
-    ``designation`` is ``'workspace'`` (the workspace agent) or a project id
-    (that project's conductor). The destination is resolved from the current
-    designation whenever rules are read (``list_rules``), so a designation
-    move needs no hook. Returns None while the scope has no designee.
+    ``designation`` is ``'workspace'`` (the CORSIA agent) or a project id
+    (that project's conductor). The persisted destination is a creation-time
+    placeholder; reads resolve the current designation, so a move needs no
+    copied owner to keep current and no sweep. Returns None while unassigned.
     """
     rule_scope = DESIGNATION_PREFIX + designation
     with write_transaction(db, scope="ensure_designation_rule") as _db:
@@ -321,9 +321,9 @@ def ensure_designation_rule(
 
 
 def _designated_thread(designation: str, db) -> str | None:
-    from infra.conductor import get_conductor
+    from infra.conductor import get_scope_coordinator
 
-    return get_conductor(designation, db=db)
+    return get_scope_coordinator(designation, db=db)
 
 
 def _resolve_designation(rule: Rule, db) -> Rule | None:

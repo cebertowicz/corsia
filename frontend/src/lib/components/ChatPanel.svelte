@@ -4,7 +4,7 @@
 	import { token } from '$lib/stores/auth';
 	import { threads, activeThreadId, activeThread, messages, isStreaming, reasoningEffort } from '$lib/stores/threads';
 	import { activeModelId, bindActiveThreadModel } from '$lib/stores/models';
-	import { workspaceConductorId } from '$lib/utils/conductor';
+	import { corsiaAgentId } from '$lib/utils/conductor';
 	import ConductorSourcesPanel from './ConductorSourcesPanel.svelte';
 	import { loadCheckpoints } from '$lib/stores/checkpoints';
 	import { beginThreadEntry } from '$lib/stores/contextUsageByThread';
@@ -353,7 +353,7 @@
 			its decision cannot be obscured by the dock or mobile controls.
 		-->
 		<ChatAttentionStack>
-			{#if $activeThreadId && $activeThreadId === $workspaceConductorId && !$activeModelId}
+			{#if $activeThreadId && $activeThreadId === $corsiaAgentId && !$activeModelId}
 				<ConductorSourcesPanel threadId={$activeThreadId} />
 			{/if}
 			{#if $activeThreadId}

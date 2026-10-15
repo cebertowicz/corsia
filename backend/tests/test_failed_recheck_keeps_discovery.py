@@ -1,8 +1,7 @@
-"""A usage recheck that cannot finish leaves an added account's discovered models in place.
+"""An added-account usage recheck preserves catalog and receipt-fenced limit state.
 
-The recheck of an added account is its own discovery run (models and usage in one Claude
-process). Only the process itself is faked here; the recheck, the refresh owner, the
-discovery commit and every reader are the real ones."""
+Only the bounded Claude control process is faked here; the recheck and usage persistence
+paths are real."""
 from __future__ import annotations
 
 import asyncio
@@ -92,7 +91,10 @@ async def test_a_recheck_that_cannot_finish_keeps_the_models_and_the_last_verdic
     reason, projection, last_check = _read(claude)
     assert reason is None
     assert projection["usable"] is False
+    assert projection["resets_at"] == RESET
     assert last_check and last_check["outcome"] == "unknown"
+    if isinstance(outcome, BaseException):
+        assert last_check["error"] == f"claude-code usage read failed: {outcome}"
 
 
 async def test_a_usage_read_that_fails_alone_keeps_the_models(limited_added_account, monkeypatch):
@@ -143,6 +145,38 @@ async def test_an_added_claude_recheck_uses_its_scoped_usage_read_without_discov
     reason, projection, last_check = _read(claude)
     assert reason is None and projection["usable"] is False
     assert last_check and last_check["outcome"] == "limited"
+
+
+async def test_stale_added_claude_usage_receipt_changes_nothing(limited_added_account, monkeypatch):
+    from connections import claude_discovery, harness_usage, harness_usage_check as checks
+    from connections.account_evidence import discovery_record, invalidate_discovery
+    from connections.account_receipts import capture_receipt
+    from connections.vendor_accounts import get_account
+
+    claude = limited_added_account
+    account = get_account(claude.other, db=claude.db)
+    receipt = capture_receipt("claude-code", account_id=claude.other, db=claude.db)
+    before_usage = harness_usage.stored_usage(
+        provider="claude-code", account_id=claude.other, db=claude.db,
+    )
+
+    async def control(_binary, _frames, **_kwargs):
+        current = get_account(claude.other, db=claude.db)
+        next_login = discovery_record(current)["login_seq"] + 1
+        invalidate_discovery(current, login_seq=next_login, auth_state="known", db=claude.db)
+        claude.db.commit()
+        return _stream(_ok("corsia-usage", {
+            "rate_limits_available": True,
+            "rate_limits": {"five_hour": {"utilization": 1}},
+        }))
+
+    monkeypatch.setattr(claude_discovery, "run_claude_control", control)
+    monkeypatch.setattr(checks, "_binary_for", lambda _provider: asyncio.sleep(0, result="/synthetic/claude"))
+    checks._LAST_STARTED.clear()
+    await checks._check("claude-code", claude.other)
+
+    assert capture_receipt("claude-code", account_id=claude.other, db=claude.db) != receipt
+    assert harness_usage.stored_usage(provider="claude-code", account_id=claude.other, db=claude.db) == before_usage
 
 
 async def test_only_the_same_logins_last_good_discovery_survives_a_failed_run(claude):

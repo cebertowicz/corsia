@@ -330,7 +330,7 @@ async def prelaunch_settings_restart(
             script_args = ["restart-prepared"]
             if caller_token is None:
                 try:
-                    from infra.accounts import issue_lifecycle_service_token
+                    from infra.token_admin import issue_lifecycle_service_token
                     from infra.db_async import run_in_db
 
                     caller_token = await run_in_db(issue_lifecycle_service_token, user["id"], operation_id)

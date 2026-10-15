@@ -2,7 +2,8 @@
 
 A script prints one JSON object per line, ``{"series": "<key>", "value": <number>}``,
 for series it registered. The runner reads that stdout as data, never as
-instructions, and owns every write. The script holds no credential and no API.
+instructions, and owns every write. The script runs in the owner's own shell
+sandbox envelope, the one its ``bash`` gets, and receives nothing beyond it.
 
 Routing is deliberately small:
 
@@ -212,33 +213,8 @@ def wake_message_id(schedule_id: str, series: str | None, day: str) -> str:
     ))
 
 
-def record_series_reading(
-    db: sqlite3.Connection, schedule: Schedule, reading: Reading, *, ts: str,
-) -> None:
-    """The one outcome-event write for a reading.
-
-    TODO(measurement seam, Self-Improvement): ``agent.script_reading`` has no
-    allowlist entry, and the allowlist has no numeric kind, so the event keeps
-    no attributes and the value is not stored on it yet. Once that kind and the
-    agent-defined series registry land, pass ``{"value": reading.value}`` here
-    and let the series' default threshold replace the bounds in ``classify``.
-    """
-    from infra.outcome_events import record_outcome_event
-
-    project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
-    record_outcome_event(
-        db,
-        dedupe_key=f"script:{schedule.id}:{reading.series}:{ts}",
-        event_name="agent.script_reading",
-        source="agent",
-        provenance="agent_recorded",
-        ts=ts,
-        subject_key=f"script:{schedule.id}:{reading.series}",
-        project_id=project,
-        agent_thread_id=schedule.thread_id,
-        attributes=None,
-    )
-
+# TODO(measurement seam, Self-Improvement): do not persist raw readings until
+# the outcome-event allowlist and numeric series registry can retain their values.
 
 def _wake_exists(db: sqlite3.Connection, message_id: str) -> bool:
     return db.execute(
@@ -257,21 +233,28 @@ def _note(db: sqlite3.Connection, schedule: Schedule, key: str, summary: str) ->
 
 def _wake(db: sqlite3.Connection, schedule: Schedule, signal: Signal, now: str) -> bool:
     """Wake the owner once for this series today; a repeat becomes a note. True if woken."""
+    from events import dead_letter
     from events.delivery import enqueue_event_wake
 
     message_id = wake_message_id(schedule.id, signal.series, local_day(now))
     if _wake_exists(db, message_id):
         _note(db, schedule, signal.series or "run", signal.summary)
         return False
+    payload = {**signal.details, "schedule_id": schedule.id, "next": _WAKE_NEXT}
     try:
         enqueue_event_wake(
             schedule.thread_id, f"script.{signal.kind}", signal.summary,
-            {**signal.details, "schedule_id": schedule.id, "next": _WAKE_NEXT},
+            payload,
             message_id=message_id,
             chip=f"Script {signal.kind.replace('_', ' ')}: {_script_name(schedule)}",
             db=db,
         )
     except ValueError:
+        dead_letter.park(
+            f"script.{signal.kind}",
+            {**payload, "summary": signal.summary, "owner": schedule.thread_id},
+            "owner_inactive", schedule.id, db=db,
+        )
         logger.warning(
             "script schedule {} owner {} unavailable; {} not delivered",
             schedule.id, schedule.thread_id, signal.kind,
@@ -298,7 +281,7 @@ def _note_readings(
     for reading in report.readings:
         series = registered[reading.series]
         if series.min is None and series.max is None:
-            continue  # unbounded: the outcome event is its only record
+            continue  # Raw readings are not persisted yet (see TODOs); a series with no bounds never wakes.
         if classify(series, reading.value) != "ok":
             continue
         unit = f" {series.unit}" if series.unit else ""
@@ -324,8 +307,8 @@ def emit_report(
 ) -> bool:
     """Write a run's events, notes and wakes and settle it; True if the owner was woken."""
     registered = {s.key: s for s in store.series_of(schedule)}
-    for reading in report.readings:
-        record_series_reading(db, schedule, reading, ts=now)
+    # TODO(measurement seam, Self-Improvement): persist readings only once the
+    # numeric event contract can retain values rather than valueless rows.
     woken = False
     for signal in report.signals:
         woken = _wake(db, schedule, signal, now) or woken

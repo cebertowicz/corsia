@@ -1,13 +1,19 @@
 """Conductor API authentication, permanent route boundaries and bounded output."""
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import asyncio
 import json
 
 import pytest
 from fastapi import FastAPI
 
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from infra.internal_principal import current_internal_user, internal_request
 from tests.registry_helpers import make_session
@@ -23,8 +29,8 @@ def _actors():
         conductor = make_session(db, prefix="conductor")
         ordinary = make_session(db, prefix="ordinary")
         project = make_session(db, prefix="project", project_id="other")
-        assert set_conductor("workspace", conductor, db=db)
-        assert set_conductor("other", project, db=db)
+        assert set_corsia_agent(conductor, db=db)
+        assert set_project_conductor("other", project, db=db)
         return conductor, ordinary, project
     finally:
         db.close()
@@ -288,7 +294,7 @@ async def test_key_check_and_value_vendor_verify_and_signin(isolated_db):
 async def test_human_seen_state_and_conductor_designation_denied(
     isolated_db, monkeypatch, method, path, query, body,
 ):
-    from infra.conductor import get_conductor
+    from infra.conductor import get_scope_coordinator
     import api.conductor as conductor_routes
     import api.plans as plan_routes
     import api.thread_seen as seen_routes
@@ -302,14 +308,14 @@ async def test_human_seen_state_and_conductor_designation_denied(
 
     monkeypatch.setattr(seen_routes, "_mark_reported", mutation)
     monkeypatch.setattr(plan_routes, "_thread_view_operation", mutation)
-    monkeypatch.setattr(conductor_routes, "set_conductor", mutation)
+    monkeypatch.setattr(conductor_routes, "set_scope_coordinator", mutation)
     body = {key: ordinary if value == "{target}" else value for key, value in body.items()}
     result = await CorsiaApiTool().execute(
         method, path.format(target=ordinary), query=query, body=body, _thread_id=conductor,
     )
     assert "off-limits" in result, result
     assert not reached
-    assert get_conductor("workspace") == conductor
+    assert get_corsia_agent() == conductor
 
 
 @pytest.mark.asyncio

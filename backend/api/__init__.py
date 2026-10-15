@@ -1,6 +1,7 @@
 """Route modules — each exports an APIRouter."""
 
 from api.auth import router as auth_router
+from api.setup import router as setup_router
 from api.threads import router as threads_router
 from api.thread_mutations import router as thread_mutations_router
 from api.thread_messages import router as thread_messages_router
@@ -47,6 +48,7 @@ from api.plans_folded import router as plans_folded_router
 
 __all__ = [
     "auth_router",
+    "setup_router",
     "threads_router",
     "thread_mutations_router",
     "thread_messages_router",

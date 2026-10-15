@@ -68,7 +68,7 @@ def test_ordinary_thread_receives_no_role_context_and_directory_does_not_instant
     after = dict(conn.execute("SELECT * FROM threads WHERE id='ordinary'").fetchone())
     assert resolution.roles == ()
     assert resolution.sources == ()
-    assert resolution.conductor_scopes == ()
+    assert resolution.coordination_scopes == ()
     assert after == before
 
 
@@ -190,7 +190,7 @@ def test_conductor_composes_agent_then_conductor_across_existing_scopes(
         "project",
         "workspace",
     ]
-    assert [scope["scope_type"] for scope in resolution.conductor_scopes] == [
+    assert [scope["scope_type"] for scope in resolution.coordination_scopes] == [
         "workspace",
         "project",
     ]

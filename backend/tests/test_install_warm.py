@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 import asyncio
 import io
 import threading
@@ -27,14 +35,14 @@ MODEL = "omlx@srv-1/model-1"
 def fresh_install(isolated_db):
     """A real first account: its conductor holds the wake and the digest."""
     from infra import accounts
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
     from infra.database import write_transaction
 
     with write_transaction(None, scope="test_install_warm") as db:
         db.execute("DELETE FROM auth_tokens")
         db.execute("DELETE FROM users")
     accounts.create_user("newcomer", SECRET_ENOUGH)
-    conductor_id = get_conductor(WORKSPACE_SCOPE)
+    conductor_id = get_corsia_agent()
     assert conductor_id
     return conductor_id
 

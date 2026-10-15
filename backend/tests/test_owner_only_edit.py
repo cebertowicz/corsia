@@ -8,6 +8,12 @@ per-scope adoption setting plays no part: the refusal holds without it.
 """
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import asyncio
 import json
 import time
@@ -546,7 +552,7 @@ def test_unowned_file_is_not_claimed_by_an_edit_while_the_adoption_setting_is_of
 @pytest.fixture
 def scopes(ownership_scope):
     """The alpha scope plus a second project and a workspace conductor, each with its own conductor."""
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from tests.registry_helpers import make_session
 
     scope = ownership_scope
@@ -563,7 +569,7 @@ def scopes(ownership_scope):
     db.execute("UPDATE threads SET spawned_by=? WHERE id=?", (scope["conductor"], conductor_worker))
     db.execute("UPDATE projects SET conductor_thread_id=? WHERE id='project-beta'", (beta_conductor,))
     db.commit()
-    assert set_conductor("workspace", workspace_conductor, db=db)
+    assert set_corsia_agent(workspace_conductor, db=db)
     scope.update(beta_conductor=beta_conductor, workspace_conductor=workspace_conductor,
                  conductor_worker=conductor_worker)
     return scope

@@ -610,20 +610,20 @@ def test_project_roster_lists_designated_conductor_that_is_not_a_registered_agen
         ("{not-json", None, "the CORSIA agent setting is malformed"),
         (None, {}, "none designated"),
         ("designated", None,
-         "designated conductor workspace-conductor does not exist"),
+         "designated CORSIA agent workspace-conductor does not exist"),
         ("designated", {"user_id": "user-2"},
-         "designated conductor belongs to another account"),
+         "designated CORSIA agent belongs to another account"),
         ("designated", {"project_id": "proj-1"},
-         "designated conductor workspace-conductor is unreachable: "
+         "designated CORSIA agent workspace-conductor is unreachable: "
          "the CORSIA agent is not a workspace thread"),
         ("designated", {"agent_enabled": 1, "agent_status": "inactive"},
-         "designated conductor workspace-conductor is unreachable: "
+         "designated CORSIA agent workspace-conductor is unreachable: "
          "agent is not active"),
         ("designated", {"lifecycle_state": "archived", "archived_reason": "user"},
-         "designated conductor workspace-conductor is unreachable: "
+         "designated CORSIA agent workspace-conductor is unreachable: "
          "thread is archived"),
         ("designated", {"lifecycle_state": "purged"},
-         "designated conductor workspace-conductor is unreachable: "
+         "designated CORSIA agent workspace-conductor is unreachable: "
          "thread has been purged"),
     ],
 )
@@ -793,6 +793,7 @@ def test_context_registry_composes_agent_then_conductor_context(tmp_path):
             composed.append(("template", source.metadata["template_kind"]))
     assert composed == [
         ("role", "agent"),
+        ("template", "core"),
         ("template", "corsia_agent"),
         ("role", "corsia_agent"),
     ]
@@ -800,7 +801,7 @@ def test_context_registry_composes_agent_then_conductor_context(tmp_path):
     assert collection.agent_facts["receives_agent_role"] is True
     assert collection.agent_facts["is_conductor"] is False
     assert collection.agent_facts["is_corsia_agent"] is True
-    assert collection.agent_facts["conductor_scopes"] == [
+    assert collection.agent_facts["coordination_scopes"] == [
         {"scope": "workspace", "scope_type": "workspace"}
     ]
 

@@ -50,7 +50,7 @@ def _is_project_conductor(actor_thread_id: str, project_id: str | None, db) -> b
         return False
     from infra import conductor
 
-    return conductor.get_conductor(project_id, db=db) == actor_thread_id
+    return conductor.get_project_conductor(project_id, db=db) == actor_thread_id
 
 
 def can_rehome(

@@ -27,11 +27,7 @@ from tools.shell_envelope import (
     execution_envelope_for_consumed_action,
     prepare_execution_envelope,
 )
-from tools.shell_environment import (
-    bind_agent_account,
-    bind_gws_home,
-    safehouse_subprocess_env,
-)
+from tools.shell_environment import safehouse_subprocess_env
 from tools.shell_guard import (
     execution_envelope_profile,
     safehouse_argv,
@@ -101,8 +97,6 @@ async def run_script(
     """Run ``script`` in the owner's protected envelope and return its capped output."""
     await _checked_environment()
     env = safehouse_subprocess_env(thread_id)
-    bind_gws_home(env, thread_id)
-    agent_account = await bind_agent_account(env)
     try:
         policies, grant_policies = await asyncio.to_thread(
             load_shell_repo_policies, list_registered_repo_policies, False, project_id,
@@ -120,7 +114,7 @@ async def run_script(
         raise ScriptSandboxError(denial)
     envelope = execution_envelope_for_consumed_action(
         None, leased=False, thread_id=thread_id, grant_policies=grant_policies,
-        policies=policies, agent_account=agent_account, env=env,
+        policies=policies, agent_account=None, env=env,
         build_profile=execution_envelope_profile, build_argv=safehouse_argv,
     )
     profile_path, argv = await prepare_execution_envelope(

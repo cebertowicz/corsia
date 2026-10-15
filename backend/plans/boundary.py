@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, cast
 
-import infra.conductor as conductor
 import infra.config as config
+from infra.corsia_agent import get_corsia_agent
 from infra.queries import user_in_project
 import plans.blocked_wait as blocked_wait
 import plans.boundary_actor as boundary_actor
@@ -274,7 +274,7 @@ def authorize_thread_owner(db, owner_id: str, actor: PlanActor) -> None:
     if owner is None or owner["user_id"] != actor.user_id:
         raise PermissionError("plan owner is not accessible to the current actor")
     if actor.kind == "thread" and owner["project_id"] != actor.project_id:
-        if conductor.get_conductor(conductor.WORKSPACE_SCOPE, db) == actor.thread_id:
+        if get_corsia_agent(db=db) == actor.thread_id:
             return
         raise PermissionError("plan is outside the current project scope")
 

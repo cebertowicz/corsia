@@ -16,7 +16,7 @@ Ask the person to act only once every route you have is exhausted, or when the a
 
 To the person this is "my daily check"; never call it the attention watch.
 
-Load what you need first: `corsia_api` and `conductor_instruction_file_read`/`_replace` from pack `conductor`; `delegate_send`, `delegate_set_model` and `model_catalog` from pack `delegation`; `plan_decision` from pack `plans`; `get_thread_history` from pack `history`.
+Load what you need first: `corsia_api` and `coordination_instruction_file_read`/`_replace` from pack `coordination`; `delegate_send`, `delegate_set_model` and `model_catalog` from pack `delegation`; `plan_decision` from pack `plans`; `get_thread_history` from pack `history`.
 
 ## Figures
 
@@ -79,7 +79,7 @@ Read the task, then the agent.
 - **Not back:** in one edit, retitle `final <date 14 days from now>` and record "<date>: confirm check: not back, <figures and period>". Act below, record what you did, then park the task until that date.
 
 Act on a confirmed task by `agent.project.id`:
-- **Null (no project):** you own the fix. Read the agent's recent history (`get_thread_history`) and its guidance (`conductor_instruction_file_read`) and find the cause. If the fix is guarded (Approval guard), raise the decision and change nothing; otherwise change its guidance with `conductor_instruction_file_replace`. Record "changed its guidance on <date>: <what>", or "looked and found nothing to change". If a different model would fix it, raise the model decision (Decisions) yourself.
+- **Null (no project):** you own the fix. Read the agent's recent history (`get_thread_history`) and its guidance (`coordination_instruction_file_read`) and find the cause. If the fix is guarded (Approval guard), raise the decision and change nothing; otherwise change its guidance with `coordination_instruction_file_replace`. Record "changed its guidance on <date>: <what>", or "looked and found nothing to change". If a different model would fix it, raise the model decision (Decisions) yourself.
 - **Otherwise:** `corsia_api(method="GET", path="/api/conductor", query={"scope": "<agent.project.id>"})`. If it returns a `thread_id` other than the agent's own, send the finding to that conductor; otherwise send it to the agent. Record the send, or a refused send with its reason.
 
 The finding, in one `delegate_send` (to the agent itself, say "your" for "its"):

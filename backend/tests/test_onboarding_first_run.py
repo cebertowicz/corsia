@@ -7,6 +7,12 @@ durable handoff exists. Every test runs against a real database.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import asyncio
 import json
 import sqlite3
@@ -76,9 +82,9 @@ def events(monkeypatch):
 
 
 def _conductor() -> str:
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
 
-    conductor_id = get_conductor(WORKSPACE_SCOPE)
+    conductor_id = get_corsia_agent()
     assert conductor_id
     return conductor_id
 
@@ -296,7 +302,7 @@ class TestWakeAndSetupPlan:
         from infra import accounts, conductor
         from registry import shared_ownership_assignment
 
-        monkeypatch.setattr(conductor, "ensure_scope_conductor", Mock(return_value=None))
+        monkeypatch.setattr(conductor, "ensure_project_conductor", Mock(return_value=None))
         monkeypatch.setattr(shared_ownership_assignment, "enforce_scaffold_ownership", Mock())
 
         assert accounts.create_user("newcomer", SECRET_ENOUGH) == "newcomer"
@@ -574,7 +580,7 @@ class TestPending:
         from api import conductor as conductor_routes
         from api import corsia_agent as corsia_agent_routes
         from infra import accounts
-        from infra.conductor import set_conductor
+        from infra.conductor import set_project_conductor
 
         async def truth(*_a, **_k):
             return {}
@@ -598,7 +604,7 @@ class TestPending:
         with write_transaction(None, scope="test_project") as db:
             db.execute("INSERT INTO projects (id,name,path,created_at,updated_at)"
                        " VALUES ('proj-a','A','/a','t','t')")
-        assert set_conductor("proj-a", conductor_id) is True
+        assert set_project_conductor("proj-a", conductor_id) is True
         body = await conductor_routes.get_conductor_route(token="caller", scope="proj-a")
         assert body["thread_id"] == conductor_id
         assert body["first_run_pending"] is False

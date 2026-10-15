@@ -56,7 +56,7 @@ async function settle() {
 beforeEach(() => {
 	vi.useFakeTimers();
 	conductor._resetFirstRunLandingForTests();
-	conductor.workspaceConductorId.set(null);
+	conductor.corsiaAgentId.set(null);
 	user.set(null);
 	token.set(null);
 	activeThreadId.set(null);

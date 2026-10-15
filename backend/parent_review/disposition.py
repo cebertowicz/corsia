@@ -115,7 +115,7 @@ def _override_authorized(actor_thread: str | None, identity: dict, db) -> bool:
         return False
     row = db.execute("SELECT project_id FROM threads WHERE id=?", (owner,)).fetchone()
     project_id = row["project_id"] if row else None
-    return project_id is not None and conductor.get_conductor(project_id, db=db) == actor_thread
+    return project_id is not None and conductor.get_project_conductor(project_id, db=db) == actor_thread
 
 
 def _enforce_blocking(artifact_id: str, identity: dict, review_result,

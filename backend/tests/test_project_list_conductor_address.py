@@ -5,7 +5,7 @@ import asyncio
 
 def test_listing_exposes_designated_model_less_conductor(isolated_db):
     from infra.accounts import create_user
-    from infra.conductor import ensure_scope_conductor, get_conductor
+    from infra.conductor import ensure_project_conductor, get_project_conductor
     from infra.database import get_db
     from tools.query_projects import ListProjectsTool
 
@@ -17,8 +17,8 @@ def test_listing_exposes_designated_model_less_conductor(isolated_db):
             "VALUES ('garden','Garden Notes','active','t','t')"
         )
         db.commit()
-        conductor = ensure_scope_conductor("garden", owner, model=None, db=db)
-        assert get_conductor("garden", db=db) == conductor
+        conductor = ensure_project_conductor("garden", owner, model=None, db=db)
+        assert get_project_conductor("garden", db=db) == conductor
         before = db.execute("SELECT model FROM threads WHERE id=?", (conductor,)).fetchone()[0]
     finally:
         db.close()
@@ -28,7 +28,7 @@ def test_listing_exposes_designated_model_less_conductor(isolated_db):
     assert f"conductor_thread_id: {conductor}" in result
     db = get_db()
     try:
-        assert get_conductor("garden", db=db) == conductor
+        assert get_project_conductor("garden", db=db) == conductor
         assert db.execute("SELECT model FROM threads WHERE id=?", (conductor,)).fetchone()[0] == before
     finally:
         db.close()

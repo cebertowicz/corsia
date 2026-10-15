@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from infra.conductor import get_conductor
+from infra.conductor import get_scope_coordinator
 from infra.corsia_agent import CorsiaAgentSettingError
 from infra.queries import thread_available_sql, thread_unavailable_reason
 
@@ -26,11 +26,11 @@ def scope_label(project_id: str | None) -> str:
 def target_scope_authority(project_id: str | None, *, db) -> dict:
     """Return the configured authority slot for a target scope.
 
-    This consumes the existing conductor designation seam; it does not create a
+    This consumes the existing coordination designation seam; it does not create a
     second authority model for /send.
     """
     try:
-        authority_thread_id = get_conductor(
+        authority_thread_id = get_scope_coordinator(
             project_id or WORKSPACE_SCOPE_ID,
             db=db,
         )

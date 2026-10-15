@@ -7,9 +7,15 @@ scope-generic capabilities and is refused the workspace-only ones.
 """
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import pytest
 
-from infra.conductor import WORKSPACE_SCOPE, set_conductor
+from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
 from infra.database import get_db
 from tests.registry_helpers import make_session
 
@@ -28,8 +34,8 @@ def actors(isolated_db):
         ordinary = make_session(db, prefix="ordinary")
         workspace_target = make_session(db, prefix="ws-target")
         project_target = make_session(db, prefix="p-target", project_id="alpha")
-        assert set_conductor(WORKSPACE_SCOPE, agent, db=db)
-        assert set_conductor("alpha", conductor, db=db)
+        assert set_corsia_agent(agent, db=db)
+        assert set_project_conductor("alpha", conductor, db=db)
         return {
             "agent": agent,
             "conductor": conductor,

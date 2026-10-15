@@ -7,6 +7,7 @@ second status in a catalog reader.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,40 @@ from connections.usage_verdicts import ACCOUNT_WINDOWS, window_scope
 
 PROVIDER = "claude-code"
 _ALLOWED = ("allowed", "allowed_warning")
+log = logging.getLogger(__name__)
+
+
+def _shape_category(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, (int, float)):
+        return "number"
+    return "other"
+
+
+def _rate_limits_category(response: object) -> str:
+    if not isinstance(response, dict) or "rate_limits" not in response:
+        return "missing"
+    return _shape_category(response["rate_limits"])
+
+
+def _availability_category(response: object) -> str:
+    if not isinstance(response, dict) or "rate_limits_available" not in response:
+        return "missing"
+    available = response["rate_limits_available"]
+    if available is True:
+        return "true"
+    if available is False:
+        return "false"
+    return "present"
 
 
 def _iso(value: object) -> str | None:
@@ -102,6 +137,10 @@ def apply_usage_response(response: object, *, receipt: ReceiptFence | None, db=N
     verdict = usage_verdict(response)
     windows, facts = _usage_windows(response) if isinstance(response, dict) else ([], {})
     if verdict["verdict"] == "unknown":
+        log.warning(
+            "Claude Code usage unknown rate_limits_type=%s rate_limits_available=%s",
+            _rate_limits_category(response), _availability_category(response),
+        )
         harness_usage.record_usage(provider=PROVIDER, windows=windows, facts=facts,
                                    check_error=verdict["error"], receipt=receipt, db=db)
     else:

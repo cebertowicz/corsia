@@ -64,12 +64,10 @@ async def test_scoped_shutdown_joins_own_task_then_restores_session_lifecycle(
 @pytest.mark.asyncio
 async def test_foreign_task_still_refuses_join_and_is_cleaned_on_its_owner_loop(monkeypatch):
     from app_shutdown_owned_tasks import shutdown_owned_tasks
-    from app_startup_runtime import RUNTIME_LOOP_TASKS
     from connections import account_controls
     from infra import state
 
-    for attr in ('_github_ownership_login_task', *(attr for _, attr in RUNTIME_LOOP_TASKS)):
-        monkeypatch.setattr(state, attr, None, raising=False)
+    isolated_shutdown_tasks.__wrapped__(monkeypatch)
     foreign = asyncio.new_event_loop()
     errors = []
     foreign.set_exception_handler(lambda _loop, context: errors.append(context))

@@ -836,6 +836,7 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         "network health",
         "turn-buffer sweeper",
         "plan liveness",
+        "corrections classifier",
     }
     started = {name: asyncio.Event() for name in worker_names}
     stopped: set[str] = set()
@@ -906,6 +907,10 @@ async def test_normal_shutdown_joins_all_owned_work_before_storage(
         turn_buffers,
         "start_sweeper",
         lambda: asyncio.create_task(block("turn-buffer sweeper")),
+    )
+    monkeypatch.setattr(
+        "jobs.corrections_realtime._startup_worker",
+        lambda: block("corrections classifier"),
     )
 
     async def shutdown_refreshes() -> None:
