@@ -1,7 +1,10 @@
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SetupScreen from './SetupScreen.svelte';
+import { connect } from '$lib/ws';
 import { token, user } from '$lib/stores/auth';
+
+vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
 	status, headers: { 'Content-Type': 'application/json' },
@@ -145,6 +148,31 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Create your account');
 		expect(host.textContent).not.toContain('CORSIA couldn’t start');
 		expect(Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => (input as HTMLInputElement).value)).toEqual(['correct-password', 'correct-password']);
+	});
+
+	it('opens the live socket once the first account holds a session', async () => {
+		await settle();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
+			if (url === '/api/setup/local-download') return json({ in_progress: true });
+			return json({ sources: [] });
+		}));
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		for (const [input, value] of [
+			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
+			[host.querySelector('input[autocomplete="username"]'), 'first'],
+			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
+		] as [HTMLInputElement, string][]) {
+			input.value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+		}
+		await tick();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
+		await settle();
+
+		expect(connect).toHaveBeenCalledTimes(1);
 	});
 
 	it('renders Claude Code and Codex beside an inert local download state', async () => {

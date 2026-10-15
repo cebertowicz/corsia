@@ -27,6 +27,9 @@ function sourcesFor(state: SetupState) {
 
 async function serveSetupState(page: Page, state: SetupState | (() => SetupState)) {
 	const currentState = () => typeof state === 'function' ? state() : state;
+	// Account creation now opens the live socket. The fake first-account session is not a real one, so hold the
+	// socket open without an answer instead of letting the real backend refuse it and sign the person out.
+	await page.routeWebSocket((url) => url.pathname === '/ws', () => {});
 	await page.route('**/api/auth/status', async (route) => {
 		await route.fulfill({ json: { has_users: false } });
 	});

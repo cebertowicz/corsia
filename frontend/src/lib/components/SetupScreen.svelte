@@ -8,6 +8,7 @@
 	import { accountToSignIn, startSignin } from '$lib/conductorSourcesApi';
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
+	import { connect } from '$lib/ws';
 
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
@@ -151,6 +152,8 @@
 			const result = await response.json();
 			onAccountCreated();
 			token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() });
+			// A session opened here has no socket until something connects it; the app shell only connects on mount.
+			connect();
 			await refreshSources();
 			password = ''; confirmation = '';
 			page = 'models';
