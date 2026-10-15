@@ -177,7 +177,7 @@ const markdownInlinePreview = ViewPlugin.fromClass(
 			this.decorations = buildInlineDecorations(view);
 		}
 		update(u: ViewUpdate) {
-			if (u.docChanged || u.viewportChanged) {
+			if (u.docChanged || u.viewportChanged || syntaxTree(u.state) !== syntaxTree(u.startState)) {
 				this.decorations = buildInlineDecorations(u.view);
 			}
 		}
