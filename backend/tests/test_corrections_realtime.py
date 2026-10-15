@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -31,11 +32,16 @@ def _manifest(version="v1"):
     from core.corrections_recording import ClassifierVersion
 
     return SimpleNamespace(
+        path=Path("/assets") / version / "manifest.json",
         version=version,
         classifier_version=lambda head="correction": ClassifierVersion(
             "corrections-classifier", version, head, 0.595681, "modernbert-owner-context-v2-2048",
         ),
     )
+
+
+def _selection(manifest):
+    return manifest, [{"location": manifest.path.parent.name, "version": manifest.version, "state": "ready", "reason": None}]
 
 
 def _result():
@@ -84,7 +90,7 @@ def worker(monkeypatch):
     fresh = corrections_realtime.CorrectionsWorker()
     monkeypatch.setattr(corrections_realtime, "WORKER", fresh)
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", ScriptedChild)
-    monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
+    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda: _selection(_manifest()))
     ScriptedChild.created, ScriptedChild.loads, ScriptedChild.calls = [], [], []
     return fresh
 
@@ -93,7 +99,8 @@ def _absent(error="classifier asset is absent"):
     from core.corrections_classifier import AssetError
 
     def raise_error():
-        raise AssetError(error)
+        from jobs.corrections_assets import AssetSelectionError
+        raise AssetSelectionError(error, [])
 
     return raise_error
 
@@ -105,7 +112,7 @@ def _absent(error="classifier asset is absent"):
 async def test_absent_asset_records_nothing_and_says_absent(worker, monkeypatch, tmp_path):
     from jobs import corrections_realtime
 
-    monkeypatch.setattr(corrections_realtime, "_manifest", _absent())
+    monkeypatch.setattr(corrections_realtime, "select_manifest", _absent())
     from jobs import corrections_assets
     monkeypatch.setattr(corrections_assets, "asset_root", lambda: tmp_path / "missing")
     recorded = AsyncMock()
@@ -125,13 +132,34 @@ async def test_present_but_unpinned_asset_is_failed_and_not_retryable(worker, mo
     (tmp_path / "manifest.json").write_text("invalid", encoding="utf-8")
     from jobs import corrections_assets
     monkeypatch.setattr(corrections_assets, "asset_root", lambda: tmp_path)
-    monkeypatch.setattr(corrections_realtime, "_manifest", _absent("manifest sha256 does not match the source pin"))
+    monkeypatch.setattr(corrections_realtime, "select_manifest", _absent("manifest sha256 does not match the source pin"))
 
     assert await worker._classify(_candidate()) is False
 
     state = worker.snapshot()
     assert (state["state"], state["retryable"]) == ("failed", False)
     assert "pin" in state["reason"]
+
+
+@pytest.mark.asyncio
+async def test_failed_state_sends_one_owner_notice_with_the_asset_reader_text(worker, monkeypatch):
+    from automation import update_failure_notice
+
+    notices = []
+
+    def send(version, reason, reader, *, tasks):
+        notices.append((version, reason, reader, tasks))
+
+    monkeypatch.setattr(update_failure_notice, "tell_corrections_classifier_failure_detached", send)
+    worker.versions = [{"location": "corrections-classifier", "version": "v2", "state": "failed", "reason": "bad pin"}]
+    worker.reader_reason = "The corrections classifier download is damaged. Retry setup."
+
+    worker._set("failed", "bad pin")
+    worker._set("failed", "bad pin")
+
+    assert [(version, reason, reader) for version, reason, reader, _ in notices] == [
+        ("v2", "bad pin", "The corrections classifier download is damaged. Retry setup."),
+    ]
 
 
 class _CountingChild:
@@ -200,7 +228,7 @@ async def test_inflight_classification_keeps_its_starting_version(worker, monkey
         return True
 
     _CountingChild.reset()
-    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: current[0])
+    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda: _selection(current[0]))
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", Child)
     monkeypatch.setattr(corrections_realtime, "record_classification", record)
 
@@ -219,7 +247,7 @@ async def test_a_newer_selected_version_replaces_the_old_child(worker, monkeypat
 
     _CountingChild.reset()
     current = [_manifest("v1")]
-    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: current[0])
+    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda: _selection(current[0]))
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
 
@@ -234,20 +262,19 @@ async def test_a_newer_selected_version_replaces_the_old_child(worker, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_failed_newer_startup_keeps_the_older_ready_version_serving(worker, monkeypatch):
+async def test_failed_newer_startup_keeps_the_older_ready_version_serving_without_recursion(worker, monkeypatch):
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
 
     current = [_manifest("v1")]
-    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: current[0])
-    monkeypatch.setattr(
-        corrections_realtime,
-        "_LAST_VERSIONS",
-        [
+
+    def selected():
+        return current[0], [
             {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
             {"location": "corrections-classifier-v2", "version": "v2", "state": "ready", "reason": None},
-        ],
-    )
+        ]
+
+    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
     recorded = AsyncMock()
     monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
 
@@ -255,20 +282,20 @@ async def test_failed_newer_startup_keeps_the_older_ready_version_serving(worker
     current[0] = _manifest("v2")
     ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError")]
 
-    assert await worker._classify(_candidate("v2")) is True
+    assert await worker._classify(_candidate("v2")) is False
 
     state = worker.snapshot()
     assert state["version"] == "v1"
     assert state["state"] == "ready"
     assert {item["version"]: item["state"] for item in state["versions"]} == {"v1": "ready", "v2": "failed"}
-    assert recorded.await_count == 2
+    assert recorded.await_count == 1
 
 
 @pytest.mark.asyncio
 async def test_a_resident_child_is_reused_not_rebuilt_on_every_call(worker, monkeypatch):
     from jobs import corrections_realtime
 
-    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: _manifest("v1"))
+    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda: _selection(_manifest("v1")))
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
     _CountingChild.reset()
@@ -315,7 +342,7 @@ async def test_deterministic_startup_failure_never_respawns_for_later_owner_mess
         assert await worker._classify(_candidate(message_id)) is False
 
     assert recorded.await_count == 0
-    assert (worker.state, worker.reason) == ("failed", "asset v1 failed deterministic startup checks")
+    assert (worker.state, worker.reason) == ("failed", "load error:AssertionError")
     assert len(ScriptedChild.created) == 1
     assert ScriptedChild.created[0].closed and worker.child is None
 
@@ -394,7 +421,7 @@ async def test_classifier_work_is_moved_off_the_event_loop(worker, monkeypatch):
 
     await worker._classify(_candidate())
 
-    assert calls == ["_manifest", "ensure_loaded", "classify"]
+    assert calls == ["<lambda>", "ensure_loaded", "classify"]
 
 
 @pytest.mark.asyncio
@@ -830,9 +857,10 @@ async def test_shutdown_during_a_slow_load_or_call_leaves_no_model_process(
         return children[-1]
 
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", real_child)
-    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: SimpleNamespace(
+    manifest = SimpleNamespace(
         path=tmp_path / "manifest.json", version="v1", classifier_version=lambda head="correction": _version(),
-    ))
+    )
+    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda: _selection(manifest))
     worker.task = asyncio.create_task(worker._classify(_candidate()))
     for _ in range(600):
         if (tmp_path / marker).exists():

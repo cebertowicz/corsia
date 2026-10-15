@@ -7,7 +7,7 @@ import socket
 import pytest
 
 
-def _manifest(root, *, version="v1", policy="modernbert-owner-context-v2-2048"):
+def _manifest(root, *, version="v1", policy="modernbert-owner-context-v2-2048", threshold=0.595681):
     model = root / "model.onnx"
     tokenizer = root / "tokenizer.json"
     model.write_bytes(b"model")
@@ -18,7 +18,7 @@ def _manifest(root, *, version="v1", policy="modernbert-owner-context-v2-2048"):
     }
     value = {
         "asset_id": "corrections-classifier", "version": version, "files": files,
-        "heads": [{"name": "correction", "threshold": 0.595681, "labels": ["not_correction", "correction"]}],
+        "heads": [{"name": "correction", "threshold": threshold, "labels": ["not_correction", "correction"]}],
         "input_policy_id": policy,
         "self_test": [{"owner": f"synthetic {index}", "expected_score": 0.5} for index in range(4)],
     }
@@ -69,9 +69,9 @@ def test_verified_manifest_builds_the_named_correction_head(tmp_path):
     )
 
 
-def _install(directory, version):
+def _install(directory, version, *, threshold=0.595681):
     directory.mkdir()
-    path = _manifest(directory, version=version)
+    path = _manifest(directory, version=version, threshold=threshold)
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -118,10 +118,10 @@ def test_highest_verified_pin_wins_and_a_broken_newer_asset_keeps_the_older_one_
     layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
     (tmp_path / "corrections-classifier-v2" / "model.onnx").write_bytes(b"tampered")
 
-    selected = corrections_realtime._manifest()
+    selected, versions = corrections_realtime.select_manifest()
 
     assert selected.version == "v1"
-    assert corrections_realtime._LAST_VERSIONS == [
+    assert versions == [
         {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
         {
             "location": "corrections-classifier-v2", "version": None, "state": "failed",
@@ -136,7 +136,7 @@ def test_a_verified_newer_sibling_replaces_the_installed_directory(layout, tmp_p
     layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
     layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
 
-    selected = corrections_realtime._manifest()
+    selected = corrections_realtime.select_manifest()[0]
 
     assert selected.version == "v2"
     assert selected.path.parent == tmp_path / "corrections-classifier-v2"
@@ -148,7 +148,7 @@ def test_a_tie_goes_to_the_installed_directory(layout, tmp_path):
     layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
     assert _install(tmp_path / "corrections-classifier-v1", "v1") == layout["v1"]
 
-    assert corrections_realtime._manifest().path.parent == tmp_path / "corrections-classifier"
+    assert corrections_realtime.select_manifest()[0].path.parent == tmp_path / "corrections-classifier"
 
 
 def test_the_installed_directory_alone_keeps_working(layout, tmp_path):
@@ -156,9 +156,9 @@ def test_the_installed_directory_alone_keeps_working(layout, tmp_path):
 
     layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
 
-    selected = corrections_realtime._manifest()
+    selected, versions = corrections_realtime.select_manifest()
     assert selected.version == "v1"
-    assert [item["state"] for item in corrections_realtime._LAST_VERSIONS] == ["ready"]
+    assert [item["state"] for item in versions] == ["ready"]
 
 
 def test_a_directory_name_never_decides_the_version(layout, tmp_path):
@@ -167,7 +167,7 @@ def test_a_directory_name_never_decides_the_version(layout, tmp_path):
     layout["v1"] = _install(tmp_path / "corrections-classifier-v2", "v1")
     layout["v2"] = "0" * 64
 
-    selected = corrections_realtime._manifest()
+    selected = corrections_realtime.select_manifest()[0]
 
     assert selected.version == "v1"
     assert selected.path.parent == tmp_path / "corrections-classifier-v2"
@@ -179,9 +179,9 @@ def test_an_unpinned_sibling_directory_is_never_looked_at(layout, tmp_path):
     layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
     _install(tmp_path / "corrections-classifier-v9", "v9")
 
-    selected = corrections_realtime._manifest()
+    selected, versions = corrections_realtime.select_manifest()
     assert selected.version == "v1"
-    assert [item["location"] for item in corrections_realtime._LAST_VERSIONS] == ["corrections-classifier"]
+    assert [item["location"] for item in versions] == ["corrections-classifier"]
 
 
 def test_nothing_installed_reads_absent_and_nothing_verified_reads_failed(layout, tmp_path):
@@ -190,12 +190,40 @@ def test_nothing_installed_reads_absent_and_nothing_verified_reads_failed(layout
 
     layout["v1"] = "0" * 64
     with pytest.raises(AssetError, match="absent"):
-        corrections_realtime._manifest()
+        corrections_realtime.select_manifest()[0]
 
     _install(tmp_path / "corrections-classifier", "v1")
     with pytest.raises(AssetError, match="no verified"):
-        corrections_realtime._manifest()
+        corrections_realtime.select_manifest()[0]
     assert corrections_realtime._installed() is True
+
+
+def test_every_failed_candidate_keeps_its_snapshot_reason(layout, tmp_path):
+    from jobs.corrections_assets import AssetSelectionError, select_manifest
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2")
+    (tmp_path / "corrections-classifier" / "model.onnx").write_bytes(b"broken-v1")
+    (tmp_path / "corrections-classifier-v2" / "tokenizer.json").write_bytes(b"broken-v2")
+
+    with pytest.raises(AssetSelectionError) as raised:
+        select_manifest()
+
+    assert [(item["location"], item["reason"]) for item in raised.value.versions] == [
+        ("corrections-classifier", "asset file model.onnx is absent or has the wrong size"),
+        ("corrections-classifier-v2", "asset file tokenizer.json has a sha256 mismatch"),
+    ]
+
+
+def test_pinned_v2_with_a_retrained_threshold_is_selected_with_its_own_policy(layout, tmp_path):
+    from jobs import corrections_realtime
+
+    layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
+    layout["v2"] = _install(tmp_path / "corrections-classifier-v2", "v2", threshold=0.71)
+
+    selected = corrections_realtime.select_manifest()[0]
+
+    assert (selected.version, selected.classifier_version().threshold) == ("v2", 0.71)
 
 
 def test_tampered_asset_file_is_refused(tmp_path):
@@ -248,12 +276,12 @@ def test_wrong_input_policy_is_refused(tmp_path):
         AssetManifest.load(_manifest(tmp_path, policy="other"))
 
 
-def test_manifest_threshold_must_match_the_core_policy(tmp_path):
+def test_manifest_threshold_must_be_numeric(tmp_path):
     from core.corrections_classifier import AssetError, AssetManifest
 
     path = _manifest(tmp_path)
     value = json.loads(path.read_text(encoding="utf-8"))
-    value["heads"][0]["threshold"] = 0.5
+    value["heads"][0]["threshold"] = "not-a-number"
     path.write_text(json.dumps(value), encoding="utf-8")
 
     with pytest.raises(AssetError, match="threshold"):
@@ -442,14 +470,14 @@ def test_runtime_refuses_an_unpinned_asset_in_the_installed_location(monkeypatch
     monkeypatch.setattr(corrections_assets, "asset_root", lambda: root)
     monkeypatch.setitem(corrections_asset_pins.PINNED_MANIFESTS, "v1", "0" * 64)
     with pytest.raises(AssetError, match="sha256 does not match"):
-        corrections_realtime._manifest()
+        corrections_realtime.select_manifest()[0]
     monkeypatch.delitem(corrections_asset_pins.PINNED_MANIFESTS, "v1")
     with pytest.raises(AssetError, match="not pinned"):
-        corrections_realtime._manifest()
+        corrections_realtime.select_manifest()[0]
     monkeypatch.setitem(
         corrections_asset_pins.PINNED_MANIFESTS, "v1", hashlib.sha256(path.read_bytes()).hexdigest(),
     )
-    assert corrections_realtime._manifest().version == "v1"
+    assert corrections_realtime.select_manifest()[0].version == "v1"
 
 
 def test_self_test_wrong_pin_hash_is_refused(self_test_asset):
