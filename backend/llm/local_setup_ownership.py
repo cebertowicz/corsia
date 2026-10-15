@@ -69,6 +69,15 @@ def _is_broken_leftover(path: str) -> bool:
     return broken
 
 
+def omlx_present() -> bool:
+    """Whether an ``omlx`` executable is present on PATH without touching it.
+
+    Pre-consent setup uses only this presence check. In particular, it does not
+    run the executable, inspect settings, or contact an oMLX server.
+    """
+    return shutil.which("omlx") is not None
+
+
 def installed_omlx() -> str | None:
     """The working ``omlx`` on PATH, or None when it is absent or a broken leftover."""
     path = shutil.which("omlx")

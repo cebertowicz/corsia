@@ -43,6 +43,53 @@ describe('SetupScreen', () => {
 		expect(calls).toEqual(['/api/setup/status']);
 	});
 
+	it('shows existing oMLX consent before any adoption request, and Not now leaves it untouched', async () => {
+		if (component) await unmount(component);
+		calls = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/local-download') return json({ in_progress: true });
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		expect(host.textContent).toContain('CORSIA will read:');
+		expect(host.textContent).toContain('your oMLX port setting');
+		expect(calls).toEqual(['/api/setup/status']);
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Not now')?.click();
+		await settle();
+		expect(calls).toEqual(['/api/setup/status']);
+		expect(host.textContent).toContain('Create your account');
+	});
+
+	it('starts existing oMLX adoption only after Use it consents', async () => {
+		if (component) await unmount(component);
+		calls = [];
+		const bodies: string[] = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/local-download') { bodies.push(String(init?.body)); return json({ in_progress: true }); }
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
+		await settle();
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/local-download']);
+		expect(bodies).toEqual(['{"consent_existing":true}']);
+	});
+
 	it('uses This computer for the ineligible local-model explanation', async () => {
 		if (component) await unmount(component);
 		calls = [];
@@ -84,6 +131,23 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('~/CORSIA');
 		expect(host.textContent).not.toContain('Change');
 		expect(host.querySelector('[aria-label="Work folder"]')).toBeNull();
+	});
+
+	it('binds every account input to its visible label', async () => {
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+
+		for (const [id, name] of [
+			['setup-name', 'Name'],
+			['setup-username', 'Username'],
+			['setup-password', 'Password'],
+			['setup-confirm-password', 'Confirm password'],
+			['setup-email', 'Email (optional)'],
+		]) {
+			const input = host.querySelector(`#${id}`) as HTMLInputElement;
+			expect(input.labels?.[0]?.textContent).toBe(name);
+		}
 	});
 
 	it('does not request a local download when free disk is below the selected model size', async () => {
@@ -237,7 +301,7 @@ describe('SetupScreen', () => {
 		const text = host.textContent ?? '';
 		expect(text).toContain('Claude Code');
 		expect(text).toContain('Codex');
-		expect(text).toContain('Downloading in the background');
+		expect(text).toContain('Downloading');
 		expect(text).toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
 		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
@@ -251,7 +315,7 @@ describe('SetupScreen', () => {
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			if (url === '/api/setup/first-account') return json({ token: '[REDACTED]', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
-				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'downloading', download_percent: 42 },
+				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: 42 },
 				{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ state: 'ready' }] },
 			] });
 			return json({ sources: [] });
@@ -273,7 +337,8 @@ describe('SetupScreen', () => {
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
 		await settle();
 
-		expect(host.textContent).toContain('Downloading in the background');
+		expect(host.textContent).toContain('Installing');
+		expect(host.textContent).toContain('Ready to use.');
 		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', false);
 	});
 });

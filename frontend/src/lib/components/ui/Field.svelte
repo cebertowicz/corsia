@@ -3,6 +3,7 @@
 
 	interface Props {
 		label: string;
+		labelFor?: string;
 		hint?: string;
 		error?: string;
 		required?: boolean;
@@ -17,15 +18,17 @@
 	}
 
 	const {
-		label, hint, error, required = false,
+		label, labelFor, hint, error, required = false,
 		layout = 'row', variant = 'default', trailing, children,
 	}: Props = $props();
 </script>
 
 <div class="field {layout}" class:chip={variant === 'chip'} class:has-error={!!error}>
-	<span class="l">
-		{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}
-	</span>
+	{#if labelFor}
+		<label class="l" for={labelFor}>{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</label>
+	{:else}
+		<span class="l">{label}{#if required}<span class="req" aria-hidden="true">*</span>{/if}</span>
+	{/if}
 	<div class="c">
 		{@render children()}
 	</div>
