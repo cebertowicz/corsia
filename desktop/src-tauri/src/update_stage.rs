@@ -49,6 +49,8 @@ pub fn run(mut context: tauri::Context<tauri::Wry>, operation_id: String) -> i32
     let app = match tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let handle = app.handle().clone();
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -101,6 +103,16 @@ async fn stage<R: tauri::Runtime>(
     clear_previous_stage(&staging_root).map_err(StageError::Build)?;
     fs::create_dir(&staging_root).map_err(|error| StageError::Build(error.to_string()))?;
 
+    let result = stage_in_work(app, &current_bundle, &staged_bundle, &staging_root).await;
+    cleanup_after_failure(result, &staged_bundle, &staging_root)
+}
+
+async fn stage_in_work<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    current_bundle: &Path,
+    staged_bundle: &Path,
+    staging_root: &Path,
+) -> Result<PathBuf, StageError> {
     let updater = app
         .updater_builder()
         .timeout(REQUEST_TIMEOUT)
@@ -121,33 +133,58 @@ async fn stage<R: tauri::Runtime>(
     }
 
     let archive = staging_root.join("CORSIA.app.tar.gz");
-    if let Err(error) = download_archive(&update.download_url, &archive).await {
-        let _ = fs::remove_file(&archive);
-        let _ = fs::remove_dir_all(&staging_root);
-        return Err(error);
-    }
-    if let Err(error) = verify_archive(&archive, &update.signature) {
-        let _ = fs::remove_file(&archive);
-        return Err(StageError::Fetch(error));
-    }
+    download_archive(&update.download_url, &archive).await?;
+    verify_archive(&archive, &update.signature).map_err(StageError::Fetch)?;
     ensure_same_device(
         current_bundle.parent().unwrap_or(Path::new("/")),
-        &staging_root,
+        staging_root,
     )
     .map_err(StageError::Build)?;
-    expand_archive(&archive, &staging_root).map_err(StageError::Build)?;
-    let _ = fs::remove_file(&archive);
+    stage_extracted_bundle(
+        current_bundle,
+        &archive,
+        staging_root,
+        staged_bundle,
+        expand_archive,
+        verify_bundle_identity,
+    )
+    .map_err(StageError::Build)
+}
+
+fn cleanup_after_failure<T>(
+    result: Result<T, StageError>,
+    staged_bundle: &Path,
+    staging_root: &Path,
+) -> Result<T, StageError> {
+    if result.is_err() {
+        let _ = fs::remove_dir_all(staging_root);
+        let _ = fs::remove_dir_all(staged_bundle);
+    }
+    result
+}
+
+fn stage_extracted_bundle<E, V>(
+    current_bundle: &Path,
+    archive: &Path,
+    staging_root: &Path,
+    staged_bundle: &Path,
+    expand: E,
+    verify_identity: V,
+) -> Result<PathBuf, String>
+where
+    E: FnOnce(&Path, &Path) -> Result<(), String>,
+    V: FnOnce(&Path, &Path) -> Result<(), String>,
+{
+    expand(archive, staging_root)?;
+    fs::remove_file(archive).map_err(|error| error.to_string())?;
     let extracted_bundle = staging_root.join("CORSIA.app");
     if !extracted_bundle.is_dir() {
-        return Err(StageError::Build(
-            "update archive did not contain CORSIA.app".into(),
-        ));
+        return Err("update archive did not contain CORSIA.app".into());
     }
-    fs::rename(&extracted_bundle, &staged_bundle)
-        .map_err(|error| StageError::Build(error.to_string()))?;
-    let _ = fs::remove_dir(&staging_root);
-    verify_bundle_identity(&current_bundle, &staged_bundle).map_err(StageError::Build)?;
-    Ok(staged_bundle)
+    verify_identity(current_bundle, &extracted_bundle)?;
+    fs::rename(&extracted_bundle, staged_bundle).map_err(|error| error.to_string())?;
+    fs::remove_dir(staging_root).map_err(|error| error.to_string())?;
+    Ok(staged_bundle.to_path_buf())
 }
 
 async fn download_archive(url: &reqwest::Url, path: &Path) -> Result<(), StageError> {
@@ -289,23 +326,15 @@ fn clear_previous_stage(staged: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn ensure_same_device(installed_parent: &Path, staged: &Path) -> Result<(), String> {
+fn ensure_same_device(installed_parent: &Path, staging_root: &Path) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt;
+
     let installed = fs::metadata(installed_parent).map_err(|error| error.to_string())?;
-    let probe = staged.with_extension("device-probe");
-    fs::create_dir(&probe).map_err(|error| error.to_string())?;
-    let staged_device = fs::metadata(&probe)
-        .map_err(|error| error.to_string())?
-        .dev();
-    fs::remove_dir(&probe).map_err(|error| error.to_string())?;
-    if !same_device(installed.dev(), staged_device) {
+    let staging = fs::metadata(staging_root).map_err(|error| error.to_string())?;
+    if installed.dev() != staging.dev() {
         return Err("staging directory is not on the installed app device".into());
     }
     Ok(())
-}
-
-fn same_device(installed_device: u64, staged_device: u64) -> bool {
-    installed_device == staged_device
 }
 
 fn expand_archive(archive: &Path, parent: &Path) -> Result<(), String> {
@@ -314,16 +343,36 @@ fn expand_archive(archive: &Path, parent: &Path) -> Result<(), String> {
     tar.unpack(parent).map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct SigningIdentity {
+    identifier: String,
+    team_id: String,
+    requirement: String,
+}
+
 fn verify_bundle_identity(current: &Path, staged: &Path) -> Result<(), String> {
     let current_identity = code_identity(current)?;
     let staged_identity = code_identity(staged)?;
-    if current_identity != staged_identity {
-        return Err("staged app signing identity differs from running app".into());
+    ensure_matching_identity(&current_identity, &staged_identity)
+}
+
+fn ensure_matching_identity(
+    current: &SigningIdentity,
+    staged: &SigningIdentity,
+) -> Result<(), String> {
+    if current.identifier != staged.identifier {
+        return Err("staged app signing identifier differs from running app".into());
+    }
+    if current.team_id != staged.team_id {
+        return Err("staged app signing Team ID differs from running app".into());
+    }
+    if current.requirement != staged.requirement {
+        return Err("staged app designated requirement differs from running app".into());
     }
     Ok(())
 }
 
-fn code_identity(bundle: &Path) -> Result<(String, String, String), String> {
+fn code_identity(bundle: &Path) -> Result<SigningIdentity, String> {
     let verify = Command::new("/usr/bin/codesign")
         .args(["--verify", "--strict"])
         .arg(bundle)
@@ -337,17 +386,44 @@ fn code_identity(bundle: &Path) -> Result<(String, String, String), String> {
         .arg(bundle)
         .output()
         .map_err(|error| error.to_string())?;
-    let text = String::from_utf8_lossy(&output.stderr);
-    let field = |name: &str| {
-        text.lines()
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let identity = parse_code_identity(
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )?;
+    ensure_developer_id_signature(&identity)?;
+    Ok(identity)
+}
+
+fn parse_code_identity(stdout: &str, stderr: &str) -> Result<SigningIdentity, String> {
+    let stderr_field = |name: &str| {
+        stderr
+            .lines()
             .find_map(|line| line.strip_prefix(name).map(str::to_owned))
             .ok_or_else(|| format!("codesign output omitted {name}"))
     };
-    Ok((
-        field("Identifier=")?,
-        field("TeamIdentifier=")?,
-        field("designated => ")?,
-    ))
+    let identifier = stderr_field("Identifier=")?;
+    let team_id = stderr_field("TeamIdentifier=")?;
+    let requirement = stdout
+        .lines()
+        .map(str::trim_start)
+        .map(|line| line.strip_prefix("# ").unwrap_or(line))
+        .find_map(|line| line.strip_prefix("designated => ").map(str::to_owned))
+        .ok_or_else(|| "codesign output omitted designated requirement".to_string())?;
+    Ok(SigningIdentity {
+        identifier,
+        team_id,
+        requirement,
+    })
+}
+
+fn ensure_developer_id_signature(identity: &SigningIdentity) -> Result<(), String> {
+    if identity.team_id == "not set" {
+        return Err("bundle is not Developer ID signed".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -426,10 +502,148 @@ mod tests {
         assert!(candidate_is_newer("not-a-version", "1.2.4").is_err());
     }
 
+    fn developer_identity() -> SigningIdentity {
+        parse_code_identity(
+            "designated => identifier \"com.cebertowicz.corsia\" and anchor apple generic and certificate leaf[subject.OU] = \"TEAMID\"\n",
+            "Identifier=com.cebertowicz.corsia\nTeamIdentifier=TEAMID\n",
+        )
+        .unwrap()
+    }
+
     #[test]
-    fn staging_refuses_a_different_device() {
-        assert!(same_device(7, 7));
-        assert!(!same_device(7, 8));
+    fn code_identity_parses_codesign_streams_and_rejects_ad_hoc_signatures() {
+        let ad_hoc = parse_code_identity(
+            "# designated => cdhash H\"e16c...\"\n",
+            "Identifier=corsia_desktop-...\nTeamIdentifier=not set\n",
+        )
+        .unwrap();
+        assert_eq!(ad_hoc.identifier, "corsia_desktop-...");
+        assert_eq!(ad_hoc.team_id, "not set");
+        assert_eq!(ad_hoc.requirement, "cdhash H\"e16c...\"");
+        assert!(matches!(ensure_developer_id_signature(&ad_hoc), Err(reason) if reason.contains("not Developer ID signed")));
+
+        assert_eq!(
+            developer_identity(),
+            SigningIdentity {
+                identifier: "com.cebertowicz.corsia".into(),
+                team_id: "TEAMID".into(),
+                requirement: "identifier \"com.cebertowicz.corsia\" and anchor apple generic and certificate leaf[subject.OU] = \"TEAMID\"".into(),
+            }
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ad_hoc_codesign_bundle_exposes_all_identity_fields_before_rejection() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("CORSIA.app");
+        let macos = bundle.join("Contents/MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(
+            bundle.join("Contents/Info.plist"),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>CORSIA</string></dict></plist>",
+        )
+        .unwrap();
+        fs::copy(env::current_exe().unwrap(), macos.join("CORSIA")).unwrap();
+
+        let signed = Command::new("/usr/bin/codesign")
+            .args(["--force", "--sign", "-"])
+            .arg(&bundle)
+            .output()
+            .unwrap();
+        assert!(signed.status.success(), "{:?}", signed.stderr);
+        let displayed = Command::new("/usr/bin/codesign")
+            .args(["--display", "--verbose=4", "--requirements", "-"])
+            .arg(&bundle)
+            .output()
+            .unwrap();
+        assert!(displayed.status.success(), "{:?}", displayed.stderr);
+
+        let identity = parse_code_identity(
+            &String::from_utf8_lossy(&displayed.stdout),
+            &String::from_utf8_lossy(&displayed.stderr),
+        )
+        .unwrap();
+        assert!(!identity.identifier.is_empty());
+        assert!(!identity.team_id.is_empty());
+        assert!(!identity.requirement.is_empty());
+        assert!(ensure_developer_id_signature(&identity).is_err());
+    }
+
+    #[test]
+    fn code_identity_rejects_each_identity_mismatch() {
+        let current = developer_identity();
+        let mut staged = developer_identity();
+        staged.identifier = "other.identifier".into();
+        assert!(matches!(ensure_matching_identity(&current, &staged), Err(reason) if reason.contains("identifier")));
+
+        let mut staged = developer_identity();
+        staged.team_id = "OTHERTEAM".into();
+        assert!(matches!(ensure_matching_identity(&current, &staged), Err(reason) if reason.contains("Team ID")));
+
+        let mut staged = developer_identity();
+        staged.requirement = "different requirement".into();
+        assert!(matches!(ensure_matching_identity(&current, &staged), Err(reason) if reason.contains("requirement")));
+    }
+
+    #[test]
+    fn staging_compares_existing_real_directories_without_a_probe() {
+        let temp = tempfile::tempdir().unwrap();
+        let installed_parent = temp.path().join("Applications");
+        let staging_root = temp.path().join("CORSIA.app.work");
+        fs::create_dir(&installed_parent).unwrap();
+        fs::create_dir(&staging_root).unwrap();
+
+        assert!(ensure_same_device(&installed_parent, &staging_root).is_ok());
+        assert!(!staging_root.with_extension("device-probe").exists());
+    }
+
+    #[test]
+    fn expand_or_identity_failures_remove_work_and_staged_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let current = temp.path().join("CORSIA.app");
+        fs::create_dir(&current).unwrap();
+
+        for failure in ["expand", "identity"] {
+            let staging_root = temp.path().join(format!("{failure}.work"));
+            let staged = temp.path().join(format!("{failure}.staged"));
+            let archive = staging_root.join("archive");
+            fs::create_dir(&staging_root).unwrap();
+            fs::write(&archive, b"archive").unwrap();
+
+            let result = if failure == "expand" {
+                stage_extracted_bundle(
+                    &current,
+                    &archive,
+                    &staging_root,
+                    &staged,
+                    |_, _| Err("forced expand failure".into()),
+                    |_, _| Ok(()),
+                )
+            } else {
+                stage_extracted_bundle(
+                    &current,
+                    &archive,
+                    &staging_root,
+                    &staged,
+                    |_, parent| {
+                        fs::create_dir(parent.join("CORSIA.app"))
+                            .map_err(|error| error.to_string())
+                    },
+                    |_, extracted| {
+                        assert!(extracted.is_dir());
+                        assert!(!staged.exists());
+                        Err("forced identity failure".into())
+                    },
+                )
+            }
+            .map_err(StageError::Build);
+            let result = cleanup_after_failure(result, &staged, &staging_root);
+
+            assert!(result.is_err());
+            assert!(!staging_root.exists());
+            assert!(!staged.exists());
+        }
     }
 
     #[test]
