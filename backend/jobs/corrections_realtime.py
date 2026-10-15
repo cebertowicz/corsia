@@ -24,6 +24,7 @@ _QUEUE: asyncio.Queue[tuple[str, float]] = asyncio.Queue(maxsize=256)
 _TASK: asyncio.Task[None] | None = None
 _CHILD: ClassifierChild | None = None
 _SCAN_OWED = False
+_STOPPING = False
 _STATE: dict[str, object] = {
     "state": "absent", "reason": "asset not verified", "retryable": True,
     "dropped_arrivals": 0, "queue_delay_ms": 0.0, "service_time_ms": 0.0,
@@ -251,6 +252,10 @@ async def _worker() -> None:
 def notify(message_id: str) -> None:
     """Best-effort post-admission trigger; it can never delay or fail a send."""
     global _TASK, _SCAN_OWED
+    if _STOPPING:
+        # The next startup's catch-up scan reads this message from the database.
+        _SCAN_OWED = True
+        return
     try:
         _QUEUE.put_nowait((message_id, _clock()))
         if _TASK is None or _TASK.done():
@@ -271,11 +276,25 @@ async def _startup_worker() -> None:
 
 def startup_scan() -> None:
     """Discard interrupted staging and start the one arrival-first worker."""
-    global _TASK, _SCAN_OWED
+    global _TASK, _SCAN_OWED, _STOPPING
+    _STOPPING = False
     _cleanup_staging()
     _SCAN_OWED = True
     if _TASK is None or _TASK.done():
         _TASK = asyncio.create_task(_startup_worker())
+
+
+async def shutdown() -> None:
+    """Cancel and join the worker, then stop the model child; later arrivals wait for the next startup."""
+    global _TASK, _CHILD, _STOPPING
+    _STOPPING = True
+    task, _TASK = _TASK, None
+    if task is not None:
+        task.cancel()
+        await asyncio.wait([task])
+    child, _CHILD = _CHILD, None
+    if child is not None:
+        await asyncio.to_thread(child.close)
 
 
 def state_snapshot() -> dict[str, object]:

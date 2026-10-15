@@ -35,6 +35,7 @@ def _reset_realtime(monkeypatch):
     monkeypatch.setattr(corrections_realtime, "_TASK", None)
     monkeypatch.setattr(corrections_realtime, "_CHILD", None)
     monkeypatch.setattr(corrections_realtime, "_SCAN_OWED", False)
+    monkeypatch.setattr(corrections_realtime, "_STOPPING", False)
     monkeypatch.setattr(
         corrections_realtime, "_STATE",
         {"state": "absent", "reason": "asset not verified", "retryable": True,
@@ -340,3 +341,34 @@ async def test_backfill_waits_one_call_duration_before_the_next_low_priority_cal
     await corrections_realtime._catch_up_scan()
 
     slept.assert_awaited_once_with(3.5)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_joins_the_worker_and_closes_the_child(monkeypatch):
+    from jobs import corrections_realtime
+
+    started = asyncio.Event()
+
+    async def blocked_worker():
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(corrections_realtime, "_startup_worker", blocked_worker)
+    monkeypatch.setattr(corrections_realtime, "_cleanup_staging", lambda: None)
+    child = Mock()
+    monkeypatch.setattr(corrections_realtime, "_CHILD", child)
+    corrections_realtime.startup_scan()
+    task = corrections_realtime._TASK
+    await started.wait()
+
+    await corrections_realtime.shutdown()
+
+    assert task is not None and task.cancelled()
+    child.close.assert_called_once_with()
+    assert corrections_realtime._CHILD is None
+
+    corrections_realtime.notify("arrived-during-shutdown")
+
+    assert corrections_realtime._TASK is None
+    assert corrections_realtime._QUEUE.qsize() == 0
+    assert corrections_realtime.state_snapshot()["scan_owed"] is True
