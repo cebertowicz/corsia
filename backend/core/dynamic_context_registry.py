@@ -167,7 +167,7 @@ def _role_sources(
     by_role = {
         role: [source for source in role_context.sources
                if source.metadata.get("role") == role]
-        for role in ("agent", "conductor")
+        for role in ("agent", "conductor", "corsia_agent")
     }
     errors = [
         source for source in role_context.sources
@@ -176,9 +176,10 @@ def _role_sources(
     ordered = [
         *by_role["agent"],
         *conductor_template_sources(
-            thread_id, db=db, scopes=role_context.conductor_scopes,
+            thread_id, db=db, scopes=role_context.coordination_scopes,
         ),
         *by_role["conductor"],
+        *by_role["corsia_agent"],
         *errors,
     ]
     return ordered, role_context

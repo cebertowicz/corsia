@@ -31,6 +31,12 @@ class EventTypeDecl:
     relationships: tuple[RelationshipDecl, ...] = ()
     event_class: str = "informational"                 # actionable | informational
     ownerless_ok: bool = False
+    # Declared fact rule (every field must equal) that promotes one event of an
+    # informational type to actionable. A producer never sets the class; a
+    # missing fact fails closed to ``event_class``.
+    actionable_when: Mapping[str, Any] | None = None
+    # Fact whose value groups this type's digest notes (one note per value).
+    collapse_fact: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +140,7 @@ def _load_builtin_manifests() -> None:
         document,
         github,
         gmail,
+        measurement,
         plan,
     )
 

@@ -2,7 +2,7 @@
 	import { activeThreadId } from '$lib/stores/threads';
 	import { choosePickerAccount } from '$lib/stores/pickerAccountChoice';
 	import { activeModelId } from '$lib/stores/models';
-	import { workspaceConductorId } from '$lib/utils/conductor';
+	import { corsiaAgentId } from '$lib/utils/conductor';
 	import type { PickerAccount } from '$lib/stores/accountPicker';
 	import AccountUsageRow from './v7/AccountUsageRow.svelte';
 
@@ -25,7 +25,7 @@
 		if (!threadId || row.marked || !row.choosable || busy) return;
 		busy = true;
 		error = '';
-		const result = await choosePickerAccount(threadId, $activeModelId, $workspaceConductorId, row);
+		const result = await choosePickerAccount(threadId, $activeModelId, $corsiaAgentId, row);
 		busy = false;
 		if (!result.ok) error = result.message;
 	}

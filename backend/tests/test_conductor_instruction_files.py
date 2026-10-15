@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import hashlib
 import json
 
 import pytest
 
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from tests.registry_helpers import make_session
 from tools.conductor_instruction_files import (
@@ -37,7 +43,7 @@ def _setup(tmp_path, monkeypatch):
             (json.dumps([str(path)]), target),
         )
         db.commit()
-        assert set_conductor("workspace", conductor, db=db)
+        assert set_corsia_agent(conductor, db=db)
     finally:
         db.close()
     path.parent.mkdir(parents=True)

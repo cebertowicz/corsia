@@ -3,7 +3,7 @@ import { acceptThreadModelTruth } from '$lib/stores/models';
 import { activeThreadId } from '$lib/stores/threads';
 import type { UiScope } from '$lib/stores/uiScope';
 
-export interface ConductorTarget {
+export interface CoordinationTarget {
 	thread_id: string;
 	title?: string | null;
 	model?: string | null;
@@ -15,27 +15,27 @@ export interface ConductorTarget {
 	[key: string]: unknown;
 }
 
-/** Result of one conductor lookup for a scope.
+/** Result of one coordination-target lookup.
  *
- * `absent` is a confirmed answer: the scope truly has no conductor for this
- * caller. Transport failures, non-OK responses, and a missing token are
- * `unknown`, so callers can retry instead of rendering a false
- * "no conductor" state from a failed lookup. */
-export type ConductorLookup =
-	| { kind: 'target'; target: ConductorTarget; firstRunPending: boolean }
+ * `absent` is a confirmed answer: the requested target truly does not exist for
+ * this caller. Transport failures, non-OK responses, and a missing token are
+ * `unknown`, so callers can retry instead of rendering a false absence from a
+ * failed lookup. */
+export type CoordinationLookup =
+	| { kind: 'target'; target: CoordinationTarget; firstRunPending: boolean }
 	| { kind: 'absent' }
 	| { kind: 'unknown' };
 
-/** The workspace conductor's thread id once a lookup confirms it; its sources
+/** The CORSIA agent's thread id once a lookup confirms it; its sources
  * panel shows only there (#3287). */
-export const workspaceConductorId = writable<string | null>(null);
+export const corsiaAgentId = writable<string | null>(null);
 
-/** The conductor thread to land on at sign-in, or null to keep Activity.
+/** The CORSIA agent thread to land on at sign-in, or null to keep Activity.
  *
  * Only a pending first run in the workspace scope lands there, once per page
  * load, and never over a thread the user already opened (#3287 N2). */
 export function firstRunLanding(
-	lookup: ConductorLookup,
+	lookup: CoordinationLookup,
 	{ scope, activeThreadId, landed }: { scope: UiScope | null; activeThreadId: string | null; landed: boolean },
 ): string | null {
 	if (landed || scope || activeThreadId) return null;
@@ -44,9 +44,9 @@ export function firstRunLanding(
 
 let firstRunLanded = false;
 
-/** Open the conductor once per page load when `firstRunLanding` says so. */
+/** Open the CORSIA agent once per page load when `firstRunLanding` says so. */
 export function landOnFirstRun(
-	lookup: ConductorLookup,
+	lookup: CoordinationLookup,
 	scope: UiScope | null,
 	open: (threadId: string) => unknown,
 ): void {
@@ -66,34 +66,44 @@ export function conductorScopeParam(scope: UiScope | null): string {
 	return scope?.id ?? 'workspace';
 }
 
-/** Read the scope's conductor target and accept its model as that thread's truth. */
-export async function fetchConductor(
-	token: string | null,
-	scope: UiScope | null
-): Promise<ConductorLookup> {
+async function fetchTarget(token: string | null, url: string): Promise<CoordinationLookup> {
 	if (!token) return { kind: 'unknown' };
 	try {
-		const param = encodeURIComponent(conductorScopeParam(scope));
-		const res = await fetch(
-			`/api/conductor?token=${encodeURIComponent(token)}&scope=${param}`
-		);
+		const res = await fetch(url);
 		if (!res.ok) return { kind: 'unknown' };
 		const data = await res.json();
 		const threadId = data?.target?.thread_id ?? data?.thread_id ?? null;
-		const workspace = conductorScopeParam(scope) === 'workspace';
-		if (!threadId) {
-			if (workspace) workspaceConductorId.set(null);
-			return { kind: 'absent' };
-		}
-		const target: ConductorTarget = { ...(data?.target ?? {}), thread_id: threadId };
-		// The thread list omits the conductor, so this read is its only row: it
+		if (!threadId) return { kind: 'absent' };
+		const target: CoordinationTarget = { ...(data?.target ?? {}), thread_id: threadId };
+		// The thread list omits this target, so this read is its only row: it
 		// enters the same server-time ordering every listed thread's model does.
 		if (target.model && target.updated_at) {
 			acceptThreadModelTruth(threadId, target.model, target.updated_at);
 		}
-		if (workspace) workspaceConductorId.set(threadId);
 		return { kind: 'target', target, firstRunPending: data?.first_run_pending === true };
 	} catch {
 		return { kind: 'unknown' };
 	}
+}
+
+/** Read a project's conductor target and accept its model as that thread's truth. */
+export function fetchConductor(token: string | null, scope: UiScope | null): Promise<CoordinationLookup> {
+	if (!scope) return Promise.resolve({ kind: 'unknown' });
+	return fetchTarget(
+		token,
+		`/api/conductor?token=${encodeURIComponent(token ?? '')}&scope=${encodeURIComponent(scope.id)}`,
+	);
+}
+
+/** Read the workspace CORSIA agent and accept its model as that thread's truth. */
+export async function fetchCorsiaAgent(token: string | null): Promise<CoordinationLookup> {
+	const lookup = await fetchTarget(token, `/api/corsia-agent?token=${encodeURIComponent(token ?? '')}`);
+	if (lookup.kind === 'target') corsiaAgentId.set(lookup.target.thread_id);
+	else if (lookup.kind === 'absent') corsiaAgentId.set(null);
+	return lookup;
+}
+
+/** Read the scope's designated thread: a project's conductor, or the workspace's CORSIA agent. */
+export function fetchScopeTarget(token: string | null, scope: UiScope | null): Promise<CoordinationLookup> {
+	return scope ? fetchConductor(token, scope) : fetchCorsiaAgent(token);
 }

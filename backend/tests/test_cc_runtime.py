@@ -260,7 +260,7 @@ class TestSpawn:
         assert child_count == 0
 
     @pytest.mark.asyncio
-    async def test_spawn_delivers_conductor_template_without_persisting_template_bytes(
+    async def test_spawn_delivers_corsia_agent_template_without_persisting_template_bytes(
         self,
         child_db,
         fake_claude,
@@ -275,7 +275,7 @@ class TestSpawn:
         _seed_parent(child_db)
         monkeypatch.setattr(
             role_context_sources,
-            "get_conductor_scopes",
+            "get_coordination_scopes",
             lambda _thread_id, db=None: [
                 {"scope": "workspace", "scope_type": "workspace"}
             ],
@@ -302,7 +302,7 @@ class TestSpawn:
             if json.loads(row["metadata"] or "{}").get("type") == "seed"
         )
 
-        template_marker = "You are the designated conductor for this scope."
+        template_marker = "You are the CORSIA agent:"
         assert template_marker in provider_seed
         assert template_marker not in persisted_seed
         await rt.retire(child_id)

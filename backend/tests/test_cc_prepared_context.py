@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 import os
 import uuid
@@ -1040,7 +1046,7 @@ def test_provider_resume_fingerprint_rejects_replaced_guard(main_db):
 
 
 def test_conductor_designation_invalidates_live_destination_before_render(main_db):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from subagents import cc_runtime
     from subagents.cc_runtime_state import _Live
 
@@ -1064,7 +1070,7 @@ def test_conductor_designation_invalidates_live_destination_before_render(main_d
     cc_runtime._LIVE.reset()
     cc_runtime._LIVE.put("main-1", live)
 
-    assert set_conductor("workspace", "main-1", db=main_db)
+    assert set_corsia_agent("main-1", db=main_db)
 
     with pytest.raises(
         cc_runtime.CCPreparedDestinationStale,

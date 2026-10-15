@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from types import SimpleNamespace
 
 import pytest
@@ -32,7 +38,7 @@ def _thread_row(main_db):
 @pytest.mark.asyncio
 async def test_claimed_input_refresh_uses_current_context_epoch(main_db, model):
     """Reusing the captured thread row makes every later refresh obsolete."""
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.input_render import prepare_claimed_batch
     from llm.resolution import resolve_execution_target
 
@@ -44,7 +50,7 @@ async def test_claimed_input_refresh_uses_current_context_epoch(main_db, model):
         batch, thread_row=_thread_row(main_db), target=target,
     )
     assert prepared.prepared_context.runtime_context_epoch == 0
-    assert set_conductor("workspace", "main-1", db=main_db)
+    assert set_corsia_agent("main-1", db=main_db)
 
     refreshed = await prepared.refresh_prepared_context()
 
@@ -60,7 +66,7 @@ async def test_claimed_input_refresh_uses_current_context_epoch(main_db, model):
 @pytest.mark.asyncio
 async def test_cc_idle_resume_selects_current_input(main_db, invalidate):
     """A completed epoch change has no future owner to unblock an old handle."""
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.input_render import prepare_claimed_batch
     from subagents import cc_runtime
 
@@ -79,7 +85,7 @@ async def test_cc_idle_resume_selects_current_input(main_db, invalidate):
     cc_runtime._LIVE.put("main-1", live)
     try:
         if invalidate:
-            assert set_conductor("workspace", "main-1", db=main_db)
+            assert set_corsia_agent("main-1", db=main_db)
         batch = _claim(main_db)
 
         prepared = await prepare_claimed_batch(
@@ -103,7 +109,7 @@ async def test_cc_idle_resume_selects_current_input(main_db, invalidate):
 @pytest.mark.asyncio
 async def test_codex_idle_resume_selects_current_input(main_db, monkeypatch, invalidate):
     """An idle app-server session must fit the same epoch as its destination."""
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.input_render import prepare_claimed_batch
     from llm.resolution import resolve_execution_target
     from registry.service import register_codex_thread
@@ -141,7 +147,7 @@ async def test_codex_idle_resume_selects_current_input(main_db, monkeypatch, inv
     monkeypatch.setitem(_APP_SESSIONS, "main-1", session)
     monkeypatch.setitem(_CODEX_THREADS, "main-1", session.codex_thread_id)
     if invalidate:
-        assert set_conductor("workspace", "main-1", db=main_db)
+        assert set_corsia_agent("main-1", db=main_db)
     prepared = await prepare_claimed_batch(
         batch, thread_row=_thread_row(main_db), target=target,
     )
@@ -291,12 +297,12 @@ async def _execute_at_boundary(main_db, batch, target, timing, registry):
     """Exercise ordinary pending ownership across the timing variants."""
     import asyncio
 
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from infra.thread_execution import execute_claimed_batch
 
     def change_context():
         for conductor in ("main-1", None, "main-1"):
-            assert set_conductor("workspace", conductor, db=main_db)
+            assert set_corsia_agent(conductor, db=main_db)
 
     if timing == "preflight":
         change_context()

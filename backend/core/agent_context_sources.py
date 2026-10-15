@@ -39,8 +39,8 @@ def _self_line(current: dict[str, Any], rows: list[dict[str, Any]]) -> str:
 
 
 def _conductor_gap_line(current: dict[str, Any]) -> list[str]:
-    gap = current.get("workspace_conductor_gap")
-    return [f"Workspace conductor: not reachable ({gap})."] if gap else []
+    gap = current.get("corsia_agent_gap")
+    return [f"CORSIA agent: not reachable ({gap})."] if gap else []
 
 
 def _owner_map_content(current: dict[str, Any], rows: list[dict[str, Any]]) -> str:
@@ -51,7 +51,7 @@ def _owner_map_content(current: dict[str, Any], rows: list[dict[str, Any]]) -> s
             row["project_id"] is None for row in others
         )
         lines.append(
-            "Other agents and workspace conductor:"
+            "Other agents and the CORSIA agent:"
             if has_workspace_contact else "Other agents in scope:"
         )
         for row in others:
@@ -107,7 +107,7 @@ def _full_roster_content(current: dict[str, Any], rows: list[dict[str, Any]]) ->
     )
     lines.extend((
         "",
-        "Active agents and workspace conductor:"
+        "Active agents and the CORSIA agent:"
         if has_workspace_contact else "Active agents:",
     ))
     for row in rows:
@@ -185,7 +185,7 @@ class AgentRosterTool(Tool):
     def description(self) -> str:
         return (
             "List full details for active agents in this thread's scope, plus "
-            "the designated workspace conductor contact for project agents. "
+            "the CORSIA agent contact for project agents. "
             "Project agents are not visible from workspace scope. "
             "Use agent_roster_entry for one entry and its revision before editing."
         )

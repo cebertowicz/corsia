@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 import time
 from datetime import datetime, timezone
 
 import pytest
 
-from infra.conductor import WORKSPACE_SCOPE, set_conductor
+from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
 from infra.database import get_db
 from infra.otel_logs.capture import CapturedRecord
 from infra.otel_logs.store import LogStore
@@ -30,8 +36,8 @@ def threads(isolated_db):
         workspace = make_session(db, prefix="ws-conductor")
         project = make_session(db, project_id="logs-project", prefix="p-conductor")
         ordinary = make_session(db, project_id="logs-project", prefix="ordinary")
-        assert set_conductor(WORKSPACE_SCOPE, workspace, db=db)
-        assert set_conductor("logs-project", project, db=db)
+        assert set_corsia_agent(workspace, db=db)
+        assert set_project_conductor("logs-project", project, db=db)
         db.commit()
         return workspace, project, ordinary
     finally:
@@ -133,9 +139,9 @@ def test_response_is_bounded_and_says_so():
 
 def test_log_read_is_catalogued_in_the_host_pack():
     entry = TOOL_CATALOG["log_read"]
-    assert entry.authority == "conductor-log-read" and not entry.core
+    assert entry.authority == "coordination-log-read" and not entry.core
     assert "other threads receive a final not_conductor refusal" in entry.summary
     assert is_reachable("log_read")
     description = LogReadTool().description
-    assert description.startswith("Conductors only.")
+    assert description.startswith("CORSIA agent and project conductors only.")
     assert "not_conductor" in description and "backend.log" in description

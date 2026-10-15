@@ -182,9 +182,9 @@
 		const current = get(token);
 		if (!current) return;
 		try {
-			const conductor = await fetch('/api/conductor', { headers: { Authorization: `Bearer ${current}` } });
-			const target = (await conductor.json())?.target?.thread_id;
-			if (!target) throw new Error('conductor unavailable');
+			const corsiaAgent = await fetch(`/api/corsia-agent?token=${encodeURIComponent(current)}`);
+			const target = (await corsiaAgent.json())?.target?.thread_id;
+			if (!target) throw new Error('CORSIA agent unavailable');
 			const accountId = await accountToSignIn(current, source.source, source.name);
 			await startSignin(current, accountId, target);
 			await refreshSources();

@@ -324,6 +324,10 @@ def init_db():
     from infra.subagent_caps import seed_subagent_caps
     seed_subagent_caps()
 
+    from infra.config import WORKSPACE
+    from infra.corsia_agent_role_files import carry_workspace_conductor_role_files
+    carry_workspace_conductor_role_files(WORKSPACE)
+
 
 def _init_fts(conn: sqlite3.Connection) -> None:
     """Create FTS5 virtual tables and sync triggers."""

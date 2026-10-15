@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import uuid
 
 import pytest
@@ -419,13 +425,13 @@ class TestAgentsApi:
     async def test_conductor_edit_after_human_demote_does_not_repromote(
         self, integration_client
     ):
-        from infra.conductor import set_conductor
+        from infra.conductor import set_scope_coordinator
         from tools.agent_roster_update import AgentRosterUpdateTool
         import json as jsonlib
 
         sid = self._session(integration_client, title="Human Demoted Coordinator")
         conductor_id = self._session(integration_client, title="Workspace Conductor")
-        assert set_conductor("workspace", conductor_id)
+        assert set_corsia_agent(conductor_id)
 
         promoted = integration_client.patch(
             f"/api/agents/{sid}?token={_TOKEN}",

@@ -8,6 +8,12 @@ store's tables is registered at 96.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 import re
 import sqlite3
@@ -16,7 +22,7 @@ from contextlib import closing
 import pytest
 
 from infra import key_store
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from infra.database_migrations import MIGRATIONS
 from infra.migration_96_to_97_key_store import migrate_96_to_97
@@ -37,7 +43,7 @@ def conductor(isolated_db, tmp_path, monkeypatch):
     monkeypatch.delenv("BRAVE_API_KEY", raising=False)
     db = get_db()
     thread_id = make_session(db, prefix="conductor")
-    assert set_conductor("workspace", thread_id, db=db)
+    assert set_corsia_agent(thread_id, db=db)
     return thread_id
 
 
@@ -90,7 +96,7 @@ async def test_every_value_route_is_off_limits(conductor, method, path, body):
 
 
 def test_the_key_store_step_is_registered_at_96_on_the_current_ladder():
-    assert SCHEMA_VERSION == 116
+    assert SCHEMA_VERSION == 118
     assert MIGRATIONS[96] is migrate_96_to_97
 
 

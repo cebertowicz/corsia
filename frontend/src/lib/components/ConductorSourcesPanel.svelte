@@ -8,7 +8,7 @@
 	import { anyReady, fetchSources, type ModelSource } from '$lib/conductorSources';
 
 	/**
-	 * The workspace conductor before it has a model: one line pointing at the picker. Nothing is
+	 * The CORSIA agent before it has a model: one line pointing at the picker. Nothing is
 	 * preselected; picking in the model picker is what starts the conductor. The install guarantees
 	 * a working model, so with none ready the card renders nothing.
 	 */
