@@ -221,11 +221,10 @@ export interface OperatorNode {
 	commitment_id: string;
 	updated_at: string;
 	last_transition_at: string;
-	/**
-	 * Finished and settled over a day ago (`plans/node_states.py`): the tree
-	 * gathers it into its level's "N completed" row. Still counted as done.
-	 */
+	/** Finished and settled over a day ago (`plans/node_states.py`): the tree gathers it into its level's "N completed" row. Still counted as done. */
 	folded: boolean;
+	/** A branch that reads as its leaves (`node_states.is_container`); its need is theirs, counted once. */
+	container: boolean;
 	requires_user_action: boolean;
 	executor: OperatorExecutor;
 	execution: OperatorExecution;
