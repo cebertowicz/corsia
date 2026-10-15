@@ -115,11 +115,12 @@ describe('BrowserLeaf navigation metadata', () => {
 		socket.open();
 		socket.receive({ type: 'browser_state', state: 'no_browser_yet' });
 		flushSync();
-		expect(host.textContent).toContain('No browser yet');
+		expect(page().textContent).toContain('Type an address above');
+		expect(toolbar().textContent).not.toContain('Type an address above');
 		for (const message of messages) socket.receive(message);
 		flushSync();
-		expect(host.textContent).not.toContain('No browser yet');
-		expect(host.querySelector('.status')).toBeNull();
+		expect(host.textContent).not.toContain('Type an address above');
+		expect(host.querySelector('.page-status')).toBeNull();
 		expect(host.textContent).not.toContain('Ready');
 	});
 
@@ -313,6 +314,9 @@ describe('BrowserLeaf agent presence', () => {
 	});
 });
 
+const page = () => host.querySelector<HTMLElement>('.browser-page')!;
+const toolbar = () => host.querySelector<HTMLElement>('form.toolbar')!;
+
 describe('BrowserLeaf toolbar', () => {
 	it('has no Go button and no standing status beside the address field', () => {
 		render();
@@ -327,8 +331,27 @@ describe('BrowserLeaf toolbar', () => {
 		const { socket } = render();
 		socket.close();
 		flushSync();
-		expect(host.textContent).toContain('Browser stream ended');
-		expect([...host.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Reconnect')).toBe(true);
+		expect(page().textContent).toContain('Browser stream ended');
+		expect(toolbar().textContent).not.toContain('Browser stream ended');
+		const reconnect = [...page().querySelectorAll('button')].filter((button) => button.textContent?.trim() === 'Reconnect');
+		expect(reconnect).toHaveLength(1);
+		expect(toolbar().querySelector('button[type=button]:not([aria-label])')).toBeNull();
+	});
+
+	it('shows opening, errors and an unavailable stream in the page area with Try again', () => {
+		const { socket } = render();
+		socket.receive({ type: 'navigate_result', error: 'blocked' });
+		flushSync();
+		expect(page().textContent).toContain('Browser could not open this URL: blocked');
+		expect(toolbar().textContent).not.toContain('Browser could not open');
+		expect(page().textContent).not.toContain('Reconnect');
+		expect(page().textContent).toContain('Try again');
+		socket.receive({ type: 'browser_state', state: 'error', reason: 'gone' });
+		flushSync();
+		expect(page().textContent).toContain('Browser stream unavailable: gone');
+		expect(toolbar().textContent).not.toContain('Browser stream unavailable');
+		// A failed stream leaves its last frame dimmed, so its status stays on the over-page pill.
+		expect(page().querySelector('.page-status.over-page')).not.toBeNull();
 	});
 });
 

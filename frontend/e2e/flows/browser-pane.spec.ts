@@ -60,7 +60,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await page.keyboard.type('hi');
 		await expect.poll(() => colorAt(canvas, 0.9, 0.9, [0, 0, 200])).toEqual([0, 0, 200]);
 
-		// Enter in the address bar navigates through the holding stream while the page stays shared.
+		// Enter in the address bar navigates through the open stream while the page stays shared.
 		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html?navigated`);
 		await address.press('Enter');
 		await expect.poll(() => browserFrames.some(entry => entry.includes('"type":"navigate_result","error":null'))).toBe(true);

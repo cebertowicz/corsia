@@ -1,25 +1,19 @@
 <script lang="ts">
 	import { browserAddressLabel } from '$lib/browserAddress';
 	import AvatarStack, { type AvatarParticipant } from '$lib/components/ui/AvatarStack.svelte';
-	import Button from '$lib/components/ui/Button.svelte';
 	import IconButton from '$lib/components/ui/IconButton.svelte';
 
-	let { url, domain = null, streaming, ended, status, announcement, people, agentPresent, onnavigate, onhistory, onreconnect }: {
+	let { url, domain = null, streaming, announcement, people, agentPresent, onnavigate, onhistory }: {
 		url: string;
 		/** The page's registrable domain as the backend names it, the same one a password step's title shows. */
 		domain?: string | null;
 		streaming: boolean;
-		/** The stream ended or failed, so the person can reconnect. */
-		ended: boolean;
-		/** Shown only when the person needs it: opening, an error, or an ended stream. */
-		status: string;
 		/** Read politely by assistive technology and never shown. */
 		announcement: string;
 		people: AvatarParticipant[];
 		agentPresent: boolean;
 		onnavigate: (url: string) => void;
 		onhistory: (action: 'back' | 'forward' | 'reload') => void;
-		onreconnect: () => void;
 	} = $props();
 
 	let addressFocused = $state(false);
@@ -62,15 +56,12 @@
 	<div class="address">
 		<input aria-label="Browser address" value={shownAddress} placeholder="http:// or https://" onfocus={focusAddress} onblur={() => addressFocused = false} oninput={editAddress} />
 	</div>
-	{#if ended}<Button size="sm" onclick={onreconnect}>Reconnect</Button>{/if}
-	{#if status}<span class="status" title={status}>{status}</span>{/if}
 	<span class="sr-only" aria-live="polite">{announcement}</span>
 </form>
 
 <style>
 	.toolbar { display: flex; flex-shrink: 0; gap: 6px; align-items: center; padding: 6px 8px; }
 	.toolbar :global(.ico-btn svg) { width: 16px; height: 16px; }
-	.status { flex-shrink: 1; min-width: 0; max-width: 40%; overflow: hidden; color: var(--text-secondary); font-size: var(--text-footnote); white-space: nowrap; text-overflow: ellipsis; }
 	.agent-seam { display: inline-flex; flex-shrink: 0; opacity: 0; visibility: hidden; transition: opacity 160ms ease, visibility 0s linear 160ms; }
 	.agent-seam.present { opacity: 1; visibility: visible; transition: opacity 160ms ease; }
 	/* The address field reuses the app's search field (DocumentsView .search). */
@@ -79,6 +70,15 @@
 	/* The address leads with the registrable domain, so ending the clip on the right keeps the domain whole. */
 	.address input { flex: 1; min-width: 0; background: none; border: none; outline: none; font: inherit; font-size: var(--text-subhead); color: var(--text-primary); text-overflow: ellipsis; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+	/* Phone width: the nav buttons take the 44px tap target and the address field matches their height. */
+	@media (max-width: 768px) {
+		/* An absent agent takes no room, so the address field gets the whole row. */
+		.agent-seam { max-width: 0; overflow: hidden; margin-left: -6px; transition: opacity 160ms ease, max-width 160ms ease, margin-left 160ms ease, visibility 0s linear 160ms; }
+		.agent-seam.present { max-width: 120px; margin-left: 0; transition: opacity 160ms ease, max-width 160ms ease, margin-left 160ms ease; }
+		.toolbar :global(.ico-btn) { width: 44px; height: 44px; }
+		.toolbar :global(.ico-btn svg) { width: 20px; height: 20px; }
+		.address { min-height: 44px; padding: 0 12px; }
+		.address input { font-size: var(--text-input, 16px); }
+	}
 	@media (prefers-reduced-motion: reduce) { .agent-seam, .agent-seam.present { transition: none; } }
-	@media (max-width: 768px) { .address input { font-size: var(--text-input, 16px); } }
 </style>
