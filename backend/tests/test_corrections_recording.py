@@ -121,6 +121,18 @@ def test_context_keeps_the_newest_six_within_the_total_character_cap():
     assert len(shape_context(big)) == 5  # 5 x 1,499 fits 8,000; a sixth would not
 
 
+def test_context_skips_only_the_deliveries_training_skipped():
+    from core.corrections_input import shape_context
+
+    rows = [
+        ("user", "brief", "brief", json.dumps({"sender_kind": "agent"})),
+        ("user", "sent", "sent", json.dumps({"sender_kind": "agent", "send_idempotency_key": "k"})),
+        ("user", "[AGENT-SEND from x]", "[AGENT-SEND from x]", json.dumps({"sender_kind": "agent"})),
+    ]
+    # Training kept agent-sent rows unless a delivery key or wrapper prefix marked them.
+    assert shape_context(rows) == (("User", "brief"),)
+
+
 @pytest.mark.asyncio
 async def test_unreadable_fact_names_its_failure_and_a_scored_fact_has_none(isolated_db):
     from jobs.corrections_recording import _record_fact
