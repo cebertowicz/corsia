@@ -14,6 +14,7 @@ from uuid import NAMESPACE_URL, uuid5
 from infra.fs_durability import fsync_directory as _fsync_directory
 
 APPLICATION_ID = "com.cebertowicz.corsia"
+MACOS_STATE_DIRECTORY = "CORSIA"
 STATE_DIRECTORY = "state"
 BOOTSTRAP_VERSION = 2
 
@@ -103,10 +104,11 @@ def default_state_root(
     """Return the configured or platform-default operational state root.
 
     ``CORSIA_STATE_DIR`` is an exact root override. Otherwise CORSIA keeps
-    operational state in an application-specific ``state`` child beneath
-    Application Support on macOS, LocalAppData on Windows, or the XDG state
-    directory on other platforms (falling back to ``~/.local/state``). The
-    child leaves room for application metadata beside operational state.
+    operational state directly in ``~/Library/Application Support/CORSIA`` on
+    macOS, or in an application-specific ``state`` child beneath LocalAppData
+    on Windows and the XDG state directory on other platforms (falling back to
+    ``~/.local/state``). The macOS path deliberately never defaults to the
+    legacy ``com.cebertowicz.corsia`` namespace.
     """
     environment = os.environ if env is None else env
     platform_name = sys.platform if platform is None else platform
@@ -120,7 +122,7 @@ def default_state_root(
         return _resolved(override)
 
     if platform_name == "darwin":
-        base = home_dir / "Library" / "Application Support"
+        return _resolved(home_dir / "Library" / "Application Support" / MACOS_STATE_DIRECTORY)
     elif platform_name.startswith("win"):
         local_app_data = environment.get("LOCALAPPDATA")
         base = (

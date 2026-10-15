@@ -8,9 +8,12 @@ use std::{
     env, fs,
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -21,6 +24,8 @@ use tauri::Manager;
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const CHILD_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+const CHILD_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Default)]
 struct AppServiceState {
@@ -87,6 +92,12 @@ fn start_window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
+fn default_state_dir_for_home(home: &Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join("CORSIA")
+}
+
 fn default_state_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Some(path) = env::var_os("CORSIA_STATE_DIR").filter(|path| !path.is_empty()) {
         return Ok(PathBuf::from(path));
@@ -95,12 +106,7 @@ fn default_state_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     // Keep the shell's default aligned with backend/infra/platform_paths.py.
     app.path()
         .home_dir()
-        .map(|home| {
-            home.join("Library")
-                .join("Application Support")
-                .join("com.cebertowicz.corsia")
-                .join("state")
-        })
+        .map(|home| default_state_dir_for_home(&home))
         .map_err(|error| format!("could not resolve the CORSIA state directory: {error}"))
 }
 
@@ -150,11 +156,80 @@ fn probe_health(port: u16) -> bool {
 
 fn stop_child(state: &mut ServiceState) {
     if let Some(mut child) = state.child.take() {
-        let _ = child.kill();
-        let _ = child.wait();
+        request_child_shutdown(&mut child);
     }
     state.port = None;
 }
+
+#[cfg(unix)]
+fn request_child_shutdown(child: &mut Child) {
+    let sent_signal = unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) } == 0;
+    if !sent_signal {
+        log::warn!(
+            "could not send SIGTERM to bundled service {}; killing it",
+            child.id()
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    }
+
+    let deadline = Instant::now() + CHILD_SHUTDOWN_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Err(error) => {
+                log::warn!(
+                    "could not confirm bundled service {} shutdown after SIGTERM: {error}; killing it",
+                    child.id()
+                );
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                log::warn!(
+                    "bundled service {} ignored SIGTERM for {:?}; killing it",
+                    child.id(),
+                    CHILD_SHUTDOWN_TIMEOUT
+                );
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+            Ok(None) => thread::sleep(CHILD_SHUTDOWN_POLL_INTERVAL),
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn request_child_shutdown(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+fn install_termination_handler(app: tauri::AppHandle) {
+    let terminate_requested = Arc::new(AtomicBool::new(false));
+    if let Err(error) = signal_hook::flag::register(
+        signal_hook::consts::signal::SIGTERM,
+        Arc::clone(&terminate_requested),
+    ) {
+        log::error!("could not install bundled service termination handler: {error}");
+        return;
+    }
+
+    thread::spawn(move || {
+        while !terminate_requested.load(Ordering::Relaxed) {
+            thread::sleep(CHILD_SHUTDOWN_POLL_INTERVAL);
+        }
+        stop_service(&app);
+        std::process::exit(0);
+    });
+}
+
+#[cfg(not(unix))]
+fn install_termination_handler(_app: tauri::AppHandle) {}
 
 fn service_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
@@ -248,7 +323,9 @@ fn start_service(
             }
         }
         stop_child(&mut state);
-        let launcher = bundled_resource_dir(app)?.join("bin").join("corsia-service");
+        let launcher = bundled_resource_dir(app)?
+            .join("bin")
+            .join("corsia-service");
         state.child = Some(
             Command::new(launcher)
                 .args(["--host", "127.0.0.1", "--port", &port.to_string()])
@@ -454,6 +531,7 @@ pub fn run() {
         })
         .setup(|app| {
             app.manage(AppServiceState::default());
+            install_termination_handler(app.handle().clone());
             // Apply traffic-light position once the main window is up.
             // The config-driven path is unreliable for our transparent +
             // windowEffects setup (see inset_traffic_lights doc comment).
@@ -494,4 +572,46 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_default_state_dir_uses_corsia_not_the_legacy_identifier() {
+        let home = Path::new("/tmp/corsia-desktop-state-test");
+        let state_dir = default_state_dir_for_home(home);
+
+        assert_eq!(
+            state_dir,
+            home.join("Library")
+                .join("Application Support")
+                .join("CORSIA")
+        );
+        assert!(!state_dir
+            .to_string_lossy()
+            .contains("com.cebertowicz.corsia"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_child_escalates_when_the_bundled_service_ignores_sigterm() {
+        let child = Command::new("/bin/sh")
+            .args(["-c", "trap '' TERM; while :; do sleep 1; done"])
+            .spawn()
+            .expect("spawn service that ignores SIGTERM");
+        let mut state = ServiceState {
+            child: Some(child),
+            port: Some(DEFAULT_SERVICE_PORT),
+            state_dir: None,
+        };
+
+        let started = Instant::now();
+        stop_child(&mut state);
+
+        assert!(started.elapsed() < CHILD_SHUTDOWN_TIMEOUT + Duration::from_secs(2));
+        assert!(state.child.is_none());
+        assert!(state.port.is_none());
+    }
 }

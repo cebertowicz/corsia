@@ -13,5 +13,19 @@ export CORSIA_SERVICE_PATH="${login_path:+$login_path:}$base_path"
 export PATH="$CORSIA_SERVICE_PATH"
 export PYTHONPATH="$resources/python/backend-packages"
 export CORSIA_STATE_DIR="$state_dir"
+service_port="unknown"
+previous_argument=""
+for argument; do
+  if [ "$previous_argument" = "--port" ]; then
+    service_port="$argument"
+    break
+  fi
+  case "$argument" in
+    --port=*) service_port="${argument#--port=}"; break ;;
+  esac
+  previous_argument="$argument"
+done
 exec >>"$state_dir/logs/service.log" 2>&1
+printf 'CORSIA bundled backend startup: state_dir=%s db_path=%s port=%s\n' \
+  "$state_dir" "$state_dir/corsia.db" "$service_port"
 exec "$resources/python/bin/python3" -m uvicorn main:app --app-dir "$resources/backend" "$@"
