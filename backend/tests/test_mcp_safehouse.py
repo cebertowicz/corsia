@@ -537,15 +537,21 @@ def _npx_cases(corsia) -> list[_Case]:
     ]
 
 
-def _npx_probe_cases(profiles: list[Path]) -> list[_Case]:
-    """P1-P8 (INFO): the syscall and PATH entry behind npm's bin spawn, under the envelope e uses."""
+def _app_envelope(profiles: list[Path], name: str, command: str, args: list[str]):
+    """The argv, env and cwd CORSIA gives one local app, with no app config of its own."""
     from mcp.client.stdio import get_default_environment
     from tools.mcp import _safehouse_stdio_parameters
 
+    params, profile = _safehouse_stdio_parameters(name, command, args, {})
+    profiles.append(profile)
+    return [params.command, *params.args], {**get_default_environment(), **params.env}, Path(params.cwd)
+
+
+def _npx_probe_cases(profiles: list[Path]) -> list[_Case]:
+    """P1-P8 (INFO): the syscall and PATH entry behind npm's bin spawn, under the envelope e uses."""
+
     def envelope(name: str, command: str, args: list[str]):
-        params, profile = _safehouse_stdio_parameters(name, command, args, {})
-        profiles.append(profile)
-        return [params.command, *params.args], {**get_default_environment(), **params.env}, Path(params.cwd)
+        return _app_envelope(profiles, name, command, args)
 
     cases = []
     for probe, label in _PROBE_LABELS.items():
@@ -561,6 +567,90 @@ def _npx_probe_cases(profiles: list[Path]) -> list[_Case]:
     ]
     for case in cases:
         case.status = "INFO"
+    return cases
+
+
+# T1-T5: where common toolchains install an app's command, under $HOME.
+_TOOLCHAIN_DIRS = {
+    "T1-home-local-bin": ".local/bin",
+    "T2-nvm-node-bin": ".nvm/versions/node/v0/bin",
+    "T3-pyenv-version-bin": ".pyenv/versions/0/bin",
+    "T4-cargo-bin": ".cargo/bin",
+    "T5-arbitrary-home-app": "corsia-probe-apps/x/bin",
+}
+_HOMEBREW_CANDIDATES = ("bash", "git", "python3", "node", "jq")
+
+
+def _exec_verdict(case: _Case) -> str:
+    if case.returncode == 0:
+        return "allowed"
+    if any("Operation not permitted" in line for line in case.stderr):
+        return "EPERM"
+    return f"failed rc={case.returncode} {(case.stderr or [case.detail])[-1][:80]}"
+
+
+def _build_native_probe(scratch: Path) -> Path | None:
+    """Build an ad-hoc-signed binary that exits 0, or None without a compiler."""
+    source = scratch / "corsia-probe.c"
+    source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    binary = scratch / "corsia-probe"
+    try:
+        subprocess.run(["cc", "-o", str(binary), str(source)], check=True, capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return binary
+
+
+def _toolchain_exec_cases(workspace: Path, scratch: Path, profiles: list[Path]) -> list[_Case]:
+    """T0-T6 (INFO): may an app exec a command from each common toolchain location?
+
+    Each location gets a native binary and a #!/bin/sh script, the form npm and
+    pip bins take; T0 places them in the granted workspace as a control. macOS
+    kills a relocated platform binary such as a copied /bin/sh, so the native
+    stand-in is built here. Homebrew is only read: T6 runs a binary already there.
+    """
+    native = _build_native_probe(scratch)
+    targets = {"T0-control-workspace": workspace / ".corsia" / "probe-bin"}
+    targets.update({name: Path.home() / relative for name, relative in _TOOLCHAIN_DIRS.items()})
+    files: list[Path] = []
+    dirs: list[Path] = []
+    cases = []
+    try:
+        for name, directory in targets.items():
+            dirs.extend(path for path in (directory, *directory.parents) if not path.exists())
+            directory.mkdir(parents=True, exist_ok=True)
+            stem = f"corsia-probe-{uuid.uuid4().hex[:8]}"
+            script = directory / f"{stem}-script"
+            script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            script.chmod(0o755)
+            files.append(script)
+            ran = []
+            if native is not None:
+                command = directory / f"{stem}-native"
+                shutil.copy(native, command)
+                files.append(command)
+                ran.append(("native", _run_raw(name, *_app_envelope(profiles, f"probe-{name}", str(command), []))))
+            ran.append(("script", _run_raw(name, *_app_envelope(profiles, f"probe-{name}-s", str(script), []))))
+            case = ran[0][1]
+            verdicts = [f"{kind} {_exec_verdict(result)}" for kind, result in ran]
+            if native is None:
+                verdicts.insert(0, "native: no cc")
+            case.status, case.detail = "INFO", f"{directory}: " + "; ".join(verdicts)
+            cases.append(case)
+    finally:
+        for path in files:
+            path.unlink(missing_ok=True)
+        for path in dirs:
+            with suppress(OSError):
+                path.rmdir()
+    brew = next((Path("/opt/homebrew/bin") / name for name in _HOMEBREW_CANDIDATES
+                 if (Path("/opt/homebrew/bin") / name).is_file()), None)
+    if brew is None:
+        cases.append(_Case("T6-homebrew-bin", "INFO", detail="no candidate binary in /opt/homebrew/bin"))
+    else:
+        case = _run_raw("T6-homebrew-bin", *_app_envelope(profiles, "probe-T6", str(brew), ["--version"]))
+        case.status, case.detail = "INFO", f"{brew} --version: {_exec_verdict(case)}"
+        cases.append(case)
     return cases
 
 
@@ -919,6 +1009,7 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
             monkeypatch.setenv("PATH", f"{uv_bin}{os.pathsep}{os.environ.get('PATH', '')}")
             host.append(f"uvx (test-installed): {shutil.which('uvx')} ({_host_output([str(uv_bin / 'uvx'), '--version'])})")
         cases.extend(await asyncio.to_thread(_npx_probe_cases, profiles))
+        cases.extend(await asyncio.to_thread(_toolchain_exec_cases, workspace, tmp_path, profiles))
         node_app = str(workspace / "node_modules" / ".bin" / "corsia-npx-mcp")
         for name, command, args, timeout in (
             ("d-node-direct", "node", [node_app], 30),
