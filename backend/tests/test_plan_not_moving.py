@@ -57,8 +57,11 @@ def _leaf(node_id: str, condition: str, *causes: dict, review: str | None = None
     }
 
 
-def _wait(ends_at: str | None) -> dict:
-    return {"kind": "waiting", "reason_key": "deadline", "owner_kind": "thread", "ends_at": ends_at}
+def _wait(ends_at: str | None, *, scheduled_reason: str | None = None) -> dict:
+    cause = {"kind": "waiting", "reason_key": "deadline", "owner_kind": "thread", "ends_at": ends_at}
+    if scheduled_reason is not None:
+        cause["scheduled_reason"] = scheduled_reason
+    return cause
 
 
 _USER_HOLD = {"placed": True, "kind": "blocked", "owner_kind": "user", "owner_id": None}
@@ -77,7 +80,7 @@ def _header(
     return ("not_moving" if still else operator_node_state.leading(counts)), display
 
 
-def _parts(need_you=0, paused_by_you=0, ends=None, overdue=0, next_overdue=None):
+def _parts(need_you=0, paused_by_you=0, ends=None, overdue=0, next_overdue=None, set_aside=0):
     """The facts ``not_moving.read`` returns; a dated wait turns overdue after the grace."""
     if ends and next_overdue is None:
         next_overdue = (
@@ -85,7 +88,7 @@ def _parts(need_you=0, paused_by_you=0, ends=None, overdue=0, next_overdue=None)
         ).isoformat()
     return {
         "need_you": need_you, "next_wait_ends_at": ends, "next_overdue_at": next_overdue,
-        "overdue_waits": overdue, "paused_by_you": paused_by_you,
+        "overdue_waits": overdue, "paused_by_you": paused_by_you, "set_aside": set_aside,
     }
 
 
@@ -341,6 +344,45 @@ def test_the_digest_note_drops_empty_parts():
         "not moving: 2 paused by the user. Pick up anything you can move; "
         "otherwise nothing is owed until something changes."
     )
+
+
+def test_the_digest_counts_self_set_aside_waits_from_the_watch_cause(db):
+    actor = _thread(db, "parked-agent")
+    plan = _plan(db, "parked-agent")
+    parked = task(db, plan.id, "Resume the draft")
+    plan_update(db, plan.id, "activate", {
+        "node_id": parked.id, "expected_revision": revision(db, parked.id),
+    }, actor=actor)
+    ends = _future(5)
+    plan_update(db, plan.id, "arm_watch", {
+        "node_id": parked.id, "expected_revision": revision(db, parked.id),
+        "condition": {"type": "deadline", "value": ends}, "reason": "After review",
+    }, actor=actor)
+
+    note = status_context.projection(db, service._plan_row(db, plan.id), actor=actor)["note"]
+
+    assert note == (
+        f"not moving: next wait ends {ends}. You scheduled 1 of these yourself; nothing releases "
+        "them early unless you do. Review them in plan order and start any you can drive now."
+    )
+
+
+def test_the_digest_tells_the_agent_to_resume_its_self_set_aside_work():
+    note = not_moving.note(_parts(ends=SOON, set_aside=2))
+    assert note == (
+        f"not moving: next wait ends {SOON}. You scheduled 2 of these yourself; nothing releases "
+        "them early unless you do. Review them in plan order and start any you can drive now."
+    )
+    _lead, display = _header([_leaf("parked", "waiting", _wait(SOON, scheduled_reason="Later"))])
+    assert display["not_moving"]["set_aside"] == 1
+
+
+def test_the_digest_does_not_count_set_aside_work_that_something_else_also_holds():
+    _lead, display = _header([
+        _leaf("also-waits", "waiting", _wait(SOON, scheduled_reason="Later"), _wait(SOON)),
+        _leaf("also-held", "blocked", _USER_HOLD, _wait(SOON, scheduled_reason="Later")),
+    ])
+    assert display["not_moving"]["set_aside"] == 0
 
 
 # --- overdue waits (Product Experience AS6) ---------------------------------------------
