@@ -327,9 +327,13 @@ STDIO_SERVER = textwrap.dedent('''
 ''')
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store, tmp_path):
-    script = tmp_path / "server.py"
+async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store):
+    from infra.config import WORKSPACE
+
+    script = Path(WORKSPACE) / ".corsia" / "mcp-secret-fixture.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(STDIO_SERVER)
     config = {"command": sys.executable, "args": [str(script)],
               "env": {"SERVICE_TOKEN": "synthetic-token-0001", "LOG_LEVEL": "debug"}}

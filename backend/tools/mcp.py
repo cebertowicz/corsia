@@ -1,7 +1,10 @@
 """Canonical MCP sessions and native tools, shared by every harness."""
 
 import asyncio
+import os
+import tempfile
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -106,6 +109,44 @@ class MCPToolWrapper(Tool):
             await asyncio.gather(call, return_exceptions=True)
 
 
+_SAFEHOUSE_MCP_ERROR = "local MCP apps require Safehouse"
+_SAFEHOUSE_INHERITED_ENV = {"HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"}
+
+
+def _safehouse_stdio_parameters(command: str, args: list[str], env: dict[str, str]):
+    """Build a scope-neutral direct-exec Safehouse launch for one local app."""
+    from mcp import StdioServerParameters
+
+    from infra.config import WORKSPACE
+    from tools.shell_guard import execution_envelope_profile, safehouse_exec_argv
+
+    cwd = Path(WORKSPACE).expanduser().resolve(strict=False)
+    cache_dir = cwd / ".corsia" / "mcp-cache"
+    server_env = {
+        **env,
+        "npm_config_cache": str(cache_dir / "npm"),
+        "UV_CACHE_DIR": str(cache_dir / "uv"),
+        "XDG_CACHE_HOME": str(cache_dir / "xdg"),
+    }
+    descriptor, raw_profile = tempfile.mkstemp(prefix="corsia-mcp-envelope-", suffix=".sb")
+    profile_path = Path(raw_profile).resolve(strict=False)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as profile:
+            profile.write(execution_envelope_profile(
+                command, cwd, profile_path, leased=False, include_agent_account=False,
+            ))
+        argv = safehouse_exec_argv(
+            command, args, cwd, profile_path,
+            env_pass_names=set(server_env) | _SAFEHOUSE_INHERITED_ENV,
+        )
+    except (FileNotFoundError, OSError):
+        profile_path.unlink(missing_ok=True)
+        raise MCPConfigError(_SAFEHOUSE_MCP_ERROR) from None
+    return StdioServerParameters(
+        command=argv[0], args=argv[1:], env=server_env, cwd=cwd,
+    ), profile_path
+
+
 async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from mcp import ClientSession, StdioServerParameters
 
@@ -122,9 +163,14 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         from mcp.client.stdio import stdio_client
 
         env = {**(config.get("env") or {}), **secret_env}
-        params = StdioServerParameters(command=config["command"],
-                                       args=config.get("args", []), env=env or None)
-        read, write = await stack.enter_async_context(stdio_client(params))
+        params, profile_path = await asyncio.to_thread(
+            _safehouse_stdio_parameters, config["command"], config.get("args", []), env,
+        )
+        stack.callback(profile_path.unlink, missing_ok=True)
+        try:
+            read, write = await stack.enter_async_context(stdio_client(params))
+        except OSError:
+            raise MCPConfigError(_SAFEHOUSE_MCP_ERROR) from None
     elif config.get("url"):
         from mcp.client.streamable_http import streamable_http_client
 
