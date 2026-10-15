@@ -6,6 +6,16 @@ Thank you for contributing. Public contributions must contain only material you 
 
 Read [`AGENTS.md`](AGENTS.md) and the relevant parts of [`ARCHITECTURE.md`](ARCHITECTURE.md), [`BACKEND.md`](BACKEND.md), or [`FRONTEND.md`](FRONTEND.md). Work from a feature branch in a linked worktree based on `dev`; do not develop in a serving checkout or test against an operational database.
 
+## Contributor License Agreement
+
+Before your first pull request from a fork can be merged, you accept the [CORSIA Contributor License Agreement](CLA.md) once for your GitHub account. A bot comments on the pull request and a check named **CLA** fails until you post this exact comment:
+
+```text
+I have read the CORSIA CLA and I accept it
+```
+
+An agent may post it for the account it runs under only after that account's owner has read the agreement and told it to accept; the owner is then bound by it. The bot identifies who wrote each commit from the commit's email address, so author your commits with an email linked to your GitHub account (your `<id>+<login>@users.noreply.github.com` address always works). Comment `recheck` to run the check again.
+
 ## Pull requests
 
 Open a public pull request to `dev` from your feature branch. Explain the user-visible or technical change, include focused tests, and keep the PR within its stated scope.
