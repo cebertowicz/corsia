@@ -241,7 +241,7 @@ def test_a_conductors_add_to_another_agents_plan_has_no_rank_line(db):
     )
     db.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-        ("workspace_conductor_session_id", json.dumps({"session_id": "wk-conductor"}), "t"),
+        ("corsia_agent_thread_id", json.dumps({"session_id": "wk-conductor"}), "t"),
     )
     db.commit()
     plan = owner_plan(db)

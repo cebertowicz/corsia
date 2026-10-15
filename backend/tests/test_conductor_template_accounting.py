@@ -135,7 +135,7 @@ async def test_native_cold_render_delivers_and_counts_role_bytes_once(
     workspace.mkdir()
     for role, filename, content in (
         ("agent", "AGENT.md", "NATIVE AGENT ROLE"),
-        ("conductor", "CONDUCTOR.md", "NATIVE CONDUCTOR ROLE"),
+        ("corsia_agent", "CORSIA_AGENT.md", "NATIVE CONDUCTOR ROLE"),
     ):
         path = workspace / "context" / "roles" / role / filename
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,7 +153,7 @@ async def test_native_cold_render_delivers_and_counts_role_bytes_once(
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
             (
-                "workspace_conductor_session_id",
+                "corsia_agent_thread_id",
                 json.dumps({"session_id": "workspace-conductor"}),
                 "t",
             ),
@@ -300,7 +300,7 @@ def test_preflight_counts_the_same_packaged_conductor_sources(
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
             (
-                "workspace_conductor_session_id",
+                "corsia_agent_thread_id",
                 json.dumps({"session_id": "workspace-conductor"}),
                 "t",
             ),

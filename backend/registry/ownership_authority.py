@@ -21,7 +21,7 @@ AUTHORITY_PARAMETER = {
         "Which rule authorizes the change; not a free-text justification. "
         "Default current-owner-handoff: the caller must be the current owner. "
         "workspace-corsia or blessed-edge-policy: the caller must be the "
-        "designated workspace conductor. source-scope-conductor or "
+        "CORSIA agent. source-scope-conductor or "
         "target-scope-conductor: the caller must be the designated project "
         "conductor of the source thread's project, and the new owner or "
         "triage thread must share that project."
@@ -39,10 +39,10 @@ def thread_is_wakeable(thread_row) -> bool:
     return thread_is_available(thread_row)
 
 
-def _is_workspace_conductor(actor_thread_id: str, db) -> bool:
-    from infra import conductor
+def _is_corsia_agent(actor_thread_id: str, db) -> bool:
+    from infra import corsia_agent
 
-    return conductor.get_conductor(conductor.WORKSPACE_SCOPE, db=db) == actor_thread_id
+    return corsia_agent.get_corsia_agent(db=db) == actor_thread_id
 
 
 def _is_project_conductor(actor_thread_id: str, project_id: str | None, db) -> bool:
@@ -69,7 +69,7 @@ def can_rehome(
             and actor_thread_id == current_owner_thread_id
         )
     if authority in {"workspace-corsia", "blessed-edge-policy"}:
-        return _is_workspace_conductor(actor_thread_id, db)
+        return _is_corsia_agent(actor_thread_id, db)
     if authority in {"source-scope-conductor", "target-scope-conductor"}:
         if not same_scope(source_thread_row, target_thread_row):
             return False
@@ -95,7 +95,7 @@ def can_release(
             return False
         return True
     if authority in {"workspace-corsia", "blessed-edge-policy"}:
-        return _is_workspace_conductor(actor_thread_id, db)
+        return _is_corsia_agent(actor_thread_id, db)
     if authority in {"source-scope-conductor", "target-scope-conductor"}:
         if triage_thread_row is not None and not same_scope(source_thread_row, triage_thread_row):
             return False

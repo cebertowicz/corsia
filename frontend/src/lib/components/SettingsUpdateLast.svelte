@@ -23,7 +23,7 @@
 	<div class="body">
 		<span class="headline">{copy.headline}</span>
 		{#if copy.body}<span class="detail">{copy.body}</span>{/if}
-		{#if failure.conductorTold}<span class="detail">Your workspace conductor has been told.</span>{/if}
+		{#if failure.conductorTold}<span class="detail">The CORSIA agent has been told.</span>{/if}
 		{#if hasDetails}
 			<details>
 				<summary>Details</summary>

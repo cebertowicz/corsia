@@ -27,7 +27,7 @@ def _watch(db, watch_id: str):
 
 
 def test_an_unbound_plan_wait_expires_and_wakes_its_owner():
-    assert SCHEMA_VERSION == 115
+    assert SCHEMA_VERSION == 117
     db = _db()
     try:
         plan, node, _other = _plan(db)

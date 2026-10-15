@@ -11,7 +11,7 @@ from core.agent_roster_queries import agent_rows
 from doceditor import feedback_delivery
 from doceditor.comments import validate_client_id
 from infra.auth import is_owner_sentinel, may_access_artifact
-from infra.conductor import ConductorSettingError, get_conductor
+from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
 from infra.queries import get_thread_for_user
 from infra.database import write_transaction
 from infra.write_effects import after_commit
@@ -95,16 +95,16 @@ def reviewer_eligibility(db, artifact, actor: ReviewActor, *,
         refusals.setdefault(actor.id, SELF_REFUSAL)
     try:
         _caller, visible = agent_rows(actor.thread_id, db)
-        workspace_conductor = get_conductor(db=db)
-    except (sqlite3.OperationalError, ConductorSettingError) as exc:
+        corsia_agent_id = get_corsia_agent(db=db)
+    except (sqlite3.OperationalError, CorsiaAgentSettingError) as exc:
         raise ReviewRosterError(ROSTER_ERROR) from exc
     choices = []
     for row in visible:
         thread_id = row["id"]
         if thread_id in refusals or (reviewer_id is not None and thread_id != reviewer_id):
             continue
-        # The roster lists the workspace conductor so agents can message it; it is never a document reviewer.
-        if thread_id == workspace_conductor:
+        # The roster lists the CORSIA agent so agents can message it; it is never a document reviewer.
+        if thread_id == corsia_agent_id:
             continue
         problem = feedback_delivery.recipient_problem(db, thread_id)
         if problem is not None:

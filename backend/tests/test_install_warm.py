@@ -257,7 +257,7 @@ def _starter_row(status: str) -> dict:
 
 @pytest.fixture
 def cli(monkeypatch):
-    import cli_conductor
+    import cli_corsia_agent
 
     monkeypatch.setenv("CORSIA_SOURCES_SERVICE_TOKEN", "svc")
     monkeypatch.delenv("CORSIA_INSTALL_FLOW", raising=False)
@@ -267,14 +267,14 @@ def cli(monkeypatch):
         calls.append(f"{method} {path.split('?')[0]}")
         if path == "/api/models":
             return {"models": [_starter_row(cli.starter_status)]}
-        if path.startswith("/api/conductor"):
+        if path.startswith("/api/corsia-agent"):
             return {"thread_id": "cond-1"}
         raise AssertionError(path)
 
-    monkeypatch.setattr(cli_conductor, "request_json", _request)
+    monkeypatch.setattr(cli_corsia_agent, "request_json", _request)
     cli.starter_status = "ready"
     cli.calls = calls
-    cli.module = cli_conductor
+    cli.module = cli_corsia_agent
     return cli
 
 
@@ -305,7 +305,7 @@ def _run(cli, reply, *, tty=False, finish_at: float | None = 3):
                     worker.join(5)
 
     try:
-        code = cli.module.warm_conductor(out=out, clock=clock, sleep=_tick, call=_post)
+        code = cli.module.warm_corsia_agent(out=out, clock=clock, sleep=_tick, call=_post)
     finally:
         gate.set()
     return code, out.getvalue()
@@ -328,35 +328,35 @@ def test_cli_is_silent_without_a_token(cli, monkeypatch):
 def test_cli_holds_one_request_and_ticks_to_done(cli):
     code, text = _run(cli, {"ok": True, "message": "Warm finished"}, tty=True)
     assert code == 0
-    assert "Getting your conductor ready (its first reply will be faster) · 0:00" in text
+    assert "Getting CORSIA ready (its first reply will be faster) · 0:00" in text
     assert "about" not in text
     assert "\r\x1b[K" in text
     assert "· 0:02" in text
-    assert text.rstrip().endswith("Conductor ready.")
+    assert text.rstrip().endswith("CORSIA ready.")
     assert [c for c in cli.calls if c.startswith("POST")] == ["POST warm cond-1 omlx-starter"]
 
 
 def test_cli_already_warm_is_done(cli):
     code, text = _run(cli, {"ok": True, "skipped": True, "message": "Already warm"}, finish_at=0)
     assert code == 0
-    assert text.splitlines()[-1] == "Conductor ready."
+    assert text.splitlines()[-1] == "CORSIA ready."
 
 
 def test_cli_failure_prints_one_line_and_exits_zero(cli):
     code, text = _run(cli, {"ok": False, "message": "model not loaded"})
     assert code == 0
     assert text.splitlines()[-1] == (
-        "Couldn't get the conductor ready ahead of time; "
+        "Couldn't get CORSIA ready ahead of time; "
         "its first reply will take a little longer."
     )
     assert text.count("Couldn't") == 1
-    assert "Conductor ready." not in text
+    assert "CORSIA ready." not in text
 
 
 def test_cli_request_error_is_a_failure_not_a_crash(cli):
     code, text = _run(cli, OSError("refused"))
     assert code == 0
-    assert text.splitlines()[-1].startswith("Couldn't get the conductor ready")
+    assert text.splitlines()[-1].startswith("Couldn't get CORSIA ready")
 
 
 def test_cli_timeout_prints_one_line_and_exits_zero(cli):
@@ -366,7 +366,7 @@ def test_cli_timeout_prints_one_line_and_exits_zero(cli):
     assert len([c for c in cli.calls if c.startswith("POST")]) == 1
 
 
-@pytest.mark.parametrize("route", ["/api/models", "/api/conductor"])
+@pytest.mark.parametrize("route", ["/api/models", "/api/corsia-agent"])
 def test_cli_discovery_error_names_the_route_on_stderr_and_exits_zero(
     cli, monkeypatch, capsys, route,
 ):
@@ -381,7 +381,7 @@ def test_cli_discovery_error_names_the_route_on_stderr_and_exits_zero(
     code, text = _run(cli, None)
     assert (code, text) == (0, "")
     assert capsys.readouterr().err == (
-        f"conductor warm: GET {route} failed (ValueError)\n"
+        f"agent warm: GET {route} failed (ValueError)\n"
     )
     assert not [c for c in cli.calls if c.startswith("POST")]
 
@@ -389,17 +389,17 @@ def test_cli_discovery_error_names_the_route_on_stderr_and_exits_zero(
 def test_cli_numbers_its_line_only_inside_the_installer(cli, monkeypatch):
     monkeypatch.setenv("CORSIA_INSTALL_FLOW", "1")
     _, text = _run(cli, {"ok": True, "message": "Warm finished"})
-    assert text.splitlines()[-1] == "8/8  Conductor ready."
+    assert text.splitlines()[-1] == "8/8  CORSIA ready."
 
 
 def test_cli_registers_under_the_existing_parser():
     import argparse
 
-    import cli_conductor
+    import cli_corsia_agent
 
     parser = argparse.ArgumentParser()
-    cli_conductor.build_parser(parser.add_subparsers(dest="cmd"))
-    assert parser.parse_args(["conductor", "warm"]).func is cli_conductor.cmd_warm
+    cli_corsia_agent.build_parser(parser.add_subparsers(dest="cmd"))
+    assert parser.parse_args(["agent", "warm"]).func is cli_corsia_agent.cmd_warm
 
 
 # --- route: wait=true ---------------------------------------------------------

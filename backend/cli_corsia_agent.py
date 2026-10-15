@@ -1,7 +1,7 @@
-"""``corsia conductor warm`` — pre-warm the conductor's prefix at install.
+"""``corsia agent warm`` — pre-warm the CORSIA agent's prefix at install.
 
-When the local starter model is ready, the first reply from the workspace
-conductor is faster if the server has already prefilled its system and tool
+When the local starter model is ready, the first reply from the
+CORSIA agent is faster if the server has already prefilled its system and tool
 prefix. The server owns that work (``POST /api/threads/{id}/warm`` renders
 through the send path and runs the warm); this command asks for it once, holds
 that one request open until the warm ends, and shows the person that something
@@ -30,10 +30,10 @@ WARM_TIMEOUT_SECONDS = 300
 # socket, decides a warm that finishes right at the limit.
 WARM_REQUEST_TIMEOUT_SECONDS = WARM_TIMEOUT_SECONDS + 15
 
-PROGRESS = "Getting your conductor ready (its first reply will be faster)"
-DONE = "Conductor ready."
+PROGRESS = "Getting CORSIA ready (its first reply will be faster)"
+DONE = "CORSIA ready."
 FAILED = (
-    "Couldn't get the conductor ready ahead of time; "
+    "Couldn't get CORSIA ready ahead of time; "
     "its first reply will take a little longer."
 )
 TIMED_OUT = "Still getting ready in the background; you can start now."
@@ -41,7 +41,7 @@ TIMED_OUT = "Still getting ready in the background; you can start now."
 # What a request can raise: no server, a refusal, a 404, or an unreadable body.
 _REQUEST_ERRORS = (OSError, ValueError, RouteMissing)
 
-REQUEST_THREAD = "conductor-warm-request"
+REQUEST_THREAD = "corsia-agent-warm-request"
 _CLEAR_LINE = "\r\033[K"
 
 
@@ -66,9 +66,9 @@ def _starter_catalog_id(token: str) -> str | None:
     return None
 
 
-def _conductor_id(token: str) -> str | None:
+def _agent_id(token: str) -> str | None:
     query = urllib.parse.urlencode({"token": token})
-    payload = request_json("GET", f"/api/conductor?{query}", token, READ_TIMEOUT_SECONDS)
+    payload = request_json("GET", f"/api/corsia-agent?{query}", token, READ_TIMEOUT_SECONDS)
     thread_id = payload.get("thread_id")
     return thread_id if isinstance(thread_id, str) and thread_id else None
 
@@ -88,7 +88,7 @@ def _elapsed(seconds: float) -> str:
 
 
 def _discover(token: str) -> tuple[str, str] | None:
-    """The starter's catalog id and the conductor's thread id, or None.
+    """The starter's catalog id and the CORSIA agent's thread id, or None.
 
     The starter not being ready is the ordinary "nothing to warm" and stays
     silent. A request that fails means a route this command consumes is broken
@@ -97,21 +97,21 @@ def _discover(token: str) -> tuple[str, str] | None:
     try:
         catalog_id = _starter_catalog_id(token)
     except _REQUEST_ERRORS as exc:
-        print(f"conductor warm: GET /api/models failed ({type(exc).__name__})", file=sys.stderr)
+        print(f"agent warm: GET /api/models failed ({type(exc).__name__})", file=sys.stderr)
         return None
     if catalog_id is None:
         return None
     try:
-        thread_id = _conductor_id(token)
+        thread_id = _agent_id(token)
     except _REQUEST_ERRORS as exc:
-        print(f"conductor warm: GET /api/conductor failed ({type(exc).__name__})", file=sys.stderr)
+        print(f"agent warm: GET /api/corsia-agent failed ({type(exc).__name__})", file=sys.stderr)
         return None
     if thread_id is None:
         return None
     return catalog_id, thread_id
 
 
-def warm_conductor(
+def warm_corsia_agent(
     *,
     out=None,
     clock: Callable[[], float] = time.monotonic,
@@ -170,14 +170,14 @@ def warm_conductor(
 
 
 def cmd_warm(_args: argparse.Namespace) -> int:
-    return warm_conductor()
+    return warm_corsia_agent()
 
 
 def build_parser(subparsers) -> None:
-    """Register ``conductor warm``."""
-    conductor = subparsers.add_parser("conductor", help="Workspace conductor helpers")
-    commands = conductor.add_subparsers(dest="conductor_cmd", required=True)
+    """Register ``agent warm``."""
+    agent = subparsers.add_parser("agent", help="CORSIA agent helpers")
+    commands = agent.add_subparsers(dest="agent_cmd", required=True)
     warm = commands.add_parser(
-        "warm", help="Pre-warm the conductor's first reply on the local starter model",
+        "warm", help="Pre-warm the CORSIA agent's first reply on the local starter model",
     )
     warm.set_defaults(func=cmd_warm)

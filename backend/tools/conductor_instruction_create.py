@@ -118,7 +118,7 @@ def _install(actor: str, target_id: str, kind: str, name: str | None, content: s
     from core.skills_registry import resolve_effective_skills
     from infra.database import write_transaction
 
-    with write_transaction(None, scope="conductor_instruction_file_create") as db:
+    with write_transaction(None, scope="coordination_instruction_file_create") as db:
         user_id = _actor_user_id(db, actor)
         target = require_designated_conductor_target(target_id, user_id=user_id, actor_thread_id=actor, db=db)
         writes = _install_paths(target, kind, name, content, supporting_files)
@@ -171,12 +171,12 @@ class ConductorInstructionFileCreateTool(Tool):
 
     @property
     def name(self) -> str:
-        return "conductor_instruction_file_create"
+        return "coordination_instruction_file_create"
 
     @property
     def description(self) -> str:
         return (
-            "Load skill conductor-api for setup. For the designated same-scope conductor: create and attach a target thread's "
+            "Load skill coordination-api for setup. For the CORSIA agent or a project conductor in the same scope: create and attach a target thread's "
             "RESPONSIBILITY.md, or install its thread skill and optional scripts/references. "
             "Use expected_revision='absent' for creation; copy the returned bundle revision "
             "for later edits. Same desired state retries are idempotent. Returns verified next-turn "
@@ -205,7 +205,7 @@ class ConductorInstructionFileCreateTool(Tool):
                       **kwargs: Any) -> str:
         actor = kwargs.get("_thread_id")
         if not isinstance(actor, str) or not actor:
-            return "Error: current thread identity is unavailable; retry from a live conductor turn."
+            return "Error: current thread identity is unavailable; retry from a live CORSIA agent or conductor turn."
         if not re.fullmatch(r"absent|[0-9a-f]{64}", expected_revision) or not content.strip():
             return "Error: use expected_revision='absent' or the returned bundle revision, and nonempty content."
         try:

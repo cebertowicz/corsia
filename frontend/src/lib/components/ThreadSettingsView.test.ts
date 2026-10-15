@@ -5,6 +5,7 @@ import ThreadSettingsView from './ThreadSettingsView.svelte';
 import { activeThreadId, threads, type Thread } from '$lib/stores/threads';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
 import { fetchConductor } from '$lib/utils/conductor';
+import { uiScope } from '$lib/stores/uiScope';
 
 vi.mock('$lib/utils/conductor', () => ({ fetchConductor: vi.fn() }));
 
@@ -87,7 +88,11 @@ describe('ThreadSettingsView', () => {
 
 	describe('conductor mode', () => {
 		const target = { thread_id: 'conductor-1', title: 'Conductor', project_id: 'corsia', bootloader_files: [] };
-		beforeEach(() => { vi.mocked(fetchConductor).mockReset(); });
+		beforeEach(() => {
+			vi.mocked(fetchConductor).mockReset();
+			uiScope.set({ id: 'corsia', name: 'CORSIA', color: '#d65a87' });
+		});
+		afterEach(() => uiScope.set(null));
 		const flush = async () => { await Promise.resolve(); await Promise.resolve(); flushSync(); };
 
 		it('shows a loading state, then context and skills without the Agent section', async () => {
@@ -105,6 +110,20 @@ describe('ThreadSettingsView', () => {
 			expect(host.textContent).toContain('Context files');
 			expect(host.textContent).toContain('Thread: Conductor');
 			expect(host.textContent).not.toContain('Make Agent');
+		});
+
+		it('names the workspace scope\'s designated thread CORSIA, not Conductor', async () => {
+			uiScope.set(null);
+			activeThreadId.set('agent-1');
+			vi.mocked(fetchConductor).mockResolvedValue({
+				kind: 'target',
+				target: { thread_id: 'agent-1', title: null, project_id: null, bootloader_files: [] },
+			} as never);
+
+			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
+			await flush();
+			expect(host.textContent).toContain('Thread: CORSIA');
+			expect(host.textContent).not.toContain('Conductor');
 		});
 
 		it('shows the unavailable state when the fetch returns nothing', async () => {

@@ -65,7 +65,7 @@ def _registrations(db):
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 115
+    assert SCHEMA_VERSION == 117
 
 
 def test_migration_retires_only_rows_of_ended_pull_requests(tmp_path):

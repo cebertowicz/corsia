@@ -48,6 +48,8 @@
 	);
 	// An unresolved lookup stays clickable: a failed fetch must not read as
 	// "no conductor" — only the API's explicit absent answer disables the entry.
+	// The workspace scope's occupant is the CORSIA agent; a project's is its conductor.
+	let entryLabel = $derived($uiScope ? 'Conductor' : 'CORSIA');
 	let conductorClickable = $derived(conductorThreadId !== null || !conductorKnownAbsent);
 	let conductorState = $derived(conductorThreadId ? $threadActivity[conductorThreadId] : undefined);
 	let conductorBusy = $derived(conductorState === 'active');
@@ -170,16 +172,16 @@
 		onpointerup={clearHold}
 		onpointercancel={clearHold}
 		title={conductorThreadId
-			? "Conductor — this scope's main thread"
+			? `${entryLabel} — this scope's main thread`
 			: conductorKnownAbsent
-				? 'No conductor for this scope'
-				: 'Open conductor chat'}
+				? `No ${entryLabel === 'CORSIA' ? 'CORSIA agent' : 'conductor'} for this scope`
+				: `Open ${entryLabel === 'CORSIA' ? 'CORSIA' : 'conductor'} chat`}
 	>
 		<button
 			type="button"
 			class="scoped-item-trigger"
 			disabled={!conductorClickable}
-			aria-label={`Conductor${conductorSummary ? `. Latest update: ${conductorSummary}` : ''}`}
+			aria-label={`${entryLabel}${conductorSummary ? `. Latest update: ${conductorSummary}` : ''}`}
 		>
 			{#if conductorThreadId && $threadPlanStates[conductorThreadId]?.paused}
 				<ThreadPausedMark />
@@ -187,7 +189,7 @@
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 			{/if}
 			<div class="agent-copy">
-				<span class="lbl">Conductor</span>
+				<span class="lbl">{entryLabel}</span>
 				{#if conductorSummary}
 					<span class="update-summary" title={conductorSummary}>{conductorSummary}</span>
 				{/if}

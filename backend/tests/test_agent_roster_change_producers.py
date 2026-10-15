@@ -161,7 +161,7 @@ def test_multiple_roster_changes_materialize_one_complete_current_map(
                 "Self: this thread (thread) has no registered responsibility.",
                 "Other agents in scope:",
                 "- Release Owner (owner) [project] — Owns releases.",
-                "Workspace conductor: not reachable (none designated).",
+                "CORSIA agent: not reachable (none designated).",
                 "Use agent_roster for paths, domains, and coordination notes.",
             ]
         )
@@ -252,7 +252,8 @@ def test_unrelated_metadata_write_survives_corrupt_workspace_conductor_setting(
     isolated_db,
 ):
     from api.thread_mutations import _write_metadata_patch
-    from infra.conductor import ConductorSettingError, get_conductor
+    from infra.conductor import get_conductor
+    from infra.corsia_agent import CorsiaAgentSettingError
     from infra.database import get_db
 
     _insert_thread("owner")
@@ -260,7 +261,7 @@ def test_unrelated_metadata_write_survives_corrupt_workspace_conductor_setting(
     try:
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-            ("workspace_conductor_session_id", "{not-json", "t"),
+            ("corsia_agent_thread_id", "{not-json", "t"),
         )
         db.commit()
     finally:
@@ -280,7 +281,7 @@ def test_unrelated_metadata_write_survives_corrupt_workspace_conductor_setting(
     assert [change["object_id"] for change in _roster_changes()] == [
         "user:user:workspace"
     ]
-    with pytest.raises(ConductorSettingError, match="workspace conductor"):
+    with pytest.raises(CorsiaAgentSettingError, match="CORSIA agent"):
         get_conductor()
 
 
@@ -296,7 +297,7 @@ def test_project_metadata_write_skips_workspace_conductor_lookup(
     try:
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-            ("workspace_conductor_session_id", "{not-json", "t"),
+            ("corsia_agent_thread_id", "{not-json", "t"),
         )
         db.commit()
     finally:
@@ -396,7 +397,7 @@ async def test_automatic_title_journals_only_visible_owner(isolated_db, monkeypa
     try:
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-            ("workspace_conductor_session_id", "{not-json", "t"),
+            ("corsia_agent_thread_id", "{not-json", "t"),
         )
         db.commit()
     finally:
@@ -463,7 +464,7 @@ def test_project_digest_refreshes_when_workspace_conductor_is_designated_or_rena
 
         assert set_conductor("workspace", "contact", db=db) is True
         assert [change["object_id"] for change in _roster_changes()] == [
-            "user:user:workspace-conductor-contact"
+            "user:user:corsia-agent-contact"
         ]
         designated_map = _project_roster_digest(db, "project-agent")
         second_project_map = _project_roster_digest(db, "project-agent-two")

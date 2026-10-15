@@ -82,10 +82,10 @@ All six onboarding events are backend-only lifecycle observations. They contain 
 | Event | When it fires | Surface |
 |---|---|---|
 | `onboarding.account_created` | The first account is created | backend |
-| `onboarding.first_run_wake` | That account queues the workspace conductor's first-run wake | backend |
-| `onboarding.first_model_selected` | The workspace conductor receives its first model | backend |
-| `onboarding.first_turn_completed` | The workspace conductor completes its first turn | backend |
-| `onboarding.first_decision_answered` | The workspace conductor's first decision is answered | backend |
+| `onboarding.first_run_wake` | That account queues the CORSIA agent's first-run wake | backend |
+| `onboarding.first_model_selected` | The CORSIA agent receives its first model | backend |
+| `onboarding.first_turn_completed` | The CORSIA agent completes its first turn | backend |
+| `onboarding.first_decision_answered` | The CORSIA agent's first decision is answered | backend |
 | `onboarding.first_outcome` | The first accepted node close using `mark_done` or `accept` in a project created after the account | backend |
 
 ### Local setup

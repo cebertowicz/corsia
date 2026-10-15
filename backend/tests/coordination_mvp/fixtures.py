@@ -100,6 +100,8 @@ def _gmail_payload(message_id: str, thread_id: str, sender: str,
         "message_id": message_id, "thread_id": thread_id,
         "from": sender, "to": "me@example.com", "label": label,
         "subject": "hello", "snippet": "first contact",
+        # Screened, unflagged, needs the person now: the declared actionable rule.
+        "screen_status": "screened", "injection": False, "needs_person": "now",
     }
 
 
