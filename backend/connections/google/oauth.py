@@ -206,22 +206,17 @@ def account_status() -> dict:
     account = get_setting(ACCOUNT_SETTING)
     if not account or key_store.resolve_google() is None:
         return {"email": None, "scopes": [], "status": "not_connected", "poller_state": None, "last_success_at": None}
+    # Imported here: the poller module imports this one.
+    from events.connectors.gmail_poller import poller_status
+
     status = account.get("status", STATUS_CONNECTED)
+    poller = poller_status()
     result = {
         "email": account.get("email"), "scopes": account.get("scopes", []),
         "status": status,
-        "poller_state": None,
-        "last_success_at": None,
+        "poller_state": poller["state"],
+        "last_success_at": poller["last_success_at"],
     }
-    try:
-        from events.connectors.gmail_poller import poller_status
-
-        poller = poller_status()
-        result["poller_state"] = poller["state"]
-        result["last_success_at"] = poller["last_success_at"]
-    except ImportError:
-        # Keep sign-in status usable while the optional mail connector is absent.
-        pass
     if status == client.STATUS_NEEDS_SIGN_IN:
         result["needs_action"] = client.SIGN_IN_RECOVERY
     return result

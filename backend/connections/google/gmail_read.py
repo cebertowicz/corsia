@@ -52,11 +52,6 @@ def headers_from_payload(payload: dict[str, Any]) -> dict[str, str]:
     return found
 
 
-def _headers(payload: dict[str, Any]) -> dict[str, str]:
-    """Backward-compatible internal spelling for callers in this module."""
-    return headers_from_payload(payload)
-
-
 async def search(query: str, max_results: int) -> list[Message]:
     """Matching messages' ids and headers only, newest first (Gmail's order)."""
     limit = max(1, min(int(max_results), MAX_RESULTS))
@@ -76,7 +71,7 @@ async def search(query: str, max_results: int) -> list[Message]:
             },
         )
         return Message(str(ref["id"]), str(data.get("threadId") or ref.get("threadId") or ""),
-                       _headers(data.get("payload") or {}))
+                       headers_from_payload(data.get("payload") or {}))
 
     return list(await asyncio.gather(*(one(ref) for ref in refs)))
 
@@ -111,4 +106,4 @@ async def fetch(message_id: str) -> Message:
         "GET", f"{API}/{mid}", params={"format": "full", "fields": "id,threadId,payload"},
     )
     payload = data.get("payload") or {}
-    return Message(mid, str(data.get("threadId") or ""), _headers(payload), body_text(payload))
+    return Message(mid, str(data.get("threadId") or ""), headers_from_payload(payload), body_text(payload))
