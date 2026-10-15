@@ -18,6 +18,7 @@ from ws.browser_stream import browser_stream_endpoint
 from api.usage_rollup import refresh_on_request as refresh_usage_rollup
 from api import (
     auth_router,
+    setup_router,
     threads_router,
     thread_mutations_router,
     thread_messages_router,
@@ -157,6 +158,7 @@ app.include_router(browser_router)
 app.include_router(plans_router)
 app.include_router(plans_folded_router)
 app.include_router(auth_router)
+app.include_router(setup_router)
 
 app.include_router(webhooks_router)
 

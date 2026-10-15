@@ -4,7 +4,7 @@ import { build } from 'vite';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import viteConfig from '../../vite.config';
+import viteConfig, { backendOriginForOwnDevRequest } from '../../vite.config';
 
 // The first bundling probe in a worker pays for esbuild/rollup cold start, which
 // can pass the 5 s default on a loaded host (same reason playwright-config.test.ts
@@ -58,6 +58,11 @@ describe('frontend env prefix', () => {
 });
 
 describe('e2e dev server', () => {
+	it('rewrites Origin only for requests from the dev server itself', () => {
+		expect(backendOriginForOwnDevRequest('http://127.0.0.1:5173', '127.0.0.1:5173', 'http://127.0.0.1:4310')).toBe('http://127.0.0.1:4310');
+		expect(backendOriginForOwnDevRequest('https://example.test', '127.0.0.1:5173', 'http://127.0.0.1:4310')).toBeUndefined();
+	});
+
 	// A full-page reload from the dev server mid-test destroys the page the test is driving.
 	const serverOf = () => viteConfig({ mode: 'development', command: 'serve' }).server;
 

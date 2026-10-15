@@ -165,27 +165,30 @@ def local_endpoint_refusal(target: Any, provider_params: Callable[[str], dict] |
 
 
 def _resolve_local_target(model_id: str | None = None) -> Any:
-    """The checker model (the configured one unless named) as a target, or :class:`ScreenUnavailable`."""
-    from infra.settings import get_corrections_checker_model
+    """Resolve one explicit screen model or the first ready eligible local catalog model."""
     from llm.endpoint_policy import endpoint_agent_use
+    from llm.model_status import catalog_base_rows
     from llm.resolution import ModelUnavailableError, resolve_execution_target
 
     db = get_db()
     try:
-        model_id = model_id or get_corrections_checker_model(db=db)
-        if model_id is None:
-            raise ScreenUnavailable("no checker model is configured")
-        if endpoint_agent_use(model_id) == "interactive_only":
-            raise ScreenUnavailable("the checker model is restricted to interactive use")
-        try:
-            target = resolve_execution_target(model_id, db=db)
-        except (ModelUnavailableError, ValueError):
-            raise ScreenUnavailable("the checker model can't be resolved") from None
-        if not target.available:
-            raise ScreenUnavailable("the checker model is unavailable")
-        if refusal := local_endpoint_refusal(target):
-            raise ScreenUnavailable(refusal)
-        return target
+        if model_id is not None:
+            candidate_ids = [model_id]
+        else:
+            candidate_ids = [
+                row["selector"] for row in catalog_base_rows() if row["status"] == "ready"
+            ]
+        for candidate_id in candidate_ids:
+            if endpoint_agent_use(candidate_id) == "interactive_only":
+                continue
+            try:
+                target = resolve_execution_target(candidate_id, db=db)
+            except (ModelUnavailableError, ValueError):
+                continue
+            if not target.available or local_endpoint_refusal(target) is not None:
+                continue
+            return target
+        raise ScreenUnavailable("no local model is ready")
     finally:
         db.close()
 

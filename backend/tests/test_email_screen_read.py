@@ -205,16 +205,87 @@ def test_a_loopback_network_target_is_accepted(api_base):
     assert email_screen.local_endpoint_refusal(_target(), lambda _m: {"api_base": api_base}) is None
 
 
-async def test_a_cloud_row_with_a_local_looking_name_never_reaches_the_model(isolated_db, monkeypatch):
-    db = get_db()
-    db.execute(
-        "INSERT INTO models (id, harness, provider, provider_model_id, litellm_model, display_name,"
-        " backend, enabled, available, context_window, created_at, updated_at)"
-        " VALUES ('omlx@local/fortissimo', 'native', 'openai', 'gpt-x', 'openai/gpt-x', 'Fortissimo (local)',"
-        " 'api', 1, 1, 100000, 't', 't')"
+def _screen_catalog(monkeypatch, rows, targets, *, interactive=()):
+    from llm import endpoint_policy, model_status, resolution
+
+    resolved = []
+    monkeypatch.setattr(model_status, "catalog_base_rows", lambda: rows)
+    monkeypatch.setattr(
+        endpoint_policy, "endpoint_agent_use",
+        lambda selector: "interactive_only" if selector in interactive else "allowed",
     )
-    db.commit()
-    set_setting("agents", {"defaults": {"corrections_checker_model": "omlx@local/fortissimo"}})
+
+    def resolve(selector, *, db):
+        resolved.append(selector)
+        return targets[selector]
+
+    monkeypatch.setattr(resolution, "resolve_execution_target", resolve)
+    return resolved
+
+
+def _screen_target(selector, *, backend="network"):
+    return SimpleNamespace(
+        catalog_id=selector, transport_model=selector, harness="native", backend=backend, available=True,
+    )
+
+
+def test_no_ready_local_model_is_unavailable(isolated_db, monkeypatch):
+    _screen_catalog(monkeypatch, [{"selector": "later", "status": "available"}], {})
+    with pytest.raises(email_screen.ScreenUnavailable, match="no local model is ready"):
+        email_screen._resolve_local_target()
+
+
+def test_a_ready_cloud_only_catalog_is_refused(isolated_db, monkeypatch):
+    cloud = _screen_target("cloud", backend="api")
+    _screen_catalog(monkeypatch, [{"selector": "cloud", "status": "ready"}], {"cloud": cloud})
+    with pytest.raises(email_screen.ScreenUnavailable, match="no local model is ready"):
+        email_screen._resolve_local_target()
+
+
+def test_first_ready_local_catalog_model_is_used(isolated_db, monkeypatch):
+    local = _screen_target("local")
+    resolved = _screen_catalog(monkeypatch, [{"selector": "local", "status": "ready"}], {"local": local})
+    monkeypatch.setattr(email_screen, "local_endpoint_refusal", lambda target: None)
+    assert email_screen._resolve_local_target() is local
+    assert resolved == ["local"]
+
+
+def test_ready_local_catalog_choice_is_deterministic(isolated_db, monkeypatch):
+    first, second = _screen_target("first"), _screen_target("second")
+    resolved = _screen_catalog(
+        monkeypatch, [{"selector": "first", "status": "ready"}, {"selector": "second", "status": "ready"}],
+        {"first": first, "second": second},
+    )
+    monkeypatch.setattr(email_screen, "local_endpoint_refusal", lambda target: None)
+    assert email_screen._resolve_local_target() is first
+    assert resolved == ["first"]
+
+
+def test_explicit_screen_model_id_is_honored(isolated_db, monkeypatch):
+    named = _screen_target("named")
+    resolved = _screen_catalog(monkeypatch, [], {"named": named})
+    monkeypatch.setattr(email_screen, "local_endpoint_refusal", lambda target: None)
+    assert email_screen._resolve_local_target("named") is named
+    assert resolved == ["named"]
+
+
+def test_interactive_only_catalog_model_is_skipped(isolated_db, monkeypatch):
+    interactive, local = _screen_target("interactive"), _screen_target("local")
+    resolved = _screen_catalog(
+        monkeypatch, [{"selector": "interactive", "status": "ready"}, {"selector": "local", "status": "ready"}],
+        {"interactive": interactive, "local": local}, interactive={"interactive"},
+    )
+    monkeypatch.setattr(email_screen, "local_endpoint_refusal", lambda target: None)
+    assert email_screen._resolve_local_target() is local
+    assert resolved == ["local"]
+
+
+async def test_a_cloud_row_with_a_local_looking_name_never_reaches_the_model(isolated_db, monkeypatch):
+    cloud = _screen_target("omlx@local/fortissimo", backend="api")
+    _screen_catalog(
+        monkeypatch, [{"selector": "omlx@local/fortissimo", "status": "ready"}],
+        {"omlx@local/fortissimo": cloud},
+    )
     model = FakeModel()
     monkeypatch.setattr(email_screen, "invoke_isolated_structured", model)
     screen = await email_screen.screen_message(ACCOUNT, "m1", {"from": "a@b.example"}, "body")

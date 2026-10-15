@@ -54,6 +54,7 @@ def _projection(
         )
         for message_id, seq, role, content in messages
     )
+    turns: tuple[PortableTurn, ...]
     if portable_messages:
         from history.types import HistoryBoundary
 

@@ -190,7 +190,7 @@ def test_attempted_today_uses_local_update_acquisition_date():
 
 def test_lifecycle_service_tokens_are_revoked_at_every_terminal_path():
     from automation import self_restart
-    from infra import accounts
+    from infra import accounts, token_admin
 
     db = _operation_table()
 
@@ -199,7 +199,7 @@ def test_lifecycle_service_tokens_are_revoked_at_every_terminal_path():
             None, "steve", None, None, "update", kind="update", db=db
         )
         assert operation_id is not None
-        return operation_id, accounts.issue_lifecycle_service_token("steve", operation_id)
+        return operation_id, token_admin.issue_lifecycle_service_token("steve", operation_id)
 
     completed, completed_token = acquire()
     assert self_restart.transition_operation(completed, expected="holding", target="resuming", db=db)
@@ -233,14 +233,14 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     from unittest.mock import AsyncMock
 
     from api import restart_shell, settings_restart, system_admin
-    from infra import accounts, product_events
+    from infra import accounts, product_events, token_admin
     from infra.database import get_db
 
     restart_log = tmp_path / "restart.log"
     emitted_events = []
     minted_tokens = []
     launch_environment = {}
-    issue_token = accounts.issue_lifecycle_service_token
+    issue_token = token_admin.issue_lifecycle_service_token
 
     def capture_token(user_id, operation_id):
         token = issue_token(user_id, operation_id)
@@ -259,7 +259,7 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
 
     monkeypatch.setenv("BACKEND_PORT", "1957")
     monkeypatch.setenv("CORSIA_DRAIN_MAX_WAIT", "999999")
-    monkeypatch.setattr(accounts, "issue_lifecycle_service_token", capture_token)
+    monkeypatch.setattr(token_admin, "issue_lifecycle_service_token", capture_token)
     monkeypatch.setattr(
         product_events,
         "emit_product_event",

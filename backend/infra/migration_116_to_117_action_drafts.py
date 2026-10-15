@@ -1,4 +1,4 @@
-"""Schema 115 -> 116: drafts of outbound actions.
+"""Schema 116 -> 117: drafts of outbound actions.
 
 Purely additive: one new table, no data to convert. The DDL is copied rather
 than imported so this step keeps producing the shape it was written for.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
-_ACTION_DRAFTS_116_DDL = """
+_ACTION_DRAFTS_117_DDL = """
     CREATE TABLE IF NOT EXISTS action_drafts (
         id                TEXT PRIMARY KEY,
         thread_id         TEXT NOT NULL REFERENCES threads(id),
@@ -26,6 +26,6 @@ _ACTION_DRAFTS_116_DDL = """
 """
 
 
-def migrate_115_to_116(conn: sqlite3.Connection) -> None:
+def migrate_116_to_117(conn: sqlite3.Connection) -> None:
     """Create the action drafts table."""
-    conn.execute(_ACTION_DRAFTS_116_DDL)
+    conn.execute(_ACTION_DRAFTS_117_DDL)

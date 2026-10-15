@@ -20,7 +20,7 @@ def test_fresh_schema_names_the_workflow_version_column():
         initialize_schema(db)
         columns = _columns(db)
 
-    assert SCHEMA_VERSION == 117
+    assert SCHEMA_VERSION == 118
     assert "workflow_version" in columns and "workflow_commit" not in columns
 
 
