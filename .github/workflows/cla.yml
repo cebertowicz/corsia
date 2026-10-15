@@ -11,9 +11,11 @@ name: CLA
 #
 # The write-scoped token is safe here because nothing checks out or runs
 # pull request code: the action reads commits and comments through the API.
-# Same-repository pull requests skip the job, which satisfies a required
-# check, and so do comments on pull requests that maintainers opened. There is deliberately no
-# allowlist: the action matches it against free-text commit author names.
+# Same-repository pull requests skip the check, which satisfies a required
+# check; comment runs look up the pull request's head repository to do the
+# same, so a fork pull request is checked whoever opened it. There is
+# deliberately no allowlist: the action matches it against free-text commit
+# author names.
 
 on:
   issue_comment:
@@ -39,13 +41,26 @@ jobs:
        github.event.pull_request.head.repo.full_name != github.repository) ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
-       !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
        (contains(github.event.comment.body, 'I have read the CORSIA CLA and I accept it') ||
         github.event.comment.body == 'recheck'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - name: Find the pull request's head repository
+        id: origin
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.repo.full_name // ""')
+          if [ "$head" = "$GITHUB_REPOSITORY" ]; then
+            echo "fork=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "fork=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Check CLA acceptance
+        if: github.event_name == 'pull_request_target' || steps.origin.outputs.fork == 'true'
         # contributor-assistant/github-action v2.6.1 (archived upstream; pinned)
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08
         env:

@@ -101,9 +101,9 @@ Follow `project-skills/sdlc-process` (contributor edition) and
   `CONTRIBUTING.md` describes. Post the acceptance comment
   only after the account's owner has read `CLA.md` and told you to accept
   it; it binds them. A label, an earlier acceptance elsewhere, or silence is
-  not that instruction. Before the first commit, set `git config user.email` to
-  the account's `<id>+<login>@users.noreply.github.com` address; a commit
-  authored with an email no GitHub account owns cannot pass the check.
+  not that instruction. The check finds each commit's account from its author
+  email; CORSIA already commits as the connected agent account's no-reply
+  address, so there is nothing to set.
 - **Scope:** one issue per PR. Include `Closes #<n>` only when the PR fully
   resolves the issue.
 - **Evidence:** link the approval comment and give targeted test results.
