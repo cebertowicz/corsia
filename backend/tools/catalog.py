@@ -28,6 +28,7 @@ TOOL_PACKS: dict[str, str] = {
     "browser": "Browser",
     "automations": "Automations",
     "web": "Web",
+    "google": "Email and calendar",
 }
 _CATEGORY_PACKS: dict[str, str] = {
     "plans": "plans",
@@ -42,6 +43,7 @@ _CATEGORY_PACKS: dict[str, str] = {
     "browser": "browser",
     "automations": "automations",
     "web": "web",
+    "google": "google",
 }
 
 
