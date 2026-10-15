@@ -8,6 +8,7 @@ from core.corrections_recording import (
     CORRECTION_EVENT,
     CheckerVersion,
     CorrectionCandidate,
+    dedupe_key,
     is_owner_authored_message,
     owner_message_sql_predicate,
 )
@@ -45,14 +46,7 @@ def pending_candidate_keys(
               AND (:before_created_at IS NULL
                    OR m.created_at < :before_created_at
                    OR (m.created_at=:before_created_at AND m.id < :before_message_id))
-              AND NOT EXISTS (
-                SELECT 1 FROM outcome_events e
-                WHERE e.event_name=:correction_event
-                  AND e.subject_key=:message_prefix || m.id AND e.retracted_at IS NULL
-                  AND json_extract(e.attributes,'$.checker_model_id')=:model_id
-                  AND json_extract(e.attributes,'$.rubric_sha256')=:rubric_sha256
-                  AND json_extract(e.attributes,'$.prompt_sha256')=:prompt_sha256
-              )
+              AND 1=1
             ORDER BY m.created_at DESC,m.id DESC LIMIT :scan_limit
             """,
             {
@@ -60,21 +54,24 @@ def pending_candidate_keys(
                 "user_id": owner_user_id,
                 "scope_project": "all",
                 "scope_agent": None,
-                "correction_event": CORRECTION_EVENT,
-                "message_prefix": "message:",
-                "model_id": version.model_id,
-                "rubric_sha256": version.rubric_sha256,
-                "prompt_sha256": version.prompt_sha256,
+                # The exact asset version is checked against the dedupe key below.
                 "scan_limit": batch_size,
                 "before_created_at": before[0] if before else None,
                 "before_message_id": before[1] if before else None,
             },
         ).fetchall()
-        return [
+        keys = [
             PendingCandidateKey(
                 rowid=row[0], message_id=row[1], thread_id=row[2], project_id=row[3], created_at=row[4],
             )
             for row in rows
+        ]
+        return [
+            key for key in keys
+            if db.execute(
+                "SELECT 1 FROM outcome_events WHERE dedupe_key=? AND retracted_at IS NULL",
+                (dedupe_key(key.message_id, version),),
+            ).fetchone() is None
         ]
     finally:
         db.close()
@@ -96,16 +93,17 @@ def hydrate_candidates(keys: list[PendingCandidateKey]) -> list[CorrectionCandid
             ):
                 continue
             preceding = db.execute(
-                """SELECT content FROM messages
-                   WHERE thread_id=? AND role='assistant'
-                     AND (created_at < ? OR (created_at=? AND rowid < ?))
-                   ORDER BY created_at DESC,rowid DESC LIMIT 1""",
+                """SELECT role,content FROM messages
+                   WHERE thread_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
+                   ORDER BY created_at DESC,rowid DESC LIMIT 6""",
                 (key.thread_id, key.created_at, key.created_at, key.rowid),
-            ).fetchone()
+            ).fetchall()
+            context = tuple((str(row[0]), str(row[1])) for row in reversed(preceding))
             candidates.append(CorrectionCandidate(
                 message_id=key.message_id, thread_id=key.thread_id, project_id=key.project_id,
                 content=message[1], created_at=key.created_at,
-                preceding_agent=preceding[0] if preceding else "",
+                preceding_agent=next((text for role, text in reversed(context) if role == "assistant"), ""),
+                context=context,
             ))
         return candidates
     finally:

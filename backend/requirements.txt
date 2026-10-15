@@ -32,6 +32,9 @@ python-frontmatter==1.3.0
 # Yjs-compatible live document state and relative positions.
 pycrdt==0.14.8
 psutil==7.2.2
+# The local, hash-pinned corrections-classifier asset runs only through CPU ONNX Runtime.
+onnxruntime==1.31.0
+tokenizers==0.23.1
 # Lexers that prove which characters of a source read are code, so credential
 # redaction leaves them as written (host_access/source_redaction.py).
 Pygments==2.20.0
