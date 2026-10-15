@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { Button, Field, ListRow, Message, StatePill, Toggle } from '$lib/components/ui';
+	import { Button, Field, Message } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
+	import SetupModelSourceChooser from './SetupModelSourceChooser.svelte';
+	import SetupWelcome from './SetupWelcome.svelte';
 	import SetupOmlxConsent from './SetupOmlxConsent.svelte';
 	import { token, user } from '$lib/stores/auth';
 	import { fetchSources, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
@@ -105,7 +107,6 @@
 				return { title: 'Choose an AI model', lede: 'Your agents need at least one. You can add more later in Settings.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
 		}
 	});
-
 	async function readStatus() {
 		statusError = '';
 		page = 'checking';
@@ -128,9 +129,7 @@
 			page = 'error';
 		}
 	}
-
 	type LocalDownloadStart = 'started' | 'consent_required' | 'replace_consent_required' | 'failed';
-
 	async function startLocalDownload(consentExisting = false, consentReplace = false): Promise<LocalDownloadStart> {
 		localPendingStage = null;
 		if (!localWanted && !consentExisting && !consentReplace) return 'started';
@@ -143,7 +142,6 @@
 		}
 		return 'failed';
 	}
-
 	async function beginSetup() {
 		if (status.existing_omlx) {
 			existingOmlxConsent = true;
@@ -169,7 +167,6 @@
 		}
 		page = 'account';
 	}
-
 	async function decideExistingOmlx(useIt: boolean) {
 		if (!useIt) {
 			const current = get(token);
@@ -208,7 +205,6 @@
 			page = needsReplacementConsent || returnToModels ? 'models' : 'account';
 		}
 	}
-
 	function validateConfirmation() {
 		confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : '';
 	}
@@ -301,18 +297,6 @@
 		}
 	}
 
-	function sourceMeta(source: ModelSource): string {
-		if (source.source === 'omlx') {
-			if (source.setup_downloading || source.setup_stage) return source.setup_stage || 'Downloading';
-			if (localRepairDeferred) return "oMLX doesn't start";
-			if (source.setup_error || localStartError) return 'Download needs attention';
-			return `Local model · ${modelSize}`;
-		}
-		if (source.state === 'not_installed') return `${source.name} needs its official app installed first.`;
-		if (source.state === 'needs_auth') return 'Sign in to use your subscription';
-		if (sourceIsReady(source)) return 'Ready to use.';
-		return 'Check this source, then try again.';
-	}
 
 	async function saveApiKey() {
 		if (!apiKey.trim() || savingKey) return;
@@ -341,19 +325,16 @@
 	{/snippet}
 
 	{#if page === 'welcome'}
-		<div class="welcome-copy">
-			{#if status.local_eligible === false}
-				<p>This computer can’t run a local model. You can connect Claude Code, Codex, or an API key in the next step.</p>
-			{:else if (status.free_disk_gb ?? Infinity) < (status.model_size_gb ?? 0)}
-				<p>Needs {modelSize} free; {status.free_disk_gb} GB is free.</p>
-				<Button variant="chip" onclick={readStatus}>Free up space, then check again</Button>
-			{:else}
-				<div class="download-choice">
-					<div class="switch"><Toggle checked={localWanted} onchange={(next) => localWanted = next} ariaLabel={`Download ${downloadModelLabel} now`} /><span>Download {downloadModelLabel} now</span></div>
-					<span class="local-meta">{modelSize} · runs on this computer</span>
-				</div>
-			{/if}
-		</div>
+		<SetupWelcome
+			localEligible={status.local_eligible}
+			freeDiskGb={status.free_disk_gb}
+			{modelSize}
+			modelSizeGb={status.model_size_gb ?? 0}
+			{downloadModelLabel}
+			{localWanted}
+			onLocalWanted={(wanted) => localWanted = wanted}
+			onCheckAgain={readStatus}
+		/>
 	{:else if page === 'account'}
 		<form class="form" onsubmit={(event) => { event.preventDefault(); createAccount(); }}>
 			<Field variant="chip" layout="stacked" label="Name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
@@ -367,33 +348,52 @@
 	{:else if page === 'models' && (existingOmlxConsent || replaceOmlxConsent)}
 		<SetupOmlxConsent replace={replaceOmlxConsent} modelLabel={downloadModelLabel} modelSize={modelSize} busy={localSetupBusy} onDecision={decideExistingOmlx} />
 	{:else if page === 'models'}
-		<div class="sources">
-			{#each sources as source (source.source)}
-				<ListRow name={source.source === 'omlx' ? 'This computer' : source.name} meta={[sourceMeta(source)]} centered>
-					{#snippet actions()}
-						{#if sourceIsReady(source)}<StatePill look="dot" state="success" label="Ready" />
-						{:else if source.source === 'omlx' && localDownloading}<StatePill look="dot" state="loading" label="Downloading" />
-						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" loading={localSetupBusy} disabled={localSetupBusy} onclick={retryLocalDownload}>{localRepairDeferred ? 'Reinstall' : source.setup_error || localStartError ? 'Try again' : 'Download'}</Button>
-						{:else if source.state === 'not_installed'}<StatePill look="dot" state="idle" label="Not installed" /><Button variant="chip" size="sm" onclick={refreshSources}>Check again</Button>
-						{:else}<Button variant="chip" size="sm" onclick={() => signIn(source)}>Sign in</Button>{/if}
-					{/snippet}
-				</ListRow>
-			{/each}
-			{#if keyOpen}
-				<Field variant="chip" layout="stacked" label="API key">
-					<select aria-label="Provider" bind:value={providerName}>{#each $providers.filter((provider) => provider.type === 'cloud') as provider}<option value={provider.name}>{provider.label}</option>{/each}</select>
-					<input type="password" aria-label="API key" placeholder="Paste your key" bind:value={apiKey} />
-					<Button variant="chip" size="sm" onclick={saveApiKey} disabled={!apiKey.trim() || savingKey}>{savingKey ? 'Saving…' : 'Save'}</Button>
-				</Field>
-			{:else}<div class="api-key-action"><Button variant="chip" size="sm" onclick={() => keyOpen = true}>Use an API key instead</Button></div>{/if}
-			{#if sourceError}<Message variant="err">{sourceError}</Message>{/if}
-		</div>
+		<SetupModelSourceChooser
+			{sources}
+			{modelSize}
+			{localDownloading}
+			{localRepairDeferred}
+			{localStartError}
+			{localSetupBusy}
+			{sourceError}
+			{keyOpen}
+			{providerName}
+			{apiKey}
+			{savingKey}
+			providers={$providers}
+			onRetryLocalDownload={retryLocalDownload}
+			onRefreshSources={refreshSources}
+			onSignIn={signIn}
+			onOpenKey={() => keyOpen = true}
+			onProviderName={(name) => providerName = name}
+			onApiKey={(key) => apiKey = key}
+			onSaveApiKey={saveApiKey}
+		/>
 	{/if}
 </SetupShell>
 <style>
-	.form { display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(var(--space-8) * 8); }
-	.folder { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-7); color: var(--text-secondary); font-size: var(--text-subhead); } .folder span { flex: none; white-space: nowrap; } .folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
-	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); } .welcome-copy p { margin: 0; }
-	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); } .switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); } .local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }
-	.api-key-action { align-self: flex-start; }
+	.form {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		max-width: calc(var(--space-8) * 8);
+	}
+	.folder {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		min-height: var(--space-7);
+		color: var(--text-secondary);
+		font-size: var(--text-subhead);
+	}
+	.folder span {
+		flex: none;
+		white-space: nowrap;
+	}
+	.folder strong {
+		color: var(--text-primary);
+		font-weight: var(--fw-regular);
+		overflow-wrap: anywhere;
+	}
+
 </style>
