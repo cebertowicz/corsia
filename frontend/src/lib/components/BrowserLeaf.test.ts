@@ -98,6 +98,29 @@ describe('BrowserLeaf drawing', () => {
 });
 
 describe('BrowserLeaf navigation metadata', () => {
+	it.each([
+		['its first frame', [{ type: 'frame', metadata: { deviceWidth: 100, deviceHeight: 50 }, data: '' }]],
+		// A reconnected stream reports the page's metadata before its first frame.
+		['page metadata', [
+			{ type: 'browser_metadata', url: 'http://127.0.0.1:5173/probe.html', title: '' },
+			{ type: 'frame', metadata: { deviceWidth: 100, deviceHeight: 50 }, data: '' },
+		]],
+	])('reports the browser ready on %s after an empty stream', (_case, messages) => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(BrowserLeaf, { target: host, props: { threadId: 'thread' } });
+		flushSync();
+		const socket = FakeSocket.instances[0];
+		socket.open();
+		socket.receive({ type: 'browser_state', state: 'no_browser_yet' });
+		flushSync();
+		expect(host.textContent).toContain('No browser yet');
+		for (const message of messages) socket.receive(message);
+		flushSync();
+		expect(host.textContent).not.toContain('No browser yet');
+		expect(host.textContent).toContain('Ready');
+	});
+
 	it('shows an address led by the registrable domain after navigation', () => {
 		const { socket } = render();
 		socket.receive({ type: 'navigate_result', error: null, url: 'https://accounts.example.co.uk/a/long/page', title: 'Example page' });

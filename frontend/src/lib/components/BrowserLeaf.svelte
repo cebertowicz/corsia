@@ -70,6 +70,12 @@
 		};
 	}
 
+	// A stream that reported no browser, or an HTTP open, has no navigate_result to say the page is ready.
+	function pageConfirmed() {
+		if (!streaming) status = 'Ready';
+		streaming = true;
+	}
+
 	function applyPageMetadata(nextUrl: unknown, nextTitle: unknown) {
 		if (typeof nextUrl === 'string') url = nextUrl;
 		if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof nextTitle === 'string' ? nextTitle : null, url));
@@ -88,7 +94,7 @@
 			return;
 		}
 		if (message.type === 'browser_metadata') {
-			streaming = true;
+			pageConfirmed();
 			applyPageMetadata(message.url, message.title);
 			return;
 		}
@@ -108,7 +114,7 @@
 			return;
 		}
 		if (message.type !== 'frame' || !message.metadata || typeof message.data !== 'string') return;
-		streaming = true;
+		pageConfirmed();
 		const metadata = message.metadata as Record<string, unknown>;
 		if (typeof metadata.deviceWidth !== 'number' || typeof metadata.deviceHeight !== 'number') return;
 		width = metadata.deviceWidth;
