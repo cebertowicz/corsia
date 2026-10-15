@@ -156,3 +156,152 @@ def test_child_self_test_mismatch_refuses_to_serve(monkeypatch, tmp_path):
         setattr(socket.socket, "connect", original_connect)
 
     assert sent == [{"error": "error:AssetError"}]
+
+
+class _FakeSession:
+    instances: list = []
+
+    def __init__(self, logits=(0.0, 0.0)):
+        self.logits = logits
+        _FakeSession.instances.append(self)
+
+    def run(self, *_args, **_kwargs):
+        return [[list(self.logits)]]
+
+
+@pytest.fixture
+def self_test_asset(monkeypatch, tmp_path):
+    """A pinned four-vector asset under a fake ORT and tokenizer; scores are 0.5."""
+    import numpy
+    import sys
+    from types import SimpleNamespace
+
+    from core import corrections_asset_pins
+
+    root = tmp_path / "v1"
+    root.mkdir()
+    path = _manifest(root)
+    monkeypatch.setitem(corrections_asset_pins.PINNED_MANIFESTS, "v1", hashlib.sha256(path.read_bytes()).hexdigest())
+    _FakeSession.instances = []
+    onnx = SimpleNamespace(
+        disable_telemetry_events=lambda: None,
+        SessionOptions=lambda: SimpleNamespace(),
+        ExecutionMode=SimpleNamespace(ORT_SEQUENTIAL="sequential"),
+        InferenceSession=lambda *_a, **_kw: _FakeSession(),
+    )
+    tokenizer = SimpleNamespace(from_file=lambda _path: SimpleNamespace(
+        encode=lambda _text, add_special_tokens=False: SimpleNamespace(ids=[1, 2]),
+    ))
+    monkeypatch.setitem(sys.modules, "onnxruntime", onnx)
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=tokenizer))
+    monkeypatch.setitem(sys.modules, "numpy", numpy)
+    return root
+
+
+def _rewrite_manifest(root, mutate):
+    from core import corrections_asset_pins
+
+    path = root / "manifest.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    mutate(value)
+    path.write_text(json.dumps(value), encoding="utf-8")
+    corrections_asset_pins.PINNED_MANIFESTS["v1"] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_self_test_passes_and_releases_its_session(self_test_asset):
+    import gc
+    import weakref
+
+    from core.corrections_classifier import run_self_test
+
+    assert run_self_test(self_test_asset) is None
+    assert len(_FakeSession.instances) == 1
+    reference = weakref.ref(_FakeSession.instances.pop())
+    gc.collect()
+    assert reference() is None
+
+
+def test_self_test_refuses_a_second_session_while_one_is_running(self_test_asset):
+    from core import corrections_classifier
+    from core.corrections_classifier import AssetError, run_self_test
+
+    assert corrections_classifier._SELF_TEST_LOCK.acquire(blocking=False)
+    try:
+        with pytest.raises(AssetError, match="already being checked"):
+            run_self_test(self_test_asset)
+    finally:
+        corrections_classifier._SELF_TEST_LOCK.release()
+    assert _FakeSession.instances == []
+    run_self_test(self_test_asset)
+
+
+def test_self_test_wrong_size_says_the_download_is_incomplete(self_test_asset):
+    from core.corrections_classifier import AssetError, run_self_test
+
+    (self_test_asset / "model.onnx").write_bytes(b"too short")
+    with pytest.raises(AssetError) as raised:
+        run_self_test(self_test_asset)
+    assert str(raised.value) == (
+        "The corrections classifier download is incomplete (the model file is missing or has the "
+        "wrong size). Retry setup."
+    )
+    assert _FakeSession.instances == []
+
+
+def test_self_test_sha_mismatch_says_the_download_is_damaged(self_test_asset):
+    from core.corrections_classifier import AssetError, run_self_test
+
+    (self_test_asset / "model.onnx").write_bytes(b"MODEL")
+    with pytest.raises(AssetError) as raised:
+        run_self_test(self_test_asset)
+    assert "damaged (the model file does not match its checksum)" in str(raised.value)
+
+
+def test_self_test_unpinned_manifest_is_refused(self_test_asset):
+    from core import corrections_asset_pins
+    from core.corrections_classifier import AssetError, run_self_test
+
+    del corrections_asset_pins.PINNED_MANIFESTS["v1"]
+    with pytest.raises(AssetError, match="does not recognise"):
+        run_self_test(self_test_asset)
+
+
+def test_self_test_wrong_pin_hash_is_refused(self_test_asset):
+    from core import corrections_asset_pins
+    from core.corrections_classifier import AssetError, run_self_test
+
+    corrections_asset_pins.PINNED_MANIFESTS["v1"] = "0" * 64
+    with pytest.raises(AssetError, match="not the version this app expects"):
+        run_self_test(self_test_asset)
+
+
+def test_self_test_score_mismatch_says_the_answers_were_unexpected(self_test_asset):
+    from core.corrections_classifier import AssetError, run_self_test
+
+    _rewrite_manifest(self_test_asset, lambda value: value["self_test"][2].update(expected_score=0.9))
+    with pytest.raises(AssetError, match="unexpected answers"):
+        run_self_test(self_test_asset)
+    assert len(_FakeSession.instances) == 1
+
+
+def test_self_test_errors_never_expose_exception_text_or_type_names(self_test_asset, monkeypatch):
+    import sys
+
+    from core.corrections_classifier import AssetError, run_self_test
+
+    def explode(*_args, **_kwargs):
+        raise ValueError("secret detail")
+
+    monkeypatch.setattr(sys.modules["onnxruntime"], "InferenceSession", explode)
+    with pytest.raises(AssetError) as raised:
+        run_self_test(self_test_asset)
+    assert str(raised.value) == "The corrections classifier could not start on this computer. Retry setup."
+    assert "secret" not in str(raised.value) and "ValueError" not in str(raised.value)
+    assert raised.value.__cause__ is None and raised.value.__suppress_context__
+
+
+def test_missing_manifest_is_a_readable_incomplete_download(tmp_path):
+    from core.corrections_classifier import AssetError, run_self_test
+
+    with pytest.raises(AssetError, match="incomplete"):
+        run_self_test(tmp_path)

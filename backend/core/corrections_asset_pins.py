@@ -6,5 +6,5 @@ disposable test mode.
 """
 
 PINNED_MANIFESTS: dict[str, str] = {
-    "v1": "fa36f7194cef9682026bd097eaa979f847fdd80e6dc715c153ca67342fb290bc",
+    "v1": "9e24b1d053a237c2bb3adf3ce879e90f803569b4477446fa143136918d89e220",
 }

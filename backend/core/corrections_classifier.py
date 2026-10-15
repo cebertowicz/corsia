@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import resource
+import threading
 import time
 from dataclasses import dataclass
 from multiprocessing import Pipe, Process
@@ -25,13 +26,22 @@ RSS_LIMIT_BYTES = int(2.5 * 1024**3)
 CALL_TIMEOUT_SECONDS = 30.0
 IDLE_SECONDS = 10 * 60
 _HASH_CHUNK_BYTES = 1024 * 1024
+# One in-process self-test at a time: a second would load a second model session.
+_SELF_TEST_LOCK = threading.Lock()
 # Verified file stats per manifest: a file is re-hashed only when its stat changes,
 # so a call never re-reads the whole model.
 _VERIFIED: dict[Path, tuple[tuple[str, int, int], ...]] = {}
 
 
 class AssetError(RuntimeError):
-    """A local classifier asset cannot safely be used."""
+    """A local classifier asset cannot safely be used.
+
+    `reader` is the sentence a person may be shown; the message stays technical.
+    """
+
+    def __init__(self, message: str, *, reader: str | None = None):
+        super().__init__(message)
+        self.reader = reader
 
 
 class ClassifierUnavailable(RuntimeError):
@@ -71,7 +81,11 @@ class AssetManifest:
         raw = path.read_bytes()
         actual = hashlib.sha256(raw).hexdigest()
         if expected_sha256 and actual != expected_sha256:
-            raise AssetError("manifest sha256 does not match the source pin")
+            raise AssetError(
+                "manifest sha256 does not match the source pin",
+                reader="The corrections classifier download is not the version this app expects. "
+                "Retry setup.",
+            )
         try:
             value = json.loads(raw)
             files = value["files"]
@@ -86,7 +100,11 @@ class AssetManifest:
                 self_test=tuple(value["self_test"]),
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            raise AssetError("manifest has an invalid classifier shape") from error
+            raise AssetError(
+                "manifest has an invalid classifier shape",
+                reader="The corrections classifier download is damaged (its description is unreadable). "
+                "Retry setup.",
+            ) from error
         if manifest.asset_id != ASSET_ID or manifest.input_policy_id != INPUT_POLICY_ID:
             raise AssetError("manifest does not describe the supported corrections asset")
         if "correction" not in manifest.heads or len(manifest.self_test) != 4:
@@ -99,7 +117,11 @@ class AssetManifest:
         for name, details in self.files.items():
             candidate = root / name
             if not candidate.is_file() or candidate.stat().st_size != int(details["bytes"]):
-                raise AssetError(f"asset file {name} is absent or has the wrong size")
+                raise AssetError(
+                    f"asset file {name} is absent or has the wrong size",
+                    reader=f"The corrections classifier download is incomplete ({_file_label(name)} "
+                    "is missing or has the wrong size). Retry setup.",
+                )
             stat = candidate.stat()
             stats.append((name, stat.st_size, stat.st_mtime_ns))
         if _VERIFIED.get(self.path) == tuple(stats):
@@ -111,7 +133,11 @@ class AssetManifest:
                 while chunk := handle.read(_HASH_CHUNK_BYTES):
                     digest.update(chunk)
             if digest.hexdigest() != details["sha256"]:
-                raise AssetError(f"asset file {name} has a sha256 mismatch")
+                raise AssetError(
+                    f"asset file {name} has a sha256 mismatch",
+                    reader=f"The corrections classifier download is damaged ({_file_label(name)} "
+                    "does not match its checksum). Retry setup.",
+                )
         _VERIFIED[self.path] = tuple(stats)
 
     def checker_version(self, head: str = "correction") -> ClassifierVersion:
@@ -120,6 +146,14 @@ class AssetManifest:
         except (KeyError, TypeError, ValueError) as error:
             raise AssetError(f"manifest has no usable {head} head") from error
         return ClassifierVersion(self.asset_id, self.version, head, threshold, self.input_policy_id)
+
+
+def _file_label(name: str) -> str:
+    if name.endswith((".onnx", ".onnx.data")):
+        return "the model file"
+    if name.startswith("tokenizer"):
+        return "a tokenizer file"
+    return "a licence file" if name.upper().startswith(("LICENSE", "NOTICE")) else "a file"
 
 
 def asset_root() -> Path:
@@ -168,6 +202,94 @@ def _disable_child_network() -> None:
     os.environ["ORT_DISABLE_TELEMETRY_EVENTS"] = "1"
 
 
+def _open_session(manifest: AssetManifest, ort: Any) -> Any:
+    """One CPU session with the options both the child and the setup self-test use."""
+    ort.disable_telemetry_events()
+    options = ort.SessionOptions()
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    options.inter_op_num_threads = 1
+    options.intra_op_num_threads = 4
+    model_name = next(name for name in manifest.files if name.endswith(".onnx"))
+    return ort.InferenceSession(
+        str(manifest.path.parent / model_name), options, providers=["CPUExecutionProvider"],
+    )
+
+
+def _tokenizer_path(manifest: AssetManifest) -> str:
+    return str(manifest.path.parent / "tokenizer.json")
+
+
+def _score(
+    session: Any, np: Any, tokenizer_path: str, context: list[tuple[str, str]], owner: str,
+) -> tuple[float, bool, int]:
+    ids, mask, truncated, original = _tokenize(tokenizer_path, context, owner)
+    logits = session.run(None, {
+        "input_ids": np.asarray([ids], dtype=np.int64),
+        "attention_mask": np.asarray([mask], dtype=np.int64),
+    })[0][0]
+    return float(np.exp(logits[1]) / np.exp(logits).sum()), truncated, original
+
+
+def _check_self_test(manifest: AssetManifest, session: Any, np: Any, tokenizer_path: str) -> None:
+    for vector in manifest.self_test:
+        score, _, _ = _score(
+            session, np, tokenizer_path, list(vector.get("context", [])), str(vector["owner"]),
+        )
+        if abs(score - float(vector["expected_score"])) > 1e-4:
+            raise AssetError(
+                "classifier self-test did not reproduce the manifest score",
+                reader="The corrections classifier gave unexpected answers on its built-in checks. "
+                "Retry setup.",
+            )
+
+
+def _readable(sentence: str) -> AssetError:
+    return AssetError(sentence, reader=sentence)
+
+
+def run_self_test(asset_dir: Path) -> None:
+    """Prove an installed asset loads and reproduces its manifest scores, in this process.
+
+    Raises AssetError with a sentence a person can read; never returns a partial pass.
+    """
+    from core.corrections_asset_pins import PINNED_MANIFESTS
+
+    if not _SELF_TEST_LOCK.acquire(blocking=False):
+        raise _readable("The corrections classifier is already being checked. Try again in a moment.")
+    session = None
+    try:
+        manifest_path = asset_dir / "manifest.json"
+        if not manifest_path.is_file():
+            raise _readable(
+                "The corrections classifier download is incomplete (its description is missing). "
+                "Retry setup."
+            )
+        pin = PINNED_MANIFESTS.get(asset_dir.name)
+        if pin is None:
+            raise _readable(
+                "The corrections classifier is a version this app does not recognise. "
+                "Update the app, then retry setup."
+            )
+        manifest = AssetManifest.load(manifest_path, expected_sha256=pin)
+        manifest.verify_files()
+        import numpy as np
+        import onnxruntime as ort
+
+        session = _open_session(manifest, ort)
+        _check_self_test(manifest, session, np, _tokenizer_path(manifest))
+    except AssetError as error:
+        # str() is the person-readable sentence; the technical message stays internal.
+        raise AssetError(error.reader or _GENERIC_READER) from None
+    except Exception:
+        raise AssetError(_GENERIC_READER) from None
+    finally:
+        del session
+        _SELF_TEST_LOCK.release()
+
+
+_GENERIC_READER = "The corrections classifier could not start on this computer. Retry setup."
+
+
 def _child_main(connection, manifest_path: str) -> None:
     """Own one ORT session. It exits after a ceiling breach, never above it."""
     try:
@@ -177,40 +299,18 @@ def _child_main(connection, manifest_path: str) -> None:
 
         manifest = AssetManifest.load(Path(manifest_path))
         manifest.verify_files()
-        ort.disable_telemetry_events()
-        options = ort.SessionOptions()
-        options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        options.inter_op_num_threads = 1
-        options.intra_op_num_threads = 4
-        model_name = next(name for name in manifest.files if name.endswith(".onnx"))
-        session = ort.InferenceSession(
-            str(manifest.path.parent / model_name), options, providers=["CPUExecutionProvider"],
-        )
-        tokenizer_path = str(manifest.path.parent / "tokenizer.json")
-        for vector in manifest.self_test:
-            ids, mask, _, _ = _tokenize(
-                tokenizer_path, list(vector.get("context", [])), str(vector["owner"]),
-            )
-            logits = session.run(None, {
-                "input_ids": np.asarray([ids], dtype=np.int64),
-                "attention_mask": np.asarray([mask], dtype=np.int64),
-            })[0][0]
-            score = float(np.exp(logits[1]) / np.exp(logits).sum())
-            if abs(score - float(vector["expected_score"])) > 1e-4:
-                raise AssetError("classifier self-test did not reproduce the manifest score")
+        session = _open_session(manifest, ort)
+        tokenizer_path = _tokenizer_path(manifest)
+        _check_self_test(manifest, session, np, tokenizer_path)
         while connection.poll(IDLE_SECONDS):
             request = connection.recv()
             if request == {"op": "close"}:
                 return
             head = str(request.get("head", "correction"))
             version = manifest.checker_version(head)
-            ids, mask, truncated, original = _tokenize(tokenizer_path, request["context"], request["owner"])
-            arrays = {
-                "input_ids": np.asarray([ids], dtype=np.int64),
-                "attention_mask": np.asarray([mask], dtype=np.int64),
-            }
-            logits = session.run(None, arrays)[0][0]
-            score = float(np.exp(logits[1]) / np.exp(logits).sum())
+            score, truncated, original = _score(
+                session, np, tokenizer_path, request["context"], request["owner"],
+            )
             if _peak_rss_bytes() > RSS_LIMIT_BYTES:
                 connection.send({"error": "rss"})
                 return
