@@ -262,6 +262,27 @@ async def test_classifier_failure_notice_uses_one_stable_delivery_key_per_versio
 
 
 @pytest.mark.asyncio
+async def test_classifier_load_crash_notice_says_it_will_keep_retrying(monkeypatch):
+    from automation import update_failure_notice
+    from jobs import corrections_recording
+
+    delivered = AsyncMock()
+    monkeypatch.setattr(corrections_recording, "owner_user_ids", lambda: ["owner"])
+    monkeypatch.setattr(update_failure_notice, "_tell_conductor_about_owner_notice", delivered)
+
+    await update_failure_notice.tell_conductor_about_corrections_classifier_load_crash("v2")
+
+    assert delivered.await_args.args == (
+        "owner", "Corrections classifier v2 keeps crashing on load and will keep retrying.",
+    )
+    assert delivered.await_args.kwargs == {
+        "event_type": "system.corrections_classifier_load_crash",
+        "delivery_id": "corrections-classifier-load-crash:v2",
+        "notice_name": "corrections classifier load crash",
+    }
+
+
+@pytest.mark.asyncio
 async def test_scheduled_lapse_skips_unavailable_workspace_conductor(isolated_db, monkeypatch):
     """A missing conductor logs the skip and cannot undo a cleared schedule."""
     from automation import update_failure_notice

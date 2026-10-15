@@ -14,6 +14,7 @@ Classifier state (``state``)::
     unavailable                  child starts its self-test                  loading
     loading                      child reply and classification succeed     ready
     loading|ready                two load/serve outages for one input       unavailable
+    loading|ready                two native load exits, sole version        unavailable (back off; notify once)
     loading|ready                newer deterministic startup failure         excluded; next pinned version
                                                                          selected, ready if it loads
     loading|ready                two input failures                         ready; ``unreadable`` fact
@@ -62,6 +63,7 @@ from jobs.corrections_runtime import ClassificationOutcome, classify, drop_child
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
 ATTEMPTS_PER_KIND = 2
+LOAD_CRASH_BACKOFF_SECONDS = 60.0
 
 
 def _clock() -> float:
@@ -85,6 +87,8 @@ class CorrectionsWorker:
         self.version: ClassifierVersion | None = None
         self.versions: list[dict[str, str | None]] = []
         self.failed_versions: dict[str, str] = {}
+        # A present version was already noticed; a positive value is its active retry deadline.
+        self.load_crash_retry_at: dict[str, float] = {}
         self.failure_notice_tasks: set[asyncio.Task] = set()
         self.scan = "idle"
         self.held_reason: str | None = None
@@ -169,6 +173,17 @@ class CorrectionsWorker:
             str(version), reason, reader, tasks=self.failure_notice_tasks,
         )
 
+    def _notice_load_crash(self, version: str) -> None:
+        from automation.update_failure_notice import tell_corrections_classifier_load_crash_detached
+
+        tell_corrections_classifier_load_crash_detached(version, tasks=self.failure_notice_tasks)
+
+    def _record_only_version_load_crash(self, version: str, reason: str, now: float) -> None:
+        if version not in self.load_crash_retry_at:
+            self._notice_load_crash(version)
+        self.load_crash_retry_at[version] = now + LOAD_CRASH_BACKOFF_SECONDS
+        self._set("unavailable", reason)
+
     async def _after_version_failure(self, failure: ClassificationOutcome) -> AssetManifest | None:
         """Re-select past a deterministic failure; with nothing left, fail naming that version."""
         manifest = await self._select_manifest(after_version_failure=True)
@@ -178,15 +193,26 @@ class CorrectionsWorker:
         return manifest
 
     async def _classify_with(self, candidate: CorrectionCandidate, manifest: AssetManifest) -> ClassificationOutcome:
+        now = _clock()
+        deadline = self.load_crash_retry_at.get(manifest.version)
+        if deadline is not None and deadline > now:
+            reason = "classifier keeps crashing on load; retrying after backoff"
+            self._set("unavailable", reason)
+            return ClassificationOutcome("outage", reason)
         has_fallback = any(
             item["state"] == "ready" and item["version"] != manifest.version
             for item in self.versions
         )
-        return await classify(
+        outcome = await classify(
             self, candidate, manifest, attempts_per_kind=ATTEMPTS_PER_KIND, has_fallback=has_fallback,
             child_factory=ClassifierChild, clock=_clock, record_classification=record_classification,
             record_unreadable=record_unreadable,
         )
+        if outcome.only_version_load_crash:
+            self._record_only_version_load_crash(manifest.version, outcome.reason or "load exited", now)
+        elif outcome.load_succeeded and manifest.version in self.load_crash_retry_at:
+            self.load_crash_retry_at[manifest.version] = 0.0
+        return outcome
 
     async def _classify(
         self, candidate: CorrectionCandidate, manifest: AssetManifest | None = None,
