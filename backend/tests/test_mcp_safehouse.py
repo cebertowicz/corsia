@@ -8,7 +8,10 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
+import tempfile
 import time
+import uuid
 from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -203,6 +206,18 @@ def _write_uvx_fixture(workspace: Path) -> Path:
 
 _CASE_TIMEOUT = 15
 _NODE_EXIT = ["-e", "process.exit(0)"]
+_CRASH_DIRS = (Path.home() / "Library" / "Logs" / "DiagnosticReports", Path("/Library/Logs/DiagnosticReports"))
+_SPAWN_SH = (
+    "const r = require('child_process').spawnSync('/bin/sh', ['-c', 'true']);"
+    "console.log(JSON.stringify({status: r.status, signal: r.signal, error: r.error && String(r.error)}));"
+    "process.exit(r.status === 0 ? 0 : 1);"
+)
+_WRITE_PROBE = (
+    "const fs = require('fs'); let r;"
+    "try { fs.writeFileSync(process.argv[1], 'x'); r = {result: 'wrote'}; }"
+    "catch (e) { r = {result: 'error', code: e.code, errno: e.errno}; }"
+    "console.log(JSON.stringify(r));"
+)
 # Each bisect variant drops one CORSIA option group before Safehouse's "--".
 _FLAG_GROUPS = {
     "env-pass": "--env-pass=",
@@ -224,6 +239,7 @@ class _Case:
     seconds: float = 0.0
     detail: str = ""
     stderr: list[str] = field(default_factory=list)
+    stdout: list[str] = field(default_factory=list)
 
 
 def _signal_of(code: int | None) -> str:
@@ -242,26 +258,32 @@ def _tail(text: str | None, secret: str = "", keep: int = 20) -> list[str]:
     return [line.replace(secret, "<secret>") for line in lines] if secret else lines
 
 
-def _run_raw(name: str, argv: list[str], env: dict[str, str], cwd: Path, keep: int = 20) -> _Case:
-    """Launch one command in its own session and keep its exit and stderr."""
+def _run_raw(
+    name: str, argv: list[str], env: dict[str, str], cwd: Path, keep: int = 20, timeout: int = _CASE_TIMEOUT,
+) -> _Case:
+    """Launch one command in its own session and keep its exit, stdout and stderr."""
     started = time.monotonic()
     try:
         process = subprocess.Popen(
-            argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, errors="replace", start_new_session=True,
         )
     except OSError as error:
         return _Case(name, "FAIL", detail=f"spawn failed: {error}")
-    detail = ""
+    timed_out = False
     try:
-        _, stderr = process.communicate(timeout=_CASE_TIMEOUT)
+        stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
-        _, stderr = process.communicate()
-        detail = f"timed out after {_CASE_TIMEOUT}s"
-    status = "PASS" if process.returncode == 0 and not detail else "FAIL"
-    return _Case(name, status, process.returncode, time.monotonic() - started, detail, _tail(stderr, keep=keep))
+        stdout, stderr = process.communicate()
+        timed_out = True
+    output = _tail(stdout, keep=keep)
+    detail = f"timed out after {timeout}s" if timed_out else f"stdout: {output[-1][:160]}" if output else ""
+    status = "PASS" if process.returncode == 0 and not timed_out else "FAIL"
+    return _Case(
+        name, status, process.returncode, time.monotonic() - started, detail, _tail(stderr, keep=keep), output,
+    )
 
 
 def _host_output(argv: list[str]) -> str:
@@ -319,8 +341,154 @@ def _bisect_cases(argv: list[str], env: dict[str, str], cwd: Path, policy: Path)
     return cases
 
 
+def _launch(name: str, corsia, command: str, args: list[str]) -> _Case:
+    """Run one command through CORSIA's real Safehouse launch; a launch that cannot be built is a case too."""
+    try:
+        argv, env, cwd = corsia(command, args)
+    except Exception as error:
+        return _Case(name, "FAIL", detail=f"launch not built: {error!r}")
+    return _run_raw(name, argv, env, cwd)
+
+
+def _npx_cases(corsia) -> list[_Case]:
+    """Cases g-k under CORSIA's flags: npx's routes into Node, a shell hop, and a Node child spawn."""
+    npx = shutil.which("npx")
+    cli = os.path.realpath(npx) if npx else ""
+    routes = (
+        ("g-node-npx-cli-version", "node", [cli, "--version"]),
+        ("h-npx-version", "npx", ["--version"]),
+        ("i-npx-cli-shebang", cli, ["--version"]),
+    )
+    return [
+        *(_launch(name, corsia, command, args) if npx else _Case(name, "SKIP", detail="npx not on PATH")
+          for name, command, args in routes),
+        _launch("j-sh-c-node", corsia, "/bin/sh", ["-c", "node -e 0"]),
+        _launch("k-node-spawnsync-sh", corsia, "node", ["-e", _SPAWN_SH]),
+    ]
+
+
+def _write_verdict(case: _Case, target: Path, grants: list[str], must_deny: bool) -> _Case:
+    """Record a write probe's result and errno; only the $HOME probe must be denied with EPERM."""
+    try:
+        probe = json.loads(case.stdout[-1]) if case.stdout else {}
+    except ValueError:
+        probe = {}
+    parent = str(target.parent.resolve())
+    # Grants may name /var or /tmp, which resolve under /private, so compare real paths.
+    real = [os.path.realpath(grant) for grant in grants]
+    inside = [grant for grant in real if parent == grant or parent.startswith(grant.rstrip("/") + "/")]
+    exists = target.exists()
+    # Keep a timeout or launch failure; the probe's own stdout is already parsed above.
+    prior = "" if case.detail.startswith("stdout: ") else f"; {case.detail}" if case.detail else ""
+    case.detail = (
+        f"{target}: {probe.get('result', 'no report')} code={probe.get('code')} errno={probe.get('errno')} "
+        f"exists={exists}; " + (f"INSIDE grant {inside[0]}" if inside else "outside every add-dirs grant") + prior
+    )
+    if case.status == "PASS":
+        denied = probe.get("code") == "EPERM" and not exists and not inside
+        case.status = ("PASS" if denied else "FAIL") if must_deny else "INFO"
+    return case
+
+
+def _write_cases(corsia, grants: list[str]) -> list[_Case]:
+    """Cases l-n: outside writes from CORSIA's launch, each into a parent created first."""
+    suffix = uuid.uuid4().hex[:12]
+    tmpdir = Path(os.environ.get("TMPDIR") or tempfile.gettempdir())
+    cases = []
+    for name, parent, must_deny in (
+        ("l-write-home-outside", Path.home() / f".corsia-mcp-outside-{suffix}", True),
+        ("m-write-tmpdir", tmpdir / f"corsia-mcp-outside-{suffix}", False),
+        ("n-write-private-tmp", Path("/private/tmp") / f"corsia-mcp-outside-{suffix}", False),
+    ):
+        target = parent / "probe"
+        try:
+            parent.mkdir()
+        except OSError as error:
+            cases.append(_Case(name, "FAIL", detail=f"could not create {parent}: {error}"))
+            continue
+        try:
+            probe = _launch(name, corsia, "node", ["-e", _WRITE_PROBE, str(target)])
+            cases.append(_write_verdict(probe, target, grants, must_deny))
+        finally:
+            shutil.rmtree(parent, ignore_errors=True)
+    return cases
+
+
+def _install_uv(target: Path) -> tuple[_Case, Path | None]:
+    """Install uv for this test only (pip --target) and return the bin directory holding uvx."""
+    case = _run_raw(
+        "f-uvx-install",
+        [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--target", str(target), "uv"],
+        dict(os.environ), target.parent, timeout=180,
+    )
+    bin_dir = target / "bin"
+    if case.status == "PASS" and not (bin_dir / "uvx").is_file():
+        case.status, case.detail = "FAIL", f"pip installed no uvx under {bin_dir}"
+    return case, bin_dir if case.status == "PASS" else None
+
+
+def _crash_reports() -> dict[Path, float]:
+    """Map each .ips report in the user and system DiagnosticReports folders to its mtime."""
+    found: dict[Path, float] = {}
+    for folder in _CRASH_DIRS:
+        with suppress(OSError):
+            for path in folder.rglob("*.ips"):
+                with suppress(OSError):
+                    found[path] = path.stat().st_mtime
+    return found
+
+
+def _crash_excerpt(path: Path) -> list[str]:
+    """Process, exception and the top faulting-thread frames from one .ips crash report."""
+    try:
+        header_line, _, body = path.read_text(encoding="utf-8", errors="replace").partition("\n")
+        header, report = json.loads(header_line), json.loads(body)
+    except (OSError, ValueError) as error:
+        return [f"{path}: unreadable ({error})"]
+    if not isinstance(report, dict) or "exception" not in report:
+        return [f"{path}: bug_type {header.get('bug_type')}, no exception"]
+    exception, images = report["exception"], report.get("usedImages", [])
+    index, threads = report.get("faultingThread", 0), report.get("threads", [])
+    frames = threads[index].get("frames", []) if isinstance(index, int) and index < len(threads) else []
+    lines = [
+        str(path),
+        f"  process: {report.get('procName')} [{report.get('pid')}] {report.get('procPath')} "
+        f"(parent {report.get('parentProc')}, responsible {report.get('responsibleProc')})",
+        f"  exception: {exception.get('type')} {exception.get('signal')} {exception.get('subtype', '')}",
+        f"  termination: {(report.get('termination') or {}).get('indicator')}",
+        *(f"  vm region: {line}" for line in str(report.get("vmRegionInfo", "")).splitlines()[:3]),
+        f"  faulting thread {index}, top {min(len(frames), 15)} frames:",
+    ]
+    for number, frame in enumerate(frames[:15]):
+        image_index = frame.get("imageIndex")
+        image = (
+            images[image_index].get("name") or images[image_index].get("path", "?")
+            if isinstance(image_index, int) and image_index < len(images) else "?"
+        )
+        where = (
+            f"{frame['symbol']} + {frame.get('symbolLocation', 0)}" if frame.get("symbol")
+            else f"0x{frame.get('imageOffset', 0):x}"
+        )
+        lines.append(f"    {number:2} {image}  {where}")
+    return lines
+
+
+def _new_crashes(before: dict[Path, float], expected: int) -> list[str]:
+    """Excerpt the reports written since `before`, waiting up to 30s for ReportCrash to write them."""
+    deadline = time.monotonic() + (30 if expected else 0)
+    while True:
+        new = sorted(path for path, mtime in _crash_reports().items() if before.get(path) != mtime)
+        if len(new) >= expected or time.monotonic() >= deadline:
+            break
+        time.sleep(2)
+    lines = [f"new .ips reports: {len(new)} (signalled cases: {expected}; searched {', '.join(map(str, _CRASH_DIRS))})"]
+    for path in new[:10]:
+        lines += _crash_excerpt(path)
+    return lines
+
+
 def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str, list[_Case]]:
-    """Cases a-c: a Node exit under Safehouse defaults, under CORSIA's launch, and its bisect."""
+    """Cases a-c and g-n: Node under Safehouse defaults and CORSIA's launch, its bisect, npx's routes, outside writes."""
     from mcp.client.stdio import get_default_environment
 
     from tools.mcp import _safehouse_stdio_parameters
@@ -338,11 +506,17 @@ def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str
         control, control_env, _ = corsia("/usr/bin/true", [])
     except Exception as error:
         return "CORSIA argv (b): unavailable", [*cases, _Case("b-corsia-flags", "FAIL", detail=repr(error))]
+    grants = [
+        path for option in argv[:argv.index("--")] if option.startswith(("--add-dirs=", "--add-dirs-ro="))
+        for path in option.split("=", 1)[1].split(":")
+    ]
     return f"CORSIA argv (b): {argv}", [
         *cases,
         _run_raw("b-corsia-flags", argv, env, cwd),
         _run_raw("b-control-usr-bin-true", control, control_env, cwd),
         *_bisect_cases(argv, env, cwd, policy),
+        *_npx_cases(corsia),
+        *_write_cases(corsia, grants),
     ]
 
 
@@ -390,8 +564,8 @@ async def _run_mcp(
     return case
 
 
-def _render(lines: list[str], cases: list[_Case]) -> str:
-    """One row per case (exit, signal, seconds, detail), then each non-empty stderr tail."""
+def _render(lines: list[str], cases: list[_Case], crashes: list[str]) -> str:
+    """One row per case (exit, signal, seconds, detail), each non-empty stderr tail, then crash reports."""
     width = max(len(case.name) for case in cases)
     rows = [f"{'case':<{width}}  status  {'rc':>4}  {'signal':<17}  {'secs':>5}  detail"]
     rows += [
@@ -403,7 +577,10 @@ def _render(lines: list[str], cases: list[_Case]) -> str:
         f"--- {case.name} stderr (last {len(case.stderr)} lines) ---\n" + "\n".join(case.stderr)
         for case in cases if case.stderr
     ]
-    return "\n".join(["", "=== Safehouse MCP launch cases ===", *lines, "", *rows, "", *tails])
+    return "\n".join([
+        "", "=== Safehouse MCP launch cases ===", *lines, "", *rows, "", *tails,
+        "", "=== Crash reports written during this test ===", *crashes,
+    ])
 
 
 @pytest.mark.integration
@@ -418,6 +595,7 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
     from mcp.client import stdio
 
     host = await asyncio.to_thread(_host_binaries)
+    crash_baseline = await asyncio.to_thread(_crash_reports)
     workspace = Path(WORKSPACE)
     _write_npx_fixture(workspace)
     blocked_root = tmp_path / "outside-safehouse-rw"
@@ -438,6 +616,12 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
     profiles: list[Path] = []
     try:
         argv_line, cases = await asyncio.to_thread(_raw_cases, workspace, tmp_path / "corsia-rendered.sb", profiles)
+        uv_case, uv_bin = await asyncio.to_thread(_install_uv, tmp_path / "uv-target")
+        cases.append(uv_case)
+        if uv_bin is not None:
+            # uvx comes first on PATH for this test only; CORSIA passes PATH through to the app.
+            monkeypatch.setenv("PATH", f"{uv_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+            host.append(f"uvx (test-installed): {shutil.which('uvx')} ({_host_output([str(uv_bin / 'uvx'), '--version'])})")
         node_app = str(workspace / "node_modules" / ".bin" / "corsia-npx-mcp")
         for name, command, args, timeout in (
             ("d-node-direct", "node", [node_app], 30),
@@ -453,7 +637,9 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
         for profile in profiles:
             profile.unlink(missing_ok=True)
 
-    report = _render([*host, argv_line], cases).replace(secret, "<secret>")
+    signalled = sum(_signal_of(case.returncode) not in ("-", "none") for case in cases)
+    crashes = await asyncio.to_thread(_new_crashes, crash_baseline, signalled)
+    report = _render([*host, argv_line], cases, crashes).replace(secret, "<secret>")
     with capsys.disabled():
         print(report, flush=True)
     if failed := [case.name for case in cases if case.status == "FAIL"]:
