@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from dataclasses import dataclass, field
 
@@ -103,6 +104,8 @@ class _LiveCodex(LiveBase):
         return self.delivery_event_tail
 
 
+log = logging.getLogger(__name__)
+
 # Codex's live-turn registry and per-session transition locks.
 _LIVE: LiveRegistry[_LiveCodex] = LiveRegistry()
 _DEAD: set[str] = set()
@@ -111,10 +114,63 @@ _APP_SESSIONS: dict[str, object] = {}
 _PROVIDER_CONTEXT_UNTRUSTED: set[str] = set()
 
 
-def finalize_live(thread_id: str, live: _LiveCodex | None = None) -> None:
-    """Drop only the exact live generation that owns this session slot."""
-    if live is None or _LIVE.get(thread_id) is live:
-        _LIVE.pop(thread_id, None)
+def finalize_live(thread_id: str, live: _LiveCodex | None = None) -> asyncio.Task[None] | None:
+    """Drop only the exact live generation that owns this session slot.
+
+    The one removal funnel for a Codex live writer. A removal that dropped a
+    handle returns the task that then lifts its thread's live-writer holds
+    (``infra.live_writer_hold``) and drives the thread, or None when nothing was
+    removed or no event loop is running.
+    """
+    if live is not None and _LIVE.get(thread_id) is not live:
+        return None
+    if _LIVE.pop(thread_id, None) is None:
+        return None
+    return schedule_live_writer_release(thread_id)
+
+
+_HOLD_RELEASES: set[asyncio.Task[None]] = set()
+
+
+def schedule_live_writer_release(thread_id: str) -> asyncio.Task[None] | None:
+    """After a writer's removal, lift its refused successors' holds and drive them.
+
+    A separate task, so the drive waits for any transition lock the removal's
+    caller still holds instead of re-entering it. The lift is a write serialized
+    after the removal, which is what closes the lost-wakeup window against a
+    hold written while the handle was still registered.
+    """
+    try:
+        task = asyncio.get_running_loop().create_task(
+            _release_live_writer_holds(thread_id), name=f"codex-live-writer-release:{thread_id}",
+        )
+    except RuntimeError:
+        return None
+    _HOLD_RELEASES.add(task)
+    task.add_done_callback(_HOLD_RELEASES.discard)
+    return task
+
+
+async def drain_live_writer_releases() -> None:
+    """Wait for every scheduled live-writer release, for callers that need it done."""
+    if _HOLD_RELEASES:
+        await asyncio.gather(*tuple(_HOLD_RELEASES))
+
+
+async def _release_live_writer_holds(thread_id: str) -> None:
+    from infra.db_async import run_in_db
+    from infra.live_writer_hold import release_live_writer_holds
+
+    try:
+        if not await run_in_db(release_live_writer_holds, thread_id):
+            return
+        if thread_id in _LIVE:
+            return  # a new writer owns the thread; its own removal drives the input
+        from infra.thread_execution import drive_thread
+
+        await drive_thread(thread_id)
+    except Exception:
+        log.exception("codex_runtime: live-writer release for %s failed", thread_id)
 
 
 def dead_generation_ready_for_settlement(
