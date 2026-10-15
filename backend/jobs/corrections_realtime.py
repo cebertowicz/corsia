@@ -14,9 +14,7 @@ from core.corrections_classifier import (
     AssetError, AssetManifest, Classification, ClassifierChild, ClassifierUnavailable,
     asset_root, load_pinned_manifest,
 )
-from core.corrections_recording import (
-    LABEL_UNCLASSIFIABLE, CheckerVersion, CorrectionCandidate,
-)
+from core.corrections_recording import CheckerVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_scanning import PendingCandidateKey, hydrate_candidates
 
@@ -24,6 +22,9 @@ _QUEUE: asyncio.Queue[tuple[str, float]] = asyncio.Queue(maxsize=256)
 _TASK: asyncio.Task[None] | None = None
 _CHILD: ClassifierChild | None = None
 _SCAN_OWED = False
+# Set when a call left a message unrecorded; the owed scan then waits for an arrival to
+# classify successfully instead of re-reading the same message in a tight loop.
+_SCAN_BLOCKED = False
 _STOPPING = False
 _STATE: dict[str, object] = {
     "state": "absent", "reason": "asset not verified", "retryable": True,
@@ -83,19 +84,17 @@ async def _record(candidate: CorrectionCandidate, result: Classification) -> boo
     return await run_in_db(_record_fact, candidate, classification, _as_version(result.version))
 
 
-async def _record_unclassifiable(candidate: CorrectionCandidate, version: CheckerVersion, reason: str) -> bool:
-    from jobs.corrections_recording import _record_fact
-
-    return await run_in_db(
-        _record_fact,
-        candidate,
-        {"label": LABEL_UNCLASSIFIABLE, "truncated": False, "original_tokens": 0, "failure_reason": reason},
-        version,
-    )
+async def _reset_child() -> None:
+    """Stop and forget the model child so the next call starts a fresh one."""
+    global _CHILD
+    child, _CHILD = _CHILD, None
+    if child is not None:
+        await asyncio.to_thread(child.close, kill=True)
 
 
-async def _classify(candidate: CorrectionCandidate) -> None:
-    global _CHILD, _SCAN_OWED
+async def _classify(candidate: CorrectionCandidate) -> bool:
+    """Record one candidate; False leaves it pending and tells a scan to stop."""
+    global _CHILD, _SCAN_OWED, _SCAN_BLOCKED
     was_ready = _STATE.get("state") == "ready"
     needs_catch_up = not was_ready or _CHILD is None
     try:
@@ -104,28 +103,34 @@ async def _classify(candidate: CorrectionCandidate) -> None:
         state = "absent" if not (asset_root() / "manifest.json").is_file() else "failed"
         _STATE.update({"state": state, "reason": str(error), "retryable": state == "absent"})
         logger.info("corrections classifier unavailable: {}", error)
-        return
+        return False
     _STATE.update({"state": "ready", "reason": None, "retryable": False, "version": manifest.version})
-    if _CHILD is None:
-        _CHILD = ClassifierChild(manifest)
-    child = _CHILD
-    version = _as_version(manifest.checker_version())
     for attempt in range(2):
+        if _CHILD is None:
+            _CHILD = ClassifierChild(manifest)
         try:
-            result = await asyncio.to_thread(child.classify, list(candidate.context), candidate.content)
-            await _record(candidate, result)
-            if needs_catch_up:
-                _SCAN_OWED = True
-            return
-        except ClassifierUnavailable as error:
+            result = await asyncio.to_thread(_CHILD.classify, list(candidate.context), candidate.content)
+        except (ClassifierUnavailable, EOFError, OSError) as error:
             logger.warning("corrections classifier attempt {} failed: {}", attempt + 1, error)
-            _CHILD = None
-            if attempt:
-                await _record_unclassifiable(candidate, version, str(error).split(":", 1)[0])
-                return
+            await _reset_child()
+            continue
         except Exception:
             logger.exception("corrections classifier failed")
-            return
+            _SCAN_OWED = _SCAN_BLOCKED = True
+            return False
+        try:
+            await _record(candidate, result)
+        except Exception:
+            logger.exception("corrections classifier could not record a fact")
+            _SCAN_OWED = _SCAN_BLOCKED = True
+            return False
+        _SCAN_BLOCKED = False
+        if needs_catch_up:
+            _SCAN_OWED = True
+        return True
+    # An outage is not a verdict: the message stays pending and a later pass reads it again.
+    _SCAN_OWED = _SCAN_BLOCKED = True
+    return False
 
 
 async def _retry_pending_activation_notice() -> None:
@@ -196,23 +201,15 @@ async def _catch_up_scan() -> None:
             await _activate_after_backfill(manifest)
             return
         before = (batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id)
-        current = []
         for candidate in batch.candidates:
-            try:
-                created = candidate.created_at.replace("Z", "+00:00")
-                from datetime import datetime
-                if datetime.fromisoformat(created).astimezone(timezone.utc) < cutoff:
-                    return
-            except ValueError:
-                logger.warning("corrections classifier skipped candidate with invalid timestamp")
-                continue
-            current.append(candidate)
-        for candidate in current:
             if not _QUEUE.empty():
                 _SCAN_OWED = True
                 return
             started_at = _clock()
-            await _classify(candidate)
+            if await _classify(candidate) is False:
+                # Unrecorded work must not reach activation; the owed scan resumes later.
+                _SCAN_OWED = True
+                return
             elapsed = _clock() - started_at
             if not _QUEUE.empty():
                 _SCAN_OWED = True
@@ -241,7 +238,7 @@ async def _worker() -> None:
         try:
             message_id, enqueued_at = _QUEUE.get_nowait()
         except asyncio.QueueEmpty:
-            if not _SCAN_OWED:
+            if not _SCAN_OWED or _SCAN_BLOCKED:
                 return
             _SCAN_OWED = False
             await _catch_up_scan()
@@ -276,8 +273,9 @@ async def _startup_worker() -> None:
 
 def startup_scan() -> None:
     """Discard interrupted staging and start the one arrival-first worker."""
-    global _TASK, _SCAN_OWED, _STOPPING
+    global _TASK, _SCAN_OWED, _SCAN_BLOCKED, _STOPPING
     _STOPPING = False
+    _SCAN_BLOCKED = False
     _cleanup_staging()
     _SCAN_OWED = True
     if _TASK is None or _TASK.done():

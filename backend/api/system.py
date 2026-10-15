@@ -21,7 +21,6 @@ from infra.cpu_sampler import apply_cpu_profiler, cpu_sampler_running
 from infra.db_async import run_in_db
 from infra.settings import (
     delete_agent_default,
-    # Corrections classifier state is asset-derived, never a setting.
     get_feature_flags,
     get_host_access_auto_approve,
     get_host_access_reviewer_fallback,
@@ -38,9 +37,6 @@ _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
     "host_access_auto_approve",
     "host_access_reviewer_fallback",
 })
-
-
-# Correction recording has no provider-model selection surface.
 
 
 @router.get("/health")
@@ -169,7 +165,6 @@ def _save_exact_model_defaults(body: dict) -> dict:
                 raise HTTPException(400, error)
             save_agent_defaults({"host_access_reviewer_model": reviewer_model})
             updated["host_access_reviewer_model"] = reviewer_model
-    # The corrections classifier is a verified local asset, not a user-selectable model.
     return updated
 
 
@@ -215,8 +210,6 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
             400,
             "Core Agent model settings have been removed. Choose a model for each thread.",
         )
-    if "corrections_checker_model" in body:
-        raise HTTPException(400, "Corrections classifier uses the verified local asset; it has no model setting.")
 
     if _HUMAN_ONLY_HOST_ACCESS_SETTINGS.intersection(body) or "live_bulletins" in body:
         require_human_user(user)
@@ -259,9 +252,6 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
         updated["features"] = await _save_features(body["features"])
 
     return {"ok": True, **updated}
-
-
-# Corrections recording is arrival-driven; it has no manual drain endpoint.
 
 
 def _network_setup() -> str | None:

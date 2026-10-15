@@ -24,6 +24,7 @@ MAX_OWNER_TOKENS = 1024
 MAX_INPUT_TOKENS = 2048
 RSS_LIMIT_BYTES = int(2.5 * 1024**3)
 CALL_TIMEOUT_SECONDS = 30.0
+LOAD_TIMEOUT_SECONDS = 180.0  # cold start: verify, load and self-test, apart from the per-call bound
 IDLE_SECONDS = 10 * 60
 _HASH_CHUNK_BYTES = 1024 * 1024
 # One in-process self-test at a time: a second would load a second model session.
@@ -317,6 +318,7 @@ def _child_main(connection, manifest_path: str) -> None:
         session = _open_session(manifest, ort)
         tokenizer_path = _tokenizer_path(manifest)
         _check_self_test(manifest, session, np, tokenizer_path)
+        connection.send({"ready": True})
         while connection.poll(IDLE_SECONDS):
             request = connection.recv()
             if request == {"op": "close"}:
@@ -344,6 +346,7 @@ class ClassifierChild:
         self._manifest = manifest
         self._process: Process | None = None
         self._connection: Connection[Any, Any] | None = None
+        self._loaded = False
         self.last_used = 0.0
 
     def _start(self) -> None:
@@ -352,20 +355,27 @@ class ClassifierChild:
         parent, child = Pipe()
         self._process = Process(target=_child_main, args=(child, str(self._manifest.path)), daemon=True)
         self._process.start()
-        self._connection = parent
+        self._connection, self._loaded = parent, False
+
+    def _exchange(self, request: dict | None, timeout: float, timeout_reason: str) -> dict:
+        assert self._connection is not None
+        try:
+            if request is not None:
+                self._connection.send(request)
+            reply = self._connection.recv() if self._connection.poll(timeout) else {"error": timeout_reason}
+        except (EOFError, OSError):
+            reply = {"error": "child_exited"}
+        if "error" in reply:
+            self.close(kill=True)
+            raise ClassifierUnavailable(str(reply["error"]))
+        return reply
 
     def classify(self, context: list[tuple[str, str]], owner: str, *, head: str = "correction") -> Classification:
         self._start()
-        assert self._connection is not None and self._process is not None
-        self._connection.send({"context": context, "owner": owner, "head": head})
-        if not self._connection.poll(CALL_TIMEOUT_SECONDS):
-            self.close(kill=True)
-            raise ClassifierUnavailable("timeout")
-        reply = self._connection.recv()
+        if not self._loaded:
+            self._loaded = bool(self._exchange(None, LOAD_TIMEOUT_SECONDS, "load_timeout"))
+        reply = self._exchange({"context": context, "owner": owner, "head": head}, CALL_TIMEOUT_SECONDS, "timeout")
         self.last_used = time.monotonic()
-        if "error" in reply:
-            self.close()
-            raise ClassifierUnavailable(str(reply["error"]))
         version = ClassifierVersion(**reply["version"])
         return Classification(
             version=version,

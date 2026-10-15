@@ -13,7 +13,7 @@ def _candidate():
     return CorrectionCandidate(
         message_id="owner-message", thread_id="thread", project_id="project",
         content="That result is wrong.", created_at="2026-10-14T00:00:00Z",
-        preceding_agent="Earlier answer.", context=(("assistant", "Earlier answer."),),
+        context=(("assistant", "Earlier answer."),),
     )
 
 
@@ -35,6 +35,7 @@ def _reset_realtime(monkeypatch):
     monkeypatch.setattr(corrections_realtime, "_TASK", None)
     monkeypatch.setattr(corrections_realtime, "_CHILD", None)
     monkeypatch.setattr(corrections_realtime, "_SCAN_OWED", False)
+    monkeypatch.setattr(corrections_realtime, "_SCAN_BLOCKED", False)
     monkeypatch.setattr(corrections_realtime, "_STOPPING", False)
     monkeypatch.setattr(
         corrections_realtime, "_STATE",
@@ -58,44 +59,102 @@ def test_full_arrival_queue_keeps_send_admission_and_records_the_drop(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_absent_asset_leaves_message_pending_without_a_refusal_fact(monkeypatch):
+async def test_absent_asset_leaves_message_pending_without_a_fact(monkeypatch):
     from core.corrections_classifier import AssetError
     from jobs import corrections_realtime
 
     monkeypatch.setattr(corrections_realtime, "_manifest", lambda: (_ for _ in ()).throw(AssetError("classifier asset is absent")))
     recorded = AsyncMock()
     monkeypatch.setattr(corrections_realtime, "_record", recorded)
-    monkeypatch.setattr(corrections_realtime, "_record_unclassifiable", recorded)
 
-    await corrections_realtime._classify(_candidate())
+    assert await corrections_realtime._classify(_candidate()) is False
 
     assert recorded.await_count == 0
     assert corrections_realtime.state_snapshot()["state"] == "absent"
 
 
 @pytest.mark.asyncio
-async def test_child_crash_is_tried_twice_then_records_one_terminal_fact(monkeypatch):
+@pytest.mark.parametrize("failure", ["unavailable", "eof", "broken_pipe"])
+async def test_child_failure_is_tried_twice_then_leaves_the_message_pending(monkeypatch, failure):
     from core.corrections_classifier import ClassifierUnavailable
     from jobs import corrections_realtime
 
-    class CrashingChild:
+    errors = {
+        "unavailable": ClassifierUnavailable("child_exited"),
+        "eof": EOFError(),
+        "broken_pipe": BrokenPipeError(),
+    }
+    created = []
+
+    class FailingChild:
         def __init__(self, manifest):
             self.calls = 0
+            self.killed = False
+            created.append(self)
 
         def classify(self, context, owner):
             self.calls += 1
-            raise ClassifierUnavailable("child exited")
+            raise errors[failure]
 
-    terminal = AsyncMock(return_value=True)
+        def close(self, kill=False):
+            self.killed = kill
+
+    recorded = AsyncMock(return_value=True)
     monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
-    monkeypatch.setattr(corrections_realtime, "ClassifierChild", CrashingChild)
-    monkeypatch.setattr(corrections_realtime, "_record_unclassifiable", terminal)
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", FailingChild)
+    monkeypatch.setattr(corrections_realtime, "_record", recorded)
 
-    await corrections_realtime._classify(_candidate())
+    assert await corrections_realtime._classify(_candidate()) is False
 
     assert corrections_realtime._CHILD is None
-    assert terminal.await_count == 1
-    assert terminal.await_args.args[2] == "child exited"
+    assert [child.calls for child in created] == [1, 1]
+    assert all(child.killed for child in created)
+    assert recorded.await_count == 0
+    assert corrections_realtime._SCAN_OWED is True
+    assert corrections_realtime._SCAN_BLOCKED is True
+
+
+@pytest.mark.asyncio
+async def test_blocked_scan_is_not_reread_until_an_arrival_records(monkeypatch):
+    from jobs import corrections_realtime
+
+    scans = []
+
+    async def scan():
+        scans.append(1)
+
+    monkeypatch.setattr(corrections_realtime, "_catch_up_scan", scan)
+    monkeypatch.setattr(corrections_realtime, "_SCAN_OWED", True)
+    monkeypatch.setattr(corrections_realtime, "_SCAN_BLOCKED", True)
+
+    await corrections_realtime._worker()
+
+    assert scans == []
+
+
+@pytest.mark.asyncio
+async def test_scan_stops_before_activation_when_a_message_stays_unrecorded(monkeypatch):
+    from jobs import corrections_realtime, corrections_recording
+
+    candidate = _candidate()
+    batch = SimpleNamespace(
+        selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)],
+        candidates=[candidate],
+    )
+
+    async def next_batch(*args, **kwargs):
+        return batch
+
+    activated = AsyncMock()
+    monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
+    monkeypatch.setattr(corrections_recording, "_next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_realtime, "_classify", AsyncMock(return_value=False))
+    monkeypatch.setattr(corrections_realtime, "_activate_after_backfill", activated)
+
+    await corrections_realtime._catch_up_scan()
+
+    assert activated.await_count == 0
+    assert corrections_realtime._SCAN_OWED is True
 
 
 @pytest.mark.asyncio
@@ -372,3 +431,115 @@ async def test_shutdown_joins_the_worker_and_closes_the_child(monkeypatch):
     assert corrections_realtime._TASK is None
     assert corrections_realtime._QUEUE.qsize() == 0
     assert corrections_realtime.state_snapshot()["scan_owed"] is True
+
+
+def _seed_owner_messages(count: int) -> list[str]:
+    """Newest-last owner messages inside the measurement window; returns their ids."""
+    from datetime import datetime, timedelta, timezone
+
+    from infra.database import get_db
+
+    now = datetime.now(timezone.utc)
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('project','project','t','t')")
+        db.execute(
+            "INSERT INTO threads (id,user_id,title,project_id,created_at,updated_at) "
+            "VALUES ('thread','owner','thread','project','t','t')"
+        )
+        ids = []
+        for index in range(count):
+            message_id = f"owner-{index:03d}"
+            created_at = (now - timedelta(minutes=count - index)).isoformat()
+            db.execute(
+                "INSERT INTO messages (id,thread_id,role,content,metadata,created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (message_id, "thread", "user", f"synthetic owner message {index}", "{}", created_at),
+            )
+            ids.append(message_id)
+        db.commit()
+        return ids
+    finally:
+        db.close()
+
+
+def _recorded_message_ids() -> set[str]:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return {
+            str(row[0]) for row in db.execute(
+                "SELECT json_extract(attributes,'$.message_id') FROM outcome_events"
+            ).fetchall()
+        }
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_recorded_newest_messages_do_not_hide_older_pending_ones(isolated_db, monkeypatch):
+    from jobs import corrections_realtime
+
+    ids = _seed_owner_messages(30)
+    seen_at_activation = []
+
+    class Child:
+        def __init__(self, manifest):
+            pass
+
+        def classify(self, context, owner):
+            return SimpleNamespace(
+                label="not_correction", truncated=False, original_tokens=4,
+                version=_manifest().checker_version(),
+            )
+
+    async def activate(manifest):
+        seen_at_activation.append(_recorded_message_ids())
+
+    monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", Child)
+    monkeypatch.setattr(corrections_realtime, "_activate_after_backfill", activate)
+
+    # The 22 newest are already recorded: more than one 20-message page.
+    for message_id in ids[-22:]:
+        candidate = await asyncio.to_thread(corrections_realtime._candidate, message_id)
+        assert await corrections_realtime._record(
+            candidate, Child(None).classify([], ""),
+        )
+    assert _recorded_message_ids() == set(ids[-22:])
+
+    await corrections_realtime._catch_up_scan()
+
+    assert seen_at_activation == [set(ids)]
+
+
+@pytest.mark.asyncio
+async def test_scan_with_an_unavailable_classifier_never_reaches_activation(isolated_db, monkeypatch):
+    from core.corrections_classifier import ClassifierUnavailable
+    from jobs import corrections_realtime
+
+    ids = _seed_owner_messages(3)
+    activated = AsyncMock()
+
+    class Down:
+        def __init__(self, manifest):
+            pass
+
+        def classify(self, context, owner):
+            raise ClassifierUnavailable("child_exited")
+
+        def close(self, kill=False):
+            pass
+
+    monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", Down)
+    monkeypatch.setattr(corrections_realtime, "_activate_after_backfill", activated)
+
+    await corrections_realtime._catch_up_scan()
+
+    assert activated.await_count == 0
+    assert _recorded_message_ids() == set()
+    assert corrections_realtime._SCAN_OWED is True
+    # The same messages are still pending for the next pass.
+    assert ids

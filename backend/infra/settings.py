@@ -114,8 +114,6 @@ def get_host_access_reviewer_model(*, db=None) -> str | None:
     return _exact_agent_default("host_access_reviewer_model", db=db)
 
 
-# Corrections use the verified local asset and deliberately expose no model setting.
-
 def _exact_agent_default(key: str, *, db=None) -> str | None:
     if db is None:
         defaults = get_agent_defaults()

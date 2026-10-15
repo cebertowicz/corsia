@@ -20,17 +20,16 @@ def test_backfill_window_uses_measurement_baseline_plus_current_period():
 
 
 def test_backfill_switches_the_active_version_once_after_completion(isolated_db):
-    from jobs.corrections_activation import _active_version_key, complete_backfill
+    from core.corrections_recording import active_corrections_version
+    from jobs.corrections_activation import complete_backfill
 
     version = _version()
 
-    assert _active_version_key() is None
+    assert active_corrections_version() is None
     assert complete_backfill(
         version, owner_user_id="owner", weeks=13, before_count=None, after_count=4,
     )
-    assert _active_version_key() == (
-        "corrections-classifier:v1:correction:0.595681:modernbert-owner-context-v2-2048"
-    )
+    assert active_corrections_version() == version
     assert not complete_backfill(
         version, owner_user_id="owner", weeks=13, before_count=None, after_count=4,
     )
@@ -91,3 +90,18 @@ def test_notice_is_marked_only_after_acceptance_and_is_not_resent(isolated_db, m
     asyncio.run(corrections_activation.tell_conductor_about_activation(version))
 
     assert len(calls) == 2
+
+
+def test_core_correction_recording_has_no_import_from_jobs():
+    import ast
+    from pathlib import Path
+
+    core = Path(__file__).parents[1] / "core"
+    for path in core.glob("corrections_*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            modules = (
+                [node.module or ""] if isinstance(node, ast.ImportFrom)
+                else [alias.name for alias in node.names] if isinstance(node, ast.Import)
+                else []
+            )
+            assert not [name for name in modules if name == "jobs" or name.startswith("jobs.")], path.name

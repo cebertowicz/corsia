@@ -204,8 +204,6 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
         return None
 
 
-# Corrections are now recorded exclusively by the realtime local ONNX worker.
-
 async def _reap_worktrees_safely() -> None:
     """Run the idle worktree reaper once; log and swallow any failure."""
     try:
@@ -214,8 +212,6 @@ async def _reap_worktrees_safely() -> None:
     except Exception:
         logger.exception("nightly_job: worktree reaper failed")
 
-
-# No detached corrections drain remains; realtime classification owns its own worker lifecycle.
 
 async def nightly_job_loop() -> None:
     """Background loop for maintenance only; correction recording is arrival-driven."""

@@ -333,3 +333,80 @@ def test_missing_manifest_is_a_readable_incomplete_download(tmp_path):
 
     with pytest.raises(AssetError, match="incomplete"):
         run_self_test(tmp_path)
+
+
+class _FakeConnection:
+    def __init__(self, replies, *, send_error=None, recv_error=None):
+        self.replies = list(replies)
+        self.polls = []
+        self.send_error = send_error
+        self.recv_error = recv_error
+
+    def poll(self, timeout):
+        self.polls.append(timeout)
+        return True
+
+    def send(self, value):
+        if self.send_error is not None:
+            raise self.send_error
+
+    def recv(self):
+        if self.recv_error is not None:
+            raise self.recv_error
+        return self.replies.pop(0)
+
+
+class _FakeProcess:
+    def __init__(self, **_kwargs):
+        self.killed = False
+
+    def start(self):
+        pass
+
+    def is_alive(self):
+        return not self.killed
+
+    def kill(self):
+        self.killed = True
+
+    def join(self, timeout=None):
+        pass
+
+
+def _child_with(monkeypatch, tmp_path, connection):
+    from core import corrections_classifier as module
+
+    monkeypatch.setattr(module, "Process", _FakeProcess)
+    monkeypatch.setattr(module, "Pipe", lambda: (connection, object()))
+    return module.ClassifierChild(module.AssetManifest.load(_manifest(tmp_path)))
+
+
+def test_first_call_waits_for_the_model_load_under_its_own_bound(monkeypatch, tmp_path):
+    from core.corrections_classifier import CALL_TIMEOUT_SECONDS, LOAD_TIMEOUT_SECONDS
+
+    version = {"asset_id": "corrections-classifier", "version": "v1", "head": "correction",
+               "threshold": 0.5, "input_policy_id": "modernbert-owner-context-v2-2048"}
+    connection = _FakeConnection([
+        {"ready": True},
+        {"score": 0.9, "version": version, "truncated": False, "original_tokens": 3},
+    ])
+    child = _child_with(monkeypatch, tmp_path, connection)
+
+    result = child.classify([("assistant", "synthetic")], "synthetic owner")
+
+    assert result.label == "correction"
+    assert connection.polls == [LOAD_TIMEOUT_SECONDS, CALL_TIMEOUT_SECONDS]
+    assert LOAD_TIMEOUT_SECONDS > CALL_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize("failure", [EOFError(), BrokenPipeError()])
+def test_pipe_failure_surfaces_as_unavailable_not_a_raw_error(monkeypatch, tmp_path, failure):
+    from core.corrections_classifier import ClassifierUnavailable
+
+    for connection in (
+        _FakeConnection([{"ready": True}], recv_error=failure),
+        _FakeConnection([{"ready": True}], send_error=failure),
+    ):
+        child = _child_with(monkeypatch, tmp_path, connection)
+        with pytest.raises(ClassifierUnavailable, match="child_exited"):
+            child.classify([], "synthetic owner")

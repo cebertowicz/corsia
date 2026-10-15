@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-ACTIVATIONS_SETTING = "corrections_classifier_activations"
-ACTIVE_VERSION_SETTING = "corrections_classifier_active_version"
+from core.corrections_recording import ACTIVATIONS_SETTING, ACTIVE_VERSION_SETTING
 
 
 def measurement_window_start(now: datetime | None = None) -> datetime:
@@ -21,48 +19,6 @@ def measurement_window_start(now: datetime | None = None) -> datetime:
 
 def _version_key(version) -> str:
     return f"{version.asset_id}:{version.version}:{version.head}:{version.threshold:.6f}:{version.input_policy_id}"
-
-
-def _active_version_key() -> str | None:
-    """Return the one version Measurement may read, never an in-progress backfill."""
-    from infra.database import get_db
-    from infra.settings import get_setting
-
-    db = get_db()
-    try:
-        value = get_setting(ACTIVE_VERSION_SETTING, db=db) or {}
-        key = value.get("key")
-        return key if isinstance(key, str) else None
-    finally:
-        db.close()
-
-
-def _active_version():
-    """Return Measurement's current immutable correction version, if backfilled."""
-    from core.corrections_recording import CheckerVersion
-    from infra.database import get_db
-    from infra.settings import get_setting
-
-    db = get_db()
-    try:
-        active = get_setting(ACTIVE_VERSION_SETTING, db=db) or {}
-        key = active.get("key")
-        activations = get_setting(ACTIVATIONS_SETTING, db=db) or {}
-        activation = activations.get(key) if isinstance(key, str) else None
-        saved = activation.get("version") if isinstance(activation, dict) else None
-        if not isinstance(saved, dict):
-            return None
-        return CheckerVersion(
-            str(saved["asset_id"]), str(saved["version"]), str(saved["head"]),
-            float(saved["threshold"]), str(saved["input_policy_id"]),
-        )
-    except (KeyError, TypeError, ValueError):
-        return None
-    finally:
-        db.close()
-
-
-# The recorder's active_corrections_version() is the sole public version reader.
 
 
 def complete_backfill(
@@ -150,7 +106,7 @@ async def tell_conductor_about_activation(version) -> None:
     else:
         detail = (
             f"Corrections for the last {activation['weeks']} weeks were re-read with classifier "
-            f"version {version.version}; the weekly corrections figure moved from {old} to {activation['after_count']}."
+            f"version {version.version}; the weekly corrections figure moved from {old:.1f} to {activation['after_count']:.1f}."
         )
     from events.delivery import deliver_to_thread
 
