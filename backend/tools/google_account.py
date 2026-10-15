@@ -42,11 +42,12 @@ class GoogleConnectTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Start the person's Google sign-in for email and calendar. Returns a URL for the person "
-            "to open; they sign in and click Allow in their own browser, and the token never reaches "
-            "you. Pass client_file, the path of the Desktop app OAuth client JSON they downloaded "
-            "from Google Cloud, unless a client was saved by an earlier sign-in. Give the person the "
-            "link, then follow google_status needs_action. Do not reconnect first."
+            "Call google_status first. If it returns needs_action, follow it before calling "
+            "google_connect. If it says not_connected, this tool starts the person's Google sign-in "
+            "for email and calendar and returns a URL for the person to open; they sign in and click "
+            "Allow in their own browser, and the token never reaches you. Pass client_file, the path "
+            "of the Desktop app OAuth client JSON they downloaded from Google Cloud, unless a client "
+            "was saved by an earlier sign-in."
         )
 
     @property

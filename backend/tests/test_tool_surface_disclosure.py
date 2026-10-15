@@ -116,6 +116,16 @@ def test_every_deferred_tool_has_one_pack_and_one_index_line(tmp_path):
     )
 
 
+def test_google_connect_surface_requires_status_before_reconnect():
+    from tools.google_account import GoogleConnectTool
+
+    description = GoogleConnectTool().description
+    assert description.startswith("Call google_status first.")
+    assert "needs_action, follow it before calling google_connect" in description
+    assert description.index("needs_action") < description.index("returns a URL")
+    assert "Give the person the link" not in description
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pack", ["artifacts", "history", "memory"])
 async def test_tools_load_returns_the_registry_schemas_of_a_pack(tmp_path, pack):
