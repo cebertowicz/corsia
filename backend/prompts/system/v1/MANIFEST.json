@@ -130,10 +130,10 @@
       "sha256": "ba40df587f5fb1538f7e6c8901f86f8aa0a4a956d814886d3972dbc336bc75ac"
     },
     {
-      "bytes": 7558,
+      "bytes": 3586,
       "kind": "skill",
       "path": "skills/assistant-onboarding/SKILL.md",
-      "sha256": "b16b50506e46b75aa4d3650b8cb6e49983d40f1bcefbee776795514eb5334c4b"
+      "sha256": "7e074fb8964496e0b5ce761e232cdf56fce6053fc7e1d44a50c20ddf8d3ec21a"
     },
     {
       "bytes": 4519,
@@ -146,36 +146,6 @@
       "kind": "skill",
       "path": "skills/assistant-onboarding/assets/gws-reply-guard.py",
       "sha256": "70daaac27a3bfded05fab13a8f86d30f55d8e9c0f28afdea741dcd432da7776f"
-    },
-    {
-      "bytes": 2366,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/assistant-email-check-skill.md",
-      "sha256": "fb12feb9c83579439606d7ea4699c0fe83128f78de7eeded14e960c7677ee012"
-    },
-    {
-      "bytes": 4314,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/assistant-google-setup-skill.md",
-      "sha256": "2bc7d1b45f2ad7c505ae1354dd07fb85e03edd229c95de7ca12e74778759227a"
-    },
-    {
-      "bytes": 3330,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/assistant-google-workspace-skill.md",
-      "sha256": "e73659e46ccd9f6f9dd83325ed8d035cd99b9c8cf6a45b4c96706d3756ac89a7"
-    },
-    {
-      "bytes": 2923,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/assistant-responsibility.md",
-      "sha256": "70e0c808a90fb100877c75b90ffa20d2024379edf6614582fdc11463efe2c092"
-    },
-    {
-      "bytes": 1334,
-      "kind": "skill",
-      "path": "skills/assistant-onboarding/references/docs-safe-write-skill.md",
-      "sha256": "ac8da4860deb1c8f2feb2af0a0233eeaba278e26e94c56bc1a293f59442de76a"
     },
     {
       "bytes": 1549,
@@ -214,10 +184,10 @@
       "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
     },
     {
-      "bytes": 2710,
+      "bytes": 2192,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-agent.md",
-      "sha256": "592240d36f01706c044460cde164df00e3339d3fffb64f8bfe4b2cec6126d2ba"
+      "sha256": "6ab0ab7c48c10b61033dbeea3dbf241e7eaa89cc3708e030edb82a72e99bb53a"
     },
     {
       "bytes": 9099,

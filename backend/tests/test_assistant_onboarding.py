@@ -19,59 +19,7 @@ SKILL = SKILL_ROOT / "SKILL.md"
 ASSETS = SKILL_ROOT / "assets"
 HELPER = ASSETS / "gws-env.sh"
 REPLY_GUARD = ASSETS / "gws-reply-guard.py"
-RESPONSIBILITY = SKILL_ROOT / "references/assistant-responsibility.md"
-GOOGLE_SETUP_SKILL = SKILL_ROOT / "references/assistant-google-setup-skill.md"
-EMAIL_CHECK_SKILL = SKILL_ROOT / "references/assistant-email-check-skill.md"
-GWS_SKILL = SKILL_ROOT / "references/assistant-google-workspace-skill.md"
-DOCS_SKILL = SKILL_ROOT / "references/docs-safe-write-skill.md"
 GOOGLE_FALLBACK = SKILL_ROOT / "references/google-cloud-setup.md"
-
-
-def _run_documented_journey(
-    *,
-    create_thread: Mock,
-    agent_roster_entry: Mock,
-    agent_roster_update: Mock,
-    install_instruction: Mock,
-    delegate_send: Mock,
-    model: str,
-    account_id: str,
-) -> None:
-    """Mock the conductor sequence required by the shipped skill."""
-    created = create_thread(
-        title="Assistant", model=model, account_id=account_id, thread_kind="chat",
-    )
-    thread_id = created["thread_id"]
-    entry = agent_roster_entry(thread_id=thread_id)
-    agent_roster_update(
-        thread_id=thread_id,
-        expected_updated_at=entry["updated_at"],
-        agent_enabled=True,
-        responsibility="Email, calendar, Drive, and Docs assistance",
-        responsibility_paths=[],
-        responsibility_domains=["email", "calendar", "drive", "docs"],
-        coordination_notes="Created through Assistant onboarding.",
-    )
-    attachments = (
-        ("responsibility", None, RESPONSIBILITY),
-        ("skill", "assistant-google-setup", GOOGLE_SETUP_SKILL),
-        ("skill", "assistant-email-check", EMAIL_CHECK_SKILL),
-        ("skill", "assistant-google-workspace", GWS_SKILL),
-        ("skill", "docs-safe-write", DOCS_SKILL),
-    )
-    for kind, name, source in attachments:
-        receipt = install_instruction(
-            target_thread_id=thread_id,
-            kind=kind,
-            name=name,
-            expected_revision="absent",
-            content=source.read_text(encoding="utf-8"),
-        )
-        assert receipt["delivery"]["next_turn"] is True
-    delegate_send(
-        thread_id=thread_id,
-        message="Run your Google setup now, then create or reuse your scheduled email check and confirm its schedule id to the user.",
-    )
 
 
 def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
@@ -82,14 +30,10 @@ def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
     assert "Import all, some (name them), or none?" in first_run
     assert "with only the pairs they approved" in first_run
     assert "`You chose not to import them. Ask me any time to bring them over.`" in first_run
-    assert "**The Assistant:**" in first_run
-    assert "never offer the Assistant" in first_run
-    assert "Set up Google tools" in first_run
-    assert "Connect your Google account" in first_run
-    assert "Create your Assistant" in first_run
-    assert "Show your first result" in first_run
-    assert "<assistant_setup_node_id>" in first_run
-    assert "<assistant_setup_node_revision>" in first_run
+    for retired in ("**The Assistant:**", "Create your Assistant", "<assistant_setup_node_id>",
+                    "assistant-onboarding"):
+        assert retired not in first_run
+    assert "Email and calendar are yours, not an agent's" in first_run
     assert "Raise the decision whose `task_title` is this task." in first_run
     assert "CORSIA builds every setup decision: raise it unchanged; never write or reword one." in first_run
     assert "Point me to a folder, or describe your work in a sentence or two." in first_run
@@ -116,85 +60,13 @@ def test_task_7_is_one_handoff_and_session_consent_is_the_find_projects_decision
     assert "Only answer **E**" not in first_run
 
 
-def test_conductor_attaches_all_assistant_skills_then_kicks_off_once():
-    create_thread = Mock(return_value={"thread_id": "assistant-1"})
-    roster_entry = Mock(return_value={"updated_at": "revision-1"})
-    roster_update = Mock(return_value={"changed": True})
-    instruction = Mock(return_value={"delivery": {"next_turn": True}})
-    kickoff = Mock()
-
-    _run_documented_journey(
-        create_thread=create_thread,
-        agent_roster_entry=roster_entry,
-        agent_roster_update=roster_update,
-        install_instruction=instruction,
-        delegate_send=kickoff,
-        model="test-model",
-        account_id="account-1",
-    )
-
-    assert [call.kwargs["name"] for call in instruction.call_args_list] == [
-        None,
-        "assistant-google-setup",
-        "assistant-email-check",
-        "assistant-google-workspace",
-        "docs-safe-write",
-    ]
-    kickoff.assert_called_once_with(
-        thread_id="assistant-1",
-        message="Run your Google setup now, then create or reuse your scheduled email check and confirm its schedule id to the user.",
-    )
-    assert create_thread.call_count == 1
-
-
-def test_conductor_sequence_runs_no_google_step_and_the_assistant_sequence_carries_them():
-    """The Assistant owns its Google home, so only its own thread may run gws setup."""
-    skill = SKILL.read_text(encoding="utf-8")
-    conductor = skill[skill.index("## Create and start the Assistant"):skill.index("## Email and Docs safety")]
-    setup = GOOGLE_SETUP_SKILL.read_text(encoding="utf-8")
-    responsibility = RESPONSIBILITY.read_text(encoding="utf-8")
-
-    assert "Assistant owns its Google credentials" in skill
-    assert "and it comes first" in conductor
-    assert "## Setup" not in skill
-    for forbidden in ("gws auth login", "gws-env.sh", "request_host_access", "brew install", "agent-browser --version"):
-        assert forbidden not in conductor
-    assert "run no Google step" in conductor
-    assert "`assistant-google-setup` from `references/assistant-google-setup-skill.md`" in conductor
-    for required in ("gws --version", "agent-browser --version", "request_host_access",
-                     "gws-env.sh --client-json", "gws auth login --scopes", "one read each"):
-        assert required in setup
-    assert "in your own thread, never the conductor's" in setup
-    assert "assistant-google-setup" in responsibility
-    assert "assistant-google-setup" in EMAIL_CHECK_SKILL.read_text(encoding="utf-8")
-
-
 def test_google_sign_in_is_watched_by_url_and_title_only():
     """The page holds the user's password while they sign in, so only its URL and title are read."""
-    setup = GOOGLE_SETUP_SKILL.read_text(encoding="utf-8")
     steps = (SKILL_ROOT.parent / "conductor-bootstrap/references/browser-person-steps.md").read_text(
         encoding="utf-8")
 
-    assert "the browser is the user's" in setup
-    assert "reading only the URL and title" in setup
-    assert "never type, fill or read a password yourself" in setup
     assert "read only the page URL and title" in steps
     assert "no snapshot, screenshot, text or value read" in steps
-
-
-def test_skill_keeps_revision_safe_create_and_target_owned_schedule():
-    skill = SKILL.read_text(encoding="utf-8")
-    email_check = EMAIL_CHECK_SKILL.read_text(encoding="utf-8")
-
-    assert "assistant_thread_id=<thread_id>" in skill
-    assert "expected_revision:<assistant_setup_node_revision>" in skill
-    assert "assistant-google-workspace" in skill
-    assert "docs-safe-write" in skill
-    assert "Do not wait for, retry, or relay confirmation" in skill
-    assert "automation_schedule" not in skill
-    assert email_check.index("automation_list") < email_check.index("automation_schedule")
-    assert 'payload `{ "kind": "assistant.scheduled_email_check" }`' in email_check
-    assert 'spec: "3600"' in email_check
 
 
 def test_helper_moves_client_sets_environment_and_never_echoes_values(tmp_path: Path):
@@ -404,29 +276,14 @@ def test_reply_guard_blocks_hydrated_parallel_message_before_preview(tmp_path: P
     assert not log.exists()
 
 
-def test_docs_skill_pins_revision_and_requires_refusal_recovery():
-    docs = DOCS_SKILL.read_text(encoding="utf-8")
-
-    assert "writeControl.requiredRevisionId" in docs
-    assert '"writeControl":{"requiredRevisionId":"<revision-id>"}' in docs
-    assert "re-read the document" in docs.lower()
-    assert "re-apply" in docs
-    assert "ask the user" in docs
-
-
-def test_fallback_and_gws_skill_use_secret_safe_handoff_and_exact_guard():
+def test_existing_assistant_keeps_its_fallback_and_exact_guard():
     fallback = GOOGLE_FALLBACK.read_text(encoding="utf-8")
-    gws_skill = GWS_SKILL.read_text(encoding="utf-8")
     guard_spec = (SKILL_ROOT / "references/gws-reply-guardrail-spec.md").read_text(encoding="utf-8")
 
     assert "Download" in fallback
     assert "Source the shipped `gws-env.sh --client-json" in fallback
     assert "every numbered Cloud Console step" in fallback
     assert "never reads or prints" in fallback
-    assert "source .corsia/skills/assistant-onboarding/assets/gws-env.sh" in gws_skill
-    assert "Never run Homebrew from the protected agent shell" in GOOGLE_SETUP_SKILL.read_text(encoding="utf-8")
-    assert "gws auth login --scopes" in gws_skill
-    assert "gws-reply-guard.py --message-id" in gws_skill
     assert "G1" in guard_spec and "G6" in guard_spec and "G8" in guard_spec
 
 
@@ -450,9 +307,26 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
     for path in (
         bootstrap / "web-search.md",
         SKILL_ROOT.parent / "github/references/agent-account.md",
-        GOOGLE_SETUP_SKILL,
     ):
         text = path.read_text(encoding="utf-8")
         assert "browser-person-steps.md" in text
         assert "`wait` on a URL" not in text
-    assert "gmail.com" in SKILL.read_text(encoding="utf-8")
+
+
+def test_skill_creates_no_assistant_and_hands_over_only_on_the_persons_word():
+    """A new connection is CORSIA's google pack; an existing Assistant runs until the person asks."""
+    skill = SKILL.read_text(encoding="utf-8")
+    takeover = skill[skill.index("## Take over from the Assistant"):skill.index("## How an existing Assistant works")]
+
+    assert "Never create an Assistant agent" in skill
+    assert "`google_connect`" in skill
+    assert "delegate_create_thread" not in skill
+    assert "conductor_instruction_file_create" not in skill
+    assert "only after the person asks for it in their own words" in takeover
+    assert takeover.index("sharing Drive files and editing Google Docs") < takeover.index(
+        "`google_adopt_assistant_sign_in`")
+    assert "never ask for or accept a password or token in chat" in takeover
+    assert "`google_status`" in takeover
+    for asset in ("assets/gws-env.sh", "assets/gws-reply-guard.py", "references/google-cloud-setup.md"):
+        assert asset in skill
+        assert (SKILL_ROOT / asset).is_file()
