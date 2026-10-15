@@ -112,8 +112,14 @@ _SLOT_HELD = "executor slot held by {title}; {action} this task after {after}"
 _AFTER_CLOSE = "that task closes"
 _LISTED = "{shown} of {total} other open tasks"
 _IDLE_LISTED = "{shown} of {total} open tasks, none ready, soonest-ending first"
+_IDLE_LISTED_SET_ASIDE = "{shown} of {total} open tasks, none ready, set-aside work first in plan order"
 #: Said when nothing is active or ready and no wait ends soon (W9).
 IDLE_PICK_UP = "Nothing is active. If a waiting task can move now, start it."
+_IDLE_PICK_UP_SET_ASIDE = (
+    "Nothing is active. You scheduled {set_aside} of these yourself; nothing will release them "
+    "before their date unless you do. They are listed in your plan's order: start the top one you "
+    "can drive now (its release_wait), or reorder them if that order is wrong."
+)
 
 
 #: Opens the plan-upkeep line beside a Turn's first tool result, so it cannot be
@@ -268,9 +274,29 @@ def listed_text(shown: int, total: int) -> str:
     return _LISTED.format(shown=shown, total=total)
 
 
-def idle_listed_text(shown: int, total: int) -> str:
+def idle_listed_text(shown: int, total: int, *, set_aside: int = 0) -> str:
     """Return how many of an idle executor's open tasks a block lists."""
-    return _IDLE_LISTED.format(shown=shown, total=total)
+    label = _IDLE_LISTED_SET_ASIDE if set_aside else _IDLE_LISTED
+    return label.format(shown=shown, total=total)
+
+
+def is_idle_listed_text(value: str) -> bool:
+    """Whether a listing label names either idle-listing order."""
+    try:
+        shown, total = listed_counts(value)
+    except ValueError:
+        return False
+    return value in (
+        idle_listed_text(shown, total), idle_listed_text(shown, total, set_aside=1),
+    )
+
+
+def idle_pick_up(set_aside: int) -> str:
+    """Return idle guidance for ordinary waits or work the executor set aside."""
+    return (
+        _IDLE_PICK_UP_SET_ASIDE.format(set_aside=set_aside)
+        if set_aside else IDLE_PICK_UP
+    )
 
 
 def listed_counts(text: str) -> tuple[int, int]:
@@ -281,7 +307,9 @@ def listed_counts(text: str) -> tuple[int, int]:
     """
     shown, _of, rest = text.partition(" of ")
     counts = int(shown), int(rest.partition(" ")[0])
-    if text not in (listed_text(*counts), idle_listed_text(*counts)):
+    if text not in (
+        listed_text(*counts), idle_listed_text(*counts), idle_listed_text(*counts, set_aside=1),
+    ):
         raise ValueError("not an open-task listing label")
     return counts
 
