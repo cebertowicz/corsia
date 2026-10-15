@@ -29,6 +29,11 @@ def needs_no_one(node: dict) -> bool:
     )
 
 
+def is_set_aside(cause: dict) -> bool:
+    """Whether a waiting cause records that the executor scheduled this task itself."""
+    return cause.get("kind") == "waiting" and cause.get("scheduled_reason") is not None
+
+
 def own_wait(node: dict) -> tuple[bool, datetime | None]:
     """The node's own timed wait: whether it has one, and its end when its agent set it aside.
 
@@ -44,7 +49,7 @@ def own_wait(node: dict) -> tuple[bool, datetime | None]:
     )
     if cause is None:
         return False, None
-    return True, _instant(cause["ends_at"]) if cause.get("scheduled_reason") else None
+    return True, _instant(cause["ends_at"]) if is_set_aside(cause) else None
 
 
 def scheduled_leaf_end(node: dict) -> datetime | None:
