@@ -42,7 +42,7 @@ def close_event_properties(operation: str, result: dict, actor) -> dict[str, Any
     named = block.get("named")
     selected = block["selected"]
     shown, total = text.listed_counts(block["open_tasks_listed"])
-    idle = block["open_tasks_listed"] == text.idle_listed_text(shown, total)
+    idle = text.is_idle_listed_text(block["open_tasks_listed"])
     return {
         "idle": (
             "pick_up" if "idle" in block else "imminent" if idle else "none"

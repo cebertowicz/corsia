@@ -36,6 +36,26 @@ async def test_visible_browser_mode_is_pinned_when_the_session_starts(synthetic_
     await fake.owner.shutdown()
 
 
+@pytest.mark.parametrize("chrome", ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", None])
+async def test_chosen_chrome_is_a_launch_option_resolved_once(synthetic_browser, monkeypatch, chrome):
+    fake = synthetic_browser
+    resolved = []
+    monkeypatch.setattr(browser_cli, "chrome_executable",
+                        lambda: resolved.append(chrome) or (chrome, "system" if chrome else "default"))
+    await fake.owner.run("visible", ["open", "about:blank"], show_window=True)
+    await fake.owner.run("visible", ["snapshot"])
+    await fake.owner.run("headless", ["snapshot"])
+    assert resolved == [chrome]
+    for call in fake.calls:
+        launch = call[:call.index("--json")]
+        assert launch[1] == "--session"
+        assert (launch[3:5] == ("--executable-path", chrome)) if chrome else ("--executable-path" not in call)
+        # Only the binary changes: agent-browser keeps its temporary profile, never the person's.
+        assert not {"--profile", "--user-data-dir", "--args"} & set(call)
+    assert "--headed" in fake.calls[0]
+    await fake.owner.shutdown()
+
+
 @pytest.mark.parametrize(
     ("initial", "requested", "current"),
     [(False, True, "headless"), (True, False, "visible")],

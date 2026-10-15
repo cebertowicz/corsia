@@ -11,7 +11,7 @@
 	import PickerAccountHeader from './PickerAccountHeader.svelte';
 	import PickerModelGroupHeader from './PickerModelGroupHeader.svelte';
 	import { choosePickerAccount } from '$lib/stores/pickerAccountChoice';
-	import { workspaceConductorId } from '$lib/utils/conductor';
+	import { corsiaAgentId } from '$lib/utils/conductor';
 	import { requestProviderCard } from '$lib/stores/settingsNavigation';
 	import { projectSettingsOpen } from '$lib/stores/projectSettings';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
@@ -62,7 +62,7 @@
 	async function chooseAccount(row: PickerAccount) {
 		if (accountChoiceBusy) return;
 		accountChoiceBusy = true;
-		const result = await choosePickerAccount($activeThreadId, $activeModelId, $workspaceConductorId, row);
+		const result = await choosePickerAccount($activeThreadId, $activeModelId, $corsiaAgentId, row);
 		accountChoiceBusy = false;
 		if (!result.ok) toasts.show(result.message, 'error');
 	}

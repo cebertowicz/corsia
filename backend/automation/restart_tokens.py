@@ -10,6 +10,6 @@ def revoke_lifecycle_token_for_terminal_operation(connection, operation_id: str)
     ).fetchone()
     if row is None or not row["requester_user"]:
         return
-    from infra.accounts import revoke_lifecycle_service_token
+    from infra.token_admin import revoke_lifecycle_service_token
 
     revoke_lifecycle_service_token(row["requester_user"], operation_id, db=connection)

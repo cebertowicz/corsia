@@ -55,7 +55,7 @@ def db():
     )
     connection.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-        ("workspace_conductor_session_id", json.dumps({"session_id": "workspace-conductor"}), "t"),
+        ("corsia_agent_thread_id", json.dumps({"session_id": "workspace-conductor"}), "t"),
     )
     connection.commit()
     try:

@@ -41,6 +41,15 @@ class CodexAppServerError(RuntimeError):
         )
 
     @property
+    def is_active_writer(self) -> bool:
+        """Whether Codex refused a new Turn because the thread's writer is still live."""
+        message = str(self.payload.get("message") or self).lower()
+        return (
+            self.payload.get("code") == -32600
+            and "already has an active writer" in message
+        )
+
+    @property
     def is_not_steerable(self) -> bool:
         data = self.payload.get("data") or {}
         info = data.get("codexErrorInfo") or data.get("codex_error_info")

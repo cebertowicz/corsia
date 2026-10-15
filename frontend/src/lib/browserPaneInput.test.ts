@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BrowserPaneInput } from './browserPaneInput';
+import { BrowserPaneInput, wheelPixels } from './browserPaneInput';
 
 let pending: Map<number, FrameRequestCallback>;
 let id: number;
@@ -54,5 +54,13 @@ describe('pane pointer input', () => {
   send.mockClear(); input.press(pointer(), { x: 20, y: 200 });
   input.release(pointer(), { x: 20, y: 200 }, true);
   expect(send).not.toHaveBeenCalled();
+ });
+});
+
+describe('wheelPixels', () => {
+ it('keeps pixel deltas and converts line and page deltas to CSS pixels', () => {
+  expect(wheelPixels({ deltaX: 3, deltaY: -90, deltaMode: 0 }, 600)).toEqual({ deltaX: 3, deltaY: -90 });
+  expect(wheelPixels({ deltaX: 1, deltaY: 3, deltaMode: 1 }, 600)).toEqual({ deltaX: 40, deltaY: 120 });
+  expect(wheelPixels({ deltaX: 0, deltaY: -1, deltaMode: 2 }, 600)).toEqual({ deltaX: 0, deltaY: -600 });
  });
 });

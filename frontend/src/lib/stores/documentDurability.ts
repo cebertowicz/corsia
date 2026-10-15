@@ -3,6 +3,7 @@ export class DocumentDurability {
 	private localGeneration = 0;
 	private ackGeneration = 0;
 	private coveredGeneration = -1;
+	private writtenGeneration = 0;
 	private messages = new Map<string, number>();
 
 	constructor(readonly storeId: string) {}
@@ -10,6 +11,12 @@ export class DocumentDurability {
 	get clean(): boolean { return this.coveredGeneration >= this.localGeneration; }
 
 	localTransaction(): void { this.localGeneration++; }
+
+	/** A local transaction no landed flush has written yet: the only work a flush from this tab has to do. */
+	get unwritten(): boolean { return this.writtenGeneration < this.localGeneration; }
+
+	/** A flush that started at this local generation landed, so every transaction up to it is in the file. */
+	written(generation: number): void { this.writtenGeneration = Math.max(this.writtenGeneration, generation); }
 
 	/** Retrying an immutable message must retain the generation of its original bytes. */
 	messageBuilt(id: string): void {

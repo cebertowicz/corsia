@@ -10,6 +10,15 @@ class CodexLiveTurnBusy(RuntimeError):
     """A normal send reached Codex while its prior Turn still owns the handle."""
 
 
+def is_live_writer_refusal(error: BaseException | None) -> bool:
+    """Whether ``error`` means a prior Codex writer still owns the thread."""
+    from subagents.codex_app_server_errors import CodexAppServerError
+
+    return isinstance(error, CodexLiveTurnBusy) or (
+        isinstance(error, CodexAppServerError) and error.is_active_writer
+    )
+
+
 class CodexPreparedContextStale(RuntimeError):
     """Raised before provider write when Codex admission is no longer exact."""
 

@@ -71,12 +71,13 @@ describe('Header', () => {
 		expect(host.querySelector('[aria-label="Open this thread\'s plan"]')).toBeNull();
 	});
 
-	it('labels the no-session landing as the workspace conductor', () => {
+	it('labels the no-session landing as the CORSIA agent', () => {
 		activeThreadId.set(null);
 		threads.set([]);
 		render();
 		expect(host.textContent).toContain('Workspace');
-		expect(host.textContent).toContain('conductor');
+		expect(host.textContent).toContain('CORSIA');
+		expect(host.textContent).not.toContain('conductor');
 	});
 
 	it('opens project settings from a scoped activity header, not workspace activity', () => {
@@ -104,6 +105,15 @@ describe('Header', () => {
 		let opened = false;
 		threadSettingsOpen.subscribe((value) => { opened = value; })();
 		expect(opened).toBe(true);
+	});
+
+	it('labels the settings gear CORSIA settings for the workspace scope\'s designated thread', () => {
+		threads.set([]);
+		activeThreadId.set('agent-1');
+		uiScope.set(null);
+		render('chat', 'agent-1');
+		expect(host.querySelector('[aria-label="CORSIA settings"]')).not.toBeNull();
+		expect(host.querySelector('[aria-label="Conductor settings"]')).toBeNull();
 	});
 
 	const agentThread = {

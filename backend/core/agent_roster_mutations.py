@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from infra.conductor import get_conductor
+from infra.conductor import get_scope_coordinator
 from infra.database import write_transaction
 from infra.passive_changes import append_agent_roster_transition
 from infra.queries import get_thread_for_user
@@ -33,7 +33,7 @@ def require_designated_conductor_target(
     if actor["project_id"] != target["project_id"]:
         raise RosterChangeError("Conductor and target must share a scope")
     scope = actor["project_id"] or "workspace"
-    if get_conductor(scope, db=db) != actor_thread_id:
+    if get_scope_coordinator(scope, db=db) != actor_thread_id:
         raise RosterChangeError("Current thread is not the designated conductor")
     return target
 

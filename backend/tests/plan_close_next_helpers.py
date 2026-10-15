@@ -62,9 +62,10 @@ def listed(shown: int, total: int) -> str:
     return f"{shown} of {total} other open tasks"
 
 
-def idle_listed(shown: int, total: int) -> str:
-    """Return the label of an idle executor's listing: nothing ready, waits first."""
-    return f"{shown} of {total} open tasks, none ready, soonest-ending first"
+def idle_listed(shown: int, total: int, *, set_aside: int = 0) -> str:
+    """Return the label of an idle executor's listing: nothing ready, self-set-aside work first."""
+    order = "set-aside work first in plan order" if set_aside else "soonest-ending first"
+    return f"{shown} of {total} open tasks, none ready, {order}"
 
 
 def serialized(value: Any) -> str:

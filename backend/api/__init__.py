@@ -1,6 +1,7 @@
 """Route modules — each exports an APIRouter."""
 
 from api.auth import router as auth_router
+from api.setup import router as setup_router
 from api.threads import router as threads_router
 from api.thread_mutations import router as thread_mutations_router
 from api.thread_messages import router as thread_messages_router
@@ -33,6 +34,7 @@ from api.version import router as version_router
 from api.webhooks import router as webhooks_router
 from api.cc_attach import router as cc_attach_router
 from api.conductor import router as conductor_router
+from api.corsia_agent import router as corsia_agent_router
 from api.context_bootloader import router as context_bootloader_router
 from api.delegation import router as delegation_router
 from api.delegation_docs import router as delegation_docs_router
@@ -46,6 +48,7 @@ from api.plans_folded import router as plans_folded_router
 
 __all__ = [
     "auth_router",
+    "setup_router",
     "threads_router",
     "thread_mutations_router",
     "thread_messages_router",
@@ -77,6 +80,7 @@ __all__ = [
     "webhooks_router",
     "cc_attach_router",
     "conductor_router",
+    "corsia_agent_router",
     "delegation_router",
     "delegation_docs_router",
     "delegation_model_router",

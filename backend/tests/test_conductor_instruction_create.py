@@ -1,6 +1,12 @@
 """Instruction creation and actual next-turn responsibility/skill delivery."""
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 from pathlib import Path
 
@@ -8,7 +14,7 @@ import pytest
 
 from core.bootloader_management import thread_bootloader_files
 from core.skills_registry import resolve_effective_skills
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from tests.registry_helpers import make_session
 from tools.conductor_instruction_create import ConductorInstructionFileCreateTool
@@ -38,7 +44,7 @@ def _setup(tmp_path, monkeypatch):
         target = make_session(db, prefix="agent")
         ordinary = make_session(db, prefix="ordinary")
         foreign = make_session(db, prefix="foreign", project_id="other")
-        assert set_conductor("workspace", actor, db=db)
+        assert set_corsia_agent(actor, db=db)
         return workspace, actor, target, ordinary, foreign
     finally:
         db.close()

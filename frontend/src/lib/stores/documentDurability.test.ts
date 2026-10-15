@@ -71,6 +71,21 @@ describe('exact browser durability', () => {
 		expect(state.clean).toBe(true);
 	});
 
+	it('a landed flush writes the transactions made before it started, never ones made after', () => {
+		const { text, state } = browser();
+		expect(state.unwritten).toBe(false);
+		text.insert(0, 'first');
+		expect(state.unwritten).toBe(true);
+		const started = state.snapshot().localGeneration;
+		text.insert(5, ' later');
+		state.written(started);
+		expect(state.unwritten).toBe(true);
+		state.written(state.snapshot().localGeneration);
+		expect(state.unwritten).toBe(false);
+		state.written(started); // A late answer to an older flush cannot un-write a newer one.
+		expect(state.unwritten).toBe(false);
+	});
+
 	it('an acknowledgement advances the snapshot generation without inventing local edits', () => {
 		const { state } = browser();
 		const before = state.snapshot();

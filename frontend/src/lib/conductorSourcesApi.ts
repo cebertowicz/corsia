@@ -16,11 +16,11 @@ const headers = (t: string, json = false): Record<string, string> => ({
 });
 
 export type BindReason = 'not_ready' | 'limited' | 'no_usable_model' | 'unchecked' | 'stale'
-	| 'not_permitted' | 'conductor_started' | 'account_missing';
+	| 'not_permitted' | 'corsia_agent_started' | 'account_missing';
 export interface BindResult { bound: boolean; reason: BindReason | null }
 
 export async function bindConductorAccount(t: string, threadId: string, accountId: string): Promise<BindResult> {
-	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/conductor-account`, {
+	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/corsia-agent-account`, {
 		method: 'POST', headers: headers(t, true), body: JSON.stringify({ account_id: accountId }),
 	});
 	if (!response.ok) throw new Error(`bind ${response.status}`);

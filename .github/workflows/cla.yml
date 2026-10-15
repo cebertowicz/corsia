@@ -1,0 +1,86 @@
+name: CLA
+
+# Contributors from forks accept the Contributor License Agreement (CLA.md)
+# once per GitHub account, by posting the exact sentence in
+# custom-pr-sign-comment as a pull request comment. Acceptances are recorded
+# on the unprotected cla-signatures branch.
+#
+# pull_request_target runs this file from the pull request's base branch;
+# issue_comment runs it from the default branch (main). Both copies must
+# exist for signing to work end to end.
+#
+# The write-scoped token is safe here because nothing checks out or runs
+# pull request code: the action reads commits and comments through the API.
+# Same-repository pull requests skip the check, which satisfies a required
+# check; comment runs look up the pull request's head repository to do the
+# same, so a fork pull request is checked whoever opened it. There is
+# deliberately no allowlist: the action matches it against free-text commit
+# author names.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    # edited also covers a base-branch change, which fires none of the others.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  cla:
+    name: CLA
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name != github.repository) ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       (contains(github.event.comment.body, 'I have read the CORSIA CLA and I accept it') ||
+        github.event.comment.body == 'recheck'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Find the pull request's head repository
+        id: origin
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.repo.full_name // ""')
+          if [ "$head" = "$GITHUB_REPOSITORY" ]; then
+            echo "fork=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "fork=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check CLA acceptance
+        if: github.event_name == 'pull_request_target' || steps.origin.outputs.fork == 'true'
+        # contributor-assistant/github-action v2.6.1 (archived upstream; pinned)
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: https://github.com/cebertowicz/corsia/blob/dev/CLA.md
+          # Acceptances are recorded per CLA version. Any change to CLA.md's
+          # text must bump its heading's version and this path together, so
+          # earlier signers re-accept the new text.
+          path-to-signatures: signatures/version1/cla.json
+          branch: cla-signatures
+          custom-pr-sign-comment: I have read the CORSIA CLA and I accept it
+          custom-notsigned-prcomment: >-
+            Thanks for your pull request. Before it can be merged, the owner of
+            each account that wrote a commit here needs to accept the
+            [CORSIA Contributor License Agreement](https://github.com/cebertowicz/corsia/blob/dev/CLA.md),
+            once. An agent may accept for the account it runs under only after
+            that account's owner has read the agreement and told it to accept;
+            the owner is then bound by it. One acceptance
+            covers every future pull request from that account. To accept,
+            post this exact comment on this pull request:
+          custom-allsigned-prcomment: All contributors have accepted the CLA.
+          lock-pullrequest-aftermerge: false

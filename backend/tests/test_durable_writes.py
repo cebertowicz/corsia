@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import hashlib
 import json
 import os
@@ -650,11 +656,11 @@ def test_direct_user_can_write_inside_a_thread_directory(durable_scope):
 
 
 def test_scope_conductor_can_write_inside_another_threads_directory(durable_scope):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from registry.durable_writes import write_text
 
     workspace, project_root, thread_id, db = durable_scope
-    assert set_conductor("project-alpha", thread_id, db=db)
+    assert set_project_conductor("project-alpha", thread_id, db=db)
     target = project_root / ".threads" / "some-other-thread" / "working" / "draft.md"
 
     assert (
@@ -837,11 +843,11 @@ def test_root_and_direct_shared_writes_are_rejected_for_ordinary_thread(
 
 
 def test_conductor_can_create_category_index_as_explicit_structure(durable_scope):
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
     from registry.durable_writes import write_text
 
     workspace, project_root, thread_id, db = durable_scope
-    assert set_conductor("project-alpha", thread_id, db=db)
+    assert set_project_conductor("project-alpha", thread_id, db=db)
     target = project_root / "shared" / "research" / "INDEX.md"
 
     receipt = write_text(

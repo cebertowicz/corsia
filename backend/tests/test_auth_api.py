@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api import auth as auth_api  # noqa: E402
 from auth_fixtures import OWNER_TOKEN, OWNER_USER, TEST_PASSWORD  # noqa: E402
-from infra import accounts  # noqa: E402
+from infra import accounts, token_admin  # noqa: E402
 
 BEARER = "Bearer {}"
 
@@ -79,7 +79,7 @@ class TestLogin:
             json={"username": OWNER_USER, "password": TEST_PASSWORD},
         )
         sessions = [
-            row for row in accounts.list_tokens(OWNER_USER)
+            row for row in token_admin.list_tokens(OWNER_USER)
             if row["kind"] == "session" and row["label"] == "browser"
         ]
         assert len(sessions) == 1

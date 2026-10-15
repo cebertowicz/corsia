@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
 import { replyField, showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
@@ -63,16 +64,18 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await editor.click();
 	await page.keyboard.press('ControlOrMeta+A');
 	await page.keyboard.press('ArrowLeft');
+	await observeSaveCue(page);
 	await page.keyboard.type('Prefix ');
 	await expect(editor).toContainText('Prefix Before Anchor sentence.');
 	await page.keyboard.press('ControlOrMeta+S');
-	await expect(page.getByText('✓ Saved')).toBeVisible();
+	// Persistence below, rather than a badge, proves the fast save has landed.
 	await expect.poll(async () => {
 		const response = await request.get(commentUrl);
 		expect(response.ok()).toBeTruthy();
 		return (await response.json()).comments.find((row: { id: string }) => row.id === commentId);
 	}).toMatchObject({ resolved: 0, acked: 1, from_off: 14, to_off: 20,
 		replies: [expect.objectContaining({ body: 'Reply persisted.' })] });
+	await expectQuietSave(page);
 	await page.reload();
 	await page.getByText(title, { exact: true }).first().click();
 	await openComments();

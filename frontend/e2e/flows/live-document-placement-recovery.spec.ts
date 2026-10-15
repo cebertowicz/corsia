@@ -125,6 +125,7 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await openComments();
 		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
 		await expect(reply).toHaveValue(`draft ${stamp}`);
+		expect(await reader.evaluate(() => document.activeElement?.getAttribute('placeholder'))).not.toBe('Reply…');
 		await reply.focus();
 		expect(await replySelection()).toEqual([2, 5]);
 		// Refocusing observes the editor's retained range; input focus owns the DOM selection meanwhile.
