@@ -53,7 +53,7 @@ def _peak_rss_bytes() -> int:
 
 
 def _disable_child_network() -> None:
-    """Inference is local-only: prohibit every outbound socket before ORT imports."""
+    """Disable ORT telemetry and reject TCP connects made through ``socket.socket.connect`` before imports."""
     import socket
 
     def blocked_connect(*_args, **_kwargs):

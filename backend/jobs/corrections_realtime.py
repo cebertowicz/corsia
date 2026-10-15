@@ -18,14 +18,19 @@ Classifier state (``state``)::
     loading|ready                two load failures for one message: load timeout,   unavailable (reason
                                  self-test mismatch, memory ceiling while loading,  kept; retried at the
                                  exit before any reply                              next arrival/startup)
-    ready                        child restarted after idle exit or a message       ready
-                                 failure, and the restart loaded
+    ready                        newer child passes startup and replaces old child  ready
+    ready                        newer child deterministic startup failure           ready (old child serves;
+                                                                                    failed version is recorded)
+    ready                        newer child exhausts transient startup budget       ready (old child serves;
+                                                                                    new version held until restart)
     loading|ready                two failures of a loaded child on one input        unchanged; an
                                  (timeout, rss, child_error)                        ``unreadable`` fact
 
 ``ready`` is never set by manifest verification alone. An outage records nothing and
 leaves the message pending; an unreadable input is an outcome, recorded with its
-``failure_reason``, and the worker moves on.
+``failure_reason``, and the worker moves on. A deterministic failure or bounded
+transient failure is retained per version, so later owner messages never cold-load a
+broken or unavailable newer child while its older child can still serve.
 
 Scan status (``scan``: idle | owed | running, plus ``held_reason``)::
 
@@ -35,11 +40,12 @@ Scan status (``scan``: idle | owed | running, plus ``held_reason``)::
     owed      the arrival queue is empty and nothing holds the scan              running
     running   the pass found nothing pending and activation ran                  idle
     running   a live arrival is waiting                                          owed
-    running   outage, absent or failed asset, pass error, corrupt activation      owed, held_reason
+    running   outage, absent or failed asset, pass error, corrupt activation     owed, held_reason
     held      an arrival is recorded (scored or unreadable), or startup          owed, hold cleared
 
 ``owed`` is cleared only when a pass finishes, so an error can delay the scan but never
-lose it.
+lose it. Failed-state notices use a deterministic version-and-reason delivery key, so
+restarts can retry delivery without repeating an accepted owner notice.
 """
 
 from __future__ import annotations
@@ -51,14 +57,16 @@ from typing import Any
 
 from loguru import logger
 
-from core.corrections_child import ClassifierChild, ClassifierUnavailable, MessageFailed
-from core.corrections_classifier import AssetError, AssetManifest, asset_root, cleanup_staging, load_pinned_manifest
+from core.corrections_child import ClassifierChild
+from core.corrections_classifier import AssetError, AssetManifest, cleanup_staging
 from core.corrections_recording import ClassifierVersion, CorrectionCandidate
+from jobs.corrections_assets import AssetSelectionError, installed as _installed, select_manifest, version_number
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_recording import (
     candidate_for_message, record_classification, record_unreadable, unreadable_messages,
 )
+from jobs.corrections_runtime import classify, record_version_state
 
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
@@ -67,12 +75,6 @@ ATTEMPTS_PER_KIND = 2
 
 def _clock() -> float:
     return time.monotonic()
-
-
-def _manifest() -> AssetManifest:
-    manifest = load_pinned_manifest(asset_root())
-    manifest.verify_files()
-    return manifest
 
 
 class CorrectionsWorker:
@@ -84,10 +86,18 @@ class CorrectionsWorker:
         self.call_seconds = 0.0
         self.task: asyncio.Task[None] | None = None
         self.child: ClassifierChild | None = None
+        self.child_version: str | None = None
+        self.children: dict[str, ClassifierChild] = {}
+        self.active_manifest: AssetManifest | None = None
         self.stopping = False
         self.state = "absent"
         self.reason: str | None = "asset not verified"
+        self.reader_reason: str | None = "The corrections classifier is not installed."
         self.version: ClassifierVersion | None = None
+        self.versions: list[dict[str, str | None]] = []
+        self.failed_versions: dict[str, str] = {}
+        self.transient_versions: dict[str, str] = {}
+        self.failure_notice_tasks: set[asyncio.Task] = set()
         self.scan = "idle"
         self.held_reason: str | None = None
         self.dropped_arrivals = 0
@@ -99,10 +109,13 @@ class CorrectionsWorker:
     def _set(self, state: str, reason: str | None) -> None:
         if (state, reason) != (self.state, self.reason):
             logger.info("corrections classifier {} -> {}: {}", self.state, state, reason or "-")
-        previous, self.state, self.reason = self.state, state, reason
+        previous, previous_reason = self.state, self.reason
+        self.state, self.reason = state, reason
         if state == "ready" and previous != "ready":
-            # Arrivals left pending while it was not ready are read by the owed scan.
+            # Unrecorded work must not reach activation; becoming ready owes the catch-up scan.
             self._owe()
+        if state == "failed" and (previous, previous_reason) != (state, reason):
+            self._notice_failed_state()
 
     def _owe(self) -> None:
         if self.scan == "idle":
@@ -126,8 +139,11 @@ class CorrectionsWorker:
         return {
             "state": self.state,
             "reason": self.reason,
+            "reader_reason": self.reader_reason,
             "retryable": self.state != "failed",
             "version": self.version.version if self.version else None,
+            "selected_version": self.version.version if self.version else None,
+            "versions": self.versions,
             "scan": self.scan,
             "scan_owed": self.scan != "idle",
             "held_reason": self.held_reason,
@@ -141,71 +157,65 @@ class CorrectionsWorker:
 
     async def _verified_manifest(self) -> AssetManifest | None:
         try:
-            manifest = await asyncio.to_thread(_manifest)
-        except AssetError as error:
-            present = (asset_root() / "manifest.json").is_file()
-            self._set("failed" if present else "absent", str(error))
+            manifest, self.versions = await asyncio.to_thread(select_manifest)
+        except AssetSelectionError as error:
+            self.versions = error.versions
+            self.reader_reason = error.reader or str(error)
+            self._set("failed" if _installed() else "absent", str(error))
             return None
-        self.version = manifest.classifier_version()
+        except AssetError as error:
+            self.versions = []
+            self.reader_reason = error.reader or str(error)
+            self._set("failed" if _installed() else "absent", str(error))
+            return None
+        reason = self.failed_versions.get(manifest.version)
+        if reason is not None:
+            record_version_state(self, manifest.version, "failed", reason)
+            if self.active_manifest is not None:
+                return self.active_manifest
+            self.reader_reason = reason
+            self._set("failed", reason)
+            return None
+        reason = self.transient_versions.get(manifest.version)
+        if reason is not None:
+            if self.child is not None and not self.child.running:
+                logger.info("corrections classifier idle restart reopens newer-version load attempts")
+                self.transient_versions.clear()
+                return manifest
+            record_version_state(self, manifest.version, "unavailable", reason)
+            if self.active_manifest is not None:
+                return self.active_manifest
+            self._set("unavailable", reason)
+            return None
         if self.state in ("absent", "failed"):
+            self.reader_reason = None
             self._set("unavailable", "asset verified; the model has not run yet")
         return manifest
 
-    async def _drop_child(self) -> None:
-        """Stop the current child; forget it only once it has exited, so shutdown still sees it."""
-        child = self.child
-        if child is None:
-            return
-        await asyncio.to_thread(child.close)
-        if self.child is child:
-            self.child = None
+    def _notice_failed_state(self) -> None:
+        """Route one owner-visible failure notice through the durable update-notice path."""
+        from automation.update_failure_notice import tell_corrections_classifier_failure_detached
+
+        failed = next((item for item in self.versions if item["state"] == "failed"), None)
+        version = next(reversed(tuple(self.failed_versions)), None)
+        version = version or (failed or {}).get("version") or (failed or {}).get("location") or "unknown"
+        reason = self.reason or "classifier asset failed"
+        reader = self.reader_reason or reason
+        tell_corrections_classifier_failure_detached(
+            str(version), reason, reader, tasks=self.failure_notice_tasks,
+        )
 
     async def _classify(self, candidate: CorrectionCandidate) -> bool:
-        """Record one candidate; True when a fact, scored or unreadable, was written.
-
-        False means an outage: nothing was recorded and the message stays pending.
-        """
-        manifest = await self._verified_manifest()
-        if manifest is None:
-            return False
-        outages: list[str] = []
-        failures: list[str] = []
-        self.call_seconds = 0.0
-        while len(outages) < ATTEMPTS_PER_KIND and len(failures) < ATTEMPTS_PER_KIND:
-            if self.child is None:
-                self.child = ClassifierChild(manifest)
-            child = self.child
-            if self.state != "ready" and not (child.loaded and child.running):
-                self._set("loading", "starting the model and its self-test")
-            try:
-                await asyncio.to_thread(child.ensure_loaded)
-            except ClassifierUnavailable as error:
-                outages.append(str(error))
-                logger.warning("corrections classifier did not load: {}", error)
-                await self._drop_child()
-                continue
-            call_started = _clock()
-            try:
-                result = await asyncio.to_thread(child.classify, list(candidate.context), candidate.content)
-            except MessageFailed as error:
-                failures.append(error.reason)
-                logger.warning("corrections classifier failed on one input: {}", error.reason)
-                await self._drop_child()
-                continue
-            except ClassifierUnavailable as error:
-                outages.append(str(error))
-                await self._drop_child()
-                continue
-            finally:
-                self.call_seconds += _clock() - call_started
-            await record_classification(candidate, result)
-            self._set("ready", None)
-            return True
-        if len(failures) == ATTEMPTS_PER_KIND:
-            await record_unreadable(candidate, manifest.classifier_version(), failures[-1])
-            return True
-        self._set("unavailable", outages[-1])
-        return False
+        """Record one candidate, or leave it pending on an outage."""
+        return await classify(
+            self,
+            candidate,
+            attempts_per_kind=ATTEMPTS_PER_KIND,
+            child_factory=ClassifierChild,
+            clock=_clock,
+            record_classification=record_classification,
+            record_unreadable=record_unreadable,
+        )
 
     # ---- worker loop ---------------------------------------------------------------------
 
@@ -255,13 +265,13 @@ class CorrectionsWorker:
         while self.queue.empty():
             batch = await next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
             if not batch.selected_keys:
+                # Unrecorded work must not reach activation.
                 return await activate_after_backfill(version)
             before = (batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id)
             for candidate in batch.candidates:
                 if not self.queue.empty():
                     return "yielded"
                 if not await self._classify(candidate):
-                    # Unrecorded work must not reach activation.
                     return f"classifier {self.state}: {self.reason}"
                 self.arrived.clear()
                 if not self.queue.empty():
@@ -299,7 +309,6 @@ class CorrectionsWorker:
         logger.opt(exception=error).error("corrections classifier worker stopped")
         if self.state == "loading":
             self._set("unavailable", f"worker error: {type(error).__name__}")
-        # The next notify or startup restarts the task; the scan stays owed until a pass finishes.
         self._hold(f"worker error: {type(error).__name__}")
 
     # ---- lifecycle -----------------------------------------------------------------------
@@ -323,6 +332,7 @@ class CorrectionsWorker:
     def startup(self) -> None:
         """Discard interrupted staging, release any hold, owe the scan and start the worker."""
         self.stopping = False
+        self.transient_versions.clear()
         cleanup_staging()
         self._release_hold()
         self.scan = "owed"
@@ -338,15 +348,16 @@ class CorrectionsWorker:
         if task is not None:
             task.cancel()
             await asyncio.wait([task])
-        child, self.child = self.child, None
-        if child is not None:
+        children, self.children = list(self.children.values()), {}
+        self.child = None
+        self.child_version = None
+        self.active_manifest = None
+        for child in children:
             # A load or call may still run in a worker thread: kill without its lock, then reap.
             child.kill()
             await asyncio.to_thread(child.close)
 
-
 WORKER = CorrectionsWorker()
-
 
 async def _startup_worker() -> None:
     try:
@@ -355,33 +366,24 @@ async def _startup_worker() -> None:
         logger.exception("corrections activation notice retry failed; the next startup retries it")
     await WORKER.run()
 
-
 def notify(message_id: str) -> None:
     """Queue one arrival for the worker; see ``notify_if_owner`` for the send-path guard."""
     WORKER.notify(message_id)
-
 
 def startup_scan() -> None:
     """Discard interrupted staging and start the one arrival-first worker."""
     WORKER.startup()
 
-
 async def shutdown() -> None:
     """Cancel and join the worker, then stop the model child; later arrivals wait for the next startup."""
     await WORKER.shutdown()
 
-
 def state_snapshot(db: Any = None) -> dict[str, object]:
-    """Return the visible local-asset state without loading a model on demand.
-
-    With a database connection it also counts the current version's ``unreadable``
-    messages in the Measurement window.
-    """
+    """Return state and, with a DB, the current version's unreadable-message count."""
     snapshot = WORKER.snapshot()
     if db is not None:
         snapshot["unreadable_messages"] = unreadable_messages(db, WORKER.version) if WORKER.version else 0
     return snapshot
-
 
 def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
     """Best-effort post-admission trigger for one ``AcceptedInput``; it can never delay or fail a send."""

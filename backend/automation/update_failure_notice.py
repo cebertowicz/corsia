@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 
 from loguru import logger
@@ -89,6 +90,41 @@ async def tell_conductor_about_scheduled_lapse(
     )
     if not sent:
         logger.warning("scheduled update conductor notice could not be delivered")
+
+
+async def tell_conductor_about_corrections_classifier_failure(
+    version: str,
+    reason: str,
+    reader: str,
+) -> None:
+    """Tell the workspace conductor once when a pinned classifier cannot serve."""
+    from infra.db_async import run_in_db
+    from jobs.corrections_recording import owner_user_ids
+
+    owner_ids = await run_in_db(owner_user_ids)
+    if len(owner_ids) != 1:
+        logger.warning("corrections classifier failure notice skipped: expected one owner, found {}", len(owner_ids))
+        return
+    digest = hashlib.sha256(reason.encode("utf-8")).hexdigest()[:16]
+    await tell_conductor_about_scheduled_lapse(
+        owner_ids[0],
+        f"Corrections classifier {version} cannot run: {reader}",
+        delivery_id=f"corrections-classifier-failed:{version}:{digest}",
+    )
+
+
+def tell_corrections_classifier_failure_detached(
+    version: str,
+    reason: str,
+    reader: str,
+    *,
+    tasks: set[asyncio.Task],
+) -> None:
+    """Deliver a classifier failure notice without delaying correction recording."""
+    task = asyncio.create_task(tell_conductor_about_corrections_classifier_failure(version, reason, reader))
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    task.add_done_callback(_log_notice_failure)
 
 
 def tell_conductor_detached(operation_id: str, tasks: set[asyncio.Task]) -> None:
