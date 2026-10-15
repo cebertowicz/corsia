@@ -247,30 +247,45 @@ def _readable(sentence: str) -> AssetError:
     return AssetError(sentence, reader=sentence)
 
 
+def load_pinned_manifest(asset_dir: Path) -> AssetManifest:
+    """Load an asset's manifest only when its bytes match the source pin for the version it declares.
+
+    The pin is keyed by the manifest's own version, never by the directory name, so the
+    installed location can be named anything and an unpinned asset is always refused.
+    """
+    from core.corrections_asset_pins import PINNED_MANIFESTS
+
+    path = asset_dir / "manifest.json"
+    if not path.is_file():
+        raise AssetError(
+            "classifier asset is absent",
+            reader="The corrections classifier download is incomplete (its description is missing). "
+            "Retry setup.",
+        )
+    declared = AssetManifest.load(path)
+    pin = PINNED_MANIFESTS.get(declared.version)
+    if pin is None:
+        raise AssetError(
+            f"classifier version {declared.version} is not pinned in source",
+            reader="The corrections classifier is a version this app does not recognise. "
+            "Update the app, then retry setup.",
+        )
+    manifest = AssetManifest.load(path, expected_sha256=pin)
+    if manifest.version != declared.version:
+        raise AssetError("classifier manifest changed while it was being read")
+    return manifest
+
+
 def run_self_test(asset_dir: Path) -> None:
     """Prove an installed asset loads and reproduces its manifest scores, in this process.
 
     Raises AssetError with a sentence a person can read; never returns a partial pass.
     """
-    from core.corrections_asset_pins import PINNED_MANIFESTS
-
     if not _SELF_TEST_LOCK.acquire(blocking=False):
         raise _readable("The corrections classifier is already being checked. Try again in a moment.")
     session = None
     try:
-        manifest_path = asset_dir / "manifest.json"
-        if not manifest_path.is_file():
-            raise _readable(
-                "The corrections classifier download is incomplete (its description is missing). "
-                "Retry setup."
-            )
-        pin = PINNED_MANIFESTS.get(asset_dir.name)
-        if pin is None:
-            raise _readable(
-                "The corrections classifier is a version this app does not recognise. "
-                "Update the app, then retry setup."
-            )
-        manifest = AssetManifest.load(manifest_path, expected_sha256=pin)
+        manifest = load_pinned_manifest(asset_dir)
         manifest.verify_files()
         import numpy as np
         import onnxruntime as ort
@@ -297,7 +312,7 @@ def _child_main(connection, manifest_path: str) -> None:
         import numpy as np
         import onnxruntime as ort
 
-        manifest = AssetManifest.load(Path(manifest_path))
+        manifest = load_pinned_manifest(Path(manifest_path).parent)
         manifest.verify_files()
         session = _open_session(manifest, ort)
         tokenizer_path = _tokenizer_path(manifest)

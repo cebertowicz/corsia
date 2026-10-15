@@ -53,7 +53,7 @@ def main() -> None:
         "input_policy_id": "modernbert-owner-context-v2-2048",
         "files": {name: digest(args.out / name) for name in names},
         "heads": [{"name": "correction", "labels": ["not_correction", "correction"], "threshold": 0.595681}],
-        "license": "Apache-2.0", "self_test": vectors,
+        "base_model_license": "Apache-2.0", "self_test": vectors,
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     print(hashlib.sha256((args.out / "manifest.json").read_bytes()).hexdigest())

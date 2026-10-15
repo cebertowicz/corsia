@@ -12,7 +12,7 @@ from loguru import logger
 
 from core.corrections_classifier import (
     AssetError, AssetManifest, Classification, ClassifierChild, ClassifierUnavailable,
-    asset_root,
+    asset_root, load_pinned_manifest,
 )
 from core.corrections_recording import (
     LABEL_UNCLASSIFIABLE, CheckerVersion, CorrectionCandidate,
@@ -43,15 +43,7 @@ def _cleanup_staging() -> None:
 
 
 def _manifest() -> AssetManifest:
-    root = asset_root()
-    path = root / "manifest.json"
-    if not path.is_file():
-        raise AssetError("classifier asset is absent")
-    # The production source pin is intentionally optional for local staged assets;
-    # release builds populate it from the versioned pin module.
-    from core.corrections_asset_pins import PINNED_MANIFESTS
-
-    manifest = AssetManifest.load(path, expected_sha256=PINNED_MANIFESTS.get(path.parent.name))
+    manifest = load_pinned_manifest(asset_root())
     manifest.verify_files()
     return manifest
 

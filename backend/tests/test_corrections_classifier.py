@@ -266,6 +266,34 @@ def test_self_test_unpinned_manifest_is_refused(self_test_asset):
         run_self_test(self_test_asset)
 
 
+def test_self_test_passes_in_the_installed_location_whatever_it_is_named(self_test_asset):
+    from core.corrections_classifier import run_self_test
+
+    installed = self_test_asset.rename(self_test_asset.parent / "corrections-classifier")
+    assert run_self_test(installed) is None
+
+
+def test_runtime_refuses_an_unpinned_asset_in_the_installed_location(monkeypatch, tmp_path):
+    from core import corrections_asset_pins
+    from core.corrections_classifier import AssetError
+    from jobs import corrections_realtime
+
+    root = tmp_path / "corrections-classifier"
+    root.mkdir()
+    path = _manifest(root)
+    monkeypatch.setattr(corrections_realtime, "asset_root", lambda: root)
+    monkeypatch.setitem(corrections_asset_pins.PINNED_MANIFESTS, "v1", "0" * 64)
+    with pytest.raises(AssetError, match="sha256 does not match"):
+        corrections_realtime._manifest()
+    monkeypatch.delitem(corrections_asset_pins.PINNED_MANIFESTS, "v1")
+    with pytest.raises(AssetError, match="not pinned"):
+        corrections_realtime._manifest()
+    monkeypatch.setitem(
+        corrections_asset_pins.PINNED_MANIFESTS, "v1", hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    assert corrections_realtime._manifest().version == "v1"
+
+
 def test_self_test_wrong_pin_hash_is_refused(self_test_asset):
     from core import corrections_asset_pins
     from core.corrections_classifier import AssetError, run_self_test
