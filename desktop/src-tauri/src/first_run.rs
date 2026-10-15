@@ -68,7 +68,7 @@ pub fn plan(home: &Path, state_dir: &Path) -> Result<FirstRun, String> {
 
     if present(&home.join(".corsia").join("config.json"))? {
         return existing_install(
-            "CORSIA found an existing install on this Mac (~/.corsia). \
+            "CORSIA found an existing install on this computer (~/.corsia). \
              This app can't open it yet."
                 .into(),
         );
@@ -129,12 +129,35 @@ pub fn recorded_port(state_dir: &Path) -> Option<u16> {
     (port != 0).then_some(port)
 }
 
-/// `git init` with the same PATH the bundled service runs with. Without Git
-/// (no Xcode command line tools) the backend still serves and creates the
-/// repository on its first guidance save, so a failure here is a warning.
-pub fn git_init(workspace: &Path, resources: Option<&Path>) -> Result<(), String> {
+/// Whether `xcode-select -p` finds the Command Line Tools. Without them
+/// `/usr/bin/git` is Apple's stub, and running it opens the system dialog that
+/// offers to install developer tools.
+pub fn command_line_tools_installed() -> bool {
+    Command::new("/usr/bin/xcode-select")
+        .arg("-p")
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+/// `git init` with the same PATH the bundled service runs with. Git is only
+/// spawned when the bundle ships one or `command_line_tools` (the probe)
+/// reports the Command Line Tools. Without Git the backend still serves and
+/// creates the repository on its first guidance save, so a skipped or failed
+/// init is a warning for the caller to log, not a startup failure.
+pub fn git_init(
+    workspace: &Path,
+    resources: Option<&Path>,
+    command_line_tools: impl FnOnce() -> bool,
+) -> Result<(), String> {
     if workspace.join(".git").exists() {
         return Ok(());
+    }
+    let bundled = resources.is_some_and(|resources| resources.join("bin").join("git").exists());
+    if !bundled && !command_line_tools() {
+        return Err(
+            "git is not available (no bundled git and the Command Line Tools are not installed)"
+                .into(),
+        );
     }
     let mut path = String::new();
     if let Some(resources) = resources {
@@ -338,6 +361,51 @@ mod tests {
         .unwrap();
 
         assert!(home.state().join(SERVICE_FILE).is_file());
+    }
+
+    #[test]
+    fn git_is_not_spawned_without_a_bundled_git_or_command_line_tools() {
+        let home = Home::new("nogit-skip");
+        let workspace = home.0.join("corsia");
+        fs::create_dir_all(&workspace).unwrap();
+        let resources = home.0.join("Resources");
+        fs::create_dir_all(resources.join("bin")).unwrap();
+
+        let result = git_init(&workspace, Some(&resources), || false);
+
+        assert!(result.unwrap_err().contains("not available"));
+        assert!(!workspace.join(".git").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bundled_git_runs_without_asking_the_command_line_tools() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = Home::new("bundled");
+        let workspace = home.0.join("corsia");
+        let resources = home.0.join("Resources");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(resources.join("bin")).unwrap();
+        // A stand-in for the bundled git: it records that it ran as `init`.
+        let fake = resources.join("bin").join("git");
+        fs::write(&fake, "#!/bin/sh\nmkdir -p \"$2/.git\"\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+
+        git_init(&workspace, Some(&resources), || {
+            panic!("the probe must not run when git is bundled")
+        })
+        .unwrap();
+
+        assert!(workspace.join(".git").is_dir());
+    }
+
+    #[test]
+    fn an_existing_repository_needs_no_git() {
+        let home = Home::new("has-git");
+        let workspace = home.0.join("corsia");
+        fs::create_dir_all(workspace.join(".git")).unwrap();
+
+        git_init(&workspace, None, || panic!("no probe expected")).unwrap();
     }
 
     #[test]

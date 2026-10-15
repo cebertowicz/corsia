@@ -306,7 +306,7 @@ fn start_service(
 ) -> Result<ServiceStartup, String> {
     let state_dir = default_state_dir(app)?;
     // Decide about the workspace before anything is written: a refusal leaves
-    // the Mac exactly as it was.
+    // the computer exactly as it was.
     let first_run = if first_run::environment_names_the_roots() {
         first_run::FirstRun::Configured
     } else {
@@ -323,7 +323,11 @@ fn start_service(
     if let first_run::FirstRun::Fresh { workspace } = first_run {
         let resources = bundled_resource_dir(app).ok();
         first_run::apply(&workspace, &state_dir, port, |path| {
-            first_run::git_init(path, resources.as_deref())
+            first_run::git_init(
+                path,
+                resources.as_deref(),
+                first_run::command_line_tools_installed,
+            )
         })?;
     }
     fs::create_dir_all(state_dir.join("logs"))
