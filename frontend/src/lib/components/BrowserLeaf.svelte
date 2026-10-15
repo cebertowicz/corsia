@@ -5,7 +5,7 @@
 	import { theme } from '$lib/stores/theme';
 	import { clampPoint } from '$lib/browserPane';
 	import { agentColor } from '$lib/docPresence';
-	import { BrowserPaneInput } from '$lib/browserPaneInput';
+	import { BrowserPaneInput, wheelPixels } from '$lib/browserPaneInput';
 	import { browserTabLabel } from '$lib/browserAddress';
 	import { BrowserAgentPresence, markerPlace, type MarkerPlace } from '$lib/browserAgentPresence.svelte';
 	import { setBrowserPaneLabel } from '$lib/stores/artifactWorkspace';
@@ -35,6 +35,8 @@
 	const agentName = $derived($threads.find((thread) => thread.id === threadId)?.title?.trim() || 'Agent');
 	const presence = $derived([{ id: threadId, name: agentName, color: agentColor(threadId), detail: 'In this page' }]);
 	let url = $state('');
+	// The page's registrable domain, named by the backend from the Public Suffix List.
+	let domain = $state<string | null>(null);
 	let width = $state(0);
 	let height = $state(0);
 	let image = $state<HTMLImageElement | null>(null);
@@ -78,7 +80,7 @@
 		next.onmessage = (event) => { if (socket === next) drawMessage(event.data); };
 		next.onclose = () => {
 			if (socket !== next) return;
-			// The server releases control whenever this connection ends, so the pane must too.
+			// Input and navigation travel only over this connection, so an ended one leaves the pane offering a reconnect.
 			if (streaming) {
 				status = 'Browser stream ended';
 				ended = true;
@@ -94,11 +96,14 @@
 		streaming = true;
 	}
 
-	function applyPageMetadata(nextUrl: unknown, nextTitle: unknown) {
+	function applyPageMetadata(nextUrl: unknown, nextTitle: unknown, nextDomain: unknown) {
 		// A marked field belongs to the page it was written in.
 		if (typeof nextUrl === 'string' && nextUrl !== url) agent.clearMark();
-		if (typeof nextUrl === 'string') url = nextUrl;
-		if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof nextTitle === 'string' ? nextTitle : null, url));
+		if (typeof nextUrl === 'string') {
+			url = nextUrl;
+			domain = typeof nextDomain === 'string' ? nextDomain : null;
+		}
+		if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof nextTitle === 'string' ? nextTitle : null, url, domain));
 	}
 
 	function drawMessage(raw: string) {
@@ -122,14 +127,14 @@
 		}
 		if (message.type === 'browser_metadata') {
 			pageConfirmed();
-			applyPageMetadata(message.url, message.title);
+			applyPageMetadata(message.url, message.title, message.domain);
 			return;
 		}
 		if (message.type === 'navigate_result') {
 			streaming = true;
 			if (typeof message.error === 'string') status = `Browser could not open this URL: ${message.error}`;
 			else {
-				applyPageMetadata(message.url, message.title);
+				applyPageMetadata(message.url, message.title, message.domain);
 				status = '';
 			}
 			return;
@@ -254,7 +259,8 @@
 		if (!point) return;
 		// The person's scroll moves the agent's field, and the marker cannot follow it there.
 		agent.clearMark();
-		socket.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: event.deltaMode }));
+		// CDP takes wheel deltas in CSS pixels, so a line or page wheel is converted first.
+		socket.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseWheel', ...point, ...wheelPixels(event, height) }));
 	}
 
 	function sendKey(event: KeyboardEvent) {
@@ -278,7 +284,7 @@
 	}
 
 	async function go(targetUrl = url) {
-		// An open browser navigates only through the stream that holds control.
+		// An open browser navigates through the pane's stream, the same page target the agent acts on.
 		if (streaming && socket?.readyState === WebSocket.OPEN) {
 			status = 'Opening';
 			socket.send(JSON.stringify({ type: 'navigate', url: targetUrl }));
@@ -303,6 +309,8 @@
 
 	function navigate(targetUrl: string) {
 		url = targetUrl;
+		// The typed address has no backend-named domain until its page reports one.
+		domain = null;
 		void go(targetUrl);
 	}
 
@@ -349,7 +357,7 @@
 </script>
 
 <div class="browser-leaf">
-	<BrowserToolbar {url} {streaming} {ended} {status} {announcement} people={presence} {agentPresent}
+	<BrowserToolbar {url} {domain} {streaming} {ended} {status} {announcement} people={presence} {agentPresent}
 		onnavigate={navigate} onhistory={history} onreconnect={connect} />
 	<div class:agent-present={agentPresent} class:keyboard-open={keyboardOpen} class="browser-page" style:--presence-color={agentColor(threadId)}>
 		{#if marker}

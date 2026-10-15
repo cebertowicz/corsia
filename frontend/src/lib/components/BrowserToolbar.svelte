@@ -4,8 +4,10 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import IconButton from '$lib/components/ui/IconButton.svelte';
 
-	let { url, streaming, ended, status, announcement, people, agentPresent, onnavigate, onhistory, onreconnect }: {
+	let { url, domain = null, streaming, ended, status, announcement, people, agentPresent, onnavigate, onhistory, onreconnect }: {
 		url: string;
+		/** The page's registrable domain as the backend names it, the same one a password step's title shows. */
+		domain?: string | null;
 		streaming: boolean;
 		/** The stream ended or failed, so the person can reconnect. */
 		ended: boolean;
@@ -22,7 +24,7 @@
 
 	let addressFocused = $state(false);
 	let addressText = $state('');
-	const shownAddress = $derived(addressFocused ? addressText : browserAddressLabel(url));
+	const shownAddress = $derived(addressFocused ? addressText : browserAddressLabel(url, domain));
 
 	function submitAddress(event: SubmitEvent) {
 		event.preventDefault();

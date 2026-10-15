@@ -13,15 +13,17 @@ from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
 from host_access import browser_control, browser_pane
+from host_access.browser_domain import url_domain
 from host_access.browser_session_state import BrowserSessionError
 from host_access.processes import ProcessOwnerError
 from infra.auth import authenticate
 from infra.database import get_db
-from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from ws.browser_frames import PaneFrames
 
 log = logging.getLogger(__name__)
+# Seconds before each re-establishment of a pane's page-address watch; it is not retried further.
+METADATA_RETRY_DELAYS = (0.5, 1.0, 2.0)
 
 
 async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
@@ -121,11 +123,16 @@ async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
     async def metadata_events() -> None:
         async def emit(message: dict) -> None:
             report(message)
-        try:
-            await browser_pane.watch_page_metadata(thread_id, connection_token, emit)
-        except (BrowserSessionError, ProcessOwnerError):
-            log.debug("browser pane metadata relay ended", exc_info=True)
-            await asyncio.Future()
+        # The address is the person's cue on a password page, so a lost watch is re-established a few
+        # times and then ends the stream visibly rather than leaving a stale address on screen.
+        for attempt, delay in enumerate(METADATA_RETRY_DELAYS, start=1):
+            try:
+                await browser_pane.watch_page_metadata(thread_id, connection_token, emit)
+            except (BrowserSessionError, ProcessOwnerError, OSError, WebSocketException) as exc:
+                log.warning("browser pane %s lost its page address watch (attempt %d of %d): %s",
+                            thread_id, attempt, len(METADATA_RETRY_DELAYS), exc)
+            await asyncio.sleep(delay)
+        raise BrowserSessionError("The pane stopped following the page's address")
 
     tasks: set[asyncio.Task] = set()
     try:
@@ -205,7 +212,7 @@ async def _run_pending(thread_id: str) -> None:
         elif (queued := _latest_appearance.pop(thread_id, None)) is not None:
             connection_token, appearance = queued
             try:
-                await browser_pane.match_pane(thread_id, appearance, connection_token)
+                await browser_pane.match_pane(thread_id, appearance)
             except (BrowserSessionError, ProcessOwnerError) as exc:
                 log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
         else:
@@ -223,16 +230,16 @@ async def _navigate(thread_id: str, connection_token: str, data: dict) -> dict:
         if action is None:
             result = await browser_pane.open_url(thread_id, str(url), connection_token)
         else:
-            result = await browser_pane.go(thread_id, action, connection_token)
+            result = await browser_pane.go(thread_id, action)
     except (BrowserSessionError, ProcessOwnerError) as exc:
         return {"type": "navigate_result", "error": str(exc)}
     if result.startswith("Error:"):
         return {"type": "navigate_result", "error": result}
     try:
-        current_url, title = await browser_pane.page_info(thread_id, connection_token)
+        current_url, title = await browser_pane.page_info(thread_id)
     except (BrowserSessionError, ProcessOwnerError) as exc:
         # The navigation succeeded but its session ended before the labels were read; the
         # metadata watch labels whatever page a reopened pane shows.
         log.warning("browser pane %s navigated but could not read the page labels: %s", thread_id, exc)
         current_url, title = (str(url) if action is None else None), None
-    return {"type": "navigate_result", "error": None, "url": current_url, "title": title}
+    return {"type": "navigate_result", "error": None, "url": current_url, "domain": url_domain(current_url), "title": title}

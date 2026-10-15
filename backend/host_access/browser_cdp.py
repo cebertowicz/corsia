@@ -11,21 +11,28 @@ from urllib.request import urlopen
 import websockets
 
 from host_access import browser_cli
+from host_access.browser_domain import url_domain
 from host_access.browser_session_state import BrowserSessionError
 
 RunCommand = Callable[[Sequence[str], float], Awaitable[browser_cli.CommandResult]]
 Rect = dict[str, float]
-# Where an agent wrote: the field's border box and its first label's, in page CSS pixels.
-FieldTarget = Callable[[Rect, Rect | None], None]
+# The CDP plain-text search matches tag names, attribute names and values, and text, in every
+# in-process document and in open and closed shadow roots; the probe keeps only password inputs.
+_PASSWORD_SEARCH = "password"
+_PASSWORD_AUTOCOMPLETE = {"current-password", "new-password"}
 
 
 @dataclass(frozen=True)
 class PasswordProbe:
-    """The guarded page visit and visible password-node identities, never values."""
+    """The guarded page visit and visible password-node identities, never values.
+
+    ``target`` is the page target probed, so a probe of another tab never settles this one's episode.
+    """
 
     visit: str
     host: str
     visible_nodes: frozenset[int]
+    target: str = ""
 
 
 class CdpClient:
@@ -67,13 +74,12 @@ class CdpClient:
         await self.socket.close()
 
 
-async def password_probe(run: RunCommand, known_visit: str | None, known_nodes: frozenset[int]) -> PasswordProbe:
-    """Find visible password controls in CDP DOM state, preserving this visit's reveal-toggle nodes."""
-    return await page_password_probe(await _endpoint(run), known_visit, known_nodes)
-
-
 async def page_password_probe(endpoint: str, known_visit: str | None, known_nodes: frozenset[int]) -> PasswordProbe:
-    """Run the password probe on a page endpoint already held, as a connected pane holds one."""
+    """Find visible password inputs on the page target, preserving this visit's reveal-toggle nodes (AR3).
+
+    It covers the top document, in-process (same-origin) frames, and open and closed shadow roots,
+    and transfers only the matching nodes, never the whole DOM.
+    """
     async with CdpClient(endpoint) as cdp:
         frame = await cdp.call("Page.getFrameTree")
         loader = _loader_id(frame)
@@ -81,12 +87,37 @@ async def page_password_probe(endpoint: str, known_visit: str | None, known_node
         # A node seen on an earlier visit can still resolve to a box after the page navigates away,
         # which would report a password field the new page does not have.
         known = known_nodes if known_visit == loader else frozenset()
-        document = await cdp.call("DOM.getDocument", depth=-1, pierce=True)
-        root = _int(document.get("root", {}).get("nodeId"))
-        nodes = await cdp.call("DOM.querySelectorAll", nodeId=root, selector="input[type=password],input[autocomplete=current-password],input[autocomplete=new-password]")
-        current = {await _backend_node_id(cdp, _int(node)) for node in nodes.get("nodeIds", [])}
+        current = await _password_inputs(cdp)
         visible = {node for node in current | known if await _visible(cdp, node)}
-        return PasswordProbe(loader, host, frozenset(visible))
+        return PasswordProbe(loader, host, frozenset(visible), endpoint)
+
+
+async def _password_inputs(cdp: CdpClient) -> set[int]:
+    # Search results are pushed against this session's document, so it is requested first, without children.
+    await cdp.call("DOM.getDocument", depth=0)
+    search = await cdp.call("DOM.performSearch", query=_PASSWORD_SEARCH, includeUserAgentShadowDOM=False)
+    search_id, count = search.get("searchId"), protocol_int(search.get("resultCount"))
+    try:
+        found = (await cdp.call("DOM.getSearchResults", searchId=search_id, fromIndex=0, toIndex=count)
+                 if count else {})
+    finally:
+        await cdp.call("DOM.discardSearchResults", searchId=search_id)
+    inputs = set()
+    for node_id in found.get("nodeIds", []):
+        node = (await cdp.call("DOM.describeNode", nodeId=protocol_int(node_id), depth=0)).get("node", {})
+        if _is_password_input(node):
+            inputs.add(protocol_int(node.get("backendNodeId")))
+    return inputs
+
+
+def _is_password_input(node: dict) -> bool:
+    """`input[type=password]` or an input whose autocomplete names a password."""
+    if str(node.get("nodeName", "")).upper() != "INPUT":
+        return False
+    flat = node.get("attributes") or []
+    attributes = {str(name).lower(): str(value).strip().lower() for name, value in zip(flat[::2], flat[1::2])}
+    return (attributes.get("type") == "password"
+            or bool(_PASSWORD_AUTOCOMPLETE & set(attributes.get("autocomplete", "").split())))
 
 
 async def watch_page_metadata(endpoint: str, report: Callable[[dict], Awaitable[None]]) -> None:
@@ -184,55 +215,27 @@ async def _report_page_metadata(cdp: CdpClient, report: Callable[[dict], Awaitab
         title = title_result.get("result", {}).get("value")
     except BrowserSessionError:
         title = None
-    await report({"type": "browser_metadata", "url": url, "title": title if isinstance(title, str) else None})
+    await report({"type": "browser_metadata", "url": url, "domain": url_domain(url),
+                  "title": title if isinstance(title, str) else None})
 
 
-async def shared_action(run: RunCommand, args: Sequence[str], on_field: FieldTarget | None = None) -> str | None:
-    """Perform a ref-resolved fill/type/click without moving the shared focus or pointer.
+async def page_endpoint(run: RunCommand) -> str:
+    """The one resolver of a session's shared page target, for agent commands, probes and the pane.
 
-    After a fill or type, ``on_field`` receives the written field's place so the pane can mark it.
+    It picks the page target showing the session's current URL, so every consumer acts on the page
+    agent-browser itself reports, even when the browser holds more than one tab.
     """
-    if len(args) < 2 or args[0] not in {"click", "fill", "type"}:
-        return None
-    selector = args[1]
-    box = await _box(run, selector)
-    if box is None:
-        return None
-    endpoint = await _endpoint(run)
-    async with CdpClient(endpoint) as cdp:
-        backend_id = await _node_for_box(cdp, box)
-        if backend_id is None:
-            return None
-        context_id = await _isolated_context(cdp)
-        resolved = await cdp.call("DOM.resolveNode", backendNodeId=backend_id, executionContextId=context_id)
-        object_id = _object_id(resolved)
-        declaration, arguments = _action(args)
-        await cdp.call("Runtime.callFunctionOn", objectId=object_id, functionDeclaration=declaration,
-                       arguments=arguments, awaitPromise=True, returnByValue=True, silent=True)
-        if on_field is not None and args[0] in {"fill", "type"}:
-            await _report_field(cdp, backend_id, object_id, on_field)
-    return "ok"
-
-
-async def _report_field(cdp: CdpClient, node: int, object_id: str, on_field: FieldTarget) -> None:
-    field = await _border_rect(cdp, backendNodeId=node)
-    if field is None or field["width"] <= 0 or field["height"] <= 0:
-        # The write removed or hid its own field, so there is no field left to mark.
-        return
-    label = await cdp.call("Runtime.callFunctionOn", objectId=object_id, returnByValue=False, silent=True,
-                           functionDeclaration="function() { return (this.labels && this.labels[0]) || null; }")
-    label_id = label.get("result", {}).get("objectId")
-    on_field(field, await _border_rect(cdp, objectId=label_id) if isinstance(label_id, str) else None)
-
-
-async def _endpoint(run: RunCommand) -> str:
-    result = await run(("get", "cdp-url"), 10)
-    payload = browser_cli.json_object(result.stdout)
-    data = payload.get("data")
-    endpoint = data.get("cdpUrl") if isinstance(data, dict) else None
-    if result.returncode or not isinstance(endpoint, str) or not endpoint.startswith("ws"):
+    browser_endpoint = _data_field(await run(("get", "cdp-url"), 10), "cdpUrl")
+    if browser_endpoint is None or not browser_endpoint.startswith("ws"):
         raise BrowserSessionError("This page couldn't be checked")
-    return await asyncio.to_thread(_page_endpoint, endpoint)
+    current_url = _data_field(await run(("get", "url"), 10), "url")
+    return await asyncio.to_thread(_page_endpoint, browser_endpoint, current_url)
+
+
+def _data_field(result: browser_cli.CommandResult, key: str) -> str | None:
+    data = browser_cli.json_object(result.stdout).get("data")
+    value = data.get(key) if isinstance(data, dict) else None
+    return value if not result.returncode and isinstance(value, str) else None
 
 
 def _page_endpoint(browser_endpoint: str, expected_url: str | None = None) -> str:
@@ -256,42 +259,7 @@ def _page_endpoint(browser_endpoint: str, expected_url: str | None = None) -> st
     raise BrowserSessionError("This page couldn't be checked")
 
 
-async def _box(run: RunCommand, selector: str) -> dict | None:
-    result = await run(("get", "box", selector), 10)
-    payload = browser_cli.json_object(result.stdout)
-    data = payload.get("data")
-    # agent-browser 0.31 exposes box geometry directly in data (older verified builds used data.result).
-    box = data.get("result", data) if isinstance(data, dict) else None
-    if not isinstance(box, dict) or not all(isinstance(box.get(key), (int, float)) for key in ("x", "y", "width", "height")):
-        return None
-    return box
-
-
-async def _node_for_box(cdp: CdpClient, box: dict) -> int | None:
-    location = await cdp.call("DOM.getNodeForLocation", x=round(box["x"] + box["width"] / 2),
-                              y=round(box["y"] + box["height"] / 2), includeUserAgentShadowDOM=False,
-                              ignorePointerEventsNone=True)
-    node = _int(location.get("backendNodeId"))
-    return node if await _matching_box(cdp, node, box) else None
-
-
-async def _matching_box(cdp: CdpClient, node: int, expected: dict) -> bool:
-    description = await cdp.call("DOM.describeNode", backendNodeId=node, depth=20, pierce=True)
-    current = description.get("node")
-    while isinstance(current, dict):
-        backend = _int(current.get("backendNodeId"))
-        if await _box_matches(cdp, backend, expected):
-            return True
-        current = current.get("parent")
-    return False
-
-
-async def _box_matches(cdp: CdpClient, node: int, expected: dict) -> bool:
-    rect = await _border_rect(cdp, backendNodeId=node)
-    return rect is not None and all(abs(rect[key] - expected[key]) <= 1 for key in ("x", "y", "width", "height"))
-
-
-async def _border_rect(cdp: CdpClient, **node: object) -> Rect | None:
+async def border_rect(cdp: CdpClient, **node: object) -> Rect | None:
     """A node's border box in the viewport's CSS pixels, or None when it renders no box."""
     try:
         model = await cdp.call("DOM.getBoxModel", **node)
@@ -304,28 +272,9 @@ async def _border_rect(cdp: CdpClient, **node: object) -> Rect | None:
     return {"x": x, "y": y, "width": border[2] - x, "height": border[5] - y}
 
 
-async def _backend_node_id(cdp: CdpClient, node_id: int) -> int:
-    description = await cdp.call("DOM.describeNode", nodeId=node_id, depth=0, pierce=True)
-    return _int(description.get("node", {}).get("backendNodeId"))
-
-
 async def _visible(cdp: CdpClient, node: int) -> bool:
-    rect = await _border_rect(cdp, backendNodeId=node)
+    rect = await border_rect(cdp, backendNodeId=node)
     return rect is not None and rect["width"] > 0 and rect["height"] > 0
-
-
-async def _isolated_context(cdp: CdpClient) -> int:
-    tree = await cdp.call("Page.getFrameTree")
-    frame = tree.get("frameTree", {}).get("frame", {}).get("id")
-    world = await cdp.call("Page.createIsolatedWorld", frameId=frame, worldName="corsia-shared-browser", grantUniveralAccess=False)
-    return _int(world.get("executionContextId"))
-
-
-def _action(args: Sequence[str]) -> tuple[str, list[dict]]:
-    if args[0] == "click":
-        return "function() { this.click(); }", []
-    text = args[2] if len(args) > 2 else ""
-    return ("function(value, append) { const proto = this instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; const setter = Object.getOwnPropertyDescriptor(proto, 'value').set; setter.call(this, append ? this.value + value : value); this.dispatchEvent(new Event('input', {bubbles:true})); this.dispatchEvent(new Event('change', {bubbles:true})); }", [{"value": text}, {"value": args[0] == "type"}])
 
 
 def _loader_id(tree: dict) -> str:
@@ -337,14 +286,7 @@ def _host(tree: dict) -> str:
     return urlparse(url).hostname or "" if isinstance(url, str) else ""
 
 
-def _object_id(result: dict) -> str:
-    value = result.get("object")
-    if not isinstance(value, dict) or not isinstance(value.get("objectId"), str):
-        raise BrowserSessionError("This page couldn't be checked")
-    return value["objectId"]
-
-
-def _int(value: object) -> int:
+def protocol_int(value: object) -> int:
     if not isinstance(value, int):
         raise BrowserSessionError("This page couldn't be checked")
     return value

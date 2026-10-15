@@ -69,21 +69,15 @@ async def password_probe(thread_id: str, connection_token: str, known_visit: str
 
 
 async def _page_endpoint(thread_id: str, connection_token: str, error: str) -> str:
+    """This pane's page target, from the same resolver as the agent's commands, kept for the connection."""
     if (cached := _page_endpoints.get((thread_id, connection_token))) is not None:
         return cached
     owner = PROCESS_OWNER.browser_sessions()
-    # A pane that leaves cancels its relay mid-read; cancelling a running command resets the shared session.
-    payload = await asyncio.shield(owner.run(thread_id, ("get", "cdp-url"), control_token=connection_token, session="existing"))
-    # owner.run returns the rendered model result: agent-browser's `data` object, unwrapped.
-    endpoint = browser_cli.json_object(payload).get("cdpUrl")
-    if not isinstance(endpoint, str) or not endpoint.startswith("ws"):
-        raise browser_cdp.BrowserSessionError(error)
-    current_url = _rendered_field(
-        await asyncio.shield(owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing")), "url")
-    page_endpoint = await asyncio.to_thread(
-        browser_cdp._page_endpoint, endpoint,
-        current_url if current_url and current_url.startswith(("http://", "https://")) else None,
-    )
+    try:
+        # A pane that leaves cancels its relay mid-read; cancelling a running command resets the shared session.
+        page_endpoint = await asyncio.shield(owner.page_endpoint(thread_id))
+    except browser_cdp.BrowserSessionError as exc:
+        raise browser_cdp.BrowserSessionError(error) from exc
     _page_endpoints[(thread_id, connection_token)] = page_endpoint
     return page_endpoint
 
@@ -101,18 +95,17 @@ async def key_event(thread_id: str, event: dict, connection_token: str) -> None:
 
 
 async def open_url(thread_id: str, url: str, connection_token: str | None = None) -> str:
-    """Open a pane URL: the holding stream navigates the open browser; without one, only a new session starts."""
+    """Open a pane URL: a connected pane navigates the open browser; without one, only a new session starts."""
     return await PROCESS_OWNER.browser_sessions().run(
-        thread_id, ("open", url), control_token=connection_token,
-        session="new" if connection_token is None else "existing", pane=True,
+        thread_id, ("open", url), session="new" if connection_token is None else "existing", pane=True,
     )
 
 
-async def page_info(thread_id: str, connection_token: str) -> tuple[str | None, str | None]:
+async def page_info(thread_id: str) -> tuple[str | None, str | None]:
     """Return the page URL and title for a pane label, without retaining either server-side."""
     owner = PROCESS_OWNER.browser_sessions()
-    url = await owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing")
-    title = await owner.run(thread_id, ("get", "title"), control_token=connection_token, session="existing")
+    url = await owner.run(thread_id, ("get", "url"), session="existing", pane=True)
+    title = await owner.run(thread_id, ("get", "title"), session="existing", pane=True)
     return _rendered_field(url, "url"), _rendered_field(title, "title")
 
 
@@ -124,16 +117,14 @@ def _rendered_field(rendered: str, key: str) -> str | None:
     return value if isinstance(value, str) else rendered
 
 
-async def go(thread_id: str, action: str, connection_token: str) -> str:
-    """Go back, forward or reload in the open browser, for the holding stream."""
+async def go(thread_id: str, action: str) -> str:
+    """Go back, forward or reload in the open browser, for a connected pane."""
     if action not in HISTORY_ACTIONS:
         raise ValueError(f"unknown browser action: {action}")
-    return await PROCESS_OWNER.browser_sessions().run(
-        thread_id, (action,), control_token=connection_token, session="existing",
-    )
+    return await PROCESS_OWNER.browser_sessions().run(thread_id, (action,), session="existing", pane=True)
 
 
-async def match_pane(thread_id: str, appearance: PaneAppearance, connection_token: str) -> None:
+async def match_pane(thread_id: str, appearance: PaneAppearance) -> None:
     """Show the open browser's page at the pane's size, pixel density and CORSIA theme."""
     # Every pane on this thread shows the one shared page, so each captures at the new size from the
     # restart that follows the viewport command and sends the resized picture at once.
@@ -142,4 +133,4 @@ async def match_pane(thread_id: str, appearance: PaneAppearance, connection_toke
     owner = PROCESS_OWNER.browser_sessions()
     for args in (("set", "viewport", str(appearance.width), str(appearance.height), f"{appearance.scale:g}"),
                  ("set", "media", appearance.scheme)):
-        await owner.run(thread_id, args, control_token=connection_token, session="existing")
+        await owner.run(thread_id, args, session="existing", pane=True)

@@ -164,9 +164,13 @@ def synthetic_browser(monkeypatch):
     monkeypatch.setattr(identity, 'connected_peer_pid', fake.peer_pid)
     # The synthetic daemon has no page: lifecycle tests see a page without a password field
     # (the guard has its own tests) and the host's installed Chrome never reaches the argv.
-    async def no_password_field(_run, _visit, _known):
-        return browser_cdp.PasswordProbe('synthetic-visit', 'synthetic.test', frozenset())
-    monkeypatch.setattr(browser_cdp, 'password_probe', no_password_field)
+    async def synthetic_page(_run):
+        return 'ws://synthetic.test/devtools/page/1'
+
+    async def no_password_field(endpoint, _visit, _known):
+        return browser_cdp.PasswordProbe('synthetic-visit', 'synthetic.test', frozenset(), endpoint)
+    monkeypatch.setattr(browser_cdp, 'page_endpoint', synthetic_page)
+    monkeypatch.setattr(browser_cdp, 'page_password_probe', no_password_field)
     monkeypatch.setattr(browser_cli, 'chrome_executable', lambda: (None, 'default'))
     yield fake
     fake.finish()

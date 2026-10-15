@@ -21,7 +21,8 @@ from uuid import uuid4
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_screencast
+from host_access import browser_cdp, browser_control, browser_dom_write, browser_screencast, browser_session_commands
+from host_access.browser_session_state import BrowserSessionError
 from host_access.browser_sessions import BrowserSessionOwner
 
 
@@ -67,9 +68,43 @@ window.addEventListener('load', () => {
 </script>"""
 
 
+# Page-context writes: a dropdown, an SVG target, a rich-text editor, a covered button and one far
+# below the fold, beside the person's own field.
+WRITES = """<!doctype html><title>Writes fixture</title>
+<input id=user value=person>
+<select id=choice><option value=a>Ay</option><option value=b>Bee</option></select>
+<svg width=60 height=40><rect id=shape width=60 height=40 fill=teal></rect></svg>
+<div id=rich contenteditable>rich</div>
+<div style="position:relative"><button id=covered>Under</button><div style="position:absolute;inset:0;background:white"></div></div>
+<div style="height:3000px"></div><button id=far>Far</button>
+<script>
+window.clicks = {shape: 0, far: 0, covered: 0};
+for (const id of Object.keys(window.clicks)) document.getElementById(id).addEventListener('click', () => { window.clicks[id]++; });
+</script>"""
+
+# Password fields the probe must find without reading the whole DOM: in a same-origin frame, in open
+# and closed shadow roots, and named only by autocomplete, on a page whose DOM is over 1 MiB.
+PROBE = """<!doctype html><title>Probe fixture</title>
+<div id=bulk></div>
+<iframe id=frame srcdoc="<input type=password id=inframe>"></iframe>
+<div id=open-host></div><div id=closed-host></div>
+<input id=auto autocomplete="username current-password">
+<input type=password id=hidden style="display:none">
+<script>
+document.querySelector('#bulk').textContent = 'x'.repeat(1200000);
+document.querySelector('#open-host').attachShadow({mode: 'open'}).innerHTML = '<input type=password id=inopen>';
+document.querySelector('#closed-host').attachShadow({mode: 'closed'}).innerHTML = '<input type=password id=inclosed>';
+</script>"""
+
+# A one-document sign-in: submitting hides the password field and shows a code field.
+SIGN_IN = """<!doctype html><title>Sign in</title>
+<input id=user value=person><input type=password id=pw value=hunter2><input id=code value=123456 hidden>"""
+
+
 @contextmanager
 def fixture_server():
-    pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode()}
+    pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode(),
+             "/writes.html": WRITES.encode(), "/probe.html": PROBE.encode(), "/sign-in.html": SIGN_IN.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -216,6 +251,128 @@ async def test_shared_pane_cdp_shortcut_sequence_submits_a_form():
             ):
                 await browser_cdp.dispatch_key_event(endpoint, event)
             assert await cdp_value(owner, thread_id, "({ value: field.value, result: document.querySelector('#result').textContent })") == {"value": "next", "result": "next"}
+    finally:
+        await owner.close_thread(thread_id)
+
+
+def _quiet_password_steps(monkeypatch, steps: list[str]) -> None:
+    """Record the person's password step instead of writing a plan, and report nothing to a pane."""
+    async def open_episode(_thread_id, episode):
+        episode.node_id = "password-step"
+        steps.append("opened")
+
+    async def settle_episode(_thread_id, _episode):
+        steps.append("settled")
+
+    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
+    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
+    monkeypatch.setattr(browser_control, "_publish_password_page", lambda *_args: None)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_shared_writes_select_click_svg_and_scroll_but_refuse_what_they_cannot_prove(monkeypatch):
+    """AR1: each write applies in the page or is refused; none falls back to the person's input."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-writes-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-writes", instance_key=uuid4().hex)
+    refusals = []
+    monkeypatch.setattr(browser_session_commands, "emit_product_event",
+                        lambda _surface, action, **kwargs: refusals.append((action, kwargs["properties"]["reason"])))
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/writes.html"), show_window=True, session="new")).startswith("Error:")
+            await cdp_value(owner, thread_id, "document.querySelector('#user').focus(); document.querySelector('#user').setSelectionRange(1, 4); null")
+            assert await owner.run(thread_id, ("select", "#choice", "Bee"), session="existing") == "ok"
+            assert await owner.run(thread_id, ("click", "#shape"), session="existing") == "ok"
+            assert await owner.run(thread_id, ("click", "#far"), session="existing") == "ok"
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="rich-text editor"):
+                await owner.run(thread_id, ("fill", "#rich", "agent"), session="existing")
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="another element covers it"):
+                await owner.run(thread_id, ("click", "#covered"), session="existing")
+            with pytest.raises(browser_dom_write.DomWriteRefused, match="no option"):
+                await owner.run(thread_id, ("select", "#choice", "Missing"), session="existing")
+            page = await cdp_value(owner, thread_id, (
+                "({ choice: document.querySelector('#choice').value, clicks: window.clicks,"
+                " rich: document.querySelector('#rich').textContent, active: document.activeElement.id,"
+                " start: document.querySelector('#user').selectionStart, end: document.querySelector('#user').selectionEnd })"))
+            assert page == {"choice": "b", "clicks": {"shape": 1, "far": 1, "covered": 0}, "rich": "rich",
+                            "active": "user", "start": 1, "end": 4}
+            assert refusals == [("agent_write_refused", "rich_text"), ("agent_write_refused", "covered"),
+                                ("agent_write_refused", "no_option")]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_the_password_probe_finds_frame_and_shadow_fields_on_a_page_over_one_mebibyte(monkeypatch):
+    """AR3: the probe reaches every in-process document and shadow root without the whole DOM."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-probe-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-probe", instance_key=uuid4().hex)
+    steps = []
+    _quiet_password_steps(monkeypatch, steps)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/probe.html"), show_window=False, session="new")).startswith("Error:")
+            # The pane's own resolver: the agent's read of this page would be refused.
+            endpoint = await owner.page_endpoint(thread_id)
+            async with browser_cdp.CdpClient(endpoint) as cdp:
+                for _ in range(50):
+                    loaded = await cdp.call("Runtime.evaluate", returnByValue=True, expression=(
+                        "!!document.querySelector('#frame').contentDocument?.querySelector('#inframe')"))
+                    if loaded["result"].get("value"):
+                        break
+                    await asyncio.sleep(0.1)
+                size = await cdp.call("Runtime.evaluate", returnByValue=True,
+                                      expression="document.documentElement.outerHTML.length")
+            assert size["result"]["value"] > 2**20
+            probe = await browser_cdp.page_password_probe(endpoint, None, frozenset())
+            # The frame's, both shadow roots' and the autocomplete-named field; never the hidden one.
+            assert len(probe.visible_nodes) == 4, probe
+            assert probe.target == endpoint
+            # The agent is refused on this page and the person's step opens.
+            with pytest.raises(BrowserSessionError, match="asks for a password"):
+                await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            assert steps == ["opened"]
+    finally:
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_settled_password_visit_refuses_reads_of_its_hidden_field_by_ref_or_selector(monkeypatch):
+    """AR2: once the field hides, a value or attribute read that locates it, or can't be located, is refused."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-read-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-read", instance_key=uuid4().hex)
+    steps = []
+    _quiet_password_steps(monkeypatch, steps)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/sign-in.html"), show_window=False, session="new")).startswith("Error:")
+            with pytest.raises(BrowserSessionError, match="asks for a password"):
+                await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            # The person submits: the page hides the password field and shows a code field.
+            endpoint = await owner.page_endpoint(thread_id)
+            async with browser_cdp.CdpClient(endpoint) as cdp:
+                await cdp.call("Runtime.evaluate", expression="pw.hidden = true; code.hidden = false; null")
+            snapshot = await owner.run(thread_id, ("snapshot", "-i"), session="existing")
+            assert steps == ["opened", "settled"]
+            refs = re.findall(r"textbox \[ref=(e\d+)\]", snapshot)
+            assert len(refs) == 2, snapshot
+            assert "123456" in await owner.run(thread_id, ("get", "value", f"@{refs[1]}"), session="existing")
+            assert "person" in await owner.run(thread_id, ("get", "value", "#user"), session="existing")
+            for command in (("get", "value", "#pw"), ("get", "attr", "#pw", "value"), ("get", "value", "input[type=password]"),
+                            ("eval", "pw.value")):
+                with pytest.raises(BrowserSessionError, match="asks for a password"):
+                    await owner.run(thread_id, command, session="existing")
     finally:
         await owner.close_thread(thread_id)
 

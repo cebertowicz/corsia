@@ -123,17 +123,24 @@ describe('BrowserLeaf navigation metadata', () => {
 		expect(host.textContent).not.toContain('Ready');
 	});
 
-	it('shows an address led by the registrable domain after navigation', () => {
+	it('shows an address led by the backend-named registrable domain after navigation', () => {
 		const { socket } = render();
-		socket.receive({ type: 'navigate_result', error: null, url: 'https://accounts.example.co.uk/a/long/page', title: 'Example page' });
+		socket.receive({ type: 'navigate_result', error: null, url: 'https://accounts.example.co.uk/a/long/page', domain: 'example.co.uk', title: 'Example page' });
 		flushSync();
 		expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('example.co.uk · accounts · …page');
+	});
+
+	it('leads a lookalike address with the site that serves it', () => {
+		const { socket } = render();
+		socket.receive({ type: 'browser_metadata', url: 'https://paypal.com.evil.com.br/login', domain: 'evil.com.br', title: 'Log in' });
+		flushSync();
+		expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('evil.com.br · paypal.com · …login');
 	});
 
 	it('updates the address and tab when an agent-side navigation reaches the stream', () => {
 		openBrowserPane('thread');
 		const { socket } = render();
-		socket.receive({ type: 'browser_metadata', url: 'https://www.example.test/agent/open', title: 'Agent opened this' });
+		socket.receive({ type: 'browser_metadata', url: 'https://www.example.test/agent/open', domain: 'example.test', title: 'Agent opened this' });
 		flushSync();
 		expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('example.test · www · …open');
 		expect(get(threadWorkspaces).thread.tabs.find((tab) => tab.kind === 'browser')?.title).toBe('Agent opened this');
@@ -368,9 +375,15 @@ describe('BrowserLeaf letterbox input', () => {
 		]);
 	});
 
-	it('forwards wheel axes and mode without turning vertical input horizontal', () => {
+	it('forwards wheel axes in pixels without turning vertical input horizontal', () => {
 		const { canvas, socket } = render();
 		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaX: 3, deltaY: 90, deltaMode: 0 }));
-		expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 3, deltaY: 90, deltaMode: 0 });
+		expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 3, deltaY: 90 });
+	});
+
+	it('converts a line wheel to pixels, as CDP expects', () => {
+		const { canvas, socket } = render();
+		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaX: 0, deltaY: 3, deltaMode: 1 }));
+		expect(socket.sent.at(-1)).toEqual({ type: 'input_mouse', eventType: 'mouseWheel', x: 50, y: 25, deltaX: 0, deltaY: 120 });
 	});
 });

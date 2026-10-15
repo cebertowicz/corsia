@@ -1,6 +1,16 @@
 import { AnimationFrameCoalescer, type PanePoint } from './browserPane';
 
-type MouseInput = { type: 'input_mouse'; eventType: string; x: number; y: number; button?: string; clickCount?: number; deltaX?: number; deltaY?: number; deltaMode?: number };
+type MouseInput = { type: 'input_mouse'; eventType: string; x: number; y: number; button?: string; clickCount?: number; deltaX?: number; deltaY?: number };
+type WheelDelta = { deltaX: number; deltaY: number; deltaMode: number };
+
+// CDP's mouseWheel deltas are CSS pixels; a line is the 40 px Chrome scrolls per wheel line.
+const WHEEL_LINE_PIXELS = 40;
+
+/** A wheel event's deltas in CSS pixels, whatever unit (pixel, line or page) the device reported. */
+export function wheelPixels(event: WheelDelta, pageHeight: number): { deltaX: number; deltaY: number } {
+	const unit = event.deltaMode === 1 ? WHEEL_LINE_PIXELS : event.deltaMode === 2 ? pageHeight : 1;
+	return { deltaX: event.deltaX * unit, deltaY: event.deltaY * unit };
+}
 type PointerPosition = { pointerId: number; pointerType: string; clientX: number; clientY: number };
 
 /** Mouse positions replace each other; touch wheel deltas preserve every drag movement. */
@@ -38,7 +48,7 @@ export class BrowserPaneInput {
 		if (!touch.dragging) return;
 		const deltaX = (touch.last.clientX - event.clientX) / scale;
 		const deltaY = (touch.last.clientY - event.clientY) / scale;
-		this.send({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX, deltaY, deltaMode: 0 });
+		this.send({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX, deltaY });
 		touch.last = event;
 	}
 

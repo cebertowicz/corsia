@@ -70,7 +70,7 @@ async def test_one_runner_keeps_one_waiting_navigation_and_the_newest_appearance
         await release_third.wait()
         return "Error:third"
 
-    async def match_pane(_thread_id, appearance, _connection_token):
+    async def match_pane(_thread_id, appearance):
         commands.append(appearance.width)
 
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
@@ -198,3 +198,31 @@ async def test_navigation_result_overflow_closes_stalled_pane(monkeypatch, caplo
         assert "browser pane navigation failed" not in caplog.text
     finally:
         browser_stream._runners.clear()
+
+
+@pytest.mark.asyncio
+async def test_a_lost_address_watch_is_re_established_then_ends_the_stream_visibly(monkeypatch, caplog):
+    monkeypatch.setattr(browser_stream, "METADATA_RETRY_DELAYS", (0, 0, 0))
+    attempts = []
+
+    async def watch_page_metadata(_thread_id, _connection_token, report):
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            # The first watch reports the page, then its CDP connection drops.
+            await report({"type": "browser_metadata", "url": "https://example.test", "domain": "example.test", "title": "Example"})
+            raise OSError("connection reset")
+        raise browser_stream.BrowserSessionError("This page couldn't be checked")
+
+    monkeypatch.setattr(browser_stream.browser_pane, "watch_page_metadata", watch_page_metadata)
+
+    class Pane(FakePane):
+        async def receive_text(self):
+            await asyncio.Future()
+
+    pane = Pane()
+    with pytest.raises(browser_stream.BrowserSessionError, match="stopped following the page's address"):
+        await asyncio.wait_for(browser_stream._relay(pane, "thread", "user"), 1)
+    assert attempts == [0, 1, 2]
+    assert caplog.text.count("lost its page address watch") == 3
+    assert {"type": "browser_metadata", "url": "https://example.test", "domain": "example.test",
+            "title": "Example"} in [json.loads(message) for message in pane.text]

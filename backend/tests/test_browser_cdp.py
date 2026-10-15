@@ -3,18 +3,47 @@ import json
 
 import pytest
 
-from host_access import browser_cdp
+from host_access import browser_cdp, browser_dom_write
 from host_access.browser_cli import CommandResult
 
 
 @pytest.mark.asyncio
-async def test_endpoint_resolves_agent_browsers_browser_url_to_the_page(monkeypatch):
-    monkeypatch.setattr(browser_cdp, "_page_endpoint", lambda _url: "ws://page.test/devtools/page/1")
+async def test_page_endpoint_resolves_the_browser_url_to_the_page_the_session_shows(monkeypatch):
+    resolved = []
+    monkeypatch.setattr(browser_cdp, "_page_endpoint",
+                        lambda browser, url: resolved.append((browser, url)) or "ws://page.test/devtools/page/1")
+    outputs = {
+        ("get", "cdp-url"): '{"data":{"cdpUrl":"ws://browser.test/devtools/browser/1"}}',
+        ("get", "url"): '{"data":{"url":"https://example.test/current"}}',
+    }
 
+    async def run(args, _timeout):
+        return CommandResult(0, outputs[tuple(args)], "")
+
+    assert await browser_cdp.page_endpoint(run) == "ws://page.test/devtools/page/1"
+    assert resolved == [("ws://browser.test/devtools/browser/1", "https://example.test/current")]
+
+
+@pytest.mark.asyncio
+async def test_page_endpoint_fails_closed_without_a_browser_url():
     async def run(_args, _timeout):
-        return CommandResult(0, '{"data":{"cdpUrl":"ws://browser.test/devtools/browser/1"}}', "")
+        return CommandResult(1, "", "no browser")
 
-    assert await browser_cdp._endpoint(run) == "ws://page.test/devtools/page/1"
+    with pytest.raises(browser_cdp.BrowserSessionError):
+        await browser_cdp.page_endpoint(run)
+
+
+@pytest.mark.parametrize(("node", "password"), [
+    ({"nodeName": "INPUT", "attributes": ["type", "Password"]}, True),
+    ({"nodeName": "INPUT", "attributes": ["type", "text", "autocomplete", "username current-password"]}, True),
+    ({"nodeName": "INPUT", "attributes": ["autocomplete", "new-password"]}, True),
+    # The search also matches text and other elements that only mention a password.
+    ({"nodeName": "LABEL", "attributes": ["for", "password"]}, False),
+    ({"nodeName": "INPUT", "attributes": ["name", "password", "type", "text"]}, False),
+    ({"nodeName": "#text", "nodeValue": "Forgot password?"}, False),
+])
+def test_only_a_password_input_counts_as_a_password_field(node, password):
+    assert browser_cdp._is_password_input(node) is password
 
 
 def test_page_endpoint_prefers_the_sessions_current_page(monkeypatch):
@@ -39,7 +68,7 @@ async def test_box_accepts_agent_browser_031s_direct_data_shape():
     async def run(_args, _timeout):
         return CommandResult(0, '{"data":{"x":1,"y":2,"width":3,"height":4}}', "")
 
-    assert await browser_cdp._box(run, "@e2") == {"x": 1, "y": 2, "width": 3, "height": 4}
+    assert await browser_dom_write._box(run, "@e2") == {"x": 1, "y": 2, "width": 3, "height": 4}
 
 
 @pytest.mark.asyncio

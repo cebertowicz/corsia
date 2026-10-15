@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from host_access import browser_cdp, browser_control, browser_pane
+from host_access import browser_cdp, browser_control, browser_dom_write, browser_pane
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -27,7 +27,7 @@ def _owner(monkeypatch, password_page):
     async def run_admitted(_runtime, _args, **_kwargs):
         return CommandResult(0, json.dumps({"success": True, "data": {"url": "https://example.test/"}}), ""), False
 
-    async def page_access(_thread_id, _probe, _args):
+    async def page_access(_thread_id, _probe, _args, **_kwargs):
         if password_page["shown"]:
             raise BrowserSessionError(browser_control.PASSWORD_PAGE)
 
@@ -36,6 +36,7 @@ def _owner(monkeypatch, password_page):
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_control, "require_page_access", page_access)
+    monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/devtools/page/1"))
     return owner
 
 
@@ -53,7 +54,7 @@ async def test_only_an_agent_command_the_guard_lets_through_puts_the_agent_in_th
     # The person's own pane commands are not the agent, the first open from a pane with no stream included.
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
     await browser_pane.open_url("thread-1", "https://example.test/")
-    await owner.run("thread-1", ("get", "url"), control_token="pane-1", session="existing")
+    await owner.run("thread-1", ("get", "url"), pane=True, session="existing")
     assert _agent_messages(messages) == []
 
     await owner.run("thread-1", ("get", "url"), session="existing")
@@ -84,9 +85,13 @@ async def test_a_pane_that_connects_later_shows_how_long_ago_the_agent_acted_unt
 class FakeCdp:
     """A page whose agent target is node 7, with a label above it when ``labelled``."""
 
-    def __init__(self, labelled):
+    def __init__(self, labelled, write=None, viewport=(800, 600), scroll=(0, 0)):
         self.labelled = labelled
+        self.write = write if write is not None else {"result": {"type": "string", "value": "ok"}}
+        self.viewport = viewport
+        self.scroll = scroll
         self.calls = []
+        self.hit_tests = []
 
     async def __aenter__(self):
         return self
@@ -97,6 +102,7 @@ class FakeCdp:
     async def call(self, method, **params):
         self.calls.append(method)
         if method == "DOM.getNodeForLocation":
+            self.hit_tests.append((params["x"], params["y"]))
             return {"backendNodeId": 7}
         if method == "DOM.describeNode":
             return {"node": {"backendNodeId": 7}}
@@ -112,6 +118,11 @@ class FakeCdp:
             return {"object": {"objectId": "field"}}
         if method == "Runtime.callFunctionOn" and "labels" in params["functionDeclaration"]:
             return {"result": {"type": "object", "objectId": "label"} if self.labelled else {"type": "object", "subtype": "null"}}
+        if method == "Runtime.callFunctionOn":
+            return self.write
+        if method == "Page.getLayoutMetrics":
+            return {"cssVisualViewport": {"clientWidth": self.viewport[0], "clientHeight": self.viewport[1],
+                                          "pageX": self.scroll[0], "pageY": self.scroll[1]}}
         return {}
 
 
@@ -125,10 +136,10 @@ async def _run(args, _timeout):
 @pytest.mark.parametrize("labelled", [True, False])
 async def test_a_shared_fill_reports_its_fields_box_and_its_labels_in_page_pixels(monkeypatch, labelled):
     cdp = FakeCdp(labelled)
-    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
-    monkeypatch.setattr(browser_cdp, "_page_endpoint", lambda _url: "ws://page.test/devtools/page/1")
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
     marked = []
-    assert await browser_cdp.shared_action(_run, ("fill", "@e2", "agent value"), lambda field, label: marked.append((field, label))) == "ok"
+    assert await browser_dom_write.shared_action(_run, "ws://page.test", ("fill", "@e2", "agent value"),
+                                           lambda field, label: marked.append((field, label))) == "ok"
     label = {"x": 20, "y": 36, "width": 60, "height": 18} if labelled else None
     assert marked == [({"x": 20, "y": 60, "width": 200, "height": 30}, label)]
 
@@ -136,8 +147,53 @@ async def test_a_shared_fill_reports_its_fields_box_and_its_labels_in_page_pixel
 @pytest.mark.asyncio
 async def test_a_shared_click_marks_no_field(monkeypatch):
     cdp = FakeCdp(labelled=True)
-    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: cdp)
-    monkeypatch.setattr(browser_cdp, "_page_endpoint", lambda _url: "ws://page.test/devtools/page/1")
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
     marked = []
-    assert await browser_cdp.shared_action(_run, ("click", "@e2"), lambda field, label: marked.append((field, label))) == "ok"
+    assert await browser_dom_write.shared_action(_run, "ws://page.test", ("click", "@e2"),
+                                           lambda field, label: marked.append((field, label))) == "ok"
     assert marked == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("write", "reason"), [
+    # A page function that throws reports exceptionDetails, not a protocol error.
+    ({"result": {"type": "object", "subtype": "error"}, "exceptionDetails": {"text": "Uncaught"}}, "page_error"),
+    ({"result": {"type": "string", "value": "no_option"}}, "no_option"),
+    ({"result": {"type": "string", "value": "rich_text"}}, "rich_text"),
+    ({"result": {"type": "string", "value": "rejected_value"}}, "rejected_value"),
+    ({"result": {"type": "undefined"}}, "page_error"),
+])
+async def test_a_shared_write_the_page_did_not_apply_is_refused_with_its_reason(monkeypatch, write, reason):
+    cdp = FakeCdp(labelled=False, write=write)
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    marked = []
+    with pytest.raises(browser_dom_write.DomWriteRefused) as refused:
+        await browser_dom_write.shared_action(_run, "ws://page.test", ("select", "@e2", "Missing"),
+                                        lambda field, label: marked.append((field, label)))
+    assert refused.value.reason == reason and "Nothing was sent as real input" in str(refused.value)
+    assert marked == []
+
+
+@pytest.mark.asyncio
+async def test_a_read_target_outside_the_viewport_is_not_located_and_the_page_is_not_scrolled(monkeypatch):
+    cdp = FakeCdp(labelled=False, viewport=(100, 50))
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    commands = []
+
+    async def run(args, timeout):
+        commands.append(tuple(args))
+        return await _run(args, timeout)
+
+    assert await browser_dom_write.target_node(run, "ws://page.test", "@e2") is None
+    assert ("scrollintoview", "@e2") not in commands
+    cdp.viewport = (800, 600)
+    assert await browser_dom_write.target_node(_run, "ws://page.test", "@e2") == 7
+
+
+@pytest.mark.asyncio
+async def test_a_scrolled_page_hit_tests_the_target_in_document_pixels(monkeypatch):
+    """The box and the box model are in viewport pixels; DOM.getNodeForLocation takes document pixels."""
+    cdp = FakeCdp(labelled=False, scroll=(5, 1905))
+    monkeypatch.setattr(browser_dom_write, "CdpClient", lambda _endpoint: cdp)
+    assert await browser_dom_write.shared_action(_run, "ws://page.test", ("click", "@e2")) == "ok"
+    assert cdp.hit_tests == [(5 + 120, 1905 + 75)]

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BrowserPaneInput } from './browserPaneInput';
+import { BrowserPaneInput, wheelPixels } from './browserPaneInput';
 
 let pending: Map<number, FrameRequestCallback>;
 let id: number;
@@ -30,8 +30,8 @@ describe('pane pointer input', () => {
   input.move(pointer('touch', 170), { x: 40, y: 340 }, .5);
   input.move(pointer('touch', 130), { x: 40, y: 260 }, .5);
   expect(send.mock.calls.map(([message]) => message)).toEqual([
-   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 340, deltaX: 0, deltaY: 60, deltaMode: 0 },
-   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 260, deltaX: 0, deltaY: 80, deltaMode: 0 },
+   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 340, deltaX: 0, deltaY: 60 },
+   { type: 'input_mouse', eventType: 'mouseWheel', x: 40, y: 260, deltaX: 0, deltaY: 80 },
   ]);
   input.move(pointer('touch', 110), { x: 40, y: 220 }, .5);
   input.release(pointer('touch', 110), { x: 40, y: 220 });
@@ -54,5 +54,13 @@ describe('pane pointer input', () => {
   send.mockClear(); input.press(pointer(), { x: 20, y: 200 });
   input.release(pointer(), { x: 20, y: 200 }, true);
   expect(send).not.toHaveBeenCalled();
+ });
+});
+
+describe('wheelPixels', () => {
+ it('keeps pixel deltas and converts line and page deltas to CSS pixels', () => {
+  expect(wheelPixels({ deltaX: 3, deltaY: -90, deltaMode: 0 }, 600)).toEqual({ deltaX: 3, deltaY: -90 });
+  expect(wheelPixels({ deltaX: 1, deltaY: 3, deltaMode: 1 }, 600)).toEqual({ deltaX: 40, deltaY: 120 });
+  expect(wheelPixels({ deltaX: 0, deltaY: -1, deltaMode: 2 }, 600)).toEqual({ deltaX: 0, deltaY: -600 });
  });
 });

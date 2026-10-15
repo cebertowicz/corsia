@@ -10,10 +10,12 @@ from typing import Awaitable, Callable
 from urllib.parse import urlparse
 
 from host_access.browser_cdp import PasswordProbe, Rect
+from host_access.browser_domain import registrable_domain
 from host_access.browser_screencast import PaneScreencast
 from host_access.browser_session_state import BrowserSessionError
 from infra import state
 from infra.database import get_db
+from infra.product_events import emit_product_event
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +25,12 @@ PASSWORD_PAGE = (
     "decline, tell them in chat what you needed the page for and stop."
 )
 PASSWORD_CHECK_FAILED = "This page couldn't be checked"
+PASSWORD_STEP_DESCRIPTION = (
+    "Enter your password in the browser pane. The agent can't see this page and carries on once you're past it.")
+PROVENANCE = "browser.password_guard"
 Probe = Callable[[str | None, frozenset[int]], Awaitable[PasswordProbe]]
+# Locates an agent's ref or CSS selector on the page as a backendNodeId, or None when it can't.
+Resolve = Callable[[str], Awaitable[int | None]]
 # AR6: while an episode is open and a pane is connected, the probe re-runs this many seconds after the
 # person's last input, and at least this often.
 REPROBE_AFTER_INPUT = 0.5
@@ -37,7 +44,11 @@ class PasswordEpisode:
     visit: str
     host: str
     seen_nodes: frozenset[int]
+    # The page target the episode's visit is on; a probe of any other target never settles it.
+    target: str = ""
     node_id: str | None = None
+    # Set once the person's decline (AR7) has been counted, so a resumed re-probe never counts it again.
+    declined: bool = False
     # The episode's one re-probe loop, and the person's latest input that it waits to pause (AR6).
     reprobe: asyncio.Task | None = field(default=None, repr=False)
     last_input: float | None = None
@@ -148,8 +159,13 @@ def _changes_metrics(args: tuple[str, ...]) -> bool:
     return args[:1] in _METRICS_COMMANDS or args[:2] in _METRICS_COMMANDS
 
 
-async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...]) -> None:
-    """Run one probe and enforce the password-page and per-visit read guards."""
+async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...], *,
+                              resolve: Resolve | None = None) -> None:
+    """Run one probe and enforce the password-page and per-visit read guards.
+
+    ``resolve`` locates a value or attribute read's target, so a read of a hidden password input is
+    refused (AR2); without it, such a read on a guarded visit is refused.
+    """
     lock = _probe_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:
         prior = _episodes.get(thread_id)
@@ -178,7 +194,7 @@ async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...
         if prior is not None:
             await _end_episode(thread_id, prior)
         if guarded is not None:
-            _refuse_password_read(guarded, args)
+            await _refuse_password_read(guarded, args, resolve)
 
 
 def person_input(thread_id: str) -> None:
@@ -229,7 +245,12 @@ async def _reprobe(thread_id: str, episode: PasswordEpisode) -> bool:
     """Probe once for an open episode; return whether it is still open and its loop should go on."""
     async with _probe_locks.setdefault(thread_id, asyncio.Lock()):
         probes = list(_pane_probes.get(thread_id, {}).values())
-        if _episodes.get(thread_id) is not episode or not probes or _step_ended(episode):
+        if _episodes.get(thread_id) is not episode or not probes:
+            return False
+        if await _step_ended(episode):
+            if not episode.declined:
+                episode.declined = True
+                await _emit("password_step_declined", thread_id)
             return False
         try:
             result = await probes[0](episode.visit, episode.seen_nodes)
@@ -237,6 +258,11 @@ async def _reprobe(thread_id: str, episode: PasswordEpisode) -> bool:
             # A page mid-navigation can fail one probe. The episode stays open, as an agent command's
             # failed probe fails closed, and the next interval probes again.
             log.info("password re-probe for %s failed: %s", thread_id, exc)
+            return True
+        if result.target != episode.target:
+            # The pane shows another tab than the one the agent was refused on; only the agent's own
+            # next command, which probes its page, can end this episode.
+            log.info("password re-probe for %s reached another page target", thread_id)
             return True
         if result.visit == episode.visit and result.visible_nodes:
             episode.seen_nodes = episode.seen_nodes | result.visible_nodes
@@ -251,8 +277,7 @@ def _episode_for(thread_id: str, result: PasswordProbe, prior: PasswordEpisode |
     if prior is not None and prior.visit == result.visit:
         prior.seen_nodes = prior.seen_nodes | result.visible_nodes
         return prior
-    host = result.host or "this site"
-    episode = PasswordEpisode(result.visit, host, result.visible_nodes)
+    episode = PasswordEpisode(result.visit, result.host, result.visible_nodes, result.target)
     _episodes[thread_id] = episode
     return episode
 
@@ -260,16 +285,12 @@ def _episode_for(thread_id: str, result: PasswordProbe, prior: PasswordEpisode |
 async def _open_episode(thread_id: str, episode: PasswordEpisode) -> None:
     if episode.node_id is not None:
         return
-    public = importlib.import_module("plans.public")
-    db = get_db()
-    try:
-        episode.node_id = public.open_user_step(
-            db, thread_id, key=episode.visit, title=f"Enter your password in the browser ({episode.host})",
-            description="Enter your password in the browser pane. The agent can't see this page and carries on once you're past it.",
-            provenance="browser.password_guard",
-        )
-    finally:
-        db.close()
+    # AR5: the title names the live page's registrable domain, the one the pane's address keeps visible.
+    domain = registrable_domain(episode.host) or "this site"
+    episode.node_id = await asyncio.to_thread(_plan_write, "open_user_step", thread_id, key=episode.visit,
+                                              title=f"Enter your password in the browser ({domain})",
+                                              description=PASSWORD_STEP_DESCRIPTION, provenance=PROVENANCE)
+    await _emit("password_step_opened", thread_id)
 
 
 async def _end_episode(thread_id: str, episode: PasswordEpisode) -> None:
@@ -279,14 +300,18 @@ async def _end_episode(thread_id: str, episode: PasswordEpisode) -> None:
     _publish_password_page(thread_id, False)
 
 
-def _step_ended(episode: PasswordEpisode) -> bool:
+async def _step_ended(episode: PasswordEpisode) -> bool:
     """Whether the person declined the episode's step or it otherwise closed (AR7)."""
     if episode.node_id is None:
         return False
+    return await asyncio.to_thread(_step_row_ended, episode.node_id)
+
+
+def _step_row_ended(node_id: str) -> bool:
     public = importlib.import_module("plans.public")
     db = get_db()
     try:
-        node = public.node_row(db, episode.node_id)
+        node = public.node_row(db, node_id)
     finally:
         db.close()
     return node["archived_at"] is not None or node["state"] in public.TERMINAL_STATES
@@ -295,25 +320,37 @@ def _step_ended(episode: PasswordEpisode) -> bool:
 async def _settle_episode(thread_id: str, episode: PasswordEpisode) -> None:
     if episode.node_id is None:
         return
+    await asyncio.to_thread(_plan_write, "settle_user_step", episode.node_id,
+                            evidence="Password field no longer on the page", provenance=PROVENANCE)
+    await _emit("password_step_settled", thread_id)
+
+
+def _plan_write(operation: str, *args: object, **kwargs: object) -> str | None:
+    """Run one plans.public step write in its own connection and transaction, off the event loop."""
     public = importlib.import_module("plans.public")
     db = get_db()
     try:
-        public.settle_user_step(db, episode.node_id, evidence="Password field no longer on the page",
-                                provenance="browser.password_guard")
+        return getattr(public, operation)(db, *args, **kwargs)
     finally:
         db.close()
 
 
-def _refuse_password_read(episode: PasswordEpisode, args: tuple[str, ...]) -> None:
-    """Keep a password visit's DOM reads unavailable after its field is hidden."""
+async def _emit(action: str, thread_id: str) -> None:
+    await asyncio.to_thread(emit_product_event, "browser_pane", action, thread_id=thread_id)
+
+
+async def _refuse_password_read(episode: PasswordEpisode, args: tuple[str, ...], resolve: Resolve | None) -> None:
+    """Keep a password visit's DOM reads unavailable after its field is hidden (AR2)."""
     if args and args[0] == "eval":
         raise BrowserSessionError(PASSWORD_PAGE)
     if len(args) >= 3 and args[0] == "get" and args[1] in {"value", "attr"}:
         try:
-            node = int(args[2])
-        except ValueError:
-            return
-        if node in episode.seen_nodes:
+            node = await resolve(args[2]) if resolve is not None else None
+        except Exception as exc:
+            log.info("password-visit read target for %s could not be located: %s", episode.visit, exc)
+            node = None
+        # A target that can't be located may be the hidden password input itself, so it fails closed.
+        if node is None or node in episode.seen_nodes:
             raise BrowserSessionError(PASSWORD_PAGE)
 
 

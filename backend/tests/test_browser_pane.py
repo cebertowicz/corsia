@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException, WebSocketDisconnect
 
 from api import browser
-from host_access import browser_cli, browser_control, browser_pane
+from host_access import browser_cdp, browser_cli, browser_control, browser_pane
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -141,18 +141,26 @@ def _rendered(data: dict) -> str:
     return browser_cli.render_model_result(CommandResult(0, json.dumps({"success": True, "data": data}), ""), redactions={})
 
 
+def _raw(data: dict) -> CommandResult:
+    """One successful agent-browser --json result, as the session's own commands receive it."""
+    return CommandResult(0, json.dumps({"success": True, "data": data}), "")
+
+
 class RenderedOwner:
-    """Answers the pane's endpoint lookups exactly as the session owner renders them."""
+    """Resolves the pane's page target through the agent commands' resolver, as the session owner does."""
 
     def __init__(self):
         self.commands = []
 
-    async def run(self, _thread_id, args, **_kwargs):
-        self.commands.append(tuple(args))
-        if args == ("get", "cdp-url"):
-            return _rendered({"cdpUrl": "ws://browser.test/devtools/browser/1"})
-        assert args == ("get", "url")
-        return _rendered({"url": "https://example.test/current"})
+    async def page_endpoint(self, _thread_id):
+        async def run(args, _timeout):
+            self.commands.append(tuple(args))
+            if tuple(args) == ("get", "cdp-url"):
+                return _raw({"cdpUrl": "ws://browser.test/devtools/browser/1"})
+            assert tuple(args) == ("get", "url")
+            return _raw({"url": "https://example.test/current"})
+
+        return await browser_cdp.page_endpoint(run)
 
 
 @pytest.mark.asyncio
@@ -206,7 +214,7 @@ async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp
 
 
 @pytest.mark.asyncio
-async def test_page_endpoint_reads_the_session_owners_rendered_result(monkeypatch):
+async def test_a_pane_resolves_its_page_target_once_through_the_agent_commands_resolver(monkeypatch):
     calls = []
     owner = RenderedOwner()
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
@@ -228,11 +236,11 @@ async def test_a_pane_leaving_mid_read_lets_the_running_command_finish(monkeypat
     started, release, finished = asyncio.Event(), asyncio.Event(), []
 
     class SlowOwner:
-        async def run(self, _thread_id, args, **_kwargs):
+        async def page_endpoint(self, _thread_id):
             started.set()
             await release.wait()
-            finished.append(tuple(args))
-            return _rendered({"cdpUrl": "ws://browser.test/devtools/browser/1"})
+            finished.append(("get", "cdp-url"))
+            return "ws://page.test/current"
 
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: SlowOwner())
     browser_pane.clear_page_endpoint("thread-1", "pane-1")
@@ -257,7 +265,7 @@ async def test_page_info_reads_url_and_title_from_the_session_owners_rendered_re
 
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: InfoOwner())
     # The pane's address and tab label show these values, never the rendered JSON around them.
-    assert await browser_pane.page_info("thread-1", "pane-1") == ("https://www.apple.com/", "Apple")
+    assert await browser_pane.page_info("thread-1") == ("https://www.apple.com/", "Apple")
 
 
 def test_pane_presence_is_not_exclusive_control():
@@ -281,7 +289,7 @@ async def test_shared_pane_does_not_refuse_agent_commands_for_presence(monkeypat
 
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", past_the_gate)
     with pytest.raises(RuntimeError, match="past the control gate"):
-        await owner.run("thread-1", ("open", "https://example.test"), control_token="pane-1")
+        await owner.run("thread-1", ("open", "https://example.test"), pane=True)
 
 
 @pytest.mark.asyncio
@@ -324,10 +332,10 @@ async def test_match_pane_sets_size_density_and_theme_on_the_open_session(monkey
             return "ok"
 
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: Owner())
-    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"), "pane-1")
+    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"))
     assert calls == [
-        (("set", "viewport", "680", "1030", "2"), {"control_token": "pane-1", "session": "existing"}),
-        (("set", "media", "dark"), {"control_token": "pane-1", "session": "existing"}),
+        (("set", "viewport", "680", "1030", "2"), {"pane": True, "session": "existing"}),
+        (("set", "media", "dark"), {"pane": True, "session": "existing"}),
     ]
 
 
@@ -335,7 +343,7 @@ async def test_match_pane_sets_size_density_and_theme_on_the_open_session(monkey
 async def test_pane_resizes_are_matched_one_at_a_time_latest_first(monkeypatch):
     fitted, release = [], asyncio.Event()
 
-    async def match_pane(thread_id, appearance, token):
+    async def match_pane(thread_id, appearance):
         fitted.append((appearance.width, appearance.height))
         await release.wait()
 
@@ -369,8 +377,8 @@ async def test_pane_resizes_are_matched_one_at_a_time_latest_first(monkeypatch):
 async def test_a_newer_pane_size_supersedes_an_older_connections(monkeypatch):
     fitted, release = [], asyncio.Event()
 
-    async def match_pane(thread_id, appearance, token):
-        fitted.append((token, appearance.height))
+    async def match_pane(thread_id, appearance):
+        fitted.append(appearance.height)
         await release.wait()
 
     monkeypatch.setattr(browser_stream.browser_pane, "match_pane", match_pane)
@@ -381,7 +389,7 @@ async def test_a_newer_pane_size_supersedes_an_older_connections(monkeypatch):
     browser_stream._request_match("thread-1", "new-pane", {**size, "height": 830})
     release.set()
     await browser_stream._runners["thread-1"]
-    assert fitted == [("old-pane", 1030), ("new-pane", 830)]
+    assert fitted == [1030, 830]
     assert "thread-1" not in browser_stream._runners
 
 
@@ -426,11 +434,11 @@ async def test_navigate_accepts_an_authenticated_shared_pane(monkeypatch):
         opened.append((thread_id, url, token))
         return "ok"
 
-    async def go(thread_id, action, token):
-        opened.append((thread_id, action, token))
+    async def go(thread_id, action):
+        opened.append((thread_id, action))
         return "ok"
 
-    async def page_info(_thread_id, _token):
+    async def page_info(_thread_id):
         return ("https://www.example.test/path", "Example page")
 
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
@@ -439,11 +447,12 @@ async def test_navigate_accepts_an_authenticated_shared_pane(monkeypatch):
     assert (await browser_stream._navigate("thread-1", "pane-1", {"url": "file:///etc/hosts"}))["error"]
     assert (await browser_stream._navigate("thread-1", "pane-1", {"action": "close"}))["error"] == "Unknown browser action"
     navigated = await browser_stream._navigate("thread-1", "pane-1", {"url": "https://example.test"})
-    assert navigated == {"type": "navigate_result", "error": None, "url": "https://www.example.test/path", "title": "Example page"}
+    assert navigated == {"type": "navigate_result", "error": None, "url": "https://www.example.test/path",
+                         "domain": "example.test", "title": "Example page"}
     for action in ("back", "forward", "reload"):
         assert (await browser_stream._navigate("thread-1", "pane-1", {"action": action}))["error"] is None
-    assert opened == [("thread-1", "https://example.test", "pane-1"), ("thread-1", "back", "pane-1"),
-                      ("thread-1", "forward", "pane-1"), ("thread-1", "reload", "pane-1")]
+    assert opened == [("thread-1", "https://example.test", "pane-1"), ("thread-1", "back"),
+                      ("thread-1", "forward"), ("thread-1", "reload")]
 
 
 @pytest.mark.asyncio
@@ -541,7 +550,7 @@ async def test_match_pane_sizes_every_screencast_on_the_thread_before_the_viewpo
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: Owner())
     for thread_id, token in (("thread-1", "pane-1"), ("thread-1", "pane-2"), ("thread-2", "pane-3")):
         browser_control.screencast_started(thread_id, token, RecordedScreencast(token, log))
-    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"), "pane-1")
+    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"))
     # The page is shared, so every pane on its thread captures at the new device size, starting with
     # the restart that the viewport command triggers.
     assert log == [("capture_at", "pane-1", 1360, 2060), ("capture_at", "pane-2", 1360, 2060),
@@ -600,7 +609,7 @@ async def test_the_command_path_holds_pane_screencasts_during_an_agent_screensho
             raise BrowserSessionError("The browser stopped")
         return CommandResult(0, '{"success":true,"data":{}}', ""), False
 
-    async def page_access(*_args):
+    async def page_access(*_args, **_kwargs):
         pass
 
     monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
@@ -608,6 +617,7 @@ async def test_the_command_path_holds_pane_screencasts_during_an_agent_screensho
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
     monkeypatch.setattr(browser_control, "require_page_access", page_access)
+    monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/current"))
     browser_control.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
     with pytest.raises(BrowserSessionError) if fails else contextlib.nullcontext():
         await owner.run("thread-1", ("screenshot", "/tmp/shot.jpg"), session="existing")
@@ -625,8 +635,8 @@ def _password_page_owner(monkeypatch, opened):
     async def run_admitted(_runtime, args, **_kwargs):
         return CommandResult(0, json.dumps({"success": True, "data": answers[tuple(args[:2])]}), ""), False
 
-    async def password_field(_run, _visit, _known):
-        return browser_control.PasswordProbe("visit-1", "login.example.test", frozenset({42}))
+    async def password_field(endpoint, _visit, _known):
+        return browser_control.PasswordProbe("visit-1", "login.example.test", frozenset({42}), endpoint)
 
     async def open_episode(_thread_id, episode):
         episode.node_id = "password-step"
@@ -636,7 +646,8 @@ def _password_page_owner(monkeypatch, opened):
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
     monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
     monkeypatch.setattr(owner, "_run_admitted", run_admitted)
-    monkeypatch.setattr(browser_pane.browser_cdp, "password_probe", password_field)
+    monkeypatch.setattr(browser_cdp, "page_password_probe", password_field)
+    monkeypatch.setattr(browser_cdp, "page_endpoint", lambda _run: asyncio.sleep(0, result="ws://page.test/current"))
     monkeypatch.setattr(browser_control, "_open_episode", open_episode)
     monkeypatch.setattr(browser_control.state, "broadcast_to_thread", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
@@ -649,8 +660,8 @@ async def test_the_pane_reads_its_labels_and_sizes_a_password_page_without_the_a
     owner = _password_page_owner(monkeypatch, opened)
     # The person navigated their pane to a sign-in page: its address and tab label are theirs to see,
     # and their pane still sizes the page. No agent asked, so no password step opens.
-    assert await browser_pane.page_info("thread-1", "pane-1") == ("https://login.example.test/", "Sign in")
-    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"), "pane-1")
+    assert await browser_pane.page_info("thread-1") == ("https://login.example.test/", "Sign in")
+    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"))
     assert opened == []
     # The agent's own read of the same page is refused and opens the person's step.
     with pytest.raises(BrowserSessionError, match="asks for a password"):
@@ -663,6 +674,6 @@ async def test_the_pane_reads_its_labels_and_sizes_a_password_page_without_the_a
 async def test_a_pane_command_is_only_navigation_labels_or_page_size(monkeypatch, args):
     owner = _password_page_owner(monkeypatch, [])
     with pytest.raises(BrowserSessionError, match="only navigates"):
-        await owner.run("thread-1", args, control_token="pane-1", session="existing")
+        await owner.run("thread-1", args, pane=True, session="existing")
 
 

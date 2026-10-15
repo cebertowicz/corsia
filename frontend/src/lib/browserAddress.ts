@@ -1,30 +1,25 @@
-const MULTIPART_PUBLIC_SUFFIXES = new Set(['co.uk', 'org.uk', 'ac.uk', 'com.au', 'net.au', 'org.au', 'co.jp']);
-
-/** The visible address leads with the registrable domain and only elides the middle. */
-export function registrableDomain(hostname: string): string {
-	// An IP address has no registrable domain: its whole host identifies the site.
-	if (hostname.startsWith('[') || /^\d+(\.\d+){3}$/.test(hostname)) return hostname;
-	const labels = hostname.toLowerCase().split('.').filter(Boolean);
-	if (labels.length <= 2) return labels.join('.');
-	const suffix = labels.slice(-2).join('.');
-	return MULTIPART_PUBLIC_SUFFIXES.has(suffix) && labels.length >= 3
-		? labels.slice(-3).join('.')
-		: labels.slice(-2).join('.');
-}
-
-export function browserAddressLabel(raw: string): string {
+/**
+ * The visible address leads with the page's registrable domain and only elides the middle.
+ *
+ * The backend names that domain from the Public Suffix List (host_access/browser_domain.py), the same
+ * one the password step's title uses, so the pane never guesses where one site ends and another starts.
+ * Without it, as for a URL with no host, the whole host leads.
+ */
+export function browserAddressLabel(raw: string, domain?: string | null): string {
 	try {
 		const parsed = new URL(raw);
-		const domain = registrableDomain(parsed.hostname);
-		const subdomain = parsed.hostname.slice(0, Math.max(0, parsed.hostname.length - domain.length)).replace(/\.$/, '');
+		const host = parsed.hostname.toLowerCase();
+		if (!host) return raw;
+		const lead = domain && (host === domain || host.endsWith(`.${domain}`)) ? domain : host;
+		const subdomain = host.slice(0, Math.max(0, host.length - lead.length)).replace(/\.$/, '');
 		const tail = `${parsed.pathname}${parsed.search}${parsed.hash}`;
-		return [domain, subdomain || null, tail && tail !== '/' ? `…${tail.split('/').at(-1) || ''}` : null]
+		return [lead, subdomain || null, tail && tail !== '/' ? `…${tail.split('/').at(-1) || ''}` : null]
 			.filter(Boolean).join(' · ');
 	} catch {
 		return raw;
 	}
 }
 
-export function browserTabLabel(title: string | null | undefined, url: string): string {
-	return title?.trim() || browserAddressLabel(url) || 'Browser';
+export function browserTabLabel(title: string | null | undefined, url: string, domain?: string | null): string {
+	return title?.trim() || browserAddressLabel(url, domain) || 'Browser';
 }
