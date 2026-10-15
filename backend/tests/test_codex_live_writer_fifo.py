@@ -109,6 +109,18 @@ async def test_input_claimed_under_a_live_writer_is_delivered_after_its_release(
     )) == 1
 
 
+def _register_writer(turn_id: str = "turn-writer"):
+    """A live Codex handle in this process, owned by a Turn other than the refused input's."""
+    from subagents import codex_runtime
+
+    live = codex_runtime._LiveCodex(
+        codex_thread_id=f"provider-{THREAD}", session=None, parent_thread_id=None,
+        name="codex", corsia_turn=SimpleNamespace(turn_id=turn_id), model="gpt-5-codex",
+    )
+    codex_runtime._LIVE.put(THREAD, live)
+    return live
+
+
 def _refusal(kind: str) -> BaseException:
     from subagents.codex_app_server_errors import CodexAppServerError
     from subagents.codex_runtime_errors import CodexLiveTurnBusy
@@ -130,6 +142,7 @@ def test_live_writer_refusal_holds_the_head_and_later_inputs_wait_behind_it(
     from shared_send_fixtures import _insert_session
 
     _insert_session(THREAD, model="codex/gpt-5-codex", spawned_by=None)
+    _register_writer()
     batch = _claim("head", "turn-head")
     assert batch is not None
     begin_batch_write(batch, attempt_id="attempt", started_at=utc_now_iso())
@@ -160,3 +173,72 @@ def test_live_writer_refusal_holds_the_head_and_later_inputs_wait_behind_it(
     )
     ids = [item.message_id for item in claimed.items]
     assert [i for i in ids if i in {"head", "later"}] == ["head", "later"]
+
+
+def _begin_refused_write(kind: str):
+    from infra.input_writes import begin_batch_write, settle_batch_write
+    from infra.time import utc_now_iso
+    from shared_send_fixtures import _insert_session
+
+    _insert_session(THREAD, model="codex/gpt-5-codex", spawned_by=None)
+    batch = _claim("head", "turn-head")
+    assert batch is not None
+    begin_batch_write(batch, attempt_id="attempt", started_at=utc_now_iso())
+    return lambda: settle_batch_write(
+        "attempt", outcome="proved_no_write", error=_refusal(kind),
+    )
+
+
+@pytest.mark.parametrize("kind", ["busy", "active_writer"])
+def test_refusal_after_the_writer_released_fails_visibly_instead_of_holding(
+    isolated_db, kind,
+) -> None:
+    """Lost wakeup: finalize_live and the release both ran before the hold write."""
+    from infra.live_writer_hold import release_live_writer_holds
+    from subagents.codex_runtime_state import finalize_live
+
+    settle = _begin_refused_write(kind)
+    live = _register_writer()
+    finalize_live(THREAD, live)
+    assert release_live_writer_holds(THREAD) is False  # matched no row yet
+    settle()
+    assert _message("head")["delivery_state"] == "failed"
+
+
+def test_active_writer_refusal_this_process_does_not_own_fails_visibly(isolated_db) -> None:
+    """A -32600 from another backend's writer: no local terminal will ever fire."""
+    settle = _begin_refused_write("active_writer")
+    settle()
+    assert _message("head")["delivery_state"] == "failed"
+
+
+def test_refusal_while_only_the_refused_input_owns_the_handle_fails_visibly(isolated_db) -> None:
+    """The successor's own live handle is not a prior writer that will release the hold."""
+    settle = _begin_refused_write("active_writer")
+    _register_writer("turn-head")
+    settle()
+    assert _message("head")["delivery_state"] == "failed"
+
+
+def test_boot_recovery_releases_a_live_writer_hold_and_delivers_the_input(isolated_db) -> None:
+    from infra.database import get_db
+    from infra.thread_recovery import recover_threads
+    from subagents import codex_runtime
+
+    settle = _begin_refused_write("busy")
+    _register_writer()
+    settle()
+    assert _message("head")["delivery_state"] == "queued"
+    codex_runtime._LIVE.pop(THREAD, None)  # a restart leaves no live handle behind
+
+    db = get_db()
+    try:
+        recovered = recover_threads(
+            boot_epoch="new-boot", recovered_at="2026-10-14T20:00:00+00:00",
+            successor_id=lambda _thread_id: "turn-boot", db=db,
+        )
+    finally:
+        db.close()
+
+    claims = [s.successor for s in recovered.settlements if s.successor] + list(recovered.batches)
+    assert [i.message_id for c in claims for i in c.items if i.message_id == "head"] == ["head"]

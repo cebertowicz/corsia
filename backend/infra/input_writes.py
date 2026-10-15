@@ -229,7 +229,9 @@ def settle_batch_write(
         from subagents.codex_runtime_errors import is_live_writer_refusal
 
         if no_write_state == "failed" and is_live_writer_refusal(error):
-            return hold_for_live_writer(connection, rows)
+            held = hold_for_live_writer(connection, rows)
+            if held is not None:
+                return held
         return sequence_attempt(
             connection, rows, state=no_write_state, outcome=outcome,
             error=str(error) if error is not None else None,
