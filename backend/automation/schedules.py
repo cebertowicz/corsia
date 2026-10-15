@@ -1,4 +1,10 @@
-"""Actor-bound bounded clock and cadence schedule store."""
+"""Actor-bound schedule store: bounded clock and cadence wakes, and script runs.
+
+A ``script`` schedule is a model-free run of a file the owner wrote
+(``automation.script_schedules``). It shares this table, its owner binding, its
+list/cancel/retire paths and its pause hold, but never becomes a continuation
+trigger: the continuation source reads ``due`` below, which leaves it out.
+"""
 
 from __future__ import annotations
 
@@ -29,6 +35,13 @@ class Schedule:
     created_by_actor: str
     created_at: str
     updated_at: str
+    script_path: str | None = None
+    script_sha256: str | None = None
+    timeout_seconds: int | None = None
+    running_since: str | None = None
+    last_status: str | None = None
+    last_error: str | None = None
+    noted_at: str | None = None
 
 
 def _parse(value: str) -> datetime:
@@ -55,7 +68,10 @@ def _next_run(kind: str, spec: str, now: str, max_runs: int) -> str:
             raise ValueError("clock schedule must be in the future")
         return due.isoformat()
     if kind != "cadence":
-        raise ValueError("schedule kind must be clock or cadence")
+        raise ValueError(
+            "schedule kind must be clock or cadence; register a script with "
+            "script_path"
+        )
     try:
         seconds = int(spec)
     except (TypeError, ValueError) as exc:
@@ -145,11 +161,14 @@ def cancel(schedule_id: str, *, thread_id: str, actor_id: str, db) -> bool:
 
 
 def due(now: str, *, db) -> list[Schedule]:
-    """Return active schedules due at the current runner clock."""
+    """Return active model-wake schedules due at the current runner clock.
+
+    A script schedule is never a wake: ``script_runner`` claims it instead.
+    """
 
     rows = db.execute(
         """SELECT * FROM automation_schedules
-           WHERE state='active' AND next_run_at<=?
+           WHERE state='active' AND kind IN ('clock','cadence') AND next_run_at<=?
            ORDER BY next_run_at,id""",
         (now,),
     ).fetchall()
