@@ -162,6 +162,9 @@ def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: d
     if existing := env.get("NODE_OPTIONS"):
         node_options = f"{node_options} {existing}"
     server_env = {
+        # npm runs a package bin through a bare `sh`, and libuv's PATH search
+        # stops at the first sandbox-denied entry (EPERM) before reaching /bin.
+        "npm_config_script_shell": "/bin/sh",
         **env,
         "npm_config_cache": str(cache_dir / "npm"),
         "UV_CACHE_DIR": str(cache_dir / "uv"),

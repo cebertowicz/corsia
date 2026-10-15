@@ -147,10 +147,12 @@ def test_local_mcp_safehouse_exec_preserves_argv_and_env_scope(local_app_workspa
         assert argv[separator + 1:] == ["/usr/local/bin/local-mcp", "--literal", "two words"]
         assert "/bin/bash" not in argv and "-c" not in argv
         assert secret not in argv
-        assert {"SERVICE_TOKEN", "LOG_LEVEL", "NODE_OPTIONS", "npm_config_cache", "UV_CACHE_DIR", "XDG_CACHE_HOME"} <= set(
-            passed_env.removeprefix("--env-pass=").split(",")
-        )
+        assert {
+            "SERVICE_TOKEN", "LOG_LEVEL", "NODE_OPTIONS", "npm_config_cache", "npm_config_script_shell",
+            "UV_CACHE_DIR", "XDG_CACHE_HOME",
+        } <= set(passed_env.removeprefix("--env-pass=").split(","))
         assert params.env["SERVICE_TOKEN"] == secret
+        assert params.env["npm_config_script_shell"] == "/bin/sh"
         assert params.cwd == local_app_workspace
         cache_dir = Path(params.env["npm_config_cache"]).parent
         assert cache_dir.parent.name == "mcp"
@@ -177,6 +179,50 @@ def test_local_mcp_preload_prepends_existing_node_options(local_app_workspace, e
         assert params.env["NODE_OPTIONS"] == (expected if existing is None else f"{expected} {existing}")
     finally:
         profile_path.unlink(missing_ok=True)
+
+
+def test_local_mcp_keeps_an_app_configured_npm_script_shell(local_app_workspace):
+    from tools.mcp import _safehouse_stdio_parameters
+
+    params, profile_path = _safehouse_stdio_parameters(
+        "script-shell", "npx", [], {"npm_config_script_shell": "/bin/zsh"},
+    )
+    try:
+        assert params.env["npm_config_script_shell"] == "/bin/zsh"
+    finally:
+        profile_path.unlink(missing_ok=True)
+
+
+def test_npx_runs_its_bin_past_a_path_entry_that_stops_libuv(local_app_workspace, tmp_path):
+    """libuv's PATH search for a bare `sh` aborts on any error but ENOENT, ENOTDIR or EACCES.
+
+    Under Safehouse that error is EPERM from a denied entry; a self-referencing
+    `sh` link (ELOOP) reproduces the same abort without a sandbox.
+    """
+    from tools.mcp import _safehouse_stdio_parameters
+
+    npx_bin, node_bin = shutil.which("npx"), shutil.which("node")
+    if npx_bin is None or node_bin is None:
+        pytest.skip("npx is unavailable")
+    _write_npx_fixture(tmp_path)
+    poison = tmp_path / "poison"
+    poison.mkdir()
+    (poison / "sh").symlink_to("sh")
+    params, profile_path = _safehouse_stdio_parameters("poisoned-path", "npx", [], {})
+    profile_path.unlink(missing_ok=True)
+    path = os.pathsep.join([str(poison), str(Path(node_bin).parent), "/usr/bin", "/bin"])
+    inherited = {key: value for key, value in os.environ.items() if key.lower() != "npm_config_script_shell"}
+    base = {**inherited, "PATH": path, "npm_config_cache": params.env["npm_config_cache"]}
+
+    def npx(env: dict[str, str]) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [npx_bin, "--no-install", "corsia-npx-mcp"], cwd=tmp_path, env=env, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, errors="replace", timeout=_CASE_TIMEOUT, check=False,
+        )
+
+    assert npx(base).returncode != 0
+    fixed = npx({**base, "npm_config_script_shell": params.env["npm_config_script_shell"]})
+    assert fixed.returncode == 0, fixed.stderr
 
 
 def test_mcp_cache_ids_are_stable_path_safe_and_app_private(local_app_workspace):
@@ -305,6 +351,41 @@ _SPAWN_SH = (
     "console.log(JSON.stringify({status: r.status, signal: r.signal, error: r.error && String(r.error)}));"
     "process.exit(r.status === 0 ? 0 : 1);"
 )
+# P1-P5 and P8: spawn routes under one app envelope; npm's own set-path builds the PATH it gives a bin.
+_SPAWN_PROBE = r'''
+const cp = require('child_process'), fs = require('fs'), path = require('path');
+const outcome = (r) => r.error
+  ? {code: r.error.code, errno: r.error.errno, syscall: r.error.syscall, path: r.error.path}
+  : {status: r.status, signal: r.signal};
+function npmPath() {
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    let cli;
+    try { cli = fs.realpathSync(path.join(dir, 'npx')); } catch { continue; }
+    const setPath = require(path.resolve(path.dirname(cli), '..', 'node_modules', '@npmcli', 'run-script', 'lib', 'set-path.js'));
+    return setPath(process.cwd(), [], {PATH: process.env.PATH}).PATH;
+  }
+  throw new Error('no readable npx on PATH');
+}
+const run = (file, args, PATH) => outcome(cp.spawnSync(file, args, {env: {...process.env, PATH}, stdio: 'ignore'}));
+const probes = {
+  P1: () => [run('/usr/bin/true', [], process.env.PATH)],
+  P2: () => [run('sh', ['-c', 'true'], '/usr/bin:/bin')],
+  P3: () => [run('sh', ['-c', 'true'], npmPath())],
+  P4: () => [run('/bin/sh', ['-c', 'true'], npmPath())],
+  P5: () => npmPath().split(path.delimiter).map((entry) => {
+    let stat = 'ok';
+    try { fs.statSync(entry); } catch (e) { stat = `${e.code} errno=${e.errno}`; }
+    const r = cp.spawnSync(path.join(entry, 'sh'), ['-c', 'true'], {stdio: 'ignore'});
+    return `${entry} stat=${stat} spawn(sh)=${r.error ? r.error.code : 'ok'}`;
+  }),
+  P8: () => [run('/usr/bin/env', ['node', '-e', '0'], npmPath())],
+};
+for (const line of probes[process.argv[1]]()) console.log(typeof line === 'string' ? line : JSON.stringify(line));
+'''
+_PROBE_LABELS = {
+    "P1": "spawn-usr-bin-true", "P2": "sh-clean-path", "P3": "sh-npm-path",
+    "P4": "bin-sh-npm-path", "P5": "npm-path-entries", "P8": "env-node-npm-path",
+}
 _WRITE_PROBE = (
     "const fs = require('fs'); let r;"
     "try { fs.writeFileSync(process.argv[1], 'x'); r = {result: 'wrote'}; }"
@@ -454,6 +535,33 @@ def _npx_cases(corsia) -> list[_Case]:
         _launch("j-sh-c-node", corsia, "/bin/sh", ["-c", "node -e 0"]),
         _launch("k-node-spawnsync-sh", corsia, "node", ["-e", _SPAWN_SH]),
     ]
+
+
+def _npx_probe_cases(profiles: list[Path]) -> list[_Case]:
+    """P1-P8 (INFO): the syscall and PATH entry behind npm's bin spawn, under the envelope e uses."""
+    from mcp.client.stdio import get_default_environment
+    from tools.mcp import _safehouse_stdio_parameters
+
+    def envelope(name: str, command: str, args: list[str]):
+        params, profile = _safehouse_stdio_parameters(name, command, args, {})
+        profiles.append(profile)
+        return [params.command, *params.args], {**get_default_environment(), **params.env}, Path(params.cwd)
+
+    cases = []
+    for probe, label in _PROBE_LABELS.items():
+        case = _run_raw(f"{probe}-{label}", *envelope(f"probe-{probe}", "node", ["-e", _SPAWN_PROBE, probe]))
+        case.detail = " | ".join(case.stdout) or case.detail
+        cases.append(case)
+    # The same npx launch with and without the launcher's absolute script shell.
+    argv, env, cwd = envelope("probe-npx", "npx", ["--no-install", "corsia-npx-mcp"])
+    without = {key: value for key, value in env.items() if key != "npm_config_script_shell"}
+    cases += [
+        _run_raw("P6-npx-without-script-shell", argv, without, cwd),
+        _run_raw("P7-npx-with-script-shell", argv, env, cwd),
+    ]
+    for case in cases:
+        case.status = "INFO"
+    return cases
 
 
 def _write_verdict(case: _Case, target: Path, grants: list[str], must_deny: bool) -> _Case:
@@ -665,12 +773,9 @@ def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str
     ]
     without_preload = {key: value for key, value in env.items() if key != "NODE_OPTIONS"}
     p = _run_raw("p-process-title-without-preload", argv, without_preload, cwd)
-    if _signal_of(p.returncode) == "SIGSEGV":
-        p.status = "PASS"
-        p.detail = f"expected SIGSEGV without preload; {p.detail}"
-    else:
-        p.status = "FAIL"
-        p.detail = f"expected SIGSEGV without preload; {p.detail}"
+    # Safehouse's shell reports the crash as 139, which _signal_of names "SIGSEGV via shell".
+    p.status = "PASS" if _signal_of(p.returncode).split()[0] == "SIGSEGV" else "FAIL"
+    p.detail = f"expected SIGSEGV without preload; {p.detail}"
     q = _run_raw("q-process-title-with-preload", argv, env, cwd)
     diagnostics = [
         _run_raw("b-control-usr-bin-true", control, control_env, cwd),
@@ -692,7 +797,9 @@ def _confinement(
     report: dict, secret: str, blocked: Path, workspace: Path, launched_argvs: list[list[str]],
 ) -> tuple[str, str]:
     """Require real MCP apps to retain the secret only in env and get EPERM outside grants."""
-    write = report.get("write") if isinstance(report.get("write"), dict) else {}
+    write = report.get("write")
+    if not isinstance(write, dict):
+        write = {}
     errno_is_eperm = write.get("errno") in {-1, errno.EPERM}
     launch_secret = any(secret in json.dumps(argv) for argv in launched_argvs)
     problems = [message for failed, message in (
@@ -811,6 +918,7 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
             # uvx comes first on PATH for this test only; CORSIA passes PATH through to the app.
             monkeypatch.setenv("PATH", f"{uv_bin}{os.pathsep}{os.environ.get('PATH', '')}")
             host.append(f"uvx (test-installed): {shutil.which('uvx')} ({_host_output([str(uv_bin / 'uvx'), '--version'])})")
+        cases.extend(await asyncio.to_thread(_npx_probe_cases, profiles))
         node_app = str(workspace / "node_modules" / ".bin" / "corsia-npx-mcp")
         for name, command, args, timeout in (
             ("d-node-direct", "node", [node_app], 30),
