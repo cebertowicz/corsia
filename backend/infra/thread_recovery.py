@@ -7,6 +7,7 @@ from typing import Callable
 
 from infra.database import write_transaction
 from infra.input_writes import settle_batch_write
+from infra.live_writer_hold import clear_live_writer_holds
 from infra.thread_input_types import TurnAdmission
 from infra.thread_inputs import start_idle_turn
 
@@ -43,6 +44,8 @@ def recover_threads(
     settlements: list[TerminalSettlement] = []
     batches: list[TurnAdmission] = []
     with write_transaction(db, scope="recover_threads") as connection:
+        # No dead epoch can own a Codex writer, so nothing would release these holds.
+        clear_live_writer_holds(connection)
         rows = connection.execute(
             "SELECT id,thread_id,status,boot_epoch,turn_order,execution_epoch,model "
             "FROM active_turns WHERE status='running' ORDER BY turn_order"
