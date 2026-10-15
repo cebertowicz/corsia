@@ -48,6 +48,8 @@ def hold_for_live_writer(
     Returns ``None`` without writing when this process owns no prior writer to
     release the hold; the caller then fails the input visibly.
     """
+    if not db.in_transaction:
+        raise RuntimeError("live-writer hold requires the input writer's transaction")
     thread_id = str(rows[0]["thread_id"])
     successors = {str(row["active_turn_id"]) for row in rows if row["active_turn_id"]}
     if not _owns_prior_writer(thread_id, successors):
@@ -65,6 +67,8 @@ def hold_for_live_writer(
 
 def clear_live_writer_holds(db: sqlite3.Connection, thread_id: str | None = None) -> bool:
     """Lift live-writer holds (one thread's, or all); true when any input became claimable."""
+    if not db.in_transaction:
+        raise RuntimeError("live-writer hold release requires a write transaction")
     return db.execute(
         "UPDATE messages SET write_outcome=NULL,delivery_error=NULL,"
         "delivery_revision=delivery_revision+1 WHERE "
