@@ -151,6 +151,7 @@ async def test_bounded_scan_passes_measurement_cutoff_to_selector(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_completed_capped_scan_activates_and_notifies_once(monkeypatch):
+    from core import corrections_recording as core_recording
     from jobs import corrections_activation, corrections_realtime, corrections_recording
 
     complete = Mock(return_value=True)
@@ -162,8 +163,10 @@ async def test_completed_capped_scan_activates_and_notifies_once(monkeypatch):
     monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
     monkeypatch.setattr(corrections_recording, "_next_pending_batch", next_batch)
     monkeypatch.setattr(corrections_recording, "_owner_user_ids", lambda: ["owner"])
-    monkeypatch.setattr(corrections_activation, "active_correction_count", lambda: 2)
-    monkeypatch.setattr(corrections_activation, "count_corrections", lambda version: 3)
+    monkeypatch.setattr(core_recording, "active_corrections_version", lambda: None)
+    monkeypatch.setattr(
+        corrections_activation, "weekly_correction_figure", lambda version, **_kwargs: 3.0,
+    )
     monkeypatch.setattr(corrections_activation, "complete_backfill", complete)
     monkeypatch.setattr(corrections_activation, "tell_conductor_about_activation", notified)
 

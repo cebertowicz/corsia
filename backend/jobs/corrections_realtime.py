@@ -135,9 +135,10 @@ async def _activate_after_backfill(manifest: AssetManifest) -> None:
     """Switch Measurement only after this immutable version's bounded fill completes."""
     from api.measurement_agents import BASELINE_PERIODS
     from jobs.corrections_activation import (
-        active_correction_count, complete_backfill, count_corrections,
-        tell_conductor_about_activation,
+        complete_backfill, measurement_window_start, tell_conductor_about_activation,
+        weekly_correction_figure,
     )
+    from core.corrections_recording import active_corrections_version
     from jobs.corrections_recording import _owner_user_ids
 
     owners = await run_in_db(_owner_user_ids)
@@ -145,13 +146,21 @@ async def _activate_after_backfill(manifest: AssetManifest) -> None:
         logger.warning("corrections activation skipped: expected one durable owner, found {}", len(owners))
         return
     version = manifest.checker_version()
+    weeks = BASELINE_PERIODS + 1
+    since = measurement_window_start().isoformat()
+    old_version = await run_in_db(active_corrections_version)
+    before = (
+        await run_in_db(weekly_correction_figure, old_version, since=since, weeks=weeks)
+        if old_version is not None else None
+    )
+    after = await run_in_db(weekly_correction_figure, version, since=since, weeks=weeks)
     activated = await run_in_db(
         complete_backfill,
         version,
         owner_user_id=owners[0],
-        weeks=BASELINE_PERIODS + 1,
-        before_count=await run_in_db(active_correction_count),
-        after_count=await run_in_db(count_corrections, version),
+        weeks=weeks,
+        before_count=before,
+        after_count=after,
     )
     if activated:
         await tell_conductor_about_activation(version)

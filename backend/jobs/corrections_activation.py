@@ -80,7 +80,7 @@ def active_correction_count() -> int | None:
 
 
 def complete_backfill(
-    version, *, owner_user_id: str, weeks: int, before_count: int | None, after_count: int,
+    version, *, owner_user_id: str, weeks: int, before_count: float | None, after_count: float,
 ) -> bool:
     """Atomically activate a fully backfilled version exactly once."""
     from infra.database import write_transaction
@@ -107,8 +107,8 @@ def complete_backfill(
     return True
 
 
-def count_corrections(version) -> int:
-    """Count retained correction facts for one immutable classifier version."""
+def weekly_correction_figure(version, *, since: str, weeks: int) -> float:
+    """Return the bounded-window weekly correction figure for one full version."""
     from core.corrections_recording import CORRECTION_EVENT
     from infra.database import get_db
 
@@ -116,13 +116,17 @@ def count_corrections(version) -> int:
     try:
         row = db.execute(
             """SELECT COUNT(*) FROM outcome_events
-               WHERE event_name=? AND retracted_at IS NULL
+               WHERE event_name=? AND retracted_at IS NULL AND ts >= ?
+                 AND json_extract(attributes, '$.asset_id')=?
                  AND json_extract(attributes, '$.asset_version')=?
                  AND json_extract(attributes, '$.head')=?
+                 AND json_extract(attributes, '$.threshold')=?
+                 AND json_extract(attributes, '$.input_policy_id')=?
                  AND json_extract(attributes, '$.label')='correction'""",
-            (CORRECTION_EVENT, version.version, version.head),
+            (CORRECTION_EVENT, since, version.asset_id, version.version, version.head,
+             f"{version.threshold:.6f}", version.input_policy_id),
         ).fetchone()
-        return int(row[0])
+        return int(row[0]) / weeks
     finally:
         db.close()
 
