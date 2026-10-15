@@ -55,6 +55,16 @@
 	const isLocalGroup = (group: ModelGroup) => group.rows.some((model) => getModelDispatchId(model).startsWith('omlx@'));
 	const hasLocalGroup = $derived(groups.some(isLocalGroup));
 	$effect(() => watchLocalStatus());
+	function showReplaceConsent() {
+		toasts.showAction(
+			"The oMLX on this computer doesn't start. CORSIA can reinstall it and download the local model. Reinstalling replaces that oMLX and changes its settings. Not now leaves it unchanged.",
+			{ label: 'Reinstall', run: async () => {
+				const replaced = await retryLocalSetup('setup', false, true);
+				if (!replaced.ok) toasts.show("Couldn't set up the local model.", 'error');
+			} },
+		);
+	}
+
 	async function retryLocal(kind: 'starter' | 'setup') {
 		const result = await retryLocalSetup(kind);
 		if (result.code === 'consent_required') {
@@ -62,9 +72,12 @@
 				'CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.',
 				{ label: 'Use existing oMLX', run: async () => {
 					const consented = await retryLocalSetup('setup', true);
-					if (!consented.ok) toasts.show("Couldn't set up the local model.", 'error');
+					if (consented.code === 'replace_consent_required') showReplaceConsent();
+					else if (!consented.ok) toasts.show("Couldn't set up the local model.", 'error');
 				} },
 			);
+		} else if (result.code === 'replace_consent_required') {
+			showReplaceConsent();
 		} else if (!result.ok) {
 			toasts.show("Couldn't set up the local model.", 'error');
 		}

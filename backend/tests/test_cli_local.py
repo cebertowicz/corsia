@@ -111,6 +111,32 @@ def test_local_setup_directs_existing_omlx_consent_to_the_app(monkeypatch, capsy
     )
 
 
+def test_local_setup_does_not_retry_when_replacement_consent_is_required(monkeypatch, capsys):
+    import io
+
+    import cli_local
+
+    monkeypatch.setattr(cli_local, "_read_token", lambda: "service-token")
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1", 409, "Conflict", {},
+        io.BytesIO(b'{"detail": {"code": "replace_consent_required"}}'),
+    )
+    calls = []
+
+    def request(*args):
+        calls.append(args)
+        raise error
+
+    monkeypatch.setattr(cli_local, "request_json", request)
+
+    assert cli_local.cmd_setup(_args()) == 2
+    assert len(calls) == 1
+    assert capsys.readouterr().out == (
+        "The oMLX on this computer doesn't start.\n"
+        "Open the CORSIA app: Reinstall replaces that oMLX and changes its settings; Not now leaves it untouched.\n"
+    )
+
+
 def test_local_setup_prints_failed_flight_result_and_returns_two(monkeypatch, capsys):
     import cli_local
 

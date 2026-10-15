@@ -187,7 +187,7 @@ def test_local_download_requires_consent_before_starting_an_existing_omlx(client
     assert response.json() == {"code": "consent_required"}
 
 
-def test_broken_leftover_requires_consent_then_starts_setup_after_consent(client, monkeypatch, tmp_path):
+def test_broken_leftover_requires_second_replacement_consent_before_setup(client, monkeypatch, tmp_path):
     from llm import local_setup, local_setup_ownership
 
     leftover = tmp_path / "omlx"
@@ -196,7 +196,7 @@ def test_broken_leftover_requires_consent_then_starts_setup_after_consent(client
     monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda name: str(leftover) if name == "omlx" else None)
     monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: tmp_path / "owned")
     monkeypatch.setattr(local_setup_ownership, "consent_marker_path", lambda: consented)
-    monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: pytest.fail("consent check must not execute oMLX"))
+    monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: True)
     monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", local_setup_ownership.existing_omlx_requires_consent)
     calls = 0
 
@@ -207,13 +207,18 @@ def test_broken_leftover_requires_consent_then_starts_setup_after_consent(client
 
     monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
     refused = _post(client, "/api/setup/local-download")
-    accepted = _post(client, "/api/setup/local-download", {"consent_existing": True})
-
+    reuse_only = _post(client, "/api/setup/local-download", {"consent_existing": True, "consent_replace": True})
+    no_replace = _post(client, "/api/setup/local-download")
     assert refused.status_code == 409
     assert refused.json() == {"code": "consent_required"}
+    assert reuse_only.status_code == no_replace.status_code == 409
+    assert reuse_only.json() == no_replace.json() == {"code": "replace_consent_required"}
+    assert consented.exists()
+    assert calls == 0
+
+    accepted = _post(client, "/api/setup/local-download", {"consent_replace": True})
     assert accepted.status_code == 200
     assert accepted.json()["stage"] == "Repairing oMLX"
-    assert consented.exists()
     assert calls == 1
 
 

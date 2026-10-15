@@ -18,10 +18,10 @@ async function read(): Promise<void> {
 	} catch { /* the line stays as it was */ }
 }
 
-export type LocalSetupRetry = { ok: boolean; code?: 'consent_required' };
+export type LocalSetupRetry = { ok: boolean; code?: 'consent_required' | 'replace_consent_required' };
 
 /** Try again: the same action as the first-run card's for that kind. The starter route never writes oMLX settings. */
-export async function retryLocalSetup(kind: 'starter' | 'setup', consentExisting = false): Promise<LocalSetupRetry> {
+export async function retryLocalSetup(kind: 'starter' | 'setup', consentExisting = false, consentReplace = false): Promise<LocalSetupRetry> {
 	const t = get(token);
 	if (!t) return { ok: false };
 	let result: LocalSetupRetry = { ok: true };
@@ -29,7 +29,9 @@ export async function retryLocalSetup(kind: 'starter' | 'setup', consentExisting
 		if (kind === 'starter') {
 			result = { ok: (await addStarterModel(t)).ok };
 		} else {
-			const response = await setupLocalSource(t, consentExisting);
+			const response = consentReplace
+				? await setupLocalSource(t, consentExisting, true)
+				: await setupLocalSource(t, consentExisting);
 			result = { ok: response.ok, code: response.code };
 		}
 	} catch { result = { ok: false }; }

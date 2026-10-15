@@ -3,6 +3,7 @@
 	import { get } from 'svelte/store';
 	import { Button, Field, ListRow, Message, StatePill, Toggle } from '$lib/components/ui';
 	import SetupShell, { type SetupJob, type SetupStep } from './SetupShell.svelte';
+	import SetupOmlxConsent from './SetupOmlxConsent.svelte';
 	import { token, user } from '$lib/stores/auth';
 	import { fetchSources, recheckSources, setupLocalSource, sourceIsReady, type ModelSource } from '$lib/conductorSources';
 	import { accountToSignIn, startSignin } from '$lib/conductorSourcesApi';
@@ -33,6 +34,8 @@
 	let localDownloadPending = $state(false);
 	let localSetupBusy = $state(false);
 	let existingOmlxConsent = $state(false);
+	let replaceOmlxConsent = $state(false);
+	let localRepairDeferred = $state(false);
 	let keyOpen = $state(false);
 	let providerName = $state('anthropic');
 	let apiKey = $state('');
@@ -88,7 +91,8 @@
 			case 'error':
 				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
-				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
+				if (replaceOmlxConsent) return { title: "The oMLX on this computer doesn't start", lede: `CORSIA can reinstall it and download ${downloadModelLabel} (${status.model_size_gb ?? '…'} GB). Reinstalling replaces that oMLX and changes its settings.` };
+			if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
 				return { title: 'Choose an AI model', lede: 'Your agents need at least one. You can add more later in Settings.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
 		}
 	});
@@ -116,13 +120,13 @@
 		}
 	}
 
-	type LocalDownloadStart = 'started' | 'consent_required' | 'failed';
+	type LocalDownloadStart = 'started' | 'consent_required' | 'replace_consent_required' | 'failed';
 
-	async function startLocalDownload(consentExisting = false): Promise<LocalDownloadStart> {
-		if (!localWanted && !consentExisting) return 'started';
-		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting }) });
+	async function startLocalDownload(consentExisting = false, consentReplace = false): Promise<LocalDownloadStart> {
+		if (!localWanted && !consentExisting && !consentReplace) return 'started';
+		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting, ...(consentReplace ? { consent_replace: true } : {}) }) });
 		const result = await response.json().catch(() => null);
-		if (response.status === 409 && result?.code === 'consent_required') return 'consent_required';
+		if (response.status === 409 && (result?.code === 'consent_required' || result?.code === 'replace_consent_required')) return result.code;
 		return response.ok && result?.ok !== false ? 'started' : 'failed';
 	}
 
@@ -139,7 +143,12 @@
 				page = 'models';
 				return;
 			}
-			if (start === 'started') localDownloadPending = localWanted;
+			if (start === 'replace_consent_required') {
+				replaceOmlxConsent = true;
+				page = 'models';
+				return;
+			}
+			if (start === 'started') { localRepairDeferred = false; localDownloadPending = localWanted; }
 			else localStartError = 'The local model download couldn’t start.';
 		} catch {
 			localStartError = 'The local model download couldn’t start.';
@@ -150,28 +159,34 @@
 	async function decideExistingOmlx(useIt: boolean) {
 		if (!useIt) {
 			existingOmlxConsent = false;
+			localRepairDeferred = replaceOmlxConsent;
+			replaceOmlxConsent = false;
 			localWanted = false;
 			page = 'account';
 			return;
 		}
+		const replacing = replaceOmlxConsent;
 		localSetupBusy = true;
 		localStartError = '';
 		let returnToModels = false;
+		let needsReplacementConsent = false;
 		try {
 			const current = get(token);
 			returnToModels = Boolean(current);
 			const start = current
-				? await setupLocalSource(current, true)
-				: await startLocalDownload(true);
-			const started = typeof start === 'string' ? start === 'started' : start.ok;
-			if (started) localDownloadPending = true;
+				? await setupLocalSource(current, !replacing, replacing)
+				: await startLocalDownload(!replacing, replacing);
+			const code = typeof start === 'string' ? start : start.code;
+			if (code === 'replace_consent_required') needsReplacementConsent = true;
+			else if ((typeof start === 'string' ? start === 'started' : start.ok)) { localRepairDeferred = false; localDownloadPending = true; }
 			else localStartError = 'The local model couldn’t start.';
 		} catch {
 			localStartError = 'The local model couldn’t start.';
 		} finally {
 			localSetupBusy = false;
 			existingOmlxConsent = false;
-			page = returnToModels ? 'models' : 'account';
+			replaceOmlxConsent = needsReplacementConsent;
+			page = needsReplacementConsent || returnToModels ? 'models' : 'account';
 		}
 	}
 
@@ -252,6 +267,10 @@
 				existingOmlxConsent = true;
 				return;
 			}
+			if (result.code === 'replace_consent_required') {
+				replaceOmlxConsent = true;
+				return;
+			}
 			if (!result.ok) sourceError = 'The local model couldn’t start. Try again, or choose another source.';
 		} catch {
 			sourceError = 'The local model couldn’t start. Try again, or choose another source.';
@@ -264,6 +283,7 @@
 	function sourceMeta(source: ModelSource): string {
 		if (source.source === 'omlx') {
 			if (source.setup_downloading || source.setup_stage) return source.setup_stage || 'Downloading';
+			if (localRepairDeferred) return "oMLX doesn't start";
 			if (source.setup_error || localStartError) return 'Download needs attention';
 			return `Local model · ${modelSize}`;
 		}
@@ -323,20 +343,8 @@
 			<div class="folder"><span>Work folder</span><strong>{folder}</strong></div>
 			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
 		</form>
-	{:else if page === 'models' && existingOmlxConsent}
-		<div class="sources consent">
-			<p>CORSIA will read:</p>
-			<ul>
-				<li>your oMLX port setting</li>
-				<li>the installed oMLX version</li>
-				<li>your oMLX server to find its available models</li>
-			</ul>
-			<p>It won’t change your oMLX.</p>
-			<div class="consent-actions">
-				<Button variant="chip" onclick={() => decideExistingOmlx(false)} disabled={localSetupBusy}>Not now</Button>
-				<Button variant="chip" onclick={() => decideExistingOmlx(true)} loading={localSetupBusy} disabled={localSetupBusy}>Use it</Button>
-			</div>
-		</div>
+	{:else if page === 'models' && (existingOmlxConsent || replaceOmlxConsent)}
+		<SetupOmlxConsent replace={replaceOmlxConsent} modelLabel={downloadModelLabel} modelSize={modelSize} busy={localSetupBusy} onDecision={decideExistingOmlx} />
 	{:else if page === 'models'}
 		<div class="sources">
 			{#each sources as source (source.source)}
@@ -344,7 +352,7 @@
 					{#snippet actions()}
 						{#if sourceIsReady(source)}<StatePill look="dot" state="success" label="Ready" />
 						{:else if source.source === 'omlx' && localDownloading}<StatePill look="dot" state="loading" label="Downloading" />
-						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" loading={localSetupBusy} disabled={localSetupBusy} onclick={retryLocalDownload}>{source.setup_error || localStartError ? 'Try again' : 'Download'}</Button>
+						{:else if source.source === 'omlx'}<Button variant="chip" size="sm" loading={localSetupBusy} disabled={localSetupBusy} onclick={retryLocalDownload}>{localRepairDeferred ? 'Reinstall' : source.setup_error || localStartError ? 'Try again' : 'Download'}</Button>
 						{:else if source.state === 'not_installed'}<StatePill look="dot" state="idle" label="Not installed" /><Button variant="chip" size="sm" onclick={refreshSources}>Check again</Button>
 						{:else}<Button variant="chip" size="sm" onclick={() => signIn(source)}>Sign in</Button>{/if}
 					{/snippet}
@@ -368,9 +376,7 @@
 	.folder span { flex: none; white-space: nowrap; }
 	.folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
 	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
-	.welcome-copy p, .consent p { margin: 0; }
-	.consent ul { margin: 0; padding-left: var(--space-5); }
-	.consent-actions { display: flex; gap: var(--space-2); }
+	.welcome-copy p { margin: 0; }
 	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); }
 	.switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); }
 	.local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }

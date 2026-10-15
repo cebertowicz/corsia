@@ -56,16 +56,17 @@ def _refusal(error: urllib.error.HTTPError) -> str | None:
     return reason if isinstance(reason, str) else None
 
 
-def _consent_required(error: urllib.error.HTTPError) -> bool:
-    """Whether local setup needs consent that only the app can collect."""
+def _consent_code(error: urllib.error.HTTPError) -> str | None:
+    """Return the local-setup consent code without retrying a write."""
     if error.code != 409:
-        return False
+        return None
     try:
         detail = json.loads(error.read().decode() or "null")
     except (OSError, ValueError):
-        return False
+        return None
     payload = detail.get("detail") if isinstance(detail, dict) else None
-    return isinstance(payload, dict) and payload.get("code") == "consent_required"
+    code = payload.get("code") if isinstance(payload, dict) else None
+    return code if code in {"consent_required", "replace_consent_required"} else None
 
 
 def _print_skipped(result: dict) -> int:
@@ -138,10 +139,16 @@ def cmd_setup(args: argparse.Namespace) -> int:
             {"no_subscription_only": args.if_no_subscription, "automatic": args.automatic, "profile": profile},
         )
     except urllib.error.HTTPError as error:
-        if _consent_required(error):
+        consent_code = _consent_code(error)
+        if consent_code == "consent_required":
             return _print_terminal_error({
                 "message": "CORSIA needs your permission to inspect the existing oMLX.",
                 "next_action": "Open the CORSIA app and choose Use it in local model setup.",
+            })
+        if consent_code == "replace_consent_required":
+            return _print_terminal_error({
+                "message": "The oMLX on this computer doesn't start.",
+                "next_action": "Open the CORSIA app: Reinstall replaces that oMLX and changes its settings; Not now leaves it untouched.",
             })
         refusal = _refusal(error)
         if refusal:

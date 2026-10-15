@@ -65,6 +65,17 @@ describe('source routes', () => {
 		expect(await setupLocalSource('tok')).toEqual({ ok: false, code: 'consent_required' });
 	});
 
+	it('returns replacement consent and sends it only after the affirmative action', async () => {
+		const fetchMock = vi.fn(async () => ({
+			ok: false, status: 409, json: async () => ({ detail: { code: 'replace_consent_required' } }),
+		}));
+		vi.stubGlobal('fetch', fetchMock);
+
+		expect(await setupLocalSource('tok', false, true)).toEqual({ ok: false, code: 'replace_consent_required' });
+		const calls = fetchMock.mock.calls as unknown as [RequestInfo | URL, RequestInit?][];
+		expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({ consent_existing: false, consent_replace: true });
+	});
+
 	it('throws on a failed read so the panel can say it could not read', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
 		await expect(fetchSources('tok')).rejects.toThrow('sources 500');

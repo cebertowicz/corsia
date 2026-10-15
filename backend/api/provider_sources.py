@@ -132,6 +132,7 @@ async def setup_local_source(
     automatic: bool = Body(False, embed=True),
     profile: str | None = Body(None, embed=True),
     consent_existing: bool = Body(False, embed=True),
+    consent_replace: bool = Body(False, embed=True),
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
     """Start the local setup flight, or report the one already running.
@@ -140,12 +141,21 @@ async def setup_local_source(
     """
     from llm.local_setup import begin_local_setup
     from llm.local_setup_gates import ProfileRefused
-    from llm.local_setup_ownership import existing_omlx_requires_consent, record_existing_omlx_consent
+    from llm.local_setup_ownership import (
+        existing_omlx_requires_consent,
+        existing_omlx_requires_replace_consent,
+        record_existing_omlx_consent,
+    )
 
     if existing_omlx_requires_consent():
         if not consent_existing:
             raise HTTPException(status_code=409, detail={"code": "consent_required"})
         record_existing_omlx_consent()
+        # Initial reuse consent is read-only; replacement needs a second action.
+        if existing_omlx_requires_replace_consent():
+            raise HTTPException(status_code=409, detail={"code": "replace_consent_required"})
+    if existing_omlx_requires_replace_consent() and not consent_replace:
+        raise HTTPException(status_code=409, detail={"code": "replace_consent_required"})
     try:
         return await begin_local_setup(
             no_subscription_only=no_subscription_only, automatic=automatic, profile_id=profile,
