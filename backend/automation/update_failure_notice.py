@@ -11,7 +11,7 @@ from loguru import logger
 async def tell_conductor_about_failed_update(operation_id: str) -> None:
     """Deliver one failed-Update notice and mark it only after acceptance."""
     from automation import self_restart
-    from core.agent_roster_queries import workspace_conductor_contact
+    from core.agent_roster_queries import corsia_agent_contact
     from infra.database import get_db
 
     def contact_and_operation() -> tuple[dict | None, dict | None, str | None]:
@@ -22,7 +22,7 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
             or operation.get("status") != "failed" or operation.get("conductor_told_at")
         ):
             return None, operation, None
-        contact, gap = workspace_conductor_contact(
+        contact, gap = corsia_agent_contact(
             str(operation.get("requester_user") or ""), connection
         )
         return contact, operation, gap
@@ -64,15 +64,15 @@ async def tell_conductor_about_scheduled_lapse(
     *,
     delivery_id: str,
 ) -> None:
-    """Tell the workspace conductor that an owner-bound schedule did not run."""
-    from core.agent_roster_queries import workspace_conductor_contact
+    """Tell the CORSIA agent that an owner-bound schedule did not run."""
+    from core.agent_roster_queries import corsia_agent_contact
     from infra.db_async import run_in_db
 
     def contact_for_owner() -> tuple[dict | None, str | None]:
         from infra.database import get_db
 
         connection = get_db()
-        return workspace_conductor_contact(str(owner_id or ""), connection)
+        return corsia_agent_contact(str(owner_id or ""), connection)
 
     contact, gap = await run_in_db(contact_for_owner)
     if contact is None:

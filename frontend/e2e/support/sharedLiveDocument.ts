@@ -61,8 +61,8 @@ export async function demoteAgent(request: APIRequestContext, threadId: string):
 	expect(response.ok(), await response.text()).toBeTruthy();
 }
 
-/** Designates `threadId` the workspace conductor, the one other agent that may edit a document it does not own; null clears it. */
+/** Designates `threadId` the CORSIA agent, the one other agent that may edit a document it does not own; null clears it. */
 export async function designateConductor(request: APIRequestContext, threadId: string | null): Promise<void> {
-	const response = await request.put(`/api/conductor?token=${TEST_SESSION_TOKEN}&scope=workspace`, { data: { thread_id: threadId } });
+	const response = await request.put(`/api/corsia-agent?token=${TEST_SESSION_TOKEN}`, { data: { thread_id: threadId } });
 	expect(response.ok(), await response.text()).toBeTruthy();
 }

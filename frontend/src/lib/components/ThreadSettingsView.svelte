@@ -37,19 +37,21 @@
 	const settingsThreadId = $derived(conductor ? conductorTarget?.thread_id ?? null : $activeThread?.id ?? null);
 	const projectId = $derived(conductor ? conductorTarget?.project_id ?? null : $activeThread?.project_id ?? null);
 	const agentScope = $derived(projectId ? 'project' : 'workspace');
+	// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
+	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
 </script>
 
 <div class="ts-scroll">
 	<div class="ts">
 		{#if conductor && !conductorTarget}
-			<p role="status">{conductorLoading ? 'Loading conductor settings…' : 'Conductor settings unavailable. Try reopening this view.'}</p>
+			<p role="status">{conductorLoading ? `Loading ${designatedName === 'CORSIA' ? 'CORSIA' : 'conductor'} settings…` : `${designatedName} settings unavailable. Try reopening this view.`}</p>
 		{:else}
 		<section class="sec">
 			<div class="sec-cap">Context files</div>
 			<p class="sec-hint">Files pinned to this thread.</p>
 			<ThreadContextPanel
 				threadId={settingsThreadId}
-				hiddenThread={conductorTarget ? { id: conductorTarget.thread_id, title: conductorTarget.title ?? 'Conductor', project_id: conductorTarget.project_id ?? null, bootloader_files: conductorTarget.bootloader_files ?? null } : null}
+				hiddenThread={conductorTarget ? { id: conductorTarget.thread_id, title: conductorTarget.title ?? designatedName, project_id: conductorTarget.project_id ?? null, bootloader_files: conductorTarget.bootloader_files ?? null } : null}
 				onHiddenThreadFilesChanged={(files) => { if (conductorTarget) conductorTarget = { ...conductorTarget, bootloader_files: files }; }}
 				onBrowseExisting={onBrowseContextFiles}
 			/>
@@ -62,7 +64,7 @@
 				scope="thread"
 				threadId={settingsThreadId}
 				projectId={projectId}
-				scopeLabel={`Thread: ${conductor ? 'Conductor' : $activeThread?.title ?? 'Current thread'}`}
+				scopeLabel={`Thread: ${conductor ? designatedName : $activeThread?.title ?? 'Current thread'}`}
 				inheritanceHint="This thread inherits global, project, and ancestor-thread skills. Same-name local skills override inherited ones."
 				onBrowseSkills={onBrowseSkills}
 				onOpenSkill={() => threadSettingsOpen.set(false)}

@@ -125,6 +125,7 @@ async def test_previously_refused_settings_read_succeeds(isolated_db):
     ("POST", "/api/plans/p/mutations"), ("DELETE", "/api/threads/t"),
     ("POST", "/api/artifacts/a/comments/root/viewed"),
     ("DELETE", "/api/security/alert"),
+    ("PUT", "/api/corsia-agent"),
 ])
 def test_each_blocklist_family_is_refused(method, path):
     assert off_limits(path, method), (method, path)
@@ -212,7 +213,7 @@ async def test_person_session_routes_refuse_the_conductor(isolated_db):
 @pytest.mark.parametrize("method,path", [
     ("POST", "/api/keys/{name}/check"), ("POST", "/api/vendor-accounts/{account_id}/verify"),
     ("POST", "/api/vendor-accounts/{account_id}/signin/check"),
-    ("POST", "/api/threads/{thread_id}/conductor-account"),
+    ("POST", "/api/threads/{thread_id}/corsia-agent-account"),
     ("PUT", "/api/threads/{thread_id}/vendor-account"), ("PUT", "/api/settings/providers/{name}"),
     ("GET", "/api/security/alert"), ("GET", "/api/settings"), ("PATCH", "/api/settings"),
     ("GET", "/api/settings/providers"), ("GET", "/api/settings/network-servers/{server_id}/settings"),
@@ -282,6 +283,7 @@ async def test_key_check_and_value_vendor_verify_and_signin(isolated_db):
     ("PUT", "/api/conductor", {}, {"thread_id": None}),
     ("PUT", "/api/conductor", {"scope": "workspace"}, {"thread_id": "{target}"}),
     ("PUT", "/api/conductor", {"scope": "other"}, {"thread_id": "{target}"}),
+    ("PUT", "/api/corsia-agent", {}, {"thread_id": "{target}"}),
 ])
 async def test_human_seen_state_and_conductor_designation_denied(
     isolated_db, monkeypatch, method, path, query, body,

@@ -114,7 +114,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         'read -r answer || answer=none\n'
         'echo "corsia $* stdin=$answer" >> "$STUB_LOG"\n'
         'case "$*" in *--before-start*) exit "${STUB_BEFORE_START_STATUS:-0}" ;; esac\n'
-        'case "$*" in *"conductor warm"*) exit "${STUB_WARM_STATUS:-0}" ;; esac\n'
+        'case "$*" in *"agent warm"*) exit "${STUB_WARM_STATUS:-0}" ;; esac\n'
     )
     corsia.chmod(0o755)
     browser_source = tmp_path / "agent-browser-source"
@@ -198,10 +198,10 @@ FRESH_INSTALL_CALLS = [
     "corsia local setup --before-start --if-no-subscription stdin=terminal-answer",
     "corsia start stdin=none",
     "corsia sources --install-summary stdin=none",
-    "corsia conductor warm stdin=none",
+    "corsia agent warm stdin=none",
     f"open http://localhost:{DEFAULT_BACKEND_PORT}",
 ]
-def test_a_failed_conductor_warm_never_stops_the_install(env):
+def test_a_failed_agent_warm_never_stops_the_install(env):
     result = _run(env, STUB_WARM_STATUS="1")
     assert result.returncode == 0, result.stderr
     assert _calls(env) == FRESH_INSTALL_CALLS

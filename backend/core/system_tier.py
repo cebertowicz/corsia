@@ -85,7 +85,7 @@ def _parse_file(item: Any) -> SystemTierFile:
     # system_tier_sources loads ``context`` rows, never them.
     if kind not in {"context", "skill", "coordination-model"}:
         raise ValueError(f"System manifest entry {path!r} has invalid kind {kind!r}")
-    if role not in {None, "agent", "conductor"}:
+    if role not in {None, "agent", "conductor", "corsia_agent"}:
         raise ValueError(f"System manifest entry {path!r} has invalid role {role!r}")
     _resource_path(path)
     return SystemTierFile(path, sha256, byte_count, kind, role)

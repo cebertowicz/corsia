@@ -152,7 +152,7 @@ def test_concurrent_designation_invalidates_the_conductor_each_write_replaced(
         control.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
             (
-                "workspace_conductor_session_id",
+                "corsia_agent_thread_id",
                 json.dumps({"session_id": "old"}),
                 "t",
             ),
@@ -189,7 +189,7 @@ def test_concurrent_designation_invalidates_the_conductor_each_write_replaced(
     assert results == {"writer-a": True, "writer-b": True}
     if scope == "workspace":
         value = control.execute(
-            "SELECT value FROM settings WHERE key='workspace_conductor_session_id'"
+            "SELECT value FROM settings WHERE key='corsia_agent_thread_id'"
         ).fetchone()["value"]
         final_conductor = json.loads(value)["session_id"]
     else:
@@ -259,7 +259,7 @@ def test_caller_deferred_transaction_acquires_write_lock_before_designation_read
     connection.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
         (
-            "workspace_conductor_session_id",
+            "corsia_agent_thread_id",
             json.dumps({"session_id": "old"}),
             "t",
         ),

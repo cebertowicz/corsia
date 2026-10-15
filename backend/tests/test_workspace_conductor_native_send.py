@@ -378,19 +378,19 @@ async def test_project_to_project_send_still_refused_at_scope(db, launched, targ
     assert launched == []
 
 
-def test_workspace_conductor_contact_output_ignores_project_conductors(db):
+def test_corsia_agent_contact_output_ignores_project_conductors(db):
     """S2: listing the workspace contact is unchanged when a project designates one."""
-    from core.agent_roster_queries import workspace_conductor_contact
+    from core.agent_roster_queries import corsia_agent_contact
     from infra.conductor import set_conductor
 
     _insert_agent(db, _CONDUCTOR, agent_enabled=0)
     _insert_agent(db, _PROJ_CONDUCTOR, project_id="proj-a", agent_enabled=0)
     assert set_conductor("workspace", _CONDUCTOR) is True
 
-    before = workspace_conductor_contact("u-test", db)
+    before = corsia_agent_contact("u-test", db)
     assert set_conductor("proj-a", _PROJ_CONDUCTOR) is True
 
-    assert workspace_conductor_contact("u-test", db) == before
+    assert corsia_agent_contact("u-test", db) == before
     contact, gap = before
     assert gap is None
     assert contact is not None and contact["id"] == _CONDUCTOR

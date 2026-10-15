@@ -37,7 +37,7 @@ class ApiCallError(ValueError):
 
 
 def conductor_user(actor_thread_id: str) -> str:
-    from infra.conductor import get_conductor_scopes
+    from infra.conductor import get_coordination_scopes
     from infra.database import get_db
     from infra.queries import thread_available_sql
 
@@ -47,8 +47,8 @@ def conductor_user(actor_thread_id: str) -> str:
             f"SELECT user_id FROM threads WHERE id=? AND {thread_available_sql()}",
             (actor_thread_id,),
         ).fetchone()
-        if actor is None or not get_conductor_scopes(actor_thread_id, db=db):
-            raise ApiCallError("Missing conductor capability; only a designated workspace or project conductor can use corsia_api")
+        if actor is None or not get_coordination_scopes(actor_thread_id, db=db):
+            raise ApiCallError("Missing conductor capability; only the CORSIA agent or a designated project conductor can use corsia_api")
         return str(actor["user_id"])
     finally:
         db.close()
@@ -149,8 +149,8 @@ class CorsiaApiTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Call any CORSIA API route in-process as the designated conductor (workspace or project). "
-            "Load skill conductor-api before use. No credential is needed. Full access except the "
+            "Call any CORSIA API route in-process as the CORSIA agent or a project conductor. "
+            "Load skill coordination-api before use. No credential is needed. Full access except the "
             "person-only list: auth and users, credentials and secrets, host-access authority, "
             "answering the person's decisions, conductor designation, sign-in flows, webhooks, "
             "UI handlers that record the person as actor, and tool recursion. "
@@ -174,7 +174,7 @@ class CorsiaApiTool(Tool):
                       body: dict | None = None, **kwargs: Any) -> str:
         actor = kwargs.get("_thread_id")
         if not isinstance(actor, str) or not actor:
-            return "Error: current thread identity is unavailable; retry from a live conductor turn."
+            return "Error: current thread identity is unavailable; retry from a live CORSIA agent or conductor turn."
         if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
             return "Error: method must be GET, POST, PUT, PATCH or DELETE."
         try:

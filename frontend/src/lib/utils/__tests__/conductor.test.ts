@@ -50,6 +50,17 @@ describe('conductorScopeParam', () => {
 });
 
 describe('fetchConductor', () => {
+	it('reads a project scope from the conductor route, not the CORSIA agent route', async () => {
+		globalThis.fetch = vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ scope: 'proj-123', thread_id: null, target: null }),
+		})) as unknown as typeof fetch;
+
+		await fetchConductor('tok', { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
+
+		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe('/api/conductor?token=tok&scope=proj-123');
+	});
+
 	it('preserves the backend target model for hidden conductor hydration', async () => {
 		globalThis.fetch = vi.fn(async () => ({
 			ok: true,
@@ -80,24 +91,25 @@ describe('fetchConductor', () => {
 			},
 			firstRunPending: false,
 		});
-		// A project conductor is never the workspace conductor.
+		// A project conductor is never the CORSIA agent.
 		expect(get(workspaceConductorId)).toBeNull();
 	});
 
-	it('reads first_run_pending and records the workspace conductor', async () => {
+	it('reads first_run_pending and records the CORSIA agent', async () => {
 		globalThis.fetch = vi.fn(async () => ({
 			ok: true,
 			json: async () => ({
 				scope: 'workspace',
 				thread_id: 'cond-w',
 				first_run_pending: true,
-				target: { thread_id: 'cond-w', title: 'Conductor' },
+				target: { thread_id: 'cond-w', title: 'CORSIA' },
 			}),
 		})) as unknown as typeof fetch;
 
 		const lookup = await fetchConductor('tok', null);
 
 		expect(lookup).toMatchObject({ kind: 'target', firstRunPending: true });
+		expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toMatch(/^\/api\/corsia-agent\?token=tok$/);
 		expect(get(workspaceConductorId)).toBe('cond-w');
 	});
 
@@ -168,7 +180,7 @@ describe('firstRunLanding', () => {
 	const settled = { ...pending, firstRunPending: false } as const;
 	const home = { scope: null, activeThreadId: null, landed: false };
 
-	it('lands on the workspace conductor only while its first run is pending', () => {
+	it('lands on the CORSIA agent only while its first run is pending', () => {
 		expect(firstRunLanding(pending, home)).toBe('cond-w');
 		expect(firstRunLanding(settled, home)).toBeNull();
 		expect(firstRunLanding({ kind: 'absent' }, home)).toBeNull();

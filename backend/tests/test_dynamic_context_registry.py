@@ -538,7 +538,7 @@ async def test_project_agent_roster_includes_only_workspace_conductor(monkeypatc
     conn.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
         (
-            "workspace_conductor_session_id",
+            "corsia_agent_thread_id",
             json.dumps({"session_id": "workspace-conductor"}),
             "t",
         ),
@@ -559,7 +559,7 @@ async def test_project_agent_roster_includes_only_workspace_conductor(monkeypatc
 def _designate_workspace_conductor(conn, value) -> None:
     conn.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-        ("workspace_conductor_session_id", value, "t"),
+        ("corsia_agent_thread_id", value, "t"),
     )
 
 
@@ -594,11 +594,11 @@ def test_project_roster_lists_designated_conductor_that_is_not_a_registered_agen
     assert [row["id"] for row in rows if row["project_id"] is None] == [
         "workspace-conductor"
     ]
-    assert "workspace_conductor_gap" not in current
+    assert "corsia_agent_gap" not in current
     assert "workspace-conductor" in snapshot["agent_thread_ids"]
     assert (
         "Workspace conductor (workspace-conductor) [workspace] — "
-        "Designated workspace conductor." in snapshot["content"]
+        "Designated CORSIA agent." in snapshot["content"]
     )
 
 
@@ -607,7 +607,7 @@ def test_project_roster_lists_designated_conductor_that_is_not_a_registered_agen
     [
         (None, None, "none designated"),
         (json.dumps({"session_id": None}), None, "none designated"),
-        ("{not-json", None, "the workspace conductor setting is malformed"),
+        ("{not-json", None, "the CORSIA agent setting is malformed"),
         (None, {}, "none designated"),
         ("designated", None,
          "designated conductor workspace-conductor does not exist"),
@@ -615,7 +615,7 @@ def test_project_roster_lists_designated_conductor_that_is_not_a_registered_agen
          "designated conductor belongs to another account"),
         ("designated", {"project_id": "proj-1"},
          "designated conductor workspace-conductor is unreachable: "
-         "designated workspace conductor is not a workspace thread"),
+         "the CORSIA agent is not a workspace thread"),
         ("designated", {"agent_enabled": 1, "agent_status": "inactive"},
          "designated conductor workspace-conductor is unreachable: "
          "agent is not active"),
@@ -646,10 +646,10 @@ def test_project_roster_names_why_workspace_conductor_is_missing(
 
     current, rows = agent_rows("sess-1", conn)
     snapshot = current_responsibility_map_snapshot("sess-1", conn)
-    line = f"Workspace conductor: not reachable ({reason})."
+    line = f"CORSIA agent: not reachable ({reason})."
 
     assert all(row["id"] != "workspace-conductor" for row in rows)
-    assert current["workspace_conductor_gap"] == reason
+    assert current["corsia_agent_gap"] == reason
     assert "workspace-conductor" not in snapshot["agent_thread_ids"]
     assert line in snapshot["content"]
     assert line in _full_roster_content(current, rows)
@@ -664,7 +664,7 @@ def test_workspace_roster_has_no_conductor_gap_line():
 
     current, _ = agent_rows("sess-1", conn)
 
-    assert "workspace_conductor_gap" not in current
+    assert "corsia_agent_gap" not in current
     assert "Workspace conductor:" not in current_responsibility_map_snapshot(
         "sess-1", conn,
     )["content"]
@@ -674,19 +674,19 @@ def test_context_registry_rejects_corrupt_workspace_conductor_setting(tmp_path):
     import json
 
     from core.dynamic_context_registry import collect_context_sources
-    from infra.conductor import ConductorSettingError
+    from infra.corsia_agent import CorsiaAgentSettingError
 
     conn = _db()
     conn.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
         (
-            "workspace_conductor_session_id",
+            "corsia_agent_thread_id",
             json.dumps("workspace-conductor"),
             "t",
         ),
     )
     try:
-        with pytest.raises(ConductorSettingError, match="workspace conductor"):
+        with pytest.raises(CorsiaAgentSettingError, match="CORSIA agent"):
             collect_context_sources(
                 thread_id="sess-1",
                 project_id=None,
@@ -757,7 +757,7 @@ def test_context_registry_composes_agent_then_conductor_context(tmp_path):
 
     for role, filename, content in (
         ("agent", "AGENT.md", "Agent foundation."),
-        ("conductor", "CONDUCTOR.md", "Conductor addition."),
+        ("corsia_agent", "CORSIA_AGENT.md", "CORSIA agent addition."),
     ):
         path = tmp_path / "context" / "roles" / role / filename
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -770,7 +770,7 @@ def test_context_registry_composes_agent_then_conductor_context(tmp_path):
     conn.execute(
         "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
         (
-            "workspace_conductor_session_id",
+            "corsia_agent_thread_id",
             json.dumps({"session_id": "sess-1"}),
             "t",
         ),
@@ -793,13 +793,13 @@ def test_context_registry_composes_agent_then_conductor_context(tmp_path):
             composed.append(("template", source.metadata["template_kind"]))
     assert composed == [
         ("role", "agent"),
-        ("template", "core"),
-        ("template", "workspace"),
-        ("role", "conductor"),
+        ("template", "corsia_agent"),
+        ("role", "corsia_agent"),
     ]
-    assert collection.agent_facts["roles"] == ["agent", "conductor"]
+    assert collection.agent_facts["roles"] == ["agent", "corsia_agent"]
     assert collection.agent_facts["receives_agent_role"] is True
-    assert collection.agent_facts["is_conductor"] is True
+    assert collection.agent_facts["is_conductor"] is False
+    assert collection.agent_facts["is_corsia_agent"] is True
     assert collection.agent_facts["conductor_scopes"] == [
         {"scope": "workspace", "scope_type": "workspace"}
     ]
