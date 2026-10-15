@@ -90,10 +90,10 @@
 					<summary>
 						<span class="ctx-source-summary-main">
 							<span class="ctx-source-swatch" style={`background: ${GROUP_COLOR[group.id as ScopeGroupId]}`} aria-hidden="true"></span>
-							<span>{group.category}</span>
+							<span class="ctx-source-group-label">{group.category}</span>
 							<span class="ctx-source-count">{group.sources.length}</span>
 						</span>
-						{#if (group.countLabel && group.id !== 'tools') || group.deltaLabel}
+						{#if group.id !== 'tools' && group.id !== 'history' && (group.countLabel || group.deltaLabel)}
 							<span class="ctx-source-group-meta">
 								{#if group.deltaLabel}
 									<span class="ctx-source-delta">{group.deltaLabel}</span>
@@ -107,7 +107,7 @@
 							<span class="ctx-source-group-token mono">{group.tokenLabel}</span>
 						{/if}
 					</summary>
-					<div class="ctx-source-group-body">
+					<div class:ctx-source-value-columns={group.id === 'tools' || group.id === 'history'} class="ctx-source-group-body">
 						{#if group.skills.length > 0}
 							{#if group.instructions.length > 0}
 								<div class="ctx-source-subhead"><span>Instructions</span><span class="mono">{group.instructionsTokenLabel}</span></div>
@@ -148,7 +148,7 @@
 		gap: var(--space-1);
 		max-height: min(48vh, 420px);
 		overflow-y: auto;
-		padding-right: var(--space-1);
+		padding-right: 0;
 	}
 	.ctx-source-group {
 		border-radius: var(--radius-xs);
@@ -162,11 +162,9 @@
 		list-style: none;
 		min-height: var(--space-5);
 		border-radius: var(--radius-xs);
-		padding: 0 var(--space-1);
+		padding: 0;
 		font-size: var(--text-caption);
 		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: var(--ls-cap);
 		color: var(--text-secondary);
 	}
 	.ctx-source-group summary::before {
@@ -195,6 +193,10 @@
 		outline-offset: 2px;
 	}
 	.ctx-source-group summary::-webkit-details-marker { display: none; }
+	.ctx-source-group-label {
+		text-transform: uppercase;
+		letter-spacing: var(--ls-cap);
+	}
 	.ctx-source-summary-main {
 		display: inline-flex;
 		align-items: center;
@@ -236,7 +238,7 @@
 	}
 	.ctx-source-row {
 		min-width: 0;
-		padding: 0 var(--space-1);
+		padding: 0;
 		border-radius: var(--radius-xs);
 		border: 0;
 		background: transparent;
@@ -261,13 +263,32 @@
 	}
 	.ctx-source-main {
 		min-width: 0;
-		max-width: 440px;
+		width: 100%;
+		box-sizing: border-box;
 		display: grid;
 		grid-template-columns: minmax(min-content, 1fr) max-content max-content max-content max-content max-content;
 		gap: var(--space-2);
 		align-items: center;
 		min-height: var(--space-5);
 	}
+	.ctx-source-value-columns {
+		display: grid;
+		grid-template-columns: minmax(min-content, 1fr) max-content max-content;
+		column-gap: var(--space-2);
+		row-gap: var(--space-1);
+		align-items: center;
+	}
+	.ctx-source-value-columns .ctx-source-row {
+		display: grid;
+		grid-template-columns: subgrid;
+		grid-column: 1 / -1;
+		align-items: center;
+		box-sizing: border-box;
+	}
+	.ctx-source-value-columns .ctx-source-main { display: contents; }
+	.ctx-source-value-columns .ctx-source-label { grid-column: 1; }
+	.ctx-source-value-columns .ctx-source-count-label { grid-column: 2; justify-self: end; }
+	.ctx-source-value-columns .ctx-source-token { grid-column: 3; justify-self: end; }
 	.ctx-source-label {
 		min-width: 0;
 		overflow: hidden;
@@ -292,6 +313,7 @@
 		white-space: nowrap;
 	}
 	.ctx-source-group-token {
+		grid-column: 4;
 		color: var(--text-secondary);
 		font-size: var(--text-footnote);
 		white-space: nowrap;
