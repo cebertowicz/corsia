@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from core.corrections_classifier import ASSET_ID, AssetError, AssetManifest, asset_root, load_pinned_manifest
@@ -53,8 +54,9 @@ def installed() -> bool:
     return any((path / "manifest.json").is_file() for path in candidate_roots())
 
 
-def select_manifest() -> tuple[AssetManifest, list[dict[str, str | None]]]:
-    """Return the highest verified pin and diagnostics for every present candidate."""
+def select_manifest(*, exclude: Mapping[str, str] | None = None) -> tuple[AssetManifest, list[dict[str, str | None]]]:
+    """Return the highest verified non-excluded pin and diagnostics for every candidate."""
+    exclude = exclude or {}
     verified: list[tuple[int, int, AssetManifest]] = []
     versions: list[dict[str, str | None]] = []
     readers: list[str] = []
@@ -69,6 +71,10 @@ def select_manifest() -> tuple[AssetManifest, list[dict[str, str | None]]]:
             versions.append({"location": directory.name, "version": None, "state": "failed", "reason": str(error)})
             if isinstance(error, AssetError) and error.reader:
                 readers.append(error.reader)
+            continue
+        reason = exclude.get(manifest.version)
+        if reason is not None:
+            versions.append({"location": directory.name, "version": manifest.version, "state": "failed", "reason": reason})
             continue
         verified.append((number, -order, manifest))
         versions.append({"location": directory.name, "version": manifest.version, "state": "ready", "reason": None})

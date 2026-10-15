@@ -160,7 +160,7 @@ def _list_inventory(inventory: list[dict[str, Any]], now: str) -> list[dict[str,
 
 
 def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
-                   detail: DetailRequest | None = None, now: str = "",
+                   detail: DetailRequest | None = None,
                    cancellation_event: Event | None = None) -> dict[str, Any]:
     """Materialize scoped database evidence without Git or external work.
 
@@ -286,7 +286,7 @@ def read_report(
     from core.lesson_report_reads import identify_recorded_reads
 
     data = collected if collected is not None else collect_report(
-        db, scope=scope, sources=sources, detail=detail_request(lesson_id, version, cursor, evidence), now=now)
+        db, scope=scope, sources=sources, detail=detail_request(lesson_id, version, cursor, evidence))
     history, missing_owners = data["history"], data["missing_owners"]
     boundaries, retained, period = data["boundaries"], data["retained"], data["period"]
     correction_facts = data["correction_facts"]

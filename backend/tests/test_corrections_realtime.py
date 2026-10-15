@@ -90,7 +90,7 @@ def worker(monkeypatch):
     fresh = corrections_realtime.CorrectionsWorker()
     monkeypatch.setattr(corrections_realtime, "WORKER", fresh)
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", ScriptedChild)
-    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda: _selection(_manifest()))
+    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda **_kwargs: _selection(_manifest()))
     ScriptedChild.created, ScriptedChild.loads, ScriptedChild.calls = [], [], []
     return fresh
 
@@ -118,7 +118,7 @@ async def test_absent_asset_records_nothing_and_says_absent(worker, monkeypatch,
     recorded = AsyncMock()
     monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
 
-    assert await worker._classify(_candidate()) is False
+    assert (await worker._classify(_candidate())).kind not in {"recorded", "unreadable"}
 
     assert recorded.await_count == 0
     assert worker.snapshot()["state"] == "absent"
@@ -134,7 +134,7 @@ async def test_present_but_unpinned_asset_is_failed_and_not_retryable(worker, mo
     monkeypatch.setattr(corrections_assets, "asset_root", lambda: tmp_path)
     monkeypatch.setattr(corrections_realtime, "select_manifest", _absent("manifest sha256 does not match the source pin"))
 
-    assert await worker._classify(_candidate()) is False
+    assert (await worker._classify(_candidate())).kind not in {"recorded", "unreadable"}
 
     state = worker.snapshot()
     assert (state["state"], state["retryable"]) == ("failed", False)
@@ -155,8 +155,8 @@ async def test_failed_state_sends_one_owner_notice_with_the_asset_reader_text(wo
     worker.reader_reason = "The corrections classifier download is damaged. Retry setup."
 
     worker.failed_versions["v9"] = "older failure"
-    worker._set("failed", "bad pin")
-    worker._set("failed", "bad pin")
+    worker._set("failed", "bad pin", failure_version="v2")
+    worker._set("failed", "bad pin", failure_version="v2")
     worker._set("failed", "new failure", failure_version="v3")
 
     assert [(version, reason, reader) for version, reason, reader, _ in notices] == [
@@ -172,6 +172,7 @@ class _CountingChild:
     peak = 0
     built: list[str] = []
     closed: list[str] = []
+    loads: list[object] = []
 
     def __init__(self, manifest):
         self.manifest = manifest
@@ -181,7 +182,9 @@ class _CountingChild:
         _CountingChild.built.append(manifest.version)
 
     def ensure_loaded(self):
-        return None
+        step = _CountingChild.loads.pop(0) if _CountingChild.loads else "ok"
+        if step != "ok":
+            raise step
 
     def classify(self, context, owner):
         return SimpleNamespace(
@@ -198,6 +201,7 @@ class _CountingChild:
         cls.live = cls.peak = 0
         cls.built = []
         cls.closed = []
+        cls.loads = []
 
 
 @pytest.mark.asyncio
@@ -245,12 +249,12 @@ async def test_inflight_classification_keeps_its_starting_version(worker, monkey
 
 
 @pytest.mark.asyncio
-async def test_a_newer_selected_version_replaces_the_old_child(worker, monkeypatch):
+async def test_a_newer_selected_version_closes_the_old_child_before_starting(worker, monkeypatch):
     from jobs import corrections_realtime
 
     _CountingChild.reset()
     current = [_manifest("v1")]
-    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda: _selection(current[0]))
+    monkeypatch.setattr(corrections_realtime, "select_manifest", lambda **_kwargs: _selection(current[0]))
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
 
@@ -260,98 +264,130 @@ async def test_a_newer_selected_version_replaces_the_old_child(worker, monkeypat
 
     assert _CountingChild.built == ["v1", "v2"]
     assert _CountingChild.closed == ["v1"]
-    # A version switch briefly holds the candidate beside the serving child until its self-test passes.
-    assert _CountingChild.peak == 2
+    assert _CountingChild.peak == 1
 
 
 @pytest.mark.asyncio
-async def test_failed_newer_startup_keeps_the_older_ready_version_serving_without_recursion(worker, monkeypatch):
+async def test_deterministic_newer_failure_reselects_v1_without_two_children_or_notice(worker, monkeypatch):
+    from automation import update_failure_notice
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
 
-    current = [_manifest("v1")]
+    prefer_newer = [False]
+    notices = []
 
-    def selected():
-        return current[0], [
+    def selected(*, exclude=None):
+        exclude = exclude or {}
+        v1, v2 = _manifest("v1"), _manifest("v2")
+        manifest = v1 if not prefer_newer[0] or "v2" in exclude else v2
+        return manifest, [
             {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
-            {"location": "corrections-classifier-v2", "version": "v2", "state": "ready", "reason": None},
+            {"location": "corrections-classifier-v2", "version": "v2", "state": "failed" if "v2" in exclude else "ready", "reason": exclude.get("v2")},
         ]
 
+    _CountingChild.reset()
     monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
-    recorded = AsyncMock()
-    monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
+    monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
+    monkeypatch.setattr(update_failure_notice, "tell_corrections_classifier_failure_detached", lambda *args, **kwargs: notices.append(args))
 
-    assert await worker._classify(_candidate("v1")) is True
-    current[0] = _manifest("v2")
-    ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError", kind="deterministic")]
+    assert (await worker._classify(_candidate("v1"))).kind == "recorded"
+    prefer_newer[0] = True
+    _CountingChild.loads = [ClassifierUnavailable("load error:AssertionError", kind="deterministic")]
 
-    assert await worker._classify(_candidate("v2")) is True
+    assert (await worker._classify(_candidate("v2"))).kind == "recorded"
 
     state = worker.snapshot()
-    assert state["version"] == "v1"
-    assert state["state"] == "ready"
+    assert state["version"] == "v1" and state["state"] == "ready"
     assert {item["version"]: item["state"] for item in state["versions"]} == {"v1": "ready", "v2": "failed"}
-    assert recorded.await_count == 2
+    assert _CountingChild.peak == 1
+    assert notices == []
 
 
 @pytest.mark.asyncio
-async def test_transient_newer_load_failure_serves_with_old_child_and_holds_the_new_version(worker, monkeypatch):
+async def test_deterministic_newer_failure_has_the_same_result_after_restart(worker, monkeypatch):
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
 
-    current = [_manifest("v1")]
-
-    def selected():
-        return current[0], [
+    def selected(*, exclude=None):
+        exclude = exclude or {}
+        manifest = _manifest("v1") if "v2" in exclude else _manifest("v2")
+        return manifest, [
             {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
-            {"location": "corrections-classifier-v2", "version": "v2", "state": "ready", "reason": None},
-        ]
-
-    recorded = AsyncMock()
-    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
-    monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
-
-    assert await worker._classify(_candidate("v1")) is True
-    current[0] = _manifest("v2")
-    ScriptedChild.loads = [ClassifierUnavailable("load timeout"), ClassifierUnavailable("load timeout")]
-
-    assert await worker._classify(_candidate("first-v2")) is True
-    assert await worker._classify(_candidate("second-v2")) is True
-
-    assert [call.args[1].version.version for call in recorded.await_args_list] == ["v1", "v1", "v1"]
-    assert len(ScriptedChild.created) == 3  # v1 plus the new version's two bounded load attempts
-    assert worker.snapshot()["versions"][-1] == {
-        "location": "corrections-classifier-v2", "version": "v2", "state": "unavailable", "reason": "load timeout",
-    }
-
-
-@pytest.mark.asyncio
-async def test_idle_fallback_restart_reopens_the_newer_version_load_attempt(worker, monkeypatch):
-    from core.corrections_child import ClassifierUnavailable
-    from jobs import corrections_realtime
-
-    current = [_manifest("v1")]
-
-    def selected():
-        return current[0], [
-            {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
-            {"location": "corrections-classifier-v2", "version": "v2", "state": "ready", "reason": None},
+            {"location": "corrections-classifier-v2", "version": "v2", "state": "failed" if "v2" in exclude else "ready", "reason": exclude.get("v2")},
         ]
 
     monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
+    for current in (worker, corrections_realtime.CorrectionsWorker()):
+        ScriptedChild.loads = [ClassifierUnavailable("bad v2", kind="deterministic")]
+        assert (await current._classify(_candidate())).kind == "recorded"
+        state = current.snapshot()
+        assert state["state"] == "ready" and state["version"] == "v1"
+        assert {row["version"]: row["state"] for row in state["versions"]} == {"v1": "ready", "v2": "failed"}
 
-    assert await worker._classify(_candidate("v1")) is True
-    current[0] = _manifest("v2")
-    ScriptedChild.loads = [ClassifierUnavailable("load timeout"), ClassifierUnavailable("load timeout")]
-    assert await worker._classify(_candidate("fallback")) is True
 
-    worker.child.running = False  # The old process exited after its idle timeout.
-    assert await worker._classify(_candidate("after-idle-restart")) is True
+@pytest.mark.asyncio
+async def test_scan_holds_on_mid_pass_version_failure_then_activates_v1_only_after_its_walk(worker, monkeypatch):
+    from core.corrections_child import ClassifierUnavailable
+    from jobs import corrections_realtime, corrections_recording
 
-    assert worker.child_version == "v2"
-    assert "v2" not in worker.transient_versions
-    assert len(ScriptedChild.created) == 4
+    calls: dict[str, int] = {"v1": 0, "v2": 0}
+    candidate = _candidate()
+
+    def selected(*, exclude=None):
+        exclude = exclude or {}
+        manifest = _manifest("v1") if "v2" in exclude else _manifest("v2")
+        return manifest, [
+            {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
+            {"location": "corrections-classifier-v2", "version": "v2", "state": "failed" if "v2" in exclude else "ready", "reason": exclude.get("v2")},
+        ]
+
+    async def next_batch(version, *_args, **_kwargs):
+        calls[version.version] += 1
+        if calls[version.version] == 1:
+            return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)], candidates=[candidate])
+        return SimpleNamespace(selected_keys=[], candidates=[])
+
+    activate = AsyncMock(return_value="done")
+    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
+    monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_realtime, "activate_after_backfill", activate)
+    ScriptedChild.loads = [ClassifierUnavailable("bad v2", kind="deterministic")]
+
+    assert "version_failed" in await worker._scan()
+    assert activate.await_count == 0
+    assert await worker._scan() == "done"
+    activate.assert_awaited_once()
+    assert activate.await_args.args[0].version == "v1"
+
+
+@pytest.mark.asyncio
+async def test_only_deterministic_version_failure_notifies_its_explicit_version(worker, monkeypatch):
+    from automation import update_failure_notice
+    from core.corrections_child import ClassifierUnavailable
+    from jobs import corrections_realtime
+    from jobs.corrections_assets import AssetSelectionError
+
+    notices = []
+
+    def selected(*, exclude=None):
+        exclude = exclude or {}
+        if "v1" in exclude:
+            raise AssetSelectionError("no selectable classifier", [
+                {"location": "corrections-classifier", "version": "v1", "state": "failed", "reason": exclude["v1"]},
+            ])
+        return _selection(_manifest())
+
+    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
+    monkeypatch.setattr(corrections_realtime, "_installed", lambda: True)
+    monkeypatch.setattr(update_failure_notice, "tell_corrections_classifier_failure_detached", lambda *args, **kwargs: notices.append(args))
+    worker.failed_versions["v0"] = "unrelated earlier failure"
+    ScriptedChild.loads = [ClassifierUnavailable("bad v1", kind="deterministic")]
+
+    assert (await worker._classify(_candidate())).kind == "version_failed"
+    assert [(version, reason) for version, reason, _reader in notices] == [("v1", "bad v1")]
 
 
 @pytest.mark.asyncio
@@ -383,7 +419,7 @@ async def test_verified_manifest_alone_never_reports_ready(worker, monkeypatch):
 
     monkeypatch.setattr(corrections_realtime, "record_classification", record)
 
-    assert await worker._classify(_candidate()) is True
+    assert (await worker._classify(_candidate())).kind in {"recorded", "unreadable"}
 
     # loading while the child starts and the call runs; ready only after the call succeeded.
     assert seen == ["loading"]
@@ -395,14 +431,25 @@ async def test_deterministic_startup_failure_never_respawns_for_later_owner_mess
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
 
+    from jobs.corrections_assets import AssetSelectionError
+
+    def selected(*, exclude=None):
+        if exclude:
+            raise AssetSelectionError("no selectable classifier", [
+                {"location": "corrections-classifier", "version": "v1", "state": "failed", "reason": exclude["v1"]},
+            ])
+        return _selection(_manifest())
+
     ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError", kind="deterministic")]
     recorded = AsyncMock()
+    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
+    monkeypatch.setattr(corrections_realtime, "_installed", lambda: True)
     monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
     monkeypatch.setattr(corrections_realtime, "record_unreadable", recorded)
 
-    assert await worker._classify(_candidate("first")) is False
+    assert (await worker._classify(_candidate("first"))).kind not in {"recorded", "unreadable"}
     for message_id in ("second", "third", "fourth"):
-        assert await worker._classify(_candidate(message_id)) is False
+        assert (await worker._classify(_candidate(message_id))).kind not in {"recorded", "unreadable"}
 
     assert recorded.await_count == 0
     assert (worker.state, worker.reason) == ("failed", "load error:AssertionError")
@@ -416,14 +463,14 @@ async def test_ready_classifier_whose_restart_cannot_load_becomes_unavailable(wo
     from jobs import corrections_realtime
 
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
-    assert await worker._classify(_candidate()) is True
+    assert (await worker._classify(_candidate())).kind in {"recorded", "unreadable"}
     assert worker.state == "ready"
 
     # The live child fails on this input, then neither restart loads.
     ScriptedChild.calls = [MessageFailed("rss")]
     ScriptedChild.loads = ["ok", ClassifierUnavailable("load rss"), ClassifierUnavailable("load rss")]
 
-    assert await worker._classify(_candidate("second")) is False
+    assert (await worker._classify(_candidate("second"))).kind not in {"recorded", "unreadable"}
     assert (worker.state, worker.reason) == ("unavailable", "load rss")
 
 
@@ -433,12 +480,12 @@ async def test_input_that_fails_twice_on_a_healthy_child_is_recorded_unreadable(
     from jobs import corrections_realtime
 
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
-    assert await worker._classify(_candidate()) is True
+    assert (await worker._classify(_candidate())).kind in {"recorded", "unreadable"}
     unreadable = AsyncMock(return_value=True)
     monkeypatch.setattr(corrections_realtime, "record_unreadable", unreadable)
     ScriptedChild.calls = [MessageFailed("timeout"), MessageFailed("rss")]
 
-    assert await worker._classify(_candidate("huge")) is True
+    assert (await worker._classify(_candidate("huge"))).kind in {"recorded", "unreadable"}
 
     assert unreadable.await_args.args[0].message_id == "huge"
     assert unreadable.await_args.args[2] == "rss"
@@ -456,7 +503,7 @@ async def test_unreadable_fact_is_written_with_its_reason_and_not_counted(isolat
     candidate = await asyncio.to_thread(corrections_realtime.candidate_for_message, ids[0])
     ScriptedChild.calls = [MessageFailed("child_error"), MessageFailed("child_error")]
 
-    assert await worker._classify(candidate) is True
+    assert (await worker._classify(candidate)).kind in {"recorded", "unreadable"}
 
     from infra.database import get_db
 
@@ -505,7 +552,7 @@ async def test_inference_runs_outside_a_database_write_transaction(isolated_db, 
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", Child)
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
 
-    assert await worker._classify(_candidate()) is True
+    assert (await worker._classify(_candidate())).kind in {"recorded", "unreadable"}
 
 
 # ---- scan status -------------------------------------------------------------------------
@@ -529,7 +576,7 @@ async def test_becoming_ready_from_another_state_owes_a_catch_up_scan(worker, mo
 
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
 
-    assert await worker._classify(_candidate()) is True
+    assert (await worker._classify(_candidate())).kind in {"recorded", "unreadable"}
     assert worker.scan == "owed"
 
 
@@ -719,10 +766,12 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
     async def next_batch(*args, **kwargs):
         return batch
 
-    async def classify(candidate):
+    async def classify(candidate, *_args):
+        from jobs.corrections_runtime import ClassificationOutcome
+
         calls.append(candidate.message_id)
         worker.queue.put_nowait(("fresh-arrival", 0.0))
-        return True
+        return ClassificationOutcome("recorded")
 
     monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
     monkeypatch.setattr(worker, "_classify", classify)
@@ -787,10 +836,12 @@ async def test_an_arrival_queued_during_the_backfill_pause_is_picked_up_at_once(
     async def next_batch(*args, **kwargs):
         return _one_candidate_batch(_candidate())
 
-    async def classify(candidate):
+    async def classify(candidate, *_args):
+        from jobs.corrections_runtime import ClassificationOutcome
+
         worker.call_seconds = 30.0  # a pause this long alone would break the 5 s live-message bound
         paused.set()
-        return True
+        return ClassificationOutcome("recorded")
 
     monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
     monkeypatch.setattr(worker, "_classify", classify)
@@ -859,10 +910,7 @@ async def test_shutdown_cancels_the_worker_kills_the_child_and_owes_later_arriva
     monkeypatch.setattr(corrections_realtime, "_startup_worker", blocked_worker)
     monkeypatch.setattr(corrections_realtime, "cleanup_staging", lambda: None)
     child = ScriptedChild(None)
-    older_child = ScriptedChild(None)
     worker.child = child
-    worker.child_version = "v2"
-    worker.children = {"v1": older_child, "v2": child}
     corrections_realtime.startup_scan()
     task = worker.task
     await started.wait()
@@ -871,8 +919,7 @@ async def test_shutdown_cancels_the_worker_kills_the_child_and_owes_later_arriva
 
     assert task is not None and task.cancelled()
     assert child.killed and child.closed
-    assert older_child.killed and older_child.closed
-    assert worker.child is None and worker.children == {}
+    assert worker.child is None and worker.child_manifest is None
 
     corrections_realtime.notify("arrived-during-shutdown")
 
