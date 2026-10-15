@@ -268,7 +268,7 @@
 					<span class="dock-count">{position} of {$visibleQueue.count}</span>
 				{/if}
 				<span class="dock-action">
-					{failed ? 'Not saved — Retry' : current.renderer === 'decision' ? 'Answer' : 'Review'} →
+					{failed ? 'Not saved — Retry' : current.renderer === 'decision' ? 'Answer' : 'Review'}
 				</span>
 			</button>
 			</div>

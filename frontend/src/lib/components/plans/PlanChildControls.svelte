@@ -104,6 +104,8 @@
 		display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
 		border: 0; border-radius: var(--radius-xs); background: transparent;
 		color: var(--text-tertiary); cursor: pointer;
+		/* The glyph, not the hit area, ends on the row's trailing column. */
+		margin-right: -4px;
 	}
 	.child-open svg {
 		width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8;

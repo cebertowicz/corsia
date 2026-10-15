@@ -42,14 +42,12 @@
 <style>
 	.ic { display: flex; flex-shrink: 0; }
 	.ic svg { width: 15px; height: 15px; }
-	/* The tile is the icon's own colour at a low tint, so each type reads by colour before shape. */
+	/* The tile keeps the row's geometry; the icon's colour carries the type, with no tint behind it. */
 	.ic.filled {
 		align-items: center;
 		justify-content: center;
 		width: var(--tile);
 		height: var(--tile);
-		border-radius: var(--radius-sm);
-		background: color-mix(in srgb, currentColor 14%, transparent);
 	}
 	.ic.filled svg { width: 55%; height: 55%; }
 </style>

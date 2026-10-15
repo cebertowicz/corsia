@@ -258,14 +258,6 @@
 	.thread-item.active {
 		background: var(--violet-bg);
 	}
-	.thread-item.active::before {
-		content: '';
-		position: absolute;
-		left: 0; top: 0; bottom: 0;
-		width: 2px;
-		background: var(--violet);
-		border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-	}
 	.thread-title-row {
 		display: flex; align-items: center; gap: 6px;
 	}

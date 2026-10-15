@@ -225,7 +225,7 @@
 		{#if decisionCount > 0}
 			<button class="decision-indicator" disabled={decisionBusy} onclick={openDecisions}>
 				<b>{decisionCount}</b> {decisionCount === 1 ? 'decision' : 'decisions'}
-				<span>{decisionBusy ? 'Loading…' : 'Open →'}</span>
+				<span>{decisionBusy ? 'Loading…' : 'Open'}</span>
 			</button>
 		{/if}
 		{#if decisionMessage}
@@ -287,12 +287,14 @@
 	.thread-plan-pane { display: flex; flex-direction: column; gap: var(--space-2); }
 	.thread-plan-pane:focus { outline: none; }
 	.decision-indicator {
-		min-height: 44px; padding: var(--space-2); border: 1px solid var(--violet-line);
-		border-radius: var(--radius-sm); background: var(--violet-bg); color: var(--violet-text);
+		display: flex; align-items: center; min-height: 38px; padding: 6px 8px 6px 4px; border: 0;
+		border-radius: var(--radius-xs); background: transparent; color: var(--violet-text);
 		font: inherit; font-size: var(--text-footnote); text-align: left; cursor: pointer;
 	}
-	.decision-indicator b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
-	.decision-indicator span { margin-left: var(--space-1); color: var(--text-primary); font-weight: var(--fw-medium); }
+	@media (hover: hover) { .decision-indicator:hover:not(:disabled) { background: var(--bg-hover); } }
+	@media (any-pointer: coarse) { .decision-indicator { min-height: 44px; } }
+	.decision-indicator b { margin-right: 0.3em; color: var(--violet-text); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+	.decision-indicator span { margin-left: auto; padding: 0 2px 0 var(--space-1); color: var(--text-tertiary); font-size: var(--text-caption); }
 	.decision-indicator:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 	.decision-indicator:disabled { cursor: wait; opacity: 0.72; }
 	.decision-message { margin: 0; padding: 0 var(--space-2); color: var(--text-tertiary); font-size: var(--text-caption); }

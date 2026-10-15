@@ -291,7 +291,6 @@
 		display: flex; flex-direction: column; gap: 1px;
 		padding: 6px 8px 8px;
 		margin: 0 0 2px;
-		border-bottom: 1px solid var(--border-subtle);
 	}
 	.scoped-item {
 		display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -334,10 +333,6 @@
 	.scoped-item.conductor.disabled svg { color: var(--text-tertiary); opacity: 0.8; }
 	.scoped-item.conductor svg { color: var(--accent); opacity: 1; }
 	.scoped-item.active { background: var(--violet-bg); }
-	.scoped-item.active::before {
-		content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px;
-		background: var(--accent); border-radius: 0 2px 2px 0;
-	}
 	.drawer-toggle {
 		display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0;
 		padding: 7px 10px; border: none; border-radius: var(--radius-sm);
