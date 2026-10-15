@@ -37,6 +37,31 @@ def active_version_key() -> str | None:
         db.close()
 
 
+def active_version():
+    """Return Measurement's current immutable correction version, if backfilled."""
+    from core.corrections_recording import CheckerVersion
+    from infra.database import get_db
+    from infra.settings import get_setting
+
+    db = get_db()
+    try:
+        active = get_setting(ACTIVE_VERSION_SETTING, db=db) or {}
+        key = active.get("key")
+        activations = get_setting(ACTIVATIONS_SETTING, db=db) or {}
+        activation = activations.get(key) if isinstance(key, str) else None
+        saved = activation.get("version") if isinstance(activation, dict) else None
+        if not isinstance(saved, dict):
+            return None
+        return CheckerVersion(
+            str(saved["asset_id"]), str(saved["version"]), str(saved["head"]),
+            float(saved["threshold"]), str(saved["input_policy_id"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    finally:
+        db.close()
+
+
 def active_correction_count() -> int | None:
     """Use the saved active-version figure for a version-switch notice."""
     from infra.database import get_db
@@ -71,6 +96,10 @@ def complete_backfill(
             "weeks": weeks,
             "before_count": before_count,
             "after_count": after_count,
+            "version": {
+                "asset_id": version.asset_id, "version": version.version, "head": version.head,
+                "threshold": version.threshold, "input_policy_id": version.input_policy_id,
+            },
             "conductor_told_at": None,
         }
         set_setting(ACTIVATIONS_SETTING, activations, db=db)

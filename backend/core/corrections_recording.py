@@ -120,6 +120,13 @@ def checker_version(
     return CheckerVersion(asset_id, version, head, threshold, input_policy_id)
 
 
+def active_corrections_version() -> CheckerVersion | None:
+    """The sole version Measurement may read; a filling version never leaks through."""
+    from jobs.corrections_activation import active_version
+
+    return active_version()
+
+
 def subject_key(message_id: str) -> str:
     """The ``outcome_events`` subject for one durable message."""
     return MESSAGE_SUBJECT_PREFIX + message_id

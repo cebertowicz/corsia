@@ -141,9 +141,21 @@ def _peak_rss_bytes() -> int:
     return value if os.uname().sysname == "Darwin" else value * 1024
 
 
+def _disable_child_network() -> None:
+    """Inference is local-only: prohibit every outbound socket before ORT imports."""
+    import socket
+
+    def blocked_connect(*_args, **_kwargs):
+        raise OSError("corrections classifier child prohibits outbound connections")
+
+    setattr(socket.socket, "connect", blocked_connect)
+    os.environ["ORT_DISABLE_TELEMETRY_EVENTS"] = "1"
+
+
 def _child_main(connection, manifest_path: str) -> None:
     """Own one ORT session. It exits after a ceiling breach, never above it."""
     try:
+        _disable_child_network()
         import numpy as np
         import onnxruntime as ort
 

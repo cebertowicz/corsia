@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 
 import pytest
 
@@ -70,3 +71,63 @@ def test_wrong_input_policy_is_refused(tmp_path):
 
     with pytest.raises(AssetError, match="supported corrections asset"):
         AssetManifest.load(_manifest(tmp_path, policy="other"))
+
+
+def test_child_prohibits_outbound_connections_and_enables_ort_telemetry_opt_out(monkeypatch, tmp_path):
+    from core.corrections_classifier import _disable_child_network
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CORSIA_STATE_DIR", str(tmp_path / "state"))
+
+    original_connect = socket.socket.connect
+    try:
+        _disable_child_network()
+        with pytest.raises(OSError, match="prohibits outbound"):
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("127.0.0.1", 9))
+        assert not list(tmp_path.rglob("*device*"))
+    finally:
+        setattr(socket.socket, "connect", original_connect)
+
+
+def test_child_self_test_mismatch_refuses_to_serve(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+
+    from core.corrections_classifier import _child_main
+
+    path = _manifest(tmp_path)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["self_test"][0]["expected_score"] = 0.9
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    tokenizer = SimpleNamespace(
+        from_file=lambda _path: SimpleNamespace(
+            encode=lambda _text, add_special_tokens=False: SimpleNamespace(ids=[1, 2]),
+        ),
+    )
+    class Exp(list):
+        def sum(self):
+            return sum(self)
+
+    numpy = SimpleNamespace(
+        int64=object(), asarray=lambda value, dtype: value,
+        exp=lambda value: Exp([1.0, 1.0]) if isinstance(value, list) else 1.0,
+    )
+    onnx = SimpleNamespace(
+        disable_telemetry_events=lambda: None,
+        SessionOptions=lambda: SimpleNamespace(),
+        ExecutionMode=SimpleNamespace(ORT_SEQUENTIAL="sequential"),
+        InferenceSession=lambda *_args, **_kwargs: SimpleNamespace(run=lambda *_a, **_kw: [[[0.0, 0.0]]]),
+    )
+    monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=tokenizer))
+    monkeypatch.setitem(sys.modules, "numpy", numpy)
+    monkeypatch.setitem(sys.modules, "onnxruntime", onnx)
+    sent = []
+    connection = SimpleNamespace(send=sent.append, poll=lambda _timeout: False)
+    original_connect = socket.socket.connect
+    try:
+        _child_main(connection, str(path))
+    finally:
+        setattr(socket.socket, "connect", original_connect)
+
+    assert sent == [{"error": "error:AssetError"}]

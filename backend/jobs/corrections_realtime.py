@@ -100,6 +100,7 @@ async def _record_unclassifiable(candidate: CorrectionCandidate, version: Checke
 async def _classify(candidate: CorrectionCandidate) -> None:
     global _CHILD, _SCAN_OWED
     was_ready = _STATE.get("state") == "ready"
+    needs_catch_up = not was_ready or _CHILD is None
     try:
         manifest = await asyncio.to_thread(_manifest)
     except AssetError as error:
@@ -108,8 +109,6 @@ async def _classify(candidate: CorrectionCandidate) -> None:
         logger.info("corrections classifier unavailable: {}", error)
         return
     _STATE.update({"state": "ready", "reason": None, "retryable": False, "version": manifest.version})
-    if not was_ready:
-        _SCAN_OWED = True
     if _CHILD is None:
         _CHILD = ClassifierChild(manifest)
     child = _CHILD
@@ -118,6 +117,8 @@ async def _classify(candidate: CorrectionCandidate) -> None:
         try:
             result = await asyncio.to_thread(child.classify, list(candidate.context), candidate.content)
             await _record(candidate, result)
+            if needs_catch_up:
+                _SCAN_OWED = True
             return
         except ClassifierUnavailable as error:
             logger.warning("corrections classifier attempt {} failed: {}", attempt + 1, error)

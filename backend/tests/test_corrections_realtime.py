@@ -126,6 +126,7 @@ async def test_classifier_work_is_moved_off_the_event_loop(monkeypatch):
     await corrections_realtime._classify(_candidate())
 
     assert len(calls) == 2
+    assert corrections_realtime._SCAN_OWED is True
 
 
 @pytest.mark.asyncio
@@ -171,3 +172,70 @@ async def test_completed_capped_scan_activates_and_notifies_once(monkeypatch):
     assert complete.call_count == 1
     assert complete.call_args.kwargs["weeks"] > 0
     notified.assert_awaited_once()
+
+
+def test_startup_cleanup_discards_interrupted_asset_staging(monkeypatch, tmp_path):
+    from jobs import corrections_realtime
+
+    root = tmp_path / "corrections-classifier"
+    staging = tmp_path / "corrections-classifier.staging"
+    staging.mkdir()
+    (staging / "partial.onnx").write_bytes(b"partial")
+    monkeypatch.setattr(corrections_realtime, "asset_root", lambda: root)
+
+    corrections_realtime._cleanup_staging()
+
+    assert not staging.exists()
+
+
+@pytest.mark.asyncio
+async def test_invalid_present_asset_surfaces_a_nonretryable_failed_state(monkeypatch, tmp_path):
+    from core.corrections_classifier import AssetError
+    from jobs import corrections_realtime
+
+    root = tmp_path / "corrections-classifier"
+    root.mkdir()
+    (root / "manifest.json").write_text("invalid", encoding="utf-8")
+    monkeypatch.setattr(corrections_realtime, "asset_root", lambda: root)
+    monkeypatch.setattr(
+        corrections_realtime, "_manifest",
+        lambda: (_ for _ in ()).throw(AssetError("manifest sha256 does not match the source pin")),
+    )
+
+    await corrections_realtime._classify(_candidate())
+
+    state = corrections_realtime.state_snapshot()
+    assert state["state"] == "failed"
+    assert state["retryable"] is False
+    assert "pin" in state["reason"]
+
+
+@pytest.mark.asyncio
+async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queued(monkeypatch):
+    from jobs import corrections_realtime, corrections_recording
+
+    first = _candidate()
+    second = _candidate()
+    batch = SimpleNamespace(
+        selected_keys=[
+            SimpleNamespace(created_at=first.created_at, message_id=first.message_id),
+            SimpleNamespace(created_at=second.created_at, message_id="older-message"),
+        ],
+        candidates=[first, second],
+    )
+    calls = []
+
+    async def next_batch(*args, **kwargs):
+        return batch
+
+    async def classify(candidate):
+        calls.append(candidate.message_id)
+        corrections_realtime._QUEUE.put_nowait(("fresh-arrival", 0.0))
+
+    monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
+    monkeypatch.setattr(corrections_recording, "_next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_realtime, "_classify", classify)
+
+    await corrections_realtime._catch_up_scan()
+
+    assert calls == ["owner-message"]
