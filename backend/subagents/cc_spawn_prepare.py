@@ -117,35 +117,6 @@ def _register_lineage(
         db.close()
 
 
-def _persist_cc_session(
-    thread_id: str,
-    cc_session_id: str,
-    *,
-    title: str | None,
-    cwd: str | None,
-    invocation=None,
-) -> dict | None:
-    """Commit a CC session identity without notifying from a DB worker."""
-    from registry.listing import find_for_thread
-    from registry.service import register_cc_session
-
-    with write_transaction(None, scope="cc_spawn_session") as connection:
-        register_cc_session(
-            thread_id, cc_session_id, title=title, cwd=cwd,
-            invocation=invocation, db=connection,
-        )
-        return find_for_thread(thread_id, "claude-code", "session", db=connection)
-
-
-def _notify_cc_session(
-    thread_id: str, cc_session_id: str, *, row: dict | None,
-) -> None:
-    from registry.notifications import notify_changed
-
-    notify_changed(row or {
-        "integration": "claude-code", "type": "session", "external_id": cc_session_id,
-    })
-
 
 def _persist_seed(child_id: str, seed_text: str, delivery) -> None:
     """Record the child's seed and the context delivery it installs, in one write."""
@@ -214,6 +185,7 @@ async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     """Create the durable child and its pre-start runtime context."""
     _check_live_cap()
     from connections.models import connection_available
+    from registry.cc_session import notify_cc_session, persist_cc_session
 
     if not connection_available("claude-code", db=db):
         raise ValueError("Claude Code connection is not available")
@@ -230,11 +202,11 @@ async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
         _register_lineage,
         request, user_id=user_id, child_id=child_id, name=name,
     )
-    session_row = await run_in_db(
-        _persist_cc_session,
+    _previous_id, session_row = await run_in_db(
+        persist_cc_session,
         child_id, child_id, title=name, cwd=working_dir,
     )
-    _notify_cc_session(child_id, child_id, row=session_row)
+    notify_cc_session(child_id, child_id, session_row)
     live, resolved_dir = await _build_live(
         request, db, child_id=child_id, name=name,
         working_dir=working_dir, cc_alias=cc_alias,

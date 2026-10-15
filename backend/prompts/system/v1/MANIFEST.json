@@ -7,10 +7,10 @@
       "sha256": "38ff342f6bc8ea0db369b0ed061e7670a7e9d861f01f02b66e65c28a64b83081"
     },
     {
-      "bytes": 5617,
+      "bytes": 5976,
       "kind": "context",
       "path": "context/20-CONTEXT-WORK-STATE.md",
-      "sha256": "60f55e2ba3b07b3eed4da1976784b6f7db99b188a60b95631cc120760bf87221"
+      "sha256": "50b0c0fa5940932fb712b27fac93e5d94380d31b2e4848ab61c3139f76909376"
     },
     {
       "bytes": 3478,
@@ -19,10 +19,10 @@
       "sha256": "2ac0f6a1e66262f6c6e8272d48f236edee50fe95b5999fafed16dbb5daabc7a3"
     },
     {
-      "bytes": 2679,
+      "bytes": 2837,
       "kind": "context",
       "path": "context/40-HUMAN-AGENT-INTERFACE.md",
-      "sha256": "8747eed7647a956d9a17522b3f26348494c6aad64220c33fc2addda6574b6779"
+      "sha256": "7ed47f77172e09d52b6353dceaeceacec46281382948bb3655e81eff12aae2f4"
     },
     {
       "bytes": 862,
@@ -43,11 +43,11 @@
       "sha256": "e1e3eb13deff650b55ae30558962fcf57eef9ad2d227241c00751c2b9c0d26a0"
     },
     {
-      "bytes": 3269,
+      "bytes": 3245,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "6c620f0e212175046191a0d0cd2c12f9a07821a1d6f0831c09075b51c13a4827"
+      "sha256": "4594c28b73bf38650fc3e131db7df95adcb948de29ac291ef29e688184806a19"
     },
     {
       "bytes": 1712,
@@ -69,10 +69,10 @@
       "sha256": "9df2a5a0dde7b703026ee62c360aa0ff5b40225008ddfed546061ac26fff1b07"
     },
     {
-      "bytes": 9599,
+      "bytes": 9673,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/context/COORDINATION-CORE.md",
-      "sha256": "948c4bcf77a8969b64b5db95f3668fc53027e99e5ddc0421eb36506be444fbd9"
+      "sha256": "38e1a4e1b87b1dd38764ea60ac18223e663e70f8408a9691da1745ae8e1db2e4"
     },
     {
       "bytes": 740,
@@ -108,7 +108,7 @@
       "bytes": 6130,
       "kind": "coordination-model",
       "path": "coordination-models/corsia-default/manifest.yaml",
-      "sha256": "40d4517b51ab0b8a58e8b3d58dd66da0ad35de3bc5c12d87bdfd67e868ee08e7"
+      "sha256": "dd34f75f4c80a209ecba6c729fe9275dd57b90237da0e31bde9ff191a7df5e02"
     },
     {
       "bytes": 3582,
@@ -213,10 +213,10 @@
       "sha256": "af633cb3a16427eca25e3111641d67d9d2e8a6d03ca28a4493de4e787979dc01"
     },
     {
-      "bytes": 17054,
+      "bytes": 17329,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "c365692b7bfdf974707beaa50c2716e7b17e38bbdf294a85edab8bb350ed64fd"
+      "sha256": "e09a7c7af317ad8de168be0c4cf00e4582ee7762626ca3d0a0cb779ea7e2012b"
     },
     {
       "bytes": 1850,

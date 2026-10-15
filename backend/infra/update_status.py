@@ -41,6 +41,9 @@ class UpdateStatus:
     available: bool | None
     checked_at: float | None
     error: str | None
+    current_version: str | None
+    target_version: str | None
+    changes: dict | None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -71,6 +74,9 @@ def _unknown(error: str) -> UpdateStatus:
         available=None,
         checked_at=time.time(),
         error=error,
+        current_version=None,
+        target_version=None,
+        changes=None,
     )
 
 
@@ -107,16 +113,26 @@ def _probe() -> UpdateStatus:
             available=None,
             checked_at=time.time(),
             error="Could not determine how far behind the remote this checkout is.",
+            current_version=None,
+            target_version=None,
+            changes=None,
         )
 
+    available = behind > 0
+    from infra.update_changes import build_update_details
+
+    details = build_update_details(available, branch, _git)
     return UpdateStatus(
         branch=branch,
         current_sha=current,
         remote_sha=remote,
         commits_behind=behind,
-        available=behind > 0,
+        available=available,
         checked_at=time.time(),
         error=None,
+        current_version=details.current_version,
+        target_version=details.target_version,
+        changes=details.changes,
     )
 
 
@@ -131,6 +147,18 @@ def update_status(force: bool = False) -> UpdateStatus:
     _cache["data"] = status
     _cache["ts"] = now
     return status
+
+
+def cached_target_version() -> str | None:
+    """Return the cached target version without probing the remote."""
+    cached = _cache["data"]
+    return cached.target_version if cached is not None else None
+
+
+def cached_changes() -> dict | None:
+    """Return the change list the cached probe offered, without probing the remote."""
+    cached = _cache["data"]
+    return cached.changes if cached is not None else None
 
 
 def invalidate_cache() -> None:

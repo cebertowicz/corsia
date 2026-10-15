@@ -364,10 +364,12 @@ async def _stop_exact(
 def abandon_stalled_stop(thread_id: str, expected_turn_id: str) -> object | None:
     """Detach the owner Stop could not retire by its deadline; return its session."""
     from subagents import codex_runtime as runtime
+    from subagents.codex_runtime_state import schedule_live_writer_release
 
     live = runtime._LIVE.abandon(thread_id, expected_turn_id)
     if live is None:
         return None
+    schedule_live_writer_release(thread_id)
     live.checkpoint_wait_scope.request_stop()
     if runtime._APP_SESSIONS.get(thread_id) is live.session:
         runtime._APP_SESSIONS.pop(thread_id, None)

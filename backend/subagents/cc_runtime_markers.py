@@ -43,14 +43,3 @@ def broadcast_subagent_marker(
         "type": "subagent_spawned", "thread_id": parent_thread_id,
         "child_thread_id": child_id, "name": name, "provider": "cc",
     })
-
-
-def post_subagent_marker(
-    parent_thread_id: str,
-    child_id: str,
-    name: str,
-    bcast: Broadcast,
-    db,
-) -> None:
-    marker_id = persist_subagent_marker(parent_thread_id, child_id, name, db)
-    broadcast_subagent_marker(parent_thread_id, child_id, name, bcast, marker_id, db)

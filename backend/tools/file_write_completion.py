@@ -177,15 +177,9 @@ def save_guided_write(
     target,
     kwargs: dict,
     expected: str | None = None,
-    return_receipt: bool = False,
     **write_args,
-) -> str | tuple[str, str | None]:
-    """Blocking. Save an agent tool's guidance write through the history primitive.
-
-    ``return_receipt`` gives an off-loop caller the undecorated managed-write
-    receipt to announce after control returns to its event loop. The displayed
-    result remains the existing history-decorated text.
-    """
+) -> str:
+    """Blocking. Save an agent tool's guidance write through the history primitive."""
     from infra.config import WORKSPACE
 
     results: list[str] = []
@@ -203,17 +197,16 @@ def save_guided_write(
         if receipt is not None and saved.line
         else receipt or saved.line or ""
     )
-    return (result, receipt) if return_receipt else result
+    return result
 
 
 async def save_guided_write_and_announce(path: Path, text: str, target, kwargs: dict, **write_args) -> str:
     """Save guidance off-loop, then nudge its managed artifact from the caller loop."""
     from infra.db_async import run_off_db
 
-    result, receipt = await run_off_db(
+    result = await run_off_db(
         save_guided_write, path, text, target, kwargs,
-        notify=False, return_receipt=True, **write_args,
+        notify=False, **write_args,
     )
-    if receipt is not None:
-        announce_published_write(receipt)
+    announce_published_write(result)
     return result

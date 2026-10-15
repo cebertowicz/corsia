@@ -5,8 +5,9 @@
 import { get } from 'svelte/store';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 
-const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const ms = (name: string) => Number.parseFloat(cssVar(name)) || 0;
+export const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+/** A duration token in milliseconds (`--dur-standard`), read from the document so the tokens stay the one source. */
+export const ms = (name: string) => Number.parseFloat(cssVar(name)) || 0;
 
 type Direction = { direction: 'in' | 'out' | 'both' };
 

@@ -12,8 +12,6 @@
 	/** Copy for each served ``size.comparable_reason``; the server alone decides whether a week compares. */
 	const reasons = (size: SizeCoverage): Record<string, string> => ({
 		outcome_definition_changed: `outcomes were counted differently before ${day(size.comparability_before)}`,
-		mixed_profiles: 'outcomes this week were rated by more than one rater or rubric',
-		profile_changes_in_range: 'the rater or rubric changes within this range',
 	});
 	/** Copy for each served ``size.rate_reason``; the code, not the counts, says why a rate is withheld. */
 	const rateStatus = (size: SizeCoverage): Record<string, string> => ({

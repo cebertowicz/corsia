@@ -13,6 +13,8 @@
 		isQueuedInputOwnedByActiveTurn,
 	} from '$lib/messageDelivery';
 	import { limitHeldThreadId } from '$lib/stores/overageSetting';
+	import { updateOperation } from '$lib/update/store';
+	import { holdsNewWork } from '$lib/update/model';
 	import AgentMessageAttribution from './AgentMessageAttribution.svelte';
 	import UserBubbleAttachments from './UserBubbleAttachments.svelte';
 
@@ -55,9 +57,15 @@
 	const timestampPending = $derived(
 		deliveryState === 'queued' || deliveryState === 'sending',
 	);
-	const deliveryLabel = $derived(delivery?.label ?? null);
+	const queuedForUpdate = $derived(
+		deliveryState === 'queued'
+			&& (delivery?.label === 'Queued' || delivery?.label === 'Sending when ready…')
+			&& !activeTurnOwnsInput
+			&& holdsNewWork($updateOperation),
+	);
+	const deliveryLabel = $derived(queuedForUpdate ? 'Sends after the update' : delivery?.label ?? null);
 	// Delivery status derives from the canonical projection.
-	const deliveryTitle = $derived(delivery?.title ?? null);
+	const deliveryTitle = $derived(queuedForUpdate ? 'Sends after the update' : delivery?.title ?? null);
 	const deliveryFailed = $derived(delivery?.failed === true);
 	const parkedOnOurDefect = $derived(isParkedOnOurDefect(msg));
 	// Codes that mean "we do not know whether the provider got it". A resend may

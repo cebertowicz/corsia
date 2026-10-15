@@ -344,7 +344,7 @@ def dispatch(plan_id, operation, params, actor, provenance, db, *, workflow_vers
     if actor.kind != "user" or operation not in user_steering.STEERING_OPERATIONS:
         return _route(plan_id, operation, params, actor, common, db, workflow_version)
     if operation in user_settle.OUTCOMES:
-        return user_settle.settle(operation, params, actor, common)
+        return user_settle.settle(operation, params, actor.audit_id, common)
     params = user_steering.prepare(operation, params, db)
     if "worker_plan_id" in params:
         return user_steering.move_worker_plan(operation, params, common)

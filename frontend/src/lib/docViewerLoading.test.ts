@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writable } from 'svelte/store';
 import { DocOpenError } from '$lib/docOpenRefusal';
 import { clearDraft, seedDraft } from '$lib/stores/docSaveQueue';
-import { loadViewerContent } from './docViewerLoading';
+import { loadViewerContent, openFromDraft } from './docViewerLoading';
 
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), writeContent: vi.fn() }));
 vi.mock('$lib/api/docs', () => api);
@@ -37,5 +37,25 @@ describe('a live open refused before the file snapshot arrives', () => {
 		const { error, onSnapshot } = await refusedBeforeAnySnapshot();
 		expect(onSnapshot).not.toHaveBeenCalled();
 		expect(error).toMatchObject({ code: 'setup_failed', message: "Live editing couldn't start for this document." });
+	});
+});
+
+describe('a tab opening from its draft', () => {
+	const draft = (editText: string, savedText: string) => ({ target, editText, savedText, status: 'idle' as const }) as unknown as Parameters<typeof openFromDraft>[0];
+
+	it('waits for the loader when its draft holds nothing', () => {
+		expect(openFromDraft(undefined, 'artifact')).toEqual({ text: null, unsaved: false, confirming: false, signal: { status: 'loading' } });
+	});
+
+	it('shows saved text at once while the loader confirms it, and claims nothing about write access meanwhile', () => {
+		const opened = openFromDraft(draft('# Saved', '# Saved'), 'artifact');
+		expect(opened).toMatchObject({ text: '# Saved', unsaved: false, confirming: true });
+		expect(opened.signal).toEqual({ status: 'ready', artifactId: 'artifact', shown: true });
+	});
+
+	it('shows unsaved text at once, read-only until the loader re-checks write access', () => {
+		const opened = openFromDraft(draft('# Local', '# Saved'), 'artifact');
+		expect(opened).toMatchObject({ text: '# Local', unsaved: true, confirming: false });
+		expect(opened.signal).toEqual({ status: 'ready', artifactId: 'artifact', shown: true, writable: false });
 	});
 });

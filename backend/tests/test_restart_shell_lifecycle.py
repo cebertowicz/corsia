@@ -339,6 +339,55 @@ drain_and_wait restart 9999
     assert sum("-X DELETE" in call for call in calls) == 1
 
 
+def test_drain_poll_accepts_the_real_operation_status_payload(
+    tmp_path: Path,
+    isolated_db,
+) -> None:
+    """The shell's poll parser reads the real caller-scoped drain payload."""
+    import json
+
+    from automation import self_restart
+    from infra.drain import get_drain_status
+
+    operation_id = self_restart.try_acquire(None, "steve", None, None, "update", kind="update")
+    assert operation_id is not None
+    payload = json.dumps(get_drain_status(user_id="steve"))
+    trace = tmp_path / "curl.log"
+    result = _run_bash(
+        """
+warn() { printf 'warn %s\\n' "$*" >&2; }
+ok() { :; }
+BACKEND_PORT=9999
+CORSIA_TOKEN=[REDACTED]
+CORSIA_RESTART_OPERATION_ID="$OPERATION_ID"
+source scripts/corsia.d/runtime.sh
+sleep() { :; }
+curl() {
+    printf '%s\\n' "$*" >> "$CURL_TRACE"
+    case " $* " in
+        *" -X POST "*"/api/system/drain/ready?"*)
+            printf '{"ok":true,"operation_id":"%s"}\\n200' "$OPERATION_ID"
+            ;;
+        *" -X DELETE "*) return 0 ;;
+        *) printf '%s' "$PAYLOAD" ;;
+    esac
+}
+drain_and_wait restart 9999
+""",
+        env={"CURL_TRACE": str(trace), "OPERATION_ID": operation_id, "PAYLOAD": payload},
+    )
+
+    assert result.returncode == 0, result.stderr
+    calls = trace.read_text().splitlines()
+    assert sum("/api/system/drain/ready?" in call for call in calls) == 1
+    assert not any("-X DELETE" in call for call in calls)
+
+    assert self_restart.abort_operation(operation_id, error="stopped", failure_code="build_failed")
+    settled = get_drain_status(user_id="steve")
+    assert settled["active"] is False
+    assert settled["activeProcesses"] == 0
+
+
 def test_forced_service_stop_uses_the_same_bounded_launchd_owner(
     tmp_path: Path,
     isolated_launch_agents_dir: Path,

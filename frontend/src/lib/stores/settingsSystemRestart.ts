@@ -71,9 +71,7 @@ export async function readSystemRestartStatus(operationId: string, signal?: Abor
 	}
 }
 
-// Cover the 60s drain cap, bounded launchd handoff, and 60s readiness bound.
-const SYSTEM_RESTART_TIMEOUT_MS = 4 * 60_000;
-const FINAL_RESTART_OBSERVATION_TIMEOUT_MS = 5_000;
+// Restart observation remains active until the durable operation settles.
 
 type RestartObservation = {
 	version: SystemVersionSnapshot | null;
@@ -87,12 +85,7 @@ type RestartObservationResult = {
 	drainEndedAt: number | null;
 };
 
-function restartPhase(
-	restartStatus: SystemRestartStatus | null,
-	hasVersion: boolean,
-	restarted: boolean,
-	revisionsAgree: boolean,
-): string {
+function restartPhase(restartStatus: SystemRestartStatus | null, hasVersion: boolean): string {
 	if (restartStatus?.status === 'in_flight') {
 		if (restartStatus.phase === 'restarting') return 'Restarting backend…';
 		if (restartStatus.phase === 'resuming') return 'Restoring restart continuity…';
@@ -100,7 +93,6 @@ function restartPhase(
 		return 'Draining active work…';
 	}
 	if (!hasVersion) return 'Restarting backend…';
-	if (restarted && !revisionsAgree) return 'Verifying backend, frontend, and checkout revisions…';
 	return restartStatus ? 'Checking restart result…' : 'Waiting for drain to begin…';
 }
 
@@ -113,7 +105,6 @@ async function observeSystemRestart(operationId: string, signal?: AbortSignal): 
 }
 
 function classifyRestartObservation(
-	mode: 'restart' | 'update',
 	before: SystemVersionSnapshot | null,
 	observation: RestartObservation,
 	sawUnavailable: boolean,
@@ -126,27 +117,18 @@ function classifyRestartObservation(
 	}
 	if (['failed', 'cancelled', 'superseded'].includes(restartRead?.status ?? '')) {
 		return {
-			result: { ok: false, message: restartRead?.error ?? 'Restart operation ended before a replacement was verified.' },
+			result: { ok: false, message: restartFailureMessage(restartRead) },
 			sawUnavailable,
 			drainEndedAt,
 		};
 	}
 
 	const backend = version?.backend;
-	const backendSha = backend?.full_hash;
-	const frontendSha = version?.frontend?.full_hash;
-	const checkoutSha = backend?.current_head?.full_hash;
 	const restarted = Boolean(
 		backend?.start_iso && (
 			(before?.backend?.start_iso && backend.start_iso !== before.backend.start_iso)
 			|| (!before?.backend?.start_iso && sawUnavailable)
 		),
-	);
-	const revisionsAgree = Boolean(
-		backendSha && backendSha !== 'unknown'
-		&& frontendSha && frontendSha !== 'unknown'
-		&& frontendSha === backendSha
-		&& (!checkoutSha || (checkoutSha !== 'unknown' && checkoutSha === backendSha)),
 	);
 	if (restartRead?.status === 'in_flight') {
 		drainEndedAt = null;
@@ -156,24 +138,20 @@ function classifyRestartObservation(
 		drainEndedAt ??= Date.now();
 	}
 
-	const phase = restartPhase(restartRead, Boolean(version), restarted, revisionsAgree);
-	if (restarted && revisionsAgree && restartRead?.status === 'complete') {
+	const phase = restartPhase(restartRead, Boolean(version));
+	if (restarted && restartRead?.status === 'complete') {
 		return { phase, result: { ok: true }, sawUnavailable, drainEndedAt };
 	}
 	if (
 		inferStoppedReplacement
 		&& drainEndedAt !== null
 		&& !sawUnavailable
+		&& restartRead?.status !== 'complete'
 		&& Date.now() - drainEndedAt >= 2_000
 	) {
 		return {
 			phase,
-			result: {
-				ok: false,
-				message: mode === 'update'
-					? 'Update stopped during restart; the previous server is still running. No replacement was verified. Inspect the restart log before retrying.'
-					: 'Restart stopped before replacing the server. Inspect the restart log before retrying.',
-			},
+			result: { ok: false, message: 'Restart stopped before replacing the server. Inspect the restart log before retrying.' },
 			sawUnavailable,
 			drainEndedAt,
 		};
@@ -203,26 +181,27 @@ async function observeSystemRestartWithin(
 	}
 }
 
-function completionUnverifiedMessage(mode: 'restart' | 'update'): string {
-	return mode === 'update'
-		? "Couldn't verify update completion. Inspect the restart log before retrying."
-		: "Couldn't verify restart completion. Inspect the restart log before retrying.";
+/** Update failure copy lives in `lib/update/model.ts`; a plain restart shows its stored summary. */
+function restartFailureMessage(status: SystemRestartStatus | null | undefined): string {
+	return status?.error ?? 'Restart operation ended before a replacement was verified.';
 }
 
 export async function waitForSystemRestart(
-	mode: 'restart' | 'update',
 	before: SystemVersionSnapshot | null,
 	operationId: string,
 	onPhase?: (message: string) => void,
-	timeoutMs = SYSTEM_RESTART_TIMEOUT_MS,
 ): Promise<{ ok: boolean; message?: string }> {
-	const deadline = Date.now() + timeoutMs;
 	let sawUnavailable = false;
 	let drainEndedAt: number | null = null;
-	while (Date.now() < deadline) {
-		const observation = await observeSystemRestartWithin(operationId, deadline - Date.now());
-		if (!observation || Date.now() >= deadline) break;
-		const outcome = classifyRestartObservation(mode, before, observation, sawUnavailable, drainEndedAt);
+	while (true) {
+		const observation = await observeSystemRestartWithin(operationId, 5_000);
+		if (observation === null) {
+			sawUnavailable = true;
+			onPhase?.('Restarting backend…');
+			await new Promise((resolve) => setTimeout(resolve, 500));
+			continue;
+		}
+		const outcome = classifyRestartObservation(before, observation, sawUnavailable, drainEndedAt);
 		sawUnavailable = outcome.sawUnavailable;
 		drainEndedAt = outcome.drainEndedAt;
 		if (outcome.phase) onPhase?.(outcome.phase);
@@ -232,17 +211,4 @@ export async function waitForSystemRestart(
 		}
 		await new Promise((resolve) => setTimeout(resolve, 500));
 	}
-
-	onPhase?.(mode === 'update' ? 'Checking update result…' : 'Checking restart result…');
-	const finalObservation = await observeSystemRestartWithin(operationId, FINAL_RESTART_OBSERVATION_TIMEOUT_MS);
-	if (finalObservation) {
-		// At the deadline, only explicit failure or strict completion can settle the fresh observation.
-		const outcome = classifyRestartObservation(mode, before, finalObservation, sawUnavailable, drainEndedAt, false);
-		if (outcome.phase) onPhase?.(outcome.phase);
-		if (outcome.result) {
-			if (outcome.result.ok) onPhase?.('Restart complete. Reloading…');
-			return outcome.result;
-		}
-	}
-	return { ok: false, message: completionUnverifiedMessage(mode) };
 }

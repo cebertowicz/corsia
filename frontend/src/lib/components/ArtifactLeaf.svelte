@@ -5,6 +5,7 @@
 	import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 	import SubagentConversationLeaf from './SubagentConversationLeaf.svelte';
 	import LegacyPlanDiscussionLeaf from './LegacyPlanDiscussionLeaf.svelte';
+	import BrowserLeaf from './BrowserLeaf.svelte';
 	import ArtifactTabStrip from './ArtifactTabStrip.svelte';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace, TabLoadSignal } from '$lib/artifactTabs';
@@ -72,7 +73,8 @@
 	let imageViewer = $state<ImageViewer | undefined>(undefined);
 	let leafEl = $state<HTMLElement | undefined>(undefined);
 	let leafBodyEl = $state<HTMLElement | undefined>(undefined);
-	let restoringDocument = $state<string | null>(null);
+	/** The tab whose place is being put back; a document not on screen yet stays covered until it is in place. */
+	let restoringDocument = $state<{ instanceId: string; covered: boolean } | null>(null);
 	let documentRestore: AbortController | null = null;
 	function restoreDocument(place: Parameters<typeof restoreDocumentPlace>[1], options: RestoreDocumentPlaceOptions = {}) {
 		documentRestore?.abort();
@@ -82,12 +84,12 @@
 			if (documentRestore === controller) documentRestore = null;
 		});
 	}
-
 	// An image of the open document shown larger. Its tab's view state is the one record of it and its camera, so a
 	// tab switch keeps it with its tab. The document stays mounted beneath it, so closing it returns to the same live
 	// document; its comments are taken from that document each time it shows, never kept with the image.
 	const shownImage = $derived(threadId && target ? tabDocumentImage(threadId, target.instanceId) : null);
 	const imageOpen = $derived(shownImage !== null && mode !== 'rail');
+	const documentCovered = $derived(imageOpen || (restoringDocument?.covered === true && restoringDocument.instanceId === target?.instanceId));
 	const imageComments = $derived(imageOpen && viewer ? viewer.imageComments() : undefined);
 	// Opening an image from its document eases the canvas wider and Back eases it back. Any other change (a tab switch,
 	// or a return to a tab whose image is open) puts the canvas at its width at once, in the frame the tab turns active.
@@ -110,6 +112,11 @@
 		if (mode === 'rail' && tid && instanceId) untrack(() => clearTabDocumentImage(tid, instanceId));
 	});
 	$effect(() => () => documentRestore?.abort());
+	$effect(() => {
+		if (restoringDocument === null || restoringDocument.instanceId === activeTab?.instanceId) return;
+		documentRestore?.abort();
+		restoringDocument = null;
+	});
 	$effect(() => {
 		if (!imageOpen || mode !== 'expanded') return;
 		const release = widenForImageViewer(untrack(() => leafEl?.getBoundingClientRect().width ?? 0), { instant: !easeCanvas });
@@ -202,11 +209,11 @@
 				? tabViewState(threadId, signal.instanceId)?.documentPlace
 				: null;
 			if (place) {
-				restoringDocument = signal.instanceId;
+				restoringDocument = { instanceId: signal.instanceId, covered: !signal.shown };
 				restoreDocument(place, {
 					mode: 'tab-return',
 					onPlaced: () => {
-						if (restoringDocument === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
+						if (restoringDocument?.instanceId === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;
 					},
 				});
 			}
@@ -273,8 +280,10 @@
 				onCollapse={collapse}
 			/>
 		{/if}
-		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} bind:this={leafBodyEl}>
-			{#if activeTab?.kind === 'subagent' && activeTab.threadId}
+		<div class="leaf-body" class:document-canvas={!!target} class:image-canvas={!!imageTarget} class:browser-canvas={activeTab?.kind === 'browser'} bind:this={leafBodyEl}>
+			{#if activeTab?.kind === 'browser' && activeTab.threadId}
+				<BrowserLeaf threadId={activeTab.threadId} />
+				{:else if activeTab?.kind === 'subagent' && activeTab.threadId}
 				<SubagentConversationLeaf threadId={activeTab.threadId} {onOpenLightbox} />
 				{:else if activeTab?.kind === 'legacy-discussion' && activeTab.artifactId}
 					<LegacyPlanDiscussionLeaf artifactId={activeTab.artifactId} title={activeTab.title} />
@@ -298,7 +307,7 @@
 			{:else if target}
 				<!-- DocViewer owns Escape precedence (comment draft, then selection),
 				     so handing it onClose keeps that order intact in compact. -->
-				<div class="doc-host" class:covered={imageOpen || restoringDocument === target.instanceId} inert={imageOpen || restoringDocument === target.instanceId}>
+				<div class="doc-host" class:covered={documentCovered} inert={documentCovered}>
 					<DocViewer
 						bind:this={viewer}
 						{target}
@@ -369,7 +378,8 @@
 	/* The document keeps its place in the layout under the image viewer; only its drawing and input are withdrawn. */
 	.doc-host { display: contents; }
 	.doc-host.covered { visibility: hidden; }
-	.leaf-body.image-canvas { overflow: hidden; display: flex; flex-direction: column; }
+	.leaf-body.image-canvas, .leaf-body.browser-canvas { overflow: hidden; display: flex; flex-direction: column; }
+	.leaf-body.browser-canvas { padding: 0; }
 	/* The same condition as --doc-phone-inset (DocViewer.css): its text inset sits inside this, so a phone keeps a 12px page gutter outside it. */
 	/* The document header's own 44px row meets the app bar directly, so no band sits above the ask line (RSR-5). */
 	@media (any-pointer: coarse) and (max-width: 600px) { .leaf-body.document-canvas { padding-inline: 12px; padding-top: 0; } }

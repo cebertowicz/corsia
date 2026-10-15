@@ -70,8 +70,10 @@ def usage_verdict(response: object) -> dict[str, Any]:
     if not isinstance(response, dict):
         return {"verdict": "unknown", "error": "Claude Code returned no usage report"}
     limits = response.get("rate_limits")
-    if response.get("rate_limits_available") is False or not isinstance(limits, dict):
-        return {"verdict": "unknown", "error": "Claude Code could not read plan usage for this account"}
+    if response.get("rate_limits_available") is False:
+        return {"verdict": "unknown", "error": "Claude Code reports plan usage unavailable for this account"}
+    if not isinstance(limits, dict):
+        return {"verdict": "unknown", "error": "Claude Code returned malformed plan usage"}
     windows = {
         name: limits[name] for name in ACCOUNT_WINDOWS
         if isinstance(limits.get(name), dict)

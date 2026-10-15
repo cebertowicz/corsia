@@ -5,6 +5,7 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import VersionOverlay from './VersionOverlay.svelte';
 	import CreateProjectModal from './CreateProjectModal.svelte';
+	import UpdateProgressToast from '$lib/update/UpdateProgressToast.svelte';
 	import type { ProjectPick } from '$lib/stores/projects';
 
 	let {
@@ -35,6 +36,7 @@
 <Lightbox bind:url={lightboxUrl} bind:open={lightboxOpen} />
 <ToastContainer />
 <VersionOverlay />
+<UpdateProgressToast />
 
 <CommandPalette
 	onPickProject={onPickProject}

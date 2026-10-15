@@ -161,6 +161,18 @@ describe('load signals apply to the tab that initiated them', () => {
 		expect(ws.tabs[0].status).toBe('readonly');
 	});
 
+	it('keeps what a tab last knew of its write access through a ready signal that claims none', () => {
+		let ws = withTabs({ path: '/context/SYSTEM.md', title: 'SYSTEM.md' });
+		const instanceId = idOf(ws, '/context/SYSTEM.md');
+		ws = applyLoadSignal(ws, { instanceId, status: 'ready', revision: 'r1', writable: false })!;
+		ws = applyLoadSignal(ws, { instanceId, status: 'ready', shown: true }) ?? ws;
+		expect(ws.tabs[0].status).toBe('readonly');
+		ws = applyLoadSignal(ws, { instanceId, status: 'ready', revision: 'r1', writable: true })!;
+		expect(ws.tabs[0].status).toBe('ready');
+		ws = applyLoadSignal(ws, { instanceId, status: 'ready', shown: true }) ?? ws;
+		expect(ws.tabs[0].status).toBe('ready');
+	});
+
 	it('enriches artifact identity without changing the instance key', () => {
 		let ws = withTabs({ path: '/a.md', title: 'a' });
 		const instanceId = idOf(ws, '/a.md');

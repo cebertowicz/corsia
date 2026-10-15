@@ -1,11 +1,12 @@
 import { writable, get } from 'svelte/store';
 import {
-	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, openTab,
+	applyLoadSignal, applyOwnSave, applyRevisionCheck, closeTab, emptyWorkspace, newInstanceId, openTab,
 	resolveTabArtifact, restoreWorkspace, tabKey, type ArtifactTabStatus,
 	type OpenArtifactInput, openLegacyDiscussionTab, type OpenLegacyDiscussionInput,
 	openSubagentTab, type OpenSubagentInput, type RevisionCheck, type TabLoadSignal,
 	type ThreadArtifactWorkspace,
 } from '$lib/artifactTabs';
+import { openBrowserTab } from '$lib/artifactAuxiliaryTabs';
 import { clearDraft, existingDraft } from '$lib/stores/docSaveQueue';
 import { closeLiveDocument } from '$lib/stores/liveDocuments';
 import { token } from '$lib/stores/auth';
@@ -108,10 +109,14 @@ function stripAuxiliaryTabs(): void {
 threadWorkspaces.subscribe(persist);
 splitWidth.subscribe(persist);
 
+// Threads whose browser an agent has revealed since this account signed in to this app session.
+const revealedBrowsers = new Set<string>();
+
 let lastToken = get(token);
 token.subscribe((value) => {
 	if (value === lastToken) return;
 	lastToken = value;
+	revealedBrowsers.clear();
 	stripAuxiliaryTabs();
 });
 
@@ -155,6 +160,16 @@ export function openArtifactTab(threadId: string, input: OpenArtifactInput): voi
 /** Applies an agent request without overriding the user's chosen canvas surface. */
 export function openAgentDocumentTab(threadId: string, input: OpenArtifactInput): void {
 	mutate(threadId, (ws) => ({ ...openTab(ws, input), activeSurface: ws.activeSurface }));
+}
+
+/**
+ * Opens a browser pane. Only an agent's first reveal of a thread's browser in this app session takes
+ * the view; a later one adds a missing tab in the background, even after the user closed it.
+ */
+export function openBrowserPane(threadId: string, agentOpened = false): void {
+	const foreground = !agentOpened || !revealedBrowsers.has(threadId);
+	if (agentOpened) revealedBrowsers.add(threadId);
+	mutate(threadId, (ws) => openBrowserTab(ws, { threadId }, newInstanceId, foreground));
 }
 
 /** Opens a canonical child conversation beside its still-mounted parent. */

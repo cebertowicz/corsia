@@ -73,6 +73,8 @@ export function createCommentSheet(props: {
 	return {
 		/** The drawer's `open`: false from a close until the next opening. */
 		get open() { return mobileDrawerOpen; },
+		/** The modal is visible until its outro finishes, including the scrim. */
+		get modalOpen() { return mobileDrawerOpen || closingMobileState !== null; },
 		/** What the sheet shows: the closing content through its outro, otherwise the surface's own state and draft. */
 		get state() { return renderedMobileState; },
 		get draft() { return renderedMobileDraft; },

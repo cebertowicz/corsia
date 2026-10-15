@@ -61,10 +61,12 @@ describe('createCommentSheet', () => {
 		t.sheet.close();
 		expect(t.onClose).toHaveBeenCalledOnce();
 		expect(t.sheet.open).toBe(false);
+		expect(t.sheet.modalOpen).toBe(true);
 		expect(t.sheet.closing).toBe(true);
 		expect(t.sheet.state).toEqual({ kind: 'list' });
 		t.sheet.finishClose();
 		flushSync();
+		expect(t.sheet.modalOpen).toBe(false);
 		expect(t.sheet.closing).toBe(false);
 		expect(t.sheet.state).toBeNull();
 		expect(t.onClose).toHaveBeenCalledOnce();

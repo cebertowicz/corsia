@@ -47,7 +47,7 @@ export type {
 
 let instanceCounter = 0;
 
-function newInstanceId(): string {
+export function newInstanceId(): string {
 	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
 		return crypto.randomUUID();
 	}
@@ -209,9 +209,11 @@ export function applyLoadSignal(ws: ThreadArtifactWorkspace, signal: TabLoadSign
 	const prev = ws.tabs[idx];
 	if (prev.kind !== 'document') return null;
 	const loaded = signal.status === 'ready' && !!signal.revision;
+	// A ready signal that makes no claim about write access keeps what the tab last knew.
+	const readonly = signal.writable === false || (signal.writable === undefined && prev.status === 'readonly');
 	const next: ArtifactTab = {
 		...prev,
-		status: signal.status === 'ready' && signal.writable === false ? 'readonly' : signal.status,
+		status: signal.status === 'ready' && readonly ? 'readonly' : signal.status,
 		loadedRevision: loaded ? signal.revision! : prev.loadedRevision,
 		latestRevision: loaded ? signal.revision! : prev.latestRevision,
 		artifactId: signal.artifactId ?? prev.artifactId,
