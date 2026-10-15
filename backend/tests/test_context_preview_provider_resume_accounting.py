@@ -82,11 +82,13 @@ def test_cold_path_still_adds_sources_and_history(monkeypatch):
     monkeypatch.setattr(
         "core.context_preview_estimate._installed_checkpoint_history", lambda *_a: None,
     )
+    monkeypatch.setattr("core.context_admission._delivered_rows", lambda *_a: [])
 
     estimate = _estimate(None)
 
     assert estimate["total_tokens"] == 48_000
     assert estimate["continuity_mode"] == "unknown"
+    assert estimate["loaded_tool_tokens"] == []
 
 
 def test_real_source_rows_equal_the_resume_headline(monkeypatch, tmp_path):

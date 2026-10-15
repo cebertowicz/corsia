@@ -42,6 +42,9 @@
 			{/if}
 			{#if source.countLabel}
 				<span class="ctx-source-count-label">{source.countLabel}</span>
+			{:else if source.layer === 'tools'}
+				<!-- Keeps the empty actions cell so CORSIA tools lines up with each app's row. -->
+				<span class="ctx-source-count-label" aria-hidden="true"></span>
 			{/if}
 			{#if source.deltaLabel}
 				<span class="ctx-source-delta">{source.deltaLabel}</span>

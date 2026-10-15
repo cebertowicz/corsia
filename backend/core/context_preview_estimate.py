@@ -64,6 +64,28 @@ def _installed_checkpoint_history(
     )
 
 
+def _looked_up_tools(
+    thread_id: str, db, prepared_history: list[dict[str, Any]] | None,
+    retained_provider_tokens: int | None, model: str,
+) -> list[dict[str, Any]]:
+    """Attribute looked-up tool definitions from the history the estimate measured.
+
+    That is the checkpoint-tail message list, or the stored rows when no
+    checkpoint is installed. A provider-resume handle holds its history in the
+    harness and reports none.
+    """
+    from core.context_admission import DEFAULT_PREFLIGHT_MEMORY_WINDOW, _delivered_rows
+    from core.loaded_tool_usage import loaded_tool_tokens
+    from tools.mcp_runtime import tool_server_index
+
+    if retained_provider_tokens is not None:
+        return []
+    rows = None if prepared_history is not None else _delivered_rows(
+        thread_id, DEFAULT_PREFLIGHT_MEMORY_WINDOW, db,
+    )
+    return loaded_tool_tokens(prepared_history, tool_server_index(), rows=rows, model=model)
+
+
 def _count_retained_once(estimate: dict[str, Any], retained_provider_tokens: int) -> None:
     """Total a provider-resume preview from the retained count, once.
 
@@ -122,6 +144,7 @@ def estimated_preflight(
         timing=timing,
     ).to_dict()
     estimate.pop("prepared_context", None)
+    loaded = _looked_up_tools(thread_id, db, prepared_history, retained_provider_tokens, model)
     if retained_provider_tokens is not None:
         _count_retained_once(estimate, retained_provider_tokens)
         checkpoint_tokens = 0
@@ -142,6 +165,7 @@ def estimated_preflight(
             else len(prepared_history) if prepared_history is not None else None
         ),
         "checkpoint_tokens": checkpoint_tokens,
+        "loaded_tool_tokens": loaded,
         "model_context_window": live_window,
         "block_reason": None,
         "trigger_reason": None,
