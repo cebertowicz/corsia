@@ -181,7 +181,7 @@ def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
     assert len(titles) == 7
     assert titles[0] == "About you."
     assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
-    assert "never skill `assistant-onboarding`" in steps
+    assert "follow skill `google-setup`" in steps
     assert "no setup task list" in app
     assert "Read nothing until a yes" in steps
 
