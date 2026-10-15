@@ -95,11 +95,14 @@ done < <(find "$GIT_CORE" -type f -print0)
 printf 'bundled-git-core-copies-of-git=%s limit=%s\n' "$git_copies" "$GIT_CORE_COPY_LIMIT"
 [ "$git_copies" -le "$GIT_CORE_COPY_LIMIT" ] || { echo "error: $git_copies files in libexec/git-core are copies of bin/git" >&2; exit 1; }
 
-# These fail-closed shims would run if Git's runtime-prefix helper lookup fell
-# back to the Command Line Tools after the app has moved.
+# These fail-closed shims would run, and record it, if Git's runtime-prefix
+# helper lookup fell back to the Command Line Tools after the app has moved, or
+# if the service's PATH reached a system Git ahead of the bundle.
+readonly SYSTEM_GIT_CALLS="$TEMP_ROOT/system-git-calls"
 mkdir -p "$TEMP_ROOT/empty-home" "$TEMP_ROOT/no-system-git"
 for command in git git-upload-pack git-receive-pack git-upload-archive git-shell; do
-  printf '#!/bin/sh\necho "system Git stub must not run: %s" >&2\nexit 99\n' "$command" > "$TEMP_ROOT/no-system-git/$command"
+  printf '#!/bin/sh\necho "%s $*" >> "%s"\necho "system Git stub must not run: %s" >&2\nexit 99\n' \
+    "$command" "$SYSTEM_GIT_CALLS" "$command" > "$TEMP_ROOT/no-system-git/$command"
   chmod 0755 "$TEMP_ROOT/no-system-git/$command"
 done
 bundled_git() {
@@ -133,9 +136,19 @@ bundled_git submodule -h >/dev/null 2>&1
 
 port="$($PYTHON -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 mkdir -p "$TEMP_ROOT/home" "$TEMP_ROOT/workspace" "$TEMP_ROOT/state"
+# The service's login-shell PATH puts the system Git shims ahead of the system
+# paths, where an Apple or Homebrew Git would be.
+printf 'export PATH="%s:$PATH"\n' "$TEMP_ROOT/no-system-git" > "$TEMP_ROOT/home/.zprofile"
+login_path="$(env -i HOME="$TEMP_ROOT/home" PATH="/usr/bin:/bin:/usr/sbin:/sbin" PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONPATH="$RESOURCES/backend" "$PYTHON" -c 'from cli_location import login_shell_path; print(login_shell_path() or "")')"
+case "$login_path" in
+  "$TEMP_ROOT/no-system-git:"*) ;;
+  *) echo "error: the service login PATH does not lead with the system Git shims: $login_path" >&2; exit 1 ;;
+esac
 env -i \
   HOME="$TEMP_ROOT/home" TMPDIR="$TEMP_ROOT" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
   CORSIA_TEST_MODE=1 CORSIA_ANALYTICS_DISABLE=1 PYTHONDONTWRITEBYTECODE=1 \
+  GIT_TRACE="$TEMP_ROOT/service-git-trace.log" \
   CORSIA_WORKSPACE="$TEMP_ROOT/workspace" CORSIA_STATE_DIR="$TEMP_ROOT/state" \
   "$RESOURCES/bin/corsia-service" --host 127.0.0.1 --port "$port" \
   >"$TEMP_ROOT/backend.log" 2>&1 &
@@ -152,9 +165,22 @@ for _ in $(seq 1 30); do
 done
 grep -q '"status":"ok"' "$TEMP_ROOT/health.json"
 curl --fail --silent "http://127.0.0.1:$port/api/version" >"$TEMP_ROOT/version.json"
+# Both the service's PATH and every Git its backend ran (version reads it) lead
+# to the bundle, not the shims ahead of the system paths.
+service_git="$(sed -n 's/^CORSIA bundled backend: git=//p' "$TEMP_ROOT/state/logs/service.log")"
+printf 'service-git=%s\n' "$service_git"
+[ "$service_git" -ef "$GIT_CORE/git" ] || { echo "error: the service resolves git to ${service_git:-nothing}, not the bundle" >&2; exit 1; }
+touch "$TEMP_ROOT/service-git-trace.log"
+service_git_runs="$(grep -c 'trace: resolved executable dir: ' "$TEMP_ROOT/service-git-trace.log" || true)"
+printf 'service-git-runs=%s\n' "$service_git_runs"
+[ "$service_git_runs" -gt 0 ] || { echo "error: the backend ran no Git" >&2; exit 1; }
+while IFS= read -r git_dir; do
+  [ "$git_dir" -ef "$GIT_CORE" ] || { echo "error: the backend ran Git from $git_dir" >&2; exit 1; }
+done < <(sed -n 's/.*trace: resolved executable dir: //p' "$TEMP_ROOT/service-git-trace.log" | sort -u)
 "$RESOURCES/bin/omlx" --version
 PYTHONPATH="$RESOURCES/python/omlx-packages" "$PYTHON" -c 'import mlx.core as mx; value = mx.sum(mx.ones((1024, 1024)) @ mx.ones((1024, 1024))); mx.eval(value); print(f"MLX device={mx.default_device()} value={value.item()}")'
 codesign --verify --deep --strict --verbose=2 "$APP"
+[ ! -e "$SYSTEM_GIT_CALLS" ] || { echo "error: a system Git shim ran:" >&2; cat "$SYSTEM_GIT_CALLS" >&2; exit 1; }
 printf 'health=%s\n' "$(cat "$TEMP_ROOT/health.json")"
 printf 'version=%s\n' "$(cat "$TEMP_ROOT/version.json")"
 du -sh "$APP"

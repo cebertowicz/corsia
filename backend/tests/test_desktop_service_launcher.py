@@ -68,11 +68,24 @@ def test_launcher_exports_the_port_it_serves_on(tmp_path):
 
 def test_launcher_prefers_its_bundled_git_and_disables_system_config(tmp_path):
     launcher = _bundle_with_recording_python(tmp_path)
+    resources = launcher.parent.parent
+    git_core = resources / "libexec" / "git-core"
+    git_core.mkdir(parents=True)
+    (git_core / "git").write_text("#!/bin/sh\n")
+    (git_core / "git").chmod(0o755)
+    # The person's login PATH reaches the system Git first.
+    (resources / "backend").mkdir()
+    (resources / "backend" / "cli_location.py").write_text(
+        "def login_shell_path():\n    return '/usr/bin:/opt/homebrew/bin'\n"
+    )
 
     log = _launch(launcher, tmp_path / "state", "--port", "18788")
 
-    resources = launcher.parent.parent
-    assert f"PATH={resources / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin" in log
+    assert (
+        f"PATH={git_core}:/usr/bin:/opt/homebrew/bin:{resources / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin\n"
+        in log
+    )
+    assert f"CORSIA bundled backend: git={git_core / 'git'}\n" in log
     assert "GIT_CONFIG_NOSYSTEM=1" in log
     assert "GIT_TERMINAL_PROMPT=0" in log
 
