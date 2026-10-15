@@ -1,7 +1,9 @@
 """Local MCP applications use a scope-neutral Safehouse direct-exec launch."""
 from __future__ import annotations
 
+import asyncio
 import json
+import signal
 import stat
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -197,18 +199,21 @@ def _write_uvx_fixture(workspace: Path) -> Path:
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("server_name, command, args_builder", [
-    ("npx", "npx", lambda _workspace: ["--no-install", "corsia-npx-mcp"]),
+    ("npx-bare", "npx", lambda _workspace: ["corsia-npx-mcp"]),
+    ("npx-y", "npx", lambda _workspace: ["-y", "corsia-npx-mcp"]),
+    ("npx-no-install", "npx", lambda _workspace: ["--no-install", "corsia-npx-mcp"]),
     ("uvx", "uvx", lambda workspace: ["--from", str(_write_uvx_fixture(workspace)), "corsia-uvx-mcp"]),
 ])
 async def test_local_mcp_package_launches_under_safehouse(
-    isolated_db, store, tmp_path, server_name, command, args_builder,
+    capsys, isolated_db, monkeypatch, store, tmp_path, server_name, command, args_builder,
 ):
     """L3 proof: package runners start a local app without escaping its profile."""
     from infra.config import WORKSPACE
     from infra.settings import get_mcp_servers
+    from mcp.client import stdio
 
     workspace = Path(WORKSPACE)
-    if server_name == "npx":
+    if server_name.startswith("npx"):
         _write_npx_fixture(workspace)
     blocked_target = tmp_path / "outside-safehouse-rw" / "must-not-exist"
     secret = "synthetic-local-mcp-secret"
@@ -220,13 +225,33 @@ async def test_local_mcp_package_launches_under_safehouse(
             "CORSIA_MCP_DENIED_WRITE": str(blocked_target),
         },
     }
-    mcp_import.save_import({server_name: config})
+    await asyncio.to_thread(mcp_import.save_import, {server_name: config})
     saved = get_mcp_servers()[server_name]
+
+    processes = []
+    create_process = stdio._create_platform_compatible_process
+
+    async def capture_process(*args, **kwargs):
+        process = await create_process(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(stdio, "_create_platform_compatible_process", capture_process)
 
     registry = ToolRegistry()
     async with AsyncExitStack() as stack:
         errors = await connect_mcp_servers({server_name: saved}, registry, stack)
-        assert errors == {}
+        stderr = capsys.readouterr().err
+        returncode = processes[0].returncode if processes else None
+        exit_signal = (
+            signal.Signals(-returncode).name if isinstance(returncode, int) and returncode < 0
+            else "none" if returncode is not None
+            else "unavailable"
+        )
+        assert errors == {}, (
+            f"Safehouse stderr ({server_name}): {stderr!r}\n"
+            f"Safehouse child exit signal ({server_name}): {exit_signal} (returncode={returncode})"
+        )
         report = json.loads(await registry.get(f"mcp_{server_name}_inspect").execute())
 
     assert report["hasSecret"] is True
