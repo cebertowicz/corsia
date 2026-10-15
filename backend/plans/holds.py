@@ -162,14 +162,24 @@ def clear(
              AND h.cleared_at IS NULL""",
         (hold_id, node_id, expected_kind),
     ).fetchone()
+    from plans.boundary import is_user_audit_id
+
+    withdrawn = expected_kind == "blocked" and hold is not None and not is_user_audit_id(actor_id)
     clear_write(
         node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
-        provenance=provenance, db=db,
+        provenance=provenance, detail={"ended": "withdrawn"} if withdrawn else None, db=db,
     )
     if expected_kind == "blocked" and hold is not None and hold["owner_id"] is not None:
-        from plans import ask_withdrawal
+        if withdrawn:
+            from plans import ask_withdrawal
 
-        ask_withdrawal.clear_withdrawn_attention(db, str(hold["owner_id"]))
+            ask_withdrawal.clear_withdrawn_attention(db, str(hold["owner_id"]))
+        else:
+            from registry import attention
+
+            attention.clear_attention(
+                str(hold["owner_id"]), outcome="acknowledge", db=db,
+            )
     from plans import admission
 
     admission.reconcile_plan(

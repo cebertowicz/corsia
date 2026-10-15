@@ -374,6 +374,38 @@ def test_withdrawing_a_document_ask_clears_its_plan_and_review_state(db):
     assert _open_holds(db, node.id) == 0
     assert user_ask.raised_asks(db, ask) == []
     assert attention.get_attention_state(ask, db=db) == "cleared"
+    metadata = json.loads(db.execute(
+        "SELECT metadata FROM artifact_identities WHERE id=?", (ask,),
+    ).fetchone()["metadata"])
+    assert metadata["attention_outcome"] == "withdraw"
+
+
+def test_user_resolving_a_document_ask_acknowledges_it_not_withdraws(db):
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="pending", external_id="user-answer.md")
+    hold = db.execute(
+        "SELECT id,clearance_event_id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL",
+        (node.id,),
+    ).fetchone()
+
+    mutate(
+        node.plan_id, "resolve_blocker", {
+            "node_id": node.id, "hold_id": hold["id"],
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=USER, provenance="test.user_answer", mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    metadata = json.loads(db.execute(
+        "SELECT metadata FROM artifact_identities WHERE id=?", (ask,),
+    ).fetchone()["metadata"])
+    cleared = db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE id=(SELECT clearance_event_id FROM plan_node_holds WHERE id=?)",
+        (hold["id"],),
+    ).fetchone()
+    assert attention.get_attention_state(ask, db=db) == "cleared"
+    assert metadata["attention_outcome"] == "acknowledge"
+    assert "detail" not in json.loads(cleared["payload_json"])
 
 
 @pytest.mark.parametrize("operation", ("fail", "close_node", "archive_node"))

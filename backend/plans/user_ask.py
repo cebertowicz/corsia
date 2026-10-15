@@ -41,7 +41,7 @@ NOT_ASKABLE = (
 _ENDS_ASK = {
     "answer": "answered", "acknowledge": "acknowledged",
     "dismiss": "dismissed", "supersede": "replaced",
-    "retire": "retired", "withdraw": "withdrawn",
+    "retire": "retired",
 }
 _PROVENANCE = "user.ask_cleared"
 #: What an agent may ask the user to review: the viewers that carry a review bar.
@@ -145,7 +145,7 @@ def ask_holds(db, hold_ids) -> dict[str, dict]:
             "raised_in": placed.get(r["id"], {}),
             "answer": {
                 k: v for k, v in answers.get(r["clearance_event_id"], {}).items()
-                if k in ("verdict", "feedback_counts")
+                if k in ("verdict", "feedback_counts", "ended")
             },
         }
         for r in rows

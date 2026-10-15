@@ -216,6 +216,21 @@ def test_a_cleared_round_reads_its_outcome_not_needs_review(db, outcome, expecte
     assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == expected
 
 
+def test_a_withdrawn_round_reads_withdrawn_not_answered(db):
+    from plans import holds
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    hold_id = _ask(db, plan_id, node_id, ask)
+    holds.clear(
+        node_id, hold_id, expected_kind="blocked",
+        expected_revision=service._node_row(db, node_id)["revision"], actor_id="owner",
+        provenance="test.withdraw", db=db,
+    )
+
+    assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == "withdrawn"
+
+
 def test_a_recorded_verdict_and_feedback_counts_survive_in_the_card(db):
     plan_id, node_id = _node(db)
     ask = document_ask(db, "owner")

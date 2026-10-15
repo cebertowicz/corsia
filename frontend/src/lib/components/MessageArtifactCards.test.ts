@@ -80,11 +80,15 @@ describe('MessageArtifactCards', () => {
 		expect(tiles()[0].querySelector('.name')?.textContent).toBe('2 comments, 1 suggestion');
 	});
 
-	it('keeps a replaced round clickable', () => {
-		render({ cards: [ask({ state: 'replaced' })] });
+	it.each([
+		['replaced', 'Replaced'],
+		['withdrawn', 'Withdrawn'],
+	] as const)('keeps a %s round clickable and muted', (state, label) => {
+		render({ cards: [ask({ state })] });
 
 		expect(tiles()[0].tagName).toBe('BUTTON');
-		expect(tiles()[0].querySelector('.state')?.textContent).toBe('Replaced');
+		expect(tiles()[0].querySelector('.state')?.textContent).toBe(label);
+		expect(tiles()[0].querySelector('.state')?.classList.contains('muted')).toBe(true);
 	});
 
 	it('draws a retired artifact as a dashed tile that is not clickable', () => {

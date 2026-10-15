@@ -31,7 +31,7 @@ def withdraw_node_asks(
     for row in rows:
         holds.clear_write(
             node_id, str(row["hold_id"]), expected_kind="blocked", actor_id=actor_id,
-            provenance=provenance, db=db,
+            provenance=provenance, detail={"ended": "withdrawn"}, db=db,
         )
     for artifact_id in dict.fromkeys(str(row["artifact_id"]) for row in rows):
         clear_withdrawn_attention(db, artifact_id)
@@ -46,6 +46,4 @@ def clear_withdrawn_attention(db, artifact_id: str) -> None:
         return
     from registry import attention
 
-    attention.clear_attention(
-        artifact_id, outcome="withdraw", reason="review request withdrawn", db=db,
-    )
+    attention.withdraw_attention(artifact_id, db=db)

@@ -25,8 +25,9 @@ ATTENTION_DEFERRED = "deferred"
 ATTENTION_CLEARED = "cleared"
 
 #: Explicit clearing actions (AC-4.2). Closing a viewer is NOT one of these.
-CLEAR_OUTCOMES = frozenset({"answer", "acknowledge", "dismiss", "supersede", "defer", "withdraw"})
+CLEAR_OUTCOMES = frozenset({"answer", "acknowledge", "dismiss", "supersede", "defer"})
 RETIRE_OUTCOME = "retire"
+WITHDRAW_OUTCOME = "withdraw"
 
 DEFER_CONDITION_TYPES = frozenset({"deadline", "event", "milestone", "dependency"})
 
@@ -152,6 +153,13 @@ def retire_attention(artifact_id: str, *, db=None) -> AttentionResult:
     """End attention because its artifact retired, never because a user dismissed it."""
     return _clear_attention(
         artifact_id, outcome=RETIRE_OUTCOME, reason="artifact retired", db=db,
+    )
+
+
+def withdraw_attention(artifact_id: str, *, db=None) -> AttentionResult:
+    """End attention because the asking task withdrew its review request."""
+    return _clear_attention(
+        artifact_id, outcome=WITHDRAW_OUTCOME, reason="review request withdrawn", db=db,
     )
 
 
