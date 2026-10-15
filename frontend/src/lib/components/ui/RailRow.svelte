@@ -92,14 +92,19 @@
 	button.row { cursor: pointer; }
 	button.row:hover { background: var(--bg-hover); color: var(--text-primary); }
 	button.row:active { background: var(--accent-wash); }
-	@media (prefers-reduced-motion: reduce) { button.row { transition: background var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap); } }
+	@media (prefers-reduced-motion: reduce) {
+		button.row { transition: background var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap); }
+		button.row::before { transition: opacity var(--dur-tight) var(--ease-snap); }
+	}
 	.row.todo { color: var(--text-tertiary); }
 	.row.current { background: var(--accent-wash); color: var(--text-primary); }
 	.row.current .lbl { font-weight: var(--fw-medium); }
-	.row.current::before {
-		content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px;
-		background: var(--accent-line); border-radius: 0 2px 2px 0;
+	/* On every row, so the bar cross-fades with the wash instead of popping when the current row changes. */
+	.row::before {
+		content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px; pointer-events: none;
+		background: var(--accent-line); border-radius: 0 2px 2px 0; opacity: 0; transition: opacity var(--dur-tight) ease;
 	}
+	.row.current::before { opacity: 1; }
 	.lead { flex: none; width: 16px; height: 1.5em; display: grid; place-items: center; }
 	.lead-state { grid-area: 1 / 1; display: grid; place-items: center; }
 	.lead :global(svg) { flex: none; opacity: 0.85; }
