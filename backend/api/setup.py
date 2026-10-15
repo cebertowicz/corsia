@@ -24,6 +24,10 @@ from infra import accounts, config, user_profile
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
+from llm.local_setup_ownership import (
+    existing_omlx_requires_consent,
+    record_existing_omlx_consent,
+)
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 logger = logging.getLogger(__name__)
@@ -31,6 +35,14 @@ logger = logging.getLogger(__name__)
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
 _TAURI_ORIGINS = frozenset({"tauri:" + "//localhost", "http:" + "//tauri.localhost"})
 _MINIMUM_MACOS_MAJOR = 15
+
+
+class LocalDownloadRequest(BaseModel):
+    """Consent for setup to inspect a pre-existing oMLX."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    consent_existing: bool = False
 
 
 class FirstAccountRequest(BaseModel):
@@ -161,6 +173,7 @@ def _setup_status() -> dict:
         "model_name": DEFAULT_PROFILE.display_name,
         "model_size_gb": round(DEFAULT_PROFILE.download_size_bytes / 1000**3, 1),
         "required_username": _required_username(),
+        "existing_omlx": existing_omlx_requires_consent(),
     }
 
 
@@ -181,6 +194,14 @@ async def local_download(request: Request) -> dict | Response:
         return Response(status_code=403)
     if await run_in_db(accounts.has_users):
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
+    try:
+        body = LocalDownloadRequest.model_validate(await request.json())
+    except (ValidationError, ValueError):
+        return Response(status_code=422)
+    if existing_omlx_requires_consent():
+        if not body.consent_existing:
+            return JSONResponse(status_code=409, content={"code": "consent_required"})
+        record_existing_omlx_consent()
     from llm.local_setup import begin_local_setup
 
     return await begin_local_setup()

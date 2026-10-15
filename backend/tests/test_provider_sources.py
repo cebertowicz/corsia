@@ -763,6 +763,7 @@ class TestRecheck:
         assert bare.post("/api/providers/sources/recheck").status_code == 401
 
     def test_local_setup_route_returns_the_current_background_stage(self, isolated_db, client, monkeypatch):
+        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: False)
         result = {"ok": True, "in_progress": True, "stage": "Downloading model (8.60 GiB)"}
         calls = []
 
@@ -777,6 +778,33 @@ class TestRecheck:
             "no_subscription_only": True, "automatic": True,
         }).json() == result
         assert calls[-1] == {"no_subscription_only": True, "automatic": True, "profile_id": None}
+
+    def test_local_setup_route_requires_existing_omlx_consent(self, isolated_db, client, monkeypatch):
+        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
+
+        async def should_not_start(**kwargs):
+            raise AssertionError("existing oMLX must not start without consent")
+
+        monkeypatch.setattr("llm.local_setup.begin_local_setup", should_not_start)
+        response = client.post("/api/providers/local/setup")
+
+        assert response.status_code == 409
+        assert response.json() == {"detail": {"code": "consent_required"}}
+
+    def test_local_setup_route_records_accepted_existing_omlx_consent(self, isolated_db, client, monkeypatch):
+        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
+        persisted = []
+        monkeypatch.setattr("llm.local_setup_ownership.record_existing_omlx_consent", lambda: persisted.append(True))
+
+        async def begin(**kwargs):
+            return {"ok": True, "in_progress": True}
+
+        monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
+        response = client.post("/api/providers/local/setup", json={"consent_existing": True})
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": True, "in_progress": True}
+        assert persisted == [True]
 
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):
         import asyncio

@@ -13,7 +13,7 @@
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
-	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; error?: string };
+	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; existing_omlx?: boolean; error?: string };
 	let page = $state<Page>('checking');
 	let status = $state<SetupStatus>({});
 	let localWanted = $state(true);
@@ -32,6 +32,7 @@
 	let localStartError = $state('');
 	let localDownloadPending = $state(false);
 	let localSetupBusy = $state(false);
+	let existingOmlxConsent = $state(false);
 	let keyOpen = $state(false);
 	let providerName = $state('anthropic');
 	let apiKey = $state('');
@@ -39,15 +40,16 @@
 
 	const steps = $derived<SetupStep[]>([
 		{ label: 'Welcome', icon: 'sparkle', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
-		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' ? 'done' : 'todo' },
+		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
 		{ label: 'AI model', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
+	const localStage = $derived(local?.setup_stage || 'Downloading');
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
 	const localJob = $derived<SetupJob | undefined>(
 		localDownloading
-			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: local?.download_percent == null ? 'Downloading' : `${local.download_percent}%`, progress: localProgress }
+			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: localStage, progress: localProgress }
 			: local?.setup_error || localStartError
 				? { label: status.model_name || local?.name || 'Local model', state: 'error', meta: 'Couldn’t download' }
 				: undefined,
@@ -86,6 +88,7 @@
 			case 'error':
 				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
+				if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
 				return { title: 'Choose an AI model', lede: 'Your agents need at least one. You can add more later in Settings.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
 		}
 	});
@@ -113,21 +116,63 @@
 		}
 	}
 
-	async function startLocalDownload(): Promise<boolean> {
-		if (!localWanted) return true;
-		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+	type LocalDownloadStart = 'started' | 'consent_required' | 'failed';
+
+	async function startLocalDownload(consentExisting = false): Promise<LocalDownloadStart> {
+		if (!localWanted && !consentExisting) return 'started';
+		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting }) });
 		const result = await response.json().catch(() => null);
-		return (response.ok || response.status === 409) && result?.ok !== false;
+		if (response.status === 409 && result?.code === 'consent_required') return 'consent_required';
+		return response.ok && result?.ok !== false ? 'started' : 'failed';
 	}
 
 	async function beginSetup() {
+		if (status.existing_omlx) {
+			existingOmlxConsent = true;
+			page = 'models';
+			return;
+		}
 		try {
-			if (await startLocalDownload()) localDownloadPending = localWanted;
+			const start = await startLocalDownload();
+			if (start === 'consent_required') {
+				existingOmlxConsent = true;
+				page = 'models';
+				return;
+			}
+			if (start === 'started') localDownloadPending = localWanted;
 			else localStartError = 'The local model download couldn’t start.';
 		} catch {
 			localStartError = 'The local model download couldn’t start.';
 		}
 		page = 'account';
+	}
+
+	async function decideExistingOmlx(useIt: boolean) {
+		if (!useIt) {
+			existingOmlxConsent = false;
+			localWanted = false;
+			page = 'account';
+			return;
+		}
+		localSetupBusy = true;
+		localStartError = '';
+		let returnToModels = false;
+		try {
+			const current = get(token);
+			returnToModels = Boolean(current);
+			const start = current
+				? await setupLocalSource(current, true)
+				: await startLocalDownload(true);
+			const started = typeof start === 'string' ? start === 'started' : start.ok;
+			if (started) localDownloadPending = true;
+			else localStartError = 'The local model couldn’t start.';
+		} catch {
+			localStartError = 'The local model couldn’t start.';
+		} finally {
+			localSetupBusy = false;
+			existingOmlxConsent = false;
+			page = returnToModels ? 'models' : 'account';
+		}
 	}
 
 	function validateConfirmation() {
@@ -194,11 +239,19 @@
 	async function retryLocalDownload() {
 		const current = get(token);
 		if (!current || localSetupBusy || localDownloading) return;
+		if (status.existing_omlx) {
+			existingOmlxConsent = true;
+			return;
+		}
 		localSetupBusy = true;
 		sourceError = '';
 		localStartError = '';
 		try {
 			const result = await setupLocalSource(current);
+			if (result.code === 'consent_required') {
+				existingOmlxConsent = true;
+				return;
+			}
 			if (!result.ok) sourceError = 'The local model couldn’t start. Try again, or choose another source.';
 		} catch {
 			sourceError = 'The local model couldn’t start. Try again, or choose another source.';
@@ -210,12 +263,13 @@
 
 	function sourceMeta(source: ModelSource): string {
 		if (source.source === 'omlx') {
-			if (source.setup_downloading || source.setup_stage) return 'Downloading in the background';
+			if (source.setup_downloading || source.setup_stage) return source.setup_stage || 'Downloading';
 			if (source.setup_error || localStartError) return 'Download needs attention';
 			return `Local model · ${modelSize}`;
 		}
 		if (source.state === 'not_installed') return `${source.name} needs its official app installed first.`;
 		if (source.state === 'needs_auth') return 'Sign in to use your subscription';
+		if (sourceIsReady(source)) return 'Ready to use.';
 		return 'Check this source, then try again.';
 	}
 
@@ -261,14 +315,28 @@
 		</div>
 	{:else if page === 'account'}
 		<form class="form" onsubmit={(event) => { event.preventDefault(); createAccount(); }}>
-			<Field variant="chip" layout="stacked" label="Name"><input autocomplete="name" bind:value={name} /></Field>
-			<Field variant="chip" layout="stacked" label="Username" error={usernameError || undefined} hint={status.required_username ? 'This matches the existing data on this computer.' : undefined}><input autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!status.required_username} /></Field>
-			<Field variant="chip" layout="stacked" label="Password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input type="password" autocomplete="new-password" bind:value={password} /></Field>
-			<Field variant="chip" layout="stacked" label="Confirm password" error={confirmationError}><input type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
-			<Field variant="chip" layout="stacked" label="Email (optional)"><input type="email" autocomplete="email" bind:value={email} /></Field>
+			<Field variant="chip" layout="stacked" label="Name" labelFor="setup-name"><input id="setup-name" autocomplete="name" bind:value={name} /></Field>
+			<Field variant="chip" layout="stacked" label="Username" labelFor="setup-username" error={usernameError || undefined} hint={status.required_username ? 'This matches the existing data on this computer.' : undefined}><input id="setup-username" autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!status.required_username} /></Field>
+			<Field variant="chip" layout="stacked" label="Password" labelFor="setup-password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input id="setup-password" type="password" autocomplete="new-password" bind:value={password} /></Field>
+			<Field variant="chip" layout="stacked" label="Confirm password" labelFor="setup-confirm-password" error={confirmationError}><input id="setup-confirm-password" type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
+			<Field variant="chip" layout="stacked" label="Email (optional)" labelFor="setup-email"><input id="setup-email" type="email" autocomplete="email" bind:value={email} /></Field>
 			<div class="folder"><span>Work folder</span><strong>{folder}</strong></div>
 			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
 		</form>
+	{:else if page === 'models' && existingOmlxConsent}
+		<div class="sources consent">
+			<p>CORSIA will read:</p>
+			<ul>
+				<li>your oMLX port setting</li>
+				<li>the installed oMLX version</li>
+				<li>your oMLX server to find its available models</li>
+			</ul>
+			<p>It won’t change your oMLX.</p>
+			<div class="consent-actions">
+				<Button variant="chip" onclick={() => decideExistingOmlx(false)} disabled={localSetupBusy}>Not now</Button>
+				<Button variant="chip" onclick={() => decideExistingOmlx(true)} loading={localSetupBusy} disabled={localSetupBusy}>Use it</Button>
+			</div>
+		</div>
 	{:else if page === 'models'}
 		<div class="sources">
 			{#each sources as source (source.source)}
@@ -300,7 +368,9 @@
 	.folder span { flex: none; white-space: nowrap; }
 	.folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
 	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
-	.welcome-copy p { margin: 0; }
+	.welcome-copy p, .consent p { margin: 0; }
+	.consent ul { margin: 0; padding-left: var(--space-5); }
+	.consent-actions { display: flex; gap: var(--space-2); }
 	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); }
 	.switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); }
 	.local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -123,6 +124,7 @@ def test_status_exposes_only_screen_facts(client, monkeypatch):
         "model_name": "Example model",
         "model_size_gb": 30.0,
         "required_username": None,
+        "existing_omlx": False,
     }
     monkeypatch.setattr(setup_api, "_setup_status", lambda: facts)
     response = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
@@ -142,9 +144,19 @@ def test_post_setup_returns_complete_code(client, path):
     assert response.json() == {"code": "setup_complete"}
 
 
+def test_status_uses_the_same_existing_omlx_consent_predicate_as_setup(client, monkeypatch):
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
+
+    response = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json()["existing_omlx"] is True
+
+
 def test_local_download_uses_existing_single_flight(client, monkeypatch):
     from llm import local_setup
 
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: False)
     calls = 0
 
     async def begin_local_setup():
@@ -158,6 +170,60 @@ def test_local_download_uses_existing_single_flight(client, monkeypatch):
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json() == {"ok": True, "in_progress": True, "stage": "Installing"}
     assert calls == 2
+
+
+def test_local_download_requires_consent_before_starting_an_existing_omlx(client, monkeypatch):
+    from llm import local_setup
+
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
+
+    async def should_not_start():
+        raise AssertionError("existing oMLX must not be inspected before consent")
+
+    monkeypatch.setattr(local_setup, "begin_local_setup", should_not_start)
+    response = _post(client, "/api/setup/local-download")
+
+    assert response.status_code == 409
+    assert response.json() == {"code": "consent_required"}
+
+
+def test_broken_leftover_requires_consent_then_starts_setup_after_consent(client, monkeypatch, tmp_path):
+    from llm import local_setup, local_setup_ownership
+
+    leftover = tmp_path / "omlx"
+    leftover.write_text("#!/nonexistent\n", encoding="utf-8")
+    consented = tmp_path / "consented"
+    monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda name: str(leftover) if name == "omlx" else None)
+    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: tmp_path / "owned")
+    monkeypatch.setattr(local_setup_ownership, "consent_marker_path", lambda: consented)
+    monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: pytest.fail("consent check must not execute oMLX"))
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", local_setup_ownership.existing_omlx_requires_consent)
+    calls = 0
+
+    async def begin_local_setup():
+        nonlocal calls
+        calls += 1
+        return {"ok": True, "in_progress": True, "stage": "Repairing oMLX"}
+
+    monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
+    refused = _post(client, "/api/setup/local-download")
+    accepted = _post(client, "/api/setup/local-download", {"consent_existing": True})
+
+    assert refused.status_code == 409
+    assert refused.json() == {"code": "consent_required"}
+    assert accepted.status_code == 200
+    assert accepted.json()["stage"] == "Repairing oMLX"
+    assert consented.exists()
+    assert calls == 1
+
+
+def test_omlx_presence_check_runs_no_command(monkeypatch):
+    from llm import local_setup_ownership
+
+    monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda _: "/usr/local/bin/omlx")
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("presence must not execute oMLX"))
+
+    assert local_setup_ownership.omlx_present() is True
 
 
 def test_first_account_route_uses_the_app_path(client, monkeypatch):
