@@ -222,7 +222,7 @@
 	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); }
 	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
-	.primary-label-stack { position: relative; display: grid; grid-template-areas: 'label'; }
+	.primary-label-stack { display: grid; grid-template-areas: 'label'; }
 	.primary-label { grid-area: label; }
 	:global(.primary-label-exiting) { position: absolute; inset: 0; display: grid; place-items: center; }
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
