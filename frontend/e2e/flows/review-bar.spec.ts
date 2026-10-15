@@ -60,6 +60,20 @@ function handOff(artifactId: string, fromThreadId: string, toThreadId: string): 
 	});
 }
 
+/** The live-placement path derives orphaning from the shown text; make every fixture comment's quote unavailable before the UI reads it. */
+function orphanComments(artifactId: string): void {
+	const state = process.env.CORSIA_E2E_STATE_DIR;
+	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The orphan fixture requires isolated E2E mock state');
+	execFileSync(python(), ['-c', [
+		'import sqlite3, sys',
+		'connection = sqlite3.connect(sys.argv[1])',
+		'changed = connection.execute("UPDATE doc_comments SET anchor_text=? WHERE artifact_id=?", ("Quote missing from the document.", sys.argv[2])).rowcount',
+		'assert changed == 22, changed',
+		'connection.commit()',
+		'connection.close()',
+	].join('\n'), path.join(state, 'corsia.db'), artifactId], { cwd: backendDir, encoding: 'utf8' });
+}
+
 const bar = (page: Page) => page.locator('.review-bar');
 /** The bar's geometry per surface: one compact row, a stacked bar with compact right-aligned buttons, or 44px touch buttons. */
 async function expectLayout(page: Page, mode: Mode) {
@@ -72,6 +86,7 @@ async function expectLayout(page: Page, mode: Mode) {
 	}
 	else if (mode === 'default') expect(await canvas(), 'the default layout is a narrow canvas').toBeLessThan(600);
 	// A 16ch ask gets a full-width ellipsized row once the 408px review-line budget cannot fit it with the name and tools.
+	// A collapsed phone ask instead keeps just its requester and disclosure in the compact header row.
 	const line = page.locator('.document-header .review-bar.ask .rb-line');
 	if (await line.count()) {
 		const header = await page.locator('.document-header').evaluate((el) => {
@@ -79,7 +94,8 @@ async function expectLayout(page: Page, mode: Mode) {
 			return el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
 		});
 		test.info().annotations.push({ type: 'header-content-width', description: `${mode}: ${header}` });
-		const fallback = header < 408;
+		const collapsedPhone = mode === 'phone' && await line.getAttribute('aria-expanded') === 'false';
+		const fallback = header < 408 && !collapsedPhone;
 		expect(await line.evaluate((el) => getComputedStyle(el).display), `review line at a ${header}px header`).toBe(fallback ? 'grid' : 'flex');
 		if (fallback) {
 			const rows = await line.evaluate((el) => {
@@ -128,6 +144,14 @@ journey('approve a plain ask from the reading', ALL, async ({ page, request, inf
 	await expect(bar(page)).toContainText('Is the rollout plan right?');
 	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
 	await expectLayout(page, mode);
+	if (mode === 'phone') {
+		const leadAsk = bar(page).locator('.rb-ask');
+		const requester = bar(page).locator('.rb-who');
+		await expect(leadAsk).toBeVisible();
+		await expect(leadAsk).toHaveText('Is the rollout plan right?');
+		await expect(requester).toHaveText(`${doc.title}:`);
+		expect(await requester.evaluate((element) => element.scrollWidth <= element.clientWidth), 'the short ask leaves its requester untruncated').toBe(true);
+	}
 	await shot(page, 'ask', info);
 	await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
 	const receipt = bar(page).locator('.rb-receipt');
@@ -289,11 +313,10 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	for (const target of targets) expect((await target.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
 	// A real tap opens the menu, selects a filter, and leaves every drawer control reachable.
 	const openFilter = drawer.getByRole('button', { name: 'Filter comments: Open', exact: true });
-	const box = (await openFilter.boundingBox())!;
-	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+	// Locator tap scrolls the current phone-sheet control into view and targets its live centre.
+	await openFilter.tap();
 	await expect(openFilter).toHaveAttribute('aria-expanded', 'true');
-	// Close the menu before tapping another drawer control; the menu intentionally owns its overlay.
-	await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+	await openFilter.tap();
 	await expect(openFilter).toHaveAttribute('aria-expanded', 'false');
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
@@ -315,8 +338,7 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await expect(filters).toHaveAttribute('aria-label', 'Filter comments: Resolved');
 	await expect(filters).toHaveAttribute('aria-expanded', 'false');
 	await shot(page, 'drawer-touch', info);
-	const closeBox = (await close.boundingBox())!;
-	await page.touchscreen.tap(closeBox.x + closeBox.width / 2, closeBox.y + closeBox.height / 2);
+	await close.click();
 	await expect(drawer).toBeHidden();
 });
 
@@ -388,6 +410,9 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 		expect(fit.drawerHeight, 'the drawer adds the footer beneath its existing cap').toBeCloseTo(expectedDrawer, 0);
 		expect(fit.listHeight, 'six-thread list keeps its pre-footer height').toBeGreaterThanOrEqual(preFooterDrawer - drawerChrome - 1);
 	}
+	// The measured footer can resize its drawer after scrolling; wait for that final layout before proving its center lands on the control.
+	await settled(page);
+	await expect(send).toBeInViewport();
 	expect(await hitAtCentre(send), 'Send now is hit-testable').toBe(true);
 	if (mode === 'phone') expect((await send.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
 	await shot(page, 'unsent-footer', info);
@@ -397,7 +422,7 @@ journey('unsent comments end the comments drawer in a Send now footer', [
 	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
 });
 
-journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
+journey('a long agent name never hides the ask', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark']], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Review long ${mode} ${theme} Platform Reliability Engineering Operations Release Coordination Agent`);
 	const reason = 'Is the rollout plan right for every region before we promote it?';
 	raiseAsk(doc.threadId, doc.artifactId, reason);
@@ -405,7 +430,7 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await expectLayout(page, mode);
 	const line = bar(page).locator('.rb-line');
 	await expect(line).toContainText('Is the rollout plan right for every region');
-	await expectNameClearOfControls(page, doc.title);
+	await expectNameClearOfControls(page, doc.title, mode);
 	await shot(page, 'long-name-collapsed', info);
 
 	// The integrated row expands its full ask below the tool line, keeping the header controls in place.
@@ -413,24 +438,93 @@ journey('a long agent name never hides the ask', [['1440 light pane closed', 'cl
 	await line.click();
 	await expect(bar(page).locator('.rb-ask-full')).toHaveText(reason);
 	expect((await bar(page).boundingBox())!.height).toBeGreaterThan(collapsedHeight);
-	await expectNameClearOfControls(page, doc.title);
+	await expectNameClearOfControls(page, doc.title, mode, false);
 	await shot(page, 'long-name-expanded', info);
 });
 
-/** The asker's name is cut in the middle with its last four characters kept, and its box stays off the header's controls. */
-async function expectNameClearOfControls(page: Page, title: string) {
-	const name = bar(page).locator('.rb-who .name');
-	await expect(name.locator('.name-tail')).toHaveText(title.slice(-4));
-	expect(await name.locator('.name-head').evaluate((el) => el.scrollWidth > el.clientWidth), 'the name is truncated, not wrapped or clipped').toBe(true);
+journey('keeps an orphan-heavy review ask compact without losing recovery', [
+	['1440 light', 'default', 'light'], ['1440 dark', 'default', 'dark'],
+	['1440 light pane closed', 'closed', 'light'], ['1440 dark pane closed', 'closed', 'dark'],
+	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
+], async ({ page, request, info, mode, theme }) => {
+	const doc = await seed(request, `Review orphan-heavy ${mode} ${theme}`, { sharedAsOf: '2026-09-12' });
+	for (let index = 0; index < 22; index += 1) await comment(request, doc, `Unplaced comment ${index + 1}`, 1);
+	orphanComments(doc.artifactId);
+	raiseAsk(doc.threadId, doc.artifactId, 'Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
+	await open(page, doc, mode, theme);
+	await settled(page);
+	const measurements = await page.locator('.doc').evaluate((root) => {
+		const firstLine = root.querySelector<HTMLElement>('.cm-line')!.getBoundingClientRect();
+		const capsule = root.querySelector<HTMLElement>('.rb-capsule')!.getBoundingClientRect();
+		const requester = root.querySelector<HTMLElement>('.rb-who')!.getBoundingClientRect();
+		const ask = root.querySelector<HTMLElement>('.rb-ask')!.getBoundingClientRect();
+		const comments = root.querySelector<HTMLElement>('.comment-status')!;
+		return {
+			firstBodyY: firstLine.top,
+			capsuleHeight: capsule.height,
+			leadRow: { requesterWidth: requester.width, askWidth: ask.width },
+			commentsPillName: comments.getAttribute('aria-label'),
+		};
+	});
+	if (mode === 'phone') {
+		expect(measurements.firstBodyY, 'the first document line stays in the approved phone reading area').toBeLessThanOrEqual(240);
+		expect(measurements.capsuleHeight, 'the fixed review action bar stays compact').toBeLessThanOrEqual(64);
+		for (const button of await bar(page).locator('.rb-capsule .btn').all()) expect((await button.boundingBox())!.height, 'phone review action touch target').toBeGreaterThanOrEqual(44);
+		const leadAsk = bar(page).locator('.rb-ask');
+		const requester = bar(page).locator('.rb-who');
+		await expect(leadAsk).toBeVisible();
+		await expect(leadAsk).toHaveText('Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
+		await expect(requester).toHaveText(`${doc.title}:`);
+		expect(await requester.evaluate((element) => element.scrollWidth <= element.clientWidth), 'the long ask leaves its requester untruncated').toBe(true);
+		expect(await leadAsk.evaluate((element) => element.scrollWidth > element.clientWidth && getComputedStyle(element).textOverflow === 'ellipsis'), 'the long ask end-ellipsizes in the lead row').toBe(true);
+	}
+	await shot(page, `orphan-heavy-reading-${mode}-${theme}`, info);
+	if (mode === 'phone') {
+		await bar(page).locator('.rb-line').click();
+		await expect(bar(page).locator('.rb-ask-full')).toHaveText('Review the long summary, confirm the owner and as-of details, and request any changes needed before launch.');
+		await expect(bar(page).locator('.rb-who')).toBeVisible();
+		await expect(page.locator('.identity-age')).toContainText(`Owner: ${doc.title}`);
+		await expect(page.locator('.identity-age')).toContainText(/as of \w+ \d+/);
+		await shot(page, `orphan-heavy-expanded-${mode}-${theme}`, info);
+	}
+	// Recovery remains exercised through the comments drawer below.
+	const comments = page.locator('.comment-status');
+	await comments.click();
+	const drawer = page.getByRole('region', { name: 'Document comments' });
+	const recovery = drawer.locator('[data-drawer-placement]');
+	await expect(recovery.getByRole('status')).toHaveText("22 comments couldn't be placed");
+	await expect(recovery.getByRole('button', { name: 'Reload comment placements' })).toBeVisible();
+	await settled(page);
+	// Drawer geometry is covered by its focused recovery journey; this flow records the phone layout annotation below.
+	await shot(page, `orphan-heavy-${mode}-${theme}`, info);
+	test.info().annotations.push({ type: 'orphan-heavy-layout', description: JSON.stringify(measurements) });
+});
+
+/** The requester keeps its distinguishing suffix while its prefix truncates, and its box stays off the header controls. */
+async function expectNameClearOfControls(page: Page, title: string, mode: Mode, assertCollapsedPhoneAlignment = true) {
+	const name = bar(page).locator('.rb-who strong');
+	await expect(name).toHaveText(title);
+	const truncation = await name.evaluate((element) => {
+		const who = element.closest<HTMLElement>('.rb-who')!;
+		const head = element.querySelector<HTMLElement>('.name-head')!;
+		const tail = element.querySelector<HTMLElement>('.name-tail')!;
+		const rect = (node: HTMLElement) => { const { left, right, top, bottom, width, height } = node.getBoundingClientRect(); return { left, right, top, bottom, width, height }; };
+		const whoRect = rect(who), tailRect = rect(tail);
+		return { who: whoRect, tail: tailRect, head: { scrollWidth: head.scrollWidth, clientWidth: head.clientWidth }, tailVisible: tailRect.width > 0 && tailRect.left >= whoRect.left - 0.5 && tailRect.right <= whoRect.right + 0.5 && tailRect.top >= whoRect.top - 0.5 && tailRect.bottom <= whoRect.bottom + 0.5 };
+	});
+	expect(truncation.tailVisible, `the distinguishing suffix stays visible within the requester box: ${JSON.stringify(truncation)}`).toBe(true);
+	expect(truncation.head.scrollWidth, 'the requester prefix truncates before its preserved suffix').toBeGreaterThan(truncation.head.clientWidth);
 	const boxes = await page.evaluate(() => {
 		const rect = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, label: (el.getAttribute('aria-label') ?? el.className ?? '').toString().slice(0, 40) }; };
 		return {
 			name: rect(document.querySelector('.rb-who')!),
+			ask: rect(document.querySelector('.rb-ask')!),
 			// A touch control's 44px hit area spills a few px into the row below; the name is held clear of what is drawn (the 28px control).
 			controls: [...document.querySelectorAll('.document-header .presence-row, .document-tools button, .rb-chev')].map(rect).filter((r) => r.right > r.left).map((r) => { const mid = (r.top + r.bottom) / 2; return r.bottom - r.top > 28 ? { ...r, top: mid - 14, bottom: mid + 14 } : r; }),
 		};
 	});
 	expect(boxes.controls.length).toBeGreaterThan(0);
+	if (mode === 'phone' && assertCollapsedPhoneAlignment) expect(Math.abs((boxes.name.top + boxes.name.bottom - boxes.ask.top - boxes.ask.bottom) / 2), `requester and ask vertical centres: ${JSON.stringify(boxes)}`).toBeLessThanOrEqual(2);
 	for (const control of boxes.controls) {
 		const apart = boxes.name.right <= control.left || control.right <= boxes.name.left || boxes.name.bottom <= control.top || control.bottom <= boxes.name.top;
 		expect(apart, `the name's box ${JSON.stringify(boxes.name)} intersects a header control ${JSON.stringify(control)}`).toBe(true);
@@ -441,9 +535,10 @@ async function expectNameClearOfControls(page: Page, title: string) {
 /** At 1280 the open plan pane overlays the document instead of docking beside it, so the whole header (tools and both ask lines) ends before it rather than under it. */
 for (const theme of ['light', 'dark'] as const) {
 	test(`@surface:review-bar the header and its ask stay clear of the overlaid plan pane (1280 ${theme})`, async ({ page, request }, info) => {
+		test.setTimeout(120_000);
 		test.skip(info.project.name === 'chromium-mobile', 'a desktop layout is proved on the desktop project');
 		// A 21-character asker: the title plus the five-character suffix that keeps it unique.
-		const doc = await seed(request, `Overlay 1280 ${theme === 'light' ? 'lt' : 'dk'}`);
+		const doc = await seed(request, `Overlay 1280 ${theme === 'light' ? 'lt' : 'dk'}`, { sharedAsOf: '2026-09-12' });
 		expect(doc.title).toHaveLength(21);
 		raiseAsk(doc.threadId, doc.artifactId, 'Is the rollout plan right?');
 		await page.setViewportSize({ width: 1280, height: 900 });
@@ -457,6 +552,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await loginByUrl(page, { waitForComposer: false });
 		await selectThread(page, doc, 'default');
 		await expect(bar(page)).toContainText('Is the rollout plan right?');
+		await expect(page.locator('.identity-age'), 'a narrow fine-pointer canvas keeps document identity visible').toBeVisible();
 		const pane = page.locator('.pane');
 		await expect(pane).toHaveClass(/\boverlay\b/);
 		await expect(pane).not.toHaveClass(/\bcollapsed\b/);
@@ -537,7 +633,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await approve.click();
 		await expect(bar(page).locator('.rb-receipt')).toContainText('You approved this');
 
-		// Where the pane docks beside the canvas, the header keeps its place: no inset at all.
+		// At 1440 and above this seeded desktop canvas can host the minimum split, so the pane docks beside it and the header has no inset.
 		for (const width of [1440, 1920]) {
 			await page.setViewportSize({ width, height: 900 });
 			await expect(pane).not.toHaveClass(/\boverlay\b/);
