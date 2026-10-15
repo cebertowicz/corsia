@@ -239,14 +239,9 @@ def _stage_trial(
     admission = admit(db, thread_id, entry, place, decision, destination)
     flags = incident_detail_flags(decision.text, entry_text(entry))
     if flags:
-        revision = entry.get("revision")
-        if revision is None:
-            raise InvalidDecision(
-                "a flagged trial cannot be recorded for an entry added in this checkpoint; review it later"
-            )
         record_placement_check(
             db, thread_id=thread_id, history_epoch=int(entry["history_epoch"]),
-            entry_id=int(entry["entry_id"]), revision=int(revision), flags=flags,
+            entry_id=int(entry["entry_id"]), revision=int(entry.get("revision") or 0), flags=flags,
             override_reason=decision.trial.incident_detail_reason if decision.trial else None,
         )
     return {

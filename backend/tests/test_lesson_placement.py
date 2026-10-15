@@ -96,6 +96,31 @@ def _place(env: Env, entry: int, answer: dict | None = None) -> str:
     )
 
 
+def test_flagged_new_checkpoint_entry_records_an_overridden_trial_check(env: Env) -> None:
+    """A checkpoint-local entry has no revision yet, but the check remains non-blocking."""
+    from types import SimpleNamespace
+
+    from core import lesson_admission, placement_answer, placement_outcomes
+    from core.placement_decide import validate_decision
+
+    env.monkeypatch.setattr(lesson_admission, "admit", lambda *_args: SimpleNamespace(hold=None))
+    env.monkeypatch.setattr(placement_outcomes, "entry_text", lambda _entry: "source")
+    decision = validate_decision(_answer(
+        text="On 2026-10-15, run the check.",
+        trial={"incident_detail_reason": "needed for the test"},
+    ))
+    result = placement_answer._stage_trial(
+        env.db, THREAD, {"history_epoch": 0, "entry_id": 999, "revision": None},
+        SimpleNamespace(), decision, SimpleNamespace(), None,
+    )
+
+    assert result["placement_check"]["flags"] == ["date", "id"]
+    row = env.db.execute(
+        "SELECT revision, override_reason FROM lesson_placement_checks WHERE entry_id=999"
+    ).fetchone()
+    assert tuple(row) == (0, "needed for the test")
+
+
 def _state(env: Env, entry: int) -> tuple[str, str | None]:
     mark = _mark(env.db, entry, THREAD)
     return mark["state"], mark["placement_state"]
@@ -194,7 +219,7 @@ async def test_a_hypothesis_becomes_a_reviewed_trial_the_next_install_offers(env
     assert trial.lesson.source_refs == tuple(TURN)
     [review] = _reviews(env)
     assert (review["state"], review["title"]) == ("pending", "Review trial lesson: cite-the-head")
-    assert review["key"] == f"lesson:{trial.lesson.id}:{trial.behavioral_sha256}"
+    assert review["key"] == f"lesson:{trial.lesson.id}:trial:{trial.behavioral_sha256}"
     assert trial.lesson.review_ref == f"plan-node:{review['id']}"
     description = env.db.execute("SELECT description FROM plan_nodes WHERE id=?", (review["id"],)).fetchone()[0]
     assert f'lesson_report(lesson_id="{trial.lesson.id}", version="{trial.behavioral_sha256}")' in description
@@ -701,7 +726,7 @@ def _one_open_review_offers(env: Env) -> None:
     """The file names the lesson's one open review, and the next install offers it."""
     trial = _trial(env)
     [review] = _open(_reviews(env, f"lesson:{trial.lesson.id}:"))
-    assert review["key"] == f"lesson:{trial.lesson.id}:{trial.behavioral_sha256}"
+    assert review["key"] == f"lesson:{trial.lesson.id}:trial:{trial.behavioral_sha256}"
     assert trial.lesson.review_ref == f"plan-node:{review['id']}"
     assert [(lesson["id"], lesson["behavioral_sha256"]) for lesson in _offered(env)] == [
         (trial.lesson.id, trial.behavioral_sha256),
@@ -847,4 +872,9 @@ async def test_duplicate_watch_placement_merges_each_turns_subjects_on_one_recor
 
     promoted = lesson_files.read_trial(_skill(env).read_text())
     assert promoted.lesson.id == watch.lesson.id
+    assert promoted.lesson.state == "trial"
+    assert promoted.lesson.review_node_id != watch.lesson.review_node_id
     assert promoted.lesson.originating_subjects == ("message:first", "message:second", "message:third")
+    reviews = {review["id"]: review for review in _reviews(env)}
+    assert reviews[watch.lesson.review_node_id]["state"] == "closed"
+    assert reviews[promoted.lesson.review_node_id]["title"] == "Review trial lesson: cite-the-head"

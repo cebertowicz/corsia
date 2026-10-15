@@ -99,16 +99,16 @@ def test_pinned_version_labels_are_all_v_and_a_number():
 @pytest.mark.parametrize("label", ["1", "v", "v1.2", "V1", "v1\n", "v-1", "v１"])
 def test_a_version_label_other_than_v_number_is_refused(label):
     from core.corrections_classifier import AssetError
-    from jobs import corrections_realtime
+    from jobs.corrections_assets import version_number
 
     with pytest.raises(AssetError):
-        corrections_realtime.version_number(label)
+        version_number(label)
 
 
 def test_versions_order_by_number_not_by_text():
-    from jobs import corrections_realtime
+    from jobs.corrections_assets import version_number
 
-    assert corrections_realtime.version_number("v10") > corrections_realtime.version_number("v9")
+    assert version_number("v10") > version_number("v9")
 
 
 def test_highest_verified_pin_wins_and_a_broken_newer_asset_keeps_the_older_one_serving(layout, tmp_path):
@@ -342,7 +342,7 @@ def test_child_self_test_mismatch_refuses_to_serve(monkeypatch, tmp_path):
     finally:
         setattr(socket.socket, "connect", original_connect)
 
-    assert sent == [{"error": "error:AssetError"}]
+    assert sent == [{"error": "error:AssetError", "kind": "deterministic"}]
 
 
 class _FakeSession:
@@ -686,11 +686,14 @@ def test_a_failed_call_names_its_kind_and_stops_the_child(monkeypatch, tmp_path,
     assert not child.running
 
 
-def test_a_load_error_is_an_outage(monkeypatch, tmp_path):
+def test_a_transient_load_error_carries_its_kind(monkeypatch, tmp_path):
     from core.corrections_child import ClassifierUnavailable
 
-    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"error": "rss"}]))
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([
+        {"error": "error:OSError", "kind": "transient"},
+    ]))
 
-    with pytest.raises(ClassifierUnavailable, match="load rss"):
+    with pytest.raises(ClassifierUnavailable, match="load error:OSError") as raised:
         child.ensure_loaded()
+    assert raised.value.kind == "transient"
     assert not child.loaded and not child.running

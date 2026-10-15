@@ -244,7 +244,7 @@ async def test_classifier_failure_notice_uses_one_stable_delivery_key_per_versio
 
     delivered = AsyncMock()
     monkeypatch.setattr(corrections_recording, "owner_user_ids", lambda: ["owner"])
-    monkeypatch.setattr(update_failure_notice, "tell_conductor_about_scheduled_lapse", delivered)
+    monkeypatch.setattr(update_failure_notice, "_tell_conductor_about_owner_notice", delivered)
 
     await update_failure_notice.tell_conductor_about_corrections_classifier_failure(
         "v2", "load error:AssertionError", "Retry setup.",
@@ -255,6 +255,8 @@ async def test_classifier_failure_notice_uses_one_stable_delivery_key_per_versio
 
     first, second = delivered.await_args_list
     assert first.args == second.args == ("owner", "Corrections classifier v2 cannot run: Retry setup.")
+    assert first.kwargs["event_type"] == "system.corrections_classifier_failed"
+    assert first.kwargs["notice_name"] == "corrections classifier failure"
     assert first.kwargs["delivery_id"] == second.kwargs["delivery_id"]
     assert first.kwargs["delivery_id"].startswith("corrections-classifier-failed:v2:")
 

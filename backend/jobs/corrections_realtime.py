@@ -60,7 +60,7 @@ from loguru import logger
 from core.corrections_child import ClassifierChild
 from core.corrections_classifier import AssetError, AssetManifest, cleanup_staging
 from core.corrections_recording import ClassifierVersion, CorrectionCandidate
-from jobs.corrections_assets import AssetSelectionError, installed as _installed, select_manifest, version_number
+from jobs.corrections_assets import AssetSelectionError, installed as _installed, select_manifest
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_recording import (
@@ -106,7 +106,7 @@ class CorrectionsWorker:
 
     # ---- state ---------------------------------------------------------------------------
 
-    def _set(self, state: str, reason: str | None) -> None:
+    def _set(self, state: str, reason: str | None, *, failure_version: str | None = None) -> None:
         if (state, reason) != (self.state, self.reason):
             logger.info("corrections classifier {} -> {}: {}", self.state, state, reason or "-")
         previous, previous_reason = self.state, self.reason
@@ -115,7 +115,7 @@ class CorrectionsWorker:
             # Unrecorded work must not reach activation; becoming ready owes the catch-up scan.
             self._owe()
         if state == "failed" and (previous, previous_reason) != (state, reason):
-            self._notice_failed_state()
+            self._notice_failed_state(failure_version)
 
     def _owe(self) -> None:
         if self.scan == "idle":
@@ -142,7 +142,6 @@ class CorrectionsWorker:
             "reader_reason": self.reader_reason,
             "retryable": self.state != "failed",
             "version": self.version.version if self.version else None,
-            "selected_version": self.version.version if self.version else None,
             "versions": self.versions,
             "scan": self.scan,
             "scan_owed": self.scan != "idle",
@@ -161,7 +160,11 @@ class CorrectionsWorker:
         except AssetSelectionError as error:
             self.versions = error.versions
             self.reader_reason = error.reader or str(error)
-            self._set("failed" if _installed() else "absent", str(error))
+            failed = next((item for item in self.versions if item["state"] == "failed"), {})
+            self._set(
+                "failed" if _installed() else "absent", str(error),
+                failure_version=failed.get("version") or failed.get("location"),
+            )
             return None
         except AssetError as error:
             self.versions = []
@@ -192,13 +195,12 @@ class CorrectionsWorker:
             self._set("unavailable", "asset verified; the model has not run yet")
         return manifest
 
-    def _notice_failed_state(self) -> None:
+    def _notice_failed_state(self, failure_version: str | None = None) -> None:
         """Route one owner-visible failure notice through the durable update-notice path."""
         from automation.update_failure_notice import tell_corrections_classifier_failure_detached
 
         failed = next((item for item in self.versions if item["state"] == "failed"), None)
-        version = next(reversed(tuple(self.failed_versions)), None)
-        version = version or (failed or {}).get("version") or (failed or {}).get("location") or "unknown"
+        version = failure_version or (failed or {}).get("version") or (failed or {}).get("location") or "unknown"
         reason = self.reason or "classifier asset failed"
         reader = self.reader_reason or reason
         tell_corrections_classifier_failure_detached(

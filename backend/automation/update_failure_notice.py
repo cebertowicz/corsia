@@ -59,13 +59,15 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
         logger.warning("update failure conductor notice could not be delivered")
 
 
-async def tell_conductor_about_scheduled_lapse(
+async def _tell_conductor_about_owner_notice(
     owner_id: str | None,
     summary: str,
     *,
+    event_type: str,
     delivery_id: str,
+    notice_name: str,
 ) -> None:
-    """Tell the workspace conductor that an owner-bound schedule did not run."""
+    """Deliver one typed conductor notice for a fact owned by one user."""
     from core.agent_roster_queries import workspace_conductor_contact
     from infra.db_async import run_in_db
 
@@ -78,18 +80,31 @@ async def tell_conductor_about_scheduled_lapse(
     contact, gap = await run_in_db(contact_for_owner)
     if contact is None:
         if gap:
-            logger.warning("scheduled update conductor notice skipped: {}", gap)
+            logger.warning("{} conductor notice skipped: {}", notice_name, gap)
         return
     from events.delivery import deliver_to_thread
 
     sent = await deliver_to_thread(
         str(contact["id"]),
-        "system.update_schedule_lapsed",
+        event_type,
         summary,
         delivery_id=delivery_id,
     )
     if not sent:
-        logger.warning("scheduled update conductor notice could not be delivered")
+        logger.warning("{} conductor notice could not be delivered", notice_name)
+
+
+async def tell_conductor_about_scheduled_lapse(
+    owner_id: str | None,
+    summary: str,
+    *,
+    delivery_id: str,
+) -> None:
+    """Tell the workspace conductor that an owner-bound schedule did not run."""
+    await _tell_conductor_about_owner_notice(
+        owner_id, summary, event_type="system.update_schedule_lapsed", delivery_id=delivery_id,
+        notice_name="scheduled update",
+    )
 
 
 async def tell_conductor_about_corrections_classifier_failure(
@@ -106,10 +121,11 @@ async def tell_conductor_about_corrections_classifier_failure(
         logger.warning("corrections classifier failure notice skipped: expected one owner, found {}", len(owner_ids))
         return
     digest = hashlib.sha256(reason.encode("utf-8")).hexdigest()[:16]
-    await tell_conductor_about_scheduled_lapse(
-        owner_ids[0],
-        f"Corrections classifier {version} cannot run: {reader}",
+    await _tell_conductor_about_owner_notice(
+        owner_ids[0], f"Corrections classifier {version} cannot run: {reader}",
+        event_type="system.corrections_classifier_failed",
         delivery_id=f"corrections-classifier-failed:{version}:{digest}",
+        notice_name="corrections classifier failure",
     )
 
 

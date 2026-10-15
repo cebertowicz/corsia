@@ -38,6 +38,10 @@ CLOSE_JOIN_SECONDS = 1.0
 class ClassifierUnavailable(RuntimeError):
     """The model could not load or answer at all; the message stays pending."""
 
+    def __init__(self, reason: str, *, kind: str = "transient") -> None:
+        super().__init__(reason)
+        self.kind = kind
+
 
 class MessageFailed(RuntimeError):
     """A loaded, self-tested model failed on this input: ``timeout``, ``rss`` or ``child_error``."""
@@ -93,7 +97,8 @@ def _child_main(connection, manifest_path: str) -> None:
                 "original_tokens": original,
             })
     except Exception as error:
-        connection.send({"error": f"error:{type(error).__name__}"})
+        kind = "transient" if isinstance(error, (OSError, MemoryError, TimeoutError)) else "deterministic"
+        connection.send({"error": f"error:{type(error).__name__}", "kind": kind})
 
 
 class ClassifierChild:
@@ -128,7 +133,7 @@ class ClassifierChild:
             self._start()
             reply = self._exchange(None, LOAD_TIMEOUT_SECONDS)
             if "error" in reply:
-                raise ClassifierUnavailable(f"load {reply['error']}")
+                raise ClassifierUnavailable(f"load {reply['error']}", kind=str(reply.get("kind", "transient")))
             self.loaded = True
 
     def classify(self, context: list[tuple[str, str]], owner: str, *, head: str = "correction") -> Classification:
@@ -193,9 +198,10 @@ class ClassifierChild:
         try:
             if request is not None:
                 connection.send(request)
-            reply = connection.recv() if connection.poll(timeout) else {"error": "timeout"}
+            reply = (connection.recv() if connection.poll(timeout)
+                     else {"error": "timeout", "kind": "transient"})
         except (EOFError, OSError):
-            reply = {"error": "child_exited"}
+            reply = {"error": "child_exited", "kind": "transient"}
         if self._killed:
             raise ClassifierUnavailable("closed")
         if "error" in reply:

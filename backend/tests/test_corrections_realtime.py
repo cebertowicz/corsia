@@ -154,11 +154,14 @@ async def test_failed_state_sends_one_owner_notice_with_the_asset_reader_text(wo
     worker.versions = [{"location": "corrections-classifier", "version": "v2", "state": "failed", "reason": "bad pin"}]
     worker.reader_reason = "The corrections classifier download is damaged. Retry setup."
 
+    worker.failed_versions["v9"] = "older failure"
     worker._set("failed", "bad pin")
     worker._set("failed", "bad pin")
+    worker._set("failed", "new failure", failure_version="v3")
 
     assert [(version, reason, reader) for version, reason, reader, _ in notices] == [
         ("v2", "bad pin", "The corrections classifier download is damaged. Retry setup."),
+        ("v3", "new failure", "The corrections classifier download is damaged. Retry setup."),
     ]
 
 
@@ -280,15 +283,15 @@ async def test_failed_newer_startup_keeps_the_older_ready_version_serving_withou
 
     assert await worker._classify(_candidate("v1")) is True
     current[0] = _manifest("v2")
-    ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError")]
+    ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError", kind="deterministic")]
 
-    assert await worker._classify(_candidate("v2")) is False
+    assert await worker._classify(_candidate("v2")) is True
 
     state = worker.snapshot()
     assert state["version"] == "v1"
     assert state["state"] == "ready"
     assert {item["version"]: item["state"] for item in state["versions"]} == {"v1": "ready", "v2": "failed"}
-    assert recorded.await_count == 1
+    assert recorded.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -392,7 +395,7 @@ async def test_deterministic_startup_failure_never_respawns_for_later_owner_mess
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
 
-    ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError")]
+    ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError", kind="deterministic")]
     recorded = AsyncMock()
     monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
     monkeypatch.setattr(corrections_realtime, "record_unreadable", recorded)

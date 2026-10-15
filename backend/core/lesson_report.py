@@ -118,13 +118,9 @@ def _page_summaries(page: list[dict[str, Any]], period: dict[str, Any],
 def _correction_inventory(
     inventory: list[dict[str, Any]], now: str, facts: dict[str, dict[str, str]],
 ) -> list[dict[str, Any]]:
-    """Attach collected correction facts and omit stale, un-recurred watches."""
-    instant = parse_instant(now)
-    cutoff = instant - WATCH_HIDE_AFTER if instant else None
-    visible = []
+    """Attach collected correction facts; list filtering follows detail and coverage."""
     for row in inventory:
         if "originating_subjects" not in row:
-            visible.append(row)
             continue
         linked = [
             {"subject": subject, **facts[subject]}
@@ -133,24 +129,32 @@ def _correction_inventory(
         row["correction_status"] = "linked" if linked else "no correction"
         row["correction_facts"] = linked
         row["recurrence_count"] = len(linked)
+    return inventory
+
+
+def _list_inventory(inventory: list[dict[str, Any]], now: str) -> list[dict[str, Any]]:
+    """Hide stale, un-recurred watches only from list and preview pages."""
+    instant = parse_instant(now)
+    cutoff = instant - WATCH_HIDE_AFTER if instant else None
+    visible = []
+    for row in inventory:
         activated = min(
             (value for review in row.get("reviews", ())
-             if (value := parse_instant(review.get("opened_at"))) is not None),
-            default=None,
+             if (value := parse_instant(review.get("opened_at"))) is not None), default=None,
         )
         first_anchor = min(
-            (value for fact in linked if (value := parse_instant(fact["ts"])) is not None),
-            default=None,
+            (value for fact in row.get("correction_facts", ())
+             if (value := parse_instant(fact["ts"])) is not None), default=None,
         )
         created = activated or first_anchor
         has_recent_anchor = any(
-            cutoff is not None and (parse_instant(fact["ts"]) or cutoff) > cutoff for fact in linked
+            cutoff is not None and (parse_instant(fact["ts"]) or cutoff) > cutoff
+            for fact in row.get("correction_facts", ())
         )
         if row.get("state") == "watch" and cutoff and created and created <= cutoff and not has_recent_anchor:
             continue
         visible.append(row)
     return visible
-
 
 
 def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
@@ -324,10 +328,12 @@ def read_report(
             return result
         return _detail_page(result, row=selected[0], period=period, reads=reads, boundaries=boundaries,
                             offset=offset, fingerprint=fingerprint, query=query)
+    visible_inventory = _list_inventory(inventory, now)
     limit = 5 if preview else 20
-    if offset > len(inventory):
+    if offset > len(visible_inventory):
         raise ValueError("invalid report position; refresh the report")
-    result["rows"] = _page_summaries(inventory[offset:offset + limit], period, reads)
-    result["known_versions"] = len(inventory)
-    result["next_cursor"] = _cursor(fingerprint, query, offset + limit) if offset + limit < len(inventory) else None
+    result["rows"] = _page_summaries(visible_inventory[offset:offset + limit], period, reads)
+    result["known_versions"] = len(visible_inventory)
+    result["next_cursor"] = (_cursor(fingerprint, query, offset + limit)
+                             if offset + limit < len(visible_inventory) else None)
     return result

@@ -153,7 +153,8 @@ def _activate(
     current = _read(path)
     held = lesson_files.read_trial(current) if current else None
     # An unchanged version keeps the review it already has, so it stays offered.
-    kept = held.lesson.review_node_id if held and held.behavioral_sha256 == trial.behavioral_sha256 else None
+    kept = (held.lesson.review_node_id if held and held.lesson.state == trial.lesson.state
+            and held.behavioral_sha256 == trial.behavioral_sha256 else None)
     draft = lesson_files.with_review_ref(base, kept) if kept else base
     if current != draft and not _save(
         entry, place, decision, relative, {path: draft}, {path: digest(current)}, "trial written",
@@ -161,7 +162,7 @@ def _activate(
         return
     is_watch = trial.lesson.state == "watch"
     node_id = _review(entry, path, relative, partial(
-        plans.ensure_lesson_review, lesson_id=trial.lesson.id,
+        plans.ensure_lesson_review, lesson_id=trial.lesson.id, state=trial.lesson.state,
         behavioral_sha256=trial.behavioral_sha256,
         title=f"Review {'watch' if is_watch else 'trial'} lesson: {trial.name}",
         acceptance=WATCH_ACCEPTANCE if is_watch else TRIAL_ACCEPTANCE,

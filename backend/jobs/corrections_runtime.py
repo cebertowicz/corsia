@@ -71,20 +71,22 @@ async def recover_load_failure(
     fallback_child,
     fallback_version: str | None,
     reason: str,
-) -> bool | None:
+    failure_kind: str,
+):
     """Restore a serving fallback or record a terminal deterministic startup failure."""
-    if reason.startswith("load error:"):
+    if failure_kind == "deterministic":
         worker.failed_versions[manifest.version] = reason
         record_version_state(worker, manifest.version, "failed", reason)
         if fallback_child is not None:
             worker.child, worker.child_version = fallback_child, fallback_version
             worker.children[fallback_version] = fallback_child
+            worker._set("ready", reason)
             logger.warning(
                 "corrections classifier kept version {} serving after {} failed: {}",
                 fallback_version, manifest.version, reason,
             )
-            return False
-        worker._set("failed", reason)
+            return worker.active_manifest
+        worker._set("failed", reason, failure_version=manifest.version)
         return False
     return None
 
@@ -127,10 +129,14 @@ async def classify(
             logger.warning("corrections classifier did not load: {}", error)
             await drop_child(worker)
             resolution = await recover_load_failure(
-                worker, manifest, fallback_child, fallback_version, reason,
+                worker, manifest, fallback_child, fallback_version, reason, error.kind,
             )
+            if resolution is False:
+                return False
             if resolution is not None:
-                return resolution
+                manifest = resolution
+                fallback_child, fallback_version = None, None
+                continue
             outages.append(reason)
             if len(outages) == attempts_per_kind and fallback_child is not None:
                 manifest = restore_transient_fallback(
