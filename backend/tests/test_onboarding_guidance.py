@@ -158,5 +158,6 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
 
 
 def test_first_run_stays_within_its_body_size():
-    # Its size after the fuller conductor-role intro, rounded up; #674 tracks the real cap.
-    assert len(FIRST_RUN.read_bytes()) <= 17200
+    # Its size after the fuller conductor-role intro and the MCP import consent step (#690),
+    # rounded up; #674 tracks the real cap.
+    assert len(FIRST_RUN.read_bytes()) <= 17400
