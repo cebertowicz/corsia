@@ -263,7 +263,7 @@
 		min-width: 0;
 		max-width: 440px;
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) max-content max-content max-content max-content max-content;
+		grid-template-columns: minmax(min-content, 1fr) max-content max-content max-content max-content max-content;
 		gap: var(--space-2);
 		align-items: center;
 		min-height: var(--space-5);
@@ -351,6 +351,11 @@
 	}
 
 	@media (max-width: 460px) {
+		.ctx-source-count-label {
+			max-width: 72px;
+			text-align: end;
+			white-space: normal;
+		}
 		.ctx-source-group summary {
 			grid-template-columns: var(--space-3) max-content minmax(0, 1fr);
 		}
