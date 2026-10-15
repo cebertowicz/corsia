@@ -44,7 +44,7 @@ test.describe('@flow:browser-pane @stress animated browser control', () => {
    const probe = new URL('/browser-pane-probe.html', page.url());
    probe.searchParams.set('stress', '1'); probe.searchParams.set('report', `http://127.0.0.1:${port}`);
    await address.fill(probe.href);
-   await page.getByRole('button', { name: 'Go', exact: true }).click();
+   await address.press('Enter');
    const canvas = page.locator('canvas[aria-label="Shared browser"]');
    await page.emulateMedia({ colorScheme: 'dark' });
    await expect.poll(() => reports.some(report => report.ready)).toBe(true);

@@ -4,11 +4,12 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 from urllib.parse import urlparse
 
-from host_access.browser_cdp import PasswordProbe
+from host_access.browser_cdp import PasswordProbe, Rect
 from host_access.browser_screencast import PaneScreencast
 from host_access.browser_session_state import BrowserSessionError
 from infra import state
@@ -52,6 +53,8 @@ _episodes: dict[str, PasswordEpisode] = {}
 _guarded_visits: dict[str, PasswordEpisode] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
 _screencasts: dict[str, dict[str, PaneScreencast]] = {}
+# When the agent last acted in each thread's page, so a pane that connects later shows it there.
+_agent_seen: dict[str, float] = {}
 # agent-browser commands that change the page's device metrics; a screenshot changes them while it captures.
 _METRICS_COMMANDS = {("screenshot",), ("set", "viewport"), ("set", "device")}
 
@@ -62,6 +65,8 @@ def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict
     _panes.setdefault(thread_id, set()).add(connection_token)
     if report is not None:
         _pane_reports.setdefault(thread_id, {})[connection_token] = report
+        if (seen := _agent_seen.get(thread_id)) is not None:
+            report(_agent_message(time.monotonic() - seen))
     if probe is not None:
         _pane_probes.setdefault(thread_id, {})[connection_token] = probe
         if (episode := _episodes.get(thread_id)) is not None:
@@ -110,6 +115,19 @@ def screencast_ended(thread_id: str, connection_token: str, cast: PaneScreencast
 def screencasts(thread_id: str) -> list[PaneScreencast]:
     """Every pane screencast showing this thread's one shared page."""
     return list(_screencasts.get(thread_id, {}).values())
+
+
+def agent_acted(thread_id: str, field: Rect | None = None, label: Rect | None = None) -> None:
+    """Show the thread's panes that its agent is in the page, and the field it wrote, if any."""
+    _agent_seen[thread_id] = time.monotonic()
+    message = _agent_message(0.0, field, label)
+    for report in _pane_reports.get(thread_id, {}).values():
+        report(message)
+
+
+def _agent_message(age: float, field: Rect | None = None, label: Rect | None = None) -> dict:
+    # An age rather than a time, so the pane needs no clock agreement with this server.
+    return {"type": "browser_agent", "age_ms": round(age * 1000), "field": field, "label": label}
 
 
 def page_command_starting(thread_id: str, args: tuple[str, ...]) -> None:
@@ -172,7 +190,8 @@ def person_input(thread_id: str) -> None:
 
 
 def browser_closed(thread_id: str) -> None:
-    """Stop an open episode's re-probe once the thread's browser has closed."""
+    """Stop an open episode's re-probe once the thread's browser has closed; the agent is in no page."""
+    _agent_seen.pop(thread_id, None)
     if (episode := _episodes.get(thread_id)) is not None:
         _stop_reprobe(episode)
 

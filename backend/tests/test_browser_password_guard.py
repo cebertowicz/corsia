@@ -15,6 +15,7 @@ def clean_password_guard():
     browser_control._episodes.clear()
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
+    browser_control._agent_seen.clear()
     yield
     browser_control._panes.clear()
     browser_control._pane_reports.clear()
@@ -22,6 +23,7 @@ def clean_password_guard():
     browser_control._episodes.clear()
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
+    browser_control._agent_seen.clear()
 
 
 @pytest.mark.asyncio

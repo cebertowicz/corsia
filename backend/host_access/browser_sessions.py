@@ -62,11 +62,12 @@ class BrowserSessionOwner:
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
                   show_window: bool | None = None, control_token: str | None = None,
-                  session: SessionAdmission = "any") -> str:
-        """Run one command through the shared-browser command path; a control token marks a pane's own command."""
+                  session: SessionAdmission = "any", pane: bool = False) -> str:
+        """Run one command through the shared-browser command path; a control token marks a pane's own
+        command, and `pane` marks the person's open from a pane that has no stream yet."""
         from host_access.browser_session_commands import run
         return await run(self, thread_id, args, lease_id=lease_id, timeout=timeout,
-                         show_window=show_window, session=session, pane=control_token is not None)
+                         show_window=show_window, session=session, pane=pane or control_token is not None)
 
     async def has_session(self, thread_id: str) -> bool:
         """Report whether this thread has a browser for a pane to show."""

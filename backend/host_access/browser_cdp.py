@@ -14,6 +14,9 @@ from host_access import browser_cli
 from host_access.browser_session_state import BrowserSessionError
 
 RunCommand = Callable[[Sequence[str], float], Awaitable[browser_cli.CommandResult]]
+Rect = dict[str, float]
+# Where an agent wrote: the field's border box and its first label's, in page CSS pixels.
+FieldTarget = Callable[[Rect, Rect | None], None]
 
 
 @dataclass(frozen=True)
@@ -184,8 +187,11 @@ async def _report_page_metadata(cdp: CdpClient, report: Callable[[dict], Awaitab
     await report({"type": "browser_metadata", "url": url, "title": title if isinstance(title, str) else None})
 
 
-async def shared_action(run: RunCommand, args: Sequence[str]) -> str | None:
-    """Perform a ref-resolved fill/type/click without moving the shared focus or pointer."""
+async def shared_action(run: RunCommand, args: Sequence[str], on_field: FieldTarget | None = None) -> str | None:
+    """Perform a ref-resolved fill/type/click without moving the shared focus or pointer.
+
+    After a fill or type, ``on_field`` receives the written field's place so the pane can mark it.
+    """
     if len(args) < 2 or args[0] not in {"click", "fill", "type"}:
         return None
     selector = args[1]
@@ -203,7 +209,20 @@ async def shared_action(run: RunCommand, args: Sequence[str]) -> str | None:
         declaration, arguments = _action(args)
         await cdp.call("Runtime.callFunctionOn", objectId=object_id, functionDeclaration=declaration,
                        arguments=arguments, awaitPromise=True, returnByValue=True, silent=True)
+        if on_field is not None and args[0] in {"fill", "type"}:
+            await _report_field(cdp, backend_id, object_id, on_field)
     return "ok"
+
+
+async def _report_field(cdp: CdpClient, node: int, object_id: str, on_field: FieldTarget) -> None:
+    field = await _border_rect(cdp, backendNodeId=node)
+    if field is None or field["width"] <= 0 or field["height"] <= 0:
+        # The write removed or hid its own field, so there is no field left to mark.
+        return
+    label = await cdp.call("Runtime.callFunctionOn", objectId=object_id, returnByValue=False, silent=True,
+                           functionDeclaration="function() { return (this.labels && this.labels[0]) || null; }")
+    label_id = label.get("result", {}).get("objectId")
+    on_field(field, await _border_rect(cdp, objectId=label_id) if isinstance(label_id, str) else None)
 
 
 async def _endpoint(run: RunCommand) -> str:
@@ -268,16 +287,21 @@ async def _matching_box(cdp: CdpClient, node: int, expected: dict) -> bool:
 
 
 async def _box_matches(cdp: CdpClient, node: int, expected: dict) -> bool:
+    rect = await _border_rect(cdp, backendNodeId=node)
+    return rect is not None and all(abs(rect[key] - expected[key]) <= 1 for key in ("x", "y", "width", "height"))
+
+
+async def _border_rect(cdp: CdpClient, **node: object) -> Rect | None:
+    """A node's border box in the viewport's CSS pixels, or None when it renders no box."""
     try:
-        model = await cdp.call("DOM.getBoxModel", backendNodeId=node)
+        model = await cdp.call("DOM.getBoxModel", **node)
     except BrowserSessionError:
-        return False
+        return None
     border = model.get("model", {}).get("border")
     if not isinstance(border, list) or len(border) < 8:
-        return False
+        return None
     x, y = border[0], border[1]
-    width, height = border[2] - x, border[5] - y
-    return all(abs(actual - expected[key]) <= 1 for actual, key in ((x, "x"), (y, "y"), (width, "width"), (height, "height")))
+    return {"x": x, "y": y, "width": border[2] - x, "height": border[5] - y}
 
 
 async def _backend_node_id(cdp: CdpClient, node_id: int) -> int:
@@ -286,12 +310,8 @@ async def _backend_node_id(cdp: CdpClient, node_id: int) -> int:
 
 
 async def _visible(cdp: CdpClient, node: int) -> bool:
-    try:
-        model = await cdp.call("DOM.getBoxModel", backendNodeId=node)
-    except BrowserSessionError:
-        return False
-    border = model.get("model", {}).get("border")
-    return isinstance(border, list) and len(border) >= 8 and border[2] > border[0] and border[5] > border[1]
+    rect = await _border_rect(cdp, backendNodeId=node)
+    return rect is not None and rect["width"] > 0 and rect["height"] > 0
 
 
 async def _isolated_context(cdp: CdpClient) -> int:

@@ -6,10 +6,15 @@
 	import { clampPoint } from '$lib/browserPane';
 	import { agentColor } from '$lib/docPresence';
 	import { BrowserPaneInput } from '$lib/browserPaneInput';
-	import { browserAddressLabel, browserTabLabel } from '$lib/browserAddress';
+	import { browserTabLabel } from '$lib/browserAddress';
+	import { BrowserAgentPresence, markerPlace, type MarkerPlace } from '$lib/browserAgentPresence.svelte';
 	import { setBrowserPaneLabel } from '$lib/stores/artifactWorkspace';
-	import AvatarStack from '$lib/components/ui/AvatarStack.svelte';
+	import Avatar from '$lib/components/ui/Avatar.svelte';
+	import BrowserToolbar from '$lib/components/BrowserToolbar.svelte';
+	import { threads } from '$lib/stores/threads';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { on } from '$lib/ws/events';
+	import { fade } from 'svelte/transition';
 	import { get } from 'svelte/store';
 	import { untrack } from 'svelte';
 
@@ -18,12 +23,18 @@
 	let socket: WebSocket | null = null;
 	let passwordPage = $state(false);
 	let keyboardOpen = $state(false);
-	let addressFocused = $state(false);
-	let status = $state('Connecting to browser');
-	const presence = $derived([{ id: threadId, name: 'Agent', color: agentColor(threadId), detail: 'Agent is in this page' }]);
+	let status = $state('');
+	let ended = $state(false);
+	let announcement = $state('');
+	const agent = new BrowserAgentPresence();
+	// Kept after the mark clears, so the marker fades out where it was.
+	let marker = $state<MarkerPlace | null>(null);
+	// A refused agent is not in a password page, so its marks go however recently it acted.
+	const agentPresent = $derived(agent.active && !passwordPage);
+	const markerShown = $derived(agentPresent && agent.mark !== null);
+	const agentName = $derived($threads.find((thread) => thread.id === threadId)?.title?.trim() || 'Agent');
+	const presence = $derived([{ id: threadId, name: agentName, color: agentColor(threadId), detail: 'In this page' }]);
 	let url = $state('');
-	let addressText = $state('');
-	const shownAddress = $derived(addressFocused ? addressText : browserAddressLabel(url));
 	let width = $state(0);
 	let height = $state(0);
 	let image = $state<HTMLImageElement | null>(null);
@@ -48,6 +59,10 @@
 	function connect() {
 		resetPointer();
 		socket?.close();
+		ended = false;
+		if (status.startsWith('Browser stream')) status = '';
+		// The server tells a new stream how recently the agent acted.
+		agent.reset();
 		const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const next = new WebSocket(`${protocol}//${location.host}/api/browser/${threadId}/stream`);
 		lastAppearance = '';
@@ -64,7 +79,10 @@
 		next.onclose = () => {
 			if (socket !== next) return;
 			// The server releases control whenever this connection ends, so the pane must too.
-			if (streaming) status = 'Browser stream ended. Reconnect to watch';
+			if (streaming) {
+				status = 'Browser stream ended';
+				ended = true;
+			}
 			streaming = false;
 			resetPointer();
 		};
@@ -72,11 +90,13 @@
 
 	// A stream that reported no browser, or an HTTP open, has no navigate_result to say the page is ready.
 	function pageConfirmed() {
-		if (!streaming) status = 'Ready';
+		if (!streaming || status === 'Opening') status = '';
 		streaming = true;
 	}
 
 	function applyPageMetadata(nextUrl: unknown, nextTitle: unknown) {
+		// A marked field belongs to the page it was written in.
+		if (typeof nextUrl === 'string' && nextUrl !== url) agent.clearMark();
 		if (typeof nextUrl === 'string') url = nextUrl;
 		if (url) setBrowserPaneLabel(threadId, browserTabLabel(typeof nextTitle === 'string' ? nextTitle : null, url));
 	}
@@ -90,7 +110,14 @@
 		}
 		if (message.type === 'browser_password_page' && typeof message.visible === 'boolean') {
 			passwordPage = message.visible;
-			if (!passwordPage) status = 'Agent can see the page again';
+			// Emptied on each password page, so the next one announces again.
+			announcement = passwordPage ? '' : 'Agent can see the page again';
+			if (passwordPage) agent.clearMark();
+			return;
+		}
+		if (message.type === 'browser_agent') {
+			agent.acted(message);
+			placeMarker();
 			return;
 		}
 		if (message.type === 'browser_metadata') {
@@ -103,14 +130,17 @@
 			if (typeof message.error === 'string') status = `Browser could not open this URL: ${message.error}`;
 			else {
 				applyPageMetadata(message.url, message.title);
-				status = 'Ready';
+				status = '';
 			}
 			return;
 		}
 		if (message.type === 'browser_state') {
 			streaming = false;
 			if (message.state === 'no_browser_yet') status = 'No browser yet';
-			else if (message.state === 'error') status = `Browser stream unavailable: ${message.reason ?? 'unknown error'}`;
+			else if (message.state === 'error') {
+				status = `Browser stream unavailable: ${message.reason ?? 'unknown error'}`;
+				ended = true;
+			}
 			return;
 		}
 		if (message.type !== 'frame' || !message.metadata || typeof message.data !== 'string') return;
@@ -131,6 +161,13 @@
 			if (!decodeWarned) console.warn('Browser pane could not decode a frame', error);
 			decodeWarned = true;
 		});
+	}
+
+	// The marker maps the field's page pixels with the same placement as drawing and input.
+	function placeMarker() {
+		if (!agent.mark || !canvas || !width || !height) return;
+		const { bounds, scale, left, top } = placement();
+		marker = markerPlace(agent.mark, { left: canvas.offsetLeft + left, top: canvas.offsetTop + top, scale, right: canvas.offsetLeft + bounds.width });
 	}
 
 	// Where the page sits in the canvas: drawing and input share it, so a click lands where it is drawn.
@@ -166,6 +203,7 @@
 		// Frame pixels per page pixel; above 1 on a high-density pane.
 		const density = Math.min(image.naturalWidth / width, image.naturalHeight / height);
 		context.drawImage(image, 0, 0, width * density, height * density, left, top, width * scale, height * scale);
+		placeMarker();
 	}
 
 	// The page takes the pane's size, pixel density and CORSIA theme: it fills the pane sharply, never glaring.
@@ -199,6 +237,8 @@
 			// Move before pressing because Chrome may use the last cursor position for a press.
 			paneInput.press(event, point);
 		} else if (event.type === 'pointermove') {
+			// A touch drag scrolls the page, and the marker cannot follow its field there.
+			if (event.pointerType === 'touch' && activePointer !== null) agent.clearMark();
 			paneInput.move(event, point, placement().scale);
 		} else {
 			paneInput.release(event, point, event.type === 'pointercancel');
@@ -212,6 +252,8 @@
 		event.preventDefault();
 		const point = coordinates(event);
 		if (!point) return;
+		// The person's scroll moves the agent's field, and the marker cannot follow it there.
+		agent.clearMark();
 		socket.send(JSON.stringify({ type: 'input_mouse', eventType: 'mouseWheel', ...point, deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: event.deltaMode }));
 	}
 
@@ -235,10 +277,6 @@
 		return event.key === 'Enter' ? '\r' : event.key.length === 1 ? event.key : '';
 	}
 
-	function controlStatus() {
-		return 'Ready';
-	}
-
 	async function go(targetUrl = url) {
 		// An open browser navigates only through the stream that holds control.
 		if (streaming && socket?.readyState === WebSocket.OPEN) {
@@ -247,6 +285,7 @@
 			return;
 		}
 		opening = true;
+		status = 'Opening';
 		try {
 			await openBrowserUrl(threadId, targetUrl, get(token) ?? '');
 			connect();
@@ -262,26 +301,9 @@
 		socket.send(JSON.stringify({ type: 'navigate', action }));
 	}
 
-	function submitAddress(event: SubmitEvent) {
-		event.preventDefault();
-		const targetUrl = addressText;
+	function navigate(targetUrl: string) {
 		url = targetUrl;
-		addressFocused = false;
 		void go(targetUrl);
-	}
-
-	function focusAddress(event: FocusEvent) {
-		addressText = url;
-		addressFocused = true;
-		// Swap in the full URL now and select it, as a browser does. Left to the next render,
-		// the swap would land after a selection made on focus and append the person's text to it.
-		const input = event.currentTarget as HTMLInputElement;
-		input.value = url;
-		input.select();
-	}
-
-	function editAddress(event: Event) {
-		addressText = (event.currentTarget as HTMLInputElement).value;
 	}
 
 	$effect(() => {
@@ -299,6 +321,7 @@
 			observer.disconnect();
 			unsubscribeTheme();
 			clearTimeout(fitTimer);
+			agent.reset();
 			paneInput.dispose();
 		};
 	});
@@ -326,51 +349,32 @@
 </script>
 
 <div class="browser-leaf">
-	<form class="toolbar" onsubmit={submitAddress}>
-		<button type="button" class="icon" aria-label="Back" title="Back" onclick={() => history('back')} disabled={!streaming}>
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-		</button>
-		<button type="button" class="icon" aria-label="Forward" title="Forward" onclick={() => history('forward')} disabled={!streaming}>
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
-		</button>
-		<button type="button" class="icon" aria-label="Reload" title="Reload" onclick={() => history('reload')} disabled={!streaming}>
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" /></svg>
-		</button>
-		<div class="agent-seam"><AvatarStack people={presence} max={3} /></div>
-		<input aria-label="Browser address" value={shownAddress} placeholder="http:// or https://" onfocus={focusAddress} onblur={() => addressFocused = false} oninput={editAddress} />
-		<button type="submit" disabled={false}>Go</button>
-		{#if streaming}
-			<span>Shared with the agent</span>
-		{:else}
-			<button type="button" onclick={connect}>Reconnect</button>
+	<BrowserToolbar {url} {streaming} {ended} {status} {announcement} people={presence} {agentPresent}
+		onnavigate={navigate} onhistory={history} onreconnect={connect} />
+	<div class:agent-present={agentPresent} class:keyboard-open={keyboardOpen} class="browser-page" style:--presence-color={agentColor(threadId)}>
+		{#if marker}
+			<span class="agent-field-marker" class:shown={markerShown} class:above={marker.above} style:left="{marker.left}px" style:top="{marker.top}px"
+				role="img" aria-label="{agentName} is filling this field" aria-hidden={!markerShown} title="{agentName} is filling this field">
+				<Avatar name={agentName} color={agentColor(threadId)} hidden />
+			</span>
 		{/if}
-		<span>{status}</span>
-	</form>
-	<div class:agent-present={!passwordPage} class:keyboard-open={keyboardOpen} class="browser-page" style:--presence-color={agentColor(threadId)}>
-		<span class="agent-field-marker" aria-label="Agent is active in this page">Agent</span>
 		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
-		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
+		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
 </div>
 
 <style>
 	.browser-leaf { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-primary); }
-	.toolbar { display: flex; flex-shrink: 0; gap: .5rem; align-items: center; padding: .5rem; font-size: .8rem; }
-	.toolbar span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-	.toolbar button { flex-shrink: 0; white-space: nowrap; }
-	.toolbar input { flex: 1; min-width: 0; }
-	.toolbar .icon { display: inline-flex; padding: 2px; border: 0; background: none; color: var(--text-secondary); cursor: pointer; }
-	.toolbar .icon:disabled { color: var(--text-tertiary); cursor: default; }
-	.toolbar .icon svg { width: 16px; height: 16px; }
-	.agent-seam { display: inline-flex; }
-	.browser-page { position: relative; display: flex; flex: 1; min-height: 0; }
+	.browser-page { position: relative; display: flex; flex: 1; min-height: 0; overflow: hidden; }
 	.browser-page::after { content: ''; position: absolute; inset: 0; border: 2px solid var(--presence-color, var(--accent)); opacity: 0; pointer-events: none; transition: opacity 160ms ease; }
 	.browser-page.agent-present::after { opacity: 1; }
-	.agent-field-marker { position: absolute; z-index: 1; top: 10px; right: 10px; padding: 3px 7px; border: 1px solid var(--presence-color, var(--accent)); border-radius: var(--radius-pill); color: var(--presence-color, var(--accent)); background: var(--bg-primary); font-size: var(--text-caption); opacity: 0; pointer-events: none; transition: opacity 160ms ease; }
-	.browser-page.agent-present .agent-field-marker { opacity: 1; }
+	.agent-field-marker { position: absolute; z-index: 1; display: inline-flex; transform: translateY(-50%); opacity: 0; visibility: hidden; transition: opacity 160ms ease, visibility 0s linear 160ms; }
+	.agent-field-marker.above { transform: translate(-100%, -100%); }
+	.agent-field-marker.shown { opacity: 1; visibility: visible; transition: opacity 160ms ease; }
+	.agent-field-marker :global(.avatar) { box-shadow: 0 0 0 2px var(--bg-primary); }
 	.password-notice { position: absolute; z-index: 1; bottom: 16px; left: 50%; display: inline-flex; gap: 8px; width: max-content; height: 44px; align-items: center; padding: 0 16px; border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); border-radius: var(--radius-pill); background: var(--glass-regular-thick); box-shadow: var(--glass-elevation-1), var(--glass-rim); backdrop-filter: var(--glass-blur); transform: translateX(-50%); }
 	.password-notice.top { top: 10px; bottom: auto; }
 	.password-notice svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
 	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; }
-	@media (prefers-reduced-motion: reduce) { .browser-page::after, .agent-field-marker { transition: none; } }
+	@media (prefers-reduced-motion: reduce) { .browser-page::after, .agent-field-marker, .agent-field-marker.shown { transition: none; } }
 </style>

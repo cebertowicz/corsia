@@ -30,8 +30,12 @@ async def run(owner: Any, thread_id: str, args: Sequence[str], *, lease_id: str 
     command = partial(_command, owner, runtime, lease_id)
     if not pane and not (session == "new" and args[0] == "open"):
         await browser_control.require_page_access(thread_id, partial(browser_cdp.password_probe, command), tuple(args))
+    if not pane:
+        # Only a command the guard let through puts the agent in the page.
+        browser_control.agent_acted(thread_id)
     if browser_control.has_pane(thread_id):
-        result = await browser_cdp.shared_action(command, args)
+        # A pane command never fills or types (_PANE_COMMANDS), so a marked field is always the agent's.
+        result = await browser_cdp.shared_action(command, args, partial(browser_control.agent_acted, thread_id))
         if result is not None:
             return result
         if args[0] in {"click", "fill", "type"}:

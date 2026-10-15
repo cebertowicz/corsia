@@ -29,7 +29,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await expect(address).toBeVisible();
 		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html`);
 		const opened = page.waitForResponse(response => response.url().includes(`/api/browser/${threadId}/open`));
-		await page.getByRole('button', { name: 'Go' }).click();
+		await address.press('Enter');
 		const openResponse = await opened;
 		expect(openResponse.status(), await openResponse.text()).toBe(200);
 		await expect.poll(() => browserSockets.filter(url => url.includes(`/api/browser/${threadId}/stream`)).length).toBeGreaterThanOrEqual(2);
@@ -45,7 +45,9 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 			return /"deviceWidth":(\d+)/.exec(last)?.[1];
 		}, { timeout: 15_000 }).toBe(String(Math.round(bounds!.width)));
 		await expect.poll(() => colorAt(canvas, 0.02, 0.02, [240, 240, 240])).toEqual([240, 240, 240]);
-		await expect(page.getByText('Shared with the agent')).toBeVisible();
+		// A ready page needs no status: the address field and the page are the whole toolbar.
+		await expect(address).toHaveValue(/^127\.0\.0\.1/);
+		await expect(page.getByRole('button', { name: 'Go' })).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Take over' })).toHaveCount(0);
 		await expect(page.getByRole('button', { name: 'Hand back' })).toHaveCount(0);
 		await saveEvidenceScreenshot(page, testInfo, 'browser-pane-shared');
@@ -62,7 +64,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await address.fill(`${new URL(page.url()).origin}/browser-pane-probe.html?navigated`);
 		await address.press('Enter');
 		await expect.poll(() => browserFrames.some(entry => entry.includes('"type":"navigate_result","error":null'))).toBe(true);
-		await expect(page.getByText('Shared with the agent')).toBeVisible();
+		await expect(page.getByText('Opening', { exact: true })).toHaveCount(0);
 		await saveEvidenceScreenshot(page, testInfo, 'browser-pane-navigation');
 
 		// The person's Meta+A reaches Chrome with its modifier bit, so this replaces the existing value and submits.

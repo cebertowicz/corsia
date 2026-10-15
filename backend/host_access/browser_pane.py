@@ -72,13 +72,14 @@ async def _page_endpoint(thread_id: str, connection_token: str, error: str) -> s
     if (cached := _page_endpoints.get((thread_id, connection_token))) is not None:
         return cached
     owner = PROCESS_OWNER.browser_sessions()
-    payload = await owner.run(thread_id, ("get", "cdp-url"), control_token=connection_token, session="existing")
+    # A pane that leaves cancels its relay mid-read; cancelling a running command resets the shared session.
+    payload = await asyncio.shield(owner.run(thread_id, ("get", "cdp-url"), control_token=connection_token, session="existing"))
     # owner.run returns the rendered model result: agent-browser's `data` object, unwrapped.
     endpoint = browser_cli.json_object(payload).get("cdpUrl")
     if not isinstance(endpoint, str) or not endpoint.startswith("ws"):
         raise browser_cdp.BrowserSessionError(error)
     current_url = _rendered_field(
-        await owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing"), "url")
+        await asyncio.shield(owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing")), "url")
     page_endpoint = await asyncio.to_thread(
         browser_cdp._page_endpoint, endpoint,
         current_url if current_url and current_url.startswith(("http://", "https://")) else None,
@@ -103,7 +104,7 @@ async def open_url(thread_id: str, url: str, connection_token: str | None = None
     """Open a pane URL: the holding stream navigates the open browser; without one, only a new session starts."""
     return await PROCESS_OWNER.browser_sessions().run(
         thread_id, ("open", url), control_token=connection_token,
-        session="new" if connection_token is None else "existing",
+        session="new" if connection_token is None else "existing", pane=True,
     )
 
 

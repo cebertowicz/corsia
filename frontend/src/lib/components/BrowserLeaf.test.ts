@@ -5,6 +5,7 @@ import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { emit } from '$lib/ws/events';
 import { get } from 'svelte/store';
 import { openBrowserPane, threadWorkspaces } from '$lib/stores/artifactWorkspace';
+import { threads, type Thread } from '$lib/stores/threads';
 
 class FakeSocket {
 	static CONNECTING = 0;
@@ -105,7 +106,7 @@ describe('BrowserLeaf navigation metadata', () => {
 			{ type: 'browser_metadata', url: 'http://127.0.0.1:5173/probe.html', title: '' },
 			{ type: 'frame', metadata: { deviceWidth: 100, deviceHeight: 50 }, data: '' },
 		]],
-	])('reports the browser ready on %s after an empty stream', (_case, messages) => {
+	])('clears the empty-browser status on %s, with no status for a ready page', (_case, messages) => {
 		host = document.createElement('div');
 		document.body.appendChild(host);
 		component = mount(BrowserLeaf, { target: host, props: { threadId: 'thread' } });
@@ -118,7 +119,8 @@ describe('BrowserLeaf navigation metadata', () => {
 		for (const message of messages) socket.receive(message);
 		flushSync();
 		expect(host.textContent).not.toContain('No browser yet');
-		expect(host.textContent).toContain('Ready');
+		expect(host.querySelector('.status')).toBeNull();
+		expect(host.textContent).not.toContain('Ready');
 	});
 
 	it('shows an address led by the registrable domain after navigation', () => {
@@ -212,10 +214,10 @@ describe('BrowserLeaf opening lifecycle', () => {
 		input.dispatchEvent(new FocusEvent('focus'));
 		input.value = url;
 		input.dispatchEvent(new Event('input', { bubbles: true }));
-		host.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+		host.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 	}
 
-	it('opens over HTTP when Go is clicked while the stream socket is connecting', async () => {
+	it('opens over HTTP when the address is submitted while the stream socket is connecting', async () => {
 		host = document.createElement('div');
 		document.body.appendChild(host);
 		component = mount(BrowserLeaf, { target: host, props: { threadId: 'thread' } });
@@ -229,6 +231,97 @@ describe('BrowserLeaf opening lifecycle', () => {
 		socket.receive({ type: 'browser_state', state: 'no_browser_yet' });
 		submit('https://example.test/no-browser');
 		await expectOpen('https://example.test/no-browser');
+	});
+});
+
+describe('BrowserLeaf agent presence', () => {
+	const ring = () => host.querySelector('.browser-page')!.classList.contains('agent-present');
+	const seam = () => host.querySelector('.agent-seam')!.classList.contains('present');
+	const marker = () => host.querySelector<HTMLElement>('.agent-field-marker');
+
+	beforeEach(() => {
+		threads.set([{ id: 'thread', title: 'Documents & Artifacts' } as Thread]);
+	});
+
+	afterEach(() => threads.set([]));
+
+	it('shows the ring and seam avatar only while the agent acts, never on a password page', () => {
+		const { socket } = render();
+		flushSync();
+		expect([ring(), seam()]).toEqual([false, false]);
+		socket.receive({ type: 'browser_agent', age_ms: 0, field: null, label: null });
+		flushSync();
+		expect([ring(), seam()]).toEqual([true, true]);
+		expect(host.querySelector('.agent-seam button')!.getAttribute('aria-label')).toBe('Documents & Artifacts');
+
+		socket.receive({ type: 'browser_password_page', visible: true });
+		flushSync();
+		expect([ring(), seam()]).toEqual([false, false]);
+		expect(host.querySelector('[aria-live="polite"]')!.textContent).toBe('');
+
+		socket.receive({ type: 'browser_password_page', visible: false });
+		flushSync();
+		expect([ring(), seam()]).toEqual([true, true]);
+		expect(host.querySelector('[aria-live="polite"]')!.textContent).toBe('Agent can see the page again');
+		// The announcement is for assistive technology only; the toolbar shows no status for it.
+		expect(host.querySelector('.status')).toBeNull();
+	});
+
+	it('shows no presence for an agent that acted longer ago than the presence window', () => {
+		const { socket } = render();
+		socket.receive({ type: 'browser_agent', age_ms: 60_000, field: null, label: null });
+		flushSync();
+		expect([ring(), seam()]).toEqual([false, false]);
+	});
+
+	it('marks the written field at the end of its label line, named for its agent, until the agent moves on', async () => {
+		const { socket } = render();
+		await vi.waitFor(() => expect(drawing.length).toBeGreaterThan(0));
+		socket.receive({ type: 'browser_agent', age_ms: 0, field: { x: 10, y: 20, width: 60, height: 10 }, label: { x: 10, y: 5, width: 30, height: 10 } });
+		flushSync();
+		// The page is drawn at scale 1 from y 25 in the 100 x 100 canvas.
+		expect(marker()!.classList.contains('shown')).toBe(true);
+		expect(marker()!.classList.contains('above')).toBe(false);
+		expect([marker()!.style.left, marker()!.style.top]).toEqual(['46px', '35px']);
+		expect(marker()!.getAttribute('aria-label')).toBe('Documents & Artifacts is filling this field');
+		expect(marker()!.getAttribute('title')).toBe('Documents & Artifacts is filling this field');
+		expect(marker()!.textContent!.trim()).toBe('D');
+
+		socket.receive({ type: 'browser_agent', age_ms: 0, field: null, label: null });
+		flushSync();
+		expect(marker()!.classList.contains('shown')).toBe(false);
+		expect(ring()).toBe(true);
+	});
+
+	it('puts the marker just above an unlabelled field, off its border, and hides it when the person scrolls', async () => {
+		const { canvas, socket } = render();
+		await vi.waitFor(() => expect(drawing.length).toBeGreaterThan(0));
+		socket.receive({ type: 'browser_agent', age_ms: 0, field: { x: 10, y: 20, width: 60, height: 10 }, label: null });
+		flushSync();
+		expect(marker()!.classList.contains('above')).toBe(true);
+		expect([marker()!.style.left, marker()!.style.top]).toEqual(['70px', '41px']);
+		canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 50, clientY: 50, deltaY: 40 }));
+		flushSync();
+		expect(marker()!.classList.contains('shown')).toBe(false);
+	});
+});
+
+describe('BrowserLeaf toolbar', () => {
+	it('has no Go button and no standing status beside the address field', () => {
+		render();
+		flushSync();
+		expect([...host.querySelectorAll('button')].map((button) => button.textContent?.trim() || button.getAttribute('aria-label')))
+			.not.toContain('Go');
+		expect(host.textContent).not.toContain('Shared with the agent');
+		expect(host.textContent).not.toContain('Reconnect');
+	});
+
+	it('offers Reconnect only once the stream has ended', () => {
+		const { socket } = render();
+		socket.close();
+		flushSync();
+		expect(host.textContent).toContain('Browser stream ended');
+		expect([...host.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Reconnect')).toBe(true);
 	});
 });
 

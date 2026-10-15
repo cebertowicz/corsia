@@ -26,6 +26,7 @@ def _no_browser_guard_state():
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
     browser_control._screencasts.clear()
+    browser_control._agent_seen.clear()
     yield
     browser_control._panes.clear()
     browser_control._pane_probes.clear()
@@ -33,6 +34,7 @@ def _no_browser_guard_state():
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
     browser_control._screencasts.clear()
+    browser_control._agent_seen.clear()
 
 
 class FakePane:
@@ -217,6 +219,33 @@ async def test_page_endpoint_reads_the_session_owners_rendered_result(monkeypatc
         assert calls == [("ws://browser.test/devtools/browser/1", "https://example.test/current")]
     finally:
         browser_pane.clear_page_endpoint("thread-1", "pane-1")
+
+
+@pytest.mark.asyncio
+async def test_a_pane_leaving_mid_read_lets_the_running_command_finish(monkeypatch):
+    # Cancelling a running command resets the shared session, so a pane that leaves while its endpoint
+    # read runs must not cancel that read.
+    started, release, finished = asyncio.Event(), asyncio.Event(), []
+
+    class SlowOwner:
+        async def run(self, _thread_id, args, **_kwargs):
+            started.set()
+            await release.wait()
+            finished.append(tuple(args))
+            return _rendered({"cdpUrl": "ws://browser.test/devtools/browser/1"})
+
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: SlowOwner())
+    browser_pane.clear_page_endpoint("thread-1", "pane-1")
+    relay = asyncio.create_task(browser_pane._page_endpoint("thread-1", "pane-1", "failed"))
+    await started.wait()
+    relay.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await relay
+    release.set()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert finished == [("get", "cdp-url")]
+    browser_pane.clear_page_endpoint("thread-1", "pane-1")
 
 
 @pytest.mark.asyncio
