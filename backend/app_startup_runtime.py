@@ -114,6 +114,9 @@ async def _start_runtime_services() -> None:
     placement_worker.poke()
     state._idle_recovery_task = asyncio.create_task(rearm_idle_checkpoints())
     state._nightly_job_task = asyncio.create_task(nightly_job_loop())
+    from jobs.corrections_realtime import startup_scan
+
+    startup_scan()
     from automation.plan_liveness import plan_liveness_sweep_loop
 
     state._plan_liveness_task = asyncio.create_task(plan_liveness_sweep_loop())

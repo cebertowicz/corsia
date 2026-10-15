@@ -22,7 +22,8 @@ LABELS = (LABEL_CORRECTION, LABEL_NOT_CORRECTION)
 # A typed refusal is a recorded fact, not a label: the checker was asked and
 # produced no usable verdict, so this version never silently re-asks.
 LABEL_REFUSED = "refused"
-FACT_LABELS = LABELS + (LABEL_REFUSED,)
+LABEL_UNCLASSIFIABLE = "unclassifiable"
+FACT_LABELS = LABELS + (LABEL_REFUSED, LABEL_UNCLASSIFIABLE)
 REFUSAL_OUTPUT_TRUNCATED = "output_truncated"
 REFUSAL_INVALID_OUTPUT = "invalid_output"
 REFUSAL_INPUT_TOO_LONG = "input_too_long"
@@ -71,21 +72,27 @@ FACT_KEYS = (
     "message_id",
     "thread_id",
     "label",
-    "reason",
-    "checker_model_id",
-    "rubric_sha256",
-    "prompt_sha256",
+    "asset_id",
+    "asset_version",
+    "head",
+    "threshold",
+    "input_policy_id",
+    "truncated",
+    "original_tokens",
+    "failure_reason",
     "classified_at",
 )
 
 
 @dataclass(frozen=True)
 class CheckerVersion:
-    """All immutable inputs that make one correction fact comparable."""
+    """The immutable local-asset identity that makes one fact comparable."""
 
-    model_id: str
-    rubric_sha256: str
-    prompt_sha256: str
+    asset_id: str
+    version: str
+    head: str
+    threshold: float
+    input_policy_id: str
 
 
 @dataclass(frozen=True)
@@ -98,6 +105,7 @@ class CorrectionCandidate:
     content: str
     created_at: str
     preceding_agent: str
+    context: tuple[tuple[str, str], ...] = ()
 
 
 def sha256_text(value: str) -> str:
@@ -105,13 +113,18 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def checker_version(model_id: str) -> CheckerVersion:
-    """Build the fact version for an exact configured catalog model."""
-    return CheckerVersion(
-        model_id=model_id,
-        rubric_sha256=sha256_text(RUBRIC_V1),
-        prompt_sha256=sha256_text(PROMPT_HASH_INPUT),
-    )
+def checker_version(
+    asset_id: str, version: str, head: str, threshold: float, input_policy_id: str,
+) -> CheckerVersion:
+    """Build the fact version from one verified named local-model asset."""
+    return CheckerVersion(asset_id, version, head, threshold, input_policy_id)
+
+
+def active_corrections_version() -> CheckerVersion | None:
+    """The sole version Measurement may read; a filling version never leaks through."""
+    from jobs.corrections_activation import _active_version
+
+    return _active_version()
 
 
 def subject_key(message_id: str) -> str:
@@ -122,8 +135,9 @@ def subject_key(message_id: str) -> str:
 def dedupe_key(message_id: str, version: CheckerVersion) -> str:
     """Stable idempotency key for one message under one checker version."""
     payload = json.dumps(
-        {"message_id": message_id, "model_id": version.model_id,
-         "rubric_sha256": version.rubric_sha256, "prompt_sha256": version.prompt_sha256},
+        {"message_id": message_id, "asset_id": version.asset_id,
+         "version": version.version, "head": version.head,
+         "threshold": version.threshold, "input_policy_id": version.input_policy_id},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -226,19 +240,23 @@ def refusal_classification(reason_code: str) -> dict[str, str]:
 
 def fact_attributes(
     candidate: CorrectionCandidate,
-    classification: Mapping[str, str],
+    classification: Mapping[str, Any],
     version: CheckerVersion,
     *,
     classified_at: str | None = None,
-) -> dict[str, str]:
-    """Shape the complete typed event attributes for a successful classification."""
+) -> dict[str, Any]:
+    """Shape one local-classifier fact without retaining message content."""
     return {
         "message_id": candidate.message_id,
         "thread_id": candidate.thread_id,
         "label": classification["label"],
-        "reason": classification["reason"],
-        "checker_model_id": version.model_id,
-        "rubric_sha256": version.rubric_sha256,
-        "prompt_sha256": version.prompt_sha256,
+        "asset_id": version.asset_id,
+        "asset_version": version.version,
+        "head": version.head,
+        "threshold": f"{version.threshold:.6f}",
+        "input_policy_id": version.input_policy_id,
+        "truncated": "true" if classification["truncated"] else "false",
+        "original_tokens": int(classification["original_tokens"]),
+        "failure_reason": str(classification.get("failure_reason", "none")),
         "classified_at": classified_at or datetime.now(timezone.utc).isoformat(),
     }

@@ -180,12 +180,14 @@ ATTRIBUTE_ALLOWLISTS: dict[str, dict[str, AttributeSpec]] = {
         "basis": enum_attr(*BASES),
         "size_class": enum_attr(*SIZE_CLASSES),
     },
-    # Independent correction classifications retain their short reason but no
-    # source message text. Every other field is an opaque id or closed enum.
+    # Local correction classifications retain only versioned result metadata,
+    # never source-message text or an LLM explanation.
     CORRECTION_EVENT: {
-        **{key: id_attr() for key in CORRECTION_FACT_KEYS if key not in {"label", "reason"}},
+        **{key: id_attr() for key in CORRECTION_FACT_KEYS if key not in {"label", "threshold", "truncated", "original_tokens"}},
         "label": enum_attr(*FACT_LABELS),
-        "reason": text_attr(MAX_REASON_CHARS),
+        "threshold": id_attr(),
+        "truncated": enum_attr("true", "false"),
+        "original_tokens": count_attr(),
     },
     "github.issue.opened": {**_ISSUE_ATTRS},
     "github.issue.closed": {
