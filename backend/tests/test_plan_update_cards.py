@@ -188,27 +188,6 @@ def test_a_nested_node_blocked_on_a_user_ask_writes_a_card(db):
     ]
 
 
-def test_a_nested_node_blocked_on_an_agent_stays_quiet(db):
-    plan = _plan(db)
-    parent = service.add_node(
-        plan.id, kind="phase", title="Parent", acceptance_criteria="Parent DOD", db=db,
-    )
-    db.commit()
-    nested = _task(db, plan.id, title="Waits on a peer", parent_id=parent.id)
-
-    update_cards.observe_node_event(
-        db,
-        node_id=nested.id,
-        event="hold_placed",
-        event_id="peer-block",
-        new_state=None,
-        payload={"kind": "blocked", "owner_kind": "thread", "hold_id": "h1", "reason_key": "peer"},
-        created_at="2026-10-15T00:00:00+00:00",
-    )
-
-    assert _cards(db) == []
-
-
 @pytest.mark.parametrize("owner", ["child", "root"], ids=["hidden-subagent", "archived-thread"])
 def test_hidden_or_archived_thread_owners_are_excluded(db, owner):
     plan = _plan(db, owner)

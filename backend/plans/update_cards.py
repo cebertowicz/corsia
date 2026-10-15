@@ -26,12 +26,9 @@ def _outcome_kind(event: str, new_state: str | None, payload: Mapping | None) ->
     return None
 
 
-def _asks_user(kind: PlanUpdateKind, payload: Mapping | None) -> bool:
-    return kind == "blocked" and payload is not None and payload.get("owner_kind") == "user"
-
-
 def _eligible_thread_id(connection, node_id: str, *, any_depth: bool) -> str | None:
-    # A nested item stays quiet unless it is the user's: assigned to them, or blocked on their ask.
+    # A nested item stays quiet unless it is the user's: assigned to them, or blocked
+    # (every blocked hold is a user ask; agent-owned blockers are waits).
     row = connection.execute(
         f"""SELECT p.owner_id AS thread_id
               FROM plan_nodes n
@@ -75,7 +72,7 @@ def observe_node_event(
     kind = _outcome_kind(event, new_state, payload)
     if kind is None:
         return
-    thread_id = _eligible_thread_id(connection, node_id, any_depth=_asks_user(kind, payload))
+    thread_id = _eligible_thread_id(connection, node_id, any_depth=kind == "blocked")
     if thread_id is None:
         return
     if kind == "blocked" and payload is not None and _duplicate_open_block(connection, node_id, payload):
