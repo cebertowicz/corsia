@@ -13,6 +13,13 @@ readonly OMLX_VERSION="0.7.0"
 readonly OMLX_WHEEL="omlx-${OMLX_VERSION}-cp311-cp311-macosx_15_0_universal2.whl"
 readonly OMLX_URL="https://github.com/jundot/omlx/releases/download/v${OMLX_VERSION}/${OMLX_WHEEL}"
 readonly OMLX_SHA256="a25b0fbf86579512ced2a45b9aba420a51e6e8f3ee9ea3832ea1b9111d2cc4a7"
+# Build Git from its upstream release instead of copying Apple's CLT binary. Runtime
+# prefix discovery makes helpers and templates follow the executable after CORSIA.app moves.
+readonly GIT_VERSION="2.53.0"
+readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
+readonly GIT_URL="https://mirrors.edge.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
+readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
+readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
 
 skip_dmg=false
 for argument in "$@"; do
@@ -28,10 +35,75 @@ fetch_verified() {
   curl --fail --location --retry 3 --silent --show-error "$url" --output "$file"
   echo "${digest}  ${file}" | shasum --algorithm 256 --check --status || fail "SHA-256 mismatch for $(basename "$file")"
 }
+build_git_runtime() {
+  local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
+  local stage="$BUILD_ROOT/git-stage"
+  local stage_root="$stage/git-runtime"
+  local stage_core="$stage_root/libexec/git-core"
+  local bundle_core="$BUNDLE_ROOT/libexec/git-core"
+  local -a git_make_args=(
+    prefix=/git-runtime
+    RUNTIME_PREFIX=YesPlease
+    SKIP_DASHED_BUILT_INS=YesPlease
+    NO_GETTEXT=YesPlease
+    NO_TCLTK=YesPlease
+    NO_PERL=YesPlease
+    NO_PYTHON=YesPlease
+    NO_BASH_COMPLETION=YesPlease
+  )
+  # Git runs these built-ins by their dashed names for local transports.
+  # SKIP_DASHED_BUILT_INS installs them only in bin/; they ship in the exec
+  # path instead, the one directory Git puts ahead of the caller's PATH.
+  local -a transport_built_ins=(git-upload-pack git-receive-pack git-upload-archive)
+  # Server-side helpers, and scalar, which is its own binary; none ship.
+  local -a excluded_core=(git-daemon git-http-backend git-shell git-cvsserver scalar)
+  local entry name
+
+  fetch_verified "$GIT_URL" "$archive" "$GIT_SHA256"
+  tar -xJf "$archive" -C "$BUILD_ROOT"
+  make -C "$GIT_SOURCE" -j2 "${git_make_args[@]}"
+  make -C "$GIT_SOURCE" "${git_make_args[@]}" INSTALL_SYMLINKS=YesPlease DESTDIR="$stage" install
+
+  # The installed stage, rather than selected build outputs, is the runtime
+  # contract: it retains every Git scripted subcommand and relocatable template.
+  [ -x "$stage_root/bin/git" ] || fail "Git install did not produce bin/git"
+  [ -d "$stage_core" ] || fail "Git install did not produce libexec/git-core"
+  [ -d "$stage_root/share/git-core/templates" ] || fail "Git install did not produce templates"
+  mkdir -p "$BUNDLE_ROOT/bin" "$bundle_core" \
+    "$BUNDLE_ROOT/share/git-core/templates" "$BUNDLE_ROOT/licenses/git"
+  install -m 0755 "$stage_root/bin/git" "$BUNDLE_ROOT/bin/git"
+
+  # Tauri copies resources with symlinks dereferenced, so stage the regular files
+  # that will ship: each kept link becomes a copy of its target here, and a link
+  # to a binary that does not ship is dropped instead of becoming a copy of it.
+  local -a core_filter=()
+  for name in "${excluded_core[@]}"; do core_filter+=(--exclude "/$name"); done
+  while IFS= read -r -d '' entry; do
+    case "$(realpath "$entry")" in
+      "$(realpath "$stage_core")"/*|"$(realpath "$stage_root/bin/git")") ;;
+      *) core_filter+=(--exclude "/${entry#"$stage_core/"}") ;;
+    esac
+  done < <(find "$stage_core" -type l -print0)
+  rsync -a --copy-links --delete "${core_filter[@]}" "$stage_core/" "$bundle_core/"
+  for name in "${transport_built_ins[@]}"; do
+    [ "$(realpath "$stage_root/bin/$name")" = "$(realpath "$stage_root/bin/git")" ] \
+      || fail "Git install did not provide $name as the git built-in"
+    install -m 0755 "$stage_root/bin/git" "$bundle_core/$name"
+  done
+  rsync -a --copy-links --delete "$stage_root/share/git-core/templates/" "$BUNDLE_ROOT/share/git-core/templates/"
+  entry="$(find "$BUNDLE_ROOT/bin/git" "$BUNDLE_ROOT/libexec" "$BUNDLE_ROOT/share" -type l -print -quit)"
+  [ -z "$entry" ] || fail "staged Git resource is a symlink Tauri would copy: $entry"
+
+  install -m 0644 "$GIT_SOURCE/COPYING" "$BUNDLE_ROOT/licenses/git/COPYING"
+  install -m 0644 "$archive" "$BUNDLE_ROOT/licenses/git/$GIT_ARCHIVE"
+  printf 'Corresponding source for Git %s\nUpstream URL: %s\nSHA-256: %s\nBuild: %s\n' \
+    "$GIT_VERSION" "$GIT_URL" "$GIT_SHA256" "${git_make_args[*]:1}" > "$BUNDLE_ROOT/licenses/git/SOURCE"
+}
 
 [ "$(uname -s)" = "Darwin" ] || fail "macOS is required"
 [ "$(uname -m)" = "arm64" ] || fail "Apple silicon is required"
 command -v npm >/dev/null || fail "npm is required"
+command -v make >/dev/null || fail "make is required to build bundled Git"
 build_number="$(git -C "$ROOT" rev-list --count HEAD)"
 app_version="${CORSIA_APP_VERSION:-0.1.0-dev.$build_number}"
 macos_short_version="${CORSIA_MACOS_SHORT_VERSION:-0.1.0}"
@@ -61,6 +133,7 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
+build_git_runtime
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"

@@ -9,8 +9,17 @@ export PYTHONDONTWRITEBYTECODE=1
 export CORSIA_DESKTOP_BUNDLE=1
 login_path="$(PYTHONPATH="$resources/backend" "$resources/python/bin/python3" -c 'from cli_location import login_shell_path; print(login_shell_path() or "")' 2>/dev/null || true)"
 base_path="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export CORSIA_SERVICE_PATH="${login_path:+$login_path:}$base_path"
+# Bundled Git's exec path leads, ahead of the login PATH, so a plain `git` never
+# reaches /usr/bin/git, which asks to install the Command Line Tools on a Mac
+# without them. It holds only Git's own commands: other bundled tools, such as
+# omlx, still come after the person's own.
+git_path="$resources/libexec/git-core"
+export CORSIA_SERVICE_PATH="$git_path:${login_path:+$login_path:}$base_path"
 export PATH="$CORSIA_SERVICE_PATH"
+# The bundle owns Git. Avoid host system configuration and credential prompts
+# when backend guidance history or spawned harnesses run it.
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_TERMINAL_PROMPT=0
 export PYTHONPATH="$resources/python/backend-packages"
 export CORSIA_STATE_DIR="$state_dir"
 
@@ -93,6 +102,7 @@ fi
 exec >>"$state_dir/logs/service.log" 2>&1
 printf 'CORSIA bundled backend startup: state_dir=%s db_path=%s port=%s workspace=%s\n' \
   "$state_dir" "$state_dir/corsia.db" "$service_port" "${CORSIA_WORKSPACE:-unset}"
+printf 'CORSIA bundled backend: git=%s\n' "$(command -v git || echo none)"
 printf '%s' "$config_notes" | while IFS= read -r note; do
   if [ -n "$note" ]; then printf 'CORSIA bundled backend: %s\n' "$note"; fi
 done
