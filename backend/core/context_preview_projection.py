@@ -19,6 +19,7 @@ from core.effective_context import (
     provider_source_artifact,
 )
 from core.model_context_sources import model_context_source_entry
+from core.tool_definition_sources import tool_definition_entries
 from core.pending_edit_marker import annotate_pending_edits
 from infra.context_receipts import context_usage_for_boundary
 
@@ -67,23 +68,17 @@ def _preview_sources(
     collection: Any,
     canonical_tool_definitions: str | None,
     frozen_tool_definitions: Any,
+    tool_def_tokens: int,
 ) -> list[ContextSourceEntry]:
     """Compose the already-resolved registry with the preview-only entries."""
     tool_sources = []
     if canonical_tool_definitions:
-        tool_sources.append(
-            ContextSourceEntry(
-                source_id=f"{provider}:tool-definitions",
-                origin_section="tools",
-                label="Tool definitions",
-                stable_reference=f"thread://{thread_id}/tool-definitions",
-                freshness="preview",
-                inclusion="included",
-                reason="Exact selected tool schema ledger for this harness",
-                owner_surface="tool-registry",
-                prompt_content=canonical_tool_definitions,
-                metadata={"tool_count": len(frozen_tool_definitions)},
-            )
+        tool_sources = tool_definition_entries(
+            id_prefix=provider, thread_id=thread_id, freshness="preview",
+            model=harness_model_facts.get("model"),
+            canonical_tool_definitions=canonical_tool_definitions,
+            frozen_tool_definitions=frozen_tool_definitions,
+            total_tokens=tool_def_tokens, single_label="Tool definitions",
         )
     return [
         source,
@@ -187,6 +182,7 @@ def _preview_usage(
             ),
             "was_trimmed": False,
             "history_messages": history_messages,
+            "loaded_tool_tokens": preflight.get("loaded_tool_tokens") or [],
         },
     )
 
@@ -241,6 +237,7 @@ def preview_usage_for_next_turn(inputs: PreviewInputs) -> dict[str, Any]:
         collection=inputs.collection,
         canonical_tool_definitions=inputs.canonical_tool_definitions,
         frozen_tool_definitions=inputs.frozen_tool_definitions,
+        tool_def_tokens=inputs.tool_def_tokens,
     )
     snapshot = _preview_snapshot(
         thread_id=inputs.thread_id,

@@ -24,6 +24,8 @@ def _fixed_estimate(monkeypatch, *, sources: int, user: int = 0):
     import core.context_admission as admission
 
     class Result:
+        delivered_rows = ()
+
         def to_dict(self):
             return {
                 "status": "allowed", "continuity_mode": "unknown",
@@ -87,6 +89,7 @@ def test_cold_path_still_adds_sources_and_history(monkeypatch):
 
     assert estimate["total_tokens"] == 48_000
     assert estimate["continuity_mode"] == "unknown"
+    assert estimate["loaded_tool_tokens"] == []
 
 
 def test_real_source_rows_equal_the_resume_headline(monkeypatch, tmp_path):

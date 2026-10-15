@@ -48,6 +48,10 @@ def test_protected_policy_denies_sensitive_paths_but_preserves_safe_ssh_files(
         Path("/tmp/corsia-shell-envelope-example.sb"),
         for_write=False,
     )
+    assert policy.denial(
+        Path("/tmp/corsia-mcp-envelope-example.sb"),
+        for_write=False,
+    )
     assert policy.denial(Path("/tmp/corsia-restart"), for_write=True)
     assert policy.denial(
         state_root / "runtime" / "corsia-restart.signal",

@@ -48,6 +48,7 @@ OFF_LIMITS_ROWS = (
     ("B11", "POST", r"^/api/plans/operator/threads/[^/]+/seen$", "records the person as actor"),
     ("B11", "POST", r"^/api/artifacts/[^/]+/comments/[^/]+/viewed$", "records the person as actor"),
     ("B11", "POST|DELETE", r"^/api/doc-reviews(?:/|$)", "records the person as actor"),
+    ("B11", "POST", r"^/api/threads/[^/]+/messages/[^/]+/(?:retry|cancel)$", "records the person as actor"),
     ("B12", "DELETE", r"^/api/security(?:/|$)",
      "dismissing the person's security alert would hide it from them; reading it stays open"),
 )

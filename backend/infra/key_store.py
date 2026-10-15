@@ -10,9 +10,10 @@ reference inside the caller's transaction, so the database commit is the only
 commit point: a rolled-back write leaves the entry on its old value.
 
 Nothing here turns an entry's name into its value for a caller. What uses a
-key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider` and
-``infra.key_store_servers.resolve_server`` are the only readers, and only a
-built-in, a cloud-provider or a server entry has one. An entry an agent adds does nothing until code
+key is fixed in code: :func:`resolve_builtin`, :func:`resolve_provider`,
+:func:`resolve_google` and ``infra.key_store_servers.resolve_server`` are the
+only readers, and only a built-in, a cloud-provider, a Google sign-in or a
+server entry has one. An entry an agent adds does nothing until code
 that uses it ships, and cannot claim a name code owns (``RESERVED_PREFIXES``).
 
 Errors raised here carry fixed text and never a value.
@@ -49,7 +50,13 @@ SOURCE_STORE = "keys"
 #: ``POST /api/keys`` cannot claim a name under any of them.
 PROVIDER_PREFIX = "provider-"
 SERVER_PREFIX = "server-"
-RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX)
+GOOGLE_PREFIX = "google-"
+RESERVED_PREFIXES = (PROVIDER_PREFIX, SERVER_PREFIX, MCP_PREFIX, GOOGLE_PREFIX)
+#: The platform-held Google sign-in: the person's OAuth client and the refresh token it earned.
+GOOGLE_CLIENT_ID = f"{GOOGLE_PREFIX}client-id"
+GOOGLE_CLIENT_SECRET = f"{GOOGLE_PREFIX}client-secret"
+GOOGLE_REFRESH_TOKEN = f"{GOOGLE_PREFIX}refresh-token"
+GOOGLE_ENTRIES = (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN)
 #: A network server's id: lowercase letters, digits and hyphens, short enough for the entry name.
 SERVER_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,32}$")
 #: Providers that can hold a key, entered in add-provider. The hidden legacy
@@ -89,9 +96,10 @@ def _db(db: sqlite3.Connection | None) -> sqlite3.Connection:
 
 
 def is_managed_name(name: str) -> bool:
-    """Whether code, not a person, owns this entry: a built-in, or a provider's, server's or MCP server's key."""
+    """Whether code, not a person, owns this entry: a built-in, or a provider's, server's, MCP server's or Google sign-in's key."""
     return (
         name in BUILTINS
+        or name in GOOGLE_ENTRIES
         or (name.startswith(PROVIDER_PREFIX) and name[len(PROVIDER_PREFIX):] in PROVIDER_NAMES)
         or (name.startswith(SERVER_PREFIX) and bool(SERVER_ID_PATTERN.match(name[len(SERVER_PREFIX):])))
         or is_mcp_entry_name(name)
@@ -241,6 +249,18 @@ def resolve_provider(name: str, *, db: sqlite3.Connection | None = None) -> str 
     if name not in PROVIDER_NAMES:
         return None
     return resolve_names([f"{PROVIDER_PREFIX}{name}"], db=db).get(f"{PROVIDER_PREFIX}{name}")
+
+
+def resolve_google(*, db: sqlite3.Connection | None = None) -> dict[str, str] | None:
+    """The Google sign-in's ``client_id``, ``client_secret`` and ``refresh_token``, or None unless all three are set."""
+    stored = resolve_names(GOOGLE_ENTRIES, db=db)
+    if len(stored) != len(GOOGLE_ENTRIES):
+        return None
+    return {
+        "client_id": stored[GOOGLE_CLIENT_ID],
+        "client_secret": stored[GOOGLE_CLIENT_SECRET],
+        "refresh_token": stored[GOOGLE_REFRESH_TOKEN],
+    }
 
 
 def resolve_names(names: Iterable[str], *, db: sqlite3.Connection | None = None) -> dict[str, str]:

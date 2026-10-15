@@ -140,6 +140,9 @@ export function formatContextDelta(metadata: Record<string, unknown> | undefined
 
 function countLabel(metadata: Record<string, unknown> | undefined): string {
 	if (!metadata) return '';
+	if (metadata.provider === 'mcp_index' && typeof metadata.tool_count === 'number') {
+		return `${Math.max(0, Math.round(metadata.tool_count))} actions`;
+	}
 	if (metadata.provider === 'agent_owner_map' && typeof metadata.agent_count === 'number') {
 		const count = Math.max(0, Math.round(metadata.agent_count));
 		return count === 1 ? '1 Agent' : `${count} Agents`;
@@ -169,21 +172,28 @@ function groupedSources(sources: ContextSheetSourceRow[]): ContextSheetSnapshotM
 		.map((group) => ({ group, rows: buckets.get(group.id) ?? [] }))
 		.filter(({ rows }) => rows.length > 0)
 		.map(({ group, rows }) => {
-			const skills = rows.filter((row) => row.kind === 'skill');
-			const instructions = rows.filter((row) => row.kind !== 'skill');
-			const tokenCount = sumTokens(rows);
+			const orderedRows = group.id === 'tools'
+				? [...rows].sort((left, right) => {
+					if (left.label === 'CORSIA tools') return 1;
+					if (right.label === 'CORSIA tools') return -1;
+					return (right.tokenCount ?? 0) - (left.tokenCount ?? 0);
+				})
+				: rows;
+			const skills = orderedRows.filter((row) => row.kind === 'skill');
+			const instructions = orderedRows.filter((row) => row.kind !== 'skill');
+			const tokenCount = sumTokens(orderedRows);
 			return {
 				id: group.id,
 				category: group.name,
-				sources: rows,
+				sources: orderedRows,
 				instructions,
 				skills,
 				instructionsTokenLabel: promptTokenLabel(sumTokens(instructions)),
 				skillsTokenLabel: promptTokenLabel(sumTokens(skills)),
 				tokenCount,
-				deltaLabel: groupDeltaLabel(rows),
-				countLabel: groupCountLabel(rows),
-				tokenLabel: rows.some((row) => row.tokenCount != null) ? promptTokenLabel(tokenCount) : '',
+				deltaLabel: groupDeltaLabel(orderedRows),
+				countLabel: groupCountLabel(orderedRows),
+				tokenLabel: orderedRows.some((row) => row.tokenCount != null) ? promptTokenLabel(tokenCount) : '',
 			};
 		});
 }
@@ -237,7 +247,7 @@ function inventoryRow(source: ContextSourceInventoryEntry, isAgent: boolean): Co
 		id: text(source.source_id),
 		layer: originSection,
 		category: sourceScope(originSection, source.metadata, isAgent),
-		label: displaySourceLabel(source),
+		label: source.metadata?.provider === 'mcp_index' ? text(source.metadata?.display_name, text(source.metadata?.server_name, text(source.label))) : displaySourceLabel(source),
 		fullLabel: fileNameFromSource(source) || text(source.label),
 		tags: sourceTags(originSection, source.metadata),
 		...(source.edited_since_install === true ? { pendingEdit: true } : {}),
