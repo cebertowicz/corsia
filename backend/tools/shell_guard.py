@@ -1010,12 +1010,13 @@ def safehouse_exec_argv(
     append_profile: str | Path,
     *,
     env_pass_names: set[str],
+    additional_dirs_rw: list[Path] | None = None,
 ) -> list[str]:
     """Build a scope-neutral Safehouse argv that execs an app without a shell."""
     return direct_safehouse_argv(
         command, args, cwd, append_profile, env_pass_names=env_pass_names,
         executable=_safehouse_executable, sandbox_dirs_rw=get_sandbox_add_dirs_rw, allowed_dirs_ro=get_allowed_dirs_ro,
-        agent_account_dirs=agent_account_ro_dirs,
+        agent_account_dirs=agent_account_ro_dirs, additional_dirs_rw=additional_dirs_rw,
     )
 
 def _terminal_boundary_profile(

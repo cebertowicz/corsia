@@ -33,6 +33,7 @@ def safehouse_prefix(
     gws_home: Path | None = None,
     thread_id: str | None = None,
     policies: list[RepoPolicy] | None = None,
+    additional_dirs_rw: list[Path] | None = None,
 ) -> list[str]:
     """Build the options shared by shell and direct-exec Safehouse launches."""
     canonical_cwd = Path(cwd).expanduser().resolve(strict=False)
@@ -45,7 +46,7 @@ def safehouse_prefix(
     if leased:
         argv.append("--allow-workdir-config-writes")
     else:
-        rw_paths = [*sandbox_dirs_rw(thread_id, policies=policies)]
+        rw_paths = [*sandbox_dirs_rw(thread_id, policies=policies), *(additional_dirs_rw or [])]
         if gws_home:
             rw_paths.append(gws_home)
         if rw := ":".join(map(str, _canonical_paths(rw_paths))):
@@ -75,6 +76,7 @@ def direct_safehouse_argv(
     sandbox_dirs_rw: Callable[..., list[Path]],
     allowed_dirs_ro: Callable[..., list[Path]],
     agent_account_dirs: Callable[[AgentAccountView | None], list[Path]],
+    additional_dirs_rw: list[Path] | None = None,
 ) -> list[str]:
     """Build a scope-neutral Safehouse argv that execs an app without a shell."""
     if not command or any(not isinstance(arg, str) for arg in args):
@@ -90,6 +92,7 @@ def direct_safehouse_argv(
             agent_account_dirs=agent_account_dirs,
             leased=False,
             include_agent_account=False,
+            additional_dirs_rw=additional_dirs_rw,
         ),
         command,
         *args,
