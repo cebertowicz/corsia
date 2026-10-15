@@ -90,7 +90,7 @@ async def test_every_value_route_is_off_limits(conductor, method, path, body):
 
 
 def test_the_key_store_step_is_registered_at_96_on_the_current_ladder():
-    assert SCHEMA_VERSION == 114
+    assert SCHEMA_VERSION == 115
     assert MIGRATIONS[96] is migrate_96_to_97
 
 

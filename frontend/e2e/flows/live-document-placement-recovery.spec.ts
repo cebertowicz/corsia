@@ -112,19 +112,20 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await deleteRenderedLine(writer, removed);
 		await expect(reader.locator('.cm-content')).not.toContainText(removed);
 		await expect(reader.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
-		const reload = reader.getByRole('button', { name: 'Reload comment placements', exact: true });
+		const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
 		await expect(reload).toBeVisible();
 		await reply.focus();
 
 		// A real resolver answer with no range keeps orphan recovery available and announces the count.
-		await closeComments();
 		await reload.click();
-		await expect(reader.getByRole('status').filter({ hasText: "1 comment still couldn't be placed" })).toBeVisible();
+		await expect(comments.getByRole('status').filter({ hasText: "1 comment still couldn't be placed" })).toBeVisible();
 		await expect(reload).toBeFocused();
 		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
+		await closeComments();
 		await openComments();
 		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
 		await expect(reply).toHaveValue(`draft ${stamp}`);
+		expect(await reader.evaluate(() => document.activeElement?.getAttribute('placeholder'))).not.toBe('Reply…');
 		await reply.focus();
 		expect(await replySelection()).toEqual([2, 5]);
 		// Refocusing observes the editor's retained range; input focus owns the DOM selection meanwhile.
@@ -132,12 +133,12 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		await expect.poll(editorSelection).toEqual(selectedRange);
 
 		refuse.arm();
-		await closeComments();
 		await reload.click();
 		await expect.poll(refuse.refused, { timeout: 20_000 }).toBe(1);
-		await expect(reader.getByRole('status').filter({ hasText: "Couldn't reload comment placements" })).toBeVisible();
+		await expect(comments.getByRole('status').filter({ hasText: "Couldn't reload comment placements" })).toBeVisible();
 		await expect(reload).toBeFocused();
 		await expect(reload).not.toHaveAttribute('aria-disabled', 'true');
+		await closeComments();
 		await openComments();
 		reply = await replyField(comments.locator(`[data-comment-id="${retainedId}"]`));
 		await expect(reply).toHaveValue(`draft ${stamp}`);
@@ -166,7 +167,10 @@ test('@slice1 @surface:live-document a disconnected 393px placement reload is de
 		const page = await context.newPage();
 		await openLiveDocument(page, document);
 		await deleteRenderedLine(page, quote);
-		const reload = page.getByRole('button', { name: 'Reload comment placements', exact: true });
+		await page.locator('.comment-status').click();
+		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
+		await expect(comments).toBeVisible();
+		const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
 		await expect(reload).toBeVisible();
 		await link.cut();
 		await expect(reload).toHaveAttribute('aria-disabled', 'true');

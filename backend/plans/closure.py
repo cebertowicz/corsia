@@ -129,7 +129,10 @@ def settled_reasons(db, nodes, *, labels: dict[str, str] | None = None) -> dict[
             if verifier and not is_user_audit_id(verifier):
                 markers[node_id] = verifier
     if markers:
+        from plans.system_user_steps import is_system_verifier
+
         known = dict(labels or {})
+        known.update({who: "CORSIA" for who in markers.values() if is_system_verifier(who)})
         missing = {thread for thread in markers.values() if thread not in known}
         if missing:
             from plans.operator_node_facts import executor_labels

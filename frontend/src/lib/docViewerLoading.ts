@@ -2,9 +2,10 @@ import { fetchContent, fetchRevision, type DocContent } from '$lib/api/docs';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { DocOpenError, docOpenRefusal, liveUnavailable, SNAPSHOT_REFUSAL_MESSAGE, type DocOpenRefusal, type LiveUnavailable } from '$lib/docOpenRefusal';
-import { effectiveDraftTarget, enrichDraftTarget, existingDraft, flushDraft } from '$lib/stores/docSaveQueue';
+import { effectiveDraftTarget, enrichDraftTarget, existingDraft, flushDraft, type DocSaveDraft } from '$lib/stores/docSaveQueue';
 import { openLiveDocument } from '$lib/stores/liveDocuments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
+import type { TabLoadSignal } from '$lib/artifactTabs';
 
 export interface ViewerContent {
 	text: string;
@@ -43,6 +44,26 @@ export type RefusedView = 'draft' | 'snapshot' | 'none';
  */
 export function refusalForView(refusal: DocOpenRefusal, view: RefusedView): DocOpenRefusal {
 	return view === 'snapshot' ? { ...refusal, message: SNAPSHOT_REFUSAL_MESSAGE } : refusal;
+}
+
+/** How a tab's document shows the moment it mounts, before the loader answers. */
+export interface DraftOpen {
+	/** The text its draft holds, shown at once; null when the tab waits for the loader. */
+	text: string | null;
+	/** Unsaved local text wins over server content, but not over write authority: it stays read-only until the loader re-checks write access. */
+	unsaved: boolean;
+	/** Saved text, read-only while the loader confirms it against the live document. */
+	confirming: boolean;
+	signal: Omit<TabLoadSignal, 'instanceId'>;
+}
+
+/** A tab whose draft holds its text shows that text at once; one without waits for the loader. */
+export function openFromDraft(draft: DocSaveDraft | undefined, artifactId: string | null): DraftOpen {
+	if (!draft) return { text: null, unsaved: false, confirming: false, signal: { status: 'loading' } };
+	const unsaved = draft.editText !== draft.savedText;
+	// Saved text claims no write access until the loader answers, so its tab shows no read-only mark meanwhile.
+	const signal: DraftOpen['signal'] = { status: 'ready', artifactId, shown: true, ...(unsaved ? { writable: false } : {}) };
+	return { text: draft.editText, unsaved, confirming: !unsaved, signal };
 }
 
 export async function loadViewerContent(options: LoadOptions): Promise<void> {

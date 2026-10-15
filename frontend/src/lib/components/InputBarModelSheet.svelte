@@ -328,7 +328,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
-		padding-left: 22px;
 	}
 
 	.model-list-item .model-list-name {

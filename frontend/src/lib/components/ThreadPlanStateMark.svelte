@@ -25,8 +25,7 @@
 	const entry = $derived($threadPlanStates[threadId]);
 	// Retain the old generic word while a stale cached row entry is replaced.
 	const count = $derived((entry?.attention_items ?? []).length);
-	const stuckCount = $derived(entry?.stuck_overdue_waits ?? 0);
-	const title = $derived(entry && owes(entry) ? chatStateTitle(entry) : entry?.state === 'failed' ? 'Failed work' : entry?.state === 'stuck' ? `Stuck · ${stuckCount} wait${stuckCount === 1 ? '' : 's'} past the deadline` : '');
+	const title = $derived(entry && owes(entry) ? chatStateTitle(entry) : entry?.state === 'failed' ? 'Failed work' : '');
 	const word = $derived(slotThreeWord(entry));
 	// The thread in front of the user shows no dot while its visit commits.
 	const updateDot = $derived(!word && Boolean(entry?.has_update) && $activeThreadId !== threadId);
@@ -85,7 +84,7 @@
 	}
 </script>
 
-{#if word && count === 0 && entry?.state !== 'stuck'}
+{#if word && count === 0}
 	<!-- Nothing listable behind it: a word, not a control that opens an empty list. -->
 	<span class="plan-state static {entry?.state}" {title}>{word}</span>
 {:else if word}
@@ -94,9 +93,9 @@
 		role="button"
 		tabindex="0"
 		{title}
-		aria-label={entry?.state === 'stuck' ? title : `${word}: ${count} item${count === 1 ? '' : 's'}`}
-		onclick={entry?.state === 'stuck' ? openThread : show}
-		onkeydown={(event) => activate(event, entry?.state === 'stuck' ? openThread : show)}
+		aria-label={`${word}: ${count} item${count === 1 ? '' : 's'}`}
+		onclick={show}
+		onkeydown={(event) => activate(event, show)}
 		onpointerdown={(event) => event.stopPropagation()}
 	>{word}</span>
 {:else if updateDot}

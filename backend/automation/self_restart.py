@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from statistics import median
 import uuid
 
+from automation.restart_tokens import revoke_lifecycle_token_for_terminal_operation
 from infra.database import get_db, write_transaction
 
 IN_FLIGHT_TTL_SECONDS = 600
@@ -188,6 +190,7 @@ def try_acquire(
     target_version: str | None = None,
     changes: str | None = None,
     operation_id: str | None = None,
+    claim: Callable[[object], bool] | None = None,
     db=None,
     _target_phase: str = "holding",
 ) -> str | None:
@@ -222,6 +225,8 @@ def try_acquire(
         if connection.execute(
             "SELECT 1 FROM self_restart_requests WHERE id=?", (operation_id,)
         ).fetchone() is not None:
+            return None
+        if claim is not None and not claim(connection):
             return None
         connection.execute(
             "INSERT INTO self_restart_requests "
@@ -329,7 +334,10 @@ def complete_operation(
             "WHERE id=? AND status='in_flight' AND phase='resuming'",
             (_now_iso(), _now_iso(), deployed_sha, operation_id),
         )
-        return cur.rowcount == 1
+        settled = cur.rowcount == 1
+        if settled:
+            revoke_lifecycle_token_for_terminal_operation(connection, operation_id)
+        return settled
 
 
 def abort_operation(
@@ -361,7 +369,10 @@ def abort_operation(
                 *sorted(ABORTABLE_PHASES),
             ),
         )
-        return cur.rowcount == 1
+        settled = cur.rowcount == 1
+        if settled:
+            revoke_lifecycle_token_for_terminal_operation(connection, operation_id)
+        return settled
 
 
 def clear_stale_in_flight(

@@ -128,7 +128,7 @@
 
 <HostAccessReviewSetting onError={(message) => settingsError = message} />
 
-<div class="settings-card">
+<div class="settings-card" data-settings-anchor="update">
 	<h3>Updates</h3>
 	<p class="card-desc">Keep CORSIA current.</p>
 	<div class="service-grid"><SettingsUpdate /></div>

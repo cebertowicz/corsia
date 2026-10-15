@@ -47,6 +47,19 @@ class Socket:
                 return frame
 
 
+class SaveReplyFailureSocket(Socket):
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+        self.attempted_types = []
+
+    async def send_json(self, frame):
+        self.attempted_types.append(frame["type"])
+        if frame["type"] == "doc_saved":
+            raise self.error
+        await super().send_json(frame)
+
+
 @pytest.mark.asyncio
 async def test_frames_open_merge_ack_and_flush_without_whole_text_save(ownership_scope, tmp_path, monkeypatch):
     from ws import document_control
@@ -81,6 +94,71 @@ async def test_frames_open_merge_ack_and_flush_without_whole_text_save(ownership
         saved = await socket.next("doc_saved")
         assert saved["server_saved"] is True
         assert entry.live.text == "old typed" == entry.live.path.read_text()
+    finally:
+        await document_control.disconnect(socket)
+        await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_message", [
+    "Unexpected ASGI message 'websocket.send', after sending 'websocket.close'",
+    'Cannot call "send" once a close message has been sent.',
+])
+async def test_closed_socket_drops_landed_replace_reply_without_an_error(ownership_scope, tmp_path, monkeypatch, caplog,
+                                                                          error_message):
+    from ws import document_control
+    from doceditor import live_runtime
+    scope = ownership_scope
+    _write(scope, "live.md", "old")
+    manager = LiveDocuments(tmp_path / "live", workspace=scope["workspace"],
+                            db_path=Path(scope["db"].execute("PRAGMA database_list").fetchone()[2]))
+    monkeypatch.setattr(live_runtime, "_manager", manager)
+    user_id = scope["db"].execute("SELECT user_id FROM threads WHERE id=?", (scope["owner"],)).fetchone()[0]
+    socket = SaveReplyFailureSocket(RuntimeError(error_message))
+    try:
+        await document_control.handle_frame(socket, {"id": user_id}, {
+            "type": "doc_open", "path": str(scope["category"] / "live.md"),
+            "project_id": "project-alpha", "thread_id": scope["owner"]})
+        opened = await socket.next("doc_opened")
+        entry = manager.documents[opened["artifact_id"]]
+        with caplog.at_level("ERROR", logger=document_control.__name__):
+            await document_control.handle_frame(socket, {"id": user_id}, {
+                "type": "doc_replace", "artifact_id": opened["artifact_id"], "store_id": opened["store_id"],
+                "text": "landed replacement"})
+        assert entry.live.path.read_text() == "landed replacement"
+        assert socket.attempted_types.count("doc_saved") == 1
+        assert "doc_error" not in socket.attempted_types
+        assert not [record for record in caplog.records
+                    if record.name == document_control.__name__ and record.levelname == "ERROR"]
+    finally:
+        await document_control.disconnect(socket)
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_non_closed_socket_failure_reports_an_internal_error(ownership_scope, tmp_path, monkeypatch, caplog):
+    from ws import document_control
+    from doceditor import live_runtime
+    scope = ownership_scope
+    _write(scope, "live.md", "old")
+    manager = LiveDocuments(tmp_path / "live", workspace=scope["workspace"],
+                            db_path=Path(scope["db"].execute("PRAGMA database_list").fetchone()[2]))
+    monkeypatch.setattr(live_runtime, "_manager", manager)
+    user_id = scope["db"].execute("SELECT user_id FROM threads WHERE id=?", (scope["owner"],)).fetchone()[0]
+    socket = SaveReplyFailureSocket(RuntimeError("unexpected implementation failure"))
+    try:
+        await document_control.handle_frame(socket, {"id": user_id}, {
+            "type": "doc_open", "path": str(scope["category"] / "live.md"),
+            "project_id": "project-alpha", "thread_id": scope["owner"]})
+        opened = await socket.next("doc_opened")
+        with caplog.at_level("ERROR", logger=document_control.__name__):
+            await document_control.handle_frame(socket, {"id": user_id}, {
+                "type": "doc_flush", "artifact_id": opened["artifact_id"], "store_id": opened["store_id"]})
+        assert (await socket.next("doc_error"))["kind"] == "internal"
+        assert socket.attempted_types.count("doc_saved") == 1
+        assert socket.attempted_types.count("doc_error") == 1
+        assert [record for record in caplog.records
+                if record.name == document_control.__name__ and record.getMessage() == "Live document frame failed"]
     finally:
         await document_control.disconnect(socket)
         await manager.close()

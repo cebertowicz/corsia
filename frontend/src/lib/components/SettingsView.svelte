@@ -9,8 +9,6 @@
 	import { loadServerVersion } from '$lib/version';
 	import IconButton from '$lib/components/ui/IconButton.svelte';
 	import { toastAnchorSurface } from '$lib/stores/toastAnchor';
-	import { toastClearanceSurface } from '$lib/stores/toastClearance';
-	import { toastStackHeight } from '$lib/stores/toastStack';
 	import { settingsActiveSection, settingsAnchorRequest, type SettingsSection } from '$lib/stores/settingsNavigation';
 
 	let { onClose, systemStatus = {} as any }: {
@@ -68,7 +66,7 @@
 		{/each}
 	</nav>
 
-	<div class="settings-content" use:toastAnchorSurface style:padding-bottom={$toastStackHeight > 0 ? `calc(var(--space-5) + ${$toastStackHeight}px + var(--space-6) + var(--space-3))` : undefined}>
+	<div class="settings-content" use:toastAnchorSurface>
 		{#if $settingsActiveSection === 'providers'}
 			<div class="providers-host">
 				<ProviderManager />
@@ -83,7 +81,7 @@
 		{/if}
 	</div>
 
-	<div class="mobile-tab-bar" use:toastClearanceSurface>
+	<div class="mobile-tab-bar">
 		{#each sections as s}
 			<button
 				class="mobile-tab press-tint"
