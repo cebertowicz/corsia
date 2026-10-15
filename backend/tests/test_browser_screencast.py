@@ -71,6 +71,7 @@ async def test_pane_screencast_acknowledges_each_frame_before_relaying_it(monkey
     assert log == [
         ("cdp", "Page.getLayoutMetrics", {}),
         ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80}),
+        ("cdp", "Page.enable", {}),
         ("cdp", "Page.screencastFrameAck", {"sessionId": 1}),
         ("pane", {"type": "frame", "data": "jpeg-1", "metadata": {"deviceWidth": 400, "deviceHeight": 600}}),
         ("cdp", "Page.screencastFrameAck", {"sessionId": 2}),
@@ -94,10 +95,10 @@ async def test_pane_screencast_restarts_at_the_new_device_size(monkeypatch):
     socket.incoming.put_nowait(None)
     await asyncio.wait_for(running, 1)
     assert [entry[1] if entry[0] == "cdp" else entry[1]["data"] for entry in log] == [
-        "Page.getLayoutMetrics", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-1",
+        "Page.getLayoutMetrics", "Page.startScreencast", "Page.enable", "Page.screencastFrameAck", "jpeg-1",
         "Page.stopScreencast", "Page.getLayoutMetrics", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-2",
     ]
-    assert log[6] == ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 1360, "maxHeight": 2060})
+    assert log[7] == ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 1360, "maxHeight": 2060})
 
 
 @pytest.mark.asyncio
@@ -107,6 +108,11 @@ async def test_a_held_pane_screencast_shows_no_frame_until_its_restart_measures_
     running = asyncio.create_task(cast.run())
     await _started(log)
     cast.hold()
+    # A page that loads mid-command leaves the restart to the command.
+    socket.incoming.put_nowait({"method": "Page.loadEventFired", "params": {"timestamp": 1.0}})
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert socket.incoming.empty()
     # Mid-command frames, such as a screenshot's temporary capture size, are acknowledged, not shown.
     socket.incoming.put_nowait(_frame(1, 1084))
     while not any(entry[2] == {"sessionId": 1} for entry in log if entry[0] == "cdp"):
@@ -128,7 +134,33 @@ async def test_pane_screencast_sized_before_it_starts_captures_at_that_size(monk
     await cast.restart()  # Not capturing yet: run() starts at the new size.
     socket.incoming.put_nowait(None)
     await asyncio.wait_for(cast.run(), 1)
-    assert log == [("cdp", "Page.getLayoutMetrics", {}), ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 800, "maxHeight": 600})]
+    assert log == [("cdp", "Page.getLayoutMetrics", {}), ("cdp", "Page.startScreencast", {"format": "jpeg", "quality": 80, "maxWidth": 800, "maxHeight": 600}),
+                   ("cdp", "Page.enable", {})]
+
+
+@pytest.mark.asyncio
+async def test_pane_screencast_restarts_once_a_new_document_loads_so_its_first_picture_is_shown(monkeypatch):
+    # Chrome can capture none of a new document's first pictures, and a still page draws no more.
+    log = []
+    cast, socket, _connected = _screencast(monkeypatch, log)
+    running = asyncio.create_task(cast.run())
+    await _started(log)
+    socket.incoming.put_nowait(_frame(1, 400))
+    socket.incoming.put_nowait({"method": "Page.frameNavigated", "params": {"frame": {"id": "main"}}})
+    socket.incoming.put_nowait({"method": "Page.loadEventFired", "params": {"timestamp": 1.0}})
+
+    async def restarted():
+        while sum(entry[1] == "Page.startScreencast" for entry in log) < 2:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(restarted(), 1)
+    socket.incoming.put_nowait(_frame(2, 400))
+    socket.incoming.put_nowait(None)
+    await asyncio.wait_for(running, 1)
+    assert [entry[1] if entry[0] == "cdp" else entry[1]["data"] for entry in log] == [
+        "Page.getLayoutMetrics", "Page.startScreencast", "Page.enable", "Page.screencastFrameAck", "jpeg-1",
+        "Page.stopScreencast", "Page.getLayoutMetrics", "Page.startScreencast", "Page.screencastFrameAck", "jpeg-2",
+    ]
 
 
 @pytest.mark.asyncio

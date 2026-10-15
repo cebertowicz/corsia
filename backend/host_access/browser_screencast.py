@@ -18,6 +18,8 @@ class PaneScreencast:
     last is acknowledged, so every frame is acknowledged on arrival, before it is relayed. After a
     page-metrics change Chrome can drop the next changes' frames; a restart sends a fresh frame and
     resumes them, so the command path restarts each pane's screencast after such a command.
+    Chrome can also capture none of a new document's first pictures, and a still page draws no
+    more, so the pane would keep showing the page it left; each load event restarts the capture.
 
     This session captures the window's whole view. Chrome will not make a window narrower than its
     minimum, so a page emulated narrower than that sits at the frame's left with the page's overflow
@@ -48,10 +50,14 @@ class PaneScreencast:
             self._cdp = cdp
             try:
                 await self._start(cdp)
+                await cdp.send("Page.enable")
                 async for raw in cdp.socket:
                     message = json.loads(raw)
                     if message.get("method") == "Page.screencastFrame":
                         await self._relay_frame(cdp, message.get("params"))
+                    elif message.get("method") == "Page.loadEventFired" and not self._held:
+                        # A held capture restarts when its metrics command finishes.
+                        await self.restart()
                     elif (answered := message.get("id")) in self._starts | self._measures:
                         if "error" in message:
                             raise BrowserSessionError("This page couldn't be shown")
