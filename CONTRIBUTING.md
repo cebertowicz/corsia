@@ -14,7 +14,7 @@ Before your first pull request from a fork can be merged, you accept the [CORSIA
 I have read the CORSIA CLA and I accept it
 ```
 
-An agent may post it for the account it runs under; that account's owner is then bound by the agreement. The bot identifies who wrote each commit from the commit's email address, so author your commits with an email linked to your GitHub account (your `<id>+<login>@users.noreply.github.com` address always works). Comment `recheck` to run the check again.
+An agent may post it for the account it runs under only after that account's owner has read the agreement and told it to accept; the owner is then bound by it. The bot identifies who wrote each commit from the commit's email address, so author your commits with an email linked to your GitHub account (your `<id>+<login>@users.noreply.github.com` address always works). Comment `recheck` to run the check again.
 
 ## Pull requests
 

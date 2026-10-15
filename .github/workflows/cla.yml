@@ -50,6 +50,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-document: https://github.com/cebertowicz/corsia/blob/dev/CLA.md
+          # Acceptances are recorded per CLA version. Any change to CLA.md's
+          # text must bump its heading's version and this path together, so
+          # earlier signers re-accept the new text.
           path-to-signatures: signatures/version1/cla.json
           branch: cla-signatures
           allowlist: cebertowicz,corsia-bot
@@ -58,8 +61,9 @@ jobs:
             Thanks for your pull request. Before it can be merged, the owner of
             each account that wrote a commit here needs to accept the
             [CORSIA Contributor License Agreement](https://github.com/cebertowicz/corsia/blob/dev/CLA.md),
-            once. An agent may accept for the account it runs under; that
-            account's owner is then bound by the agreement. One acceptance
+            once. An agent may accept for the account it runs under only after
+            that account's owner has read the agreement and told it to accept;
+            the owner is then bound by it. One acceptance
             covers every future pull request from that account. To accept,
             post this exact comment on this pull request:
           custom-allsigned-prcomment: All contributors have accepted the CLA.
