@@ -107,6 +107,9 @@ def local_app_workspace(monkeypatch, tmp_path) -> Path:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setattr(config, "WORKSPACE", workspace)
+    from tools import mcp
+
+    monkeypatch.setattr(mcp.Path, "home", lambda: tmp_path / "home")
     monkeypatch.setattr(shell_guard, "_safehouse_executable", lambda: tmp_path / "safehouse")
     monkeypatch.setattr(shell_guard, "list_registered_repo_policies", lambda: [])
     monkeypatch.setattr(
@@ -127,6 +130,7 @@ def test_local_mcp_safehouse_exec_preserves_argv_and_env_scope(local_app_workspa
 
     secret = "synthetic-local-mcp-secret"
     params, profile_path = _safehouse_stdio_parameters(
+        "local-app",
         "/usr/local/bin/local-mcp",
         ["--literal", "two words"],
         {"SERVICE_TOKEN": secret, "LOG_LEVEL": "debug"},
@@ -139,16 +143,72 @@ def test_local_mcp_safehouse_exec_preserves_argv_and_env_scope(local_app_workspa
         assert argv[separator + 1:] == ["/usr/local/bin/local-mcp", "--literal", "two words"]
         assert "/bin/bash" not in argv and "-c" not in argv
         assert secret not in argv
-        assert {"SERVICE_TOKEN", "LOG_LEVEL", "npm_config_cache", "UV_CACHE_DIR", "XDG_CACHE_HOME"} <= set(
+        assert {"SERVICE_TOKEN", "LOG_LEVEL", "NODE_OPTIONS", "npm_config_cache", "UV_CACHE_DIR", "XDG_CACHE_HOME"} <= set(
             passed_env.removeprefix("--env-pass=").split(",")
         )
         assert params.env["SERVICE_TOKEN"] == secret
         assert params.cwd == local_app_workspace
-        assert params.env["npm_config_cache"] == str(local_app_workspace / ".corsia/mcp-cache/npm")
-        assert params.env["UV_CACHE_DIR"] == str(local_app_workspace / ".corsia/mcp-cache/uv")
-        assert params.env["XDG_CACHE_HOME"] == str(local_app_workspace / ".corsia/mcp-cache/xdg")
+        cache_dir = Path(params.env["npm_config_cache"]).parent
+        assert cache_dir.parent.name == "mcp"
+        assert not cache_dir.is_relative_to(local_app_workspace)
+        assert params.env["UV_CACHE_DIR"] == str(cache_dir / "uv")
+        assert params.env["XDG_CACHE_HOME"] == str(cache_dir / "xdg")
+        shim_path = cache_dir / "no-proctitle.cjs"
+        assert params.env["NODE_OPTIONS"] == f"--require {shim_path}"
+        assert "Object.defineProperty(process, 'title', {get, set(){}, configurable:true})" in shim_path.read_text(encoding="utf-8")
+        assert str(cache_dir) in next(option for option in argv if option.startswith("--add-dirs="))
     finally:
         profile_path.unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("existing", [None, "--conditions=development"])
+def test_local_mcp_preload_prepends_existing_node_options(local_app_workspace, existing):
+    from tools.mcp import _safehouse_stdio_parameters
+
+    env = {} if existing is None else {"NODE_OPTIONS": existing}
+    params, profile_path = _safehouse_stdio_parameters("node-options", "node", [], env)
+    try:
+        shim_path = Path(params.env["npm_config_cache"]).parent / "no-proctitle.cjs"
+        expected = f"--require {shim_path}"
+        assert params.env["NODE_OPTIONS"] == (expected if existing is None else f"{expected} {existing}")
+    finally:
+        profile_path.unlink(missing_ok=True)
+
+
+def test_mcp_cache_ids_are_stable_path_safe_and_app_private(local_app_workspace):
+    from tools.mcp import _mcp_app_id, _mcp_cache_dir
+
+    state_root = local_app_workspace.parent / "state"
+    app_a = _mcp_cache_dir("../../App A", local_app_workspace, state_root)
+    app_b = _mcp_cache_dir("App B", local_app_workspace, state_root)
+    assert app_a == _mcp_cache_dir("../../App A", local_app_workspace, state_root)
+    assert app_a != app_b
+    assert app_a.name == _mcp_app_id("../../App A")
+    assert app_a.parent.name == "mcp"
+    assert not app_a.is_relative_to(local_app_workspace)
+    assert not app_a.is_relative_to(state_root)
+
+
+def test_no_proctitle_preload_preserves_getter_and_blocks_nonconfigurable_descriptor(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is unavailable")
+    from tools.mcp import _write_no_proctitle_shim
+
+    shim_path = _write_no_proctitle_shim(tmp_path / "cache")
+    success = subprocess.run(
+        [node, "--require", str(shim_path), "-e", "const old = process.title; process.title = 'x'; process.exit(process.title === old ? 0 : 1)"],
+        capture_output=True, text=True, check=False,
+    )
+    assert success.returncode == 0
+    preamble = tmp_path / "nonconfigurable.cjs"
+    preamble.write_text("Object.defineProperty(process, 'title', {get(){ return 'x'; }, set(){}, configurable:false});\n", encoding="utf-8")
+    blocked = subprocess.run(
+        [node, "--require", str(preamble), "--require", str(shim_path), "-e", ""],
+        capture_output=True, text=True, check=False,
+    )
+    assert blocked.returncode != 0
+    assert "cannot safely disable process.title" in blocked.stderr
 
 
 def test_local_mcp_safehouse_missing_fails_closed(monkeypatch, local_app_workspace):
@@ -161,7 +221,7 @@ def test_local_mcp_safehouse_missing_fails_closed(monkeypatch, local_app_workspa
 
     monkeypatch.setattr(shell_guard, "_safehouse_executable", unavailable)
     with pytest.raises(MCPConfigError, match=_SAFEHOUSE_MCP_ERROR):
-        _safehouse_stdio_parameters("local-mcp", [], {})
+        _safehouse_stdio_parameters("local-app", "local-mcp", [], {})
 
 
 @pytest.mark.asyncio
@@ -205,7 +265,7 @@ def _write_uvx_fixture(workspace: Path) -> Path:
 
 
 _CASE_TIMEOUT = 15
-_NODE_EXIT = ["-e", "process.exit(0)"]
+_NODE_EXIT = ["-e", "process.title = 'x'"]
 _CRASH_DIRS = (Path.home() / "Library" / "Logs" / "DiagnosticReports", Path("/Library/Logs/DiagnosticReports"))
 _SPAWN_SH = (
     "const r = require('child_process').spawnSync('/bin/sh', ['-c', 'true']);"
@@ -495,7 +555,7 @@ def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str
 
     def corsia(command: str, args: list[str]):
         # The argv, environment and cwd the MCP stdio client would launch.
-        params, profile = _safehouse_stdio_parameters(command, args, {})
+        params, profile = _safehouse_stdio_parameters(f"raw-{command}", command, args, {})
         profiles.append(profile)
         return [params.command, *params.args], {**get_default_environment(), **params.env}, Path(params.cwd)
 
@@ -510,12 +570,24 @@ def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str
         path for option in argv[:argv.index("--")] if option.startswith(("--add-dirs=", "--add-dirs-ro="))
         for path in option.split("=", 1)[1].split(":")
     ]
-    return f"CORSIA argv (b): {argv}", [
-        *cases,
-        _run_raw("b-corsia-flags", argv, env, cwd),
+    without_preload = {key: value for key, value in env.items() if key != "NODE_OPTIONS"}
+    p = _run_raw("p-process-title-without-preload", argv, without_preload, cwd)
+    if _signal_of(p.returncode) != "SIGSEGV":
+        p.status = "FAIL"
+        p.detail = f"expected SIGSEGV without preload; {p.detail}"
+    q = _run_raw("q-process-title-with-preload", argv, env, cwd)
+    diagnostics = [
         _run_raw("b-control-usr-bin-true", control, control_env, cwd),
         *_bisect_cases(argv, env, cwd, policy),
         *_npx_cases(corsia),
+    ]
+    for case in diagnostics:
+        case.status = "INFO"
+    return f"CORSIA argv (q): {argv}", [
+        *cases,
+        p,
+        q,
+        *diagnostics,
         *_write_cases(corsia, grants),
     ]
 

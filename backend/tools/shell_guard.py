@@ -1018,7 +1018,6 @@ def safehouse_exec_argv(
         executable=_safehouse_executable, sandbox_dirs_rw=get_sandbox_add_dirs_rw, allowed_dirs_ro=get_allowed_dirs_ro,
         agent_account_dirs=agent_account_ro_dirs, additional_dirs_rw=additional_dirs_rw,
     )
-
 def _terminal_boundary_profile(
     profile_path: Path,
     cwd: Path,
