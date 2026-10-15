@@ -30,6 +30,10 @@ _STATE: dict[str, object] = {
 }
 
 
+def _clock() -> float:
+    return time.monotonic()
+
+
 def _cleanup_staging() -> None:
     """Discard an interrupted asset install; only a complete verified root is loadable."""
     root = asset_root()
@@ -213,9 +217,9 @@ async def _catch_up_scan() -> None:
             if not _QUEUE.empty():
                 _SCAN_OWED = True
                 return
-            started_at = time.monotonic()
+            started_at = _clock()
             await _classify(candidate)
-            elapsed = time.monotonic() - started_at
+            elapsed = _clock() - started_at
             if not _QUEUE.empty():
                 _SCAN_OWED = True
                 return
@@ -225,14 +229,14 @@ async def _catch_up_scan() -> None:
 
 
 async def _process_arrival(message_id: str, enqueued_at: float) -> None:
-    started_at = time.monotonic()
+    started_at = _clock()
     try:
         _STATE["queue_delay_ms"] = (started_at - enqueued_at) * 1000
         candidate = await run_in_db(_candidate, message_id)
         if candidate is not None:
             await _classify(candidate)
     finally:
-        _STATE["service_time_ms"] = (time.monotonic() - started_at) * 1000
+        _STATE["service_time_ms"] = (_clock() - started_at) * 1000
         _QUEUE.task_done()
 
 
@@ -255,7 +259,7 @@ def notify(message_id: str) -> None:
     """Best-effort post-admission trigger; it can never delay or fail a send."""
     global _TASK, _SCAN_OWED
     try:
-        _QUEUE.put_nowait((message_id, time.monotonic()))
+        _QUEUE.put_nowait((message_id, _clock()))
         if _TASK is None or _TASK.done():
             _TASK = asyncio.create_task(_worker())
     except asyncio.QueueFull:

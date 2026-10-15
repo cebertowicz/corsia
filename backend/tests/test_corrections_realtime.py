@@ -309,3 +309,33 @@ async def test_restart_retries_only_an_unaccepted_activation_notice(monkeypatch)
     monkeypatch.setattr(corrections_activation, "active_version", lambda: None)
     await corrections_realtime._retry_pending_activation_notice()
     assert sent.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_backfill_waits_one_call_duration_before_the_next_low_priority_call(monkeypatch):
+    from jobs import corrections_realtime, corrections_recording
+
+    candidate = _candidate()
+    batches = [
+        SimpleNamespace(
+            selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)],
+            candidates=[candidate],
+        ),
+        SimpleNamespace(selected_keys=[], candidates=[]),
+    ]
+    slept = AsyncMock()
+
+    async def next_batch(*args, **kwargs):
+        return batches.pop(0)
+
+    monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
+    monkeypatch.setattr(corrections_recording, "_next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_realtime, "_classify", AsyncMock())
+    monkeypatch.setattr(corrections_realtime, "_activate_after_backfill", AsyncMock())
+    monkeypatch.setattr(corrections_realtime.asyncio, "sleep", slept)
+    ticks = iter((10.0, 13.5))
+    monkeypatch.setattr(corrections_realtime, "_clock", lambda: next(ticks))
+
+    await corrections_realtime._catch_up_scan()
+
+    slept.assert_awaited_once_with(3.5)
