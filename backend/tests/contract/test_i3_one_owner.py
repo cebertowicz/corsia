@@ -51,6 +51,10 @@ TRANSITION_WRITERS = {
     # file-size boundary; it requires that existing transaction and cannot open
     # its own, and it settles only rows that writer already claimed.
     "infra/checkpoint_refusal_settlement.py",
+    # One owner for the live-writer hold: the input writer's refusal hold runs
+    # inside that writer's transaction, and the writer's terminal release and
+    # boot recovery are the hold's only release paths.
+    "infra/live_writer_hold.py",
 }
 
 _WRITE_RE = re.compile(

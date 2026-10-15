@@ -225,6 +225,13 @@ def settle_batch_write(
             return settle_account_refusal(connection, rows, error)
         if no_write_state == "failed" and isinstance(error, CheckpointUnavailable):
             return settle_checkpoint_refusal(connection, rows, error)
+        from infra.live_writer_hold import hold_for_live_writer
+        from subagents.codex_runtime_errors import is_live_writer_refusal
+
+        if no_write_state == "failed" and is_live_writer_refusal(error):
+            held = hold_for_live_writer(connection, rows)
+            if held is not None:
+                return held
         return sequence_attempt(
             connection, rows, state=no_write_state, outcome=outcome,
             error=str(error) if error is not None else None,
