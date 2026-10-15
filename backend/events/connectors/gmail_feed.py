@@ -33,6 +33,19 @@ class GmailHistoryExpired(GmailFeedError):
         super().__init__("history_expired")
 
 
+class GmailMessageGone(GmailFeedError):
+    """The message was deleted after the history listed it; the page skips it."""
+
+    def __init__(self) -> None:
+        super().__init__("message_http_404")
+
+
+def _message_error(exc: client.GoogleRequestFailed) -> GmailFeedError:
+    if exc.status == 404:
+        return GmailMessageGone()
+    return GmailFeedError(f"message_http_{exc.status}" if exc.status else "message_unreachable")
+
+
 @dataclass(frozen=True)
 class HistoryPage:
     """Unread Gmail message ids and the newest history id that covers them."""
@@ -112,7 +125,7 @@ async def metadata(message_id: str) -> gmail_read.Message:
             },
         )
     except client.GoogleRequestFailed as exc:
-        raise GmailFeedError(f"message_http_{exc.status}" if exc.status else "message_unreachable") from None
+        raise _message_error(exc) from None
     payload = raw.get("payload") if isinstance(raw, dict) else None
     if not isinstance(payload, dict):
         raise GmailFeedError("message_invalid")
@@ -124,4 +137,4 @@ async def full_message(message_id: str) -> gmail_read.Message:
     try:
         return await gmail_read.fetch(message_id)
     except client.GoogleRequestFailed as exc:
-        raise GmailFeedError(f"message_http_{exc.status}" if exc.status else "message_unreachable") from None
+        raise _message_error(exc) from None

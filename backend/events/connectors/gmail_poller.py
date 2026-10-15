@@ -161,8 +161,11 @@ async def poll_once(account: str) -> None:
         return
     page = await feed.added_messages(cursor.history_id)
     for message_id in page.message_ids:
-        metadata = await feed.metadata(message_id)
-        full = await feed.full_message(message_id)
+        try:
+            metadata = await feed.metadata(message_id)
+            full = await feed.full_message(message_id)
+        except feed.GmailMessageGone:
+            continue
         screen = await email_screen.screen_message(account, message_id, full.headers, full.body)
         await deliver_platform_event("gmail", event_payload(metadata, screen, page.history_id))
     now = utc_now_iso()

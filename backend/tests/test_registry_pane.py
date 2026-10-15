@@ -179,6 +179,16 @@ class TestHierarchicalPaneShape:
 
         assert _node_ids(view.pane_for_thread(parent)) == set()
 
+    def test_a_gmail_routing_identity_is_never_a_pane_row(self):
+        db = get_db()
+        parent = _mk_parent(db)
+        models.register_artifact(
+            integration="gmail", type="email-thread",
+            external_id=f"thread-{uuid.uuid4().hex[:8]}", parent_thread_id=parent, db=db,
+        )
+
+        assert _node_ids(view.pane_for_thread(parent)) == set()
+
     def test_quiet_artifact_is_omitted_but_registry_identity_persists(self):
         db = get_db()
         parent = _mk_parent(db)

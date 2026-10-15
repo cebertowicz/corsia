@@ -116,6 +116,84 @@ async def test_failed_delivery_holds_the_cursor(monkeypatch):
     assert get_setting(poller.CURSOR_SETTING) == OLD_CURSOR
 
 
+async def test_a_message_deleted_after_listing_is_skipped(monkeypatch):
+    set_setting(poller.CURSOR_SETTING, OLD_CURSOR)
+    delivered: list[str] = []
+
+    async def metadata(message_id: str):
+        if message_id == "gone":
+            raise feed.GmailMessageGone()
+        return _message(message_id)
+
+    async def deliver(_connector: str, raw: dict):
+        delivered.append(raw["message_id"])
+        return []
+
+    monkeypatch.setattr(feed, "added_messages", lambda _history: _answer(feed.HistoryPage(("gone", "m1"), "new-history")))
+    monkeypatch.setattr(feed, "metadata", metadata)
+    monkeypatch.setattr(feed, "full_message", lambda message_id: _answer(_message(message_id)))
+    monkeypatch.setattr(email_screen, "screen_message", lambda *_args: _answer(email_screen.Screen("unavailable")))
+    monkeypatch.setattr(poller, "deliver_platform_event", deliver)
+    monkeypatch.setattr(email_screen, "sweep_expired", lambda: 0)
+
+    await poller.poll_once(ACCOUNT)
+
+    assert delivered == ["m1"]
+    assert get_setting(poller.CURSOR_SETTING)["history_id"] == "new-history"
+
+
+async def test_retry_after_a_partial_page_wakes_each_message_once(monkeypatch):
+    from connections import binder
+    from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
+    from infra.database import get_db
+    from tests.event_routing_helpers import mk_session
+
+    monkeypatch.setenv("CORSIA_ANALYTICS_DISABLE", "1")
+    workspace = mk_session("ws")
+    assert set_scope_coordinator(WORKSPACE_SCOPE, workspace)
+    assert binder.ensure_designation_rule(connector="gmail", fact="label", value="INBOX") is not None
+    set_setting(poller.CURSOR_SETTING, OLD_CURSOR)
+    failing = {"b"}
+
+    def message(message_id: str) -> gmail_read.Message:
+        return gmail_read.Message(message_id, f"thread-{message_id}", _message().headers, "body")
+
+    async def full_message(message_id: str):
+        if message_id in failing:
+            raise feed.GmailFeedError("message_unreachable")
+        return message(message_id)
+
+    def wakes() -> int:
+        db = get_db()
+        try:
+            return db.execute(
+                "SELECT COUNT(*) FROM messages WHERE thread_id=? AND id LIKE 'platform-event:%'",
+                (workspace,),
+            ).fetchone()[0]
+        finally:
+            db.close()
+
+    monkeypatch.setattr(feed, "added_messages", lambda _history: _answer(feed.HistoryPage(("a", "b"), "new-history")))
+    monkeypatch.setattr(feed, "metadata", lambda message_id: _answer(message(message_id)))
+    monkeypatch.setattr(feed, "full_message", full_message)
+    monkeypatch.setattr(
+        email_screen,
+        "screen_message",
+        lambda *_args: _answer(email_screen.Screen("screened", "scheduling", "now", False, "none", "local")),
+    )
+    monkeypatch.setattr(email_screen, "sweep_expired", lambda: 0)
+
+    with pytest.raises(feed.GmailFeedError):
+        await poller.poll_once(ACCOUNT)
+    assert wakes() == 1
+    assert get_setting(poller.CURSOR_SETTING) == OLD_CURSOR
+
+    failing.clear()
+    await poller.poll_once(ACCOUNT)
+    assert wakes() == 2
+    assert get_setting(poller.CURSOR_SETTING)["history_id"] == "new-history"
+
+
 async def test_expired_history_resets_the_floor_without_a_gap_digest(monkeypatch):
     set_setting(poller.CURSOR_SETTING, OLD_CURSOR)
     monkeypatch.setattr(poller, "disabled_reason", lambda: _answer(None))

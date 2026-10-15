@@ -25,9 +25,10 @@ TIMEOUT_SECONDS = 20.0
 
 NOT_CONNECTED = "Google isn't connected. Call google_connect and give the person the link."
 SIGN_IN_RECOVERY = (
-    'Google rejected the saved sign-in; usually the project is in Testing and expires every 7 days; '
-    'ask the person to publish their app "In production" on the Audience page of the OAuth consent '
-    'screen in Google Cloud, keeping the same project, then call google_connect and give them the link.'
+    'Google rejected the saved sign-in. Sign-ins for a project in Testing expire after 7 days: '
+    'if the Audience page of the OAuth consent screen in Google Cloud shows Testing, ask the person '
+    'to publish their app "In production", keeping the same project. Then call google_connect and '
+    'give them the link.'
 )
 NEEDS_SIGN_IN = SIGN_IN_RECOVERY
 UNREACHABLE = "Couldn't reach Google. Try again later."

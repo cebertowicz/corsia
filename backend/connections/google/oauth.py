@@ -42,8 +42,10 @@ CLIENT_FILE_MAX_BYTES = 16_384
 CALLBACK_PATH = "/api/google/oauth/callback"
 
 NEEDS_CLIENT_FILE = (
-    "Ask the person for the Desktop OAuth client JSON already downloaded for this setup. "
-    "Never create a new Google Cloud project or client. Pass client_file: its path."
+    "No Google client is saved. If this setup already created the person's Desktop OAuth client, "
+    "pass client_file: the path of its downloaded JSON. If none exists yet, create it in the "
+    "person's own Google project in a browser they watch and publish it In production, then pass "
+    "its file. Never create a second project or client when one already exists."
 )
 BAD_CLIENT_FILE = "That file isn't a Google Desktop app client file. Pass the path of the downloaded client JSON."
 DENIED = "Google sign-in was refused or has expired. Call google_connect for a new link."
