@@ -127,7 +127,6 @@
 		border-radius: var(--radius-pill); border-color: transparent;
 		background: var(--accent-fill); color: var(--accent-on-fill);
 		font-size: var(--text-callout); font-weight: var(--fw-semibold);
-		overflow: hidden;
 	}
 	.btn.pill:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-fill) 88%, var(--text-primary)); }
 	.btn.pill:disabled { opacity: 0.3; }
