@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 
-from automation import schedules
+from automation import schedules, script_schedules
 from infra.database import get_db
 from infra.db_async import run_in_db
 from tools.base import Tool
@@ -29,9 +29,41 @@ def _schema(properties: dict, required: list[str]) -> dict:
     }
 
 
+def _script_schedule(thread_id: str, scope_id: str, params: dict) -> dict:
+    """Register one model-free script run for the current thread."""
+    from infra.config import WORKSPACE
+
+    for name in ("script_path", "cadence_seconds", "series"):
+        if params.get(name) is None:
+            raise ValueError(f"{name} is required for a script schedule")
+    series = script_schedules.parse_series(params["series"])
+    path, sha256 = script_schedules.pin_script(
+        str(params["script_path"]), workspace=WORKSPACE,
+    )
+    schedule = script_schedules.create_script(
+        thread_id,
+        scope_id,
+        script_path=path,
+        script_sha256=sha256,
+        cadence_seconds=params["cadence_seconds"],
+        series=series,
+        timeout_seconds=params.get(
+            "timeout_seconds", script_schedules.DEFAULT_TIMEOUT_SECONDS,
+        ),
+        now=datetime.now(timezone.utc).isoformat(),
+        db=None,
+    )
+    return {"schedule": asdict(schedule)}
+
+
 def _operate(thread_id, actor_row, operation: str, params: dict):
     if operation == "schedule":
         scope_id = actor_row["project_id"] or "__workspace__"
+        if params.get("kind") == script_schedules.SCRIPT_KIND:
+            return _script_schedule(thread_id, scope_id, params)
+        for name in ("spec", "max_runs"):
+            if params.get(name) is None:
+                raise ValueError(f"{name} is required for a clock or cadence schedule")
         return {
             "schedule": asdict(
                 schedules.create(
@@ -95,30 +127,91 @@ class AutomationScheduleTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Schedule a bounded clock or cadence wake for the current thread. "
-            "max_runs is mandatory; clock schedules require max_runs=1."
+            "Schedule work for the current thread. kind=clock or cadence is a "
+            "bounded wake of you: spec and max_runs are mandatory, and clock "
+            "requires max_runs=1. kind=script runs a file you wrote on a "
+            "cadence with no model turn, in your own sandbox: use it to watch "
+            "a number (a count, a duration, a cost) cheaply. The script prints "
+            "one JSON object per line, {\"series\": \"<key>\", \"value\": "
+            "<number>}, for each series you registered, and exits 0. You are "
+            "woken once per series per day when a reading leaves its min/max, "
+            "the script fails or times out, or the file changes after "
+            "registration; readings inside bounds reach you as a passive "
+            "update. A script schedule has no expiry: cancel it with "
+            "automation_cancel. Check its last_status with automation_list."
         )
 
     @property
     def parameters(self) -> dict[str, Any]:
         return _schema(
             {
-                "kind": {"type": "string", "enum": ["clock", "cadence"]},
+                "kind": {
+                    "type": "string", "enum": ["clock", "cadence", "script"],
+                },
                 "spec": {
                     "type": "string",
                     "description": (
                         "ISO-8601 future time for clock, or integer seconds "
-                        "for cadence."
+                        "for cadence. Not used by script."
                     ),
                 },
                 "max_runs": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": schedules.MAX_SCHEDULE_RUNS,
+                    "description": "Required for clock and cadence; not used by script.",
                 },
                 "payload": {"type": "object"},
+                "script_path": {
+                    "type": "string",
+                    "description": (
+                        "script kind: a file you wrote (.py, .sh or .js, or an "
+                        "executable). Its sha256 is pinned at registration."
+                    ),
+                },
+                "cadence_seconds": {
+                    "type": "integer",
+                    "minimum": script_schedules.MIN_CADENCE_SECONDS,
+                    "maximum": schedules.MAX_CADENCE_SECONDS,
+                    "description": "script kind: seconds between runs, at least 300.",
+                },
+                "series": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": script_schedules.MAX_SERIES,
+                    "description": (
+                        "script kind: the readings the script may print. min "
+                        "and max are your own bounds; a reading outside them wakes you; a series with no bounds never wakes you."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "key": {"type": "string"},
+                            "unit": {"type": "string"},
+                            "min": {"type": "number"},
+                            "max": {"type": "number"},
+                            "worse": {
+                                "type": "string", "enum": ["up", "down"],
+                                "description": "Which direction is worse.",
+                            },
+                            "reduce": {
+                                "type": "string",
+                                "enum": ["last", "mean", "max"],
+                                "description": "How a period's readings reduce; default last.",
+                            },
+                        },
+                        "required": ["key"],
+                    },
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": script_schedules.MAX_TIMEOUT_SECONDS,
+                    "description": "script kind: stop a run after this long. Default 60.",
+                },
             },
-            ["kind", "spec", "max_runs"],
+            ["kind"],
         )
 
     async def execute(self, **kwargs: Any) -> str:
@@ -152,7 +245,11 @@ class AutomationListTool(Tool):
 
     @property
     def description(self) -> str:
-        return "List bounded automation schedules owned by the current thread."
+        return (
+            "List automation schedules owned by the current thread. A script "
+            "schedule shows state, last_status (ok, breach, no_data, error, "
+            "timeout, hash_mismatch, interrupted), last_error and last_run_at."
+        )
 
     @property
     def parameters(self) -> dict[str, Any]:
