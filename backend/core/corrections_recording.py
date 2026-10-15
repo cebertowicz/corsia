@@ -122,9 +122,9 @@ def checker_version(
 
 def active_corrections_version() -> CheckerVersion | None:
     """The sole version Measurement may read; a filling version never leaks through."""
-    from jobs.corrections_activation import active_version
+    from jobs.corrections_activation import _active_version
 
-    return active_version()
+    return _active_version()
 
 
 def subject_key(message_id: str) -> str:

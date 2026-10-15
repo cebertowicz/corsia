@@ -23,7 +23,7 @@ def _version_key(version) -> str:
     return f"{version.asset_id}:{version.version}:{version.head}:{version.threshold:.6f}:{version.input_policy_id}"
 
 
-def active_version_key() -> str | None:
+def _active_version_key() -> str | None:
     """Return the one version Measurement may read, never an in-progress backfill."""
     from infra.database import get_db
     from infra.settings import get_setting
@@ -37,7 +37,7 @@ def active_version_key() -> str | None:
         db.close()
 
 
-def active_version():
+def _active_version():
     """Return Measurement's current immutable correction version, if backfilled."""
     from core.corrections_recording import CheckerVersion
     from infra.database import get_db
@@ -135,13 +135,14 @@ async def tell_conductor_about_activation(version) -> None:
     """Send one accepted notice; persist the mark only after delivery accepts it."""
     from core.agent_roster_queries import workspace_conductor_contact
     from infra.database import get_db
+    from infra.settings import get_setting
 
     key = _version_key(version)
 
     def load():
         db = get_db()
         try:
-            activations = __import__("infra.settings", fromlist=["get_setting"]).get_setting(ACTIVATIONS_SETTING, db=db) or {}
+            activations = get_setting(ACTIVATIONS_SETTING, db=db) or {}
             activation = activations.get(key)
             if not activation or activation.get("conductor_told_at"):
                 return None, None, None

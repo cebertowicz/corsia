@@ -204,18 +204,7 @@ async def _run_scheduled_update_if_due(now: datetime | None = None) -> str | Non
         return None
 
 
-async def _run_corrections_recording_safely() -> None:
-    """Drain corrections within their time budget without changing maintenance disposition."""
-    try:
-        from jobs.corrections_recording import run_corrections_recording
-
-        result = await run_corrections_recording()
-        logger.info("nightly_job: corrections recording {}", result["status"])
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("nightly_job: corrections recording failed")
-
+# Corrections are now recorded exclusively by the realtime local ONNX worker.
 
 async def _reap_worktrees_safely() -> None:
     """Run the idle worktree reaper once; log and swallow any failure."""
@@ -226,13 +215,7 @@ async def _reap_worktrees_safely() -> None:
         logger.exception("nightly_job: worktree reaper failed")
 
 
-def _log_corrections_drain(task: asyncio.Task[None]) -> None:
-    """Observe a detached nightly or manual drain; the drain logs its own failures."""
-    try:
-        task.result()
-    except asyncio.CancelledError:
-        logger.info("nightly_job: corrections recording cancelled")
-
+# No detached corrections drain remains; realtime classification owns its own worker lifecycle.
 
 async def nightly_job_loop() -> None:
     """Background loop for maintenance only; correction recording is arrival-driven."""

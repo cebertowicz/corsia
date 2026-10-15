@@ -110,3 +110,26 @@ async def test_same_message_and_version_is_recorded_once_when_scan_and_notify_ra
     payload = {"label": "not_correction", "truncated": False, "original_tokens": 9, "failure_reason": "none"}
     assert _record_fact(candidate, payload, _version())
     assert not _record_fact(candidate, payload, _version())
+
+
+def test_only_send_thread_input_calls_the_corrections_admission_hook():
+    """Plan wakes, event delivery, digests and spawn paths cannot enqueue classification."""
+    import ast
+    from pathlib import Path
+
+    backend = Path(__file__).parents[1]
+    callers = []
+    for path in backend.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "notify_corrections"
+                for node in ast.walk(function)
+            ):
+                callers.append((path.relative_to(backend).as_posix(), function.name))
+
+    assert callers == [("infra/send_service.py", "send_thread_input")]

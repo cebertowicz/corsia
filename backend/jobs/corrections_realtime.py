@@ -137,9 +137,10 @@ async def _classify(candidate: CorrectionCandidate) -> None:
 
 async def _retry_pending_activation_notice() -> None:
     """Retry an accepted-delivery notice after restart or an interrupted mark."""
-    from jobs.corrections_activation import active_version, tell_conductor_about_activation
+    from core.corrections_recording import active_corrections_version
+    from jobs.corrections_activation import tell_conductor_about_activation
 
-    version = await run_in_db(active_version)
+    version = await run_in_db(active_corrections_version)
     if version is not None:
         await tell_conductor_about_activation(version)
 

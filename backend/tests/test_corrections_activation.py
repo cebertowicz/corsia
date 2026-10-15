@@ -20,15 +20,15 @@ def test_backfill_window_uses_measurement_baseline_plus_current_period():
 
 
 def test_backfill_switches_the_active_version_once_after_completion(isolated_db):
-    from jobs.corrections_activation import active_version_key, complete_backfill
+    from jobs.corrections_activation import _active_version_key, complete_backfill
 
     version = _version()
 
-    assert active_version_key() is None
+    assert _active_version_key() is None
     assert complete_backfill(
         version, owner_user_id="owner", weeks=13, before_count=None, after_count=4,
     )
-    assert active_version_key() == (
+    assert _active_version_key() == (
         "corrections-classifier:v1:correction:0.595681:modernbert-owner-context-v2-2048"
     )
     assert not complete_backfill(
