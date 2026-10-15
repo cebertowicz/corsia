@@ -36,7 +36,7 @@
 	{@const detail = source.fullLabel && source.fullLabel !== source.label ? source.fullLabel : source.label}
 	{#snippet main()}
 		<div class="ctx-source-main">
-			<span class="ctx-source-label" class:wrap={source.wrapLabel} title={detail}>{source.label}</span>
+			<span class="ctx-source-label" class:wrap={source.id.startsWith('usage:loaded-tool:')} title={detail}>{source.label}</span>
 			{#if source.tags?.length}
 				<span class="ctx-source-tag">{source.tags.join(' · ')}</span>
 			{/if}

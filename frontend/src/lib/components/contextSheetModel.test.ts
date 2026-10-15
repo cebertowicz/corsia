@@ -1244,8 +1244,8 @@ describe('held-by-the-harness row', () => {
 		expect(history?.tokenCount).toBe(1050);
 		expect(usage.total_used).toBe(1050);
 		const looked = (history?.sources ?? []).filter((row) => row.label.includes('looked up'));
-		expect(looked.every((row) => row.wrapLabel === true && row.statusClass === 'included')).toBe(true);
-		expect((history?.sources ?? []).find((row) => row.label === 'Conversation history')?.wrapLabel).toBeUndefined();
+		expect(looked.map((row) => row.id)).toEqual(['usage:loaded-tool:github', 'usage:loaded-tool:linear']);
+		expect(looked.every((row) => row.statusClass === 'included' && row.countLabel === '')).toBe(true);
 	});
 
 	it('shows History unchanged when nothing was looked up', () => {

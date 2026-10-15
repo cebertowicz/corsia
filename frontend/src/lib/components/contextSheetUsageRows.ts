@@ -61,7 +61,7 @@ export function usageSourceRows(usage: ContextUsage): ContextSheetSourceRow[] {
 			reason: 'Estimated cost of tool definitions this conversation looked up, already inside conversation history',
 			ownerSurface: 'conversation-history', ownerLabel: 'Conversation history',
 			actionLabel: '', statusLabel: 'Included', statusClass: 'included', deltaLabel: '',
-			countLabel: '', tokenCount, tokenLabel: promptTokenLabel(tokenCount), wrapLabel: true,
+			countLabel: '', tokenCount, tokenLabel: promptTokenLabel(tokenCount),
 		});
 	}
 	if (usage.user_tokens > 0) {
