@@ -139,6 +139,7 @@ def data_owners_without_accounts(
 def create_user(
     username: str, password: str, *, db: sqlite3.Connection | None = None,
     first_run_wake: bool = True, require_first: bool = False,
+    claim_data_owner: bool = False, profile_seed: tuple[str, str] | None = None,
 ) -> str:
     """Create an account and return its id. Raises if the name is taken.
 
@@ -146,7 +147,9 @@ def create_user(
     queues that conductor's first-run wake in the same transaction. Only a
     caller with no person waiting on the conductor (the eval harness)
     passes False. ``require_first`` atomically refuses if another account
-    already exists, for pre-auth first-run setup.
+    already exists, for pre-auth first-run setup. ``claim_data_owner`` and
+    ``profile_seed`` are the first-account rules; use
+    :func:`infra.first_account.create_first_account`.
     """
     name = normalize_username(username)
     _require_password(password)
@@ -157,6 +160,10 @@ def create_user(
         had_users = has_users(conn)
         if require_first and had_users:
             raise FirstAccountExists("setup is already complete")
+        if claim_data_owner:
+            from infra import first_account
+
+            first_account.require_data_owner_name(name, conn)
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
             raise AccountError(f"account '{name}' already exists")
         conn.execute(
@@ -165,6 +172,10 @@ def create_user(
             (name, encoded, now, now),
         )
         if not had_users:
+            if profile_seed is not None:
+                from infra import first_account
+
+                first_account.seed_workspace_profile(*profile_seed)
             from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor
 
             conductor_id = ensure_scope_conductor(

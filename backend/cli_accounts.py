@@ -1,9 +1,13 @@
 """``corsia user`` and ``corsia token`` — creating accounts and credentials.
 
-This is the only way an account comes into existence, and that is deliberate:
-the backend binds ``0.0.0.0``, so a first-run web form would hand the install
-to whoever reached the port first. Running a command proves local access to
-the machine.
+An account comes into existence in one of two ways: ``corsia user add``, or the
+pre-auth first-account route ``/api/setup/first-account``. That route exists
+only while no account exists, only for a direct loopback browser request, behind
+the host, origin, forwarded-header, content-type and single-flight gates, and
+only for the first account. The backend binds ``0.0.0.0``, so the route refuses
+every non-loopback caller: a remote visitor cannot create the first account, and
+running a command still proves local access to the machine. Both paths create
+the first account through ``infra.first_account.create_first_account``.
 
 Three rules about output, because other programs read it:
 
@@ -184,19 +188,10 @@ def _prompt_contact_email() -> str:
     return _email_choice(input("Pick one, type another, or press Enter for 1: "), found)
 
 
-def _seed_user_profile(call_name: str, email: str = "") -> None:
-    """Create the workspace profile from the answers and the Mac's timezone, if missing."""
-    from infra import config
-    from infra.user_profile import add_profile_email, mac_timezone, write_user_profile
-
-    if not write_user_profile(config.WORKSPACE, call_name, mac_timezone(), email):
-        add_profile_email(config.WORKSPACE, email)
-
-
 def cmd_user_add(args: argparse.Namespace) -> int:
     """Create an account, offering the data-owner names already in use."""
     _ensure_schema()
-    from infra import accounts
+    from infra import accounts, first_account
 
     owners = accounts.data_owners_without_accounts()
     if owners:
@@ -208,13 +203,11 @@ def cmd_user_add(args: argparse.Namespace) -> int:
         return _fail(str(error))
     except EOFError:
         return _fail(_INPUT_ENDED)
-    if owners and name not in owners and not accounts.has_users():
-        # The first account on an install that already has data decides who
-        # can reach it; any other name would strand every existing thread.
-        return _fail(
-            f"'{name}' owns none of the existing data. Create the first "
-            f"account as one of: {', '.join(owners)}. Add others after."
-        )
+    try:
+        # Checked before any prompt; create_first_account enforces it again.
+        first_account.require_data_owner_name(name)
+    except accounts.AccountError as error:
+        return _fail(str(error))
     # The first interactive account is who the profile describes. That also
     # fires on an upgrade with no accounts yet; an existing profile is never touched.
     seeds_profile = not accounts.has_users() and not args.password_stdin
@@ -225,11 +218,17 @@ def cmd_user_add(args: argparse.Namespace) -> int:
         return _fail(_INPUT_ENDED)
     password = _read_password(args.password_stdin)
     try:
-        accounts.create_user(name, password)
+        if seeds_profile:
+            first_account.create_first_account(name, password, call_name=call_name, email=email)
+        else:
+            accounts.create_user(name, password)
     except accounts.AccountError as error:
         return _fail(str(error))
-    if seeds_profile:
-        _seed_user_profile(call_name, email)
+    except first_account.ProfileSeedError:
+        return _fail(
+            "The workspace profile could not be written, so no account was created. "
+            "Check that the work folder is writable."
+        )
     print(f"Account '{name}' created.")
     return 0
 

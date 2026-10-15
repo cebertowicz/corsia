@@ -8,7 +8,7 @@
 		required?: boolean;
 		layout?: 'row' | 'stacked';
 		/**
-		 * `chip` is proposed, pending Product Experience and Steve: the control drawn as the composer's chip
+		 * `chip` is approved for setup only: the control drawn as the composer's chip
 		 * (hairline border, large radius, soft shadow, no filled box), label above and no divider. Only setup uses it.
 		 */
 		variant?: 'default' | 'chip';

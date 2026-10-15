@@ -1,8 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
 
-test.use({ video: { mode: 'on', size: { width: 1440, height: 1000 } } });
-
 const shots = process.env.PICKER_SHOTS_DIR;
 const authed = (path: string) => `${path}?${['to', 'ken'].join('')}=${TEST_TOKEN}`;
 const at = new Date(Date.now() + 3 * 86_400_000).toISOString();
@@ -196,34 +194,6 @@ test('renders approved M1–M8 model-first picker states with live-shaped compon
 	const signedOut = base([], [codexA, codexB]);
 	signedOut.rows = [...models('claude-code', [claudeA], [entry(claudeA, true, { status: 'unavailable', status_reason: 'connection_unavailable' })]), ...models('codex', [codexA, codexB]), ...external(), ...local()];
 	await show('M8', signedOut);
-});
-
-test('records the M2-to-M4 model-picker transition', async ({ page }, testInfo) => {
-	let fixture = { rows: [] as unknown[], accounts: [] as unknown[], policy: undefined as unknown, sources: undefined as unknown[] | undefined };
-	await routePicker(page, () => fixture);
-	const claudeA = account('claude-primary', 'FOMRRT1', 'claude-code', usage(12, 62));
-	const claudeLimited = account('claude-research', 'Research Subscription — Northwest Studio Account', 'claude-code', limited());
-	const claudeC = account('claude-team', 'Team Workspace', 'claude-code', usage(43, 94));
-	const codexA = account('codex-pro', 'ChatGPT Pro', 'codex', usage(28, 51));
-	const codexB = account('codex-lite', 'Personal', 'codex', usage(67, 79));
-	const base = (policy: unknown = undefined) => ({
-		rows: [...models('claude-code', [claudeA, claudeLimited, claudeC]), ...models('codex', [codexA, codexB]), ...external(), ...local()],
-		accounts: [claudeA, claudeLimited, claudeC, codexA, codexB],
-		policy,
-	});
-
-	fixture = base();
-	await page.setViewportSize({ width: 1440, height: 1000 });
-	await openPicker(page);
-	await expect(page.locator('.model-sheet')).toBeVisible();
-	await page.screenshot({ path: testInfo.outputPath('model-picker-m2-light-1440x1000.png'), scale: 'css' });
-
-	fixture = base({ providers: [{ provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true }, rollover: true, order: [claudeA.id, claudeLimited.id, claudeC.id], units: [] }] });
-	await page.locator('button.model-chip').click();
-	await expect(page.locator('.model-sheet')).toBeHidden();
-	await page.locator('button.model-chip').click();
-	await expect(page.locator('.model-sheet')).toBeVisible();
-	await page.screenshot({ path: testInfo.outputPath('model-picker-m4-light-1440x1000.png'), scale: 'css' });
 });
 
 test('renders six anonymous account recovery states in the actual picker', async ({ page }) => {

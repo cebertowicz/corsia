@@ -7,7 +7,7 @@
 		label?: string;
 		size?: 'sm' | 'md';
 		/**
-		 * `dot` is proposed, pending Product Experience and Steve: a small dot and the word, as the "Update"
+		 * `dot` is approved for setup only: a small dot and the word, as the "Update"
 		 * mark under a chat message, with no box. Only setup uses it.
 		 */
 		look?: 'pill' | 'dot';

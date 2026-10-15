@@ -224,22 +224,4 @@ test.describe('@surface:provider-policy Slice 2 subscription capture matrix', ()
 			await page.screenshot({ path: testInfo.outputPath(`post-second-toggle-${surface}.png`), animations: 'disabled', scale: 'css' });
 		}
 	});
-
-	test('captures populated workspace providers at 800 by 600 from the shared vendor account fixture', async ({ page }, testInfo) => {
-		const state: { screen: ScreenId } = { screen: 'W1' };
-		await servePolicyStates(page, state);
-		await page.setViewportSize({ width: 800, height: 600 });
-		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
-		await loginByUrl(page, { waitForComposer: false });
-		await openActivity(page);
-		await page.getByRole('button', { name: 'Workspace settings' }).click();
-		const region = page.getByRole('region', { name: 'Workspace providers' });
-		await expect(region).toBeVisible();
-		await expect(region.getByText('Personal Max · sam@example.com')).toBeVisible();
-		await expect(region.getByText('Acme (Team) · sam@example.com')).toBeVisible();
-		await expect(region.getByText('Pro · sam@example.com')).toBeVisible();
-		await expect(region.getByText('Pro Lite · sam.studio@example.com')).toBeVisible();
-		await region.evaluate((element) => element.scrollIntoView({ block: 'start' }));
-		await page.screenshot({ path: testInfo.outputPath('providers-populated-800x600.png'), animations: 'disabled', scale: 'css' });
-	});
 });

@@ -72,10 +72,27 @@ describe('LoginScreen', () => {
 		await vi.waitFor(() => expect(onNoAccount).toHaveBeenCalledOnce());
 	});
 
+	it('keeps the CLI guidance and never hands over to setup when setup refuses the client', async () => {
+		const onNoAccount = vi.fn();
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input) === '/api/setup/status') return { ok: false, status: 403, json: async () => ({}) };
+			return statusResponse(false);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		mountScreen({ onNoAccount });
+
+		await vi.waitFor(() => expect(host.textContent).toContain('corsia user add'));
+		await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/setup/status'));
+		expect(onNoAccount).not.toHaveBeenCalled();
+		expect(host.textContent).toContain('Check again');
+	});
+
 	it('re-checks status when Check again is clicked and shows the form once an account exists', async () => {
-		const fetchMock = vi.fn()
-			.mockResolvedValueOnce(statusResponse(false))
-			.mockResolvedValueOnce(statusResponse(true));
+		const statuses = [statusResponse(false), statusResponse(true)];
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input) === '/api/setup/status') return { ok: false, status: 403, json: async () => ({}) };
+			return statuses.shift();
+		});
 		vi.stubGlobal('fetch', fetchMock);
 		mountScreen();
 		await vi.waitFor(() => expect(host.textContent).toContain('Check again'));
@@ -86,7 +103,7 @@ describe('LoginScreen', () => {
 		flushSync();
 
 		await vi.waitFor(() => expect(usernameField()).not.toBeNull());
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock.mock.calls.filter(([url]) => url === '/api/auth/status')).toHaveLength(2);
 	});
 
 	it('signs in on success: posts JSON credentials, stores the token, and connects', async () => {

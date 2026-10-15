@@ -108,6 +108,35 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Create your account');
 	});
 
+	it('prefills the one data owner read-only with the matching-data helper text', async () => {
+		if (component) await unmount(component);
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_size_gb: 30, work_folder: '~/CORSIA', required_username: 'legacy-owner' });
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+
+		const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
+		expect(username.value).toBe('legacy-owner');
+		expect(username.readOnly).toBe(true);
+		expect(host.textContent).toContain('This matches the existing data on this computer.');
+	});
+
+	it('leaves the username editable with no helper text on a fresh install', async () => {
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		const username = host.querySelector('input[autocomplete="username"]') as HTMLInputElement;
+		expect(username.value).toBe('');
+		expect(username.readOnly).toBe(false);
+		expect(host.textContent).not.toContain('This matches the existing data');
+	});
+
 	it('validates usernames before submitting the account form', async () => {
 		await settle();
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();

@@ -1,4 +1,11 @@
-"""Sign-in — the only routes that turn a password into a token.
+"""Sign-in — the routes that turn a password into a token.
+
+An account is created by ``corsia user add`` or by the pre-auth first-account
+route ``/api/setup/first-account`` (``api/setup.py``): that route exists only
+while no account exists, only for a direct loopback browser request, behind the
+host, origin, forwarded-header, content-type and single-flight gates, and only
+for the first account. Apart from it, the routes here are the only ones that
+turn a password into a token.
 
 Three endpoints, and each is public for a reason: ``status`` because the login
 screen must be able to say "no account exists yet" before anyone can

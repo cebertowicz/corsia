@@ -6,7 +6,6 @@ exist. They are not a general unauthenticated provider or account API.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import platform
@@ -20,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from infra import accounts, config
 from infra.db_async import run_in_db
+from infra.first_account import create_first_account
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
 
@@ -121,13 +121,10 @@ def _work_folder_display(workspace: Path) -> str:
     return "~" if not relative.parts else f"~/{relative.as_posix()}"
 
 
-def _seed_workspace_profile(name: str, email: str) -> None:
-    """Use the CLI's existing profile-create-or-add-email behavior after account creation."""
-    from infra.user_profile import add_profile_email, mac_timezone, write_user_profile
-
-    safe_name = "".join(character for character in name if character.isprintable())
-    if not write_user_profile(config.WORKSPACE, safe_name, mac_timezone(), email):
-        add_profile_email(config.WORKSPACE, email)
+def _required_username() -> str | None:
+    """The one data owner with no account, whose name the first account must take."""
+    owners = accounts.data_owners_without_accounts()
+    return owners[0] if len(owners) == 1 else None
 
 
 def _setup_status() -> dict:
@@ -153,6 +150,7 @@ def _setup_status() -> dict:
         "work_folder": _work_folder_display(config.WORKSPACE),
         "model_name": DEFAULT_PROFILE.display_name,
         "model_size_gb": round(DEFAULT_PROFILE.download_size_bytes / 1000**3, 1),
+        "required_username": _required_username(),
     }
 
 
@@ -189,16 +187,20 @@ async def first_account(request: Request) -> dict | Response:
         return Response(status_code=422)
     try:
         user_id = await run_in_db(
-            accounts.create_user, body.username, body.password, require_first=True,
+            create_first_account, body.username, body.password,
+            call_name=body.name, email=body.email or "", require_first=True,
         )
     except accounts.FirstAccountExists:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
     except accounts.AccountError as error:
         return JSONResponse(status_code=422, content={"detail": str(error)})
-    try:
-        await asyncio.to_thread(_seed_workspace_profile, body.name, body.email or "")
     except Exception as error:
-        logger.warning("Workspace profile seeding failed after first-account creation: %s", type(error).__name__)
+        # Raised inside the account transaction, so no account was left behind.
+        logger.warning("First-account creation failed: %s", type(error).__name__)
+        return JSONResponse(
+            status_code=500,
+            content={"code": "setup_failed", "detail": "Your account could not be created. Nothing was changed; try again."},
+        )
     token, expires_at = await run_in_db(accounts.issue_token, user_id, kind="session", label="browser")
     user = await run_in_db(accounts.get_user, user_id)
     return {

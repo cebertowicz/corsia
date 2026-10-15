@@ -13,7 +13,7 @@
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'models' | 'hard-stop' | 'error';
-	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; error?: string };
+	type SetupStatus = { has_users?: boolean; apple_silicon?: boolean; macos_supported?: boolean; ram_tier?: 'eligible' | 'low' | 'below_minimum'; free_disk_gb?: number; local_eligible?: boolean; app_location?: 'applications' | 'disk_image' | 'other'; work_folder?: string; model_name?: string; model_size_gb?: number; required_username?: string | null; error?: string };
 	let page = $state<Page>('checking');
 	let status = $state<SetupStatus>({});
 	let localWanted = $state(true);
@@ -99,6 +99,7 @@
 			if (!response.ok) throw new Error(`setup status ${response.status}`);
 			status = await response.json();
 			folder = status.work_folder || folder;
+			if (status.required_username) username = status.required_username;
 			if (status.has_users) { onExistingAccount(); return; }
 			if (status.apple_silicon === false || status.macos_supported === false || status.app_location === 'disk_image') page = 'hard-stop';
 			else {
@@ -261,7 +262,7 @@
 	{:else if page === 'account'}
 		<form class="form" onsubmit={(event) => { event.preventDefault(); createAccount(); }}>
 			<Field variant="chip" layout="stacked" label="Name"><input autocomplete="name" bind:value={name} /></Field>
-			<Field variant="chip" layout="stacked" label="Username" error={usernameError || undefined}><input autocomplete="username" autocapitalize="off" bind:value={username} /></Field>
+			<Field variant="chip" layout="stacked" label="Username" error={usernameError || undefined} hint={status.required_username ? 'This matches the existing data on this computer.' : undefined}><input autocomplete="username" autocapitalize="off" bind:value={username} readonly={!!status.required_username} /></Field>
 			<Field variant="chip" layout="stacked" label="Password" error={password && password.length < 8 ? 'Use at least 8 characters.' : undefined}><input type="password" autocomplete="new-password" bind:value={password} /></Field>
 			<Field variant="chip" layout="stacked" label="Confirm password" error={confirmationError}><input type="password" autocomplete="new-password" bind:value={confirmation} onblur={validateConfirmation} /></Field>
 			<Field variant="chip" layout="stacked" label="Email (optional)"><input type="email" autocomplete="email" bind:value={email} /></Field>
