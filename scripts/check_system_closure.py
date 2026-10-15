@@ -7,7 +7,7 @@ The check computes that set from the text and compares it with the skills the
 manifest lists.
 
 1. Declaration sources are every ``kind: "context"`` System manifest file and
-   the conductor core prompt that consumes System skills.
+   the conductor core and CORSIA agent prompts that consume System skills.
 2. The skill pool is the System skills, the starter kit's remaining skills and
    the kit's ``project-skills``.
 3. Seed: every declared ``skill `name` `` reference in those sources.
@@ -34,7 +34,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 SYSTEM_REL = Path("backend/prompts/system/v1")
-CONDUCTOR_CONTEXT_REL = Path("backend/prompts/conductor/core-v2.md")
+CONDUCTOR_CONTEXT_RELS = (
+    Path("backend/prompts/conductor/core-v2.md"),
+    Path("backend/prompts/conductor/corsia-agent-v2.md"),
+)
 KIT_REL = Path("docs/contributing/bootstrap/starter-kit")
 _DECLARED_SKILL = re.compile(r"\bskill\s+`([a-z][a-z0-9-]*)`")
 
@@ -64,13 +67,14 @@ def _declared_skills(text: str) -> list[tuple[str, int]]:
 def _closure_sources(
     root: Path, context_files: list[Path], errors: list[str],
 ) -> list[Path]:
-    """Add the conductor prompt that consumes packaged System skills."""
+    """Add the conductor and CORSIA agent prompts that consume packaged System skills."""
     sources = list(context_files)
-    conductor_context = root / CONDUCTOR_CONTEXT_REL
-    if conductor_context.is_file():
-        sources.append(conductor_context)
-    else:
-        errors.append(f"closure source missing on disk: {CONDUCTOR_CONTEXT_REL.as_posix()}")
+    for rel in CONDUCTOR_CONTEXT_RELS:
+        context = root / rel
+        if context.is_file():
+            sources.append(context)
+        else:
+            errors.append(f"closure source missing on disk: {rel.as_posix()}")
     return sources
 
 

@@ -102,13 +102,13 @@ def _override_authorized(actor_thread: str | None, identity: dict, db) -> bool:
 
     Reuses the existing conductor-authority model (infra.conductor) — the same one
     registry ownership transfer uses — so override authority cannot be
-    self-asserted by passing an arbitrary string. Workspace conductor, or the
+    self-asserted by passing an arbitrary string. The CORSIA agent, or the
     project conductor of the artifact owner's scope, is authorized.
     """
     if not actor_thread:
         return False
-    from infra import conductor
-    if conductor.get_conductor(conductor.WORKSPACE_SCOPE, db=db) == actor_thread:
+    from infra import conductor, corsia_agent
+    if corsia_agent.get_corsia_agent(db=db) == actor_thread:
         return True
     owner = AR.register_or_resolve(identity, db=db).owner_thread
     if owner is None:

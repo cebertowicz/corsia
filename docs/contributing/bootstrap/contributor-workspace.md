@@ -11,7 +11,7 @@ directory has the exact commands for every step below marked *(setup)*.
   repository as a registered, branch-pinned (`dev`), protected worker clone.
   Never put the contributor agent at the workspace root: it would lose
   checkout protection and `worktree_create`. *(setup: `workspace-setup.md` §2)*
-- **One conductor** (it may be the workspace conductor) and **one
+- **One conductor** (it may be the CORSIA agent) and **one
   contributor agent** in that project. Add a second agent only when recurring
   work needs distinct context. More agents cost more of the owner's
   attention and do not increase the token budget being donated.

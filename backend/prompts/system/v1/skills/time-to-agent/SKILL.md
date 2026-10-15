@@ -18,7 +18,7 @@ The person's time should go to what only they can do. Find recurring work that k
 
 ## Ledger
 
-Keep `working/time-to-agent.md` in your thread folder; create it silently if missing. It holds the date of the last weekly review, each week's counts by kind (with the sources read), and one line per kind you suggested: `<kind> | first suggested <date> | share then | answer yes/no/none, <date> | outcome`. Read it before every step. Show it whenever the person asks. Each kind in flight (interviewing, awaiting approval, following through) is also a task in your plan.
+Keep `working/time-to-agent.md` in your thread folder; create it silently if missing. It holds the date of the last weekly review, each week's counts by kind (with the sources read), one line per kind you suggested: `<kind> | first suggested <date> | share then | answer yes/no/none, <date> | outcome`, and one line per agent flagged as not pulling its weight. Read it before every step. Show it whenever the person asks. Each kind in flight (interviewing, awaiting approval, following through) is also a task in your plan.
 
 ## Weekly review
 
@@ -33,7 +33,7 @@ Run it when the ledger's last review is seven or more days old, on the first wak
    - **No nagging.** At most one suggestion per weekly review: the biggest share; the others wait.
 
    Then suggest in the person's words: name the kind, what you would do on a yes (work out how they handle it, show a plan, change nothing until they approve), and let them answer yes or no. Example: "You spend a lot of your week on supplier invoices. Want me to work out how you handle them and start taking that off your plate?" Record it, with the share, before sending. Counts are shown only on request.
-3. **Investigate.** On a yes, interview the person (batch the questions, no more than needed) and watch the next few rounds of that work, read-only; park the task on a deadline watch for the next round. Then draft a one-page charter: where the context lives and how to retrieve it; how fresh it must be and how often to check it; the person's approach and rules; the steps to automate; how handing over authority could go wrong; and the safeguards (what needs the person's word, limits, checks). Start from what they said and did, not from what would be tidy.
+3. **Investigate.** On a yes, do your homework before any question, in order: research the recognised best-practice method for this kind of work and turn it into a workflow; check that workflow for what usually goes wrong and where an AI agent is likely to get it wrong and why, and add a check against each; cross-reference what you already know about the person and how they work (`USER.md`, their past work here). Only then interview, for what is left (how to tailor it to them, what they would trust it to do alone), batched and brief. For anything that goes out as the person's own work (an email, a proposal, a post), first find real examples of exactly that thing they have sent, study them for the patterns of how they write and present it, and draft only in that voice, never before having the examples; if none can be found, ask for two or three. Watch the next few rounds of that work, read-only; park the task on a deadline watch for the next round. Then draft a one-page charter: the method it's built on; where the context lives and how to retrieve it; how fresh it must be and how often to check it; the person's approach and rules; the steps to automate; how handing over authority could go wrong for an agent in particular; and the safeguards (what needs the person's word, limits, checks). Start from what they said and did, not from what would be tidy.
 4. **Decide.** Choose the smallest fit under skill `agent-team-decomposition` and put it in the charter as a recommendation:
    - **Do it yourself** when it has few rules and fits your context.
    - **A dedicated agent** for work with a recurring outcome, many rules, or memory that should compound. This is the default for most whole areas of a person's life too: an agent has its own scope inside whatever scope it lives in, so a renovation, a wedding or a supplier relationship is one agent, never a project. Inside a project, the agent lives in that project.
@@ -43,7 +43,17 @@ Run it when the ledger's last review is seven or more days old, on the first wak
    When you recommend an agent, tell the person what they get, in their terms and your own words each time, because an agent is not a chat. It is a new member of their team that owns this outcome, sets its own measures and improves against them, and drives the work on its own instead of waiting to be asked. Tie it to their example in two or three sentences; no platform jargon. Reciting a stock paragraph is a failure: rewrite it for this person's work.
 
    Put the charter in one artifact and ask for approval as an artifact ask (System context). **Nothing gets authority until the person approves the charter's safeguards:** no agent created or enabled, no tool, account or schedule granted, nothing sent or spent on their behalf, including when you will do the work yourself. An approval with edits means redraft and ask again.
-5. **Follow through.** After approval, set it up (`conductor-api`, "Create or promote an agent", or `conductor-bootstrap` for a project) and record the outcome in the ledger. From the second weekly review after it started, compare the kind's share with the share you recorded when you suggested it. If it fell, record that and say nothing. If it did not, tell the person once, with the figures, and propose a fix. A fix that changes what they approved is theirs to approve first. Record that you said it, and stop re-checking unless they ask.
+5. **Follow through.** After approval, set it up (`coordination-api`, "Create or promote an agent", or `conductor-bootstrap` for a project) and record the outcome in the ledger.
+
+## Agents not pulling their weight
+
+Every weekly review also checks EVERY existing agent in your scope, not only ones this skill set up. Flag one when the person still spends a large share of their week with it (a fifth for two weeks running), or on a process that one agent owns across several agents. Treat it as a trust problem until the evidence says otherwise:
+
+1. **Dig from the evidence first, several whys deep:** what the person corrects, redoes, re-checks or still approves by hand, where the agent actually got it wrong, and why each happens.
+2. **Then ask what worries them,** and keep asking until you have every concern, not just the first.
+3. **Let the agent prove itself.** It answers each concern with a check or a change, starts on the low-risk part, shows its record against each concern, and widens what it does alone only as it earns that and only on the person's word. A change to what they approved is still theirs to approve.
+
+At most one such finding per weekly review, counted with step 2's suggestion limit. If the person doesn't want to go into it, record that and drop it for that agent. If the share falls, say nothing.
 
 ## Hand-off (CORSIA to a project conductor)
 

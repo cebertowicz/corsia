@@ -313,7 +313,7 @@ def test_workspace_conductor_is_never_offered_but_the_project_conductor_is(clien
     seed_thread(db, "project-conductor", title="Project conductor")
     db.execute("UPDATE threads SET project_id='project-a' WHERE id='project-conductor'")
     db.execute("UPDATE threads SET agent_enabled=1, agent_responsibility='Coordinates' WHERE id IN ('workspace-conductor','project-conductor')")
-    db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('workspace_conductor_session_id', ?, 't')",
+    db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('corsia_agent_thread_id', ?, 't')",
                ('{"session_id": "workspace-conductor"}',))
     db.commit()
     body = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()
@@ -328,7 +328,7 @@ def test_workspace_conductor_is_not_offered_to_a_caller_outside_any_project(clie
     db, aid = review_env
     seed_thread(db, "workspace-conductor", title="Workspace conductor")
     db.execute("UPDATE threads SET agent_enabled=1, agent_responsibility='Coordinates' WHERE id='workspace-conductor'")
-    db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('workspace_conductor_session_id', ?, 't')",
+    db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('corsia_agent_thread_id', ?, 't')",
                ('{"session_id": "workspace-conductor"}',))
     db.commit()
     ids = {row["id"] for row in client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"}).json()["reviewers"]}

@@ -110,15 +110,15 @@ run_sources_cli() {
             "$PYTHON" -m cli sources "$@")
 }
 
-run_conductor_cli() {
-    # The conductor warm calls the running backend. Same credential handling as
+run_corsia_agent_cli() {
+    # The CORSIA agent warm calls the running backend. Same credential handling as
     # the sources summary. A failed mint is not an install failure: the warm is
     # only a head start, so the caller skips it.
     local svc
     svc="$(mint_service_token)" || return 1
     (cd "$BACKEND_DIR" \
         && CORSIA_SOURCES_SERVICE_TOKEN="$svc" BACKEND_PORT="$BACKEND_PORT" \
-            "$PYTHON" -m cli conductor "$@")
+            "$PYTHON" -m cli agent "$@")
 }
 
 run_local_setup_cli() {

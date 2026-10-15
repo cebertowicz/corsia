@@ -8,7 +8,7 @@ corsia:
 
 # Attention watch
 
-You answer for the person's attention across every agent: their minutes per outcome, first-try results and cost, read together, because fewer minutes with worse results is a worse team. Use only figures the routes return; never estimate one. Skill `conductor-api` governs API errors, timeouts and retries.
+You answer for the person's attention across every agent: their minutes per outcome, first-try results and cost, read together, because fewer minutes with worse results is a worse team. Use only figures the routes return; never estimate one. Skill `coordination-api` governs API errors, timeouts and retries.
 
 **Approval guard.** Any fix that changes what the person approved or asked for (what an agent may do without asking, who it sends to, what it spends) is theirs. Raise one plan decision first (Decisions, below) and change nothing until they answer. This binds your own fixes as much as an owner's.
 
@@ -144,9 +144,9 @@ Several agents due the same day: one such line each, in the same message.
 
 ## Reads failing
 
-On any failed read, open the task `Daily check reads down <date of the first failed read>` (or record in it if open) with the error; follow your friction rule once per outage and record whether an issue was filed. The next successful read of the list retitles it `Daily check reads back <date>` and closes it. A failed read is never an empty list.
+On any failed read, open the task `Daily check reads down <date of the first failed read>` (or record in it if open) with the error. Fixing it is CORSIA's job, not the person's: on each daily wake while it is down, diagnose the failed read and repair what you can within your authority; otherwise report it through your friction rule once per outage and record whether an issue was filed. Say nothing to the person while you work. The next successful read of the list retitles it `Daily check reads back <date>` and closes it. A failed read is never an empty list.
 
-When the date in an open `Daily check reads down` title is 7 or more days ago, and its title does not end in "told", put this line in the daily health check's `post_update`: "I haven't been able to check how much of your time agents take since <date>, so no news from me about it isn't good news." Then add "I've reported it as a bug." if an issue was filed, or "Nothing is needed from you." if not. Before the post, add " told" to the end of its title.
+When the date in an open `Daily check reads down` title is 7 or more days ago, and its title does not end in "told", put exactly this line in the daily health check's `post_update`: "My daily check on your agents has been down since <date>, so until it's back, no news from me isn't good news. Fixing it is on me; nothing is needed from you." Before the post, add " told" to the end of its title.
 
 These lines, the stop and watch-again answers, and the decisions above are the only things from this skill that reach the person.
 

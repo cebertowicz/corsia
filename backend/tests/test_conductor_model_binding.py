@@ -20,7 +20,7 @@ def test_ensure_scope_conductor_binds_the_stated_model(isolated_db):
     accounts.create_user("newcomer", "long-enough-password")
     db = get_db()
     try:
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.commit()
         thread_id = ensure_scope_conductor(
             WORKSPACE_SCOPE, "newcomer", model="claude-code/sonnet", db=db,
@@ -45,7 +45,7 @@ def test_backfill_deliberately_binds_no_model(monkeypatch, isolated_db):
     accounts.create_user("owner", "long-enough-password")
     db = get_db()
     try:
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.execute(
             "INSERT INTO projects (id,name,created_at,updated_at) "
             "VALUES ('p1','P1','t','t')"
@@ -60,7 +60,14 @@ def test_backfill_deliberately_binds_no_model(monkeypatch, isolated_db):
         calls.append((scope, kwargs["model"]))
         return real(scope, user_id, **kwargs)
 
+    real_agent = conductor.ensure_corsia_agent
+
+    def _agent_spy(user_id, **kwargs):
+        calls.append(("workspace", kwargs["model"]))
+        return real_agent(user_id, **kwargs)
+
     monkeypatch.setattr(conductor, "ensure_scope_conductor", _spy)
+    monkeypatch.setattr(conductor, "ensure_corsia_agent", _agent_spy)
 
     conductor.backfill_scope_conductors()
 
@@ -119,7 +126,7 @@ def test_human_conductor_model_prefers_the_workspace_conductors_ready_model(
     accounts.create_user("u", "long-enough-password")
     db = get_db()
     try:
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.commit()
         thread_id = ensure_scope_conductor(
             WORKSPACE_SCOPE, "u", model="claude-code/sonnet", db=db,
@@ -195,7 +202,7 @@ async def test_human_project_api_keeps_its_first_input_for_model_selection(
 
     db = get_db()
     try:
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.commit()
         workspace_conductor = ensure_scope_conductor(
             WORKSPACE_SCOPE, OWNER_USER, model="codex/unavailable", db=db,

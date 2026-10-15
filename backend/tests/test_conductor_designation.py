@@ -29,7 +29,7 @@ def test_ensure_scope_conductor_creates_workspace_thread_once(isolated_db):
     accounts.create_user("newcomer", "long-enough-password")
     db = get_db()
     try:
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.execute("DELETE FROM threads")
         db.commit()
 
@@ -37,14 +37,14 @@ def test_ensure_scope_conductor_creates_workspace_thread_once(isolated_db):
         second = ensure_scope_conductor(WORKSPACE_SCOPE, "newcomer", model=None, db=db)
 
         rows = db.execute(
-            "SELECT id,user_id,title,model,project_id FROM threads WHERE title='Conductor'"
+            "SELECT id,user_id,title,model,project_id FROM threads WHERE title='CORSIA'"
         ).fetchall()
         assert first == second == get_conductor(WORKSPACE_SCOPE, db=db)
         assert [dict(row) for row in rows] == [
             {
                 "id": first,
                 "user_id": "newcomer",
-                "title": "Conductor",
+                "title": "CORSIA",
                 "model": None,
                 "project_id": None,
             }
@@ -89,7 +89,7 @@ def test_backfill_scope_conductors_heals_missing_workspace_and_project(isolated_
     accounts.create_user("newcomer", "long-enough-password")
     db = get_db()
     try:
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.execute("DELETE FROM threads")
         _insert_project(db, "project-a", "Project A", "/workspace/projects/a")
         db.commit()
@@ -99,7 +99,8 @@ def test_backfill_scope_conductors_heals_missing_workspace_and_project(isolated_
         assert [scope for scope, _thread_id in healed] == [WORKSPACE_SCOPE, "project-a"]
         assert get_conductor(WORKSPACE_SCOPE, db=db) is not None
         assert get_conductor("project-a", db=db) is not None
-        assert db.execute("SELECT COUNT(*) FROM threads WHERE title='Conductor'").fetchone()[0] == 2
+        assert db.execute("SELECT COUNT(*) FROM threads WHERE title='CORSIA'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM threads WHERE title='Conductor'").fetchone()[0] == 1
     finally:
         db.close()
 
@@ -119,26 +120,23 @@ def test_workspace_readers_reject_corrupt_designation(
     reader,
     stored_value,
 ):
-    from infra.conductor import (
-        ConductorSettingError,
-        get_conductor,
-        get_conductor_scopes,
-    )
+    from infra.conductor import get_conductor, get_coordination_scopes
+    from infra.corsia_agent import CorsiaAgentSettingError
     from infra.database import get_db
 
     db = get_db()
     try:
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
-            ("workspace_conductor_session_id", stored_value, "t"),
+            ("corsia_agent_thread_id", stored_value, "t"),
         )
         db.commit()
 
-        with pytest.raises(ConductorSettingError, match="workspace conductor"):
+        with pytest.raises(CorsiaAgentSettingError, match="CORSIA agent"):
             if reader == "designation":
                 get_conductor("workspace", db=db)
             else:
-                get_conductor_scopes("candidate", db=db)
+                get_coordination_scopes("candidate", db=db)
     finally:
         db.close()
 
@@ -160,7 +158,7 @@ def test_set_conductor_change_invalidates_old_and_new_epochs_only(
             db.execute(
                 "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
                 (
-                    "workspace_conductor_session_id",
+                    "corsia_agent_thread_id",
                     json.dumps({"session_id": "old"}),
                     "t",
                 ),
@@ -215,7 +213,7 @@ def test_set_conductor_rolls_back_designation_when_epoch_invalidation_fails(
             db.execute(
                 "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
                 (
-                    "workspace_conductor_session_id",
+                    "corsia_agent_thread_id",
                     json.dumps({"session_id": "old"}),
                     "t",
                 ),

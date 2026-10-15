@@ -133,7 +133,7 @@
 		// A user with no conductor has nothing to land on, so the chat surface stays.
 		if (conductorLookup.kind === 'absent') { resetSurface('chat'); return true; }
 		// Unresolved lookup: keep the surface, leave the rail retryable.
-		toasts.show("Couldn't load the conductor — try again", 'error');
+		toasts.show(`Couldn't load ${$uiScope ? 'the conductor' : 'the CORSIA agent'} — try again`, 'error');
 		return false;
 	}
 	$effect(() => {

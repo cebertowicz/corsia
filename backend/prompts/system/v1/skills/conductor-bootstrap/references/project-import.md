@@ -4,7 +4,7 @@ Use this when the person picked a folder they already work in, or described work
 
 The objective is a project that runs the way this person actually works and gets better at it, not a generic template. So you learn how they work, and what good practice is for this kind of work, **before** you design anything.
 
-## If you are the workspace conductor
+## If you are the CORSIA agent
 
 1. **Show what was found** (the import decision's option that names projects), newest first, at most 10: name, path, last used, which tool, whether it is a git repo. Nothing found: `I didn't find any. Tell me a folder, or describe what you're working on.`
 2. **Raise `Which should I set up first?`** with the top three as A–C and Other for any listed or typed path. Context: `I'll create the project and hand it to its own conductor. Nothing starts until you approve how it should run.`
@@ -25,7 +25,7 @@ Add these as your own plan tasks before you start, so the person can watch them:
    5. What would you hand to agents right away, what do you want to see before it happens, and what should they never do?
    6. What practices or standards do you hold this work to (reviews, testing, approvals, style)?
 
-   Answers may arrive over several messages; follow up once on anything vague. Write the person's role and how they like to work into the workspace `USER.md` (if you can't write it, send the workspace conductor the lines to add). Their role and decision rights for this project go in the charter (SKILL step 2).
+   Answers may arrive over several messages; follow up once on anything vague. Write the person's role and how they like to work into the workspace `USER.md` (if you can't write it, send the CORSIA agent the lines to add). Their role and decision rights for this project go in the charter (SKILL step 2).
 
 3. **Research how this work is done well.** For this kind of work (for example a web app, a research program, a sales pipeline), look up current, credible practice: how strong teams structure it, what they check before calling something done, common failure modes. Cite sources. Note where the person's current process already matches and where it differs; differences are suggestions, never imposed.
 

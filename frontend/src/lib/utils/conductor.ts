@@ -26,7 +26,7 @@ export type ConductorLookup =
 	| { kind: 'absent' }
 	| { kind: 'unknown' };
 
-/** The workspace conductor's thread id once a lookup confirms it; its sources
+/** The CORSIA agent's thread id once a lookup confirms it; its sources
  * panel shows only there (#3287). */
 export const workspaceConductorId = writable<string | null>(null);
 
@@ -73,14 +73,15 @@ export async function fetchConductor(
 ): Promise<ConductorLookup> {
 	if (!token) return { kind: 'unknown' };
 	try {
-		const param = encodeURIComponent(conductorScopeParam(scope));
-		const res = await fetch(
-			`/api/conductor?token=${encodeURIComponent(token)}&scope=${param}`
-		);
+		const workspace = conductorScopeParam(scope) === 'workspace';
+		// The workspace scope's occupant is the CORSIA agent, with its own route.
+		const url = workspace
+			? `/api/corsia-agent?token=${encodeURIComponent(token)}`
+			: `/api/conductor?token=${encodeURIComponent(token)}&scope=${encodeURIComponent(conductorScopeParam(scope))}`;
+		const res = await fetch(url);
 		if (!res.ok) return { kind: 'unknown' };
 		const data = await res.json();
 		const threadId = data?.target?.thread_id ?? data?.thread_id ?? null;
-		const workspace = conductorScopeParam(scope) === 'workspace';
 		if (!threadId) {
 			if (workspace) workspaceConductorId.set(null);
 			return { kind: 'absent' };

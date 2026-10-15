@@ -52,9 +52,11 @@ export function syncCanvasHeader(input: CanvasHeaderInput) {
 		const threadTitle = input.activeThreadId
 			? input.threads.find((thread) => thread.id === input.activeThreadId)?.title
 			: null;
+		// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
+		const designatedName = input.uiScopeName === null ? 'CORSIA' : 'Conductor';
 		canvasHeader.set({
-			title: conductor ? 'Conductor settings' : 'Thread settings',
-			backLabel: threadTitle ?? (conductor ? 'Conductor' : 'Thread'),
+			title: conductor ? `${designatedName} settings` : 'Thread settings',
+			backLabel: threadTitle ?? (conductor ? designatedName : 'Thread'),
 			onBack: input.closeThreadSettings,
 		});
 		return;

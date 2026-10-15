@@ -133,9 +133,9 @@ def test_response_is_bounded_and_says_so():
 
 def test_log_read_is_catalogued_in_the_host_pack():
     entry = TOOL_CATALOG["log_read"]
-    assert entry.authority == "conductor-log-read" and not entry.core
+    assert entry.authority == "coordination-log-read" and not entry.core
     assert "other threads receive a final not_conductor refusal" in entry.summary
     assert is_reachable("log_read")
     description = LogReadTool().description
-    assert description.startswith("Conductors only.")
+    assert description.startswith("CORSIA agent and project conductors only.")
     assert "not_conductor" in description and "backend.log" in description
