@@ -292,3 +292,20 @@ async def test_one_worker_processes_arrival_queued_during_startup_scan(monkeypat
     await corrections_realtime._worker()
 
     assert processed == ["during-startup"]
+
+
+@pytest.mark.asyncio
+async def test_restart_retries_only_an_unaccepted_activation_notice(monkeypatch):
+    from jobs import corrections_activation, corrections_realtime
+
+    version = _manifest().checker_version()
+    sent = AsyncMock()
+    monkeypatch.setattr(corrections_activation, "active_version", lambda: version)
+    monkeypatch.setattr(corrections_activation, "tell_conductor_about_activation", sent)
+
+    await corrections_realtime._retry_pending_activation_notice()
+
+    sent.assert_awaited_once_with(version)
+    monkeypatch.setattr(corrections_activation, "active_version", lambda: None)
+    await corrections_realtime._retry_pending_activation_notice()
+    assert sent.await_count == 1

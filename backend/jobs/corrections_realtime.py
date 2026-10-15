@@ -131,6 +131,15 @@ async def _classify(candidate: CorrectionCandidate) -> None:
             return
 
 
+async def _retry_pending_activation_notice() -> None:
+    """Retry an accepted-delivery notice after restart or an interrupted mark."""
+    from jobs.corrections_activation import active_version, tell_conductor_about_activation
+
+    version = await run_in_db(active_version)
+    if version is not None:
+        await tell_conductor_about_activation(version)
+
+
 async def _activate_after_backfill(manifest: AssetManifest) -> None:
     """Switch Measurement only after this immutable version's bounded fill completes."""
     from api.measurement_agents import BASELINE_PERIODS
@@ -164,6 +173,7 @@ async def _activate_after_backfill(manifest: AssetManifest) -> None:
     )
     if activated:
         await tell_conductor_about_activation(version)
+    await _retry_pending_activation_notice()
 
 
 async def _catch_up_scan() -> None:
@@ -257,13 +267,18 @@ def notify(message_id: str) -> None:
         logger.exception("corrections classifier admission notification failed")
 
 
+async def _startup_worker() -> None:
+    await _retry_pending_activation_notice()
+    await _worker()
+
+
 def startup_scan() -> None:
     """Discard interrupted staging and start the one arrival-first worker."""
     global _TASK, _SCAN_OWED
     _cleanup_staging()
     _SCAN_OWED = True
     if _TASK is None or _TASK.done():
-        _TASK = asyncio.create_task(_worker())
+        _TASK = asyncio.create_task(_startup_worker())
 
 
 def state_snapshot() -> dict[str, object]:
