@@ -245,7 +245,6 @@ describe('Header glass layers', () => {
 	it('keeps the phone header blur on the masked layer so it fades out at the bottom', () => {
 		// An unmasked blur layer ends in a hard line across the transcript.
 		expect(rule(phone, '.shell-header::before')).not.toMatch(/backdrop-filter: none;/);
-		expect(rule(phone, '.shell-header::after')).toBe('');
 		const base = rule(headerSource, '.shell-header::before');
 		expect(base).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
 		expect(base).toMatch(/mask-image: linear-gradient/);

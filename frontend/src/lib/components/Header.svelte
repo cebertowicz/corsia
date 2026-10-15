@@ -274,6 +274,9 @@
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
+		/* The blur stays on this masked layer so it fades out with no hard edge.
+		   Known trade-off: the mask also thins the blur, so the transcript can
+		   show faintly through the title row. */
 		.shell-header::before {
 			background-image: linear-gradient(
 				180deg,
