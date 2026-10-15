@@ -93,6 +93,25 @@ def _load(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+def _recording(captured: dict):
+    """Wrap the real model call so a validation failure keeps the model's raw answer for the report."""
+    from llm.isolated_structured import invoke_isolated_structured
+
+    async def invoke(target, **kwargs):
+        validator = kwargs["validator"]
+
+        def spy(raw):
+            try:
+                return validator(raw)
+            except Exception as exc:
+                captured["failure"] = {"error": str(exc), "raw": raw}
+                raise
+
+        return await invoke_isolated_structured(target, **{**kwargs, "validator": spy})
+
+    return invoke
+
+
 async def _run(rows: list[dict]) -> list[dict]:
     from connections.google import email_screen
     from infra.database import get_db
@@ -105,8 +124,12 @@ async def _run(rows: list[dict]) -> list[dict]:
         db.execute("UPDATE network_server_endpoints SET last_ok_at = ? WHERE id = 'ep-eval'", (utc_now_iso(),))
         db.commit()
         started = time.monotonic()
-        screen = await email_screen.screen_message("eval@example.com", row["id"], row["headers"], row["body"])
+        captured: dict = {}
+        screen = await email_screen.screen_message(
+            "eval@example.com", row["id"], row["headers"], row["body"], invoke=_recording(captured),
+        )
         results.append({
+            "failure": captured.get("failure"),
             "id": row["id"], "expected_injection": row["expected_injection"],
             "expected_rule": row["expected_rule"], "status": screen.status,
             "injection": screen.injection, "rule": screen.rule, "kind": screen.kind,
@@ -168,10 +191,18 @@ def _report(rows: list[dict], results: list[dict], *, model: str, hardware: str,
         *(block(r) for r in wrong_rule),
         *(["(none)"] if not wrong_rule else []),
         "",
-        "## Not screened",
+        "## Not screened (body withheld, subject omitted)",
         "",
         *(block(r) for r in missing),
         *(["(none)"] if not missing else []),
+        "",
+        "## Validation failures: what the model returned",
+        "",
+        *(
+            f"- `{r['id']}`: {r['failure']['error']}; raw: `{json.dumps(r['failure']['raw'])[:300]}`"
+            for r in missing if r.get("failure")
+        ),
+        *(["(none)"] if not any(r.get("failure") for r in missing) else []),
         "",
     ]
     return "\n".join(lines)

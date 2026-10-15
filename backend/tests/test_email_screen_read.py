@@ -418,5 +418,8 @@ def test_the_evaluation_set_covers_every_rule_and_ordinary_mail():
     assert sum(1 for r in rows if not r["expected_injection"]) >= 10
 
 
-def test_a_kind_label_may_use_underscores_and_digits():
-    assert email_screen.validate_screen({**CLEAN, "kind": "payment_request_2"})["kind"] == "payment_request_2"
+def test_a_snake_case_kind_is_stored_as_words_and_other_characters_still_fail():
+    assert email_screen.validate_screen({**CLEAN, "kind": "payment_request"})["kind"] == "payment request"
+    for bad in ("payment2", "pay.ment", "Payment", "payment/request"):
+        with pytest.raises(email_screen.ScreenOutputError):
+            email_screen.validate_screen({**CLEAN, "kind": bad})

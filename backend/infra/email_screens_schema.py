@@ -2,7 +2,7 @@
 
 There is deliberately no column that can hold an email's subject or body; the
 only free-text field is ``kind``, which the screen's schema caps at 40
-characters of lowercase letters, digits, spaces, hyphens and underscores.
+characters of lowercase letters, spaces and hyphens.
 """
 
 from __future__ import annotations

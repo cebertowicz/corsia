@@ -66,13 +66,13 @@ OUTPUT_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "required": ["kind", "needs_person", "injection", "injection_rule"],
     "properties": {
-        "kind": {"type": "string", "maxLength": 40, "pattern": "^[a-z][a-z0-9_ -]{0,39}$"},
+        "kind": {"type": "string", "maxLength": 40, "pattern": "^[a-z][a-z -]{0,39}$"},
         "needs_person": {"enum": list(NEEDS_PERSON)},
         "injection": {"type": "boolean"},
         "injection_rule": {"enum": list(RULES)},
     },
 }
-_KIND = re.compile(r"^[a-z][a-z0-9_ -]{0,39}$")
+_KIND = re.compile(r"^[a-z][a-z -]{0,39}$")
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
@@ -116,6 +116,9 @@ def validate_screen(raw: object) -> dict[str, Any]:
     if not isinstance(raw, dict) or set(raw) != set(OUTPUT_SCHEMA["required"]):
         raise ScreenOutputError("screen result must have exactly kind, needs_person, injection, injection_rule")
     kind, needs, injection, rule = raw["kind"], raw["needs_person"], raw["injection"], raw["injection_rule"]
+    if isinstance(kind, str):
+        # Models often write snake_case labels; the stored label is lowercase words.
+        kind = kind.replace("_", " ")
     if not isinstance(kind, str) or not _KIND.match(kind):
         raise ScreenOutputError("screen kind is invalid")
     if needs not in NEEDS_PERSON or rule not in RULES or not isinstance(injection, bool):
