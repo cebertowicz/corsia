@@ -8,7 +8,6 @@ from typing import Any
 from host_access.failure_reasons import (
     ACTIVATION_FAILED_STAGE,
     BROWSER_ISOLATION_FAILED_STAGE,
-    CAUSE_GUIDANCE,
     REVIEWER_UNAVAILABLE_REASON,
     is_holder_safe,
     safe_rejection,
@@ -271,8 +270,4 @@ class RequestHostAccessTool(Tool):
                 payload["guidance"] = application_guidance(
                     lease.get(REVIEWER_UNAVAILABLE_ERROR_KEY)
                 )
-            else:
-                cause_guidance = CAUSE_GUIDANCE.get(terminal_reason.partition(": ")[2])
-                if cause_guidance is not None:
-                    payload["guidance"] = cause_guidance
         return json.dumps(payload, separators=(",", ":"))

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Literal, get_args
 
-from connections.account_policy import AccountAdmissionError
 from host_access.errors import ReviewerUnavailableError
 from llm.isolated_structured import (
     IsolatedStructuredError,
@@ -28,7 +27,7 @@ REVIEWER_UNAVAILABLE_REASON = "reviewer_unavailable"
 ReviewTerminal = Literal[
     "allow", "block", "revoke", "invalid_output", "identity_failure",
     "provider_error", "reviewer_output_truncated", "rate_limit", "timeout",
-    "transport_failure", "reviewer_account_unavailable",
+    "transport_failure",
 ]
 
 ReviewCause = Literal[
@@ -39,7 +38,6 @@ ReviewCause = Literal[
     "rate_limit",
     "timeout",
     "transport_failure",
-    "reviewer_account_unavailable",
 ]
 
 REVIEW_CAUSES = frozenset(get_args(ReviewCause))
@@ -127,21 +125,8 @@ class HostAccessBrowserIsolationError(RuntimeError):
     """Model-owned browser sessions could not be closed after an allowed review."""
 
 
-#: Corrections the holder can act on, keyed by cause. Only causes with a
-#: holder-side remedy appear here; the rest keep the generic next step.
-CAUSE_GUIDANCE: dict[str, str] = {
-    "reviewer_account_unavailable": (
-        "The lease reviewer's account cannot run for this request, so it was not "
-        "reviewed and no lease was issued. Retry once that account is available, "
-        "or ask the user to choose another reviewer account in Settings."
-    ),
-}
-
-
 def classify_failure(exc: BaseException) -> ReviewCause | None:
     """Return the bounded cause for a recognised failure, else ``None``."""
-    if isinstance(exc, AccountAdmissionError):
-        return "reviewer_account_unavailable"
     if isinstance(exc, HostAccessReviewValidationError):
         return "invalid_output"
     if isinstance(exc, IsolatedStructuredIdentityError):

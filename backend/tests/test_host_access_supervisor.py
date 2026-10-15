@@ -2553,7 +2553,6 @@ async def test_review_failure_distinguishes_causes_for_the_holder(
     """
     from host_access import supervisor
     from host_access.reviewer import HostAccessReviewValidationError
-    from connections.account_policy import AccountAdmissionError
     from llm.isolated_structured import (
         IsolatedStructuredOutputTruncatedError,
         IsolatedStructuredProviderError,
@@ -2567,7 +2566,6 @@ async def test_review_failure_distinguishes_causes_for_the_holder(
         ("provider", IsolatedStructuredProviderError("provider_error:http_503"), "provider_error"),
         ("truncated", IsolatedStructuredOutputTruncatedError("reviewer_output_truncated"), "reviewer_output_truncated"),
         ("badoutput", HostAccessReviewValidationError("bad"), "invalid_output"),
-        ("account", AccountAdmissionError("account_session_mismatch"), "reviewer_account_unavailable"),
     )
     seen: list[str] = []
     for session, error, expected_cause in cases:

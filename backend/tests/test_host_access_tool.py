@@ -453,35 +453,6 @@ async def test_request_host_access_tool_reports_why_the_review_failed(
 
 
 @pytest.mark.asyncio
-async def test_request_host_access_tool_names_the_next_step_for_an_account_cause(
-    isolated_db,
-    monkeypatch,
-):
-    """An account-admission refusal carries its fixed correction, not a bare cause."""
-    from tools import host_access as host_access_tool
-    from tools.host_access import RequestHostAccessTool
-
-    async def account_blocked(_thread_id, **_application):
-        return {
-            "state": "blocked",
-            "terminal_reason": "application_reviewer_failure: reviewer_account_unavailable",
-        }
-
-    monkeypatch.setattr(host_access_tool, "request_reviewed_lease", account_blocked)
-    result = json.loads(
-        await RequestHostAccessTool().execute(
-            purpose="Inspect the local runtime",
-            plan=["Read logs"],
-            duration_seconds=60,
-            _thread_id="root",
-        )
-    )
-
-    assert result["reason"] == "application_reviewer_failure: reviewer_account_unavailable"
-    assert "reviewer" in result["guidance"] and "account" in result["guidance"]
-
-
-@pytest.mark.asyncio
 async def test_request_host_access_tool_omits_reason_when_nothing_ended(
     isolated_db,
     monkeypatch,
