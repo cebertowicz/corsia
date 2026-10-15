@@ -75,10 +75,22 @@ async def reload_mcp_runtime(config: dict) -> dict[str, str]:
 
 def register_mcp_tools(registry: ToolRegistry) -> None:
     """Populate native and harness registries from the completed startup snapshot."""
+    registry.mcp_server_configs = getattr(_registry, "mcp_server_configs", {})
+    registry.mcp_server_states = getattr(_registry, "mcp_server_states", {})
     for name in _registry.tool_names:
         if registry.has(name) and registry.get(name) is not _registry.get(name):
             raise RuntimeError("Configured MCP tool collides with an existing tool")
         registry.register(_registry.get(name))
+
+
+def tool_server_index() -> dict[str, str]:
+    """Map each live MCP tool's public name to the server it belongs to."""
+    index = {}
+    for name in _registry.tool_names:
+        server = getattr(_registry.get(name), "mcp_server_name", None)
+        if isinstance(server, str) and server:
+            index[name] = server
+    return index
 
 
 async def _close() -> None:

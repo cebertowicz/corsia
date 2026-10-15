@@ -29,6 +29,7 @@ class MCPServer:
         self.status = 200
         self.delay = 0
         self.echo = False
+        self.instructions = None
 
     async def respond(self, request: Request):
         authorization = request.headers.get("authorization")
@@ -44,6 +45,8 @@ class MCPServer:
         if method == "initialize":
             result = {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}},
                       "serverInfo": {"name": "fixture", "version": "1"}}
+            if self.instructions is not None:
+                result["instructions"] = self.instructions
         elif method == "tools/list":
             result = {"tools": [{"name": name, "description": "Read fixture data",
                                  "inputSchema": {"type": "object", "properties": {}}}
@@ -100,6 +103,27 @@ async def test_http_bearer_allowlist_and_identity(tmp_path, http_mcp):
         assert set(http_mcp.headers) == {f"Bearer {http_mcp.token}"}
         assert http_mcp.token not in json.dumps(registry.get_definitions())
         assert http_mcp.token not in json.dumps(config)
+
+
+@pytest.mark.asyncio
+async def test_initialize_instructions_reach_every_tool_of_the_server(tmp_path, http_mcp):
+    http_mcp.instructions = "Profiles for the fixture service. Cite the record id."
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        await connect_mcp_servers({"fixture": server_config(tmp_path, http_mcp)}, registry, stack)
+        tools = [registry.get(name) for name in registry.tool_names]
+
+    assert {tool.mcp_instructions for tool in tools} == {http_mcp.instructions}
+    assert [tool.mcp_tool_name for tool in tools] == ["read_profile"]
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_instructions_reports_none(tmp_path, http_mcp):
+    registry = ToolRegistry()
+    async with AsyncExitStack() as stack:
+        await connect_mcp_servers({"fixture": server_config(tmp_path, http_mcp)}, registry, stack)
+
+        assert registry.get("work_read_profile").mcp_instructions is None
 
 
 @pytest.mark.asyncio

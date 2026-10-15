@@ -57,6 +57,9 @@ class ContextPreflightResult:
     block_reason: str | None = None
     trigger_reason: str | None = None
     prepared_context: PreparedContextPayload | None = None
+    # The stored rows the history figure measured, so a caller that attributes
+    # that history reads them from the result instead of reading them again.
+    delivered_rows: tuple[Any, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the preflight result for send-service callers."""
