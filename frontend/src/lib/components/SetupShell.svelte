@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { tick, untrack } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { Button, RailRow, RailSection } from '$lib/components/ui';
 	import { peerFade } from '$lib/popoverMotion';
@@ -25,6 +25,12 @@
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
 	let sceneHeading = $state<HTMLHeadingElement | null>(null);
+	let primaryButton = $state<HTMLButtonElement | null>(null);
+	let primaryLabelDuration = $state(0);
+	let previousPrimaryLabel: string | undefined;
+	let flipVersion = 0;
+	let pendingWidthFrame: number | undefined;
+	let removeWidthTransitionListener: (() => void) | undefined;
 	let mounted = false;
 
 	$effect(() => {
@@ -50,6 +56,82 @@
 	function clearClosingJobs() {
 		if (jobs.length === 0) shownJobs = [];
 	}
+
+	function readPrimaryLabelDuration(node: HTMLElement | null) {
+		return node ? Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0 : 0;
+	}
+
+	function clearWidthTransitionListener() {
+		if (pendingWidthFrame !== undefined) cancelAnimationFrame(pendingWidthFrame);
+		pendingWidthFrame = undefined;
+		removeWidthTransitionListener?.();
+		removeWidthTransitionListener = undefined;
+	}
+
+	function makeOutgoingLabelAbsolute(event: Event) {
+		(event.currentTarget as HTMLElement).classList.add('primary-label-exiting');
+	}
+
+	$effect.pre(() => {
+		const nextLabel = primary?.label;
+		if (nextLabel === previousPrimaryLabel) return;
+
+		const previousLabel = previousPrimaryLabel;
+		previousPrimaryLabel = nextLabel;
+		primaryLabelDuration = readPrimaryLabelDuration(primaryButton);
+		if (!primaryButton || !previousLabel || !nextLabel) {
+			if (!nextLabel) {
+				flipVersion += 1;
+				clearWidthTransitionListener();
+				primaryButton?.style.removeProperty('width');
+			}
+			return;
+		}
+
+		const button = primaryButton;
+		const oldWidth = button.getBoundingClientRect().width;
+		const transitionVersion = ++flipVersion;
+		clearWidthTransitionListener();
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			button.style.removeProperty('width');
+			return;
+		}
+
+		void tick().then(() => {
+			if (transitionVersion !== flipVersion || primaryButton !== button) return;
+
+			const inlineTransition = button.style.transition;
+			button.style.transition = 'none';
+			button.style.width = 'auto';
+			const newWidth = button.getBoundingClientRect().width;
+			button.style.width = `${oldWidth}px`;
+			void button.offsetWidth;
+			button.style.transition = inlineTransition;
+			if (Math.abs(newWidth - oldWidth) < 0.01) {
+				button.style.removeProperty('width');
+				return;
+			}
+
+			const onTransitionEnd = (event: TransitionEvent) => {
+				if (event.target !== button || event.propertyName !== 'width') return;
+				button.style.removeProperty('width');
+				clearWidthTransitionListener();
+			};
+			button.addEventListener('transitionend', onTransitionEnd);
+			removeWidthTransitionListener = () => button.removeEventListener('transitionend', onTransitionEnd);
+			pendingWidthFrame = requestAnimationFrame(() => {
+				pendingWidthFrame = undefined;
+				if (transitionVersion !== flipVersion || primaryButton !== button) return;
+				button.style.width = `${newWidth}px`;
+			});
+		});
+	});
+
+	onDestroy(() => {
+		flipVersion += 1;
+		clearWidthTransitionListener();
+		primaryButton?.style.removeProperty('width');
+	});
 
 	function jobHeightMotion(node: Element, _params: undefined, { direction }: { direction: 'in' | 'out' | 'both' }) {
 		const style = getComputedStyle(node);
@@ -111,10 +193,10 @@
 			{#if primary}
 				<div class="primary-action">
 					{#if primary.disabled && primary.note}<span class="footer-note">{primary.note}</span>{/if}
-					<Button variant="pill" disabled={primary.disabled} loading={primary.loading} onclick={onPrimary}>
+					<Button variant="pill" disabled={primary.disabled} loading={primary.loading} onclick={onPrimary} bind:el={primaryButton}>
 						<span class="primary-label-stack">
 							{#key primary.label}
-								<span class="primary-label" in:fade={{ duration: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 0 }} out:fade={{ duration: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 0 }}>{primary.label}</span>
+								<span class="primary-label" in:fade={{ duration: primaryLabelDuration }} out:fade={{ duration: primaryLabelDuration }} onoutrostart={makeOutgoingLabelAbsolute}>{primary.label}</span>
 							{/key}
 						</span>
 					</Button>
@@ -140,8 +222,9 @@
 	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); }
 	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
-	.primary-label-stack { display: grid; grid-template-areas: 'label'; }
+	.primary-label-stack { position: relative; display: grid; grid-template-areas: 'label'; }
 	.primary-label { grid-area: label; }
+	:global(.primary-label-exiting) { position: absolute; inset: 0; display: grid; place-items: center; }
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
 	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
 	.job-region { overflow: hidden; }

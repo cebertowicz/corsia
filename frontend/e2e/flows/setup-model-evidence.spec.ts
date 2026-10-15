@@ -139,6 +139,41 @@ function expectSinglePersistentPill(footer: FooterSnapshot, labels: string[]) {
 	}
 }
 
+type WidthTransition = { start: number; mid: number; end: number };
+
+function expectMonotonicWidthTransition({ start, mid, end }: WidthTransition) {
+	expect(mid).not.toBeCloseTo(start, 3);
+	expect(mid).not.toBeCloseTo(end, 3);
+	if (end > start) {
+		expect(mid).toBeGreaterThan(start);
+		expect(mid).toBeLessThan(end);
+	} else {
+		expect(mid).toBeLessThan(start);
+		expect(mid).toBeGreaterThan(end);
+	}
+}
+
+async function recordPillWidthTransition<T>(page: Page, nextLabel: string, activate: () => Promise<void>, observeCrossfade: () => Promise<T>) {
+	const button = page.locator('.pane > footer .btn.pill');
+	const start = await button.evaluate((element) => element.getBoundingClientRect().width);
+	await activate();
+	const crossfadePromise = observeCrossfade();
+	await expect(page.locator('.pane > footer .primary-label').filter({ hasText: nextLabel })).toHaveCount(1);
+	await expect.poll(() => button.evaluate((element) => element.getAnimations().some((animation) => animation instanceof CSSTransition && animation.transitionProperty === 'width' && animation.playState === 'running'))).toBe(true);
+	const mid = await button.evaluate(async (element) => {
+		const transition = element.getAnimations().find((animation): animation is CSSTransition => animation instanceof CSSTransition && animation.transitionProperty === 'width' && animation.playState === 'running');
+		if (!transition) throw new Error('Missing running setup-pill width transition');
+		const duration = Number(transition.effect?.getComputedTiming().duration ?? 0);
+		const elapsed = Number(transition.currentTime ?? 0);
+		await new Promise<void>((resolve) => window.setTimeout(resolve, Math.max(0, duration / 2 - elapsed)));
+		return element.getBoundingClientRect().width;
+	});
+	const crossfade = await crossfadePromise;
+	await expect.poll(() => button.evaluate((element) => element.getAnimations().every((animation) => animation.playState !== 'running'))).toBe(true);
+	const end = await button.evaluate((element) => element.getBoundingClientRect().width);
+	return { crossfade, widths: { start, mid, end } satisfies WidthTransition };
+}
+
 async function openModelStep(page: Page) {
 	await page.addInitScript(() => localStorage.setItem('corsia_theme', 'auto'));
 	await page.goto('/');
@@ -283,8 +318,14 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.screenshot({ path: testInfo.outputPath('setup-welcome-visible-before-start-light-1280x900.png'), scale: 'css' });
 		const welcomeFooter = await setupFooter(page);
 		expectSinglePersistentPill(welcomeFooter, ['Get started']);
-		await page.getByRole('button', { name: 'Get started' }).click();
-		const welcomeToAccount = await waitForPaneCrossfade(page);
+		const welcomeToAccountTransition = await recordPillWidthTransition(page, 'Continue', () => page.getByRole('button', { name: 'Get started' }).click(), async () => {
+			const scenes = await waitForPaneCrossfade(page);
+			const footer = await setupFooter(page);
+			await page.locator('.pane > footer').screenshot({ path: testInfo.outputPath('setup-welcome-account-footer-width-mid-light-1280x900.png'), scale: 'css' });
+			return { scenes, footer };
+		});
+		expectMonotonicWidthTransition(welcomeToAccountTransition.widths);
+		const welcomeToAccount = welcomeToAccountTransition.crossfade.scenes;
 		expect(welcomeToAccount).toHaveLength(2);
 		expect(welcomeToAccount.map((scene) => scene.title).sort()).toEqual(['Create your account', 'Welcome to CORSIA']);
 		for (const scene of welcomeToAccount) {
@@ -295,10 +336,7 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		}
 		expect(welcomeToAccount.find((scene) => scene.title === 'Welcome to CORSIA')?.inert).toBe(true);
 		expect(welcomeToAccount.find((scene) => scene.title === 'Create your account')?.inert).toBe(false);
-		const welcomeToAccountFooter = await setupFooter(page);
-		expectSinglePersistentPill(welcomeToAccountFooter, ['Get started', 'Continue']);
-		expect(welcomeToAccountFooter.button?.width).toBeGreaterThanOrEqual(welcomeFooter.button?.width ?? 0);
-		await page.screenshot({ path: testInfo.outputPath('setup-welcome-account-mid-crossfade-light-1280x900.png'), scale: 'css' });
+		expectSinglePersistentPill(welcomeToAccountTransition.crossfade.footer, ['Get started', 'Continue']);
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeFocused();
 		await waitForPaneAnimationsSettled(page);
 
@@ -310,8 +348,14 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		] as const) await locator.fill(value);
 		const accountFooter = await setupFooter(page);
 		expectSinglePersistentPill(accountFooter, ['Continue']);
-		await page.getByRole('button', { name: 'Continue' }).click();
-		const accountToModels = await waitForPaneCrossfade(page);
+		const accountToModelsTransition = await recordPillWidthTransition(page, 'Start using CORSIA', () => page.getByRole('button', { name: 'Continue' }).click(), async () => {
+			const scenes = await waitForPaneCrossfade(page);
+			const footer = await setupFooter(page);
+			await page.locator('.pane > footer').screenshot({ path: testInfo.outputPath('setup-account-models-footer-width-mid-light-1280x900.png'), scale: 'css' });
+			return { scenes, footer };
+		});
+		expectMonotonicWidthTransition(accountToModelsTransition.widths);
+		const accountToModels = accountToModelsTransition.crossfade.scenes;
 		expect(accountToModels).toHaveLength(2);
 		expect(accountToModels.map((scene) => scene.title).sort()).toEqual(['Choose an AI model', 'Create your account']);
 		for (const scene of accountToModels) {
@@ -322,10 +366,7 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		}
 		expect(accountToModels.find((scene) => scene.title === 'Create your account')?.inert).toBe(true);
 		expect(accountToModels.find((scene) => scene.title === 'Choose an AI model')?.inert).toBe(false);
-		const accountToModelsFooter = await setupFooter(page);
-		expectSinglePersistentPill(accountToModelsFooter, ['Continue', 'Start using CORSIA']);
-		expect(accountToModelsFooter.button?.width).toBeGreaterThanOrEqual(accountFooter.button?.width ?? 0);
-		await page.screenshot({ path: testInfo.outputPath('setup-account-models-mid-crossfade-light-1280x900.png'), scale: 'css' });
+		expectSinglePersistentPill(accountToModelsTransition.crossfade.footer, ['Continue', 'Start using CORSIA']);
 		await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toBeFocused();
 	});
 
@@ -350,7 +391,10 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.locator('html').evaluate((element) => element.style.setProperty('--dur-tight', '1000ms'));
 		await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
 		await waitForPaneAnimationsSettled(page);
+		const initialWidth = await page.locator('.pane > footer .btn.pill').evaluate((element) => element.getBoundingClientRect().width);
 		await page.getByRole('button', { name: 'Get started' }).click();
+		await page.waitForTimeout(500);
+		const reducedMotionMidWidth = await page.locator('.pane > footer .btn.pill').evaluate((element) => element.getBoundingClientRect().width);
 		const scenes = await waitForPaneCrossfade(page);
 		expect(scenes).toHaveLength(2);
 		for (const scene of scenes) {
@@ -359,7 +403,24 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 			expect(scene.transform).toBe('none');
 			expect(scene.box).toEqual(scenes[0].box);
 		}
+		const reducedMotionEndWidth = await page.locator('.pane > footer .btn.pill').evaluate((element) => element.getBoundingClientRect().width);
+		expect(reducedMotionMidWidth).toBeCloseTo(reducedMotionEndWidth, 3);
+		expect(reducedMotionEndWidth).not.toBeCloseTo(initialWidth, 3);
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeFocused();
+	});
+
+	test('captures the 393px footer during the Welcome-to-Account crossfade', async ({ page }, testInfo) => {
+		await serveSetupState(page, 'ready');
+		await page.setViewportSize({ width: 393, height: 852 });
+		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+		await page.goto('/');
+		await page.locator('html').evaluate((element) => element.style.setProperty('--dur-tight', '1000ms'));
+		await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
+		await waitForPaneAnimationsSettled(page);
+		await page.getByRole('button', { name: 'Get started' }).click();
+		await waitForPaneCrossfade(page);
+		expectSinglePersistentPill(await setupFooter(page), ['Get started', 'Continue']);
+		await page.locator('.pane > footer').screenshot({ path: testInfo.outputPath('setup-welcome-account-footer-mid-light-393x852.png'), scale: 'css' });
 	});
 
 	test('captures a settled visible job row with animations enabled', async ({ page }, testInfo) => {
