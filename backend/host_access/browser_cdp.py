@@ -55,18 +55,21 @@ class CdpClient:
         await self.socket.close()
 
 
-async def password_probe(run: RunCommand, known_nodes: frozenset[int]) -> PasswordProbe:
-    """Find visible password controls in CDP DOM state, preserving reveal-toggle nodes."""
+async def password_probe(run: RunCommand, known_visit: str | None, known_nodes: frozenset[int]) -> PasswordProbe:
+    """Find visible password controls in CDP DOM state, preserving this visit's reveal-toggle nodes."""
     endpoint = await _endpoint(run)
     async with CdpClient(endpoint) as cdp:
         frame = await cdp.call("Page.getFrameTree")
         loader = _loader_id(frame)
         host = _host(frame)
+        # A node seen on an earlier visit can still resolve to a box after the page navigates away,
+        # which would report a password field the new page does not have.
+        known = known_nodes if known_visit == loader else frozenset()
         document = await cdp.call("DOM.getDocument", depth=-1, pierce=True)
         root = _int(document.get("root", {}).get("nodeId"))
         nodes = await cdp.call("DOM.querySelectorAll", nodeId=root, selector="input[type=password],input[autocomplete=current-password],input[autocomplete=new-password]")
         current = {await _backend_node_id(cdp, _int(node)) for node in nodes.get("nodeIds", [])}
-        visible = {node for node in current | set(known_nodes) if await _visible(cdp, node)}
+        visible = {node for node in current | known if await _visible(cdp, node)}
         return PasswordProbe(loader, host, frozenset(visible))
 
 

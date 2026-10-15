@@ -1,6 +1,6 @@
 import pytest
 
-from host_access import browser_control
+from host_access import browser_cdp, browser_control
 from host_access.browser_cdp import PasswordProbe
 from host_access.browser_session_state import BrowserSessionError
 
@@ -34,7 +34,7 @@ async def test_password_episode_settles_then_keeps_eval_and_hidden_password_read
     ))
     events, opened, settled = [], [], []
 
-    async def probe(_known):
+    async def probe(_visit, _known):
         return next(responses)
 
     async def open_episode(_thread_id, episode):
@@ -78,7 +78,7 @@ async def test_new_password_visit_opens_a_new_step_and_reports_to_the_pane(monke
     ))
     opened, settled, pane_events = [], [], []
 
-    async def probe(_known):
+    async def probe(_visit, _known):
         return next(responses)
 
     async def open_episode(_thread_id, episode):
@@ -105,8 +105,39 @@ async def test_new_password_visit_opens_a_new_step_and_reports_to_the_pane(monke
 
 
 @pytest.mark.asyncio
+async def test_password_probe_keeps_known_nodes_only_on_their_own_visit(monkeypatch):
+    """A node seen on the password page can still resolve to a box after the page navigates away."""
+    class FakeCdp:
+        def __init__(self, _endpoint):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def call(self, method, **_params):
+            return {
+                "Page.getFrameTree": {"frameTree": {"frame": {"loaderId": "visit-two", "url": "https://example.test/next"}}},
+                "DOM.getDocument": {"root": {"nodeId": 1}},
+                "DOM.querySelectorAll": {"nodeIds": []},
+                "DOM.getBoxModel": {"model": {"border": [0, 0, 10, 0, 10, 10, 0, 10]}},
+            }[method]
+
+    async def endpoint(_run):
+        return "ws://page.test"
+
+    monkeypatch.setattr(browser_cdp, "CdpClient", FakeCdp)
+    monkeypatch.setattr(browser_cdp, "_endpoint", endpoint)
+    assert (await browser_cdp.password_probe(None, "visit-one", frozenset({42}))).visible_nodes == frozenset()
+    # Within one visit a known field stays guarded even after a reveal toggle changes its type.
+    assert (await browser_cdp.password_probe(None, "visit-two", frozenset({42}))).visible_nodes == frozenset({42})
+
+
+@pytest.mark.asyncio
 async def test_password_probe_failure_fails_closed():
-    async def broken_probe(_known):
+    async def broken_probe(_visit, _known):
         raise RuntimeError("CDP went away")
 
     with pytest.raises(BrowserSessionError, match="couldn't be checked"):

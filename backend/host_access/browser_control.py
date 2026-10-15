@@ -18,7 +18,7 @@ PASSWORD_PAGE = (
     "decline, tell them in chat what you needed the page for and stop."
 )
 PASSWORD_CHECK_FAILED = "This page couldn't be checked"
-Probe = Callable[[frozenset[int]], Awaitable[PasswordProbe]]
+Probe = Callable[[str | None, frozenset[int]], Awaitable[PasswordProbe]]
 
 
 @dataclass
@@ -71,9 +71,9 @@ async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...
     lock = _probe_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:
         prior = _episodes.get(thread_id)
-        known = prior.seen_nodes if prior is not None else frozenset()
+        known_visit, known = (prior.visit, prior.seen_nodes) if prior is not None else (None, frozenset())
         try:
-            result = await probe(known)
+            result = await probe(known_visit, known)
         except Exception as exc:
             if isinstance(exc, BrowserSessionError) and str(exc) == PASSWORD_CHECK_FAILED:
                 raise
