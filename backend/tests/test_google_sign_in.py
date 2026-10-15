@@ -21,7 +21,7 @@ from api import google as google_api
 from connections.google import client as google_client
 from connections.google import oauth
 from infra import key_store
-from infra.conductor import set_conductor
+from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
 from infra.settings import get_setting
 from tests.registry_helpers import make_session
@@ -85,7 +85,7 @@ def google(isolated_db, tmp_path, monkeypatch):
 def conductor(google):
     db = get_db()
     thread_id = make_session(db, prefix="conductor")
-    assert set_conductor("workspace", thread_id, db=db)
+    assert set_corsia_agent(thread_id, db=db)
     return thread_id
 
 

@@ -4,9 +4,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import ThreadSettingsView from './ThreadSettingsView.svelte';
 import { activeThreadId, threads, type Thread } from '$lib/stores/threads';
 import { threadSettingsOpen } from '$lib/stores/threadSettings';
-import { fetchConductor } from '$lib/utils/conductor';
+import { fetchScopeTarget } from '$lib/utils/conductor';
+import { uiScope } from '$lib/stores/uiScope';
 
-vi.mock('$lib/utils/conductor', () => ({ fetchConductor: vi.fn() }));
+vi.mock('$lib/utils/conductor', () => ({ fetchScopeTarget: vi.fn() }));
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -87,13 +88,17 @@ describe('ThreadSettingsView', () => {
 
 	describe('conductor mode', () => {
 		const target = { thread_id: 'conductor-1', title: 'Conductor', project_id: 'corsia', bootloader_files: [] };
-		beforeEach(() => { vi.mocked(fetchConductor).mockReset(); });
+		beforeEach(() => {
+			vi.mocked(fetchScopeTarget).mockReset();
+			uiScope.set({ id: 'corsia', name: 'CORSIA', color: '#d65a87' });
+		});
+		afterEach(() => uiScope.set(null));
 		const flush = async () => { await Promise.resolve(); await Promise.resolve(); flushSync(); };
 
 		it('shows a loading state, then context and skills without the Agent section', async () => {
 			activeThreadId.set('conductor-1');
 			let resolve!: (lookup: { kind: 'target'; target: typeof target }) => void;
-			vi.mocked(fetchConductor).mockReturnValue(new Promise((r) => { resolve = r; }) as never);
+			vi.mocked(fetchScopeTarget).mockReturnValue(new Promise((r) => { resolve = r; }) as never);
 
 			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
 			flushSync();
@@ -107,9 +112,23 @@ describe('ThreadSettingsView', () => {
 			expect(host.textContent).not.toContain('Make Agent');
 		});
 
+		it('names the workspace scope\'s designated thread CORSIA, not Conductor', async () => {
+			uiScope.set(null);
+			activeThreadId.set('agent-1');
+			vi.mocked(fetchScopeTarget).mockResolvedValue({
+				kind: 'target',
+				target: { thread_id: 'agent-1', title: null, project_id: null, bootloader_files: [] },
+			} as never);
+
+			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
+			await flush();
+			expect(host.textContent).toContain('Thread: CORSIA');
+			expect(host.textContent).not.toContain('Conductor');
+		});
+
 		it('shows the unavailable state when the fetch returns nothing', async () => {
 			activeThreadId.set('conductor-1');
-			vi.mocked(fetchConductor).mockResolvedValue({ kind: 'unknown' } as never);
+			vi.mocked(fetchScopeTarget).mockResolvedValue({ kind: 'unknown' } as never);
 
 			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
 			await flush();
@@ -119,7 +138,7 @@ describe('ThreadSettingsView', () => {
 
 		it('treats a conductor for a different thread as unavailable', async () => {
 			activeThreadId.set('some-other-thread');
-			vi.mocked(fetchConductor).mockResolvedValue({ kind: 'target', target } as never);
+			vi.mocked(fetchScopeTarget).mockResolvedValue({ kind: 'target', target } as never);
 
 			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
 			await flush();
@@ -128,15 +147,15 @@ describe('ThreadSettingsView', () => {
 
 		it('refetches when the active thread changes', async () => {
 			activeThreadId.set('conductor-1');
-			vi.mocked(fetchConductor).mockResolvedValue({ kind: 'target', target } as never);
+			vi.mocked(fetchScopeTarget).mockResolvedValue({ kind: 'target', target } as never);
 
 			component = mount(ThreadSettingsView, { target: host, props: { conductor: true } });
 			await flush();
-			expect(fetchConductor).toHaveBeenCalledTimes(1);
+			expect(fetchScopeTarget).toHaveBeenCalledTimes(1);
 
 			activeThreadId.set('conductor-2');
 			await flush();
-			expect(fetchConductor).toHaveBeenCalledTimes(2);
+			expect(fetchScopeTarget).toHaveBeenCalledTimes(2);
 			expect(host.textContent).toContain('Conductor settings unavailable');
 		});
 	});

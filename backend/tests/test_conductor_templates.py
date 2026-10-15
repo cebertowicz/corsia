@@ -10,28 +10,42 @@ from tests.project_ref_helpers import project_ref
 
 _TEMPLATE_TEXT = {
     "core": (
-        "# Conductor operating contract\n\n"
-        "You are the designated conductor for this scope. Maintain a coherent view of its purpose, current authority, work and unresolved decisions. Coordinate within the user's commission; designation never supplies new grants.\n\n"
+        "# Coordinating agent operating contract\n\n"
+        "You are the designated coordinating agent for this scope. Maintain a coherent view of its purpose, current authority, work and unresolved decisions. Coordinate within the user's commission; designation never supplies new grants.\n\n"
         "Keep one accountable owner for each authorized whole outcome, including its integration and verification. Ownership remains with you where your commission includes an outcome that has not been explicitly assigned; an unowned objective does not authorize new work. Name the decision authority and contributors when a consequential outcome spans owners, and preserve each domain's constraints.\n\n"
         "Maintain the coordination model, responsibility boundaries, context/skill organization and supported integrations that reduce user attention. Use skill `conductor-bootstrap` when establishing or materially revising them. Prefer the smallest effective team; skill `agent-team-decomposition` defines the cut.\n\n"
         "Keep policy, responsibility context, plans, task briefs and references distinct. Refresh affected context after material changes. Keep source-checked scope notices dated with an expiry; remove stale notices rather than accumulating them. Route domain failures to their owners and mechanical gaps to the responsible product owner; more instructions cannot repair missing capabilities.\n"
+        "\n"
+        "When a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`.\n\n"
+        "- Review structural and cross-agent proposals with skill `context-stewardship`. Choose one canonical home, search conflicts and duplication, and verify changed behavior and delivery. System projections are not locally editable policy.\n"
+        "- When goals or constraints change, identify affected owners and explicitly refresh their context through supported routes. Do not assume subscriptions, invalidation, receipts or cross-plan access exist.\n"
+        "- Review active responsibilities, references and operating rules at a recorded horizon and after material roster or objective changes. Remove overlap and obsolete guidance without deleting useful history.\n"
+        "- Measure context cost by role and trigger. Separate delivered token evidence from source estimates; reduce duplication before shortening invariants. Set model-routing defaults inside allowed policy using cost per accepted outcome and correction rate, never savings that skip verification.\n"
     ),
-    "workspace": (
-        "# Workspace conductor responsibilities\n\n"
+    "corsia_agent": (
+        "# CORSIA agent operating contract\n"
+        "\n"
+        "You are the CORSIA agent: the person's one workspace-level agent.\n"
+        "\n"
+        "## Workspace responsibilities\n"
+        "\n"
         "- Establish the workspace purpose, shared operating context and actual commissioning authority. Keep project-specific goals and execution inside projects.\n"
         "- Steward cross-project context, skills, document organization and coordination health. Check the health and availability signals the instance actually exposes; record missing observation or repair routes rather than claiming healthy by absence of evidence.\n"
         "- Route authorized work to the appropriate project or workspace owner and make cross-project dependencies visible. Use projects for distinct purposes, sources, participants or disclosure boundaries; use workspace agents for recurring cross-project stewardship. Scope choice grants no extra access.\n"
         "- Own the workspace category registry at `shared/INDEX.md`. Reuse adequate categories; create a category index and registry entry when classification is clear within authority. Category owners steward contents. Ask only for a material missing decision.\n"
         "- Review whether shared policy and team structure reduce setup, correction and attention costs while preserving verified outcomes. Preserve project-specific choices within the common invariants.\n"
-        "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost per accepted result) and improve their context and skills, carrying what one agent or project learns to the rest. Projects' coordination belongs to their own conductors.\n"
-        "- Daily health check: on a wake whose payload kind is `conductor.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do; otherwise say nothing.\n"
+        "- Where the person's time goes: once a week, on the daily health-check wake, run skill `time-to-agent` across everything the person does, and hand a finding that sits inside one project to that project's conductor. On the same wake, watch for agents that got worse for the person (skill `attention-watch`).\n"
+        "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost per accepted result) and improve their context and skills, carrying what one agent or project learns to the rest. A project's coordination belongs to its own conductor.\n"
+        "- Daily health check: on a wake whose payload kind is `corsia_agent.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do; otherwise say nothing.\n"
         "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): when GitHub is set up and the person allowed agents to post, search CORSIA's open issues first and add to a match, otherwise file one. Give steps, expected vs actual and the CORSIA version. State technical facts only: no personal data, names, paths or conversation text, because the repository is public.\n"
     ),
     "project": (
         "# Project conductor responsibilities\n\n"
+        "You are the designated conductor for this project scope.\n\n"
         "- Elicit and maintain the user's purpose, vision, position and authority, constraints, acceptance evidence and current initiatives. Keep the charter in `context/PROJECT.md` and operating projection in `context/COORDINATION-MODEL.md`; live status stays in plans.\n"
         "- Agree a review horizon and revisit alignment when objectives, evidence or constraints materially change. Resolve conflicting objectives with the user; propagate the resulting direction to affected agents.\n"
         "- Own measures of whole project outcomes and user attention, with quality and rework guardrails. Detect local optimization that damages the combined result. Review team effectiveness and adjust coordination within the commission; do not equate activity or agent count with value.\n"
+        "- Once seven days have passed since your last review, at your next turn run skill `time-to-agent` inside this project: find recurring work that eats the person's time or holds back the project's objectives, suggest taking it over once per kind, and set it up as an agent in the project once they approve its charter.\n"
         "- Maintain project context, responsibility design, integrations and triggered skills; do not force software workflows onto other activities or duplicate domain execution.\n"
         "- Own the category registry at `shared/INDEX.md`. Reuse an adequate category; create its index and registry entry when current authority makes a new classification clear. Category owners steward their contents and freshness. Ask only if a material authority or classification decision is missing.\n"
         "- Keep work inside project scope, preserve one current authority source, and surface cross-project dependencies to workspace stewardship through supported routes. Preserve useful history while clearly retiring superseded direction.\n"
@@ -40,9 +54,9 @@ _TEMPLATE_TEXT = {
 }
 
 _TEMPLATE_SHA256 = {
-    "core": "ee8f9e475e2e5b17b17886c3a4caacdf737279f30536391fed0b0720cc542e86",
-    "workspace": "85c43e9e5557f58b9f19e60dcf38de848ce68cbb0e3bdc5fe47d1ed1ae27c422",
-    "project": "d6e7b3af3b98c20666dae82b40646bfb84d86109c5374fcf7a740454a1c466ae",
+    "core": "6542dcd24b13f44e5a09200d2ea7f98448895fbdf2856c5b14731c7f2fd1c89b",
+    "corsia_agent": "2cee995934c7038a62a6642f94a91a0c1963a9ff1a62c9b8973670f9a8387c88",
+    "project": "f93f36c76de64b8cdd711b6f543d3628f3fc9bfd8365086e45bc543cd1d01d1a",
 }
 
 _V1_TEMPLATE_SHA256 = {
@@ -97,7 +111,7 @@ def test_packaged_templates_select_scope_dedupe_and_preserve_raw_provenance(
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
             (
-                "workspace_conductor_session_id",
+                "corsia_agent_thread_id",
                 json.dumps({"session_id": "workspace-only"}),
                 "t",
             ),
@@ -109,8 +123,7 @@ def test_packaged_templates_select_scope_dedupe_and_preserve_raw_provenance(
 
         assert conductor_template_sources("ordinary", db=db) == []
         assert _source_kinds(conductor_template_sources("workspace-only", db=db)) == [
-            "core",
-            "workspace",
+            "core", "corsia_agent",
         ]
         assert _source_kinds(conductor_template_sources("project-only", db=db)) == [
             "core",
@@ -118,7 +131,7 @@ def test_packaged_templates_select_scope_dedupe_and_preserve_raw_provenance(
         ]
 
         db.execute(
-            "UPDATE settings SET value=? WHERE key='workspace_conductor_session_id'",
+            "UPDATE settings SET value=? WHERE key='corsia_agent_thread_id'",
             (json.dumps({"session_id": "combined"}),),
         )
         db.execute("UPDATE projects SET conductor_thread_id='combined'")
@@ -127,11 +140,11 @@ def test_packaged_templates_select_scope_dedupe_and_preserve_raw_provenance(
     finally:
         db.close()
 
-    assert _source_kinds(combined) == ["core", "workspace", "project"]
+    assert _source_kinds(combined) == ["core", "project", "corsia_agent"]
     assert [source.source_id for source in combined] == [
         "conductor-template:core:v2",
-        "conductor-template:workspace:v2",
         "conductor-template:project:v2",
+        "corsia-agent-template:v2",
     ]
     for source in combined:
         kind = source.metadata["template_kind"]
@@ -144,10 +157,10 @@ def test_packaged_templates_select_scope_dedupe_and_preserve_raw_provenance(
         assert source.metadata["raw_sha256"] == _TEMPLATE_SHA256[kind]
         assert source.metadata["raw_byte_count"] == len(expected_bytes)
         assert source.metadata["package"] == "prompts.conductor"
-        assert source.metadata["resource"] == f"{kind}-v2.md"
+        assert source.metadata["resource"] == f"{kind.replace('_', '-')}-v2.md"
 
 
-@pytest.mark.parametrize("kind", ["workspace", "project"])
+@pytest.mark.parametrize("kind", ["corsia_agent", "project"])
 def test_scope_templates_assign_category_index_ownership(kind):
     from core.conductor_templates import _load_template
 
@@ -179,7 +192,7 @@ def test_packaged_template_loading_rejects_non_utf8_bytes(isolated_db, monkeypat
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
             (
-                "workspace_conductor_session_id",
+                "corsia_agent_thread_id",
                 json.dumps({"session_id": "workspace-conductor"}),
                 "t",
             ),
@@ -235,7 +248,7 @@ def test_registry_orders_base_scope_then_conductor_thread_and_skills(
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
             (
-                "workspace_conductor_session_id",
+                "corsia_agent_thread_id",
                 json.dumps({"session_id": "combined"}),
                 "t",
             ),
@@ -269,6 +282,7 @@ def test_registry_orders_base_scope_then_conductor_thread_and_skills(
         "corsia",
         "corsia",
         "corsia",
+        "corsia",
         "workspace",
         "project",
         "project",
@@ -282,12 +296,13 @@ def test_registry_orders_base_scope_then_conductor_thread_and_skills(
 
 def _assert_exact_template_delivery(provider_text: str, inventory) -> None:
     template_rows = [
-        row for row in inventory if row.source_id.startswith("conductor-template:")
+        row for row in inventory
+        if row.source_id.startswith(("conductor-template:", "corsia-agent-template:"))
     ]
     assert [row.metadata["template_kind"] for row in template_rows] == [
         "core",
-        "workspace",
         "project",
+        "corsia_agent",
     ]
     for row in template_rows:
         content = row.prompt_content
@@ -315,6 +330,7 @@ def _assert_exact_role_delivery(provider_text: str, inventory) -> None:
         ("agent", "project"),
         ("conductor", "workspace"),
         ("conductor", "project"),
+        ("corsia_agent", "workspace"),
     ]
     for row in role_rows:
         content = row.prompt_content
@@ -368,6 +384,7 @@ def test_cc_and_codex_cold_reconstructions_share_collector_and_deliver_once(
         (project, "agent", "AGENT.md", "CC CODEX PROJECT AGENT"),
         (workspace, "conductor", "CONDUCTOR.md", "CC CODEX GLOBAL CONDUCTOR"),
         (project, "conductor", "CONDUCTOR.md", "CC CODEX PROJECT CONDUCTOR"),
+        (workspace, "corsia_agent", "CORSIA_AGENT.md", "CC CODEX CORSIA AGENT"),
     ):
         path = root / "context" / "roles" / role / filename
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -381,7 +398,7 @@ def test_cc_and_codex_cold_reconstructions_share_collector_and_deliver_once(
         db.execute(
             "INSERT INTO settings (key,value,updated_at) VALUES (?,?,?)",
             (
-                "workspace_conductor_session_id",
+                "corsia_agent_thread_id",
                 json.dumps({"session_id": "combined"}),
                 "t",
             ),
@@ -430,12 +447,12 @@ def test_cc_and_codex_cold_reconstructions_share_collector_and_deliver_once(
     cc_templates = [
         (row.source_id, row.prompt_content, row.metadata["raw_sha256"])
         for row in cc.snapshot.source_inventory
-        if row.source_id.startswith("conductor-template:")
+        if row.source_id.startswith(("conductor-template:", "corsia-agent-template:"))
     ]
     codex_templates = [
         (row.source_id, row.prompt_content, row.metadata["raw_sha256"])
         for row in codex.snapshot.source_inventory
-        if row.source_id.startswith("conductor-template:")
+        if row.source_id.startswith(("conductor-template:", "corsia-agent-template:"))
     ]
     assert cc_templates == codex_templates
     cc_roles = [

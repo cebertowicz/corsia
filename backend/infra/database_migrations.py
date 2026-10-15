@@ -172,8 +172,10 @@ from infra.migration_112_to_113_retype_upload_images import migrate_112_to_113
 from infra.migration_113_to_114_update_operations import migrate_113_to_114
 from infra.migration_114_to_115_scheduled_updates import migrate_114_to_115
 from infra.migration_115_to_116_corrections_checker_cleanup import migrate_115_to_116
-from infra.migration_116_to_117_action_drafts import migrate_116_to_117
-from infra.migration_117_to_118_email_screens import migrate_117_to_118
+from infra.migration_116_to_117_script_schedules import migrate_116_to_117
+from infra.migration_117_to_118_corsia_agent import migrate_117_to_118
+from infra.migration_118_to_119_action_drafts import migrate_118_to_119
+from infra.migration_119_to_120_email_screens import migrate_119_to_120
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -776,6 +778,8 @@ MIGRATIONS[114] = migrate_114_to_115
 MIGRATIONS[115] = migrate_115_to_116
 MIGRATIONS[116] = migrate_116_to_117
 MIGRATIONS[117] = migrate_117_to_118
+MIGRATIONS[118] = migrate_118_to_119
+MIGRATIONS[119] = migrate_119_to_120
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

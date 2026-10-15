@@ -9,11 +9,11 @@ import { type PickerAccount } from '$lib/stores/accountPicker';
 export async function choosePickerAccount(
 	threadId: string | null,
 	activeModelId: string | null,
-	workspaceConductorId: string | null,
+	corsiaAgentId: string | null,
 	row: PickerAccount,
 ): Promise<PinResult> {
 	if (!threadId || row.marked || !row.choosable) return { ok: true, changed: false };
-	if (threadId === workspaceConductorId && !activeModelId) {
+	if (threadId === corsiaAgentId && !activeModelId) {
 		const result = await bindConductorFromPicker(threadId, row.account.id);
 		return result.ok ? { ok: true, changed: true } : result;
 	}

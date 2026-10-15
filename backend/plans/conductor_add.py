@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import infra.conductor as conductor
+from infra.corsia_agent import get_corsia_agent
 
 
 def conductor_may_add(db, plan, actor) -> bool:
@@ -17,8 +18,8 @@ def conductor_may_add(db, plan, actor) -> bool:
     if owner is None:
         return False
     return actor.thread_id in {
-        conductor.get_conductor(str(owner["project_id"]), db),
-        conductor.get_conductor(conductor.WORKSPACE_SCOPE, db),
+        conductor.get_scope_coordinator(str(owner["project_id"]), db),
+        get_corsia_agent(db=db),
     }
 
 

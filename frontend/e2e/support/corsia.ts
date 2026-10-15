@@ -46,17 +46,17 @@ export async function loginByUrl(
 
 /**
  * Runs one page load and waits out the first-run landing it can trigger. A fresh
- * workspace answers /api/conductor with first_run_pending, and on every load the
+ * workspace answers /api/corsia-agent with first_run_pending, and on every load the
  * app then opens the conductor thread, which closes the phone sidebar. Opening the
  * rail before that lands races it: the sidebar closes under the click and the
- * shell header covers the rail. The page's own /api/conductor response is not read,
+ * shell header covers the rail. The page's own /api/corsia-agent response is not read,
  * because a response from the page being left can match and its body is gone once
  * the navigation replaces it. Off the root the landing's composer is its proof. At
  * the root the composer is up before the landing, so a caller whose load lands
  * there passes `lands` and waits for the conductor's messages instead.
  */
 export async function loadPastFirstRunLanding(page: Page, load: () => Promise<unknown>, { lands = false } = {}) {
-	const conductor = await page.request.get(`/api/conductor?token=${TEST_TOKEN}`);
+	const conductor = await page.request.get(`/api/corsia-agent?token=${TEST_TOKEN}`);
 	expect(conductor.ok(), 'the conductor state is readable').toBeTruthy();
 	const state = await conductor.json();
 	const firstRunPending = state.first_run_pending === true;

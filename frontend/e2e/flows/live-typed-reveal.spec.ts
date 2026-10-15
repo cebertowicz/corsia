@@ -177,7 +177,7 @@ for (const [width, height, project] of layouts) {
 
 			await expect.poll(async () => [await shownCount(viewer, lastA), await shownCount(viewer, lastB)], { timeout: PACE_CAP_MS + 5_000 }).toEqual([1, 1]);
 		} finally {
-			// A designated workspace conductor changes where the app lands; later cases expect none.
+			// A designated CORSIA agent changes where the app lands; later cases expect none.
 			if (designated) await designateConductor(request, null);
 			await context.close();
 		}
