@@ -91,6 +91,34 @@ async def recover_load_failure(
     return None
 
 
+async def settle_load_failure(
+    worker: CorrectionsWorker,
+    manifest,
+    fallback: tuple,
+    error: ClassifierUnavailable,
+    outages: list[str],
+    attempts_per_kind: int,
+):
+    """Settle one failed load: None stops, else the manifest and fallback to try next."""
+    fallback_child, fallback_version = fallback
+    reason = str(error)
+    logger.warning("corrections classifier did not load: {}", error)
+    await drop_child(worker)
+    resolution = await recover_load_failure(
+        worker, manifest, fallback_child, fallback_version, reason, error.kind,
+    )
+    if resolution is False:
+        return None
+    if resolution is not None:
+        return resolution, (None, None)
+    outages.append(reason)
+    if len(outages) == attempts_per_kind and fallback_child is not None:
+        manifest = restore_transient_fallback(worker, manifest, fallback_child, str(fallback_version), reason)
+        outages.clear()
+        return manifest, (None, None)
+    return manifest, fallback
+
+
 async def classify(
     worker: CorrectionsWorker,
     candidate: CorrectionCandidate,
@@ -125,25 +153,12 @@ async def classify(
         try:
             await asyncio.to_thread(child.ensure_loaded)
         except ClassifierUnavailable as error:
-            reason = str(error)
-            logger.warning("corrections classifier did not load: {}", error)
-            await drop_child(worker)
-            resolution = await recover_load_failure(
-                worker, manifest, fallback_child, fallback_version, reason, error.kind,
+            step = await settle_load_failure(
+                worker, manifest, (fallback_child, fallback_version), error, outages, attempts_per_kind,
             )
-            if resolution is False:
+            if step is None:
                 return False
-            if resolution is not None:
-                manifest = resolution
-                fallback_child, fallback_version = None, None
-                continue
-            outages.append(reason)
-            if len(outages) == attempts_per_kind and fallback_child is not None:
-                manifest = restore_transient_fallback(
-                    worker, manifest, fallback_child, str(fallback_version), reason,
-                )
-                fallback_child, fallback_version = None, None
-                outages.clear()
+            manifest, (fallback_child, fallback_version) = step
             continue
         if fallback_child is not None:
             await retire_fallback(worker, fallback_child)
