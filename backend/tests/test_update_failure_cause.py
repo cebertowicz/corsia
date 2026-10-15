@@ -238,6 +238,30 @@ async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolate
 
 
 @pytest.mark.asyncio
+async def test_classifier_failure_notice_uses_one_stable_delivery_key_per_version_and_reason(monkeypatch):
+    from automation import update_failure_notice
+    from jobs import corrections_recording
+
+    delivered = AsyncMock()
+    monkeypatch.setattr(corrections_recording, "owner_user_ids", lambda: ["owner"])
+    monkeypatch.setattr(update_failure_notice, "_tell_conductor_about_owner_notice", delivered)
+
+    await update_failure_notice.tell_conductor_about_corrections_classifier_failure(
+        "v2", "load error:AssertionError", "Retry setup.",
+    )
+    await update_failure_notice.tell_conductor_about_corrections_classifier_failure(
+        "v2", "load error:AssertionError", "Retry setup.",
+    )
+
+    first, second = delivered.await_args_list
+    assert first.args == second.args == ("owner", "Corrections classifier v2 cannot run: Retry setup.")
+    assert first.kwargs["event_type"] == "system.corrections_classifier_failed"
+    assert first.kwargs["notice_name"] == "corrections classifier failure"
+    assert first.kwargs["delivery_id"] == second.kwargs["delivery_id"]
+    assert first.kwargs["delivery_id"].startswith("corrections-classifier-failed:v2:")
+
+
+@pytest.mark.asyncio
 async def test_scheduled_lapse_skips_unavailable_workspace_conductor(isolated_db, monkeypatch):
     """A missing conductor logs the skip and cannot undo a cleared schedule."""
     from automation import update_failure_notice

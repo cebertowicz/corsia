@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from core.lesson_report import ReportScope, read_report
+from core.lesson_report import ReportScope, _correction_inventory, _list_inventory, read_report
 from plans import closure, public
 from tests.test_lesson_report_inventory import source
 from tests.test_lesson_review_history import db, review  # noqa: F401 - shared real-schema fixture
@@ -98,3 +98,19 @@ def test_due_work_is_visible_when_selected_period_has_no_calls(db):
     assert result["rows"][0]["due"] is True
     assert result["rows"][0]["indexed"]["calls"] == 0
     assert result["rows"][0]["indexed"]["efficacy"] is None
+
+
+def test_report_hides_only_old_watches_without_a_recent_correction_anchor():
+    rows = _correction_inventory([
+        {"id": "old", "version": "v", "state": "watch", "originating_subjects": [],
+         "reviews": [{"opened_at": "2026-08-23T00:00:00Z"}]},
+        {"id": "recent", "version": "v", "state": "watch", "originating_subjects": [],
+         "reviews": [{"opened_at": "2026-09-22T00:00:00Z"}]},
+        {"id": "recurred", "version": "v", "state": "watch", "originating_subjects": ["message:new"],
+         "reviews": [{"opened_at": "2026-08-23T00:00:00Z"}]},
+    ], {"message:new": {"id": "fact", "ts": "2026-09-20T00:00:00+00:00"}})
+
+    assert [row["id"] for row in rows] == ["old", "recent", "recurred"]
+    assert [row["id"] for row in _list_inventory(rows, "2026-10-02T12:00:00Z")] == ["recent", "recurred"]
+    assert rows[2]["correction_status"] == "linked"
+    assert rows[2]["recurrence_count"] == 1

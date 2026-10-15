@@ -272,7 +272,10 @@ def stage_edit(
         from infra.placement_marks import stage_checkpoint_review
 
         insert = functools.partial(_insert, db, str(checkpoint["id"]))
-        return stage_checkpoint_review(db, thread_id, entries, prior, params, insert=insert)
+        return stage_checkpoint_review(
+            db, thread_id, entries, prior, params, insert=insert,
+            history_epoch=int(checkpoint["history_epoch"]),
+        )
     entry_id = int(params["entry_id"])
     target = entries.get(entry_id)
     if target is None:

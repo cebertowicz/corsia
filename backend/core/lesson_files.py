@@ -103,7 +103,8 @@ def _day(review_after: str) -> str:
 
 def render_trial(
     *, lesson_id: str, owner: str, name: str, description: str, text: str,
-    trial: Trial, source_refs: list[dict[str, Any]], origin: dict[str, str] | None = None,
+    trial: Trial, source_refs: list[dict[str, Any]], originating_subjects: tuple[str, ...] | None = None,
+    origin: dict[str, str] | None = None,
 ) -> str:
     """A trial skill with no ``review_ref``: written, and not yet offered.
 
@@ -120,9 +121,11 @@ def render_trial(
     if trial.boundary:
         body += f"\nDoes not apply: {trial.boundary}\n"
     lesson = {
-        "id": lesson_id, "state": "trial", "owner": owner,
+        "id": lesson_id, "state": trial.state, "owner": owner,
         "review_after": trial.review_after, "source_refs": _refs(source_refs),
     }
+    if originating_subjects is not None:
+        lesson["originating_subjects"] = list(originating_subjects)
     if origin:
         lesson["origin"] = dict(origin)
     return _dump(

@@ -1,13 +1,14 @@
 """Resolve existing caller visibility and sources for both lesson-report adapters."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 from threading import Event
 from typing import Any
 
+from core.lesson_corrections import correction_facts, source_subjects
 from core.lesson_report import ReportScope, collect_report, detail_request, read_report
 from core.lesson_report_db import report_snapshot
 from core.lesson_report_offers import LessonReportCollectionCancelled
@@ -86,9 +87,26 @@ def collect_for_identity(*, user_id: str | None = None, workspace: Path, caller_
     return ReportCollection(selected, inputs, collected, dict(options), range, scope, project, agent)
 
 
-def render_collection(collection: ReportCollection, workspace: Path) -> dict[str, Any]:
+def collect_corrections(collection: ReportCollection, sources: list[dict[str, Any]],
+                        cancellation_event: Event | None = None) -> ReportCollection:
+    """Join correction facts for current lessons' subjects in a second short snapshot.
+
+    Subjects live in lesson files, which are read only after the first snapshot closes.
+    """
+    subjects = source_subjects(sources)
+    if not subjects:
+        return collection
+    snapshot = (report_snapshot(cancellation_event=cancellation_event)
+                if cancellation_event is not None else report_snapshot())
+    with snapshot as db:
+        facts = correction_facts(db, subjects)
+    return replace(collection, collected={**collection.collected, "correction_facts": facts})
+
+
+def render_collection(collection: ReportCollection, workspace: Path,
+                      resolved: tuple[list, list, dict] | None = None) -> dict[str, Any]:
     """Resolve filesystem and Git evidence only after the DB snapshot is closed."""
-    sources, unavailable, discovery = current_sources(workspace, collection.inputs)
+    sources, unavailable, discovery = resolved or current_sources(workspace, collection.inputs)
     blob_reader, blob_reason = recorded_blob_reader(workspace)
     try:
         result = read_report(None, scope=collection.scope, sources=sources, collected=collection.collected,
@@ -126,4 +144,6 @@ async def report_for_identity(*, cancellation_event: Event | None = None, **kwar
     """Run the read-only snapshot and immutable render phases on their owners."""
     workspace = kwargs["workspace"]
     collection = await run_bulk(collect_for_identity, cancellation_event=cancellation_event, **kwargs)
-    return await run_off_db(render_collection, collection, workspace)
+    resolved = await run_off_db(current_sources, workspace, collection.inputs)
+    collection = await run_bulk(collect_corrections, collection, resolved[0], cancellation_event)
+    return await run_off_db(render_collection, collection, workspace, resolved)
