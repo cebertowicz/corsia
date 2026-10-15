@@ -16,21 +16,19 @@ async function routeReplacement(page: Page, state: State) {
 	} }));
 	await page.route('**/api/setup/local-download', (route) => {
 		unsignedRequests += 1;
-		if (state === 'progress' && unsignedRequests > 1) return route.fulfill({ json: { ok: true, in_progress: true } });
+		if (state === 'progress' && unsignedRequests > 1) return route.fulfill({ json: { ok: true, in_progress: true, stage: 'Installing' } });
 		return route.fulfill({ status: 409, json: { code: 'replace_consent_required' } });
 	});
 	await page.route('**/api/providers/local/setup', (route) => {
 		signedRequests += 1;
 		return route.fulfill({ status: 409, json: { detail: { code: 'replace_consent_required' }, request: signedRequests } });
 	});
-	await page.route('**/api/providers/sources/recheck', (route) => route.fulfill({ json: { sources: [
-		{ source: 'omlx', name: 'Local model', state: 'needs_setup' },
+	const sources = [
+		{ source: 'omlx', name: 'Local model', state: 'needs_setup', ...(state === 'progress' ? { setup_downloading: false, setup_stage: 'Installing' } : {}) },
 		{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
-	] } }));
-	await page.route('**/api/providers/sources', (route) => route.fulfill({ json: { sources: [
-		{ source: 'omlx', name: 'Local model', state: 'needs_setup' },
-		{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
-	] } }));
+	];
+	await page.route('**/api/providers/sources/recheck', (route) => route.fulfill({ json: { sources } }));
+	await page.route('**/api/providers/sources', (route) => route.fulfill({ json: { sources } }));
 }
 
 async function settleOnHeading(page: Page, title: string) {
@@ -43,7 +41,7 @@ async function settleOnHeading(page: Page, title: string) {
 
 async function applyCaptureOverrides(page: Page) {
 	await page.addStyleTag({ content: `
-		:root {
+		:root, html[data-theme="light"] {
 			--accent-fill: #00769e;
 			--accent-on-fill: #ffffff;
 			--accent-text: #006d92;
@@ -57,6 +55,7 @@ async function applyCaptureOverrides(page: Page) {
 			--accent-line: #2e9cc4;
 			--accent-wash: #152026;
 		}
+		*, *::before, *::after { transition: none !important; animation: none !important; }
 		.version-overlay { display: none !important; }
 	` });
 }
@@ -78,6 +77,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect(replacementCopy).toHaveCount(1);
 			await expect(page.locator('.primary-action').getByRole('button', { name: 'Reinstall' })).toBeVisible();
 			await expect(page.locator('.consent').getByRole('button', { name: 'Not now' })).toBeVisible();
+
 			await expect(page.getByRole('button', { name: 'Continue' })).toHaveCount(0);
 
 			if (state === 'progress') {
@@ -85,6 +85,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await settleOnHeading(page, 'Create your account');
 				await expect(page.getByLabel('Setup progress').getByText('In the background')).toBeVisible();
 				await expect(page.getByLabel('Setup progress').getByText('Qwen 3.8', { exact: true })).toBeVisible();
+				await expect(page.getByLabel('Setup progress').getByText('Installing', { exact: true })).toBeVisible();
 			}
 			if (state === 'not-now') {
 				await page.getByRole('button', { name: 'Not now' }).click();
@@ -97,6 +98,8 @@ for (const theme of ['light', 'dark'] as const) {
 				await expect(page.locator('.pane-scene:not([inert]) .sources').getByRole('button', { name: 'Reinstall', exact: true })).toBeVisible();
 				await expect(page.getByText('Claude Code', { exact: true })).toBeVisible();
 			}
+			await page.mouse.move(0, 0);
+			if (state === 'ask' && theme === 'light') await expect(page.locator('.primary-action button')).toHaveCSS('background-color', 'rgb(0, 118, 158)');
 			await page.screenshot({ path: `${assets}/${state}-${theme}-1440x900.png`, animations: 'disabled', scale: 'css' });
 		});
 	}

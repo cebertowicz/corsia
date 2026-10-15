@@ -33,6 +33,7 @@
 	let sourceError = $state('');
 	let localStartError = $state('');
 	let localDownloadPending = $state(false);
+	let localPendingStage = $state<string | null>(null);
 	let localSetupBusy = $state(false);
 	let existingOmlxConsent = $state(false);
 	let replaceOmlxConsent = $state(false);
@@ -49,7 +50,7 @@
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
-	const localStage = $derived(local?.setup_stage || 'Downloading');
+	const localStage = $derived(local?.setup_stage || localPendingStage || 'Downloading');
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
 	const localJob = $derived<SetupJob | undefined>(
 		localDownloading
@@ -131,11 +132,16 @@
 	type LocalDownloadStart = 'started' | 'consent_required' | 'replace_consent_required' | 'failed';
 
 	async function startLocalDownload(consentExisting = false, consentReplace = false): Promise<LocalDownloadStart> {
+		localPendingStage = null;
 		if (!localWanted && !consentExisting && !consentReplace) return 'started';
 		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting, ...(consentReplace ? { consent_replace: true } : {}) }) });
 		const result = await response.json().catch(() => null);
 		if (response.status === 409 && (result?.code === 'consent_required' || result?.code === 'replace_consent_required')) return result.code;
-		return response.ok && result?.ok !== false ? 'started' : 'failed';
+		if (response.ok && result?.ok !== false) {
+			localPendingStage = typeof result?.stage === 'string' ? result.stage : null;
+			return 'started';
+		}
+		return 'failed';
 	}
 
 	async function beginSetup() {
@@ -241,11 +247,13 @@
 		try {
 			sources = await recheckSources(current);
 			localDownloadPending = false;
+			localPendingStage = null;
 			sourceError = '';
 		} catch {
 			try {
 				sources = await fetchSources(current);
 				localDownloadPending = false;
+				localPendingStage = null;
 				sourceError = '';
 			} catch { sourceError = 'CORSIA couldn’t check your model sources. Try again.'; }
 		}
@@ -382,16 +390,10 @@
 		</div>
 	{/if}
 </SetupShell>
-
 <style>
 	.form { display: flex; flex-direction: column; gap: var(--space-2); max-width: calc(var(--space-8) * 8); }
-	.folder { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-7); color: var(--text-secondary); font-size: var(--text-subhead); }
-	.folder span { flex: none; white-space: nowrap; }
-	.folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
-	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
-	.welcome-copy p { margin: 0; }
-	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); }
-	.switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); }
-	.local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }
+	.folder { display: flex; align-items: center; gap: var(--space-3); min-height: var(--space-7); color: var(--text-secondary); font-size: var(--text-subhead); } .folder span { flex: none; white-space: nowrap; } .folder strong { color: var(--text-primary); font-weight: var(--fw-regular); overflow-wrap: anywhere; }
+	.welcome-copy, .sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); } .welcome-copy p { margin: 0; }
+	.download-choice { display: flex; flex-direction: column; gap: var(--space-1); } .switch { display: flex; gap: var(--space-2); align-items: center; color: var(--text-primary); } .local-meta { color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.api-key-action { align-self: flex-start; }
 </style>

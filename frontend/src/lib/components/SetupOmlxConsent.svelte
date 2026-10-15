@@ -36,5 +36,6 @@
 	.consent p { margin: 0; }
 	.consent ul { margin: 0; padding-left: var(--space-5); }
 	.consent-actions { align-self: flex-start; }
+	.consent-actions :global(.btn.chip) { margin-inline: calc(var(--space-2) * -1); }
 	/* The deferral deliberately uses the setup accent-text chip directly. */
 </style>

@@ -111,7 +111,7 @@ describe('SetupScreen', () => {
 			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
 			if (url === '/api/setup/local-download') {
 				downloads += 1;
-				return downloads === 1 ? json({ code: 'replace_consent_required' }, 409) : json({ ok: true, in_progress: true });
+				return downloads === 1 ? json({ code: 'replace_consent_required' }, 409) : json({ ok: true, in_progress: true, stage: 'Installing' });
 			}
 			return json({ sources: [] });
 		}));
@@ -133,6 +133,7 @@ describe('SetupScreen', () => {
 		await settle();
 		expect(host.textContent).toContain('Create your account');
 		expect(host.querySelector('.job-region')?.textContent).toContain('Example model');
+		expect(host.querySelector('.job-region')?.textContent).toContain('Installing');
 		expect(host.querySelectorAll('.row.current')).toHaveLength(1);
 		expect(host.querySelector('.row.current')?.textContent).toContain('Your account');
 	});
