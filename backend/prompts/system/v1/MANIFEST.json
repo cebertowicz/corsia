@@ -256,10 +256,10 @@
       "sha256": "5a737798876019404b7802a8aebf33d712658bb21e1df33ce00a325f558bc175"
     },
     {
-      "bytes": 3985,
+      "bytes": 4198,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "8e9388c21e0d38f50bf725daab2cc237f236f4e90a350aa75215a7be55ec0790"
+      "sha256": "52d41bf3569f81a527d9d702975d3be37f4f5bd554af87223002d0f466dd1d5e"
     },
     {
       "bytes": 5925,

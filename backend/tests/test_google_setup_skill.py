@@ -95,7 +95,8 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "go on only when it says In production" in steps
     assert "browser-person-steps.md` B" in steps
     assert "Never make a second project or client." in steps
-    assert "never the client secret" in steps and "never open it" in steps
+    assert "shows the client secret, so take no snapshot or screenshot of it" in steps
+    assert "Read the client ID from the Clients list" in steps and "never open it" in steps
     assert steps.index("`google_connect` with no `client_file`") < steps.index("agent-browser --version")
     assert "Connected as <address>. If that's the wrong account, say so and I'll switch it." in steps
     assert "gws" not in skill
