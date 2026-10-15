@@ -1,5 +1,6 @@
 use std::{
     env,
+    future::Future,
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -128,7 +129,10 @@ async fn stage_in_work<R: tauri::Runtime>(
         .map_err(|error| StageError::Fetch(error.to_string()))?
         .ok_or_else(|| StageError::Fetch("release manifest contained no candidate".into()))?;
     let archive = staging_root.join("CORSIA.app.tar.gz");
-    download_archive(&update.download_url, &archive).await?;
+    download_newer_archive(&update.current_version, &update.version, || {
+        download_archive(&update.download_url, &archive)
+    })
+    .await?;
     verify_archive(&archive, &update.signature).map_err(StageError::Fetch)?;
     ensure_same_device(
         current_bundle.parent().unwrap_or(Path::new("/")),
@@ -187,6 +191,31 @@ where
         .map_err(|error| StageError::Build(error.to_string()))?;
     fs::remove_dir(staging_root).map_err(|error| StageError::Build(error.to_string()))?;
     Ok(staged_bundle.to_path_buf())
+}
+
+async fn download_newer_archive<F, Fut>(
+    current_version: &str,
+    candidate_version: &str,
+    download: F,
+) -> Result<(), StageError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), StageError>>,
+{
+    let is_newer = candidate_is_newer(current_version, candidate_version).map_err(|error| {
+        match error {
+            StageError::Fetch(reason) => {
+                StageError::Fetch(format!("refusing replay or downgrade: {reason}"))
+            }
+            StageError::Build(reason) => StageError::Build(reason),
+        }
+    })?;
+    if !is_newer {
+        return Err(StageError::Fetch(format!(
+            "refusing replay or downgrade: candidate {candidate_version} is not newer than installed {current_version}"
+        )));
+    }
+    download().await
 }
 
 async fn download_archive(url: &reqwest::Url, path: &Path) -> Result<(), StageError> {
@@ -273,6 +302,14 @@ where
     }
     file.sync_all()
         .map_err(|error| StageError::Fetch(error.to_string()))
+}
+
+fn candidate_is_newer(current: &str, candidate: &str) -> Result<bool, StageError> {
+    let current = Version::parse(current)
+        .map_err(|error| StageError::Fetch(format!("invalid installed version: {error}")))?;
+    let candidate = Version::parse(candidate)
+        .map_err(|error| StageError::Fetch(format!("invalid candidate version: {error}")))?;
+    Ok(candidate > current)
 }
 
 fn ensure_staged_bundle_version(
@@ -619,6 +656,18 @@ mod tests {
             ensure_staged_bundle_version("1.2.3", "1.2.4", &bundle),
             Err(reason) if reason.contains("invalid bundle version")
         ));
+    }
+
+    #[test]
+    fn stale_or_invalid_manifest_is_refused_before_archive_download() {
+        for candidate in ["1.2.3", "1.2.2", "not-a-version"] {
+            let result = tauri::async_runtime::block_on(download_newer_archive(
+                "1.2.3",
+                candidate,
+                || async { Err(StageError::Build("download was called".into())) },
+            ));
+            assert!(matches!(result, Err(StageError::Fetch(_))), "{candidate}");
+        }
     }
 
     fn developer_identity() -> SigningIdentity {
