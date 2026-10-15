@@ -13,7 +13,7 @@ import pytest
 
 from connections.google import handover, oauth
 from infra import key_store
-from infra.conductor import set_conductor
+from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
 from infra.database import get_db
 from tests.registry_helpers import make_session
 from tools.google_account import GoogleAdoptAssistantSignInTool, GoogleConnectTool
@@ -71,7 +71,7 @@ def legacy_assistant(handover_env):
     _, homes = handover_env
     db = get_db()
     conductor = make_session(db, prefix="conductor")
-    assert set_conductor("workspace", conductor, db=db)
+    assert set_scope_coordinator(WORKSPACE_SCOPE, conductor, db=db)
     assistant = make_session(db, prefix="assistant", title="Assistant")
     db.execute(
         "UPDATE threads SET agent_enabled=1,agent_responsibility=?,agent_domains=?,agent_notes=? WHERE id=?",
