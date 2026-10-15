@@ -350,6 +350,8 @@ describe('BrowserLeaf toolbar', () => {
 		flushSync();
 		expect(page().textContent).toContain('Browser stream unavailable: gone');
 		expect(toolbar().textContent).not.toContain('Browser stream unavailable');
+		// A failed stream leaves its last frame dimmed, so its status stays on the over-page pill.
+		expect(page().querySelector('.page-status.over-page')).not.toBeNull();
 	});
 });
 

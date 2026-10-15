@@ -368,7 +368,7 @@
 			</span>
 		{/if}
 		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
-		<BrowserPageStatus {status} {streaming} onreconnect={connect} onretry={() => void go()} />
+		<BrowserPageStatus {status} {streaming} {ended} onreconnect={connect} onretry={() => void go()} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
 </div>

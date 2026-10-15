@@ -2,11 +2,13 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Spinner from '$lib/components/ui/Spinner.svelte';
 
-	let { status, streaming, onreconnect, onretry }: {
+	let { status, streaming, ended, onreconnect, onretry }: {
 		/** What the pane has to say: no browser, opening, an error, or an ended stream; empty when the page is simply there. */
 		status: string;
 		/** A live page is on the canvas, so the status sits over its edge instead of replacing it. */
 		streaming: boolean;
+		/** The stream ended or failed, leaving its last frame dimmed on the canvas. */
+		ended: boolean;
 		onreconnect: () => void;
 		onretry: () => void;
 	} = $props();
@@ -15,8 +17,8 @@
 	const noBrowser = $derived(status === 'No browser yet');
 	const streamEnded = $derived(status === 'Browser stream ended');
 	const unavailable = $derived(status.startsWith('Browser stream unavailable'));
-	// Over a live page, or the stale frame an ended stream leaves behind.
-	const overPage = $derived(streaming || streamEnded);
+	// Over a live page, or the stale frame an ended or failed stream leaves behind.
+	const overPage = $derived(streaming || ended);
 	const retryable = $derived(unavailable || status.startsWith('Browser could not open'));
 </script>
 
