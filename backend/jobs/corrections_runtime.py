@@ -31,6 +31,12 @@ async def drop_child(worker: CorrectionsWorker) -> None:
     worker.children = {key: value for key, value in worker.children.items() if value is not child}
 
 
+async def retire_fallback(worker: CorrectionsWorker, fallback_child) -> None:
+    """Close the older child once the newer version has loaded."""
+    await asyncio.to_thread(fallback_child.close)
+    worker.children = {key: value for key, value in worker.children.items() if value is not fallback_child}
+
+
 def record_version_state(worker: CorrectionsWorker, version: str, state: str, reason: str) -> None:
     """Keep a version-level startup outcome in the worker's diagnostic snapshot."""
     worker.versions = [
@@ -134,8 +140,7 @@ async def classify(
                 outages.clear()
             continue
         if fallback_child is not None:
-            await asyncio.to_thread(fallback_child.close)
-            worker.children = {key: value for key, value in worker.children.items() if value is not fallback_child}
+            await retire_fallback(worker, fallback_child)
             fallback_child = None
         worker.active_manifest = manifest
         worker.version = manifest.classifier_version()
