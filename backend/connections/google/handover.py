@@ -5,17 +5,18 @@ import json
 import shutil
 from pathlib import Path
 
+from automation import schedules
 from connections import gws_agent_home
 from connections.google import oauth
 from core import thread_lifecycle
 from infra.database import write_transaction
 from infra.db_async import run_in_db
+from infra.time import utc_now_iso
 from tools.corsia_api import conductor_user
 
 LEGACY_ASSISTANT_RESPONSIBILITY = "Email, calendar, Drive, and Docs assistance"
 LEGACY_ASSISTANT_DOMAINS = ["email", "calendar", "drive", "docs"]
 LEGACY_ASSISTANT_NOTES = "Created through Assistant onboarding."
-SCHEDULE_KIND = "assistant.scheduled_email_check"
 
 MISSING_ASSISTANT = "No eligible old Assistant Google sign-in was found. Nothing was moved; use google_connect to sign in."
 AMBIGUOUS_ASSISTANT = "More than one eligible old Assistant was found. Nothing was moved; CORSIA will not choose one. Archive or remove the unwanted Assistant, then retry."
@@ -72,12 +73,8 @@ def _select_assistant(user_id: str) -> _Assistant:
 
 
 def _schedule_step(db, thread_id: str) -> None:
-    db.execute(
-        "UPDATE automation_schedules SET state='cancelled',updated_at=CURRENT_TIMESTAMP "
-        "WHERE thread_id=? AND state IN ('active','paused') AND json_valid(payload_json) "
-        "AND json_extract(payload_json,'$.kind')=?",
-        (thread_id, SCHEDULE_KIND),
-    )
+    # Every open schedule goes: an archived thread's schedules would still fire.
+    schedules.retire_for_thread(thread_id, utc_now_iso(), db=db)
 
 
 def _archive_step(db, thread_id: str) -> None:

@@ -88,6 +88,12 @@ def legacy_assistant(handover_env):
         "VALUES ('check',?, 'workspace','cadence','3600','2099-01-01T00:00:00+00:00',1000,'active',?,'assistant','now','now')",
         (assistant, json.dumps({"kind": "assistant.scheduled_email_check"})),
     )
+    db.execute(
+        "INSERT INTO automation_schedules "
+        "(id,thread_id,scope_id,kind,spec,next_run_at,max_runs,state,payload_json,created_by_actor,created_at,updated_at) "
+        "VALUES ('other',?, 'workspace','cadence','86400','2099-01-01T00:00:00+00:00',1000,'paused',?,'person','now','now')",
+        (assistant, json.dumps({"kind": "person.weekly_reminder"})),
+    )
     db.commit()
     client = homes / assistant / "config" / "desktop-client.json"
     client.parent.mkdir(parents=True)
@@ -111,7 +117,17 @@ async def _start(legacy_assistant, handover_env) -> str:
 def _legacy_state(assistant: str, client: Path) -> tuple[str, str, bool]:
     db = get_db()
     thread = db.execute("SELECT lifecycle_state FROM threads WHERE id=?", (assistant,)).fetchone()[0]
-    schedule = db.execute("SELECT state FROM automation_schedules WHERE id='check'").fetchone()[0]
+    # Both the email check and the person's own schedule must move together.
+    states = {
+        row[0]: row[1]
+        for row in db.execute("SELECT id,state FROM automation_schedules WHERE id IN ('check','other')")
+    }
+    if states == {"check": "active", "other": "paused"}:
+        schedule = "active"
+    elif set(states.values()) == {"cancelled"} and len(states) == 2:
+        schedule = "cancelled"
+    else:
+        schedule = f"mixed:{states}"
     return thread or "active", schedule, client.exists()
 
 
