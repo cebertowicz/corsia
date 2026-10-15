@@ -4,7 +4,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
-import { forceParsing } from '@codemirror/language';
+import { forceParsing, syntaxTree, syntaxTreeAvailable } from '@codemirror/language';
 import { GFM } from '@lezer/markdown';
 import { commentMarks, setCommentRanges } from './comment-marks';
 import { markdownLivePreview } from './markdown-live';
@@ -25,7 +25,7 @@ interface Options {
 	passedOn?: () => void;
 }
 
-function mount(doc: string, { opener = vi.fn(), readOnly = false, cursor, passedOn }: Options = {}) {
+function mount(doc: string, { opener = vi.fn(), readOnly = false, cursor, passedOn }: Options = {}, finishParsing = true) {
 	const state = EditorState.create({
 		doc,
 		selection: cursor != null ? { anchor: cursor } : undefined,
@@ -38,7 +38,7 @@ function mount(doc: string, { opener = vi.fn(), readOnly = false, cursor, passed
 		],
 	});
 	const view = new EditorView({ state, parent: document.body });
-	if (!forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
+	if (finishParsing && !forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
 	views.push(view);
 	return view;
 }
@@ -72,6 +72,32 @@ const link = (view: EditorView, text?: string) => {
 
 afterEach(() => {
 	while (views.length) views.pop()!.destroy();
+	vi.useRealTimers();
+});
+
+describe('background Markdown parsing', () => {
+	it('decorates a link when background parsing reaches it without a document edit', async () => {
+		vi.useFakeTimers();
+		const target = 'deferred link';
+		// Paragraphs, not one long line: Markdown parses a block whole, so only separate blocks can lie past the
+		// initial parse reach (3000 characters). jsdom has no layout, so the viewport spans these few long lines.
+		const filler = Array.from({ length: 10 }, () => 'x'.repeat(600)).join('\n\n');
+		const doc = `${filler}\n\n[${target}](./deferred.md)\n`;
+		const linkFrom = doc.indexOf(`[${target}]`);
+		const view = mount(doc, { opener: vi.fn() }, false);
+		expect(view.viewport.to).toBeGreaterThan(linkFrom);
+		const initialTree = syntaxTree(view.state);
+
+		expect(syntaxTreeAvailable(view.state, linkFrom)).toBe(false);
+		expect(view.dom.querySelector('.cm-md-link')).toBeNull();
+
+		await vi.advanceTimersByTimeAsync(500);
+
+		expect(syntaxTree(view.state)).not.toBe(initialTree);
+		expect(syntaxTreeAvailable(view.state, linkFrom)).toBe(true);
+		expect(view.state.doc.toString()).toBe(doc);
+		expect(view.dom.querySelector('.cm-md-link')?.textContent).toBe(target);
+	});
 });
 
 describe('a click on link text', () => {
