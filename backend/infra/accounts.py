@@ -195,10 +195,9 @@ def _create_account(
 
                 start_setup_task = first_run_path != "app" or not app_reference_served()
                 if start_setup_task:
+                    first_run_path = "script"  # seeded tasks mean the wake follows the script path
                     seed_first_run_setup_plan(conductor_id, name, db=conn)
-                woke = enqueue_first_run_wake(
-                    conductor_id, first_run_path=first_run_path, db=conn,
-                )
+                woke = enqueue_first_run_wake(conductor_id, first_run_path=first_run_path, db=conn)
         if before_commit is not None:
             before_commit()
 

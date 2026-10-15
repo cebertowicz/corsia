@@ -140,7 +140,8 @@ async def _app_setup() -> dict[str, list[dict[str, Any]]]:
     from onboarding import setup_decisions
 
     facts = await setup_decisions.read_facts(self_check_passed=True, probe_web_search=False)
-    return {"setup_decisions": setup_decisions.build_decisions(replace(facts, email=""))}
+    # No address in the wake, and no projects consent: the app path never raises it.
+    return {"setup_decisions": setup_decisions.build_decisions(replace(facts, email="", session_apps=()))}
 
 
 def _unavailable(name: str) -> dict[str, str]:

@@ -7,6 +7,7 @@ model, only while no Turn has read it.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -331,6 +332,18 @@ class TestAppPath:
 
         for name in expected:
             assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[name]}
+
+    async def test_app_setup_decisions_omit_projects_consent_and_address(self, monkeypatch):
+        from onboarding import first_run_wake, setup_decisions
+
+        facts = setup_decisions.Facts(session_apps=("Claude Code",), email="person@gmail.com")
+        monkeypatch.setattr(setup_decisions, "read_facts", AsyncMock(return_value=facts))
+
+        decisions = (await first_run_wake._app_setup())["setup_decisions"]
+
+        assert len(decisions) == 1  # GitHub only; no projects consent
+        assert "person@gmail.com" not in json.dumps(decisions)
+        assert "Claude Code" not in json.dumps(decisions)
 
     # This base does not yet serve the app reference; validate its fact contract when Agent Substrate ships it.
     @pytest.mark.skipif(not __import__("onboarding.first_run_wake", fromlist=["app_reference_served"]).app_reference_served(), reason="first-run-app.md is not served on this base")
