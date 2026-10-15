@@ -30,11 +30,11 @@ def configured_root() -> Path | None:
     return Path("~/.config/corsia-gws").expanduser()
 
 
-def existing_home_for(thread_id: object) -> Path | None:
-    """Return one valid gws-home path without creating it.
+def home_for(thread_id: object) -> Path | None:
+    """This thread's gws home, created 0700, or None when it may not be used.
 
-    Handover needs to inspect or remove a legacy home without accidentally
-    creating a new credential location when the old Assistant was never set up.
+    None means no environment name and no grant, so the helper fails closed. A path inside
+    the workspace, or any other path the agents' GitHub home rule refuses, is never used.
     """
     root = configured_root()
     if root is None or not isinstance(thread_id, str) or not _THREAD_ID.match(thread_id):
@@ -42,18 +42,6 @@ def existing_home_for(thread_id: object) -> Path | None:
     home = root / thread_id
     if (reason := refusal(home)) is not None:
         logger.warning("gws home refused for a thread shell: %s", reason)
-        return None
-    return home
-
-
-def home_for(thread_id: object) -> Path | None:
-    """This thread's gws home, created 0700, or None when it may not be used.
-
-    None means no environment name and no grant, so the helper fails closed. A path inside
-    the workspace, or any other path the agents' GitHub home rule refuses, is never used.
-    """
-    home = existing_home_for(thread_id)
-    if home is None:
         return None
     try:
         home.mkdir(mode=0o700, parents=True, exist_ok=True)

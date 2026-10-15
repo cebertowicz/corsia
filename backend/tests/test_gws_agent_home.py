@@ -41,13 +41,6 @@ def test_home_is_created_private_under_the_root_per_thread(homes_root):
     assert gws_agent_home.home_for(THREAD_B) == homes_root / THREAD_B
 
 
-def test_existing_home_path_does_not_create_a_credential_location(homes_root):
-    home = gws_agent_home.existing_home_for(THREAD_A)
-
-    assert home == homes_root / THREAD_A
-    assert not home.exists()
-
-
 def test_home_inside_the_workspace_is_refused(monkeypatch):
     from infra.config import WORKSPACE
 
