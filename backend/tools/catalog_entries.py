@@ -260,6 +260,16 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Read the Google sign-in's email, scopes and status",
         activity="Checking Google sign-in",
     ),
+    "email_draft": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Save an email as a draft document for the person to review; nothing is sent",
+        activity="Drafting email",
+    ),
+    "email_send": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Send a saved email draft after the person says to send it",
+        activity="Sending email",
+    ),
     "plan_read": _Entry(
         "plans", status="substrate", authority="plan-read", core=True,
         activity="Reading plan",

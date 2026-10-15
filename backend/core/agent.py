@@ -244,12 +244,14 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
 
 def _register_google_tools(agent: CORSIAAgent) -> None:
     from tools.google_account import GoogleConnectTool, GoogleStatusTool
-    from tools.google_email import EmailReadTool, EmailSearchTool
+    from tools.google_email import EmailDraftTool, EmailReadTool, EmailSearchTool, EmailSendTool
 
     agent.tools.register(EmailSearchTool())
     agent.tools.register(EmailReadTool())
     agent.tools.register(GoogleConnectTool())
     agent.tools.register(GoogleStatusTool())
+    agent.tools.register(EmailDraftTool())
+    agent.tools.register(EmailSendTool())
 
 
 def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:

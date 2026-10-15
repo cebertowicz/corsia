@@ -49,17 +49,27 @@ def create_draft(
 
 
 def record_draft(
-    draft_id: str, data: bytes, *, db: sqlite3.Connection | None = None,
+    draft_id: str, data: bytes, target: dict | None = None, *, db: sqlite3.Connection | None = None,
 ) -> dict:
-    """Record ``data`` as the open draft's current bytes, at server time now."""
+    """Record ``data`` as the open draft's current bytes, at server time now.
+
+    ``target`` replaces the stored target when given; None keeps it.
+    """
     revision = document_revision(data)
     now = utc_now_iso()
     with write_transaction(db, scope="action_draft_record") as conn:
-        cursor = conn.execute(
-            "UPDATE action_drafts SET recorded_revision=?, recorded_at=?"
-            " WHERE id=? AND state='open'",
-            (revision, now, draft_id),
-        )
+        if target is None:
+            cursor = conn.execute(
+                "UPDATE action_drafts SET recorded_revision=?, recorded_at=?"
+                " WHERE id=? AND state='open'",
+                (revision, now, draft_id),
+            )
+        else:
+            cursor = conn.execute(
+                "UPDATE action_drafts SET recorded_revision=?, recorded_at=?, target_json=?"
+                " WHERE id=? AND state='open'",
+                (revision, now, json.dumps(target), draft_id),
+            )
         if cursor.rowcount != 1:
             raise DraftError("There is no open draft with that id.")
     return {"draft_id": draft_id, "revision": revision, "recorded_at": now}
