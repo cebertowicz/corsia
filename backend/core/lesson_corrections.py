@@ -7,12 +7,16 @@ join the fact on a later report read without a repair job.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from core.corrections_recording import CORRECTION_EVENT, is_owner_authored_message
+from core.placement_proposal import names_in, shares_run
+
+logger = logging.getLogger(__name__)
 
 SUBJECT_PREFIX = "message:"
 CHECK_NAME = "incident-details"
@@ -24,7 +28,6 @@ CHECK_RETIREMENT_CONDITION = (
 _DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b")
 _IDENTIFIER = re.compile(r"\b(?:[A-Z]{2,}[-_]?)?\d{3,}\b")
 _QUOTE = re.compile(r"[\"“”][^\"“”]{20,}[\"“”]")
-_NAME = re.compile(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\b")
 
 
 def merge_subjects(*groups: Iterable[object]) -> tuple[str, ...]:
@@ -59,23 +62,22 @@ def current_owner_subjects(db: sqlite3.Connection, thread_id: str) -> tuple[str,
     )
 
 
-def incident_detail_flags(text: str, source: str) -> tuple[str, ...]:
-    """Flag likely incident detail in a lesson body; never decide whether to write it."""
+def incident_detail_flags(text: str, source: str, user_names: list[str]) -> tuple[str, ...]:
+    """Flag likely incident detail in a lesson body; never decide whether to write it.
+
+    Names and repeated runs use placement's own screen, so a line is flagged here
+    exactly when a proposal of it would be refused.
+    """
     flags: list[str] = []
     if _DATE.search(text):
         flags.append("date")
     if _IDENTIFIER.search(text):
         flags.append("id")
-    if _NAME.search(text):
+    if names_in(text, source, user_names):
         flags.append("name")
-    if _QUOTE.search(text) or any(run in text for run in _quoted_runs(source)):
+    if _QUOTE.search(text) or shares_run(text, source):
         flags.append("quote")
     return tuple(flags)
-
-
-def _quoted_runs(source: str) -> tuple[str, ...]:
-    words = re.findall(r"[A-Za-z0-9']+", source)
-    return tuple(" ".join(words[index:index + 6]) for index in range(max(0, len(words) - 5)))
 
 
 def record_placement_check(
@@ -120,8 +122,17 @@ def placement_check_counts(db: sqlite3.Connection, thread_ids: tuple[str, ...]) 
             "fires": fires, "overrides": overrides}
 
 
+def source_subjects(sources: Iterable[dict[str, Any]]) -> tuple[str, ...]:
+    """The correction subjects current lesson files name: the one input to the report join."""
+    return merge_subjects(*(source.get("originating_subjects", ()) for source in sources))
+
+
 def correction_facts(db: sqlite3.Connection, subjects: Iterable[str]) -> dict[str, dict[str, str]]:
-    """Resolve correction facts by immutable outcome-event subject key."""
+    """Resolve correction facts by immutable outcome-event subject key.
+
+    A fact whose attributes cannot be read is returned as ``unreadable``, so the
+    report says it cannot tell rather than reporting no correction.
+    """
     keys = merge_subjects(subjects)
     if not keys:
         return {}
@@ -134,10 +145,13 @@ def correction_facts(db: sqlite3.Connection, subjects: Iterable[str]) -> dict[st
     ).fetchall()
     found: dict[str, dict[str, str]] = {}
     for row in rows:
+        subject = str(row["subject_key"])
         try:
             attributes = json.loads(row["attributes"])
         except (TypeError, ValueError):
+            logger.warning("correction fact %s has unreadable attributes", row["id"])
+            found.setdefault(subject, {"id": str(row["id"]), "ts": str(row["ts"]), "unreadable": "true"})
             continue
-        if attributes.get("label") == "correction":
-            found[str(row["subject_key"])] = {"id": str(row["id"]), "ts": str(row["ts"])}
+        if isinstance(attributes, dict) and attributes.get("label") == "correction":
+            found[subject] = {"id": str(row["id"]), "ts": str(row["ts"])}
     return found

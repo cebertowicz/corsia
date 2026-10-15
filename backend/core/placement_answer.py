@@ -235,9 +235,10 @@ def _stage_trial(
         raise InvalidDecision("room does not go with a trial; call again without room")
     from core.lesson_corrections import incident_detail_flags, record_placement_check
     from core.placement_outcomes import entry_text
+    from core.placement_proposal import thread_user_names
 
     admission = admit(db, thread_id, entry, place, decision, destination)
-    flags = incident_detail_flags(decision.text, entry_text(entry))
+    flags = incident_detail_flags(decision.text, entry_text(entry), thread_user_names(db, thread_id))
     if flags:
         record_placement_check(
             db, thread_id=thread_id, history_epoch=int(entry["history_epoch"]),

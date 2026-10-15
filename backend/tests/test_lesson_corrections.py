@@ -11,6 +11,7 @@ from core.lesson_corrections import (
     placement_check_counts,
     record_placement_check,
 )
+from core.placement_proposal import p3_problem
 
 
 def test_subject_anchors_preserve_batched_order_and_dedupe():
@@ -34,16 +35,34 @@ def test_late_correction_fact_joins_the_stored_message_subject():
     assert correction_facts(db, ("message:one", "message:two")) == {
         "message:two": {"id": "fact-1", "ts": "2026-10-15T00:00:00+00:00"},
     }
+    db.execute("INSERT INTO outcome_events VALUES ('fact-2', 'measurement.correction', NULL, "
+               "'message:one', '2026-10-15T00:00:00+00:00', 'not json')")
+    # An unreadable fact is reported as unreadable, never as no correction.
+    assert correction_facts(db, ("message:one",))["message:one"]["unreadable"] == "true"
 
 
 def test_placement_check_flags_incident_details_without_rejecting_text():
     flags = incident_detail_flags(
         'On 2026-10-14, Alex Example fixed CORSIA-1234: "this exact long phrase should never be copied verbatim".',
-        "The incident message said this exact long phrase should never be copied verbatim.",
+        "Alex Example said this exact long phrase should never be copied verbatim.",
+        [],
     )
 
     assert {"date", "id", "name", "quote"} <= set(flags)
     assert "overrides exceed half of fires" in CHECK_RETIREMENT_CONDITION
+
+
+def test_name_and_quote_flags_agree_with_the_placement_screen():
+    source = "When Claude Code stalls, Dana Whitfield said to retry the build twice."
+    for text, names in (
+        ("When Claude Code stalls, retry once and report it.", []),
+        ("Ask Whitfield before retrying a stalled build.", []),
+        ("Check with sam before retrying a stalled build.", ["sam"]),
+        ("Dana Whitfield said to retry the build twice.", []),
+        ("Retry a stalled build once, then report it.", []),
+    ):
+        flags = set(incident_detail_flags(text, source, names))
+        assert bool(flags & {"name", "quote"}) == (p3_problem(text, source, names) is not None), text
 
 
 def test_placement_check_counts_one_observation_with_multiple_flags_once():

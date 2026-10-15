@@ -1,8 +1,8 @@
 """Child lifecycle transitions for the worker-owned corrections classifier state machine.
 
-This module stores no state: ``CorrectionsWorker`` remains the sole owner of its child,
-selected versions, and state snapshot. Keeping the transition mechanics here leaves the
-worker module small enough to retain its complete state-machine contract.
+These functions are the worker's own transition steps, moved here for file size: they
+read and write only ``CorrectionsWorker``'s fields and keep no state of their own. The
+worker module's docstring is the one transition matrix for both files.
 """
 
 from __future__ import annotations

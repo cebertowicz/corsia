@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Event
 from typing import Any
 
-from core.lesson_corrections import correction_facts, merge_subjects
+from core.lesson_corrections import correction_facts, source_subjects
 from core.lesson_report import ReportScope, collect_report, detail_request, read_report
 from core.lesson_report_db import report_snapshot
 from core.lesson_report_offers import LessonReportCollectionCancelled
@@ -93,7 +93,7 @@ def collect_corrections(collection: ReportCollection, sources: list[dict[str, An
 
     Subjects live in lesson files, which are read only after the first snapshot closes.
     """
-    subjects = merge_subjects(*(source.get("originating_subjects", ()) for source in sources))
+    subjects = source_subjects(sources)
     if not subjects:
         return collection
     snapshot = (report_snapshot(cancellation_event=cancellation_event)

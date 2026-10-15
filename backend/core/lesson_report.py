@@ -122,11 +122,13 @@ def _correction_inventory(
     for row in inventory:
         if "originating_subjects" not in row:
             continue
-        linked = [
+        found = [
             {"subject": subject, **facts[subject]}
             for subject in row.get("originating_subjects", ()) if subject in facts
         ]
-        row["correction_status"] = "linked" if linked else "no correction"
+        linked = [fact for fact in found if "unreadable" not in fact]
+        row["correction_status"] = ("linked" if linked else "unreadable" if found
+                                    else "no correction")
         row["correction_facts"] = linked
         row["recurrence_count"] = len(linked)
     return inventory
@@ -177,11 +179,10 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
     retained = offers["retained"] + boundaries
     bodies = read_bodies(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
                          facts=sources + retained)
-    from core.lesson_corrections import correction_facts, merge_subjects, placement_check_counts
+    from core.lesson_corrections import correction_facts, placement_check_counts, source_subjects
 
-    inventory = build_inventory(history=history, sources=sources,
-                                retained=retained + bodies["reads"], now=now)
-    subjects = merge_subjects(*(row.get("originating_subjects", ()) for row in inventory))
+    # The adapter passes no sources here and joins corrections after reading lesson files.
+    subjects = source_subjects(sources)
     return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
             "retained": retained, "period": period, "bodies": bodies,
             "correction_facts": correction_facts(db, subjects),

@@ -22,7 +22,9 @@ Classifier state (``state``)::
     ready                        newer child deterministic startup failure           ready (old child serves;
                                                                                     failed version is recorded)
     ready                        newer child exhausts transient startup budget       ready (old child serves;
-                                                                                    new version held until restart)
+                                                                                    new version retried once the
+                                                                                    serving child stops: idle exit,
+                                                                                    mid-call exit, or restart)
     loading|ready                two failures of a loaded child on one input        unchanged; an
                                  (timeout, rss, child_error)                        ``unreadable`` fact
 

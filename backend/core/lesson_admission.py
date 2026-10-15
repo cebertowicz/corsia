@@ -120,7 +120,7 @@ def admit(
         raise TrialRefused("invalid-output", (
             "skill_name must be a new lowercase-hyphenated name for the trial skill"
         ))
-    identity, text = _render(db, thread_id, capture_id, entry, decision, destination.path)
+    identity, text = _render(thread_id, capture_id, entry, decision, destination.path)
     offered = _offered_elsewhere(db, place, str(decision.skill_name), destination.path)
     line = _index_line(decision, destination.path)
     from core.lesson_index import fits_budget
@@ -217,7 +217,7 @@ def _on_trial(row: sqlite3.Row) -> bool:
 
 
 def _render(
-    db: sqlite3.Connection, thread_id: str, capture_id: str, entry: dict[str, Any],
+    thread_id: str, capture_id: str, entry: dict[str, Any],
     decision: Decision, path: Path,
 ) -> tuple[str, str]:
     """The trial's identity and its file text, against what the path holds now.
