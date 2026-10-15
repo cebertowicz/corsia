@@ -111,6 +111,9 @@ async def dispatch_mouse_event(endpoint: str, event: dict) -> None:
             if button not in {"none", "left", "middle", "right", "back", "forward"}:
                 raise BrowserSessionError("This page couldn't receive pointer input")
             params["button"] = button
+        # CDP does not infer the held-button mask from `button`; a pointer press
+        # must carry it or a background shared page can ignore the click sequence.
+        params["buttons"] = 1 if event_type == "mousePressed" else 0
         if click_count is not None:
             if not isinstance(click_count, int) or isinstance(click_count, bool) or click_count < 0:
                 raise BrowserSessionError("This page couldn't receive pointer input")
@@ -197,8 +200,8 @@ async def _endpoint(run: RunCommand) -> str:
     return await asyncio.to_thread(_page_endpoint, endpoint)
 
 
-def _page_endpoint(browser_endpoint: str) -> str:
-    """Resolve agent-browser's browser-level endpoint to its current page target."""
+def _page_endpoint(browser_endpoint: str, expected_url: str | None = None) -> str:
+    """Resolve agent-browser's browser endpoint to the page its session currently displays."""
     parsed = urlparse(browser_endpoint)
     listing = urlunparse(("http", parsed.netloc, "/json/list", "", "", ""))
     try:
@@ -208,9 +211,10 @@ def _page_endpoint(browser_endpoint: str) -> str:
         raise BrowserSessionError("This page couldn't be checked") from exc
     if not isinstance(targets, list):
         raise BrowserSessionError("This page couldn't be checked")
-    for target in targets:
-        if not isinstance(target, dict) or target.get("type") != "page":
-            continue
+    pages = [target for target in targets if isinstance(target, dict) and target.get("type") == "page"]
+    if expected_url:
+        pages.sort(key=lambda target: target.get("url") != expected_url)
+    for target in pages:
         endpoint = target.get("webSocketDebuggerUrl")
         if isinstance(endpoint, str) and endpoint.startswith("ws"):
             return endpoint

@@ -57,6 +57,8 @@
 		next.onopen = () => {
 			next.send(JSON.stringify({ token: get(token) ?? '' }));
 			sendAppearance();
+			// A newly opened socket can beat the canvas's first layout; send again once it is laid out.
+			requestAnimationFrame(() => sendAppearance());
 		};
 		next.onmessage = (event) => { if (socket === next) drawMessage(event.data); };
 		next.onclose = () => {
@@ -262,9 +264,14 @@
 		void go(targetUrl);
 	}
 
-	function focusAddress() {
+	function focusAddress(event: FocusEvent) {
 		addressText = url;
 		addressFocused = true;
+		// Swap in the full URL now and select it, as a browser does. Left to the next render,
+		// the swap would land after a selection made on focus and append the person's text to it.
+		const input = event.currentTarget as HTMLInputElement;
+		input.value = url;
+		input.select();
 	}
 
 	function editAddress(event: Event) {
@@ -290,13 +297,17 @@
 		};
 	});
 
+	// The host passes threadId from its active tab, so reading the prop tracks that tab object;
+	// any tab change (this pane relabelling itself included) would otherwise reconnect the stream.
+	const streamThreadId = $derived(threadId);
+
 	$effect(() => {
-		if (!browser) return;
+		if (!browser || !streamThreadId) return;
 		const viewport = window.visualViewport;
 		const updateKeyboard = () => { keyboardOpen = !!viewport && window.innerHeight - viewport.height > 160; };
 		updateKeyboard();
 		viewport?.addEventListener('resize', updateKeyboard);
-		connect();
+		untrack(connect);
 		const unsubscribe = on('browser_opened', (data: { thread_id?: string }) => {
 			if (data?.thread_id === threadId && !streaming && !opening && (!socket || socket.readyState === WebSocket.CLOSED)) connect();
 		});

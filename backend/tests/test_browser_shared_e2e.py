@@ -36,6 +36,13 @@ document.querySelector('#agent-button').addEventListener('click', () => { clicks
 KEYBOARD = """<!doctype html><title>Keyboard fixture</title>
 <input id=field value=old>"""
 
+FORM = """<!doctype html><title>Form fixture</title>
+<form><input id=field value=old><output id=result></output></form>
+<script>
+const field = document.querySelector('#field');
+document.querySelector('form').addEventListener('submit', event => { event.preventDefault(); document.querySelector('#result').textContent = field.value; });
+</script>"""
+
 # This deliberately loads the real React UMD distribution: the controlled input exercises React's
 # value-setter/event path rather than a lookalike implementation.
 REACT = """<!doctype html><title>React fixture</title>
@@ -62,7 +69,7 @@ window.addEventListener('load', () => {
 
 @contextmanager
 def fixture_server():
-    pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/react.html": REACT.encode()}
+    pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/form.html": FORM.encode(), "/react.html": REACT.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -180,6 +187,35 @@ async def test_cdp_keyboard_dispatch_preserves_meta_shortcuts():
             await browser_cdp.dispatch_key_event(endpoint, {"eventType": "keyDown", "key": "Meta", "code": "MetaLeft", "keyCode": 91, "text": "", "modifiers": 4})
             await browser_cdp.dispatch_key_event(endpoint, {"eventType": "keyDown", "key": "a", "code": "KeyA", "keyCode": 65, "text": "", "modifiers": 4})
             assert await cdp_value(owner, thread_id, "[field.selectionStart, field.selectionEnd]") == [0, 3]
+    finally:
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_shared_pane_cdp_shortcut_sequence_submits_a_form():
+    """A shortcut, text and submit delivered serially through CDP replace and submit one field."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-form-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-form", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/form.html"), show_window=True, session="new")).startswith("Error:")
+            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            for event_type, button, click_count in (("mouseMoved", "none", 0), ("mousePressed", "left", 1), ("mouseReleased", "left", 1)):
+                await browser_cdp.dispatch_mouse_event(endpoint, {"eventType": event_type, "x": 20, "y": 20, "button": button, "clickCount": click_count})
+            for event in (
+                {"eventType": "keyDown", "key": "Meta", "code": "MetaLeft", "keyCode": 91, "text": "", "modifiers": 4},
+                {"eventType": "keyDown", "key": "a", "code": "KeyA", "keyCode": 65, "text": "", "modifiers": 4},
+                {"eventType": "keyUp", "key": "a", "code": "KeyA", "keyCode": 65, "text": "", "modifiers": 4},
+                {"eventType": "keyUp", "key": "Meta", "code": "MetaLeft", "keyCode": 91, "text": "", "modifiers": 0},
+                *({"eventType": kind, "key": letter, "code": f"Key{letter.upper()}", "keyCode": ord(letter.upper()), "text": letter if kind == "keyDown" else "", "modifiers": 0} for letter in "next" for kind in ("keyDown", "keyUp")),
+                {"eventType": "keyDown", "key": "Enter", "code": "Enter", "keyCode": 13, "text": "\r", "modifiers": 0},
+                {"eventType": "keyUp", "key": "Enter", "code": "Enter", "keyCode": 13, "text": "", "modifiers": 0},
+            ):
+                await browser_cdp.dispatch_key_event(endpoint, event)
+            assert await cdp_value(owner, thread_id, "({ value: field.value, result: document.querySelector('#result').textContent })") == {"value": "next", "result": "next"}
     finally:
         await owner.close_thread(thread_id)
 

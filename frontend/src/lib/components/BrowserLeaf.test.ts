@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import BrowserLeaf from './BrowserLeaf.svelte';
+import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { emit } from '$lib/ws/events';
 import { get } from 'svelte/store';
 import { openBrowserPane, threadWorkspaces } from '$lib/stores/artifactWorkspace';
@@ -111,6 +112,23 @@ describe('BrowserLeaf navigation metadata', () => {
 		flushSync();
 		expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('example.test · www · …open');
 		expect(get(threadWorkspaces).thread.tabs.find((tab) => tab.kind === 'browser')?.title).toBe('Agent opened this');
+		expect(FakeSocket.instances).toEqual([socket]);
+		expect(socket.readyState).not.toBe(FakeSocket.CLOSED);
+	});
+
+	it('keeps its stream connected when page metadata relabels the browser tab', () => {
+		openBrowserPane('thread');
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(ArtifactLeaf, { target: host, props: { threadId: 'thread', mode: 'expanded' } });
+		flushSync();
+		const socket = FakeSocket.instances[0];
+		socket.open();
+		socket.receive({ type: 'browser_metadata', url: 'https://www.example.test/agent/open', title: 'Agent opened this' });
+		flushSync();
+		expect(get(threadWorkspaces).thread.tabs.find((tab) => tab.kind === 'browser')?.title).toBe('Agent opened this');
+		expect(FakeSocket.instances).toEqual([socket]);
+		expect(socket.readyState).not.toBe(FakeSocket.CLOSED);
 	});
 
 	it('submits exactly the URL typed after an agent navigation', () => {
@@ -123,9 +141,43 @@ describe('BrowserLeaf navigation metadata', () => {
 		host.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 		expect(socket.sent.at(-1)).toEqual({ type: 'navigate', url: 'https://next.example.test/person/page' });
 	});
+
+	it('replaces the full address when a selection made on focus is typed over before the next render', () => {
+		const { socket } = render();
+		socket.receive({ type: 'browser_metadata', url: 'https://www.example.test/agent/open', title: 'Agent opened this' });
+		flushSync();
+		const input = host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!;
+		input.dispatchEvent(new FocusEvent('focus'));
+		input.select();
+		flushSync();
+		input.setRangeText('https://next.example.test/person/page', input.selectionStart!, input.selectionEnd!, 'end');
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		host.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
+		expect(socket.sent.at(-1)).toEqual({ type: 'navigate', url: 'https://next.example.test/person/page' });
+	});
 });
 
 describe('BrowserLeaf opening lifecycle', () => {
+	it('sends appearance after the first layout when the socket opens before it', () => {
+		let afterLayout: FrameRequestCallback | undefined;
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+			afterLayout = callback;
+			return 1;
+		});
+		vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect')
+			.mockReturnValueOnce(new DOMRect(0, 0, 0, 0))
+			.mockReturnValue(new DOMRect(0, 0, 100, 100));
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(BrowserLeaf, { target: host, props: { threadId: 'thread' } });
+		flushSync();
+		const socket = FakeSocket.instances[0];
+		socket.open();
+		expect(socket.sent.filter(message => message.type === 'appearance')).toEqual([]);
+		afterLayout?.(0);
+		expect(socket.sent).toContainEqual({ type: 'appearance', width: 100, height: 100, scale: 1, scheme: 'dark' });
+	});
+
 	async function expectOpen(url: string) {
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/browser/thread/open?url=${encodeURIComponent(url)}`, {
 			method: 'POST', headers: { Authorization: 'Bearer ' }

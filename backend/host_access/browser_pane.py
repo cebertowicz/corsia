@@ -58,10 +58,17 @@ async def _page_endpoint(thread_id: str, connection_token: str, error: str) -> s
         return cached
     owner = PROCESS_OWNER.browser_sessions()
     payload = await owner.run(thread_id, ("get", "cdp-url"), control_token=connection_token, session="existing")
-    endpoint = browser_cli.json_object(payload).get("data", {}).get("cdpUrl")
+    # owner.run returns the rendered model result: agent-browser's `data` object, unwrapped.
+    endpoint = browser_cli.json_object(payload).get("cdpUrl")
     if not isinstance(endpoint, str) or not endpoint.startswith("ws"):
         raise browser_cdp.BrowserSessionError(error)
-    page_endpoint = await asyncio.to_thread(browser_cdp._page_endpoint, endpoint)
+    rendered_url = await owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing")
+    current_url = browser_cli.json_object(rendered_url).get("url")
+    if not isinstance(current_url, str):
+        current_url = rendered_url
+    page_endpoint = await asyncio.to_thread(
+        browser_cdp._page_endpoint, endpoint, current_url if current_url.startswith(("http://", "https://")) else None,
+    )
     _page_endpoints[(thread_id, connection_token)] = page_endpoint
     return page_endpoint
 

@@ -1,3 +1,6 @@
+import io
+import json
+
 import pytest
 
 from host_access import browser_cdp
@@ -12,6 +15,23 @@ async def test_endpoint_resolves_agent_browsers_browser_url_to_the_page(monkeypa
         return CommandResult(0, '{"data":{"cdpUrl":"ws://browser.test/devtools/browser/1"}}', "")
 
     assert await browser_cdp._endpoint(run) == "ws://page.test/devtools/page/1"
+
+
+def test_page_endpoint_prefers_the_sessions_current_page(monkeypatch):
+    targets = [
+        {"type": "page", "url": "about:blank", "webSocketDebuggerUrl": "ws://page.test/devtools/page/blank"},
+        {"type": "page", "url": "https://example.test/current", "webSocketDebuggerUrl": "ws://page.test/devtools/page/current"},
+    ]
+
+    class Response:
+        def __enter__(self):
+            return io.BytesIO(json.dumps(targets).encode())
+
+        def __exit__(self, *_args):
+            pass
+
+    monkeypatch.setattr(browser_cdp, "urlopen", lambda *_args, **_kwargs: Response())
+    assert browser_cdp._page_endpoint("ws://browser.test/devtools/browser/1", "https://example.test/current") == "ws://page.test/devtools/page/current"
 
 
 @pytest.mark.asyncio
@@ -45,6 +65,30 @@ async def test_dispatch_mouse_event_preserves_wheel_axes(monkeypatch):
     assert calls == [("Input.dispatchMouseEvent", {
         "type": "mouseWheel", "x": 209, "y": 220, "deltaX": 0, "deltaY": 640,
     })]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_mouse_event_sets_the_pressed_button_mask(monkeypatch):
+    calls = []
+
+    class Client:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        async def call(self, method, **params):
+            calls.append((method, params))
+            return {}
+
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: Client())
+    await browser_cdp.dispatch_mouse_event("websocket-endpoint", {
+        "eventType": "mousePressed", "x": 10, "y": 20, "button": "left", "clickCount": 1,
+    })
+    await browser_cdp.dispatch_mouse_event("websocket-endpoint", {
+        "eventType": "mouseReleased", "x": 10, "y": 20, "button": "left", "clickCount": 1,
+    })
+    assert calls == [
+        ("Input.dispatchMouseEvent", {"type": "mousePressed", "x": 10, "y": 20, "button": "left", "buttons": 1, "clickCount": 1}),
+        ("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": 10, "y": 20, "button": "left", "buttons": 0, "clickCount": 1}),
+    ]
 
 
 @pytest.mark.asyncio

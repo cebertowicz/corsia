@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException, WebSocketDisconnect
 
 from api import browser
-from host_access import browser_control, browser_pane
+from host_access import browser_cli, browser_control, browser_pane
 from host_access.browser_cli import CommandResult
 from host_access.browser_session_state import BrowserRuntime, BrowserSessionError, BrowserSessionRecord
 from host_access.browser_sessions import BrowserSessionOwner
@@ -115,33 +115,82 @@ async def test_stream_does_not_close_a_pane_that_left_before_auth():
     assert pane.closed == []
 
 
+def _rendered(data: dict) -> str:
+    """The string BrowserSessionOwner.run returns for one successful agent-browser --json command."""
+    return browser_cli.render_model_result(CommandResult(0, json.dumps({"success": True, "data": data}), ""), redactions={})
+
+
+class RenderedOwner:
+    """Answers the pane's endpoint lookups exactly as the session owner renders them."""
+
+    def __init__(self):
+        self.commands = []
+
+    async def run(self, _thread_id, args, **_kwargs):
+        self.commands.append(tuple(args))
+        if args == ("get", "cdp-url"):
+            return _rendered({"cdpUrl": "ws://browser.test/devtools/browser/1"})
+        assert args == ("get", "url")
+        return _rendered({"url": "https://example.test/current"})
+
+
 @pytest.mark.asyncio
-async def test_relay_delivers_mouse_then_keyboard_through_cdp_without_a_turn_handoff(monkeypatch):
-    pane = FakePane([
-        json.dumps({"type": "input_mouse", "x": 1}),
-        json.dumps({"type": "input_keyboard", "key": "a"}),
-        json.dumps({"type": "unexpected"}),
-    ])
+async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp_target(monkeypatch):
+    click = [{"type": "input_mouse", "eventType": kind, "x": 5, "y": 6, "button": "left", "clickCount": 1}
+             for kind in ("mousePressed", "mouseReleased")]
+    keys = [
+        {"type": "input_keyboard", "eventType": "keyDown", "key": "a", "code": "KeyA", "keyCode": 65, "modifiers": 4},
+        {"type": "input_keyboard", "eventType": "keyUp", "key": "a", "code": "KeyA", "keyCode": 65, "modifiers": 4},
+        {"type": "input_keyboard", "eventType": "keyDown", "key": "n", "code": "KeyN", "keyCode": 78, "text": "n", "modifiers": 0},
+        {"type": "input_keyboard", "eventType": "keyUp", "key": "n", "code": "KeyN", "keyCode": 78, "modifiers": 0},
+        {"type": "input_keyboard", "eventType": "keyDown", "key": "Enter", "code": "Enter", "keyCode": 13, "text": "\r", "modifiers": 0},
+        {"type": "input_keyboard", "eventType": "keyUp", "key": "Enter", "code": "Enter", "keyCode": 13, "modifiers": 0},
+    ]
+    pane = FakePane(json.dumps(event) for event in (*click, *keys))
     delivered = []
 
-    async def mouse_event(thread_id, event, connection_token):
-        delivered.append(("mouse", thread_id, event, connection_token))
+    def recorder(kind):
+        async def record(endpoint, event):
+            delivered.append((kind, endpoint, event.get("eventType"), event.get("key")))
+        return record
 
-    async def key_event(thread_id, event, connection_token):
-        delivered.append(("key", thread_id, event, connection_token))
+    async def no_metadata(_endpoint, _report):
+        await asyncio.Future()
 
-    monkeypatch.setattr(browser_stream.browser_pane, "mouse_event", mouse_event)
-    monkeypatch.setattr(browser_stream.browser_pane, "key_event", key_event)
+    owner = RenderedOwner()
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
+    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda _endpoint, _expected_url: "ws://page.test/current")
+    monkeypatch.setattr(browser_pane.browser_cdp, "dispatch_mouse_event", recorder("mouse"))
+    monkeypatch.setattr(browser_pane.browser_cdp, "dispatch_key_event", recorder("key"))
+    monkeypatch.setattr(browser_pane.browser_cdp, "watch_page_metadata", no_metadata)
     stream = FakeStream()
     with pytest.raises(WebSocketDisconnect):
         await browser_stream._relay(pane, stream, "thread-1", "user-1")
+    # Every person event reached the page target in the order typed; none went through the
+    # unacknowledged stream, so nothing could overtake the shortcut, the text or the submit.
     assert stream.sent == [json.dumps({"type": "screencast_start"})]
-    assert [entry[:3] for entry in delivered] == [
-        ("mouse", "thread-1", {"type": "input_mouse", "x": 1}),
-        ("key", "thread-1", {"type": "input_keyboard", "key": "a"}),
+    assert delivered == [
+        ("mouse", "ws://page.test/current", "mousePressed", None),
+        ("mouse", "ws://page.test/current", "mouseReleased", None),
+        *(("key", "ws://page.test/current", event["eventType"], event["key"]) for event in keys),
     ]
-    assert all(isinstance(entry[3], str) and entry[3] for entry in delivered)
     assert not browser_control.has_pane("thread-1")
+
+
+@pytest.mark.asyncio
+async def test_page_endpoint_reads_the_session_owners_rendered_result(monkeypatch):
+    calls = []
+    owner = RenderedOwner()
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
+    monkeypatch.setattr(browser_pane.browser_cdp, "_page_endpoint", lambda endpoint, expected_url: calls.append((endpoint, expected_url)) or "ws://page.test/current")
+    browser_pane.clear_page_endpoint("thread-1", "pane-1")
+    try:
+        assert await browser_pane._page_endpoint("thread-1", "pane-1", "failed") == "ws://page.test/current"
+        assert await browser_pane._page_endpoint("thread-1", "pane-1", "failed") == "ws://page.test/current"
+        assert owner.commands == [("get", "cdp-url"), ("get", "url")]
+        assert calls == [("ws://browser.test/devtools/browser/1", "https://example.test/current")]
+    finally:
+        browser_pane.clear_page_endpoint("thread-1", "pane-1")
 
 
 def test_pane_presence_is_not_exclusive_control():

@@ -78,6 +78,7 @@ test.describe('@flow:browser-pane shared browser pane', () => {
 		await page.keyboard.press('Enter');
 		await expect.poll(() => colorAt(canvas, 0.5, 0.5, [0, 160, 80])).toEqual([0, 160, 80]);
 		await saveEvidenceScreenshot(page, testInfo, 'browser-pane-password-submitted');
-		await page.getByRole('button', { name: 'Close Browser' }).click();
+		// The page's own submit navigated it, and the tab label followed that main-frame navigation.
+		await page.getByRole('button', { name: /^Close .*browser-pane-probe\.html\?submitted$/ }).click();
 	});
 });
