@@ -10,6 +10,7 @@ import { measurementScope } from '$lib/stores/measurement';
 import { projects } from '$lib/stores/projects';
 import { measurementOrigin } from '$lib/stores/measurementNavigation';
 import Header from './Header.svelte';
+import headerSource from './Header.svelte?raw';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -231,5 +232,23 @@ describe('Header title on the Measurement page', () => {
 		activeThreadId.set('thread-1');
 		render('chat');
 		expect(title()).toContain('Bugs');
+	});
+});
+
+describe('Header glass layers', () => {
+	const rule = (css: string, selector: string) => {
+		const start = css.indexOf(`${selector} {`);
+		return start < 0 ? '' : css.slice(start, css.indexOf('}', start));
+	};
+	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
+
+	it('keeps the phone header blur off the layer that carries the fade mask', () => {
+		// A mask fades whatever its layer draws, blur included: on the masked layer
+		// WebKit shows the transcript through the title row.
+		expect(rule(phone, '.shell-header::before')).toMatch(/-webkit-backdrop-filter: none;/);
+		const blur = rule(phone, '.shell-header::after');
+		expect(blur).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
+		expect(blur).toMatch(/z-index: -2;/);
+		expect(blur).not.toMatch(/mask/);
 	});
 });

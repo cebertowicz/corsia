@@ -106,6 +106,7 @@
   --header-height: 60px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
+  --header-bottom: calc(var(--header-height) + var(--safe-top));
   --status-ready: #22c55e;
   --status-in-progress: #3b82f6;
   --status-planned: #f59e0b;

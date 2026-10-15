@@ -249,7 +249,7 @@
 	.h-overflow:hover, .h-overflow.open { background: var(--bg-hover); color: var(--text-primary); }
 	.h-overflow-backdrop { position: fixed; inset: 0; z-index: 59; background: transparent; border: none; }
 	.h-overflow-sheet {
-		position: absolute; top: calc(var(--header-height) - 4px); right: 10px; z-index: 60;
+		position: absolute; top: calc(var(--header-bottom) - 4px); right: 10px; z-index: 60;
 		min-width: 168px; padding: 6px; display: flex; flex-direction: column; gap: 1px;
 		background: var(--glass-regular-thick, var(--bg-secondary));
 		backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
@@ -267,8 +267,8 @@
 	@media (max-width: 768px) {
 		.shell-header {
 			transform: translateY(var(--empty-parallax-offset, 0));
-			height: calc(var(--header-height) + env(safe-area-inset-top, 0px));
-			padding-top: max(8px, calc(env(safe-area-inset-top, 0px) - 28px));
+			height: var(--header-bottom);
+			padding-top: max(8px, calc(var(--safe-top) - 28px));
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;
@@ -282,6 +282,15 @@
 				color-mix(in srgb, var(--header-top-base) 15%, transparent) 80%,
 				transparent 100%
 			);
+			/* The fade mask also fades the blur, so WebKit lets the transcript show
+			   through the title row; the blur lives unmasked on ::after instead. */
+			backdrop-filter: none;
+			-webkit-backdrop-filter: none;
+		}
+		.shell-header::after {
+			content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+			backdrop-filter: var(--glass-blur);
+			-webkit-backdrop-filter: var(--glass-blur);
 		}
 		.h-left { justify-self: start; }
 		.h-right { justify-self: end; margin-left: 0; }
