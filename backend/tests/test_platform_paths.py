@@ -16,7 +16,7 @@ def _platform_paths():
     return importlib.import_module("infra.platform_paths")
 
 
-def test_default_state_root_uses_macos_application_support(tmp_path):
+def test_default_state_root_uses_macos_corsia_directory(tmp_path):
     paths = _platform_paths()
 
     result = paths.default_state_root(
@@ -25,25 +25,24 @@ def test_default_state_root_uses_macos_application_support(tmp_path):
         home=tmp_path,
     )
 
-    assert result == (
-        tmp_path / "Library" / "Application Support" / APPLICATION_ID / "state"
-    )
+    assert result == tmp_path / "Library" / "Application Support" / "CORSIA"
 
 
-def test_default_state_root_does_not_claim_existing_application_metadata(tmp_path):
+def test_default_state_root_never_uses_legacy_macos_directory_implicitly(tmp_path):
     paths = _platform_paths()
-    application_root = tmp_path / "Library" / "Application Support" / APPLICATION_ID
-    application_root.mkdir(parents=True)
-    config = application_root / "config.json"
+    legacy_root = tmp_path / "Library" / "Application Support" / APPLICATION_ID
+    legacy_root.mkdir(parents=True)
+    config = legacy_root / "config.json"
     config.write_text('{"server_url":"http://localhost"}\n', encoding="utf-8")
 
     result = paths.default_state_root(
-        env={},
+        env={"CORSIA_APPLICATION_ID": APPLICATION_ID},
         platform="darwin",
         home=tmp_path,
     )
 
-    assert result == application_root / "state"
+    assert result == tmp_path / "Library" / "Application Support" / "CORSIA"
+    assert not result.is_relative_to(legacy_root)
     assert config.read_text(encoding="utf-8") == ('{"server_url":"http://localhost"}\n')
 
 

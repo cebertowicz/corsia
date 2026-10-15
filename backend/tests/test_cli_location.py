@@ -38,6 +38,18 @@ def test_service_path_honours_the_override(monkeypatch):
     assert cli_location.service_path() == "/custom/bin"
 
 
+def test_login_shell_path_reads_the_login_shell_path_once(monkeypatch):
+    commands: list[str] = []
+    monkeypatch.setattr(
+        cli_location,
+        "_shell_value",
+        lambda command: commands.append(command) or "/custom/bin:/usr/bin",
+    )
+
+    assert cli_location.login_shell_path() == "/custom/bin:/usr/bin"
+    assert commands == ["printf '%s\\n' \"$PATH\""]
+
+
 def test_service_binary_sees_only_the_service_path(monkeypatch, tmp_path):
     visible = _executable(tmp_path / "service-bin" / "codex")
     _executable(tmp_path / "login-bin" / "claude")

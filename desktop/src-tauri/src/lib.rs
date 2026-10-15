@@ -1,21 +1,48 @@
 // CORSIA desktop shell.
 //
-// Thin Tauri wrapper that hosts the corsia web UI inside a native macOS
-// window with vibrancy + traffic-lights overlay. The UI ships from the
-// corsia backend (HTTP); this binary only handles window chrome,
-// remembering which server URL to load, and the eventual auto-update path.
-//
-// First launch: load `dist-shell/index.html` (a tiny URL picker). User
-// pastes their server URL, we persist it to
-// ~/Library/Application Support/com.cebertowicz.corsia/config.json, and navigate the
-// window to that URL. Subsequent launches skip the picker and load
-// straight to the saved URL.
+// The bundle owns one local backend for the lifetime of its window. The
+// static shell shows startup progress until the bundled service passes its
+// loopback health check, then the WebView navigates to the local CORSIA UI.
 
-use std::fs;
-use std::path::PathBuf;
+use std::{
+    env, fs,
+    io::{Read, Write},
+    net::{SocketAddr, TcpListener, TcpStream},
+    path::{Path, PathBuf},
+    process::{Child, Command},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::Manager;
+
+const DEFAULT_SERVICE_PORT: u16 = 47_895;
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
+const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const CHILD_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+const CHILD_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+#[derive(Default)]
+struct AppServiceState {
+    service: Mutex<ServiceState>,
+}
+
+#[derive(Default)]
+struct ServiceState {
+    child: Option<Child>,
+    port: Option<u16>,
+    state_dir: Option<PathBuf>,
+}
+
+#[derive(Serialize)]
+struct ServiceStartup {
+    url: String,
+}
 
 /// Drag-region handler injected into every page (including external URLs
 /// loaded into the WebView). Tauri 2's data-tauri-drag-region attribute
@@ -65,54 +92,285 @@ fn start_window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|e| e.to_string())
 }
 
-#[derive(Default, Serialize, Deserialize)]
-struct Config {
-    server_url: Option<String>,
+fn default_state_dir_for_home(home: &Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join("CORSIA")
 }
 
-fn config_path(app: &tauri::AppHandle) -> PathBuf {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .expect("no app config dir");
-    fs::create_dir_all(&dir).ok();
-    dir.join("config.json")
+fn default_state_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("CORSIA_STATE_DIR").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
+
+    // Keep the shell's default aligned with backend/infra/platform_paths.py.
+    app.path()
+        .home_dir()
+        .map(|home| default_state_dir_for_home(&home))
+        .map_err(|error| format!("could not resolve the CORSIA state directory: {error}"))
 }
 
-fn load_config(app: &tauri::AppHandle) -> Config {
-    fs::read_to_string(config_path(app))
+fn service_log_path(state_dir: &PathBuf) -> PathBuf {
+    state_dir.join("logs").join("service.log")
+}
+
+fn preferred_port() -> u16 {
+    env::var("CORSIA_DESKTOP_PORT")
         .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|port| *port != 0)
+        .unwrap_or(DEFAULT_SERVICE_PORT)
 }
 
-fn save_config(app: &tauri::AppHandle, cfg: &Config) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    fs::write(config_path(app), json).map_err(|e| e.to_string())
+fn select_port() -> Result<u16, String> {
+    let preferred = preferred_port();
+    if TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], preferred))).is_ok() {
+        return Ok(preferred);
+    }
+
+    TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .map_err(|error| format!("could not select a fallback loopback service port: {error}"))?
+        .local_addr()
+        .map(|address| address.port())
+        .map_err(|error| format!("could not determine the fallback service port: {error}"))
 }
 
-/// Persists the user's server URL. The picker's JS handles the actual
-/// navigation via window.location after this resolves — we only store
-/// the URL so subsequent launches skip the picker.
+fn probe_health(port: u16) -> bool {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(250)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+    if stream
+        .write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .is_ok_and(|_| response.starts_with("HTTP/1.1 200"))
+}
+
+fn stop_child(state: &mut ServiceState) {
+    if let Some(mut child) = state.child.take() {
+        request_child_shutdown(&mut child);
+    }
+    state.port = None;
+}
+
+#[cfg(unix)]
+fn request_child_shutdown(child: &mut Child) {
+    let sent_signal = unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) } == 0;
+    if !sent_signal {
+        log::warn!(
+            "could not send SIGTERM to bundled service {}; killing it",
+            child.id()
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    }
+
+    let deadline = Instant::now() + CHILD_SHUTDOWN_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Err(error) => {
+                log::warn!(
+                    "could not confirm bundled service {} shutdown after SIGTERM: {error}; killing it",
+                    child.id()
+                );
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                log::warn!(
+                    "bundled service {} ignored SIGTERM for {:?}; killing it",
+                    child.id(),
+                    CHILD_SHUTDOWN_TIMEOUT
+                );
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+            Ok(None) => thread::sleep(CHILD_SHUTDOWN_POLL_INTERVAL),
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn request_child_shutdown(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+fn install_termination_handler(app: tauri::AppHandle) {
+    let terminate_requested = Arc::new(AtomicBool::new(false));
+    if let Err(error) = signal_hook::flag::register(
+        signal_hook::consts::signal::SIGTERM,
+        Arc::clone(&terminate_requested),
+    ) {
+        log::error!("could not install bundled service termination handler: {error}");
+        return;
+    }
+
+    thread::spawn(move || {
+        while !terminate_requested.load(Ordering::Relaxed) {
+            thread::sleep(CHILD_SHUTDOWN_POLL_INTERVAL);
+        }
+        stop_service(&app);
+        std::process::exit(0);
+    });
+}
+
+#[cfg(not(unix))]
+fn install_termination_handler(_app: tauri::AppHandle) {}
+
+fn service_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+fn bundled_resource_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    match app.path().resource_dir() {
+        Ok(path) => Ok(path),
+        Err(path_error) => {
+            // `resource_dir` is the canonical Tauri path. Fall back to the
+            // app-bundle-relative location when macOS cannot resolve the
+            // extracted bundle through its path APIs.
+            let executable = env::current_exe()
+                .map_err(|error| format!("could not resolve the app executable: {error}"))?;
+            let resources = executable
+                .parent()
+                .and_then(|macos| macos.parent())
+                .map(|contents| contents.join("Resources"))
+                .filter(|path| path.is_dir())
+                .ok_or_else(|| {
+                    format!(
+                        "could not resolve bundled resources through Tauri ({path_error}) or from executable {}",
+                        executable.display()
+                    )
+                })?;
+            Ok(resources)
+        }
+    }
+}
+
+fn wait_for_service(service: &AppServiceState, port: u16) -> Result<(), String> {
+    let deadline = Instant::now() + HEALTH_TIMEOUT;
+    loop {
+        if probe_health(port) {
+            return Ok(());
+        }
+
+        {
+            let mut state = service
+                .service
+                .lock()
+                .map_err(|_| "service state is unavailable")?;
+            let exited = match state.child.as_mut() {
+                Some(child) => child
+                    .try_wait()
+                    .map_err(|error| format!("could not inspect bundled service state: {error}"))?,
+                None => return Err("the bundled service was stopped".into()),
+            };
+            if exited.is_some() {
+                state.child = None;
+                state.port = None;
+                return Err("the bundled service exited before it was ready".into());
+            }
+        }
+
+        if Instant::now() >= deadline {
+            let mut state = service
+                .service
+                .lock()
+                .map_err(|_| "service state is unavailable")?;
+            stop_child(&mut state);
+            return Err("the bundled service did not become ready in time".into());
+        }
+        thread::sleep(HEALTH_POLL_INTERVAL);
+    }
+}
+
+fn start_service(
+    app: &tauri::AppHandle,
+    service: &AppServiceState,
+) -> Result<ServiceStartup, String> {
+    let state_dir = default_state_dir(app)?;
+    fs::create_dir_all(state_dir.join("logs"))
+        .map_err(|error| format!("could not create the CORSIA service log directory: {error}"))?;
+    let port = select_port()?;
+
+    {
+        let mut state = service
+            .service
+            .lock()
+            .map_err(|_| "service state is unavailable")?;
+        if let Some(child) = state.child.as_mut() {
+            if child
+                .try_wait()
+                .map_err(|error| error.to_string())?
+                .is_none()
+            {
+                return Ok(ServiceStartup {
+                    url: service_url(state.port.unwrap_or(port)),
+                });
+            }
+        }
+        stop_child(&mut state);
+        let launcher = bundled_resource_dir(app)?
+            .join("bin")
+            .join("corsia-service");
+        state.child = Some(
+            Command::new(launcher)
+                .args(["--host", "127.0.0.1", "--port", &port.to_string()])
+                .env("CORSIA_STATE_DIR", &state_dir)
+                .spawn()
+                .map_err(|error| format!("could not start the bundled CORSIA service: {error}"))?,
+        );
+        state.port = Some(port);
+        state.state_dir = Some(state_dir);
+    }
+
+    wait_for_service(service, port)?;
+    Ok(ServiceStartup {
+        url: service_url(port),
+    })
+}
+
+fn stop_service(app: &tauri::AppHandle) {
+    let service = app.state::<AppServiceState>();
+    if let Ok(mut state) = service.service.lock() {
+        stop_child(&mut state);
+    };
+}
+
 #[tauri::command]
-fn set_server_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    // Validate the URL is at least parseable before persisting.
-    let _: url::Url = url.parse().map_err(|e: url::ParseError| e.to_string())?;
-    let mut cfg = load_config(&app);
-    cfg.server_url = Some(url);
-    save_config(&app, &cfg)
+fn start_local_service(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+) -> Result<ServiceStartup, String> {
+    start_service(&app, &service)
 }
 
-/// Returns the saved URL (if any) so the picker page can prefill.
 #[tauri::command]
-fn get_server_url(app: tauri::AppHandle) -> Option<String> {
-    load_config(&app).server_url
-}
-
-/// Clears the saved URL — next launch shows the picker again.
-#[tauri::command]
-fn reset_server_url(app: tauri::AppHandle) -> Result<(), String> {
-    save_config(&app, &Config::default())
+fn get_service_log_path(
+    app: tauri::AppHandle,
+    service: tauri::State<'_, AppServiceState>,
+) -> Result<String, String> {
+    let state_dir = service
+        .service
+        .lock()
+        .map_err(|_| "service state is unavailable")?
+        .state_dir
+        .clone()
+        .unwrap_or(default_state_dir(&app)?);
+    Ok(service_log_path(&state_dir).display().to_string())
 }
 
 /// Macos traffic-light positioning workaround.
@@ -224,12 +482,21 @@ fn sync_window_chrome(window: &tauri::WebviewWindow) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::default().build())
+        // The backend owns persistent service logs under CORSIA_STATE_DIR. Keep
+        // native diagnostics on stdout so an existing macOS app-log path cannot
+        // prevent the packaged app from starting before the service does.
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .clear_targets()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            set_server_url,
-            get_server_url,
-            reset_server_url,
+            start_local_service,
+            get_service_log_path,
             start_window_drag,
         ])
         .on_page_load(|webview, _payload| {
@@ -238,14 +505,18 @@ pub fn run() {
             // so multiple injections don't double-bind.
             let _ = webview.eval(DRAG_INIT_SCRIPT);
             // Re-apply traffic-light position after each navigation —
-            // the picker → corsia redirect rebuilds the view tree and
-            // can reset button positions on some macOS versions.
+            // the startup-shell → local-app redirect rebuilds the view tree
+            // and can reset button positions on some macOS versions.
             #[cfg(target_os = "macos")]
             if let Some(window) = webview.window().get_webview_window(webview.label()) {
                 sync_window_chrome(&window);
             }
         })
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                stop_service(window.app_handle());
+            }
+
             // Keep the DOM's native fullscreen state and normal-window control
             // frames synchronized after focus and resize transitions.
             #[cfg(target_os = "macos")]
@@ -259,6 +530,8 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            app.manage(AppServiceState::default());
+            install_termination_handler(app.handle().clone());
             // Apply traffic-light position once the main window is up.
             // The config-driven path is unreliable for our transparent +
             // windowEffects setup (see inset_traffic_lights doc comment).
@@ -269,13 +542,76 @@ pub fn run() {
                     sync_window_chrome(&window);
                 }
             }
-            // The default window loads dist-shell/index.html (the picker).
-            // The picker's JS reads the saved URL via get_server_url and,
-            // if set, immediately redirects via window.location.href —
-            // which the WebView handles natively without hitting Tauri 2's
-            // external-URL navigation guards.
+            // The default window loads the static startup shell while Tauri
+            // owns the first service launch. Retrying after a visible failure
+            // stays available through start_local_service.
+            let app_handle = app.handle().clone();
+            thread::spawn(move || {
+                let service = app_handle.state::<AppServiceState>();
+                match start_service(&app_handle, &service) {
+                    Ok(startup) => {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            if let Err(error) =
+                                window.eval(format!("window.location.replace('{}');", startup.url))
+                            {
+                                log::error!(
+                                    "could not navigate to the local CORSIA service: {error}"
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("bundled CORSIA service did not start: {error}");
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.eval("window.__corsiaShowServiceFailure?.();");
+                        }
+                    }
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_default_state_dir_uses_corsia_not_the_legacy_identifier() {
+        let home = Path::new("/tmp/corsia-desktop-state-test");
+        let state_dir = default_state_dir_for_home(home);
+
+        assert_eq!(
+            state_dir,
+            home.join("Library")
+                .join("Application Support")
+                .join("CORSIA")
+        );
+        assert!(!state_dir
+            .to_string_lossy()
+            .contains("com.cebertowicz.corsia"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_child_escalates_when_the_bundled_service_ignores_sigterm() {
+        let child = Command::new("/bin/sh")
+            .args(["-c", "trap '' TERM; while :; do sleep 1; done"])
+            .spawn()
+            .expect("spawn service that ignores SIGTERM");
+        let mut state = ServiceState {
+            child: Some(child),
+            port: Some(DEFAULT_SERVICE_PORT),
+            state_dir: None,
+        };
+
+        let started = Instant::now();
+        stop_child(&mut state);
+
+        assert!(started.elapsed() < CHILD_SHUTDOWN_TIMEOUT + Duration::from_secs(2));
+        assert!(state.child.is_none());
+        assert!(state.port.is_none());
+    }
 }

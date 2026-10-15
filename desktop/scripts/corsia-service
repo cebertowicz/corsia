@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+resources="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+state_dir="${CORSIA_STATE_DIR:-$HOME/Library/Application Support/CORSIA}"
+mkdir -p "$state_dir/logs"
+export PYTHONNOUSERSITE=1
+export PYTHONDONTWRITEBYTECODE=1
+export CORSIA_DESKTOP_BUNDLE=1
+login_path="$(PYTHONPATH="$resources/backend" "$resources/python/bin/python3" -c 'from cli_location import login_shell_path; print(login_shell_path() or "")' 2>/dev/null || true)"
+base_path="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export CORSIA_SERVICE_PATH="${login_path:+$login_path:}$base_path"
+export PATH="$CORSIA_SERVICE_PATH"
+export PYTHONPATH="$resources/python/backend-packages"
+export CORSIA_STATE_DIR="$state_dir"
+service_port="unknown"
+previous_argument=""
+for argument; do
+  if [ "$previous_argument" = "--port" ]; then
+    service_port="$argument"
+    break
+  fi
+  case "$argument" in
+    --port=*) service_port="${argument#--port=}"; break ;;
+  esac
+  previous_argument="$argument"
+done
+# The backend finds its own loopback port through BACKEND_PORT (the Claude Code
+# tool bridge URL, scheduled updates, the CLI); unset, it falls back to the
+# default port, which the packaged app does not serve on.
+if [ "$service_port" != "unknown" ]; then
+  export BACKEND_PORT="$service_port"
+fi
+exec >>"$state_dir/logs/service.log" 2>&1
+printf 'CORSIA bundled backend startup: state_dir=%s db_path=%s port=%s\n' \
+  "$state_dir" "$state_dir/corsia.db" "$service_port"
+exec "$resources/python/bin/python3" -m uvicorn main:app --app-dir "$resources/backend" "$@"

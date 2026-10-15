@@ -80,6 +80,19 @@ def test_descriptor_limit_precedes_frontend_pairing(monkeypatch) -> None:
     assert events == ["file-limit", "frontend"]
 
 
+def test_packaged_desktop_skips_checkout_release_pairing(monkeypatch, tmp_path) -> None:
+    """An immutable app bundle serves its included frontend without checkout scripts."""
+    monkeypatch.setenv("CORSIA_DESKTOP_BUNDLE", "1")
+    monkeypatch.setattr(frontend_build, "FRONTEND_ROOT", tmp_path)
+    monkeypatch.setattr(
+        frontend_build.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("desktop bundle ran checkout release pairing"),
+    )
+
+    frontend_build.ensure_frontend_built()
+
+
 def test_frontend_pairing_passes_resolved_runtime_identity(monkeypatch, tmp_path) -> None:
     """Direct Uvicorn startup cannot re-enter interactive CLI initialization."""
     script = tmp_path / "scripts" / "corsia"
