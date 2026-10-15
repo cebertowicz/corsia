@@ -97,7 +97,7 @@
 	{:else if isConductor}
 		<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 		<span class="h-scope">{scopeTitle}</span>
-		<span class="h-cond-tag">conductor</span>
+		<span class="h-cond-tag">{$uiScope ? 'conductor' : 'CORSIA'}</span>
 	{:else if $activeThread}
 		{#if isNavAgent($activeThread)}
 			<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Agent"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>

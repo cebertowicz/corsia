@@ -8,7 +8,7 @@ corsia:
 
 # Conductor API and agent setup
 
-Load `corsia_api` from the `conductor` pack. It calls the real API handlers in-process with your server-bound identity; no credential is needed. Every designated conductor, workspace or project, has full API access except the person-only list below. Other agents do not have the API tool. A project conductor's reach is not limited to its project: the API acts for the whole user, every project and the workspace's settings included. As a project conductor, change only your own project unless the person asked for more.
+Load `corsia_api` from the `coordination` pack. It calls the real API handlers in-process with your server-bound identity; no credential is needed. Every designated conductor, workspace or project, has full API access except the person-only list below. Other agents do not have the API tool. A project conductor's reach is not limited to its project: the API acts for the whole user, every project and the workspace's settings included. As a project conductor, change only your own project unless the person asked for more.
 
 Use it for authorized setup, operations and inspection: projects, agents, model profiles, providers and models, network servers, accounts and bindings, MCP servers, key checks, documents and costs. Before a write, read the target and know its route schema. API access never grants authority to choose a new effect for the user. Prefer a purpose-built native tool when one already owns the operation.
 
@@ -37,6 +37,6 @@ Agents use these keys but never read them. `GET /api/keys` returns each entry's 
 1. Read `model_catalog`; use an exact ready selector and respect local concurrency and user model-control policy.
 2. Create a visible thread with `delegate_create_thread`, or read the existing target with `agent_roster_entry`.
 3. Use `agent_roster_update` with the target's fresh `expected_updated_at`, `agent_enabled=true` and the approved responsibility. A same-state retry changes nothing.
-4. Load `conductor_instruction_file_create` from the `conductor` pack. With `kind="responsibility"`, `target_thread_id`, `expected_revision="absent"` and approved `content`, create and attach `RESPONSIBILITY.md`. Require `delivery.next_turn=true` before calling setup complete.
+4. Load `coordination_instruction_file_create` from the `coordination` pack. With `kind="responsibility"`, `target_thread_id`, `expected_revision="absent"` and approved `content`, create and attach `RESPONSIBILITY.md`. Require `delivery.next_turn=true` before calling setup complete.
 5. For a thread skill, use `kind="skill"`, a unique lowercase `name`, valid `SKILL.md` frontmatter and `content`. Optional `supporting_files` maps one-level `scripts/` or `references/` paths to text. Scripts are installed, never run by this tool. The receipt proves the skill appears in the target's next-turn skills list; a shadowed skill is an incomplete install.
 6. Keep the returned bundle `revision` for later edits; `absent` protects creation. Retrying the same desired bytes is idempotent. For stale revisions, read current files before changing them. Verify roster, attached responsibility and skill delivery through the target's fresh turn.

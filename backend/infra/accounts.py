@@ -138,7 +138,7 @@ def create_user(
 ) -> str:
     """Create an account and return its id. Raises if the name is taken.
 
-    The first account also gets the workspace conductor; ``first_run_wake``
+    The first account also gets the CORSIA agent; ``first_run_wake``
     queues that conductor's first-run wake in the same transaction. Only a
     caller with no person waiting on the conductor (the eval harness)
     passes False.

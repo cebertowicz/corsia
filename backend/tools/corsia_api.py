@@ -37,7 +37,7 @@ class ApiCallError(ValueError):
 
 
 def conductor_user(actor_thread_id: str) -> str:
-    from infra.conductor import get_conductor_scopes
+    from infra.conductor import get_coordination_scopes
     from infra.database import get_db
     from infra.queries import thread_available_sql
 
@@ -47,8 +47,8 @@ def conductor_user(actor_thread_id: str) -> str:
             f"SELECT user_id FROM threads WHERE id=? AND {thread_available_sql()}",
             (actor_thread_id,),
         ).fetchone()
-        if actor is None or not get_conductor_scopes(actor_thread_id, db=db):
-            raise ApiCallError("Missing conductor capability; only a designated workspace or project conductor can use corsia_api")
+        if actor is None or not get_coordination_scopes(actor_thread_id, db=db):
+            raise ApiCallError("Missing conductor capability; only the CORSIA agent or a designated project conductor can use corsia_api")
         return str(actor["user_id"])
     finally:
         db.close()

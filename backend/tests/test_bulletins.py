@@ -163,7 +163,7 @@ async def test_system_change_reaches_real_event_delivery(monkeypatch: pytest.Mon
     assert await bulletin_live.check_live_bulletins() is False
     identity = second
     mk_session("system-conductor")
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "system-conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "system-conductor")
     received: list[str] = []
 
     async def send(*args, **_kwargs):
@@ -336,7 +336,7 @@ def test_system_change_before_any_turn_becomes_the_baseline(monkeypatch: pytest.
     monkeypatch.setattr(bulletins, "system_identity", lambda: first)
     asyncio.run(bulletin_live.check_live_bulletins())
     monkeypatch.setattr(bulletins, "system_identity", lambda: second)
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     calls = _recording_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
     assert calls == []
@@ -358,7 +358,7 @@ def test_changed_system_notifies_once_until_disposition(monkeypatch: pytest.Monk
     monkeypatch.setattr(bulletins, "system_identity", lambda: first)
     asyncio.run(bulletin_live.check_live_bulletins())
     monkeypatch.setattr(bulletins, "system_identity", lambda: second)
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     calls = _recording_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is True
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
@@ -374,7 +374,7 @@ def test_system_change_is_held_without_a_conductor(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(bulletins, "system_identity", lambda: next(identities, bulletins.SystemIdentity("2", "second", (("a", "2"),))))
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     calls = _recording_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is True
     assert len(calls) == 1
@@ -392,7 +392,7 @@ def test_new_system_change_supersedes_an_older_pending_row(monkeypatch: pytest.M
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
     identity = third
     mk_session("supersede-conductor")
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "supersede-conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "supersede-conductor")
     _recording_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is True
     db = get_db()
@@ -420,13 +420,13 @@ def test_acknowledging_older_system_change_leaves_current_one_pending(monkeypatc
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
     identity = second
     mk_session("ack-conductor")
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "ack-conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "ack-conductor")
     _recording_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is True
     identity = third
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: None)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "ack-conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "ack-conductor")
     tool = BulletinDispositionTool()
     assert '"recorded": true' in asyncio.run(
         tool.execute("system-change:second", "acted", "reviewed", _thread_id="ack-conductor"),
@@ -458,7 +458,7 @@ def test_reverting_to_a_superseded_system_change_reclaims_it(monkeypatch: pytest
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
     identity = second
     mk_session("revert-conductor")
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "revert-conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "revert-conductor")
     _recording_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is True
     db = get_db()
@@ -478,7 +478,7 @@ def test_pending_system_change_does_not_accelerate_live_fetch(monkeypatch: pytes
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
     identity = second
     monkeypatch.setattr(bulletins, "PUBLIC_KEYS", ("test-key",))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     _recording_delivery(monkeypatch, delivered=False)
     fetches = []
 
@@ -513,7 +513,7 @@ def test_live_delivery_is_batched_and_idempotent_across_restart(monkeypatch: pyt
             return httpx.Response(200, stream=httpx.ByteStream(sig_one))
         return httpx.Response(200, stream=httpx.ByteStream(sig_two))
     _use_transport(monkeypatch, httpx.MockTransport(handler))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     calls = _recording_delivery(monkeypatch)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is True
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
@@ -578,7 +578,7 @@ def test_refused_delivery_is_deferred_and_retried_despite_etag(monkeypatch: pyte
     content, signature, public = _signed_bulletin()
     monkeypatch.setattr(bulletins, "PUBLIC_KEYS", (public,))
     _use_transport(monkeypatch, _feed_transport(content, signature))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     _recording_delivery(monkeypatch, delivered=False)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
     calls = _recording_delivery(monkeypatch, delivered=True)
@@ -605,7 +605,7 @@ def test_withdrawal_is_only_ledgered_after_delivery(monkeypatch: pytest.MonkeyPa
             db.execute("INSERT INTO system_bulletins(id,source,state,delivered_at,updated_at) VALUES('withdraw','live','delivered','now','now')")
     finally:
         db.close()
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     _recording_delivery(monkeypatch, delivered=False)
     assert asyncio.run(bulletin_live.check_live_bulletins()) is False
     db = get_db()
@@ -620,10 +620,10 @@ def test_withdrawal_is_only_ledgered_after_delivery(monkeypatch: pytest.MonkeyPa
 
 def test_disposition_tool_accepts_only_known_or_current_pending_ids(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_ledger()
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "conductor")
     tool = BulletinDispositionTool()
     refusal = asyncio.run(tool.execute("anything", "acted", "x", _thread_id="ordinary"))
-    assert "Only the designated" in refusal and "no action is needed from you" in refusal
+    assert "Only the CORSIA agent" in refusal and "no action is needed from you" in refusal
     assert "Unknown bulletin id" in asyncio.run(tool.execute("system-change:stale", "acted", "x", _thread_id="conductor"))
     assert "Unknown bulletin id" in asyncio.run(tool.execute("invented", "acted", "x", _thread_id="conductor"))
     db = get_db()

@@ -107,13 +107,13 @@ def bounded_response(rows: list[dict], limit: int, window: list[str], status: di
 
 
 def _require_conductor(thread_id: str) -> None:
-    from infra.conductor import get_conductor_scopes
+    from infra.conductor import get_coordination_scopes
 
-    if not get_conductor_scopes(thread_id):
+    if not get_coordination_scopes(thread_id):
         raise LogReadError(
-            "not_conductor: log_read is only for a designated conductor "
-            "(workspace or project). This is final: do not retry or request a "
-            "host lease; ask your conductor to read the logs"
+            "not_conductor: log_read is only for the CORSIA agent or a "
+            "designated project conductor. This is final: do not retry or "
+            "request a host lease; ask your conductor to read the logs"
         )
 
 

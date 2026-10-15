@@ -1,6 +1,6 @@
 # Conductor API and instruction setup
 
-This additive capability gives the designated workspace conductor bounded, credential-free access to reviewed application handlers. Project conductors use existing scoped roster and instruction tools. Human-only operations retain their existing entry points.
+This additive capability gives the designated CORSIA agent bounded, credential-free access to reviewed application handlers. Project conductors use existing scoped roster and instruction tools. Human-only operations retain their existing entry points.
 
 ## Code ground
 
@@ -21,7 +21,7 @@ Requests and collected responses are limited to 32 KiB, and each request has a 3
 | Step | Surface and acceptance |
 | --- | --- |
 | Discover | System skills index includes `conductor-api`; tool descriptions direct setup to it. |
-| Inspect | Workspace conductor reads its roster through native dispatch and the real API handler. |
+| Inspect | The CORSIA agent reads its roster through native dispatch and the real API handler. |
 | Create | Existing delegation creates a visible thread using a catalog-valid model. |
 | Promote | Revisioned roster update enables the agent and supplies its approved responsibility. |
 | Attach | Instruction tool saves responsibility, attaches it, and reports next-turn inclusion. |

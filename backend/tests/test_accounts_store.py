@@ -108,14 +108,14 @@ class TestAccounts:
         assert accounts.has_users() is True
         assert "newcomer" in [u["id"] for u in accounts.list_users()]
 
-    def test_first_account_creates_workspace_conductor(self, isolated_db):
+    def test_first_account_creates_corsia_agent(self, isolated_db):
         from infra.conductor import WORKSPACE_SCOPE, get_conductor
         from infra.database import get_db
 
         db = get_db()
         try:
             db.execute("DELETE FROM auth_tokens")
-            db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+            db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
             db.execute("DELETE FROM threads")
             db.execute("DELETE FROM users")
             db.commit()
@@ -132,7 +132,7 @@ class TestAccounts:
             ).fetchone()
             assert dict(row) == {
                 "user_id": "newcomer",
-                "title": "Conductor",
+                "title": "CORSIA",
                 "project_id": None,
                 "model": None,
             }
@@ -166,7 +166,7 @@ class TestAccounts:
         db = get_db()
         try:
             db.execute("DELETE FROM auth_tokens")
-            db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+            db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
             db.execute("DELETE FROM threads")
             db.execute("DELETE FROM users")
             db.commit()
@@ -200,7 +200,7 @@ class TestAccounts:
         db = get_db()
         try:
             db.execute("DELETE FROM auth_tokens")
-            db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+            db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
             db.execute("DELETE FROM threads")
             db.execute("DELETE FROM users")
             db.commit()
@@ -456,7 +456,7 @@ class TestAccountsMigration:
         from infra.migration_25_to_26_accounts import migrate_25_to_26
         from infra.schema import SCHEMA_VERSION
 
-        assert SCHEMA_VERSION == 115
+        assert SCHEMA_VERSION == 116
         assert MIGRATIONS[25] is migrate_25_to_26
 
     def test_migrated_shape_matches_a_freshly_created_one(self, tmp_path):

@@ -118,7 +118,7 @@ def _install(actor: str, target_id: str, kind: str, name: str | None, content: s
     from core.skills_registry import resolve_effective_skills
     from infra.database import write_transaction
 
-    with write_transaction(None, scope="conductor_instruction_file_create") as db:
+    with write_transaction(None, scope="coordination_instruction_file_create") as db:
         user_id = _actor_user_id(db, actor)
         target = require_designated_conductor_target(target_id, user_id=user_id, actor_thread_id=actor, db=db)
         writes = _install_paths(target, kind, name, content, supporting_files)
@@ -171,7 +171,7 @@ class ConductorInstructionFileCreateTool(Tool):
 
     @property
     def name(self) -> str:
-        return "conductor_instruction_file_create"
+        return "coordination_instruction_file_create"
 
     @property
     def description(self) -> str:

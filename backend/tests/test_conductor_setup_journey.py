@@ -31,7 +31,7 @@ async def test_fresh_workspace_conductor_discovers_creates_and_reads_agent(deleg
     index = next(row for row in skills if row.source_id == "dynamic:skills-index")
     assert "conductor-api" in index.prompt_content
     assert "conductor-api" in registry.get("corsia_api").description
-    assert registry.get("conductor_instruction_file_create") is not None
+    assert registry.get("coordination_instruction_file_create") is not None
 
     binding = state._current_thread_id.set("sender-self")
     try:
@@ -49,7 +49,7 @@ async def test_fresh_workspace_conductor_discovers_creates_and_reads_agent(deleg
         assert promoted["changed"]
         retried = json.loads(await registry.execute("agent_roster_update", promotion))
         assert not retried["changed"]
-        installed = json.loads(await registry.execute("conductor_instruction_file_create", {
+        installed = json.loads(await registry.execute("coordination_instruction_file_create", {
             "target_thread_id": target, "kind": "responsibility", "expected_revision": "absent",
             "content": "# Responsibility\nOwns the authorized checks.\n",
         }))

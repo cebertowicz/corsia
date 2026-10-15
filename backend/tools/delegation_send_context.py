@@ -91,7 +91,7 @@ def native_send_scope_error(
                 project_conductor = None
         gap = native_endpoint_gap(
             row,
-            workspace_conductor_id=conductor_id,
+            corsia_agent_id=conductor_id,
             project_conductor=project_conductor,
         )
         if gap:
