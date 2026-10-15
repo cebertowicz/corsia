@@ -21,6 +21,8 @@ use std::{
 use serde::Serialize;
 use tauri::Manager;
 
+mod first_run;
+
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -114,16 +116,17 @@ fn service_log_path(state_dir: &PathBuf) -> PathBuf {
     state_dir.join("logs").join("service.log")
 }
 
-fn preferred_port() -> u16 {
+fn preferred_port(recorded: Option<u16>) -> u16 {
     env::var("CORSIA_DESKTOP_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .filter(|port| *port != 0)
+        .or(recorded)
         .unwrap_or(DEFAULT_SERVICE_PORT)
 }
 
-fn select_port() -> Result<u16, String> {
-    let preferred = preferred_port();
+fn select_port(recorded: Option<u16>) -> Result<u16, String> {
+    let preferred = preferred_port(recorded);
     if TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], preferred))).is_ok() {
         return Ok(preferred);
     }
@@ -302,9 +305,33 @@ fn start_service(
     service: &AppServiceState,
 ) -> Result<ServiceStartup, String> {
     let state_dir = default_state_dir(app)?;
+    // Decide about the workspace before anything is written: a refusal leaves
+    // the computer exactly as it was.
+    let first_run = if first_run::environment_names_the_roots() {
+        first_run::FirstRun::Configured
+    } else {
+        let home = app
+            .path()
+            .home_dir()
+            .map_err(|error| format!("could not resolve the home folder: {error}"))?;
+        first_run::plan(&home, &state_dir)?
+    };
+    if let first_run::FirstRun::ExistingInstall { reason } = first_run {
+        return Err(reason);
+    }
+    let port = select_port(first_run::recorded_port(&state_dir))?;
+    if let first_run::FirstRun::Fresh { workspace } = first_run {
+        let resources = bundled_resource_dir(app).ok();
+        first_run::apply(&workspace, &state_dir, port, |path| {
+            first_run::git_init(
+                path,
+                resources.as_deref(),
+                first_run::command_line_tools_installed,
+            )
+        })?;
+    }
     fs::create_dir_all(state_dir.join("logs"))
         .map_err(|error| format!("could not create the CORSIA service log directory: {error}"))?;
-    let port = select_port()?;
 
     {
         let mut state = service
@@ -563,7 +590,10 @@ pub fn run() {
                     Err(error) => {
                         log::error!("bundled CORSIA service did not start: {error}");
                         if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.eval("window.__corsiaShowServiceFailure?.();");
+                            let reason = serde_json::to_string(&error).unwrap_or_default();
+                            let _ = window.eval(format!(
+                                "window.__corsiaShowServiceFailure?.({reason});"
+                            ));
                         }
                     }
                 }
