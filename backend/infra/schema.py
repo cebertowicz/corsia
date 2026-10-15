@@ -1,5 +1,4 @@
 """SQLite schema DDL used by database initialization."""
-from __future__ import annotations
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
 from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
 from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
