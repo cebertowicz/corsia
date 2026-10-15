@@ -26,7 +26,8 @@ def _classify(raw: dict[str, Any]) -> str:
 
 
 def _extract_facts(raw: dict[str, Any]) -> dict[str, Any]:
-    keys = ("from", "to", "label", "thread_id", "message_id", "subject")
+    keys = ("from", "to", "label", "thread_id", "message_id", "subject",
+            "screen_status", "needs_person", "injection", "kind")
     return {k: raw[k] for k in keys if raw.get(k) is not None}
 
 
@@ -54,7 +55,10 @@ MANIFEST = register(ConnectorManifest(
         "email.received": EventTypeDecl(
             "email.received", ("message_id",), _FILTERABLE,
             artifact_type=EMAIL_THREAD_TYPE, artifact_integration=GMAIL_INTEGRATION,
-            relationships=(_MESSAGE_TO_THREAD,), event_class="actionable"),
+            relationships=(_MESSAGE_TO_THREAD,), event_class="informational",
+            actionable_when={"screen_status": "screened", "injection": False,
+                             "needs_person": "now"},
+            collapse_fact="thread_id"),
     },
     classify=_classify,
     extract_facts=_extract_facts,
