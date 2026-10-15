@@ -193,6 +193,18 @@ async def test_page_endpoint_reads_the_session_owners_rendered_result(monkeypatc
         browser_pane.clear_page_endpoint("thread-1", "pane-1")
 
 
+@pytest.mark.asyncio
+async def test_page_info_reads_url_and_title_from_the_session_owners_rendered_result(monkeypatch):
+    class InfoOwner:
+        async def run(self, _thread_id, args, **_kwargs):
+            return {("get", "url"): _rendered({"url": "https://www.apple.com/"}),
+                    ("get", "title"): _rendered({"title": "Apple"})}[tuple(args)]
+
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: InfoOwner())
+    # The pane's address and tab label show these values, never the rendered JSON around them.
+    assert await browser_pane.page_info("thread-1", "pane-1") == ("https://www.apple.com/", "Apple")
+
+
 def test_pane_presence_is_not_exclusive_control():
     browser_control.pane_connected("thread-1", "first")
     browser_control.pane_connected("thread-1", "second")

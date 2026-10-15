@@ -62,12 +62,11 @@ async def _page_endpoint(thread_id: str, connection_token: str, error: str) -> s
     endpoint = browser_cli.json_object(payload).get("cdpUrl")
     if not isinstance(endpoint, str) or not endpoint.startswith("ws"):
         raise browser_cdp.BrowserSessionError(error)
-    rendered_url = await owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing")
-    current_url = browser_cli.json_object(rendered_url).get("url")
-    if not isinstance(current_url, str):
-        current_url = rendered_url
+    current_url = _rendered_field(
+        await owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing"), "url")
     page_endpoint = await asyncio.to_thread(
-        browser_cdp._page_endpoint, endpoint, current_url if current_url.startswith(("http://", "https://")) else None,
+        browser_cdp._page_endpoint, endpoint,
+        current_url if current_url and current_url.startswith(("http://", "https://")) else None,
     )
     _page_endpoints[(thread_id, connection_token)] = page_endpoint
     return page_endpoint
@@ -99,7 +98,15 @@ async def page_info(thread_id: str, connection_token: str) -> tuple[str | None, 
     owner = PROCESS_OWNER.browser_sessions()
     url = await owner.run(thread_id, ("get", "url"), control_token=connection_token, session="existing")
     title = await owner.run(thread_id, ("get", "title"), control_token=connection_token, session="existing")
-    return (None if url.startswith("Error:") else url, None if title.startswith("Error:") else title)
+    return _rendered_field(url, "url"), _rendered_field(title, "title")
+
+
+def _rendered_field(rendered: str, key: str) -> str | None:
+    """Read one value from owner.run's rendered result: agent-browser's `data` object, unwrapped."""
+    if rendered.startswith("Error:"):
+        return None
+    value = browser_cli.json_object(rendered).get(key)
+    return value if isinstance(value, str) else rendered
 
 
 async def go(thread_id: str, action: str, connection_token: str) -> str:
