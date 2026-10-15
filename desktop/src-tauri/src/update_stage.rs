@@ -68,7 +68,7 @@ pub fn run(mut context: tauri::Context<tauri::Wry>, operation_id: String) -> i32
             return FETCH_FAILED;
         }
     };
-    app.run(|_, _| {});
+    let _ = app.run_return(|_, _| {});
     match receiver.recv() {
         Ok(Ok(path)) => {
             println!("{}", path.display());
