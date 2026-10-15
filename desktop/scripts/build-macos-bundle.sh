@@ -39,15 +39,25 @@ build_git_runtime() {
   local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
   local stage="$BUILD_ROOT/git-stage"
   local stage_root="$stage/git-runtime"
+  local stage_core="$stage_root/libexec/git-core"
+  local bundle_core="$BUNDLE_ROOT/libexec/git-core"
   local -a git_make_args=(
     prefix=/git-runtime
     RUNTIME_PREFIX=YesPlease
+    SKIP_DASHED_BUILT_INS=YesPlease
     NO_GETTEXT=YesPlease
     NO_TCLTK=YesPlease
     NO_PERL=YesPlease
     NO_PYTHON=YesPlease
     NO_BASH_COMPLETION=YesPlease
   )
+  # Git runs these built-ins by their dashed names for local transports.
+  # SKIP_DASHED_BUILT_INS installs them only in bin/; they ship in the exec
+  # path instead, the one directory Git puts ahead of the caller's PATH.
+  local -a transport_built_ins=(git-upload-pack git-receive-pack git-upload-archive)
+  # Server-side helpers, and scalar, which is its own binary; none ship.
+  local -a excluded_core=(git-daemon git-http-backend git-shell git-cvsserver scalar)
+  local entry name
 
   fetch_verified "$GIT_URL" "$archive" "$GIT_SHA256"
   tar -xJf "$archive" -C "$BUILD_ROOT"
@@ -57,24 +67,37 @@ build_git_runtime() {
   # The installed stage, rather than selected build outputs, is the runtime
   # contract: it retains every Git scripted subcommand and relocatable template.
   [ -x "$stage_root/bin/git" ] || fail "Git install did not produce bin/git"
-  [ -d "$stage_root/libexec/git-core" ] || fail "Git install did not produce libexec/git-core"
+  [ -d "$stage_core" ] || fail "Git install did not produce libexec/git-core"
   [ -d "$stage_root/share/git-core/templates" ] || fail "Git install did not produce templates"
-  mkdir -p "$BUNDLE_ROOT/bin" "$BUNDLE_ROOT/libexec/git-core" \
+  mkdir -p "$BUNDLE_ROOT/bin" "$bundle_core" \
     "$BUNDLE_ROOT/share/git-core/templates" "$BUNDLE_ROOT/licenses/git"
   install -m 0755 "$stage_root/bin/git" "$BUNDLE_ROOT/bin/git"
-  rsync -a --delete "$stage_root/libexec/git-core/" "$BUNDLE_ROOT/libexec/git-core/"
-  # INSTALL_SYMLINKS makes core aliases point at individual bin targets. Only
-  # bin/git ships, so retain each core command name while redirecting it there.
-  while IFS= read -r -d '' link; do
-    case "$(readlink "$link")" in
-      ../../bin/*) ln -sf ../../bin/git "$link" ;;
+
+  # Tauri copies resources with symlinks dereferenced, so stage the regular files
+  # that will ship: each kept link becomes a copy of its target here, and a link
+  # to a binary that does not ship is dropped instead of becoming a copy of it.
+  local -a core_filter=()
+  for name in "${excluded_core[@]}"; do core_filter+=(--exclude "/$name"); done
+  while IFS= read -r -d '' entry; do
+    case "$(realpath "$entry")" in
+      "$(realpath "$stage_core")"/*|"$(realpath "$stage_root/bin/git")") ;;
+      *) core_filter+=(--exclude "/${entry#"$stage_core/"}") ;;
     esac
-  done < <(find "$BUNDLE_ROOT/libexec/git-core" -type l -print0)
-  rsync -a --delete "$stage_root/share/git-core/templates/" "$BUNDLE_ROOT/share/git-core/templates/"
+  done < <(find "$stage_core" -type l -print0)
+  rsync -a --copy-links --delete "${core_filter[@]}" "$stage_core/" "$bundle_core/"
+  for name in "${transport_built_ins[@]}"; do
+    [ "$(realpath "$stage_root/bin/$name")" = "$(realpath "$stage_root/bin/git")" ] \
+      || fail "Git install did not provide $name as the git built-in"
+    install -m 0755 "$stage_root/bin/git" "$bundle_core/$name"
+  done
+  rsync -a --copy-links --delete "$stage_root/share/git-core/templates/" "$BUNDLE_ROOT/share/git-core/templates/"
+  entry="$(find "$BUNDLE_ROOT/bin/git" "$BUNDLE_ROOT/libexec" "$BUNDLE_ROOT/share" -type l -print -quit)"
+  [ -z "$entry" ] || fail "staged Git resource is a symlink Tauri would copy: $entry"
+
   install -m 0644 "$GIT_SOURCE/COPYING" "$BUNDLE_ROOT/licenses/git/COPYING"
   install -m 0644 "$archive" "$BUNDLE_ROOT/licenses/git/$GIT_ARCHIVE"
-  printf 'Corresponding source for Git %s\nUpstream URL: %s\nSHA-256: %s\nBuild: RUNTIME_PREFIX=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease\n' \
-    "$GIT_VERSION" "$GIT_URL" "$GIT_SHA256" > "$BUNDLE_ROOT/licenses/git/SOURCE"
+  printf 'Corresponding source for Git %s\nUpstream URL: %s\nSHA-256: %s\nBuild: %s\n' \
+    "$GIT_VERSION" "$GIT_URL" "$GIT_SHA256" "${git_make_args[*]:1}" > "$BUNDLE_ROOT/licenses/git/SOURCE"
 }
 
 [ "$(uname -s)" = "Darwin" ] || fail "macOS is required"

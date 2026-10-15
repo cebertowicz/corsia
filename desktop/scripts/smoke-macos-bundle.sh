@@ -52,7 +52,13 @@ readonly GIT_HTTP="$GIT_CORE/git-remote-http"
 readonly GIT_VERSION="2.53.0"
 readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
 readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
+readonly GIT_SIZE_LIMIT_KIB=60000
+# git itself plus the transport built-ins Git runs by their dashed names.
+readonly GIT_CORE_COPY_LIMIT=4
 
+macho_uuid() {
+  otool -l "$1" 2>/dev/null | awk '$1 == "uuid" && !found {print $2; found = 1}'
+}
 assert_system_libraries() {
   local binary="$1"
   if otool -L "$binary" | tail -n +2 | grep -Ev '^[[:space:]]*(/System/Library/|/usr/lib/)'; then
@@ -72,6 +78,22 @@ assert_system_libraries "$GIT_HTTP"
 while IFS= read -r -d '' link; do
   [ -e "$link" ] || { echo "error: broken bundled Git symlink: $link" >&2; exit 1; }
 done < <(find "$GIT_CORE" -type l -print0)
+
+# Tauri dereferences symlinks when it copies resources, so every Git alias in the
+# app is a full copy of its target; measure the relocated app, not the stage.
+git_kib="$(du -sk "$GIT" "$GIT_CORE" "$RESOURCES/share/git-core/templates" | awk '{sum += $1} END {print sum}')"
+printf 'bundled-git-uncompressed-kib=%s limit=%s\n' "$git_kib" "$GIT_SIZE_LIMIT_KIB"
+[ "$git_kib" -le "$GIT_SIZE_LIMIT_KIB" ] || { echo "error: bundled Git is $git_kib KiB, over $GIT_SIZE_LIMIT_KIB KiB" >&2; exit 1; }
+# Signing gives each copy an identifier from its own file name, so copies differ
+# byte for byte; the linker's Mach-O UUID still identifies them.
+git_uuid="$(macho_uuid "$GIT")"
+[ -n "$git_uuid" ] || { echo "error: bundled git has no Mach-O UUID" >&2; exit 1; }
+git_copies=0
+while IFS= read -r -d '' file; do
+  if [ "$(macho_uuid "$file")" = "$git_uuid" ]; then git_copies=$((git_copies + 1)); fi
+done < <(find "$GIT_CORE" -type f -print0)
+printf 'bundled-git-core-copies-of-git=%s limit=%s\n' "$git_copies" "$GIT_CORE_COPY_LIMIT"
+[ "$git_copies" -le "$GIT_CORE_COPY_LIMIT" ] || { echo "error: $git_copies files in libexec/git-core are copies of bin/git" >&2; exit 1; }
 
 # These fail-closed shims would run if Git's runtime-prefix helper lookup fell
 # back to the Command Line Tools after the app has moved.
@@ -108,7 +130,6 @@ bundled_git -C "$GIT_CLONE" show origin/main:fetch-smoke >/dev/null
 bundled_git archive --remote="$GIT_REMOTE" --format=tar main > "$TEMP_ROOT/git-archive.tar"
 tar -tf "$TEMP_ROOT/git-archive.tar" | grep -qx 'smoke'
 bundled_git submodule -h >/dev/null 2>&1
-printf 'bundled-git-uncompressed-kib=%s\n' "$(du -sk "$GIT" "$GIT_CORE" "$RESOURCES/share/git-core/templates" | awk '{sum += $1} END {print sum}')"
 
 port="$($PYTHON -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 mkdir -p "$TEMP_ROOT/home" "$TEMP_ROOT/workspace" "$TEMP_ROOT/state"
