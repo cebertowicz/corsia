@@ -95,11 +95,13 @@ async def classify(
 ) -> bool:
     """Record one candidate, retaining a serving older child if a newer version cannot start."""
     manifest = await worker._verified_manifest()
-    if manifest is None: return False
+    if manifest is None:
+        return False
     outages: list[str] = []
     failures: list[str] = []
     worker.call_seconds = 0.0
-    fallback_child, fallback_version = (worker.child, worker.child_version) if worker.child_version != manifest.version else (None, None)
+    fallback_child = worker.child if worker.child_version != manifest.version else None
+    fallback_version = worker.child_version if fallback_child is not None else None
     if fallback_child is not None:
         worker.child = child_factory(manifest)
         worker.child_version = manifest.version
