@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
+import re
+import shlex
 import shutil
 import signal
 import stat
@@ -42,16 +45,16 @@ function result(id, value) {
   process.stdout.write(JSON.stringify({jsonrpc: "2.0", id, result: value}) + "\n");
 }
 function report() {
-  let write = "not-attempted";
+  let write = {result: "not-attempted"};
   if (process.env.CORSIA_MCP_DENIED_WRITE) {
     try {
       fs.writeFileSync(process.env.CORSIA_MCP_DENIED_WRITE, "blocked");
-      write = "wrote";
-    } catch (_error) {
-      write = "denied";
+      write = {result: "wrote"};
+    } catch (error) {
+      write = {result: "denied", code: error.code, errno: error.errno};
     }
   }
-  return JSON.stringify({argv: process.argv, hasSecret: Boolean(process.env.SERVICE_TOKEN), write});
+  return JSON.stringify({argv: process.argv, cwd: process.cwd(), hasSecret: Boolean(process.env.SERVICE_TOKEN), write});
 }
 readline.createInterface({input: process.stdin}).on("line", (line) => {
   const request = JSON.parse(line);
@@ -65,7 +68,8 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
 });
 '''
 
-_PYTHON_MCP_SERVER = r'''import json
+_PYTHON_MCP_SERVER = r'''import errno
+import json
 import os
 import sys
 
@@ -75,16 +79,16 @@ def respond(request_id, value):
 
 
 def report():
-    write = "not-attempted"
+    write = {"result": "not-attempted"}
     target = os.environ.get("CORSIA_MCP_DENIED_WRITE")
     if target:
         try:
             with open(target, "w", encoding="utf-8") as output:
                 output.write("blocked")
-            write = "wrote"
-        except OSError:
-            write = "denied"
-    return json.dumps({"argv": sys.argv, "hasSecret": bool(os.environ.get("SERVICE_TOKEN")), "write": write})
+            write = {"result": "wrote"}
+        except OSError as error:
+            write = {"result": "denied", "code": errno.errorcode.get(error.errno), "errno": error.errno}
+    return json.dumps({"argv": sys.argv, "cwd": os.getcwd(), "hasSecret": bool(os.environ.get("SERVICE_TOKEN")), "write": write})
 
 
 for line in sys.stdin:
@@ -244,10 +248,39 @@ async def test_local_mcp_missing_safehouse_never_starts_a_server(
 
 
 def _write_npx_fixture(workspace: Path) -> None:
-    binary = workspace / "node_modules" / ".bin" / "corsia-npx-mcp"
+    """Install a true local package and bin link so npx resolves from its launch cwd."""
+    package = workspace / "node_modules" / "corsia-npx-mcp"
+    binary = package / "bin" / "server.js"
     binary.parent.mkdir(parents=True, exist_ok=True)
+    (package / "package.json").write_text(
+        '{"name":"corsia-npx-mcp","version":"0.0.1","bin":"bin/server.js"}\n', encoding="utf-8",
+    )
     binary.write_text(_NODE_MCP_SERVER, encoding="utf-8")
     binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+    link = workspace / "node_modules" / ".bin" / "corsia-npx-mcp"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(Path("..") / "corsia-npx-mcp" / "bin" / "server.js")
+
+
+def test_npx_fixture_is_a_local_package(tmp_path):
+    _write_npx_fixture(tmp_path)
+
+    package = tmp_path / "node_modules" / "corsia-npx-mcp"
+    link = tmp_path / "node_modules" / ".bin" / "corsia-npx-mcp"
+    assert json.loads((package / "package.json").read_text(encoding="utf-8"))["bin"] == "bin/server.js"
+    assert link.resolve() == package / "bin" / "server.js"
+
+
+@pytest.mark.skipif(shutil.which("npx") is None, reason="npx is unavailable")
+def test_npx_fixture_resolves_from_its_launch_workspace(tmp_path):
+    _write_npx_fixture(tmp_path)
+
+    result = subprocess.run(
+        ["npx", "--no-install", "corsia-npx-mcp"], cwd=tmp_path, capture_output=True,
+        text=True, errors="replace", timeout=_CASE_TIMEOUT, check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _write_uvx_fixture(workspace: Path) -> Path:
@@ -411,17 +444,13 @@ def _launch(name: str, corsia, command: str, args: list[str]) -> _Case:
 
 
 def _npx_cases(corsia) -> list[_Case]:
-    """Cases g-k under CORSIA's flags: npx's routes into Node, a shell hop, and a Node child spawn."""
+    """Diagnostic npx version plus shell and Node-child routes under CORSIA's flags."""
     npx = shutil.which("npx")
-    cli = os.path.realpath(npx) if npx else ""
-    routes = (
-        ("g-node-npx-cli-version", "node", [cli, "--version"]),
-        ("h-npx-version", "npx", ["--version"]),
-        ("i-npx-cli-shebang", cli, ["--version"]),
-    )
+    version = _launch("h-npx-version", corsia, "npx", ["--version"])
+    if npx is None:
+        version = _Case("h-npx-version", "SKIP", detail="npx not on PATH")
     return [
-        *(_launch(name, corsia, command, args) if npx else _Case(name, "SKIP", detail="npx not on PATH")
-          for name, command, args in routes),
+        version,
         _launch("j-sh-c-node", corsia, "/bin/sh", ["-c", "node -e 0"]),
         _launch("k-node-spawnsync-sh", corsia, "node", ["-e", _SPAWN_SH]),
     ]
@@ -472,6 +501,69 @@ def _write_cases(corsia, grants: list[str]) -> list[_Case]:
         finally:
             shutil.rmtree(parent, ignore_errors=True)
     return cases
+
+
+def _cache_isolation_cases(workspace: Path, profile_dir: Path, profiles: list[Path]) -> list[_Case]:
+    """Prove real Safehouse denies an agent shell and App A access to another app cache."""
+    from mcp.client.stdio import get_default_environment
+    from tools import shell_guard
+    from tools.mcp import _safehouse_stdio_parameters
+
+    def mcp_launch(name: str, target: Path):
+        params, profile = _safehouse_stdio_parameters(name, "node", ["-e", _WRITE_PROBE, str(target)], {})
+        profiles.append(profile)
+        return [params.command, *params.args], {**get_default_environment(), **params.env}, Path(params.cwd), params
+
+    unused = profile_dir / "app-b-cache-target"
+    _, _, _, app_b = mcp_launch("cache-app-b", unused)
+    app_b_cache = Path(app_b.env["npm_config_cache"]).parent
+    app_b_target = app_b_cache / "app-a-must-not-write"
+    argv, env, cwd, app_a = mcp_launch("cache-app-a", app_b_target)
+    app_a_cache = Path(app_a.env["npm_config_cache"]).parent
+    app_case = _write_verdict(_run_raw("r-app-a-write-app-b-cache", argv, env, cwd), app_b_target, [str(app_a_cache)], True)
+
+    agent_target = app_a_cache / "agent-shell-must-not-write"
+    command = f"node -e {shlex.quote(_WRITE_PROBE)} {shlex.quote(str(agent_target))}"
+    profile = profile_dir / "agent-shell-cache.sb"
+    profile.write_text(
+        shell_guard.execution_envelope_profile(command, workspace, profile, leased=False), encoding="utf-8",
+    )
+    agent_case = _write_verdict(
+        _run_raw("o-agent-shell-write-app-cache", shell_guard.safehouse_argv(command, workspace, profile),
+                 shell_guard.safehouse_subprocess_env(None), workspace),
+        agent_target, [str(workspace)], True,
+    )
+    for target in (app_b_target, agent_target):
+        target.unlink(missing_ok=True)
+    return [agent_case, app_case]
+
+
+def _sandbox_denials() -> list[str]:
+    """Return at most 20 macOS Sandbox denial operation/path pairs for an npx failure."""
+    if sys.platform != "darwin":
+        return []
+    try:
+        result = subprocess.run(
+            ["/usr/bin/log", "show", "--last", "2m", "--style", "compact", "--predicate", 'eventMessage CONTAINS "Sandbox:"'],
+            capture_output=True, text=True, errors="replace", timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    pairs = []
+    for line in result.stdout.splitlines():
+        if match := re.search(r"deny\(\d+\)\s+(\S+)\s+(.+)$", line):
+            pairs.append(f"{match.group(1)} {match.group(2)}")
+    return pairs[-20:]
+
+
+def _npx_failure_diagnostics(stderr: str, npm_cache: str | None, secret: str) -> list[str]:
+    """Preserve full redacted stderr plus bounded app-cache npm logs and Sandbox denials."""
+    lines = ["full stderr:", *_tail(stderr, secret, keep=10_000)]
+    log_dir = Path(npm_cache or ".") / "_logs"
+    for log in sorted(log_dir.glob("*.log"))[-3:]:
+        with suppress(OSError):
+            lines += [f"npm log {log.name}:", *_tail(log.read_text(encoding="utf-8", errors="replace"), secret, keep=80)]
+    return [*lines, "Sandbox denials (operation/path):", *_sandbox_denials()]
 
 
 def _install_uv(target: Path) -> tuple[_Case, Path | None]:
@@ -561,6 +653,7 @@ def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str
 
     safehouse = shutil.which("safehouse") or "safehouse"
     cases = [_run_raw("a-safehouse-defaults", [safehouse, "--", "node", *_NODE_EXIT], dict(os.environ), workspace)]
+    cases[0].status = "INFO"
     try:
         argv, env, cwd = corsia("node", _NODE_EXIT)
         control, control_env, _ = corsia("/usr/bin/true", [])
@@ -572,7 +665,10 @@ def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str
     ]
     without_preload = {key: value for key, value in env.items() if key != "NODE_OPTIONS"}
     p = _run_raw("p-process-title-without-preload", argv, without_preload, cwd)
-    if _signal_of(p.returncode) != "SIGSEGV":
+    if _signal_of(p.returncode) == "SIGSEGV":
+        p.status = "PASS"
+        p.detail = f"expected SIGSEGV without preload; {p.detail}"
+    else:
         p.status = "FAIL"
         p.detail = f"expected SIGSEGV without preload; {p.detail}"
     q = _run_raw("q-process-title-with-preload", argv, env, cwd)
@@ -592,31 +688,41 @@ def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str
     ]
 
 
-def _confinement(report: dict, secret: str, blocked: Path) -> tuple[str, str]:
-    """Hold a started app to the secret-delivery and outside-write proof."""
+def _confinement(
+    report: dict, secret: str, blocked: Path, workspace: Path, launched_argvs: list[list[str]],
+) -> tuple[str, str]:
+    """Require real MCP apps to retain the secret only in env and get EPERM outside grants."""
+    write = report.get("write") if isinstance(report.get("write"), dict) else {}
+    errno_is_eperm = write.get("errno") in {-1, errno.EPERM}
+    launch_secret = any(secret in json.dumps(argv) for argv in launched_argvs)
     problems = [message for failed, message in (
         (report.get("hasSecret") is not True, "secret env missing"),
-        (secret in json.dumps(report.get("argv")), "secret in argv"),
-        (report.get("write") != "denied", "outside write not denied"),
+        (secret in json.dumps(report.get("argv")), "server argv contains secret"),
+        (launch_secret, "launched process argv contains secret"),
+        (report.get("cwd") != str(workspace), "launch cwd differs from workspace"),
+        (write.get("result") != "denied" or write.get("code") != "EPERM" or not errno_is_eperm, "outside write was not EPERM"),
         (blocked.exists(), "outside target exists"),
     ) if failed]
-    summary = f"hasSecret={report.get('hasSecret')} write={report.get('write')}"
+    summary = (
+        f"hasSecret={report.get('hasSecret')} cwd={report.get('cwd')} launchArgvSecret={launch_secret} "
+        f"write={write.get('result')} code={write.get('code')} errno={write.get('errno')}"
+    )
     return ("FAIL" if problems else "PASS"), "; ".join([summary, *problems])
 
 
 async def _run_mcp(
-    name: str, command: str, args: list[str], timeout: int, *, secret: str, blocked_root: Path, launch: dict,
+    name: str, command: str, args: list[str], timeout: int, *, secret: str, blocked_root: Path, launch: dict, workspace: Path,
 ) -> _Case:
     """Save and start one local app through the real MCP launch, then inspect it."""
     from infra.settings import get_mcp_servers
 
-    blocked = blocked_root / f"{name}-must-not-exist"
+    blocked = blocked_root / "probe"
     config = {"command": command, "args": args, "connect_timeout": timeout,
               "env": {"SERVICE_TOKEN": secret, "CORSIA_MCP_DENIED_WRITE": str(blocked)}}
     await asyncio.to_thread(mcp_import.save_import, {name: config})
     case, started = _Case(name), time.monotonic()
     with open(launch["dir"] / f"{name}.stderr", "w+", encoding="utf-8", errors="replace") as errlog:
-        launch.update(errlog=errlog, processes=[])
+        launch.update(errlog=errlog, processes=[], argvs=[], envs=[])
         try:
             async with AsyncExitStack() as stack:
                 registry = ToolRegistry()
@@ -627,11 +733,19 @@ async def _run_mcp(
                     case.status, case.detail = "FAIL", errors[name]
                 else:
                     report = json.loads(await registry.get(f"mcp_{name}_inspect").execute())
-                    case.status, case.detail = _confinement(report, secret, blocked)
+                    case.status, case.detail = _confinement(report, secret, blocked, workspace, launch["argvs"])
         except Exception as error:
             case.status, case.detail = "FAIL", f"{type(error).__name__}: {error}"
         errlog.seek(0)
-        case.stderr = _tail(errlog.read(), secret)
+        stderr = errlog.read()
+        launch_secret = any(secret in json.dumps(argv) for argv in launch["argvs"])
+        if launch_secret:
+            case.status = "FAIL"
+            case.detail = "; ".join(filter(None, [case.detail, "launched process argv contains secret"]))
+        elif launch["argvs"]:
+            case.detail = "; ".join(filter(None, [case.detail, "launchArgvSecret=False"]))
+        npm_cache = launch["envs"][0].get("npm_config_cache") if launch["envs"] else None
+        case.stderr = _npx_failure_diagnostics(stderr, npm_cache, secret) if name.startswith("e-npx") and case.status == "FAIL" else _tail(stderr, secret)
     case.seconds = time.monotonic() - started
     return case
 
@@ -670,15 +784,18 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
     crash_baseline = await asyncio.to_thread(_crash_reports)
     workspace = Path(WORKSPACE)
     _write_npx_fixture(workspace)
-    blocked_root = tmp_path / "outside-safehouse-rw"
     secret = "synthetic-local-mcp-secret"
-    # The outside directory exists, so "denied" proves the sandbox rather than a missing parent.
-    blocked_root.mkdir()
-    launch: dict = {"dir": tmp_path, "errlog": None, "processes": []}
+    # Each real app below receives its own pre-created HOME target.
+    launch: dict = {"dir": tmp_path, "errlog": None, "processes": [], "argvs": [], "envs": []}
     create_process = stdio._create_platform_compatible_process
 
     async def capture_process(*args, **kwargs):
-        # The real launch, with this case's stderr kept apart from the others.
+        # Keep the real process launch, including argv, distinct for every MCP case.
+        command = kwargs["command"] if "command" in kwargs else args[0]
+        process_args = kwargs["args"] if "args" in kwargs else args[1]
+        env = kwargs["env"] if "env" in kwargs else (args[2] if len(args) > 2 else {})
+        launch["argvs"].append([command, *process_args])
+        launch["envs"].append(env)
         kwargs["errlog"] = launch["errlog"]
         process = await create_process(*args, **kwargs)
         launch["processes"].append(process)
@@ -702,9 +819,16 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
             ("e-npx-no-install", "npx", ["--no-install", "corsia-npx-mcp"], 30),
             ("f-uvx", "uvx", ["--from", str(_write_uvx_fixture(workspace)), "corsia-uvx-mcp"], 90),
         ):
-            cases.append(await _run_mcp(
-                name, command, args, timeout, secret=secret, blocked_root=blocked_root, launch=launch,
-            ))
+            blocked_root = Path.home() / f".corsia-mcp-outside-{name}-{uuid.uuid4().hex[:12]}"
+            blocked_root.mkdir()
+            try:
+                cases.append(await _run_mcp(
+                    name, command, args, timeout, secret=secret, blocked_root=blocked_root,
+                    launch=launch, workspace=workspace,
+                ))
+            finally:
+                shutil.rmtree(blocked_root, ignore_errors=True)
+        cases.extend(await asyncio.to_thread(_cache_isolation_cases, workspace, tmp_path, profiles))
     finally:
         for profile in profiles:
             profile.unlink(missing_ok=True)
