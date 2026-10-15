@@ -208,7 +208,7 @@ async def test_not_connected_text_and_status_shape(google, conductor):
 async def test_connect_when_connected_and_without_a_client_file(google, conductor, client_file):
     out = await GoogleConnectTool().execute(_thread_id=conductor)
     assert out == f"Error: {oauth.NEEDS_CLIENT_FILE}"
-    assert "If none exists yet, create it in the person's own Google project" in out
+    assert "If none exists yet, follow skill `google-setup`" in out
     assert "Never create a second project or client when one already exists." in out
     _, state = await _start(google, conductor, client_file)
     async with _http() as http:

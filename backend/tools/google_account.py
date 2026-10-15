@@ -47,7 +47,8 @@ class GoogleConnectTool(Tool):
             "for email and calendar and returns a URL for the person to open; they sign in and click "
             "Allow in their own browser, and the token never reaches you. Pass client_file, the path "
             "of the Desktop app OAuth client JSON they downloaded from Google Cloud, unless a client "
-            "was saved by an earlier sign-in."
+            "was saved by an earlier sign-in. To set Google up from the start, follow skill "
+            "`google-setup`."
         )
 
     @property
