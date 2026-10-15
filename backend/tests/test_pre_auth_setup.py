@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api import setup as setup_api  # noqa: E402
-from infra import accounts, first_account  # noqa: E402
+from infra import accounts, token_admin  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
 
 
@@ -43,7 +43,16 @@ def no_users(isolated_db):
 
 
 @pytest.fixture
-def client(app_client, no_users):
+def workspace(tmp_path, monkeypatch):
+    """A throwaway workspace, so no first-account test writes a real profile."""
+    from infra import config
+
+    monkeypatch.setattr(config, "WORKSPACE", tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def client(app_client, no_users, workspace):
     return app_client
 
 
@@ -151,9 +160,7 @@ def test_local_download_uses_existing_single_flight(client, monkeypatch):
     assert calls == 2
 
 
-def test_first_account_issues_normal_browser_session(client, monkeypatch):
-    seeded = []
-    monkeypatch.setattr(first_account, "seed_workspace_profile", lambda name, email: seeded.append((name, email)))
+def test_first_account_issues_normal_browser_session(client, workspace):
     response = _post(client, "/api/setup/first-account", {
         "name": "First Person",
         "username": "First",
@@ -167,10 +174,12 @@ def test_first_account_issues_normal_browser_session(client, monkeypatch):
     assert accounts.resolve_token(body["token"]) == {
         "id": "first", "name": "first", "token_kind": "session",
     }
-    sessions = [row for row in accounts.list_tokens("first") if row["kind"] == "session"]
+    sessions = [row for row in token_admin.list_tokens("first") if row["kind"] == "session"]
     assert len(sessions) == 1
     assert sessions[0]["label"] == "browser"
-    assert seeded == [("First Person", "first@example.test")]
+    profile = (workspace / "context" / "50-USER-PROFILE.md").read_text(encoding="utf-8")
+    assert "- **Preferred name:** First Person\n" in profile
+    assert "- **Email:** first@example.test\n" in profile
 
 
 def _own_data(owner: str) -> None:
@@ -185,42 +194,7 @@ def _own_data(owner: str) -> None:
     database.commit()
 
 
-def test_first_account_seeding_failure_is_an_error_and_leaves_no_account(client, monkeypatch, caplog):
-    def fail_profile_seed(_name, _email):
-        raise RuntimeError("profile store unavailable")
-
-    monkeypatch.setattr(first_account, "seed_workspace_profile", fail_profile_seed)
-    response = _post(client, "/api/setup/first-account", {
-        "name": "First Person", "username": "first", "password": "correct horse battery staple",
-        "email": "first@example.test",
-    })
-
-    assert response.status_code == 500
-    assert response.json()["code"] == "setup_failed"
-    assert accounts.list_users() == []
-    assert accounts.list_tokens("first") == []
-    assert "First-account creation failed: RuntimeError" in caplog.text
-    assert "First Person" not in caplog.text
-    assert "first@example.test" not in caplog.text
-
-
-def test_an_unwritable_profile_fails_account_creation_instead_of_passing_silently(client, monkeypatch, tmp_path):
-    from infra import config
-
-    blocker = tmp_path / "not-a-folder"
-    blocker.write_text("x", encoding="utf-8")
-    monkeypatch.setattr(config, "WORKSPACE", blocker)
-    response = _post(client, "/api/setup/first-account", {
-        "name": "First Person", "username": "first", "password": "a-long-enough-passphrase",
-    })
-
-    assert response.status_code == 500
-    assert response.json()["code"] == "setup_failed"
-    assert accounts.list_users() == []
-
-
 def test_first_account_refuses_a_name_outside_the_data_owners(client, monkeypatch):
-    monkeypatch.setattr(first_account, "seed_workspace_profile", lambda *_args: None)
     _own_data("legacy-owner")
     response = _post(client, "/api/setup/first-account", {
         "name": "First Person", "username": "someone-else", "password": "correct horse battery staple",
@@ -229,11 +203,10 @@ def test_first_account_refuses_a_name_outside_the_data_owners(client, monkeypatc
     assert response.status_code == 422
     assert "owns none of the existing data" in response.json()["detail"]
     assert accounts.list_users() == []
-    assert accounts.list_tokens("someone-else") == []
+    assert token_admin.list_tokens("someone-else") == []
 
 
 def test_first_account_accepts_the_required_data_owner_name(client, monkeypatch):
-    monkeypatch.setattr(first_account, "seed_workspace_profile", lambda *_args: None)
     _own_data("legacy-owner")
     response = _post(client, "/api/setup/first-account", {
         "name": "First Person", "username": "legacy-owner", "password": "correct horse battery staple",
@@ -270,7 +243,6 @@ def test_first_account_rejects_the_client_only_folder_field(client):
 
 
 def test_concurrent_first_account_requests_have_one_winner(client, monkeypatch):
-    monkeypatch.setattr(first_account, "seed_workspace_profile", lambda *_args: None)
     body = {"name": "First", "username": "first", "password": "correct horse battery staple"}
 
     def create():
@@ -314,61 +286,6 @@ def test_work_folder_display_hides_the_home_name(monkeypatch, tmp_path):
     monkeypatch.setattr(setup_api.Path, "home", lambda: home)
     assert setup_api._work_folder_display(home / "corsia") == "~/corsia"
     assert setup_api._work_folder_display(tmp_path / "shared" / "workspace") == "…/workspace"
-
-
-def test_profile_seeding_is_one_helper_shared_by_the_cli_and_the_setup_route(monkeypatch, tmp_path):
-    import cli_accounts
-    from infra import config, user_profile
-
-    writes = []
-    additions = []
-    monkeypatch.setattr(config, "WORKSPACE", tmp_path)
-    monkeypatch.setattr(user_profile, "mac_timezone", lambda: "America/Los_Angeles")
-    monkeypatch.setattr(
-        user_profile, "write_user_profile",
-        lambda workspace, name, timezone, email: writes.append((workspace, name, timezone, email)) or False,
-    )
-    monkeypatch.setattr(user_profile, "add_profile_email", lambda workspace, email: additions.append((workspace, email)))
-    profile_path = tmp_path / user_profile.PROFILE_RELATIVE_PATH
-    profile_path.parent.mkdir(parents=True)
-    profile_path.write_text("# User profile\n", encoding="utf-8")
-    first_account.seed_workspace_profile("First\nPerson\x00", "first@example.test")
-    assert writes == [(tmp_path, "FirstPerson", "America/Los_Angeles", "first@example.test")]
-    assert additions == [(tmp_path, "first@example.test")]
-    assert not hasattr(cli_accounts, "_seed_user_profile")
-    assert not hasattr(setup_api, "_seed_workspace_profile")
-
-
-def test_cli_and_setup_route_write_the_same_profile(client, monkeypatch, tmp_path):
-    import argparse
-    import io
-
-    import cli_accounts
-    from infra import config, user_profile
-
-    monkeypatch.setattr(config, "WORKSPACE", tmp_path)
-    monkeypatch.setattr(user_profile, "mac_timezone", lambda: "America/Los_Angeles")
-    profile = tmp_path / user_profile.PROFILE_RELATIVE_PATH
-    response = _post(client, "/api/setup/first-account", {
-        "name": "Pat", "username": "pat", "password": "correct horse battery staple",
-        "email": "pat@example.test",
-    })
-    assert response.status_code == 200
-    from_route = profile.read_text()
-
-    database = accounts._db(None)
-    database.execute("DELETE FROM users")
-    database.commit()
-    profile.unlink()
-    answers = ["Pat", "pat@example.test"]
-    stdin = io.StringIO()
-    stdin.isatty = lambda: True  # type: ignore[method-assign]
-    monkeypatch.setattr(sys, "stdin", stdin)
-    monkeypatch.setattr("builtins.input", lambda prompt="": answers.pop(0))
-    monkeypatch.setattr(cli_accounts.getpass, "getpass", lambda prompt="": "correct horse battery staple")
-    monkeypatch.setattr(cli_accounts, "_ensure_schema", lambda: None)
-    assert cli_accounts.cmd_user_add(argparse.Namespace(name="pat", password_stdin=False)) == 0
-    assert profile.read_text() == from_route
 
 
 def test_status_has_a_stable_below_minimum_ram_variant(monkeypatch, tmp_path):

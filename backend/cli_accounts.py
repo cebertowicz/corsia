@@ -7,7 +7,9 @@ the host, origin, forwarded-header, content-type and single-flight gates, and
 only for the first account. The backend binds ``0.0.0.0``, so the route refuses
 every non-loopback caller: a remote visitor cannot create the first account, and
 running a command still proves local access to the machine. Both paths create
-the first account through ``infra.first_account.create_first_account``.
+the first account through ``infra.accounts.create_first_account``, which
+refuses a name outside the existing data owners and writes no account when the
+workspace profile cannot be written; later accounts come only from this command.
 
 Three rules about output, because other programs read it:
 
@@ -191,7 +193,7 @@ def _prompt_contact_email() -> str:
 def cmd_user_add(args: argparse.Namespace) -> int:
     """Create an account, offering the data-owner names already in use."""
     _ensure_schema()
-    from infra import accounts, first_account
+    from infra import accounts
 
     owners = accounts.data_owners_without_accounts()
     if owners:
@@ -203,28 +205,24 @@ def cmd_user_add(args: argparse.Namespace) -> int:
         return _fail(str(error))
     except EOFError:
         return _fail(_INPUT_ENDED)
-    try:
-        # Checked before any prompt; create_first_account enforces it again.
-        first_account.require_data_owner_name(name)
-    except accounts.AccountError as error:
-        return _fail(str(error))
     # The first interactive account is who the profile describes. That also
     # fires on an upgrade with no accounts yet; an existing profile is never touched.
-    seeds_profile = not accounts.has_users() and not args.password_stdin
+    first = not accounts.has_users()
+    seeds_profile = first and not args.password_stdin
     try:
-        call_name = _prompt_profile_name(name) if seeds_profile else ""
+        call_name = _prompt_profile_name(name) if seeds_profile else None
         email = _prompt_contact_email() if seeds_profile else ""
     except EOFError:
         return _fail(_INPUT_ENDED)
     password = _read_password(args.password_stdin)
     try:
-        if seeds_profile:
-            first_account.create_first_account(name, password, call_name=call_name, email=email)
+        if first:
+            accounts.create_first_account(name, password, call_name=call_name, email=email)
         else:
             accounts.create_user(name, password)
     except accounts.AccountError as error:
         return _fail(str(error))
-    except first_account.ProfileSeedError:
+    except OSError:
         return _fail(
             "The workspace profile could not be written, so no account was created. "
             "Check that the work folder is writable."
@@ -280,22 +278,22 @@ def cmd_token_create(args: argparse.Namespace) -> int:
 
 def cmd_token_service(args: argparse.Namespace) -> int:
     """Mint the lifecycle shell's short-lived service token, stdout only."""
-    from infra import accounts
+    from infra import accounts, token_admin
 
     users = accounts.list_users()
     if not users:
         raise SystemExit("No account exists yet. Run: corsia user add")
-    token = accounts.issue_service_token(users[0]["id"], "lifecycle")
+    token = token_admin.issue_service_token(users[0]["id"], "lifecycle")
     print(token)
     return 0
 
 
 def cmd_token_list(args: argparse.Namespace) -> int:
     """List token labels, kinds and ages — never a token value."""
-    from infra import accounts
+    from infra import token_admin
 
     user = args.user and _resolve_user(args.user)
-    tokens = accounts.list_tokens(user)
+    tokens = token_admin.list_tokens(user)
     if not tokens:
         print("No tokens.")
         return 0
@@ -310,10 +308,10 @@ def cmd_token_list(args: argparse.Namespace) -> int:
 
 def cmd_token_revoke(args: argparse.Namespace) -> int:
     """Delete every token of one account carrying a label."""
-    from infra import accounts
+    from infra import token_admin
 
     user = _resolve_user(args.user)
-    revoked = accounts.revoke_label(user, args.label)
+    revoked = token_admin.revoke_label(user, args.label)
     if not revoked:
         return _fail(f"No token labelled '{args.label}' for '{user}'.")
     print(f"Revoked {revoked} token(s) labelled '{args.label}' for '{user}'.")

@@ -101,7 +101,7 @@ async def test_lifecycle_token_mint_failure_releases_the_prepared_update_hold(
     isolated_db, monkeypatch, raised_error
 ):
     from api import settings_restart
-    from infra import accounts
+    from infra import accounts, token_admin
     from infra.database import get_db
 
     monkeypatch.setattr(settings_restart, "_check_update_backup_room", AsyncMock())
@@ -112,7 +112,7 @@ async def test_lifecycle_token_mint_failure_releases_the_prepared_update_hold(
     def mint(_user_id: str, _operation_id: str) -> str:
         raise raised_error
 
-    monkeypatch.setattr(accounts, "issue_lifecycle_service_token", mint)
+    monkeypatch.setattr(token_admin, "issue_lifecycle_service_token", mint)
 
     with pytest.raises(type(raised_error)):
         await settings_restart.prelaunch_settings_restart(

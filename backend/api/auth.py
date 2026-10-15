@@ -40,7 +40,7 @@ import time
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from infra import accounts
+from infra import accounts, token_admin
 from infra.auth import authenticate, token_from_request
 from infra.db_async import run_in_db
 from infra.time import utc_storage_iso_to_api
@@ -193,5 +193,5 @@ async def logout(authorization: str | None = Header(None)) -> dict:
     token = token_from_request(None, authorization)
     if not authenticate(token):
         raise HTTPException(401, "Invalid or expired session")
-    await run_in_db(accounts.revoke_token, token)
+    await run_in_db(token_admin.revoke_token, token)
     return {"ok": True}

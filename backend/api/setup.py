@@ -1,7 +1,10 @@
 """Loopback-only, pre-auth first-run setup.
 
 These routes deliberately expose only the facts needed before an account can
-exist. They are not a general unauthenticated provider or account API.
+exist. They are not a general unauthenticated provider or account API. The one
+account route, ``/first-account``, hands the request to
+``accounts.create_first_account`` (the same owner ``corsia user add`` uses for
+the first account); it exists only while no account does.
 """
 
 from __future__ import annotations
@@ -15,11 +18,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from infra import accounts, config
+from infra import accounts, config, user_profile
 from infra.db_async import run_in_db
-from infra.first_account import create_first_account
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
 
@@ -40,6 +42,14 @@ class FirstAccountRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=1024)
     email: str | None = Field(default=None, max_length=320)
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_not_blank(cls, value: str) -> str:
+        """A name of only whitespace is a validation error, never a profile-file one."""
+        if not user_profile.one_line(value):
+            raise ValueError("name is required")
+        return value
 
 
 def _own_backend_port(request: Request) -> int | None:
@@ -187,19 +197,19 @@ async def first_account(request: Request) -> dict | Response:
         return Response(status_code=422)
     try:
         user_id = await run_in_db(
-            create_first_account, body.username, body.password,
-            call_name=body.name, email=body.email or "", require_first=True,
+            accounts.create_first_account, body.username, body.password,
+            call_name=body.name, email=body.email or "",
         )
     except accounts.FirstAccountExists:
         return Response(content='{"code":"setup_complete"}', status_code=409, media_type="application/json")
     except accounts.AccountError as error:
         return JSONResponse(status_code=422, content={"detail": str(error)})
-    except Exception as error:
-        # Raised inside the account transaction, so no account was left behind.
-        logger.warning("First-account creation failed: %s", type(error).__name__)
+    except Exception:
+        # No user field is in this message; the traceback names only the failing step.
+        logger.exception("First-account creation failed")
         return JSONResponse(
             status_code=500,
-            content={"code": "setup_failed", "detail": "Your account could not be created. Nothing was changed; try again."},
+            content={"code": "setup_failed", "detail": "Your account was not created. Try again."},
         )
     token, expires_at = await run_in_db(accounts.issue_token, user_id, kind="session", label="browser")
     user = await run_in_db(accounts.get_user, user_id)
