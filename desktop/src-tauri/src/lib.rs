@@ -520,6 +520,7 @@ pub fn run() {
                 ))
                 .build(),
         )
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             start_local_service,
@@ -607,6 +608,70 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
+
+    #[test]
+    fn updater_configuration_pins_the_release_verification_key() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .expect("tauri configuration must be valid JSON");
+        let updater = config
+            .get("plugins")
+            .and_then(|plugins| plugins.get("updater"))
+            .expect("updater plugin configuration must be present");
+        let pubkey = updater
+            .get("pubkey")
+            .and_then(serde_json::Value::as_str)
+            .expect("updater public key must be a string");
+        let minisign_bytes = base64::engine::general_purpose::STANDARD
+            .decode(pubkey)
+            .expect("updater public key must be base64");
+        let minisign_text = std::str::from_utf8(&minisign_bytes)
+            .expect("updater public key must decode to minisign text");
+        let mut lines = minisign_text.lines();
+        let untrusted_comment = lines
+            .next()
+            .expect("minisign text must include an untrusted comment");
+        assert!(
+            untrusted_comment.starts_with("untrusted comment: minisign public key: "),
+            "minisign text must start with an untrusted public-key comment"
+        );
+        assert!(
+            untrusted_comment.ends_with("2EA93E7893462EB7"),
+            "minisign untrusted comment must identify the pinned key"
+        );
+        let key_bytes = base64::engine::general_purpose::STANDARD
+            .decode(
+                lines
+                    .next()
+                    .expect("minisign text must include an encoded public key"),
+            )
+            .expect("minisign public key must be base64");
+        assert_eq!(key_bytes.len(), 42, "minisign public key has 42 bytes");
+        assert_eq!(&key_bytes[..2], b"Ed", "minisign key algorithm is Ed");
+        let key_id = u64::from_le_bytes(
+            key_bytes[2..10]
+                .try_into()
+                .expect("minisign key must include an eight-byte key id"),
+        );
+        assert_eq!(key_id, 0x2EA93E7893462EB7);
+        assert_eq!(
+            updater
+                .get("endpoints")
+                .and_then(serde_json::Value::as_array)
+                .expect("updater endpoints must be an array")
+                .iter()
+                .map(|endpoint| endpoint.as_str().expect("endpoint must be a string"))
+                .collect::<Vec<_>>(),
+            vec!["https://github.com/cebertowicz/corsia/releases/latest/download/latest.json"]
+        );
+        assert!(
+            matches!(
+                updater.get("createUpdaterArtifacts"),
+                None | Some(serde_json::Value::Bool(false))
+            ),
+            "updater artifacts must remain disabled"
+        );
+    }
 
     #[test]
     fn macos_default_state_dir_uses_corsia_not_the_legacy_identifier() {
