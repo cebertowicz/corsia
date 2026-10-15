@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 ACTIVATIONS_SETTING = "corrections_classifier_activations"
+ACTIVE_VERSION_SETTING = "corrections_classifier_active_version"
 
 
 def measurement_window_start(now: datetime | None = None) -> datetime:
@@ -22,10 +23,41 @@ def _version_key(version) -> str:
     return f"{version.asset_id}:{version.version}:{version.head}:{version.threshold:.6f}:{version.input_policy_id}"
 
 
+def active_version_key() -> str | None:
+    """Return the one version Measurement may read, never an in-progress backfill."""
+    from infra.database import get_db
+    from infra.settings import get_setting
+
+    db = get_db()
+    try:
+        value = get_setting(ACTIVE_VERSION_SETTING, db=db) or {}
+        key = value.get("key")
+        return key if isinstance(key, str) else None
+    finally:
+        db.close()
+
+
+def active_correction_count() -> int | None:
+    """Use the saved active-version figure for a version-switch notice."""
+    from infra.database import get_db
+    from infra.settings import get_setting
+
+    db = get_db()
+    try:
+        active = get_setting(ACTIVE_VERSION_SETTING, db=db) or {}
+        key = active.get("key")
+        activations = get_setting(ACTIVATIONS_SETTING, db=db) or {}
+        activation = activations.get(key) if isinstance(key, str) else None
+        value = activation.get("after_count") if isinstance(activation, dict) else None
+        return value if isinstance(value, int) else None
+    finally:
+        db.close()
+
+
 def complete_backfill(
     version, *, owner_user_id: str, weeks: int, before_count: int | None, after_count: int,
 ) -> bool:
-    """Persist an activation exactly once after the bounded backfill has completed."""
+    """Atomically activate a fully backfilled version exactly once."""
     from infra.database import write_transaction
     from infra.settings import get_setting, set_setting
 
@@ -42,7 +74,28 @@ def complete_backfill(
             "conductor_told_at": None,
         }
         set_setting(ACTIVATIONS_SETTING, activations, db=db)
+        set_setting(ACTIVE_VERSION_SETTING, {"key": key}, db=db)
     return True
+
+
+def count_corrections(version) -> int:
+    """Count retained correction facts for one immutable classifier version."""
+    from core.corrections_recording import CORRECTION_EVENT
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """SELECT COUNT(*) FROM outcome_events
+               WHERE event_name=? AND retracted_at IS NULL
+                 AND json_extract(attributes, '$.asset_version')=?
+                 AND json_extract(attributes, '$.head')=?
+                 AND json_extract(attributes, '$.label')='correction'""",
+            (CORRECTION_EVENT, version.version, version.head),
+        ).fetchone()
+        return int(row[0])
+    finally:
+        db.close()
 
 
 async def tell_conductor_about_activation(version) -> None:

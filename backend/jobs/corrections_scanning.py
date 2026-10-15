@@ -28,7 +28,7 @@ class PendingCandidateKey:
 
 def pending_candidate_keys(
     version: CheckerVersion, batch_size: int, owner_user_id: str,
-    before: tuple[str, str] | None = None,
+    before: tuple[str, str] | None = None, since: str | None = None,
 ) -> list[PendingCandidateKey]:
     """Read one owner's pending ordering keys without projecting message content."""
     from infra.database import get_db
@@ -46,7 +46,7 @@ def pending_candidate_keys(
               AND (:before_created_at IS NULL
                    OR m.created_at < :before_created_at
                    OR (m.created_at=:before_created_at AND m.id < :before_message_id))
-              AND 1=1
+              AND (:since_created_at IS NULL OR m.created_at >= :since_created_at)
             ORDER BY m.created_at DESC,m.id DESC LIMIT :scan_limit
             """,
             {
@@ -58,6 +58,7 @@ def pending_candidate_keys(
                 "scan_limit": batch_size,
                 "before_created_at": before[0] if before else None,
                 "before_message_id": before[1] if before else None,
+                "since_created_at": since,
             },
         ).fetchall()
         keys = [

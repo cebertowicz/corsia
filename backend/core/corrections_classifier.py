@@ -13,6 +13,7 @@ import resource
 import time
 from dataclasses import dataclass
 from multiprocessing import Pipe, Process
+from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -199,7 +200,7 @@ class ClassifierChild:
     def __init__(self, manifest: AssetManifest):
         self._manifest = manifest
         self._process: Process | None = None
-        self._connection = None
+        self._connection: Connection[Any, Any] | None = None
         self.last_used = 0.0
 
     def _start(self) -> None:

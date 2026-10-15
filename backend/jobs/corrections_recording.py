@@ -276,12 +276,15 @@ class _PendingBatch:
 
 async def _next_pending_batch(
     version: CheckerVersion, batch_size: int, before: tuple[str, str] | None,
+    *, since: str | None = None,
 ) -> _PendingBatch:
     """Globally select keys before reading the 20 classifier inputs."""
     keys: list[PendingCandidateKey] = []
     for owner_user_id in await run_in_db(_owner_user_ids):
         keys.extend(
-            await run_in_db(pending_candidate_keys, version, batch_size, owner_user_id, before)
+            await run_in_db(
+                pending_candidate_keys, version, batch_size, owner_user_id, before, since,
+            )
         )
     selected = sorted(
         keys, key=lambda key: (key.created_at, key.message_id), reverse=True,

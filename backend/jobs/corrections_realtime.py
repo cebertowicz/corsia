@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
+import time
 from pathlib import Path
 
 from loguru import logger
@@ -18,11 +20,22 @@ from core.corrections_recording import (
 from infra.db_async import run_in_db
 from jobs.corrections_scanning import PendingCandidateKey, hydrate_candidates
 
-_QUEUE: asyncio.Queue[str] = asyncio.Queue(maxsize=256)
+_QUEUE: asyncio.Queue[tuple[str, float]] = asyncio.Queue(maxsize=256)
 _TASK: asyncio.Task[None] | None = None
 _CHILD: ClassifierChild | None = None
 _SCAN_OWED = False
-_STATE: dict[str, object] = {"state": "absent", "reason": "asset not verified", "retryable": True}
+_STATE: dict[str, object] = {
+    "state": "absent", "reason": "asset not verified", "retryable": True,
+    "dropped_arrivals": 0, "queue_delay_ms": 0.0, "service_time_ms": 0.0,
+}
+
+
+def _cleanup_staging() -> None:
+    """Discard an interrupted asset install; only a complete verified root is loadable."""
+    root = asset_root()
+    staging = root.with_name(f"{root.name}.staging")
+    if staging.exists():
+        shutil.rmtree(staging)
 
 
 def _manifest() -> AssetManifest:
@@ -85,20 +98,25 @@ async def _record_unclassifiable(candidate: CorrectionCandidate, version: Checke
 
 
 async def _classify(candidate: CorrectionCandidate) -> None:
-    global _CHILD
+    global _CHILD, _SCAN_OWED
+    was_ready = _STATE.get("state") == "ready"
     try:
         manifest = await asyncio.to_thread(_manifest)
     except AssetError as error:
-        _STATE.update({"state": "failed", "reason": str(error), "retryable": False})
+        state = "absent" if not (asset_root() / "manifest.json").is_file() else "failed"
+        _STATE.update({"state": state, "reason": str(error), "retryable": state == "absent"})
         logger.info("corrections classifier unavailable: {}", error)
         return
     _STATE.update({"state": "ready", "reason": None, "retryable": False, "version": manifest.version})
+    if not was_ready:
+        _SCAN_OWED = True
     if _CHILD is None:
         _CHILD = ClassifierChild(manifest)
+    child = _CHILD
     version = _as_version(manifest.checker_version())
     for attempt in range(2):
         try:
-            result = await asyncio.to_thread(_CHILD.classify, list(candidate.context), candidate.content)
+            result = await asyncio.to_thread(child.classify, list(candidate.context), candidate.content)
             await _record(candidate, result)
             return
         except ClassifierUnavailable as error:
@@ -110,6 +128,32 @@ async def _classify(candidate: CorrectionCandidate) -> None:
         except Exception:
             logger.exception("corrections classifier failed")
             return
+
+
+async def _activate_after_backfill(manifest: AssetManifest) -> None:
+    """Switch Measurement only after this immutable version's bounded fill completes."""
+    from api.measurement_agents import BASELINE_PERIODS
+    from jobs.corrections_activation import (
+        active_correction_count, complete_backfill, count_corrections,
+        tell_conductor_about_activation,
+    )
+    from jobs.corrections_recording import _owner_user_ids
+
+    owners = await run_in_db(_owner_user_ids)
+    if len(owners) != 1:
+        logger.warning("corrections activation skipped: expected one durable owner, found {}", len(owners))
+        return
+    version = manifest.checker_version()
+    activated = await run_in_db(
+        complete_backfill,
+        version,
+        owner_user_id=owners[0],
+        weeks=BASELINE_PERIODS + 1,
+        before_count=await run_in_db(active_correction_count),
+        after_count=await run_in_db(count_corrections, version),
+    )
+    if activated:
+        await tell_conductor_about_activation(version)
 
 
 async def _catch_up_scan() -> None:
@@ -126,8 +170,11 @@ async def _catch_up_scan() -> None:
     cutoff = measurement_window_start().astimezone(timezone.utc)
     before = None
     while _QUEUE.empty():
-        batch = await _next_pending_batch(_as_version(manifest.checker_version()), 20, before)
+        batch = await _next_pending_batch(
+            _as_version(manifest.checker_version()), 20, before, since=cutoff.isoformat(),
+        )
         if not batch.selected_keys:
+            await _activate_after_backfill(manifest)
             return
         before = (batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id)
         current = []
@@ -150,12 +197,15 @@ async def _catch_up_scan() -> None:
 async def _drain() -> None:
     global _SCAN_OWED
     while True:
-        message_id = await _QUEUE.get()
+        message_id, enqueued_at = await _QUEUE.get()
+        started_at = time.monotonic()
         try:
+            _STATE["queue_delay_ms"] = (started_at - enqueued_at) * 1000
             candidate = await run_in_db(_candidate, message_id)
             if candidate is not None:
                 await _classify(candidate)
         finally:
+            _STATE["service_time_ms"] = (time.monotonic() - started_at) * 1000
             _QUEUE.task_done()
         if _SCAN_OWED and _QUEUE.empty():
             _SCAN_OWED = False
@@ -166,19 +216,22 @@ def notify(message_id: str) -> None:
     """Best-effort post-admission trigger; it can never delay or fail a send."""
     global _TASK, _SCAN_OWED
     try:
-        _QUEUE.put_nowait(message_id)
+        _QUEUE.put_nowait((message_id, time.monotonic()))
         if _TASK is None or _TASK.done():
             _TASK = asyncio.create_task(_drain())
     except asyncio.QueueFull:
         _SCAN_OWED = True
+        dropped = _STATE.get("dropped_arrivals")
+        _STATE["dropped_arrivals"] = (dropped if isinstance(dropped, int) else 0) + 1
         logger.warning("corrections classifier arrival queue is full; scan is owed")
     except Exception:
         logger.exception("corrections classifier admission notification failed")
 
 
 def startup_scan() -> None:
-    """Begin the bounded startup catch-up without blocking backend startup."""
+    """Discard interrupted staging and begin catch-up without blocking startup."""
     global _TASK
+    _cleanup_staging()
     if _TASK is None or _TASK.done():
         _TASK = asyncio.create_task(_catch_up_scan())
 
