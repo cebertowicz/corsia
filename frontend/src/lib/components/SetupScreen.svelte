@@ -296,7 +296,7 @@
 	function sourceMeta(source: ModelSource): string {
 		if (source.source === 'omlx') {
 			if (source.setup_downloading || source.setup_stage) return source.setup_stage || 'Downloading';
-			if (localRepairDeferred) return 'Not started';
+			if (localRepairDeferred) return "oMLX doesn't start";
 			if (source.setup_error || localStartError) return 'Download needs attention';
 			return `Local model · ${modelSize}`;
 		}

@@ -98,7 +98,7 @@ describe('SetupScreen', () => {
 		expect(calls).toContain('/api/providers/local/setup');
 		expect(host.textContent).toContain('Choose an AI model');
 		expect(host.textContent).toContain('Claude Code');
-		expect(host.textContent).toContain('Not started');
+		expect(host.textContent).toContain("oMLX doesn't start");
 		expect(host.textContent).toContain('Reinstall');
 		expect(host.textContent).not.toContain('Create your account');
 	});

@@ -93,7 +93,7 @@ for (const theme of ['light', 'dark'] as const) {
 			if (state === 'signed-in-not-now') {
 				await page.getByRole('button', { name: 'Not now' }).click();
 				await settleOnHeading(page, 'Choose an AI model');
-				await expect(page.getByText('Not started', { exact: true })).toBeVisible();
+				await expect(page.getByText("oMLX doesn't start", { exact: true })).toBeVisible();
 				await expect(page.locator('.pane-scene:not([inert]) .sources').getByRole('button', { name: 'Reinstall', exact: true })).toBeVisible();
 				await expect(page.getByText('Claude Code', { exact: true })).toBeVisible();
 			}
