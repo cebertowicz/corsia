@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 const root = __dirname;
 const tokenCss = readFileSync(resolve(root, 'app-tokens.css'), 'utf8');
-const safeAreaName = ['safe', 'area', 'inset', 'top'].join('-');
 const clearanceConsumers = [
 	'lib/components/Header.svelte',
 	'lib/components/HomeShell.svelte',
@@ -23,7 +22,7 @@ const clearanceConsumers = [
 
 describe('phone header clearance tokens', () => {
 	it('defines the header bottom from the one safe-top source', () => {
-		expect(tokenCss).toContain(`--safe-top: env(${safeAreaName}, 0px);`);
+		expect(tokenCss).toContain('--safe-top: env(safe-area-inset-top, 0px);');
 		expect(tokenCss).toContain('--header-bottom: calc(var(--header-height) + var(--safe-top));');
 	});
 
