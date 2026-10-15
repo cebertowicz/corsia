@@ -48,6 +48,10 @@ class AccountError(ValueError):
     """A request about an account is invalid — safe to show the operator."""
 
 
+class FirstAccountExists(AccountError):
+    """A first-run account request lost to an account already in the store."""
+
+
 _UNKNOWN_ACCOUNT_HASH: str | None = None
 
 
@@ -134,14 +138,15 @@ def data_owners_without_accounts(
 
 def create_user(
     username: str, password: str, *, db: sqlite3.Connection | None = None,
-    first_run_wake: bool = True,
+    first_run_wake: bool = True, require_first: bool = False,
 ) -> str:
     """Create an account and return its id. Raises if the name is taken.
 
     The first account also gets the workspace conductor; ``first_run_wake``
     queues that conductor's first-run wake in the same transaction. Only a
     caller with no person waiting on the conductor (the eval harness)
-    passes False.
+    passes False. ``require_first`` atomically refuses if another account
+    already exists, for pre-auth first-run setup.
     """
     name = normalize_username(username)
     _require_password(password)
@@ -150,6 +155,8 @@ def create_user(
     woke = False
     with write_transaction(db, scope="create_user") as conn:
         had_users = has_users(conn)
+        if require_first and had_users:
+            raise FirstAccountExists("setup is already complete")
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
             raise AccountError(f"account '{name}' already exists")
         conn.execute(
