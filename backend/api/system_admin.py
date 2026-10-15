@@ -156,14 +156,6 @@ async def system_restart(
     return {"ok": True, "mode": mode, "operation_id": operation_id, "message": message}
 
 
-@router.get("/system/operation-active")
-async def system_operation_active():
-    """Expose only whether the durable update/restart lock currently holds."""
-    from automation import self_restart
-    from infra.db_async import run_in_db
-
-    return {"active": await run_in_db(self_restart.in_flight_request) is not None}
-
 
 async def _monitor_restart_process(process, operation_id: str) -> None:
     """Compensate an immediate child exit without joining backend shutdown."""
@@ -379,9 +371,7 @@ async def update_schedule(body: dict, user: dict = Depends(require_user)):
 
 
 @router.post("/system/update-operations/{operation_id}/outcome-seen")
-async def system_update_outcome_seen(
-    operation_id: str, user: dict = Depends(require_human_user)
-):
+async def system_update_outcome_seen(operation_id: str, user: dict = Depends(require_human_user)):
     """Mark one settled Update's outcome as shown; the first client to do so wins."""
     from automation.update_outcome import mark_outcome_seen
     from infra.db_async import run_in_db
