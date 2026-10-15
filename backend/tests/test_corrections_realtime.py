@@ -239,3 +239,31 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
     await corrections_realtime._catch_up_scan()
 
     assert calls == ["owner-message"]
+
+
+@pytest.mark.asyncio
+async def test_inference_runs_outside_a_database_write_transaction(monkeypatch):
+    from jobs import corrections_realtime
+
+    class Child:
+        def __init__(self, manifest):
+            pass
+
+        def classify(self, context, owner):
+            from infra.database import get_db
+
+            db = get_db()
+            try:
+                assert db.in_transaction is False
+            finally:
+                db.close()
+            return SimpleNamespace(
+                label="not_correction", truncated=False, original_tokens=4,
+                version=_manifest().checker_version(),
+            )
+
+    monkeypatch.setattr(corrections_realtime, "_manifest", _manifest)
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", Child)
+    monkeypatch.setattr(corrections_realtime, "_record", AsyncMock(return_value=True))
+
+    await corrections_realtime._classify(_candidate())
