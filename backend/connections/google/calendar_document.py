@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from connections.google.email_document import is_plain_address
+
 
 OFFSET_REQUIRED = "Give times with a UTC offset, e.g. 2026-10-15T09:00:00-07:00."
 
@@ -30,7 +32,7 @@ def attendee_emails(value: Any) -> list[str]:
         not isinstance(item, str)
         or item.count("@") != 1
         or not all(item.split("@"))
-        or any(char.isspace() or char in ",;<>" or ord(char) < 32 or ord(char) == 127 for char in item)
+        or not is_plain_address(item)
         for item in value
     ))
     if invalid:
