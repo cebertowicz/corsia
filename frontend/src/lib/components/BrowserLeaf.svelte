@@ -11,6 +11,7 @@
 	import { setBrowserPaneLabel } from '$lib/stores/artifactWorkspace';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import BrowserToolbar from '$lib/components/BrowserToolbar.svelte';
+	import BrowserPageStatus from '$lib/components/BrowserPageStatus.svelte';
 	import { threads } from '$lib/stores/threads';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { on } from '$lib/ws/events';
@@ -357,8 +358,8 @@
 </script>
 
 <div class="browser-leaf">
-	<BrowserToolbar {url} {domain} {streaming} {ended} {status} {announcement} people={presence} {agentPresent}
-		onnavigate={navigate} onhistory={history} onreconnect={connect} />
+	<BrowserToolbar {url} {domain} {streaming} {announcement} people={presence} {agentPresent}
+		onnavigate={navigate} onhistory={history} />
 	<div class:agent-present={agentPresent} class:keyboard-open={keyboardOpen} class="browser-page" style:--presence-color={agentColor(threadId)}>
 		{#if marker}
 			<span class="agent-field-marker" class:shown={markerShown} class:above={marker.above} style:left="{marker.left}px" style:top="{marker.top}px"
@@ -367,6 +368,7 @@
 			</span>
 		{/if}
 		<canvas bind:this={canvas} tabindex="0" aria-label="Shared browser" onpointerdown={sendMouse} onpointerup={sendMouse} onpointercancel={sendMouse} onpointermove={sendMouse} onwheel={sendWheel} onkeydown={sendKey} onkeyup={sendKey}></canvas>
+		<BrowserPageStatus {status} {streaming} onreconnect={connect} onretry={() => void go()} />
 		{#if passwordPage}<div class="password-notice" class:top={keyboardOpen} role="status" transition:fade={{ duration: $prefersReducedMotion ? 0 : 160 }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" /></svg>Enter your password to continue</div>{/if}
 	</div>
 </div>
