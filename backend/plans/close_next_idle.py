@@ -93,10 +93,14 @@ def ready_first(tasks: list, projections: dict[str, dict]) -> list:
 
 
 def release_wait(projection: dict, row) -> dict:
-    """Return the optional row field that releases the task's self-scheduled wait."""
-    cause = next((cause for cause in projection["causes"] if operator_scheduled.is_set_aside(cause)), None)
-    if cause is None:
+    """Return the optional row field that releases the task's self-scheduled wait.
+
+    Offered only when that wait is all that holds the task, so releasing it
+    lets the task move.
+    """
+    if not _set_aside(projection):
         return {}
+    cause = projection["causes"][0]
     return {
         "release_wait": {
             "operation": "resolve_watch",
@@ -121,8 +125,8 @@ def _key(projection: dict, seconds: float | None, index: int) -> tuple:
 
 
 def _set_aside(projection: dict) -> bool:
-    """Whether any waiting cause records that this executor set the task aside."""
-    return any(operator_scheduled.is_set_aside(cause) for cause in projection["causes"])
+    """Whether this executor set the task aside and nothing else holds it."""
+    return operator_scheduled.only_set_aside(projection["causes"])
 
 
 def _seconds_left(projection: dict, now: datetime) -> float | None:

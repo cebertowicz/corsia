@@ -34,6 +34,15 @@ def is_set_aside(cause: dict) -> bool:
     return cause.get("kind") == "waiting" and cause.get("scheduled_reason") is not None
 
 
+def only_set_aside(causes: list[dict]) -> bool:
+    """Whether the executor's own schedule is all that holds a task, so releasing it frees the task.
+
+    A task that also waits on a hold, a dependency, a pause or anything else is
+    not one the executor can drive now.
+    """
+    return bool(causes) and all(is_set_aside(cause) for cause in causes)
+
+
 def own_wait(node: dict) -> tuple[bool, datetime | None]:
     """The node's own timed wait: whether it has one, and its end when its agent set it aside.
 

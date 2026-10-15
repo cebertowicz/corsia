@@ -377,6 +377,14 @@ def test_the_digest_tells_the_agent_to_resume_its_self_set_aside_work():
     assert display["not_moving"]["set_aside"] == 1
 
 
+def test_the_digest_does_not_count_set_aside_work_that_something_else_also_holds():
+    _lead, display = _header([
+        _leaf("also-waits", "waiting", _wait(SOON, scheduled_reason="Later"), _wait(SOON)),
+        _leaf("also-held", "blocked", _USER_HOLD, _wait(SOON, scheduled_reason="Later")),
+    ])
+    assert display["not_moving"]["set_aside"] == 0
+
+
 # --- overdue waits (Product Experience AS6) ---------------------------------------------
 
 
