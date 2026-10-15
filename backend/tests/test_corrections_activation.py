@@ -85,7 +85,7 @@ def test_activation_never_replaces_a_corrupt_record_or_says_now_counted(isolated
     monkeypatch.setattr(corrections_activation, "tell_conductor_about_activation", tell)
     manifest = SimpleNamespace(classifier_version=_version)
 
-    outcome = asyncio.run(corrections_realtime._activate_after_backfill(manifest))
+    outcome = asyncio.run(corrections_activation.activate_after_backfill(manifest.classifier_version()))
 
     assert outcome == "activation record unreadable"
     assert completed == [] and told == []

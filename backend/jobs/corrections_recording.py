@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS,
+    LABEL_UNREADABLE,
     ClassifierVersion,
     CorrectionCandidate,
     dedupe_key,
@@ -15,6 +17,9 @@ from core.corrections_recording import (
 )
 from infra.db_async import run_in_db
 from jobs.corrections_scanning import PendingCandidateKey, hydrate_candidates, pending_candidate_keys
+
+if TYPE_CHECKING:
+    from core.corrections_classifier import Classification
 
 
 def _owner_user_ids() -> list[str]:
@@ -62,6 +67,44 @@ def _record_fact(
         if result.dropped_keys:
             raise RuntimeError("correction fact attributes were dropped")
         return result.inserted
+
+
+def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
+    """Read one arrived message as a candidate; None when it is not an owner candidate."""
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """SELECT m.rowid,m.id,m.thread_id,t.project_id,m.created_at
+               FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.id=?""", (message_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        key = PendingCandidateKey(int(row[0]), str(row[1]), str(row[2]), row[3], str(row[4]))
+    finally:
+        db.close()
+    candidates = hydrate_candidates([key])
+    return candidates[0] if candidates else None
+
+
+async def record_classification(candidate: CorrectionCandidate, result: Classification) -> bool:
+    """Record a scored fact; ``failure_reason`` is ``none``."""
+    classification = {
+        "label": result.label,
+        "truncated": result.truncated,
+        "original_tokens": result.original_tokens,
+        "failure_reason": "none",
+    }
+    return await run_in_db(_record_fact, candidate, classification, result.version)
+
+
+async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierVersion, reason: str) -> bool:
+    """Record an input a healthy model failed on twice, with that failure's kind."""
+    classification = {
+        "label": LABEL_UNREADABLE, "truncated": False, "original_tokens": 0, "failure_reason": reason,
+    }
+    return await run_in_db(_record_fact, candidate, classification, version)
 
 
 @dataclass(slots=True)

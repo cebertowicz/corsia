@@ -30,9 +30,7 @@ def _drain_admitted(function):
     @wraps(function)
     async def guarded(*args, **kwargs):
         from infra.drain import (
-            begin_turn_admission,
-            finish_turn_admission,
-            turn_admission_is_inherited,
+            begin_turn_admission, finish_turn_admission, turn_admission_is_inherited,
         )
 
         if turn_admission_is_inherited():
@@ -360,12 +358,8 @@ async def send_thread_input(
         delivery_options=options,
         continuation=continuation,
     )
-    from jobs.corrections_realtime import notify_if_owner
-
-    notify_if_owner(
-        admission.accepted.message_id, role=role, content=text, metadata=metadata,
-        duplicate=admission.accepted.duplicate,
-    )
+    from jobs.corrections_realtime import notify_if_owner  # best effort; never fails the send
+    notify_if_owner(admission.accepted, role=role, content=text, metadata=metadata)
     return await _deliver_admission(
         admission, thread_row,
         delivery_intent=delivery_intent,

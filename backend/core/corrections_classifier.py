@@ -1,7 +1,8 @@
-"""Verified local ONNX correction-classifier asset and isolated runtime.
+"""Verified local ONNX correction-classifier asset: manifest, source pin, file checks and self-test.
 
-The runtime deliberately has one asset owner: the manifest supplies model identity,
-input policy and heads; callers receive that immutable version with every result.
+The manifest is the one asset owner: it supplies model identity, input policy and heads;
+callers receive that immutable version with every result. The model process itself is
+``core.corrections_child``.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,6 +147,14 @@ def asset_root() -> Path:
     from infra.config import STATE_ROOT
 
     return STATE_ROOT / "assets" / ASSET_ID
+
+
+def cleanup_staging() -> None:
+    """Discard an interrupted asset install; only a complete verified root is loadable."""
+    root = asset_root()
+    staging = root.with_name(f"{root.name}.staging")
+    if staging.exists():
+        shutil.rmtree(staging)
 
 
 def _open_session(manifest: AssetManifest, ort: Any) -> Any:

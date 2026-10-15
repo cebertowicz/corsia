@@ -45,19 +45,17 @@ lose it.
 from __future__ import annotations
 
 import asyncio
-import shutil
 import time
 from typing import Any
 
 from loguru import logger
 
 from core.corrections_child import ClassifierChild, ClassifierUnavailable, MessageFailed
-from core.corrections_classifier import (
-    AssetError, AssetManifest, Classification, asset_root, load_pinned_manifest,
-)
+from core.corrections_classifier import AssetError, AssetManifest, asset_root, cleanup_staging, load_pinned_manifest
 from core.corrections_recording import LABEL_UNREADABLE, CorrectionCandidate
 from infra.db_async import run_in_db
-from jobs.corrections_scanning import PendingCandidateKey, hydrate_candidates
+from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
+from jobs.corrections_recording import candidate_for_message, record_classification, record_unreadable
 
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
@@ -72,53 +70,6 @@ def _manifest() -> AssetManifest:
     manifest = load_pinned_manifest(asset_root())
     manifest.verify_files()
     return manifest
-
-
-def _cleanup_staging() -> None:
-    """Discard an interrupted asset install; only a complete verified root is loadable."""
-    root = asset_root()
-    staging = root.with_name(f"{root.name}.staging")
-    if staging.exists():
-        shutil.rmtree(staging)
-
-
-def _candidate(message_id: str) -> CorrectionCandidate | None:
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        row = db.execute(
-            """SELECT m.rowid,m.id,m.thread_id,t.project_id,m.created_at
-               FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.id=?""", (message_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        key = PendingCandidateKey(int(row[0]), str(row[1]), str(row[2]), row[3], str(row[4]))
-    finally:
-        db.close()
-    candidates = hydrate_candidates([key])
-    return candidates[0] if candidates else None
-
-
-async def _record(candidate: CorrectionCandidate, result: Classification) -> bool:
-    from jobs.corrections_recording import _record_fact
-
-    classification = {
-        "label": result.label,
-        "truncated": result.truncated,
-        "original_tokens": result.original_tokens,
-        "failure_reason": "none",
-    }
-    return await run_in_db(_record_fact, candidate, classification, result.version)
-
-
-async def _record_unreadable(candidate: CorrectionCandidate, manifest: AssetManifest, reason: str) -> bool:
-    from jobs.corrections_recording import _record_fact
-
-    classification = {
-        "label": LABEL_UNREADABLE, "truncated": False, "original_tokens": 0, "failure_reason": reason,
-    }
-    return await run_in_db(_record_fact, candidate, classification, manifest.classifier_version())
 
 
 class CorrectionsWorker:
@@ -237,11 +188,11 @@ class CorrectionsWorker:
                 outages.append(str(error))
                 await self._drop_child()
                 continue
-            await _record(candidate, result)
+            await record_classification(candidate, result)
             self._set("ready", None)
             return True
         if len(failures) == ATTEMPTS_PER_KIND:
-            await _record_unreadable(candidate, manifest, failures[-1])
+            await record_unreadable(candidate, manifest.classifier_version(), failures[-1])
             return True
         self._set("unavailable", outages[-1])
         return False
@@ -252,7 +203,7 @@ class CorrectionsWorker:
         started_at = _clock()
         self.queue_delay_ms = (started_at - enqueued_at) * 1000
         try:
-            candidate = await run_in_db(_candidate, message_id)
+            candidate = await run_in_db(candidate_for_message, message_id)
             if candidate is not None and await self._classify(candidate):
                 self._release_hold()
         except Exception:
@@ -294,7 +245,7 @@ class CorrectionsWorker:
         while self.queue.empty():
             batch = await _next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
             if not batch.selected_keys:
-                return await _activate_after_backfill(manifest)
+                return await activate_after_backfill(version)
             before = (batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id)
             for candidate in batch.candidates:
                 if not self.queue.empty():
@@ -358,7 +309,7 @@ class CorrectionsWorker:
 
     def startup(self) -> None:
         self.stopping = False
-        _cleanup_staging()
+        cleanup_staging()
         self._release_hold()
         self.scan = "owed"
         self._start_task(_startup_worker())
@@ -382,62 +333,9 @@ class CorrectionsWorker:
 WORKER = CorrectionsWorker()
 
 
-async def _retry_pending_activation_notice() -> None:
-    """Retry an accepted-delivery notice after restart or an interrupted mark."""
-    from core.corrections_recording import ClassifierVersion, active_corrections_version
-    from jobs.corrections_activation import tell_conductor_about_activation
-
-    version = await run_in_db(active_corrections_version)
-    if isinstance(version, ClassifierVersion):
-        await tell_conductor_about_activation(version)
-
-
-async def _activate_after_backfill(manifest: AssetManifest) -> str:
-    """Switch Measurement only after this immutable version's bounded fill completes.
-
-    Returns ``done``, or the reason the scan stays held.
-    """
-    from api.measurement_agents import BASELINE_PERIODS
-    from core.corrections_recording import CorruptActivation, active_corrections_version
-    from jobs.corrections_activation import (
-        complete_backfill, measurement_window_start, tell_conductor_about_activation,
-        weekly_correction_figure,
-    )
-    from jobs.corrections_recording import _owner_user_ids
-
-    owners = await run_in_db(_owner_user_ids)
-    if len(owners) != 1:
-        logger.warning("corrections activation skipped: expected one durable owner, found {}", len(owners))
-        return "done"
-    old_version = await run_in_db(active_corrections_version)
-    if isinstance(old_version, CorruptActivation):
-        # Never treat an unreadable record as no version: that would replace it silently.
-        return "activation record unreadable"
-    version = manifest.classifier_version()
-    weeks = BASELINE_PERIODS + 1
-    since = measurement_window_start().isoformat()
-    before = (
-        await run_in_db(weekly_correction_figure, old_version, since=since, weeks=weeks)
-        if old_version is not None else None
-    )
-    after = await run_in_db(weekly_correction_figure, version, since=since, weeks=weeks)
-    activated = await run_in_db(
-        complete_backfill,
-        version,
-        owner_user_id=owners[0],
-        weeks=weeks,
-        before_count=before,
-        after_count=after,
-    )
-    if activated:
-        await tell_conductor_about_activation(version)
-    await _retry_pending_activation_notice()
-    return "done"
-
-
 async def _startup_worker() -> None:
     try:
-        await _retry_pending_activation_notice()
+        await retry_pending_activation_notice()
     except Exception:
         logger.exception("corrections activation notice retry failed; the next startup retries it")
     await WORKER.run()
@@ -476,12 +374,12 @@ def state_snapshot(db: Any = None) -> dict[str, object]:
     return snapshot
 
 
-def notify_if_owner(message_id: str, *, role: str, content: str, metadata: object, duplicate: bool) -> None:
-    """Best-effort post-admission trigger; it can never delay or fail a send."""
+def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
+    """Best-effort post-admission trigger for one ``AcceptedInput``; it can never delay or fail a send."""
     from core.corrections_recording import is_owner_authored_message
 
     try:
-        if not duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
-            notify(message_id)
+        if not accepted.duplicate and is_owner_authored_message(role=role, content=content, metadata=metadata):
+            notify(accepted.message_id)
     except Exception:
         logger.exception("corrections classifier admission notification failed")

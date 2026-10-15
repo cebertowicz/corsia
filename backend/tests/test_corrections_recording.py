@@ -46,9 +46,16 @@ def test_arrival_trigger_only_notifies_new_owner_messages(monkeypatch):
     seen = []
     monkeypatch.setattr(corrections_realtime, "notify", seen.append)
 
-    corrections_realtime.notify_if_owner("message", role="user", content="A correction.", metadata="{}", duplicate=False)
-    corrections_realtime.notify_if_owner("duplicate", role="user", content="A correction.", metadata="{}", duplicate=True)
-    corrections_realtime.notify_if_owner("agent", role="user", content="A correction.", metadata={"sender_kind": "agent"}, duplicate=False)
+    def accepted(message_id, duplicate=False):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(message_id=message_id, duplicate=duplicate)
+
+    corrections_realtime.notify_if_owner(accepted("message"), role="user", content="A correction.", metadata="{}")
+    corrections_realtime.notify_if_owner(accepted("duplicate", True), role="user", content="A correction.", metadata="{}")
+    corrections_realtime.notify_if_owner(
+        accepted("agent"), role="user", content="A correction.", metadata={"sender_kind": "agent"},
+    )
 
     assert seen == ["message"]
 

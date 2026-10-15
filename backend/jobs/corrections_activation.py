@@ -10,6 +10,7 @@ from core.corrections_recording import (
     ACTIVATIONS_SETTING, ACTIVE_VERSION_SETTING, ClassifierVersion, version_attributes, version_key,
     version_match_sql,
 )
+from infra.db_async import run_in_db
 
 
 def measurement_window_start(now: datetime | None = None) -> datetime:
@@ -89,8 +90,6 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
         finally:
             db.close()
 
-    from infra.db_async import run_in_db
-
     contact, activation, gap = await run_in_db(load)
     if contact is None:
         if activation is not None and gap:
@@ -129,3 +128,50 @@ async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
                 set_setting(ACTIVATIONS_SETTING, activations, db=db)
 
     await run_in_db(mark_told)
+
+
+async def retry_pending_activation_notice() -> None:
+    """Retry an accepted-delivery notice after restart or an interrupted mark."""
+    from core.corrections_recording import active_corrections_version
+
+    version = await run_in_db(active_corrections_version)
+    if isinstance(version, ClassifierVersion):
+        await tell_conductor_about_activation(version)
+
+
+async def activate_after_backfill(version: ClassifierVersion) -> str:
+    """Switch Measurement only after this immutable version's bounded fill completes.
+
+    Returns ``done``, or the reason the scan stays held.
+    """
+    from api.measurement_agents import BASELINE_PERIODS
+    from core.corrections_recording import CorruptActivation, active_corrections_version
+    from jobs.corrections_recording import _owner_user_ids
+
+    owners = await run_in_db(_owner_user_ids)
+    if len(owners) != 1:
+        logger.warning("corrections activation skipped: expected one durable owner, found {}", len(owners))
+        return "done"
+    old_version = await run_in_db(active_corrections_version)
+    if isinstance(old_version, CorruptActivation):
+        # Never treat an unreadable record as no version: that would replace it silently.
+        return "activation record unreadable"
+    weeks = BASELINE_PERIODS + 1
+    since = measurement_window_start().isoformat()
+    before = (
+        await run_in_db(weekly_correction_figure, old_version, since=since, weeks=weeks)
+        if old_version is not None else None
+    )
+    after = await run_in_db(weekly_correction_figure, version, since=since, weeks=weeks)
+    activated = await run_in_db(
+        complete_backfill,
+        version,
+        owner_user_id=owners[0],
+        weeks=weeks,
+        before_count=before,
+        after_count=after,
+    )
+    if activated:
+        await tell_conductor_about_activation(version)
+    await retry_pending_activation_notice()
+    return "done"
