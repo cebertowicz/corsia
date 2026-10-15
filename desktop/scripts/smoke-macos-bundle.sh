@@ -47,7 +47,11 @@ ditto "$SOURCE_APP" "$APP"
 readonly RESOURCES="$APP/Contents/Resources"
 readonly PYTHON="$RESOURCES/python/bin/python3"
 readonly GIT="$RESOURCES/bin/git"
-readonly GIT_HTTP="$RESOURCES/libexec/git-core/git-remote-http"
+readonly GIT_CORE="$RESOURCES/libexec/git-core"
+readonly GIT_HTTP="$GIT_CORE/git-remote-http"
+readonly GIT_VERSION="2.53.0"
+readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
+readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
 
 assert_system_libraries() {
   local binary="$1"
@@ -60,28 +64,51 @@ assert_system_libraries() {
 [ -x "$GIT_HTTP" ] || { echo "error: bundled HTTPS git helper is missing" >&2; exit 1; }
 [ -f "$RESOURCES/licenses/git/COPYING" ] || { echo "error: bundled Git license is missing" >&2; exit 1; }
 [ -f "$RESOURCES/licenses/git/SOURCE" ] || { echo "error: bundled Git source notice is missing" >&2; exit 1; }
+[ -f "$RESOURCES/licenses/git/$GIT_ARCHIVE" ] || { echo "error: bundled Git corresponding source is missing" >&2; exit 1; }
+echo "${GIT_SHA256}  $RESOURCES/licenses/git/$GIT_ARCHIVE" | shasum --algorithm 256 --check --status
 "$GIT" --version
 assert_system_libraries "$GIT"
 assert_system_libraries "$GIT_HTTP"
+while IFS= read -r -d '' link; do
+  [ -e "$link" ] || { echo "error: broken bundled Git symlink: $link" >&2; exit 1; }
+done < <(find "$GIT_CORE" -type l -print0)
 
-# The fail-closed shim would win before /usr/bin/git if resource resolution regressed.
-mkdir -p "$TEMP_ROOT/empty-home" "$TEMP_ROOT/git-workspace" "$TEMP_ROOT/no-system-git"
-printf '#!/bin/sh\necho "/usr/bin/git must not run" >&2\nexit 99\n' > "$TEMP_ROOT/no-system-git/git"
-chmod 0755 "$TEMP_ROOT/no-system-git/git"
-env -i HOME="$TEMP_ROOT/empty-home" \
-  PATH="$RESOURCES/bin:$TEMP_ROOT/no-system-git:/usr/bin:/bin" \
-  GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
-  git -C "$TEMP_ROOT/git-workspace" init --quiet
-touch "$TEMP_ROOT/git-workspace/smoke"
-env -i HOME="$TEMP_ROOT/empty-home" \
-  PATH="$RESOURCES/bin:$TEMP_ROOT/no-system-git:/usr/bin:/bin" \
-  GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
-  git -C "$TEMP_ROOT/git-workspace" add smoke
-env -i HOME="$TEMP_ROOT/empty-home" \
-  PATH="$RESOURCES/bin:$TEMP_ROOT/no-system-git:/usr/bin:/bin" \
-  GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
-  git -C "$TEMP_ROOT/git-workspace" -c user.name=CORSIA -c user.email=corsia@local commit --quiet -m smoke
-printf 'bundled-git-uncompressed-kib=%s\n' "$(du -sk "$GIT" "$RESOURCES/libexec/git-core" "$RESOURCES/share/git-core/templates" "$RESOURCES/licenses/git" | awk '{sum += $1} END {print sum}')"
+# These fail-closed shims would run if Git's runtime-prefix helper lookup fell
+# back to the Command Line Tools after the app has moved.
+mkdir -p "$TEMP_ROOT/empty-home" "$TEMP_ROOT/no-system-git"
+for command in git git-upload-pack git-receive-pack git-upload-archive git-shell; do
+  printf '#!/bin/sh\necho "system Git stub must not run: %s" >&2\nexit 99\n' "$command" > "$TEMP_ROOT/no-system-git/$command"
+  chmod 0755 "$TEMP_ROOT/no-system-git/$command"
+done
+bundled_git() {
+  env -i HOME="$TEMP_ROOT/empty-home" \
+    PATH="$RESOURCES/bin:$TEMP_ROOT/no-system-git:/usr/bin:/bin" \
+    GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+    git "$@"
+}
+
+readonly GIT_WORKSPACE="$TEMP_ROOT/git-workspace"
+readonly GIT_REMOTE="$TEMP_ROOT/git-remote.git"
+readonly GIT_CLONE="$TEMP_ROOT/git-clone"
+mkdir -p "$GIT_WORKSPACE"
+bundled_git -C "$GIT_WORKSPACE" init --quiet
+touch "$GIT_WORKSPACE/smoke"
+bundled_git -C "$GIT_WORKSPACE" add smoke
+bundled_git -C "$GIT_WORKSPACE" -c user.name=CORSIA -c user.email=corsia@local commit --quiet -m smoke
+bundled_git init --bare --quiet "$GIT_REMOTE"
+bundled_git -C "$GIT_WORKSPACE" remote add origin "$GIT_REMOTE"
+bundled_git -C "$GIT_WORKSPACE" push --quiet origin HEAD:main
+bundled_git clone --quiet "$GIT_REMOTE" "$GIT_CLONE"
+touch "$GIT_WORKSPACE/fetch-smoke"
+bundled_git -C "$GIT_WORKSPACE" add fetch-smoke
+bundled_git -C "$GIT_WORKSPACE" -c user.name=CORSIA -c user.email=corsia@local commit --quiet -m fetch-smoke
+bundled_git -C "$GIT_WORKSPACE" push --quiet origin HEAD:main
+bundled_git -C "$GIT_CLONE" fetch --quiet origin
+bundled_git -C "$GIT_CLONE" show origin/main:fetch-smoke >/dev/null
+bundled_git archive --remote="$GIT_REMOTE" --format=tar main > "$TEMP_ROOT/git-archive.tar"
+tar -tf "$TEMP_ROOT/git-archive.tar" | grep -qx 'smoke'
+bundled_git submodule -h >/dev/null 2>&1
+printf 'bundled-git-uncompressed-kib=%s\n' "$(du -sk "$GIT" "$GIT_CORE" "$RESOURCES/share/git-core/templates" | awk '{sum += $1} END {print sum}')"
 
 port="$($PYTHON -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 mkdir -p "$TEMP_ROOT/home" "$TEMP_ROOT/workspace" "$TEMP_ROOT/state"

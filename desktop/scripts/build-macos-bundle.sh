@@ -37,22 +37,43 @@ fetch_verified() {
 }
 build_git_runtime() {
   local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
+  local stage="$BUILD_ROOT/git-stage"
+  local stage_root="$stage/git-runtime"
+  local -a git_make_args=(
+    prefix=/git-runtime
+    RUNTIME_PREFIX=YesPlease
+    NO_GETTEXT=YesPlease
+    NO_TCLTK=YesPlease
+    NO_PERL=YesPlease
+    NO_PYTHON=YesPlease
+    NO_BASH_COMPLETION=YesPlease
+  )
+
   fetch_verified "$GIT_URL" "$archive" "$GIT_SHA256"
   tar -xJf "$archive" -C "$BUILD_ROOT"
-  make -C "$GIT_SOURCE" -j2 prefix=/git-runtime RUNTIME_PREFIX=YesPlease \
-    NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease \
-    NO_BASH_COMPLETION=YesPlease
+  make -C "$GIT_SOURCE" -j2 "${git_make_args[@]}"
+  make -C "$GIT_SOURCE" "${git_make_args[@]}" INSTALL_SYMLINKS=YesPlease DESTDIR="$stage" install
 
-  # Keep only the client, HTTPS helper, aliases, and init templates needed by
-  # CORSIA's documented Git operations. Built-in commands run from `git`.
+  # The installed stage, rather than selected build outputs, is the runtime
+  # contract: it retains every Git scripted subcommand and relocatable template.
+  [ -x "$stage_root/bin/git" ] || fail "Git install did not produce bin/git"
+  [ -d "$stage_root/libexec/git-core" ] || fail "Git install did not produce libexec/git-core"
+  [ -d "$stage_root/share/git-core/templates" ] || fail "Git install did not produce templates"
   mkdir -p "$BUNDLE_ROOT/bin" "$BUNDLE_ROOT/libexec/git-core" \
     "$BUNDLE_ROOT/share/git-core/templates" "$BUNDLE_ROOT/licenses/git"
-  install -m 0755 "$GIT_SOURCE/git" "$BUNDLE_ROOT/bin/git"
-  install -m 0755 "$GIT_SOURCE/git-remote-http" "$BUNDLE_ROOT/libexec/git-core/git-remote-http"
-  ln -s git-remote-http "$BUNDLE_ROOT/libexec/git-core/git-remote-https"
-  rsync -a --delete "$GIT_SOURCE/templates/blt/" "$BUNDLE_ROOT/share/git-core/templates/"
+  install -m 0755 "$stage_root/bin/git" "$BUNDLE_ROOT/bin/git"
+  rsync -a --delete "$stage_root/libexec/git-core/" "$BUNDLE_ROOT/libexec/git-core/"
+  # INSTALL_SYMLINKS makes core aliases point at individual bin targets. Only
+  # bin/git ships, so retain each core command name while redirecting it there.
+  while IFS= read -r -d '' link; do
+    case "$(readlink "$link")" in
+      ../../bin/*) ln -sf ../../bin/git "$link" ;;
+    esac
+  done < <(find "$BUNDLE_ROOT/libexec/git-core" -type l -print0)
+  rsync -a --delete "$stage_root/share/git-core/templates/" "$BUNDLE_ROOT/share/git-core/templates/"
   install -m 0644 "$GIT_SOURCE/COPYING" "$BUNDLE_ROOT/licenses/git/COPYING"
-  printf 'Git %s source\nURL: %s\nSHA-256: %s\nBuild: RUNTIME_PREFIX=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease\n' \
+  install -m 0644 "$archive" "$BUNDLE_ROOT/licenses/git/$GIT_ARCHIVE"
+  printf 'Corresponding source for Git %s\nUpstream URL: %s\nSHA-256: %s\nBuild: RUNTIME_PREFIX=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease\n' \
     "$GIT_VERSION" "$GIT_URL" "$GIT_SHA256" > "$BUNDLE_ROOT/licenses/git/SOURCE"
 }
 
