@@ -26,7 +26,14 @@ def parse_time(value: Any) -> tuple[str, datetime]:
 
 
 def attendee_emails(value: Any) -> list[str]:
-    if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
+    invalid = (not isinstance(value, list) or any(
+        not isinstance(item, str)
+        or item.count("@") != 1
+        or not all(item.split("@"))
+        or any(char.isspace() or char in ",;<>" or ord(char) < 32 or ord(char) == 127 for char in item)
+        for item in value
+    ))
+    if invalid:
         raise ValueError("Attendees must be email addresses.")
     return value
 
@@ -40,5 +47,6 @@ def one_line_text(value: Any, label: str) -> str:
 def compose_document(account: str, title: str, start: str, end: str, attendees: list[str], description: str) -> str:
     return (
         f"From: {account}\nTitle: {title}\nWhen: {start} to {end}\n"
-        f"Attendees: {', '.join(attendees)}\n\n{description}\n"
+        f"Attendees: {', '.join(attendees)}\n"
+        f"Sending this emails an invitation to every attendee.\n\n{description}\n"
     )

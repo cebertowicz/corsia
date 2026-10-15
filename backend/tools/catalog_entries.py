@@ -270,6 +270,20 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Send a saved email draft after the person says to send it",
         activity="Sending email",
     ),
+    "calendar_list": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="List the person's Google Calendar events, up to 31 days at a time", activity="Reading calendar",
+    ),
+    "calendar_draft_invite": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Save a calendar invite as a draft document for the person to review; nothing is sent",
+        activity="Drafting invite",
+    ),
+    "calendar_send_invite": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Send a saved invite draft after the person says to send it; attendees get emails",
+        activity="Sending invite",
+    ),
     "plan_read": _Entry(
         "plans", status="substrate", authority="plan-read", core=True,
         activity="Reading plan",

@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 from connections.google import client as google_client
 from connections.google import oauth
-from connections.google.calendar_document import attendee_emails, compose_document, one_line_text, parse_time
+from connections.google.calendar_document import OFFSET_REQUIRED, attendee_emails, compose_document, one_line_text, parse_time
 from connections.google.client import GoogleError, GoogleRequestFailed
 from infra import config
 from infra.db_async import run_in_db
@@ -38,7 +38,6 @@ log = logging.getLogger(__name__)
 
 CALENDAR = "https://www.googleapis.com/calendar/v3"
 DRAFT_DIR = "calendar-invites"
-OFFSET_REQUIRED = "Give times with a UTC offset, e.g. 2026-10-15T09:00:00-07:00."
 RANGE_TOO_LARGE = "Ask for at most 31 days at a time."
 NO_OPEN_DRAFT = "Save the invite again with calendar_draft_invite and show the person."
 BAD_DOCUMENT = (
@@ -115,7 +114,6 @@ def _read_document(relative: str) -> bytes | None:
     return _read_bytes(relative)
 
 
-
 def _event_url(calendar_id: str) -> str:
     return f"{CALENDAR}/calendars/{quote(calendar_id, safe='')}/events"
 
@@ -126,7 +124,6 @@ def _event_time(event: dict, key: str) -> str | None:
         return None
     candidate = value.get("dateTime", value.get("date"))
     return candidate if isinstance(candidate, str) else None
-
 
 class CalendarListTool(Tool):
     self_describing_errors = True
@@ -268,15 +265,14 @@ class CalendarDraftInviteTool(Tool):
         if isinstance(written, str) and written.startswith("Error"):
             return written
         data = await run_in_db(_read_document, relative)
-        if data is None:
-            raise ValueError("The invite draft was written but couldn't be read back, so it is not recorded.")
-        target = {"title": title, "start": start, "end": end, "attendees": attendees, "description": description}
+        if data != text.encode("utf-8"):
+            raise ValueError("The invite draft changed while it was being saved, so it is not recorded. "
+                             "Save it again with calendar_draft_invite.")
+        target = {"account": email, "title": title, "start": start, "end": end,
+                  "attendees": attendees, "description": description}
         saved = await run_in_db(record_draft, existing["id"], data, target) if existing else await run_in_db(create_draft, thread_id, "invite", relative, data, target)
-        return json.dumps({
-            "draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative,
-            "from": email, "next": AFTER_DRAFT,
-        })
-
+        return json.dumps({"draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative,
+                           "from": email, "next": AFTER_DRAFT})
 
 class CalendarSendInviteTool(Tool):
     self_describing_errors = True
@@ -339,14 +335,21 @@ class CalendarSendInviteTool(Tool):
                 return f"Error: {BAD_DOCUMENT}"
             attendees = attendee_emails(target.get("attendees"))
             description = target.get("description", "")
-            if not isinstance(description, str):
+            account = target.get("account")
+            if not isinstance(description, str) or not isinstance(account, str) or not account:
                 return f"Error: {BAD_DOCUMENT}"
+            current = await run_in_db(oauth.account_status)
+            current_email = current.get("email") if isinstance(current, dict) else None
+            if current_email != account:
+                current_display = current_email if isinstance(current_email, str) and current_email else "no account"
+                return (
+                    f"Error: Not sent: Google is now signed in as {current_display}, but this invite was "
+                    f"drafted from {account}. Save it again with calendar_draft_invite and show the person."
+                )
         except (UnicodeDecodeError, ValueError):
             return f"Error: {BAD_DOCUMENT}"
-        return {
-            "summary": title, "start": {"dateTime": start}, "end": {"dateTime": end},
-            "attendees": [{"email": email} for email in attendees], "description": description,
-        }
+        return {"summary": title, "start": {"dateTime": start}, "end": {"dateTime": end},
+                "attendees": [{"email": email} for email in attendees], "description": description}
 
     async def _deliver(self, draft_id: str, body: dict) -> str:
         try:

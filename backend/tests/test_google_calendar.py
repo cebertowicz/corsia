@@ -14,6 +14,7 @@ from infra.database import get_db
 from tests.test_action_gate import _admit, _bind, _draft, workspace  # noqa: F401 (fixture)
 from tests.test_google_email import mail  # noqa: F401 (fixture)
 from tests.test_google_sign_in import client_file, conductor, google  # noqa: F401 (mail dependencies)
+from connections.google.calendar_document import attendee_emails, compose_document
 from tools import action_gate, google_calendar
 from tools.action_drafts import record_draft
 from tools.action_gate import Approved, Refusal
@@ -130,7 +131,8 @@ async def test_draft_and_send_follow_the_email_lifecycle_with_attendee_notificat
     document = (mail.workspace / saved["path"]).read_text()
     assert document == (
         "From: person@example.com\nTitle: Planning\nWhen: 2026-10-15T09:00:00-07:00 to "
-        "2026-10-15T10:00:00-07:00\nAttendees: sam@example.com\n\nAgenda\n"
+        "2026-10-15T10:00:00-07:00\nAttendees: sam@example.com\n"
+        "Sending this emails an invitation to every attendee.\n\nAgenda\n"
     )
 
     async def approved(_kind, draft_id, _revision):
@@ -252,3 +254,65 @@ async def test_uncertain_calendar_insert_keeps_the_claim_and_cannot_repeat(mail,
     )
     assert again == f"Error: {google_calendar.STILL_SENDING}"
     assert len(calls) == 1
+
+
+def test_invite_document_discloses_attendee_notification_and_keeps_from_first():
+    document = compose_document(
+        "person@example.com", "Planning", "2026-10-15T09:00:00-07:00",
+        "2026-10-15T10:00:00-07:00", ["sam@example.com"], "Agenda",
+    )
+    assert document.startswith("From: person@example.com\n")
+    assert "Attendees: sam@example.com\nSending this emails an invitation to every attendee.\n" in document
+
+
+@pytest.mark.parametrize("value", [
+    "a@b.example\\nTitle: x", "a@b.example, c@d.example", "Name <a@b.example>",
+    "a b@c.example", "ab.example", "a@@b.example",
+])
+def test_attendee_emails_rejects_non_plain_addresses(value):
+    with pytest.raises(ValueError, match="Attendees must be email addresses"):
+        attendee_emails([value])
+    assert attendee_emails(["a.b+c@d.example"]) == ["a.b+c@d.example"]
+
+
+@pytest.mark.asyncio
+async def test_draft_refuses_to_record_changed_readback(mail, monkeypatch):
+    monkeypatch.setattr(google_calendar, "_read_document", lambda _relative: b"changed")
+    before = get_db().execute("SELECT COUNT(*) FROM action_drafts").fetchone()[0]
+    output = await CalendarDraftInviteTool().execute(
+        _thread_id=mail.thread, title="Planning", start="2026-10-15T09:00:00-07:00",
+        end="2026-10-15T10:00:00-07:00", attendees=["sam@example.com"], description="Agenda",
+    )
+    assert output == (
+        "Error: The invite draft changed while it was being saved, so it is not recorded. "
+        "Save it again with calendar_draft_invite."
+    )
+    assert get_db().execute("SELECT COUNT(*) FROM action_drafts").fetchone()[0] == before
+
+
+@pytest.mark.asyncio
+async def test_send_refuses_when_the_google_account_changed(mail, monkeypatch):
+    saved = await _calendar_draft(mail)
+
+    async def approved(_kind, draft_id, _revision):
+        return await _approved_calendar_draft(draft_id)
+
+    calls = []
+
+    async def request_json(*_args, **_kwargs):
+        calls.append(True)
+        return {"id": "unexpected"}
+
+    monkeypatch.setattr(google_calendar, "check_action", approved)
+    monkeypatch.setattr(google_calendar.oauth, "account_status", lambda: {"email": "other@example.com"})
+    monkeypatch.setattr(google_calendar.google_client, "request_json", request_json)
+    output = await CalendarSendInviteTool().execute(
+        _thread_id=mail.thread, draft_id=saved["draft_id"], revision=saved["revision"],
+    )
+    assert output == (
+        "Error: Not sent: Google is now signed in as other@example.com, but this invite was "
+        "drafted from person@example.com. Save it again with calendar_draft_invite and show the person."
+    )
+    assert calls == []
+    row = get_db().execute("SELECT state FROM action_drafts WHERE id=?", (saved["draft_id"],)).fetchone()
+    assert row["state"] == "open"
