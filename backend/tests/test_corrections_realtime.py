@@ -331,7 +331,7 @@ async def test_one_native_exit_during_load_stays_transient(worker, monkeypatch):
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
 
-    ScriptedChild.loads = [ClassifierUnavailable("load child_exited"), "ok"]
+    ScriptedChild.loads = [ClassifierUnavailable("load native exit", cause="child_exited"), "ok"]
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
 
     assert (await worker._classify(_candidate())).kind == "recorded"
@@ -352,45 +352,36 @@ async def test_two_native_exits_during_load_exclude_the_newer_version(worker, mo
             {"location": "corrections-classifier-v2", "version": "v2", "state": "failed" if "v2" in exclude else "ready", "reason": exclude.get("v2")},
         ]
 
-    ScriptedChild.loads = [ClassifierUnavailable("load child_exited"), ClassifierUnavailable("load child_exited")]
+    ScriptedChild.loads = [
+        ClassifierUnavailable("load native exit", cause="child_exited"),
+        ClassifierUnavailable("load native exit", cause="child_exited"),
+    ]
     monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
 
     assert (await worker._classify(_candidate())).kind == "recorded"
-    assert worker.failed_versions == {"v2": "load child_exited"}
+    assert worker.failed_versions == {"v2": "load native exit"}
     assert worker.snapshot()["version"] == "v1"
 
 
 @pytest.mark.asyncio
-async def test_only_version_with_two_native_load_exits_fails_and_notifies_once(worker, monkeypatch):
-    from automation import update_failure_notice
+async def test_only_version_with_two_native_load_exits_stays_retryable_then_records(worker, monkeypatch):
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
-    from jobs.corrections_assets import AssetSelectionError
 
-    notices = []
-
-    def selected(*, exclude=None):
-        if exclude:
-            raise AssetSelectionError("no selectable classifier", [
-                {"location": "corrections-classifier", "version": "v1", "state": "failed", "reason": exclude["v1"]},
-            ])
-        return _selection(_manifest())
-
-    ScriptedChild.loads = [ClassifierUnavailable("load child_exited"), ClassifierUnavailable("load child_exited")]
-    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
-    monkeypatch.setattr(corrections_realtime, "_installed", lambda: True)
+    ScriptedChild.loads = [
+        ClassifierUnavailable("load native exit", cause="child_exited"),
+        ClassifierUnavailable("load native exit", cause="child_exited"),
+        "ok",
+    ]
     monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        update_failure_notice, "tell_corrections_classifier_failure_detached",
-        lambda version, reason, reader, *, tasks: notices.append((version, reason, reader, tasks)),
-    )
 
-    assert (await worker._classify(_candidate())).kind == "version_failed"
-    assert (worker.state, worker.reason) == ("failed", "load child_exited")
-    assert [(version, reason) for version, reason, _reader, _tasks in notices] == [("v1", "load child_exited")]
-    assert (await worker._classify(_candidate("later"))).kind == "outage"
-    assert len(notices) == 1
+    assert (await worker._classify(_candidate())).kind == "outage"
+    assert (worker.state, worker.reason) == ("unavailable", "load native exit")
+    assert worker.failed_versions == {}
+
+    assert (await worker._classify(_candidate("later"))).kind == "recorded"
+    assert worker.snapshot()["state"] == "ready"
 
 
 @pytest.mark.asyncio

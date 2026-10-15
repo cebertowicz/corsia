@@ -22,11 +22,13 @@ Scan state (``scan``)::
 
     from                         event                                      to
     idle                         ready, startup, or dropped arrival          owed
+    idle                         arrival error or notify while stopping        owed
     owed                         worker starts a pass                         running
     running                      pass finishes                                idle
     running                      yields to an arrival or must reselect        owed
     owed|running                 unavailable pass or worker error             held
-    held                         a recorded/unreadable arrival succeeds       owed
+    held                         recorded/unreadable arrival or startup        owed
+                                 `_release_hold()`
 
 ``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
 only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
@@ -176,8 +178,12 @@ class CorrectionsWorker:
         return manifest
 
     async def _classify_with(self, candidate: CorrectionCandidate, manifest: AssetManifest) -> ClassificationOutcome:
+        has_fallback = any(
+            item["state"] == "ready" and item["version"] != manifest.version
+            for item in self.versions
+        )
         return await classify(
-            self, candidate, manifest, attempts_per_kind=ATTEMPTS_PER_KIND,
+            self, candidate, manifest, attempts_per_kind=ATTEMPTS_PER_KIND, has_fallback=has_fallback,
             child_factory=ClassifierChild, clock=_clock, record_classification=record_classification,
             record_unreadable=record_unreadable,
         )
