@@ -12,7 +12,7 @@ from loguru import logger
 async def tell_conductor_about_failed_update(operation_id: str) -> None:
     """Deliver one failed-Update notice and mark it only after acceptance."""
     from automation import self_restart
-    from core.agent_roster_queries import workspace_conductor_contact
+    from core.agent_roster_queries import corsia_agent_contact
     from infra.database import get_db
 
     def contact_and_operation() -> tuple[dict | None, dict | None, str | None]:
@@ -23,7 +23,7 @@ async def tell_conductor_about_failed_update(operation_id: str) -> None:
             or operation.get("status") != "failed" or operation.get("conductor_told_at")
         ):
             return None, operation, None
-        contact, gap = workspace_conductor_contact(
+        contact, gap = corsia_agent_contact(
             str(operation.get("requester_user") or ""), connection
         )
         return contact, operation, gap
@@ -67,15 +67,15 @@ async def _tell_conductor_about_owner_notice(
     delivery_id: str,
     notice_name: str,
 ) -> None:
-    """Deliver one typed conductor notice for a fact owned by one user."""
-    from core.agent_roster_queries import workspace_conductor_contact
+    """Deliver one typed CORSIA agent notice for a fact owned by one user."""
+    from core.agent_roster_queries import corsia_agent_contact
     from infra.db_async import run_in_db
 
     def contact_for_owner() -> tuple[dict | None, str | None]:
         from infra.database import get_db
 
         connection = get_db()
-        return workspace_conductor_contact(str(owner_id or ""), connection)
+        return corsia_agent_contact(str(owner_id or ""), connection)
 
     contact, gap = await run_in_db(contact_for_owner)
     if contact is None:
@@ -100,7 +100,7 @@ async def tell_conductor_about_scheduled_lapse(
     *,
     delivery_id: str,
 ) -> None:
-    """Tell the workspace conductor that an owner-bound schedule did not run."""
+    """Tell the CORSIA agent that an owner-bound schedule did not run."""
     await _tell_conductor_about_owner_notice(
         owner_id, summary, event_type="system.update_schedule_lapsed", delivery_id=delivery_id,
         notice_name="scheduled update",
@@ -112,7 +112,7 @@ async def tell_conductor_about_corrections_classifier_failure(
     reason: str,
     reader: str,
 ) -> None:
-    """Tell the workspace conductor once when a pinned classifier cannot serve."""
+    """Tell the CORSIA agent once when a pinned classifier cannot serve."""
     from infra.db_async import run_in_db
     from jobs.corrections_recording import owner_user_ids
 

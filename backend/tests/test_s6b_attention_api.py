@@ -8,6 +8,14 @@ directly into the shared app DB, then drives them through HTTP.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 import sys
 import os
 import uuid
@@ -112,7 +120,7 @@ class TestDispositionGate:
                   "actor_thread": "steve-actor"})
         assert self_assert.status_code == 409
         # A real workspace conductor as actor is authorized.
-        conductor.set_conductor(conductor.WORKSPACE_SCOPE, "ws-cond")
+        corsia_agent.set_corsia_agent("ws-cond")
         db.close()
         ok = integration_client.post(
             f"/api/attention/{aid}/dispose",

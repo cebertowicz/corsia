@@ -75,7 +75,7 @@ def _target_path(paths: dict[str, Path], path: str) -> Path:
     target = paths.get(candidate)
     if target is None:
         raise RosterChangeError(
-            "instruction file is not attached; call conductor_instruction_file_read "
+            "instruction file is not attached; call coordination_instruction_file_read "
             "without path and copy one returned path"
         )
     return target
@@ -103,14 +103,14 @@ class ConductorInstructionFileReadTool(Tool):
 
     @property
     def name(self) -> str:
-        return "conductor_instruction_file_read"
+        return "coordination_instruction_file_read"
 
     @property
     def description(self) -> str:
         return (
-            "For the designated conductor only: omit path to list a target thread's "
+            "For the CORSIA agent or a project conductor only: omit path to list a target thread's "
             "attached instruction files and revisions, or provide one returned path to "
-            "read its content. Use its revision with conductor_instruction_file_replace."
+            "read its content. Use its revision with coordination_instruction_file_replace."
         )
 
     @property
@@ -173,13 +173,13 @@ class ConductorInstructionFileReplaceTool(Tool):
 
     @property
     def name(self) -> str:
-        return "conductor_instruction_file_replace"
+        return "coordination_instruction_file_replace"
 
     @property
     def description(self) -> str:
         return (
-            "For the designated conductor only: replace one existing attached instruction "
-            "file after reading it with conductor_instruction_file_read. Copy the returned "
+            "For the CORSIA agent or a project conductor only: replace one existing attached instruction "
+            "file after reading it with coordination_instruction_file_read. Copy the returned "
             "path and SHA-256 revision exactly. This cannot create, attach, move, delete, "
             "or change an instruction file's mission or authority."
         )
@@ -195,7 +195,7 @@ class ConductorInstructionFileReplaceTool(Tool):
                 "path": {"type": "string", "minLength": 1},
                 "expected_revision": {
                     "type": "string", "pattern": "^[0-9a-f]{64}$",
-                    "description": "Copy the revision returned by conductor_instruction_file_read.",
+                    "description": "Copy the revision returned by coordination_instruction_file_read.",
                 },
                 "content": {
                     "type": "string", "maxLength": MAX_TEXT_BYTES,
@@ -212,7 +212,7 @@ class ConductorInstructionFileReplaceTool(Tool):
         if not isinstance(actor_thread_id, str) or not actor_thread_id:
             return "Error: current thread identity is unavailable; retry from a live conductor turn."
         if not isinstance(expected_revision, str) or not _REVISION.fullmatch(expected_revision):
-            return "Error: expected_revision must be the 64-character lowercase SHA-256 revision from conductor_instruction_file_read."
+            return "Error: expected_revision must be the 64-character lowercase SHA-256 revision from coordination_instruction_file_read."
         if not isinstance(content, str):
             return "Error: content must be replacement text."
         replacement = content.encode("utf-8")
@@ -247,7 +247,7 @@ class ConductorInstructionFileReplaceTool(Tool):
         if saved.outcome == "stale":
             return (
                 "Error: instruction file changed since it was read; call "
-                "conductor_instruction_file_read again, merge, and retry once."
+                "coordination_instruction_file_read again, merge, and retry once."
             )
         receipt: dict[str, Any] = {
             "ok": True, "thread_id": target_thread_id, "path": str(file_path),
@@ -288,7 +288,7 @@ def _audit(user_id: str, actor_thread_id: str, target_thread_id: str, receipt: d
 
     db = get_db()
     try:
-        with write_transaction(db, scope="conductor_instruction_file_replace") as connection:
+        with write_transaction(db, scope="coordination_instruction_file_replace") as connection:
             log_bootloader_event(
                 connection, actor_user_id=user_id, actor_thread_id=actor_thread_id, scope="thread",
                 target_id=target_thread_id, action="replace_content",

@@ -26,6 +26,7 @@
 	const h = $derived($canvasHeader);
 	const isTakeover = $derived(h != null);
 	const scopeTitle = $derived($uiScope?.name ?? 'Workspace');
+	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
 	const isConductorThread = $derived(conductorThreadId != null && $activeThreadId === conductorThreadId);
 
 	// isConductor only when no thread is active at all (home/conductor landing).
@@ -97,7 +98,7 @@
 	{:else if isConductor}
 		<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
 		<span class="h-scope">{scopeTitle}</span>
-		<span class="h-cond-tag">conductor</span>
+		<span class="h-cond-tag">{$uiScope ? 'conductor' : 'CORSIA'}</span>
 	{:else if $activeThread}
 		{#if isNavAgent($activeThread)}
 			<svg class="h-cond-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Agent"><path d="M12 3l1.8 5 5 1.8-5 1.8L12 17l-1.8-5-5-1.8 5-1.8z"/></svg>
@@ -140,7 +141,7 @@
 			</button>
 		{/if}
 		{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
-			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? 'Conductor settings' : 'Thread settings'} aria-label={isConductorThread ? 'Conductor settings' : 'Thread settings'}>
+			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
 				{@render gearIcon()}
 			</button>
 		{:else if activeView === 'activity' && $uiScope && !$projectSettingsOpen}

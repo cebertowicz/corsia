@@ -188,7 +188,7 @@ async def test_failed_update_marks_conductor_only_after_successful_send(isolated
     )
     sent = AsyncMock(return_value=True)
     monkeypatch.setattr(
-        agent_roster_queries, "workspace_conductor_contact", lambda _user, _db: ({"id": "conductor"}, None)
+        agent_roster_queries, "corsia_agent_contact", lambda _user, _db: ({"id": "conductor"}, None)
     )
     monkeypatch.setattr(delivery, "deliver_to_thread", sent)
 
@@ -221,7 +221,7 @@ async def test_failed_update_keeps_conductor_marker_null_when_send_fails(isolate
     assert operation_id is not None
     assert self_restart.abort_operation(operation_id, error="fetch summary", failure_code="fetch_failed")
     monkeypatch.setattr(
-        agent_roster_queries, "workspace_conductor_contact", lambda _user, _db: ({"id": "conductor"}, None)
+        agent_roster_queries, "corsia_agent_contact", lambda _user, _db: ({"id": "conductor"}, None)
     )
     monkeypatch.setattr(delivery, "deliver_to_thread", AsyncMock(return_value=False))
 
@@ -271,7 +271,7 @@ async def test_scheduled_lapse_skips_unavailable_workspace_conductor(isolated_db
     warnings = []
     monkeypatch.setattr(
         agent_roster_queries,
-        "workspace_conductor_contact",
+        "corsia_agent_contact",
         lambda _user, _db: (None, "no workspace conductor"),
     )
     monkeypatch.setattr(delivery, "deliver_to_thread", AsyncMock())

@@ -188,9 +188,9 @@ def backlog_target(
     db: sqlite3.Connection, project_id: str | None
 ) -> tuple[str | None, str | None]:
     """The conductor's lane label and the project's GitHub repository."""
-    from infra.conductor import get_conductor
+    from infra.conductor import get_scope_coordinator
 
-    conductor = get_conductor(project_id or "workspace", db=db)
+    conductor = get_scope_coordinator(project_id or "workspace", db=db)
     label = None
     repo_project = project_id
     if conductor:

@@ -512,17 +512,17 @@ class TestSessionListRoleFilter:
         sid = resp.json()["thread_id"]
         assert sid in self._session_ids(integration_client)
 
-    def test_workspace_conductor_excluded(self, integration_client):
+    def test_corsia_agent_excluded(self, integration_client):
         create_resp = integration_client.post(
             f"/api/threads?token={_TOKEN}",
-            json={"title": "Workspace conductor"},
+            json={"title": "CORSIA agent"},
         )
         sid = create_resp.json()["thread_id"]
 
         assert sid in self._session_ids(integration_client)
 
         denied = integration_client.put(
-            f"/api/conductor?token={_TOKEN}&scope=workspace",
+            f"/api/corsia-agent?token={_TOKEN}",
             json={"thread_id": sid},
         )
         assert denied.status_code == 403
@@ -531,7 +531,7 @@ class TestSessionListRoleFilter:
         )
 
         put_resp = integration_client.put(
-            f"/api/conductor?token={OWNER_SESSION_TOKEN}&scope=workspace",
+            f"/api/corsia-agent?token={OWNER_SESSION_TOKEN}",
             json={"thread_id": sid},
         )
         assert put_resp.status_code == 200
@@ -540,7 +540,7 @@ class TestSessionListRoleFilter:
             assert sid not in self._session_ids(integration_client)
         finally:
             integration_client.put(
-                f"/api/conductor?token={OWNER_SESSION_TOKEN}&scope=workspace",
+                f"/api/corsia-agent?token={OWNER_SESSION_TOKEN}",
                 json={"thread_id": None},
             )
 

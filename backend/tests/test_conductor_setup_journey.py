@@ -1,13 +1,19 @@
 """Mock-mode native dispatch journey through existing creation and roster owners."""
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 from types import SimpleNamespace
 
 import pytest
 
 from delegation_fixtures import deleg_db  # noqa: F401
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from tools.registry import ToolRegistry
 
 
@@ -22,16 +28,16 @@ async def test_fresh_workspace_conductor_discovers_creates_and_reads_agent(deleg
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setattr(config, "WORKSPACE", workspace)
-    assert set_conductor("workspace", "sender-self", db=deleg_db)
+    assert set_corsia_agent("sender-self", db=deleg_db)
     registry = ToolRegistry()
     _register_agent_roster_tools(SimpleNamespace(tools=registry))
     registry.register(DelegateCreateThreadTool())
     skills = skill_context_sources(thread_id="sender-self", project_id=None,
                                     workspace=workspace, db=deleg_db)
     index = next(row for row in skills if row.source_id == "dynamic:skills-index")
-    assert "conductor-api" in index.prompt_content
-    assert "conductor-api" in registry.get("corsia_api").description
-    assert registry.get("conductor_instruction_file_create") is not None
+    assert "coordination-api" in index.prompt_content
+    assert "coordination-api" in registry.get("corsia_api").description
+    assert registry.get("coordination_instruction_file_create") is not None
 
     binding = state._current_thread_id.set("sender-self")
     try:
@@ -49,7 +55,7 @@ async def test_fresh_workspace_conductor_discovers_creates_and_reads_agent(deleg
         assert promoted["changed"]
         retried = json.loads(await registry.execute("agent_roster_update", promotion))
         assert not retried["changed"]
-        installed = json.loads(await registry.execute("conductor_instruction_file_create", {
+        installed = json.loads(await registry.execute("coordination_instruction_file_create", {
             "target_thread_id": target, "kind": "responsibility", "expected_revision": "absent",
             "content": "# Responsibility\nOwns the authorized checks.\n",
         }))

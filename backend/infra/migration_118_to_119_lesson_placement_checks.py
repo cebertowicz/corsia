@@ -1,10 +1,10 @@
-"""Schema 116 -> 117: persist lesson placement-check observations."""
+"""Schema 118 -> 119: persist lesson placement-check observations."""
 from __future__ import annotations
 
 import sqlite3
 
 
-def migrate_116_to_117(conn: sqlite3.Connection) -> None:
+def migrate_118_to_119(conn: sqlite3.Connection) -> None:
     """Create the idempotent check-observation store without changing lesson files."""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS lesson_placement_checks (

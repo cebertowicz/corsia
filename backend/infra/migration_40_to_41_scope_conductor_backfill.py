@@ -25,13 +25,13 @@ _logger = logging.getLogger(__name__)
 
 def migrate_40_to_41(conn: sqlite3.Connection) -> None:
     """Designate a conductor for every scope that lacks one."""
-    from infra.conductor import backfill_scope_conductors
+    from infra.conductor import backfill_coordination_scopes
 
     # The conductor writer reads rows by name; the caller's connection is
     # left as found.
     caller_factory, conn.row_factory = conn.row_factory, sqlite3.Row
     try:
-        healed = backfill_scope_conductors(db=conn)
+        healed = backfill_coordination_scopes(db=conn)
         for scope, thread_id in healed:
             _logger.info("conductor backfill: scope=%s thread=%s", scope, thread_id)
     finally:

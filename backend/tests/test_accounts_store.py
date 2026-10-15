@@ -6,6 +6,12 @@ mean something, so stubbing it would only prove the stub works.
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import os
 import sqlite3
 import sys
@@ -108,14 +114,14 @@ class TestAccounts:
         assert accounts.has_users() is True
         assert "newcomer" in [u["id"] for u in accounts.list_users()]
 
-    def test_first_account_creates_workspace_conductor(self, isolated_db):
-        from infra.conductor import WORKSPACE_SCOPE, get_conductor
+    def test_first_account_creates_corsia_agent(self, isolated_db):
+        from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
         from infra.database import get_db
 
         db = get_db()
         try:
             db.execute("DELETE FROM auth_tokens")
-            db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+            db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
             db.execute("DELETE FROM threads")
             db.execute("DELETE FROM users")
             db.commit()
@@ -125,14 +131,14 @@ class TestAccounts:
         assert accounts.create_user("newcomer", GOOD_PASSWORD) == "newcomer"
         db = get_db()
         try:
-            conductor_id = get_conductor(WORKSPACE_SCOPE, db=db)
+            conductor_id = get_corsia_agent(db=db)
             row = db.execute(
                 "SELECT user_id,title,project_id,model FROM threads WHERE id=?",
                 (conductor_id,),
             ).fetchone()
             assert dict(row) == {
                 "user_id": "newcomer",
-                "title": "Conductor",
+                "title": "CORSIA",
                 "project_id": None,
                 "model": None,
             }
@@ -144,7 +150,7 @@ class TestAccounts:
     ):
         from core.workspace_scaffolding import scaffold_workspace
         from infra import config
-        from infra.conductor import WORKSPACE_SCOPE, get_conductor
+        from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
         from infra.database import get_db
         from infra.platform_paths import WorkspaceSelection
         from infra.settings import get_setting
@@ -166,13 +172,13 @@ class TestAccounts:
         db = get_db()
         try:
             db.execute("DELETE FROM auth_tokens")
-            db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+            db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
             db.execute("DELETE FROM threads")
             db.execute("DELETE FROM users")
             db.commit()
 
             accounts.create_user("newcomer", GOOD_PASSWORD, db=db)
-            conductor = get_conductor(WORKSPACE_SCOPE, db=db)
+            conductor = get_corsia_agent(db=db)
             shared_index = workspace / "shared" / "INDEX.md"
             artifact = service.find_file_identity(str(shared_index), db=db)
 
@@ -194,13 +200,13 @@ class TestAccounts:
             db.close()
 
     def test_later_account_preserves_workspace_conductor_owner(self, isolated_db):
-        from infra.conductor import WORKSPACE_SCOPE, get_conductor
+        from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
         from infra.database import get_db
 
         db = get_db()
         try:
             db.execute("DELETE FROM auth_tokens")
-            db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+            db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
             db.execute("DELETE FROM threads")
             db.execute("DELETE FROM users")
             db.commit()
@@ -208,9 +214,9 @@ class TestAccounts:
             db.close()
 
         first = accounts.create_user("first", GOOD_PASSWORD)
-        conductor_id = get_conductor(WORKSPACE_SCOPE)
+        conductor_id = get_corsia_agent()
         assert accounts.create_user("second", GOOD_PASSWORD) == "second"
-        assert get_conductor(WORKSPACE_SCOPE) == conductor_id
+        assert get_corsia_agent() == conductor_id
         assert first == "first"
 
     def test_created_name_is_normalized(self, isolated_db):
@@ -456,7 +462,7 @@ class TestAccountsMigration:
         from infra.migration_25_to_26_accounts import migrate_25_to_26
         from infra.schema import SCHEMA_VERSION
 
-        assert SCHEMA_VERSION == 117
+        assert SCHEMA_VERSION == 119
         assert MIGRATIONS[25] is migrate_25_to_26
 
     def test_migrated_shape_matches_a_freshly_created_one(self, tmp_path):

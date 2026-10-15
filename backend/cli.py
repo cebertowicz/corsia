@@ -264,9 +264,9 @@ def _add_runtime_commands(sub: argparse._SubParsersAction) -> None:
 
     build_local_parser(sub)
 
-    from cli_conductor import build_parser as build_conductor_parser
+    from cli_corsia_agent import build_parser as build_corsia_agent_parser
 
-    build_conductor_parser(sub)
+    build_corsia_agent_parser(sub)
 
     from cli_perf import build_parser as build_perf_parser
 
