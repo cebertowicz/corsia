@@ -24,7 +24,11 @@ from infra import accounts, config, user_profile
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
-from llm.local_setup_ownership import omlx_present
+from llm.local_setup_ownership import (
+    existing_omlx_needs_consent_prompt,
+    existing_omlx_requires_consent,
+    record_existing_omlx_consent,
+)
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
 logger = logging.getLogger(__name__)
@@ -170,7 +174,7 @@ def _setup_status() -> dict:
         "model_name": DEFAULT_PROFILE.display_name,
         "model_size_gb": round(DEFAULT_PROFILE.download_size_bytes / 1000**3, 1),
         "required_username": _required_username(),
-        "existing_omlx": omlx_present(),
+        "existing_omlx": existing_omlx_needs_consent_prompt(),
     }
 
 
@@ -195,10 +199,10 @@ async def local_download(request: Request) -> dict | Response:
         body = LocalDownloadRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
-    # A presence check is deliberately the last pre-consent interaction with an
-    # oMLX CORSIA did not start. It performs no process, settings, or network IO.
-    if omlx_present() and not body.consent_existing:
-        return JSONResponse(status_code=409, content={"code": "consent_required"})
+    if existing_omlx_requires_consent():
+        if not body.consent_existing:
+            return JSONResponse(status_code=409, content={"code": "consent_required"})
+        record_existing_omlx_consent()
     from llm.local_setup import begin_local_setup
 
     return await begin_local_setup()

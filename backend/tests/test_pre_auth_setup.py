@@ -144,10 +144,24 @@ def test_post_setup_returns_complete_code(client, path):
     assert response.json() == {"code": "setup_complete"}
 
 
+def test_status_uses_the_marker_only_consent_prompt_predicate(client, monkeypatch):
+    monkeypatch.setattr(setup_api, "existing_omlx_needs_consent_prompt", lambda: True)
+    monkeypatch.setattr(
+        setup_api,
+        "existing_omlx_requires_consent",
+        lambda: pytest.fail("pre-auth status must not execute the POST consent gate"),
+    )
+
+    response = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json()["existing_omlx"] is True
+
+
 def test_local_download_uses_existing_single_flight(client, monkeypatch):
     from llm import local_setup
 
-    monkeypatch.setattr(setup_api, "omlx_present", lambda: False)
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: False)
     calls = 0
 
     async def begin_local_setup():
@@ -166,7 +180,7 @@ def test_local_download_uses_existing_single_flight(client, monkeypatch):
 def test_local_download_requires_consent_before_starting_an_existing_omlx(client, monkeypatch):
     from llm import local_setup
 
-    monkeypatch.setattr(setup_api, "omlx_present", lambda: True)
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
 
     async def should_not_start():
         raise AssertionError("existing oMLX must not be inspected before consent")
@@ -181,7 +195,9 @@ def test_local_download_requires_consent_before_starting_an_existing_omlx(client
 def test_local_download_starts_existing_omlx_only_after_consent(client, monkeypatch):
     from llm import local_setup
 
-    monkeypatch.setattr(setup_api, "omlx_present", lambda: True)
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
+    persisted = []
+    monkeypatch.setattr(setup_api, "record_existing_omlx_consent", lambda: persisted.append(True))
     calls = 0
 
     async def begin_local_setup():
@@ -195,6 +211,7 @@ def test_local_download_starts_existing_omlx_only_after_consent(client, monkeypa
     assert response.status_code == 200
     assert response.json()["stage"] == "Checking your oMLX"
     assert calls == 1
+    assert persisted == [True]
 
 
 def test_omlx_presence_check_runs_no_command(monkeypatch):

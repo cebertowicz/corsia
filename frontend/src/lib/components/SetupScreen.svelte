@@ -116,11 +116,14 @@
 		}
 	}
 
-	async function startLocalDownload(consentExisting = false): Promise<boolean> {
-		if (!localWanted && !consentExisting) return true;
+	type LocalDownloadStart = 'started' | 'consent_required' | 'failed';
+
+	async function startLocalDownload(consentExisting = false): Promise<LocalDownloadStart> {
+		if (!localWanted && !consentExisting) return 'started';
 		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting }) });
 		const result = await response.json().catch(() => null);
-		return (response.ok || response.status === 409) && result?.ok !== false;
+		if (response.status === 409 && result?.code === 'consent_required') return 'consent_required';
+		return response.ok && result?.ok !== false ? 'started' : 'failed';
 	}
 
 	async function beginSetup() {
@@ -130,7 +133,13 @@
 			return;
 		}
 		try {
-			if (await startLocalDownload()) localDownloadPending = localWanted;
+			const start = await startLocalDownload();
+			if (start === 'consent_required') {
+				existingOmlxConsent = true;
+				page = 'models';
+				return;
+			}
+			if (start === 'started') localDownloadPending = localWanted;
 			else localStartError = 'The local model download couldn’t start.';
 		} catch {
 			localStartError = 'The local model download couldn’t start.';
@@ -147,11 +156,14 @@
 		}
 		localSetupBusy = true;
 		localStartError = '';
+		let returnToModels = false;
 		try {
 			const current = get(token);
-			const started = current
-				? (await setupLocalSource(current, true)).ok
+			returnToModels = Boolean(current);
+			const start = current
+				? await setupLocalSource(current, true)
 				: await startLocalDownload(true);
+			const started = typeof start === 'string' ? start === 'started' : start.ok;
 			if (started) localDownloadPending = true;
 			else localStartError = 'The local model couldn’t start.';
 		} catch {
@@ -159,7 +171,7 @@
 		} finally {
 			localSetupBusy = false;
 			existingOmlxConsent = false;
-			page = 'account';
+			page = returnToModels ? 'models' : 'account';
 		}
 	}
 
@@ -236,6 +248,10 @@
 		localStartError = '';
 		try {
 			const result = await setupLocalSource(current);
+			if (result.code === 'consent_required') {
+				existingOmlxConsent = true;
+				return;
+			}
 			if (!result.ok) sourceError = 'The local model couldn’t start. Try again, or choose another source.';
 		} catch {
 			sourceError = 'The local model couldn’t start. Try again, or choose another source.';

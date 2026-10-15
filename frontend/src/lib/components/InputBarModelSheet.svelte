@@ -56,7 +56,12 @@
 	const hasLocalGroup = $derived(groups.some(isLocalGroup));
 	$effect(() => watchLocalStatus());
 	async function retryLocal(kind: 'starter' | 'setup') {
-		if (!(await retryLocalSetup(kind))) toasts.show("Couldn't set up the local model.", 'error');
+		const result = await retryLocalSetup(kind);
+		if (result.code === 'consent_required') {
+			toasts.show('CORSIA needs your permission to inspect the existing oMLX. Open the CORSIA app setup and choose Use it.', 'error');
+		} else if (!result.ok) {
+			toasts.show("Couldn't set up the local model.", 'error');
+		}
 	}
 
 	async function chooseAccount(row: PickerAccount) {

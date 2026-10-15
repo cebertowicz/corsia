@@ -90,6 +90,27 @@ describe('SetupScreen', () => {
 		expect(bodies).toEqual(['{"consent_existing":true}']);
 	});
 
+	it('shows the existing oMLX choice when local download reports consent required', async () => {
+		if (component) await unmount(component);
+		calls = [];
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: false, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/local-download') return json({ code: 'consent_required' }, 409);
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+
+		expect(calls).toEqual(['/api/setup/status', '/api/setup/local-download']);
+		expect(host.textContent).toContain('CORSIA will read:');
+		expect(host.textContent).not.toContain('Create your account');
+	});
+
 	it('uses This computer for the ineligible local-model explanation', async () => {
 		if (component) await unmount(component);
 		calls = [];
@@ -266,6 +287,46 @@ describe('SetupScreen', () => {
 		await settle();
 
 		expect(connect).toHaveBeenCalledTimes(1);
+	});
+
+	it('returns to the existing oMLX choice when the signed-in source start needs consent', async () => {
+		if (component) await unmount(component);
+		let localSetupStarts = 0;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
+			if (url === '/api/providers/sources/recheck') return json({ sources: [{ source: 'omlx', name: 'Local model', state: 'needs_setup' }] });
+			if (url === '/api/providers/local/setup') {
+				localSetupStarts += 1;
+				return localSetupStarts === 1 ? json({ detail: { code: 'consent_required' } }, 409) : json({ ok: true });
+			}
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		for (const [input, value] of [
+			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
+			[host.querySelector('input[autocomplete="username"]'), 'first'],
+			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
+		] as [HTMLInputElement, string][]) {
+			input.value = value;
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+		}
+		await tick();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Download')?.click();
+		await settle();
+
+		expect(host.textContent).toContain('CORSIA will read:');
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
+		await settle();
+		expect(host.textContent).toContain('Choose an AI model');
+		expect(host.textContent).not.toContain('Create your account');
 	});
 
 	it('renders Claude Code and Codex beside an inert local download state', async () => {

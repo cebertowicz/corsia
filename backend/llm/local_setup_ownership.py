@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 MARKER_NAME = "local_setup_installed_omlx"
+CONSENT_MARKER_NAME = "local_setup_existing_omlx_consented"
 OMLX_FORMULA = "jundot/omlx/omlx"
 DEFAULT_PORT = 8000
 
@@ -30,11 +31,24 @@ def marker_path() -> Path:
     return Path(STATE_ROOT) / MARKER_NAME
 
 
+def consent_marker_path() -> Path:
+    from infra.config import STATE_ROOT
+
+    return Path(STATE_ROOT) / CONSENT_MARKER_NAME
+
+
 def mark_installed_by_setup() -> None:
     """Record, durably, that local setup itself installed oMLX."""
     path = marker_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("installed by corsia local setup\n", encoding="utf-8")
+
+
+def record_existing_omlx_consent() -> None:
+    """Remember consent to inspect the pre-existing oMLX in this CORSIA state root."""
+    path = consent_marker_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("consented to existing oMLX\n", encoding="utf-8")
 
 
 _BROKEN_RETURN_CODES = (126, 127)
@@ -70,12 +84,37 @@ def _is_broken_leftover(path: str) -> bool:
 
 
 def omlx_present() -> bool:
-    """Whether an ``omlx`` executable is present on PATH without touching it.
-
-    Pre-consent setup uses only this presence check. In particular, it does not
-    run the executable, inspect settings, or contact an oMLX server.
-    """
+    """Whether an ``omlx`` executable is present on PATH without touching it."""
     return shutil.which("omlx") is not None
+
+
+def existing_omlx_needs_consent_prompt() -> bool:
+    """Whether pre-auth status should show the existing-oMLX consent choice.
+
+    This is deliberately marker-only: status must not execute an oMLX binary
+    before consent. The POST gate performs the broken-leftover classification.
+    """
+    return bool(
+        shutil.which("omlx")
+        and not marker_path().exists()
+        and not consent_marker_path().exists()
+    )
+
+
+def existing_omlx_requires_consent() -> bool:
+    """Whether setup must ask before inspecting a usable pre-existing oMLX.
+
+    Setup-owned and previously consented installations are safe to resume. A
+    broken leftover is repaired as a new setup, so it never needs consent. This
+    performs no settings read or network request before consent.
+    """
+    omlx = shutil.which("omlx")
+    return bool(
+        omlx
+        and not marker_path().exists()
+        and not consent_marker_path().exists()
+        and not _is_broken_leftover(omlx)
+    )
 
 
 def installed_omlx() -> str | None:

@@ -90,13 +90,26 @@ export async function fetchSources(t: string): Promise<ModelSource[]> {
 	}));
 }
 
-export async function setupLocalSource(t: string, consentExisting = false): Promise<{ ok: boolean; in_progress?: boolean; stage?: string; message?: string; next_action?: string; progress?: string[] }> {
+export type LocalSetupResult = {
+	ok: boolean;
+	in_progress?: boolean;
+	stage?: string;
+	message?: string;
+	next_action?: string;
+	progress?: string[];
+	code?: 'consent_required';
+};
+
+export async function setupLocalSource(t: string, consentExisting = false): Promise<LocalSetupResult> {
 	const response = await fetch('/api/providers/local/setup', {
 		method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ consent_existing: consentExisting }),
 	});
+	const body = await response.json().catch(() => null);
+	const code = body?.detail?.code ?? body?.code;
+	if (response.status === 409 && code === 'consent_required') return { ok: false, code };
 	if (!response.ok) throw new Error(`local setup ${response.status}`);
-	return response.json();
+	return body;
 }
 
 /** Re-run every source check once; concurrent callers share the server's run. */

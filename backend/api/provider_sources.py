@@ -140,10 +140,12 @@ async def setup_local_source(
     """
     from llm.local_setup import begin_local_setup
     from llm.local_setup_gates import ProfileRefused
-    from llm.local_setup_ownership import omlx_present
+    from llm.local_setup_ownership import existing_omlx_requires_consent, record_existing_omlx_consent
 
-    if omlx_present() and not consent_existing:
-        raise HTTPException(status_code=409, detail={"code": "consent_required"})
+    if existing_omlx_requires_consent():
+        if not consent_existing:
+            raise HTTPException(status_code=409, detail={"code": "consent_required"})
+        record_existing_omlx_consent()
     try:
         return await begin_local_setup(
             no_subscription_only=no_subscription_only, automatic=automatic, profile_id=profile,
