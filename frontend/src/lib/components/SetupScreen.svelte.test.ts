@@ -178,6 +178,7 @@ describe('SetupScreen', () => {
 
 		const replacementCopy = 'CORSIA can reinstall oMLX and download Example model (30 GB). Reinstalling replaces that oMLX and changes its settings.';
 		expect(Array.from(host.querySelectorAll('p')).filter((paragraph) => paragraph.textContent?.trim() === replacementCopy)).toHaveLength(1);
+		expect(host.querySelector('.consent-actions button')?.textContent?.trim()).toBe('Not now');
 	});
 
 	it('shows the existing oMLX choice when local download reports consent required', async () => {
