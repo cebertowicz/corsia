@@ -524,5 +524,3 @@ def test_a_load_error_is_an_outage(monkeypatch, tmp_path):
     with pytest.raises(ClassifierUnavailable, match="load rss"):
         child.ensure_loaded()
     assert not child.loaded and not child.running
-
-
