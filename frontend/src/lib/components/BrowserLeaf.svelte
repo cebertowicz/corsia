@@ -52,8 +52,8 @@
 		const next = new WebSocket(`${protocol}//${location.host}/api/browser/${threadId}/stream`);
 		lastAppearance = '';
 		socket = next;
-		// A connecting socket counts as streaming, so browser_opened never races a second one.
-		streaming = true;
+		// A stream is usable only after the server confirms an existing browser page.
+		streaming = false;
 		next.onopen = () => {
 			next.send(JSON.stringify({ token: get(token) ?? '' }));
 			sendAppearance();
@@ -86,10 +86,12 @@
 			return;
 		}
 		if (message.type === 'browser_metadata') {
+			streaming = true;
 			applyPageMetadata(message.url, message.title);
 			return;
 		}
 		if (message.type === 'navigate_result') {
+			streaming = true;
 			if (typeof message.error === 'string') status = `Browser could not open this URL: ${message.error}`;
 			else {
 				applyPageMetadata(message.url, message.title);
@@ -104,6 +106,7 @@
 			return;
 		}
 		if (message.type !== 'frame' || !message.metadata || typeof message.data !== 'string') return;
+		streaming = true;
 		const metadata = message.metadata as Record<string, unknown>;
 		if (typeof metadata.deviceWidth !== 'number' || typeof metadata.deviceHeight !== 'number') return;
 		width = metadata.deviceWidth;
@@ -230,8 +233,7 @@
 
 	async function go(targetUrl = url) {
 		// An open browser navigates only through the stream that holds control.
-		if (streaming) {
-			if (socket?.readyState !== WebSocket.OPEN) return;
+		if (streaming && socket?.readyState === WebSocket.OPEN) {
 			status = 'Opening';
 			socket.send(JSON.stringify({ type: 'navigate', url: targetUrl }));
 			return;
@@ -296,7 +298,7 @@
 		viewport?.addEventListener('resize', updateKeyboard);
 		connect();
 		const unsubscribe = on('browser_opened', (data: { thread_id?: string }) => {
-			if (data?.thread_id === threadId && !streaming && !opening) connect();
+			if (data?.thread_id === threadId && !streaming && !opening && (!socket || socket.readyState === WebSocket.CLOSED)) connect();
 		});
 		return () => {
 			unsubscribe();

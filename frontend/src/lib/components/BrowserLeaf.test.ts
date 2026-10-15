@@ -59,6 +59,7 @@ beforeEach(() => {
 	vi.stubGlobal('WebSocket', FakeSocket);
 	vi.stubGlobal('PointerEvent', TestPointerEvent);
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+	vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 	vi.stubGlobal('Image', class { naturalWidth = 100; naturalHeight = 50; src = ''; decode() { return Promise.resolve(); } });
 	vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
 	drawing = [];
@@ -121,6 +122,38 @@ describe('BrowserLeaf navigation metadata', () => {
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		host.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
 		expect(socket.sent.at(-1)).toEqual({ type: 'navigate', url: 'https://next.example.test/person/page' });
+	});
+});
+
+describe('BrowserLeaf opening lifecycle', () => {
+	async function expectOpen(url: string) {
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/browser/thread/open?url=${encodeURIComponent(url)}`, {
+			method: 'POST', headers: { Authorization: 'Bearer ' }
+		}));
+	}
+
+	function submit(url: string) {
+		const input = host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!;
+		input.dispatchEvent(new FocusEvent('focus'));
+		input.value = url;
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		host.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+	}
+
+	it('opens over HTTP when Go is clicked while the stream socket is connecting', async () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(BrowserLeaf, { target: host, props: { threadId: 'thread' } });
+		flushSync();
+		submit('https://example.test/connecting');
+		await expectOpen('https://example.test/connecting');
+	});
+
+	it('opens over HTTP after the stream reports no browser yet', async () => {
+		const { socket } = render();
+		socket.receive({ type: 'browser_state', state: 'no_browser_yet' });
+		submit('https://example.test/no-browser');
+		await expectOpen('https://example.test/no-browser');
 	});
 });
 

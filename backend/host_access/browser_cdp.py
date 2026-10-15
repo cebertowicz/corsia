@@ -89,6 +89,36 @@ async def watch_page_metadata(endpoint: str, report: Callable[[dict], Awaitable[
                 await _report_page_metadata(cdp, report)
 
 
+async def dispatch_mouse_event(endpoint: str, event: dict) -> None:
+    """Send one pane pointer or wheel event through the same CDP target as keys."""
+    event_type = event.get("eventType")
+    x, y = event.get("x"), event.get("y")
+    if (event_type not in {"mouseMoved", "mousePressed", "mouseReleased", "mouseWheel"}
+            or not isinstance(x, (int, float)) or isinstance(x, bool)
+            or not isinstance(y, (int, float)) or isinstance(y, bool)):
+        raise BrowserSessionError("This page couldn't receive pointer input")
+    params: dict[str, object] = {"type": event_type, "x": x, "y": y}
+    if event_type == "mouseWheel":
+        delta_x, delta_y = event.get("deltaX"), event.get("deltaY")
+        if (not isinstance(delta_x, (int, float)) or isinstance(delta_x, bool)
+                or not isinstance(delta_y, (int, float)) or isinstance(delta_y, bool)):
+            raise BrowserSessionError("This page couldn't receive pointer input")
+        params.update(deltaX=delta_x, deltaY=delta_y)
+    else:
+        button = event.get("button")
+        click_count = event.get("clickCount")
+        if button is not None:
+            if button not in {"none", "left", "middle", "right", "back", "forward"}:
+                raise BrowserSessionError("This page couldn't receive pointer input")
+            params["button"] = button
+        if click_count is not None:
+            if not isinstance(click_count, int) or isinstance(click_count, bool) or click_count < 0:
+                raise BrowserSessionError("This page couldn't receive pointer input")
+            params["clickCount"] = click_count
+    async with CdpClient(endpoint) as cdp:
+        await cdp.call("Input.dispatchMouseEvent", **params)
+
+
 async def dispatch_key_event(endpoint: str, event: dict) -> None:
     """Send a pane key event through CDP so Chrome receives its modifier state."""
     event_type = event.get("eventType")
@@ -102,7 +132,9 @@ async def dispatch_key_event(endpoint: str, event: dict) -> None:
     text = event.get("text") if event_type == "keyDown" else None
     is_text = isinstance(text, str) and bool(text)
     params: dict[str, object] = {
-        "type": "keyDown" if is_text else "rawKeyDown" if event_type == "keyDown" else event_type,
+        # Chrome applies modifier shortcuts only to a keyDown event; rawKeyDown carries
+        # the bit but does not consistently update the page's shortcut state.
+        "type": "keyDown" if event_type == "keyDown" else event_type,
         "key": key,
         "code": code,
         "windowsVirtualKeyCode": key_code,
@@ -110,6 +142,10 @@ async def dispatch_key_event(endpoint: str, event: dict) -> None:
     }
     if is_text:
         params["text"] = text
+    # DevTools does not infer editing commands from synthetic Meta/Ctrl shortcuts.
+    # Preserve the DOM key event and ask Chrome to perform the matching native edit.
+    if event_type == "keyDown" and key.lower() == "a" and modifiers & 6:
+        params["commands"] = ["selectAll"]
     async with CdpClient(endpoint) as cdp:
         await cdp.call("Input.dispatchKeyEvent", **params)
 

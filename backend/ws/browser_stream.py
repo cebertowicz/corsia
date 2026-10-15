@@ -117,7 +117,9 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
             elif kind == "appearance":
                 _request_match(thread_id, connection_token, data)
             elif kind == "input_mouse":
-                await stream.send(message)
+                # CDP serializes pointer and key delivery on the page target, so typing cannot
+                # overtake the click that focuses its field.
+                await browser_pane.mouse_event(thread_id, data, connection_token)
             elif kind == "input_keyboard":
                 await browser_pane.key_event(thread_id, data, connection_token)
 
@@ -155,6 +157,7 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         # A closed connection's size must never land after a newer pane's.
         if (queued := _latest_appearance.get(thread_id)) and queued[0] == connection_token:
             del _latest_appearance[thread_id]
+        browser_pane.clear_page_endpoint(thread_id, connection_token)
         browser_control.pane_disconnected(thread_id, connection_token)
 
 

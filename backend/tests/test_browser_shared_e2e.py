@@ -142,6 +142,30 @@ async def test_shared_agent_actions_preserve_person_focus_caret_and_pointer(fixt
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_cdp_mouse_dispatch_clicks_the_visible_page():
+    """The pane sends pointer input to Chrome's current page target."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-mouse-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-mouse", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=True, session="new")).startswith("Error:")
+            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            point = await cdp_value(owner, thread_id, "(() => { const box = document.querySelector('#agent-button').getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()")
+            for event_type in ("mouseMoved", "mousePressed", "mouseReleased"):
+                await browser_cdp.dispatch_mouse_event(endpoint, {
+                    "eventType": event_type, "x": point["x"], "y": point["y"],
+                    "button": "none" if event_type == "mouseMoved" else "left",
+                    "clickCount": 0 if event_type == "mouseMoved" else 1,
+                })
+            assert await cdp_value(owner, thread_id, "document.querySelector('#result').textContent") == "1"
+    finally:
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_cdp_keyboard_dispatch_preserves_meta_shortcuts():
     """The shared pane bypasses agent-browser's modifier-less stream input."""
     if os.environ.get("CORSIA_BROWSER_E2E") != "1":
