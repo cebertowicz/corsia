@@ -116,6 +116,7 @@ class ClassifierChild:
 
     @property
     def running(self) -> bool:
+        """Whether a child process exists and is alive."""
         process = self._process
         return process is not None and process.is_alive()
 

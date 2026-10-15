@@ -61,6 +61,7 @@ class AssetManifest:
 
     @classmethod
     def load(cls, path: Path, *, expected_sha256: str | None = None) -> "AssetManifest":
+        """Read and check one manifest against its pin; a bad manifest raises ``AssetError``."""
         raw = path.read_bytes()
         actual = hashlib.sha256(raw).hexdigest()
         if expected_sha256 and actual != expected_sha256:
@@ -95,6 +96,7 @@ class AssetManifest:
         return manifest
 
     def verify_files(self) -> None:
+        """Check each listed file's size and checksum, rehashing only files that changed."""
         root = self.path.parent
         stats = []
         for name, details in self.files.items():
@@ -124,6 +126,7 @@ class AssetManifest:
         _VERIFIED[self.path] = tuple(stats)
 
     def classifier_version(self, head: str = "correction") -> ClassifierVersion:
+        """Return the version identity that facts and the activation record use for this asset."""
         try:
             threshold = float(self.heads[head]["threshold"])
         except (KeyError, TypeError, ValueError) as error:

@@ -117,6 +117,7 @@ class CorrectionsWorker:
         self.scan, self.held_reason = "idle", None
 
     def snapshot(self) -> dict[str, object]:
+        """Return the classifier state, scan status and arrival-queue figures."""
         return {
             "state": self.state,
             "reason": self.reason,
@@ -294,6 +295,7 @@ class CorrectionsWorker:
     # ---- lifecycle -----------------------------------------------------------------------
 
     def notify(self, message_id: str) -> None:
+        """Queue one arrival and start the worker; a full queue or stopping app owes the scan."""
         if self.stopping:
             # The next startup's catch-up scan reads this message from the database.
             self._owe()
@@ -308,6 +310,7 @@ class CorrectionsWorker:
         self._start_task(self.run())
 
     def startup(self) -> None:
+        """Discard interrupted staging, release any hold, owe the scan and start the worker."""
         self.stopping = False
         cleanup_staging()
         self._release_hold()
@@ -315,6 +318,7 @@ class CorrectionsWorker:
         self._start_task(_startup_worker())
 
     async def shutdown(self) -> None:
+        """Mark stopping, cancel and join the worker, then kill and reap the model child."""
         if self.task is not None and self.task.get_loop() is not asyncio.get_running_loop():
             # Waiting on another loop's task never finishes; refuse loudly like the other owned tasks.
             raise RuntimeError("corrections classifier worker is attached to a different loop")
