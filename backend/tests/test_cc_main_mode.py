@@ -178,10 +178,10 @@ class TestMainMode:
     ):
         from pathlib import Path
 
-        from infra.conductor import set_conductor
+        from infra.corsia_agent import set_corsia_agent
         import subagents.cc_runtime as rt
 
-        assert set_conductor("workspace", "main-1", db=main_db) is True
+        assert set_corsia_agent("main-1", db=main_db) is True
 
         await _feed_main(
             "main-1",
@@ -203,7 +203,7 @@ class TestMainMode:
             if json.loads(row["metadata"] or "{}").get("type") == "seed"
         )
 
-        template_marker = "You are the designated conductor for this scope."
+        template_marker = "You are the CORSIA agent: the person's one workspace-level agent."
         assert template_marker in provider_seed
         assert template_marker not in persisted_seed
         await rt.retire("main-1")
@@ -287,10 +287,10 @@ class TestMainModeRobustness:
         fake_claude,
         tmp_path,
     ):
-        from infra.conductor import set_conductor
+        from infra.corsia_agent import set_corsia_agent
         import subagents.cc_runtime as rt
 
-        assert set_conductor("workspace", "main-1", db=main_db)
+        assert set_corsia_agent("main-1", db=main_db)
         home = tmp_path / "cc-home"
         (home / "projects" / "-x").mkdir(parents=True)
         kw = dict(binary=fake_claude, claude_dir=str(home),
@@ -314,7 +314,7 @@ class TestMainModeRobustness:
             for row in seed_rows
             if json.loads(row["metadata"] or "{}").get("type") == "seed"
         ]
-        template_marker = "You are the designated conductor for this scope."
+        template_marker = "You are the CORSIA agent: the person's one workspace-level agent."
         assert "--resume" in cmd and cc_sid in cmd
         assert "--append-system-prompt-file" in cmd
         assert template_marker in provider_seed
