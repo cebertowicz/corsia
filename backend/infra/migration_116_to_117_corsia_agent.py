@@ -1,4 +1,4 @@
-"""Schema 115 -> 116: the workspace conductor becomes the CORSIA agent.
+"""Schema 116 -> 117: the workspace conductor becomes the CORSIA agent.
 
 Renames the persisted names of the workspace-scope agent in one transaction
 (the runner's): the designation settings key, the daily health-check schedule
@@ -92,7 +92,7 @@ def _rename_contact_journal(conn: sqlite3.Connection) -> None:
     )
 
 
-def migrate_115_to_116(conn: sqlite3.Connection) -> None:
+def migrate_116_to_117(conn: sqlite3.Connection) -> None:
     """Rename the workspace conductor's persisted names to the CORSIA agent's."""
     if _has_table(conn, "settings"):
         thread_id = _rename_setting(conn)

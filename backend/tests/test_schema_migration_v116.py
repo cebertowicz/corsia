@@ -1,167 +1,90 @@
-"""Schema v116 renames the workspace conductor's persisted names to CORSIA agent."""
+"""Schema 115 -> 116: schedules may be model-free scripts."""
 
 from __future__ import annotations
 
-import json
 import sqlite3
 
-from infra.database_migrations import MIGRATIONS
-from infra.migration_115_to_116_corsia_agent import migrate_115_to_116
-from infra.schema import SCHEMA_VERSION
+import pytest
 
-OLD_KEY = "workspace_conductor_session_id"
-NEW_KEY = "corsia_agent_thread_id"
+from infra.database_migrations import MIGRATIONS, migrate_to_current
+from infra.migration_115_to_116_script_schedules import migrate_115_to_116
+from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 
-
-def _db() -> sqlite3.Connection:
-    db = sqlite3.connect(":memory:")
-    db.row_factory = sqlite3.Row
-    db.executescript(
-        """
-        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
-        CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, project_id TEXT);
-        CREATE TABLE automation_schedules (id TEXT PRIMARY KEY, payload_json TEXT);
-        CREATE TABLE context_change_journal (
-            seq INTEGER PRIMARY KEY AUTOINCREMENT,
-            object_kind TEXT NOT NULL,
-            object_id TEXT NOT NULL,
-            summary TEXT
-        );
-        """
-    )
-    return db
+_V115_TABLE = """
+    CREATE TABLE automation_schedules (
+        id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, scope_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('clock', 'cadence')),
+        spec TEXT NOT NULL, next_run_at TEXT NOT NULL, last_run_at TEXT,
+        runs INTEGER NOT NULL DEFAULT 0,
+        max_runs INTEGER NOT NULL CHECK (max_runs > 0),
+        state TEXT NOT NULL DEFAULT 'active'
+            CHECK (state IN ('active', 'paused', 'cancelled', 'exhausted')),
+        payload_json TEXT, created_by_actor TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_automation_schedules_due
+        ON automation_schedules(state, next_run_at);
+    CREATE INDEX idx_automation_schedules_scope
+        ON automation_schedules(scope_id, next_run_at);
+"""
 
 
-def _setting(db: sqlite3.Connection, key: str, thread_id: str) -> None:
-    db.execute(
-        "INSERT INTO settings (key,value,updated_at) VALUES (?,?,'t')",
-        (key, json.dumps({"session_id": thread_id})),
-    )
+def _columns(db: sqlite3.Connection) -> list[str]:
+    return [row[1] for row in db.execute("PRAGMA table_info(automation_schedules)")]
 
 
-def _keys(db: sqlite3.Connection) -> dict[str, str]:
-    return {
-        row["key"]: json.loads(row["value"])["session_id"]
-        for row in db.execute("SELECT key,value FROM settings")
-    }
+def _indexes(db: sqlite3.Connection) -> set[str]:
+    return {row[1] for row in db.execute("PRAGMA index_list(automation_schedules)")}
 
 
-def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 116
-    assert MIGRATIONS[115] is migrate_115_to_116
-
-
-def test_seeded_old_payloads_are_renamed_in_one_pass():
-    db = _db()
-    _setting(db, OLD_KEY, "ws")
-    db.executemany(
-        "INSERT INTO threads (id,title,project_id) VALUES (?,?,?)",
-        [
-            ("ws", "Conductor", None),
-            ("proj", "Conductor", "p1"),
-            ("custom", "Mine", None),
-        ],
-    )
-    db.executemany(
-        "INSERT INTO automation_schedules (id,payload_json) VALUES (?,?)",
-        [
-            ("s1", json.dumps({"kind": "conductor.health_check"})),
-            ("s2", json.dumps({"kind": "other"})),
-            ("s3", None),
-        ],
-    )
-    db.executemany(
-        "INSERT INTO context_change_journal (object_kind,object_id,summary) VALUES (?,?,?)",
-        [
-            ("agent_roster", "user:u1:workspace-conductor-contact", "a"),
-            ("agent_roster", "user:u1:workspace", "b"),
-            ("thread_context", "user:u1:workspace-conductor-contact", "c"),
-        ],
-    )
-
-    migrate_115_to_116(db)
-
-    assert _keys(db) == {NEW_KEY: "ws"}
-    titles = {r["id"]: r["title"] for r in db.execute("SELECT id,title FROM threads")}
-    assert titles == {"ws": "CORSIA", "proj": "Conductor", "custom": "Mine"}
-    payloads = {
-        r["id"]: r["payload_json"]
-        for r in db.execute("SELECT id,payload_json FROM automation_schedules")
-    }
-    assert json.loads(payloads["s1"]) == {"kind": "corsia_agent.health_check"}
-    assert json.loads(payloads["s2"]) == {"kind": "other"}
-    assert payloads["s3"] is None
-    ids = {
-        r["summary"]: r["object_id"]
-        for r in db.execute("SELECT summary,object_id FROM context_change_journal")
-    }
-    assert ids == {
-        "a": "user:u1:corsia-agent-contact",
-        "b": "user:u1:workspace",
-        "c": "user:u1:workspace-conductor-contact",
-    }
-
-
-def test_idempotent():
-    db = _db()
-    _setting(db, OLD_KEY, "ws")
-    db.execute("INSERT INTO threads (id,title) VALUES ('ws','Conductor')")
-    migrate_115_to_116(db)
-    migrate_115_to_116(db)
-    assert _keys(db) == {NEW_KEY: "ws"}
-
-
-def test_new_key_only_is_untouched_and_its_title_renamed():
-    db = _db()
-    _setting(db, NEW_KEY, "ws")
-    db.execute("INSERT INTO threads (id,title) VALUES ('ws','Conductor')")
-    migrate_115_to_116(db)
-    assert _keys(db) == {NEW_KEY: "ws"}
-    assert db.execute("SELECT title FROM threads").fetchone()[0] == "CORSIA"
-
-
-def test_both_keys_keep_new_and_delete_old():
-    db = _db()
-    _setting(db, OLD_KEY, "old-thread")
-    _setting(db, NEW_KEY, "new-thread")
-    db.executemany(
-        "INSERT INTO threads (id,title) VALUES (?,?)",
-        [("old-thread", "Conductor"), ("new-thread", "Conductor")],
-    )
-    migrate_115_to_116(db)
-    assert _keys(db) == {NEW_KEY: "new-thread"}
-    titles = {r["id"]: r["title"] for r in db.execute("SELECT id,title FROM threads")}
-    assert titles == {"old-thread": "Conductor", "new-thread": "CORSIA"}
-
-
-def test_no_designation_changes_no_titles():
-    db = _db()
-    db.execute("INSERT INTO threads (id,title) VALUES ('t','Conductor')")
-    migrate_115_to_116(db)
-    assert db.execute("SELECT title FROM threads").fetchone()[0] == "Conductor"
-
-
-def test_runner_upgrades_a_115_database_in_one_transaction(tmp_path):
-    from infra.database_migrations import migrate_to_current
-
-    path = tmp_path / "upgrade.db"
-    with sqlite3.connect(path) as connection:
-        connection.executescript(
-            """
-            CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
-            CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT);
-            INSERT INTO threads VALUES ('ws', 'Conductor');
+def test_v116_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
+    assert SCHEMA_VERSION == 117 and MIGRATIONS[115] is migrate_115_to_116
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as db:
+        db.executescript(_V115_TABLE + """
+            CREATE TABLE threads (id TEXT PRIMARY KEY);
+            INSERT INTO threads VALUES ('t');
+            INSERT INTO automation_schedules VALUES
+              ('s1','t','__workspace__','cadence','60','n',NULL,2,5,'active',
+               '{}','t','c','u');
             PRAGMA user_version=115;
-            """
+        """)
+    with sqlite3.connect(path) as db:
+        result = migrate_to_current(db, SCHEMA_VERSION)
+        row = db.execute(
+            "SELECT id,kind,runs,max_runs,script_path,running_since,noted_at "
+            "FROM automation_schedules"
+        ).fetchone()
+        db.execute(
+            "INSERT INTO automation_schedules (id,thread_id,scope_id,kind,spec,"
+            "next_run_at,max_runs,created_by_actor,created_at,updated_at) "
+            "VALUES ('s2','t','w','script','300','n',1,'t','c','u')"
         )
-        _setting(connection, OLD_KEY, "ws")
-    with sqlite3.connect(path) as connection:
-        result = migrate_to_current(connection, SCHEMA_VERSION)
-        rows = connection.execute("SELECT key, value FROM settings").fetchall()
-        title = connection.execute("SELECT title FROM threads").fetchone()[0]
-        version = connection.execute("PRAGMA user_version").fetchone()[0]
-    assert result.migrated is True
-    assert (result.from_version, result.to_version) == (115, 116)
-    assert version == 116
-    assert [(k, json.loads(v)["session_id"]) for k, v in rows] == [(NEW_KEY, "ws")]
-    assert title == "CORSIA"
+        indexes = _indexes(db)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 115, 117)
+    assert row == ("s1", "cadence", 2, 5, None, None, None)
+    assert {"idx_automation_schedules_due", "idx_automation_schedules_scope"} <= indexes
+
+
+def test_migrated_table_matches_a_fresh_database(tmp_path) -> None:
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as db:
+        db.executescript(_V115_TABLE + "PRAGMA user_version=115;")
+    with sqlite3.connect(path) as migrated, sqlite3.connect(":memory:") as fresh:
+        migrate_to_current(migrated, SCHEMA_VERSION)
+        fresh.executescript(SCHEMA_SQL)
+        assert _columns(migrated) == _columns(fresh)
+        assert _indexes(migrated) == _indexes(fresh)
+
+
+def test_script_kind_rejects_unknown_kinds_after_migration(tmp_path) -> None:
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as db:
+        db.executescript(_V115_TABLE + "PRAGMA user_version=115;")
+        migrate_115_to_116(db)
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                "INSERT INTO automation_schedules (id,thread_id,scope_id,kind,spec,"
+                "next_run_at,max_runs,created_by_actor,created_at,updated_at) "
+                "VALUES ('x','t','w','weekly','1','n',1,'t','c','u')"
+            )
