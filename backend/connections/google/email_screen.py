@@ -146,7 +146,9 @@ def local_endpoint_refusal(target: Any, provider_params: Callable[[str], dict] |
     if getattr(target, "harness", None) != "native" or getattr(target, "backend", None) != "network":
         return "the screen model is not served from a local endpoint"
     if provider_params is None:
-        from llm.capabilities import make_provider_params as provider_params
+        from llm.capabilities import make_provider_params
+
+        provider_params = make_provider_params
     try:
         api_base = provider_params(target.transport_model).get("api_base")
         host = urlparse(str(api_base or "")).hostname or ""
