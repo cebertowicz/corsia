@@ -128,18 +128,18 @@ def _seed() -> None:
         db.commit()
     finally:
         db.close()
-    from infra.conductor import set_conductor
+    from infra.corsia_agent import set_corsia_agent
 
-    set_conductor("workspace", "conductor")
+    set_corsia_agent("conductor")
 
 
 async def _read_routes(monkeypatch) -> None:
-    from api import conductor, model_account_scope, models, plans, projects, thread_messages, threads
+    from api import conductor, corsia_agent, model_account_scope, models, plans, projects, thread_messages, threads
     from api import vendor_accounts
     from connections import harness_refresh
     from infra.runtime_truth import read_runtime_truth
 
-    for module in (conductor, model_account_scope, projects, thread_messages, threads):
+    for module in (conductor, corsia_agent, model_account_scope, projects, thread_messages, threads):
         monkeypatch.setattr(module, "authenticate", lambda _token: _USER)
     monkeypatch.setattr(harness_refresh, "schedule_stale_refresh", lambda: None)
     request = SimpleNamespace(query_params={"token": "tok"}, headers={})
@@ -147,7 +147,7 @@ async def _read_routes(monkeypatch) -> None:
     assert (await threads.list_threads("tok"))["threads"]
     assert (await projects.list_projects("tok"))["count"] == 1
     await thread_messages.get_messages("root", "tok", limit=20)
-    await conductor.get_conductor_route("tok", scope="workspace")
+    await corsia_agent.get_corsia_agent_route("tok")
     assert await models.list_models()
     for scope in ({"project_id": "proj"}, {"thread_id": "root"}):
         assert await models.list_models(request=request, **scope)

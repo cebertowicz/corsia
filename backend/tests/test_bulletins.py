@@ -14,6 +14,10 @@ from infra.database import get_db, write_transaction
 from tests.event_routing_helpers import mk_session
 from tools.bulletins import BulletinDispositionTool
 
+# The ledger and designation these tests read live in the database; without an
+# isolated one they share the process-default DB with whichever file ran before.
+pytestmark = pytest.mark.usefixtures("isolated_db")
+
 
 def _signed_bulletin(
     *, bulletin_id: str = "test", expires: str | None = None, version: str = ">=0", providers: list[str] | None = None,
