@@ -245,7 +245,11 @@ describe('Header glass layers', () => {
 	it('keeps the phone header blur off the layer that carries the fade mask', () => {
 		// A mask fades whatever its layer draws, blur included: on the masked layer
 		// WebKit shows the transcript through the title row.
-		expect(rule(phone, '.shell-header::before')).toMatch(/-webkit-backdrop-filter: none;/);
+		const tint = rule(phone, '.shell-header::before');
+		expect(tint).toMatch(/bottom: -24px;/);
+		expect(tint).toMatch(/-webkit-mask-image: linear-gradient/);
+		expect(tint).toMatch(/mask-image: linear-gradient/);
+		expect(tint).toMatch(/-webkit-backdrop-filter: none;/);
 		const blur = rule(phone, '.shell-header::after');
 		expect(blur).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
 		expect(blur).toMatch(/z-index: -2;/);
