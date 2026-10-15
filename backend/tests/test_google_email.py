@@ -46,6 +46,8 @@ THREADED = {
     "payload": {"headers": [
         {"name": "Message-ID", "value": "<abc@mail.example>"},
         {"name": "References", "value": "<root@mail.example>"},
+        {"name": "From", "value": "Pat Kim <pat@mail.example>"},
+        {"name": "Subject", "value": "Lunch plans"},
     ]},
 }
 
@@ -193,13 +195,34 @@ async def test_reply_reads_message_headers_only(mail):
     assert len(reads) == 1
     params = reads[0].url.params
     assert params["format"] == "metadata"
-    assert sorted(params.get_list("metadataHeaders")) == ["Message-ID", "References"]
+    assert sorted(params.get_list("metadataHeaders")) == ["From", "Message-ID", "References", "Subject"]
     target = json.loads(_row(saved["draft_id"])["target_json"])
     assert target == {
         "reply_to": "m-100", "thread_id": "t-9", "in_reply_to": "<abc@mail.example>",
         "references": "<root@mail.example> <abc@mail.example>",
     }
     assert "SECRET BODY" not in (mail.workspace / saved["path"]).read_text()
+
+
+async def test_a_reply_target_is_shown_in_the_document_and_a_plain_draft_shows_none(mail):
+    plain = await _draft(mail)
+    assert "In reply to:" not in (mail.workspace / plain["path"]).read_text()
+
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    head = (mail.workspace / saved["path"]).read_text().split("\n\n")[0].split("\n")
+    assert head[-2:] == ["Subject: Lunch", 'In reply to: "Lunch plans" from Pat Kim <pat@mail.example>']
+    # Display only: the send threads with the stored target, and the line is not a send input.
+    assert json.loads(_row(saved["draft_id"])["target_json"])["reply_to"] == "m-100"
+    assert email_document.parse_document((mail.workspace / saved["path"]).read_text())["subject"] == "Lunch"
+    # An update that names no target keeps threading, so the document keeps saying so.
+    again = await _draft(mail, draft_id=saved["draft_id"], body="Later?")
+    assert "In reply to: " in (mail.workspace / again["path"]).read_text()
+
+
+async def test_a_reply_target_with_no_readable_headers_is_still_shown_and_saved(mail):
+    mail.messages["m-100"] = {"id": "m-100", "threadId": "t-9", "payload": {"headers": []}}
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    assert "\nIn reply to: an earlier message\n" in (mail.workspace / saved["path"]).read_text()
 
 
 async def test_message_ids_are_url_encoded_into_a_fixed_template(mail):

@@ -16,7 +16,6 @@ import uuid
 from base64 import urlsafe_b64encode
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from connections.google import client as google_client
 from connections.google import oauth
@@ -30,9 +29,9 @@ from connections.google.email_document import (
     build_message,
     compose_document,
     parse_document,
-    signature_text,
     text_arg,
 )
+from connections.google.email_gmail import GMAIL, fetch_signature, kept_reply_label, reply_target
 from infra import config
 from infra.db_async import run_in_db
 from tools.action_drafts import (
@@ -49,12 +48,9 @@ from tools.google_account import _designated
 
 log = logging.getLogger(__name__)
 
-GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
-SEND_AS_URL = f"{GMAIL}/settings/sendAs"
 SEND_URL = f"{GMAIL}/messages/send"
 DRAFT_DIR = "email-drafts"
 
-NO_MESSAGE = "That message can't be found."
 NO_OPEN_DRAFT = "There is no open draft with that id in this conversation."
 BAD_DOCUMENT = (
     "Not sent: the draft document isn't in the draft format. Save it again with email_draft, "
@@ -78,50 +74,6 @@ UNCONFIRMED = (
     "Google didn't confirm the send, so the email may have gone out. Don't send this draft "
     "again: check the person's Sent mail first."
 )
-
-
-def _message_url(message_id: str) -> str:
-    return f"{GMAIL}/messages/{quote(message_id, safe='')}"
-
-
-async def _reply_target(message_id: str) -> dict:
-    """Threading facts from the message's headers only; no body is requested."""
-    try:
-        found = await google_client.request_json(
-            "GET", _message_url(message_id),
-            params={"format": "metadata", "metadataHeaders": ["Message-ID", "References"]},
-        )
-    except GoogleRequestFailed as exc:
-        if exc.status == 404:
-            raise DraftRefused(NO_MESSAGE) from None
-        raise
-    if not isinstance(found, dict):
-        raise DraftRefused(NO_MESSAGE)
-    headers = {
-        str(item.get("name", "")).lower(): str(item.get("value", ""))
-        for item in (found.get("payload") or {}).get("headers", []) if isinstance(item, dict)
-    }
-    message_header = headers.get("message-id", "").strip()
-    references = " ".join(part for part in (headers.get("references", "").strip(), message_header) if part)
-    return {
-        "reply_to": message_id,
-        "thread_id": found.get("threadId"),
-        "in_reply_to": message_header or None,
-        "references": references or None,
-    }
-
-
-async def _signature() -> str:
-    found = await google_client.get_json(SEND_AS_URL)
-    aliases = found.get("sendAs") if isinstance(found, dict) else None
-    if not isinstance(aliases, list):
-        return ""
-    chosen = next(
-        (alias for alias in aliases if isinstance(alias, dict) and alias.get("isPrimary")),
-        next((alias for alias in aliases if isinstance(alias, dict)), None),
-    )
-    html = chosen.get("signature") if chosen else None
-    return signature_text(html) if isinstance(html, str) and html.strip() else ""
 
 
 def _workspace_root() -> Path:
@@ -237,12 +189,15 @@ class EmailDraftTool(Tool):
             if existing is None or existing["state"] != "open":
                 raise DraftRefused(NO_OPEN_DRAFT)
         reply_id = kwargs.get("reply_to_message_id")
-        target = await _reply_target(str(reply_id)) if reply_id else None
-        signature = await _signature()
+        if reply_id:
+            target, reply_label = await reply_target(str(reply_id))
+        else:
+            target, reply_label = None, await kept_reply_label(existing)
+        signature = await fetch_signature()
         account = await run_in_db(oauth.account_status)
         if not account.get("email"):
             raise DraftRefused(google_client.NOT_CONNECTED)
-        text = compose_document(account["email"], to, cc, subject, body, signature)
+        text = compose_document(account["email"], to, cc, subject, body, signature, reply_label)
 
         if existing is not None:
             path = _workspace_root() / existing["path"]
