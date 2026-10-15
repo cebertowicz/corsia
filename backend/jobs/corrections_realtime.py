@@ -55,6 +55,7 @@ class CorrectionsWorker:
         self.stopping = False
         self.state = "absent"
         self.reason: str | None = "asset not verified"
+        self.reader_reason: str | None = "The corrections classifier is not installed."
         self.version: ClassifierVersion | None = None
         self.versions: list[dict[str, str | None]] = []
         self.failed_version: str | None = None
@@ -71,7 +72,6 @@ class CorrectionsWorker:
             logger.info("corrections classifier {} -> {}: {}", self.state, state, reason or "-")
         previous, self.state, self.reason = self.state, state, reason
         if state == "ready" and previous != "ready":
-            # Arrivals left pending while it was not ready are read by the owed scan.
             self._owe()
 
     def _owe(self) -> None:
@@ -96,6 +96,7 @@ class CorrectionsWorker:
         return {
             "state": self.state,
             "reason": self.reason,
+            "reader_reason": self.reader_reason,
             "retryable": self.state != "failed",
             "version": self.version.version if self.version else None,
             "selected_version": self.version.version if self.version else None,
@@ -116,6 +117,7 @@ class CorrectionsWorker:
             selected = await asyncio.to_thread(_manifest)
         except AssetError as error:
             self.versions = _LAST_VERSIONS
+            self.reader_reason = error.reader or str(error)
             self._set("failed" if _installed() else "absent", str(error))
             return None
         manifest = selected
@@ -138,6 +140,7 @@ class CorrectionsWorker:
             {"location": manifest.path.parent.name if hasattr(manifest, "path") else "test", "version": manifest.version, "state": "ready", "reason": None}
         ]
         if self.state in ("absent", "failed"):
+            self.reader_reason = None
             self._set("unavailable", "asset verified; the model has not run yet")
         return manifest
 
@@ -276,7 +279,6 @@ class CorrectionsWorker:
                 if not self.queue.empty():
                     return "yielded"
                 if not await self._classify(candidate):
-                    # Unrecorded work must not reach activation.
                     return f"classifier {self.state}: {self.reason}"
                 self.arrived.clear()
                 if not self.queue.empty():
@@ -314,7 +316,6 @@ class CorrectionsWorker:
         logger.opt(exception=error).error("corrections classifier worker stopped")
         if self.state == "loading":
             self._set("unavailable", f"worker error: {type(error).__name__}")
-        # The next notify or startup restarts the task; the scan stays owed until a pass finishes.
         self._hold(f"worker error: {type(error).__name__}")
 
     # ---- lifecycle -----------------------------------------------------------------------
@@ -322,7 +323,6 @@ class CorrectionsWorker:
     def notify(self, message_id: str) -> None:
         """Queue one arrival and start the worker; a full queue or stopping app owes the scan."""
         if self.stopping:
-            # The next startup's catch-up scan reads this message from the database.
             self._owe()
             return
         try:
