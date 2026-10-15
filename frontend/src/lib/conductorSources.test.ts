@@ -14,7 +14,7 @@ function source(id: string, name: string, state: ModelSource['state'], extra: Pa
 }
 
 function account(state: SourceAccount['state'], extra: Partial<SourceAccount> = {}): SourceAccount {
-	return { account_id: 'a1', label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, conductor_binding: false, ...extra };
+	return { account_id: 'a1', label: 'me@example.com', label_verified: true, identified: true, state, resets_at: null, corsia_agent_binding: false, ...extra };
 }
 
 describe('anyReady', () => {

@@ -313,3 +313,75 @@ class TestConductorRoutes:
         assert target["addressability_error"] == (
             f"Model '{removed_model}' not found in catalog. Choose another model."
         )
+
+
+class TestWorkspaceScopeIsTheCorsiaAgent:
+    """The workspace scope moved to /api/corsia-agent; the old route 404s loudly."""
+
+    @pytest.fixture
+    def routes(self, conductor_db, monkeypatch):
+        async def _inline(fn, *a, **kw):
+            return fn(*a, **kw)
+
+        import api.conductor as conductor_routes
+        import api.corsia_agent as corsia_agent_routes
+        import infra.corsia_agent as corsia_agent_mod
+        import infra.queries as queries_mod
+
+        def authenticate(_credential):
+            return {"id": "steve", "token_kind": "session"}
+
+        async def truth(*_a, **_k):
+            return {}
+
+        monkeypatch.setattr(conductor_routes, "run_in_db", _inline)
+        monkeypatch.setattr(conductor_routes, "run_read", _inline)
+        monkeypatch.setattr(conductor_routes, "authenticate", authenticate)
+        monkeypatch.setattr(conductor_routes, "read_runtime_truth", truth)
+        monkeypatch.setattr(corsia_agent_routes, "authenticate", authenticate)
+        monkeypatch.setattr(queries_mod, "get_db", lambda: conductor_db)
+        monkeypatch.setattr(corsia_agent_mod, "get_db", lambda: conductor_db)
+        from infra.context_change_schema import CONTEXT_CHANGE_SCHEMA_SQL
+
+        conductor_db._c.executescript(CONTEXT_CHANGE_SCHEMA_SQL)
+        conductor_db.execute(
+            "INSERT INTO threads (id, user_id, title, lifecycle_state) "
+            "VALUES ('agent-1', 'steve', 'CORSIA', 'active')"
+        )
+        conductor_db.commit()
+        return conductor_routes, corsia_agent_routes
+
+    @pytest.mark.asyncio
+    async def test_old_route_404s_for_the_workspace_scope(self, routes):
+        from fastapi import HTTPException
+
+        conductor_routes, _ = routes
+        with pytest.raises(HTTPException) as read:
+            await conductor_routes.get_conductor_route("session", scope="workspace")
+        with pytest.raises(HTTPException) as write:
+            await conductor_routes.put_conductor_route(
+                "session", {"thread_id": "agent-1"}, scope="workspace"
+            )
+        assert read.value.status_code == 404
+        assert write.value.status_code == 404
+        assert "/api/corsia-agent" in read.value.detail
+
+    @pytest.mark.asyncio
+    async def test_corsia_agent_route_designates_and_reads(self, routes, conductor_db):
+        _, corsia_agent_routes = routes
+        out = await corsia_agent_routes.put_corsia_agent_route(
+            "session", {"thread_id": "agent-1"}
+        )
+        assert out == {"ok": True, "scope": "workspace", "thread_id": "agent-1"}
+        got = await corsia_agent_routes.get_corsia_agent_route("session")
+        assert got["scope"] == "workspace"
+        assert got["thread_id"] == "agent-1"
+        rows = conductor_db.execute("SELECT key FROM settings").fetchall()
+        assert [row["key"] for row in rows] == ["corsia_agent_thread_id"]
+
+    @pytest.mark.asyncio
+    async def test_old_route_still_serves_project_scopes(self, routes):
+        conductor_routes, _ = routes
+        got = await conductor_routes.get_conductor_route("session", scope="proj-a")
+        assert got["scope"] == "proj-a"
+        assert got["thread_id"] is None

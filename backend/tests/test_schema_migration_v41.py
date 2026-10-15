@@ -42,7 +42,7 @@ def _legacy_v39_db(path):
     """A v39 install: two accounts, a member-owned project, an empty one."""
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         _seed_user(db, "first", "2026-01-01T00:00:00")
         _seed_user(db, "member", "2026-02-01T00:00:00")
         _seed_project(db, "project-owned", "Owned")
@@ -74,7 +74,7 @@ def test_startup_migration_heals_scopes_with_membership_safe_owner(tmp_path):
 
         workspace = json.loads(
             db.execute(
-                "SELECT value FROM settings WHERE key='workspace_conductor_session_id'"
+                "SELECT value FROM settings WHERE key='corsia_agent_thread_id'"
             ).fetchone()["value"]
         )["session_id"]
         assert dict(
@@ -82,7 +82,7 @@ def test_startup_migration_heals_scopes_with_membership_safe_owner(tmp_path):
                 "SELECT user_id, title, project_id FROM threads WHERE id=?",
                 (workspace,),
             ).fetchone()
-        ) == dict(user_id="first", title="Conductor", project_id=None)
+        ) == dict(user_id="first", title="CORSIA", project_id=None)
 
         # The project conductor goes to the earliest ACCOUNT-BACKED thread
         # owner ('member'), not the ghost owner and not the first account:
@@ -139,7 +139,7 @@ def test_startup_migration_without_accounts_is_a_no_op(tmp_path):
     path = tmp_path / "legacy-conductor-empty-v39.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        db.execute("DELETE FROM settings WHERE key='workspace_conductor_session_id'")
+        db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         rewind_below_v42(db)
         rewind_to_v88_policy(db)
 

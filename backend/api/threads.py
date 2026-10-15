@@ -18,7 +18,7 @@ from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
 from infra.product_events import emit_product_event
-from infra.conductor import get_all_conductor_ids
+from infra.conductor import get_all_coordination_ids
 from infra.fresh_threads import create_visible_fresh_thread
 from infra.queries import (
     get_thread_for_user,
@@ -38,7 +38,7 @@ async def list_threads(token: str, archived: int = 0):
         raise HTTPException(401)
     def _query():
         db = get_db()
-        conductor_ids = get_all_conductor_ids(db=db)
+        conductor_ids = get_all_coordination_ids(db=db)
         # Sidebar visibility = parent presence (single source of truth):
         # ``spawned_by IS NULL`` ⇒ top-level/visible. By design ``spawned_by`` is
         # set ONLY for hidden subagents — every visible-peer spawn path leaves it

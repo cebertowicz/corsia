@@ -1,4 +1,4 @@
-"""Role-scoped context selected from existing Agent and Conductor identity."""
+"""Role-scoped context selected from existing Agent, Conductor and CORSIA agent identity."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from typing import Literal
 
 from core.effective_context import ContextSourceEntry
 from core.thread_identity import thread_agent_identity
-from infra.conductor import ConductorScope, get_conductor_scopes
+from infra.conductor import CoordinationScope, get_coordination_scopes
 
-RoleName = Literal["agent", "conductor"]
+RoleName = Literal["agent", "conductor", "corsia_agent"]
 RoleScope = Literal["workspace", "project"]
 
-ROLE_ORDER: tuple[RoleName, ...] = ("agent", "conductor")
+ROLE_ORDER: tuple[RoleName, ...] = ("agent", "conductor", "corsia_agent")
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ class RoleContextResolution:
     """Inferred roles, designation evidence, and their delivered context sources."""
 
     roles: tuple[RoleName, ...]
-    conductor_scopes: tuple[ConductorScope, ...]
+    conductor_scopes: tuple[CoordinationScope, ...]
     scope_roots: tuple[RoleScopeRoot, ...]
     sources: tuple[ContextSourceEntry, ...]
 
@@ -41,6 +41,7 @@ class RoleContextResolution:
             "roles": list(self.roles),
             "receives_agent_role": "agent" in self.roles,
             "is_conductor": "conductor" in self.roles,
+            "is_corsia_agent": "corsia_agent" in self.roles,
             "conductor_scopes": [dict(scope) for scope in self.conductor_scopes],
         }
 
@@ -50,7 +51,7 @@ def _conductor_scopes(
     db,
     *,
     strict_db: bool,
-) -> tuple[ConductorScope, ...]:
+) -> tuple[CoordinationScope, ...]:
     """Read current conductor designations, optionally requiring full schema."""
     if db is None:
         # DB-less reconstruction callers intentionally operate without live
@@ -58,7 +59,7 @@ def _conductor_scopes(
         # process-global DB or failing context reconstruction.
         return ()
     try:
-        return tuple(get_conductor_scopes(thread_id, db=db))
+        return tuple(get_coordination_scopes(thread_id, db=db))
     except sqlite3.OperationalError:
         if strict_db:
             raise
@@ -95,18 +96,29 @@ def infer_thread_roles(
     thread_id: str,
     *,
     db,
-    conductor_scopes: tuple[ConductorScope, ...] | None = None,
+    conductor_scopes: tuple[CoordinationScope, ...] | None = None,
     strict_db: bool = False,
 ) -> tuple[RoleName, ...]:
-    """Infer exactly the launch Agent/Conductor roles from existing state."""
+    """Infer the Agent, Conductor and CORSIA agent roles from existing state.
+
+    The CORSIA agent is the workspace scope's occupant; a conductor is a
+    project's. Each designation adds its own role on top of Agent, in
+    ``ROLE_ORDER``.
+    """
     scopes = (
         conductor_scopes
         if conductor_scopes is not None
         else _conductor_scopes(thread_id, db, strict_db=strict_db)
     )
-    is_conductor = bool(scopes)
-    if is_conductor:
-        return ROLE_ORDER
+    scope_types = {scope.get("scope_type") for scope in scopes}
+    if scope_types:
+        return tuple(
+            role
+            for role in ROLE_ORDER
+            if role == "agent"
+            or (role == "conductor" and "project" in scope_types)
+            or (role == "corsia_agent" and "workspace" in scope_types)
+        )
     is_agent = _thread_is_agent(thread_id, db, strict_db=strict_db)
     if is_agent:
         return ("agent",)
@@ -276,7 +288,7 @@ def role_context_sources(
     *,
     thread_id: str,
 ) -> tuple[ContextSourceEntry, ...]:
-    """Load Agent then Conductor role files, outermost scope first."""
+    """Load role files in ``ROLE_ORDER``, outermost scope first."""
     sources: list[ContextSourceEntry] = []
     for role in roles:
         for scope_root in scope_roots:

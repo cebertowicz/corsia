@@ -14,7 +14,7 @@ HOST_ACCESS_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
         activity="Reading audit log",
     ),
     "log_read": _Entry(
-        "host_access", authority="conductor-log-read",
+        "host_access", authority="coordination-log-read",
         summary=(
             "Conductors: read CORSIA's backend logs without a lease; other "
             "threads receive a final not_conductor refusal"
