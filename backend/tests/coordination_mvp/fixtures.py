@@ -177,8 +177,9 @@ GMAIL_REPEAT = _add(Scenario(
     event_class="actionable",
     resolution="path_a_resolve", disposition="owner_digest",
     acs=("AC-2.1", "AC-1.6"), slice_owner="S4",
-    notes="event_class is type-level (email.received=actionable); the digest vs "
-          "wake split is a lifecycle decision in the S4 disposition table.",
+    notes="email.received is informational by type; its actionable_when fact rule "
+          "promotes this message. The digest vs wake split is a lifecycle "
+          "decision in the S4 disposition table.",
 ))
 
 GITHUB_PR = _add(Scenario(

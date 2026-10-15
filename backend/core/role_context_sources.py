@@ -15,6 +15,9 @@ RoleName = Literal["agent", "conductor", "corsia_agent"]
 RoleScope = Literal["workspace", "project"]
 
 ROLE_ORDER: tuple[RoleName, ...] = ("agent", "conductor", "corsia_agent")
+ROLE_LABELS: dict[RoleName, str] = {
+    "agent": "Agent", "conductor": "Conductor", "corsia_agent": "CORSIA agent",
+}
 
 
 @dataclass(frozen=True)
@@ -214,7 +217,7 @@ def _source_for_file(
             f"{role}:{relative_path}"
         ),
         origin_section="role",
-        label=f"{role.title()} role context: {relative_path}",
+        label=f"{ROLE_LABELS[role]} role context: {relative_path}",
         stable_reference=str(path.resolve(strict=False)),
         freshness="fresh",
         inclusion="included",

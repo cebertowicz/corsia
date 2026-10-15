@@ -26,15 +26,6 @@ export type CoordinationLookup =
 	| { kind: 'absent' }
 	| { kind: 'unknown' };
 
-/** A project conductor target; retained for project-conductor consumers. */
-export type ConductorTarget = CoordinationTarget;
-
-/** Result of a project conductor lookup. */
-export type ConductorLookup = CoordinationLookup;
-
-/** Result of the workspace CORSIA-agent lookup. */
-export type CorsiaAgentLookup = CoordinationLookup;
-
 /** The CORSIA agent's thread id once a lookup confirms it; its sources
  * panel shows only there (#3287). */
 export const corsiaAgentId = writable<string | null>(null);
@@ -44,7 +35,7 @@ export const corsiaAgentId = writable<string | null>(null);
  * Only a pending first run in the workspace scope lands there, once per page
  * load, and never over a thread the user already opened (#3287 N2). */
 export function firstRunLanding(
-	lookup: CorsiaAgentLookup,
+	lookup: CoordinationLookup,
 	{ scope, activeThreadId, landed }: { scope: UiScope | null; activeThreadId: string | null; landed: boolean },
 ): string | null {
 	if (landed || scope || activeThreadId) return null;
@@ -55,7 +46,7 @@ let firstRunLanded = false;
 
 /** Open the CORSIA agent once per page load when `firstRunLanding` says so. */
 export function landOnFirstRun(
-	lookup: CorsiaAgentLookup,
+	lookup: CoordinationLookup,
 	scope: UiScope | null,
 	open: (threadId: string) => unknown,
 ): void {
@@ -96,7 +87,7 @@ async function fetchTarget(token: string | null, url: string): Promise<Coordinat
 }
 
 /** Read a project's conductor target and accept its model as that thread's truth. */
-export function fetchConductor(token: string | null, scope: UiScope | null): Promise<ConductorLookup> {
+export function fetchConductor(token: string | null, scope: UiScope | null): Promise<CoordinationLookup> {
 	if (!scope) return Promise.resolve({ kind: 'unknown' });
 	return fetchTarget(
 		token,
@@ -105,7 +96,7 @@ export function fetchConductor(token: string | null, scope: UiScope | null): Pro
 }
 
 /** Read the workspace CORSIA agent and accept its model as that thread's truth. */
-export async function fetchCorsiaAgent(token: string | null): Promise<CorsiaAgentLookup> {
+export async function fetchCorsiaAgent(token: string | null): Promise<CoordinationLookup> {
 	const lookup = await fetchTarget(token, `/api/corsia-agent?token=${encodeURIComponent(token ?? '')}`);
 	if (lookup.kind === 'target') corsiaAgentId.set(lookup.target.thread_id);
 	else if (lookup.kind === 'absent') corsiaAgentId.set(null);
