@@ -19,7 +19,7 @@ from fastapi import FastAPI
 
 from api import google as google_api
 from connections.google import client as google_client
-from connections.google import oauth
+from connections.google import handover, oauth
 from infra import key_store
 from infra.corsia_agent import set_corsia_agent
 from infra.database import get_db
@@ -131,6 +131,38 @@ async def test_connect_builds_a_pkce_loopback_url_and_keeps_the_secret_out(googl
     # Nothing is saved until Google answers.
     assert key_store.resolve_google() is None
     assert state
+
+
+async def test_api_connect_refuses_legacy_assistant_home(google, client_file, tmp_path, monkeypatch):
+    homes = tmp_path / "gws-homes"
+    monkeypatch.setenv("CORSIA_GWS_AGENT_HOMES_DIR", str(homes))
+    db = get_db()
+    assistant = make_session(db, prefix="assistant", title="Assistant")
+    db.execute(
+        "UPDATE threads SET agent_enabled=1,agent_responsibility=?,agent_domains=?,agent_notes=? WHERE id=?",
+        (
+            handover.LEGACY_ASSISTANT_RESPONSIBILITY,
+            json.dumps(handover.LEGACY_ASSISTANT_DOMAINS),
+            handover.LEGACY_ASSISTANT_NOTES,
+            assistant,
+        ),
+    )
+    db.commit()
+    (homes / assistant).mkdir(parents=True)
+
+    async with _http() as http:
+        response = await http.post(
+            "/api/google/connect",
+            json={"client_file": client_file},
+            headers={"Authorization": f"Bearer {OWNER_SESSION_TOKEN}"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "An old Assistant Google sign-in is still available. "
+        "Call google_adopt_assistant_sign_in instead of google_connect to move it safely."
+    )
+    assert key_store.resolve_google() is None
 
 
 async def test_callback_completes_the_sign_in_and_stores_all_three_entries(google, conductor, client_file):
