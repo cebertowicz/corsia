@@ -46,7 +46,7 @@
     "backend/tools/grep.py": 455,
     "backend/tools/host_access_gate.py": 1047,
     "backend/tools/shell.py": 549,
-    "backend/tools/shell_guard.py": 1176,
+    "backend/tools/shell_guard.py": 1182,
     "frontend/src/lib/components/DocumentsView.svelte": 522,
     "frontend/src/lib/components/HostAccessLeaseControl.svelte": 560,
     "frontend/src/lib/components/InputBar.svelte": 409,
