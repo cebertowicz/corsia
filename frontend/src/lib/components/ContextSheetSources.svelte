@@ -351,11 +351,7 @@
 	}
 
 	@media (max-width: 460px) {
-		.ctx-source-count-label {
-			max-width: 72px;
-			text-align: end;
-			white-space: normal;
-		}
+		
 		.ctx-source-group summary {
 			grid-template-columns: var(--space-3) max-content minmax(0, 1fr);
 		}
