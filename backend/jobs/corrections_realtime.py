@@ -20,7 +20,8 @@ Classifier state (``state``)::
 
 An outage writes no fact and keeps the message pending. A deterministic startup
 failure is retained per process in ``failed_versions``. A scan activates only after
-it reaches the end using its originally selected manifest.
+it reaches the end using its originally selected manifest; a deterministic failure
+ends the pass unactivated, and the next pass re-selects (or the state is failed).
 """
 
 from __future__ import annotations
@@ -125,7 +126,8 @@ class CorrectionsWorker:
             if self.failed_versions and self.state == "failed":
                 return None
             if not after_version_failure:
-                failed = next((item for item in self.versions if item["state"] == "failed"), {})
+                failed = next((item for item in self.versions
+                               if item["state"] == "failed" and item.get("version") not in self.failed_versions), {})
                 self._set(
                     "failed" if _installed() else "absent", str(error),
                     failure_version=failed.get("version") or failed.get("location"),
@@ -152,32 +154,37 @@ class CorrectionsWorker:
             str(version), reason, reader, tasks=self.failure_notice_tasks,
         )
 
-    async def _classify(
-        self, candidate: CorrectionCandidate, manifest: AssetManifest | None = None,
-    ) -> ClassificationOutcome:
-        """Select then classify an arrival, or classify a scan's fixed manifest."""
-        failure: ClassificationOutcome | None = None
-        while manifest is None:
-            manifest = await self._select_manifest(after_version_failure=failure is not None)
-            if manifest is None:
-                if failure is not None:
-                    self.reader_reason = failure.reason
-                    self._set("failed", failure.reason, failure_version=failure.failure_version)
-                    return failure
-                return ClassificationOutcome("outage", self.reason)
-            outcome = await classify(
-                self, candidate, manifest, attempts_per_kind=ATTEMPTS_PER_KIND,
-                child_factory=ClassifierChild, clock=_clock, record_classification=record_classification,
-                record_unreadable=record_unreadable,
-            )
-            if outcome.kind != "version_failed":
-                return outcome
-            failure, manifest = outcome, None
+    async def _after_version_failure(self, failure: ClassificationOutcome) -> AssetManifest | None:
+        """Re-select past a deterministic failure; with nothing left, fail naming that version."""
+        manifest = await self._select_manifest(after_version_failure=True)
+        if manifest is None:
+            self.reader_reason = failure.reason
+            self._set("failed", failure.reason, failure_version=failure.failure_version)
+        return manifest
+
+    async def _classify_with(self, candidate: CorrectionCandidate, manifest: AssetManifest) -> ClassificationOutcome:
         return await classify(
             self, candidate, manifest, attempts_per_kind=ATTEMPTS_PER_KIND,
             child_factory=ClassifierChild, clock=_clock, record_classification=record_classification,
             record_unreadable=record_unreadable,
         )
+
+    async def _classify(
+        self, candidate: CorrectionCandidate, manifest: AssetManifest | None = None,
+    ) -> ClassificationOutcome:
+        """Classify a scan's fixed manifest, or select (past failed versions) for an arrival."""
+        if manifest is not None:
+            return await self._classify_with(candidate, manifest)
+        manifest = await self._select_manifest()
+        if manifest is None:
+            return ClassificationOutcome("outage", self.reason)
+        while True:  # bounded: each version_failed adds one pinned version to failed_versions
+            outcome = await self._classify_with(candidate, manifest)
+            if outcome.kind != "version_failed":
+                return outcome
+            manifest = await self._after_version_failure(outcome)
+            if manifest is None:
+                return outcome
 
     async def _arrival(self, message_id: str, enqueued_at: float) -> None:
         started_at = _clock()
@@ -203,7 +210,7 @@ class CorrectionsWorker:
             return
         if outcome == "done":
             self._finish_scan()
-        elif outcome == "yielded":
+        elif outcome in ("yielded", "reselect"):
             self.scan = "owed"
         else:
             self._hold(outcome)
@@ -230,10 +237,12 @@ class CorrectionsWorker:
                 if not self.queue.empty():
                     return "yielded"
                 outcome = await self._classify(candidate, manifest)
-                if outcome.kind not in {"recorded", "unreadable"}:
-                    if outcome.kind == "outage":
-                        return f"classifier {self.state}: {outcome.reason or self.reason}"
-                    return f"classifier {outcome.kind}: {outcome.reason or self.reason}"
+                if outcome.kind == "version_failed":
+                    if await self._after_version_failure(outcome) is not None:
+                        return "reselect"
+                    return f"classifier failed: {outcome.reason}"
+                if outcome.kind == "outage":
+                    return f"classifier {self.state}: {outcome.reason or self.reason}"
                 self.arrived.clear()
                 if not self.queue.empty():
                     return "yielded"

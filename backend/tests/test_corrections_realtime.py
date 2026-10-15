@@ -328,7 +328,7 @@ async def test_deterministic_newer_failure_has_the_same_result_after_restart(wor
 
 
 @pytest.mark.asyncio
-async def test_scan_holds_on_mid_pass_version_failure_then_activates_v1_only_after_its_walk(worker, monkeypatch):
+async def test_scan_ends_unactivated_on_mid_pass_version_failure_then_activates_v1_only_after_its_walk(worker, monkeypatch):
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime, corrections_recording
 
@@ -356,7 +356,9 @@ async def test_scan_holds_on_mid_pass_version_failure_then_activates_v1_only_aft
     monkeypatch.setattr(corrections_realtime, "activate_after_backfill", activate)
     ScriptedChild.loads = [ClassifierUnavailable("bad v2", kind="deterministic")]
 
-    assert "version_failed" in await worker._scan()
+    worker.scan = "owed"
+    await worker._scan_pass()
+    assert (worker.scan, worker.held_reason) == ("owed", None)  # re-selects on the next pass, not held
     assert activate.await_count == 0
     assert await worker._scan() == "done"
     activate.assert_awaited_once()
@@ -388,6 +390,42 @@ async def test_only_deterministic_version_failure_notifies_its_explicit_version(
 
     assert (await worker._classify(_candidate())).kind == "version_failed"
     assert [(version, reason) for version, reason, _reader in notices] == [("v1", "bad v1")]
+
+
+@pytest.mark.asyncio
+async def test_only_version_failing_during_a_scan_fails_with_one_notice_and_no_activation(worker, monkeypatch):
+    from automation import update_failure_notice
+    from core.corrections_child import ClassifierUnavailable
+    from jobs import corrections_realtime, corrections_recording
+    from jobs.corrections_assets import AssetSelectionError
+
+    notices = []
+    candidate = _candidate()
+
+    def selected(*, exclude=None):
+        exclude = exclude or {}
+        if "v1" in exclude:
+            raise AssetSelectionError("no selectable classifier", [
+                {"location": "corrections-classifier", "version": "v1", "state": "failed", "reason": exclude["v1"]},
+            ])
+        return _selection(_manifest())
+
+    async def next_batch(*_args, **_kwargs):
+        return SimpleNamespace(selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)], candidates=[candidate])
+
+    activate = AsyncMock(return_value="done")
+    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
+    monkeypatch.setattr(corrections_realtime, "_installed", lambda: True)
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_realtime, "activate_after_backfill", activate)
+    monkeypatch.setattr(update_failure_notice, "tell_corrections_classifier_failure_detached", lambda *args, **kwargs: notices.append(args))
+    worker.failed_versions["v0"] = "unrelated earlier failure"
+    ScriptedChild.loads = [ClassifierUnavailable("bad v1", kind="deterministic")]
+
+    assert await worker._scan() == "classifier failed: bad v1"
+    assert (worker.state, worker.reason) == ("failed", "bad v1")
+    assert [(version, reason) for version, reason, _reader in notices] == [("v1", "bad v1")]
+    assert activate.await_count == 0
 
 
 @pytest.mark.asyncio
