@@ -45,7 +45,7 @@
 			-webkit-user-drag: none;
 		}
 		h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.015em; }
-		.failure { width: 100%; max-width: 420px; margin-top: 24px; }
+		.failure, .background-approval { width: 100%; max-width: 420px; margin-top: 24px; }
 		.failure-card {
 			border-radius: 12px;
 			padding: 20px;
@@ -61,6 +61,11 @@
 		.log-label { display: block; margin-top: 16px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
 		.log-path { display: block; margin-top: 6px; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.5; }
 		.actions { display: flex; justify-content: center; margin-top: 20px; }
+		.approval-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; text-align: left; }
+		.approval-check { display: inline-flex; flex: none; width: 20px; height: 20px; align-items: center; justify-content: center; border: 1px solid var(--accent-border); border-radius: 50%; color: var(--accent-text-dark); font-size: 13px; }
+		html[data-theme="light"] .approval-check { color: var(--accent-text-light); }
+		.approval-check[aria-checked="false"] { color: transparent; }
+		.approval-action { flex: none; }
 		button {
 			height: 36px;
 			padding: 0 16px;
@@ -92,6 +97,13 @@
 	<div class="app" data-tauri-drag-region>
 		<img class="mark" src="corsia-mark.svg" alt="" data-tauri-drag-region />
 		<h1 id="status" role="status" aria-live="polite" data-tauri-drag-region>Starting CORSIA…</h1>
+		<section id="background-approval" class="background-approval" hidden aria-labelledby="status">
+			<div class="failure-card approval-row">
+				<span id="approval-check" class="approval-check" role="checkbox" aria-checked="false">✓</span>
+				<span class="failure-copy">Keep CORSIA running when the window is closed</span>
+				<button id="open-login-items" class="approval-action" type="button">Open Login Items</button>
+			</div>
+		</section>
 		<section id="failure" class="failure" hidden aria-labelledby="status">
 			<div class="failure-card">
 				<p class="failure-copy">CORSIA couldn’t start.</p>
@@ -108,11 +120,17 @@
 			const invoke = window.__TAURI__?.core?.invoke;
 			const status = document.getElementById('status');
 			const failure = document.getElementById('failure');
+			const backgroundApproval = document.getElementById('background-approval');
+			const approvalCheck = document.getElementById('approval-check');
+			const openLoginItems = document.getElementById('open-login-items');
 			const logPath = document.getElementById('log-path');
 			const reason = document.getElementById('failure-reason');
 			const retry = document.getElementById('retry');
+			let approvalPoll;
 
 			async function showFailure(why) {
+				clearInterval(approvalPoll);
+				backgroundApproval.hidden = true;
 				status.textContent = 'CORSIA couldn’t start';
 				reason.textContent = typeof why === 'string' ? why : '';
 				reason.hidden = !reason.textContent;
@@ -126,9 +144,31 @@
 				retry.focus();
 			}
 
+			function continueToService(startup) {
+				clearInterval(approvalPoll);
+				window.location.replace(startup.url);
+			}
+
+			async function showBackgroundApproval() {
+				failure.hidden = true;
+				backgroundApproval.hidden = false;
+				approvalCheck.setAttribute('aria-checked', 'false');
+				clearInterval(approvalPoll);
+				approvalPoll = setInterval(async () => {
+					try {
+						const startup = await invoke('start_local_service');
+						if (startup.state === 'ready') {
+							approvalCheck.setAttribute('aria-checked', 'true');
+							continueToService(startup);
+						}
+					} catch (_) {}
+				}, 1000);
+			}
+
 			async function start() {
 				status.textContent = 'Starting CORSIA…';
 				failure.hidden = true;
+				backgroundApproval.hidden = true;
 				retry.disabled = true;
 				if (!invoke) {
 					await showFailure();
@@ -136,14 +176,21 @@
 				}
 				try {
 					const startup = await invoke('start_local_service');
-					window.location.replace(startup.url);
+					if (startup.state === 'ready') {
+						continueToService(startup);
+					} else {
+						await showBackgroundApproval();
+					}
 				} catch (error) {
 					await showFailure(error);
 				}
 			}
 
 			window.__corsiaShowServiceFailure = showFailure;
+			window.__corsiaShowBackgroundApproval = showBackgroundApproval;
+			openLoginItems.addEventListener('click', () => invoke?.('open_login_items'));
 			retry.addEventListener('click', start);
+			if (window.location.hash === '#background-approval') showBackgroundApproval();
 		})();
 	</script>
 </body>

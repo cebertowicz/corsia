@@ -2,8 +2,16 @@
 set -eu
 
 resources="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+contents="$(CDPATH= cd -- "$resources/.." && pwd -P)"
+bundle="$(CDPATH= cd -- "$contents/.." && pwd -P)"
 state_dir="${CORSIA_STATE_DIR:-$HOME/Library/Application Support/CORSIA}"
 mkdir -p "$state_dir/logs"
+# The service identity comes from the bundle that launchd started, never an
+# inherited shell environment. This makes a replaced bundle observable.
+info_plist="$contents/Info.plist"
+bundle_short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$info_plist")" || exit 1
+bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info_plist")" || exit 1
+export CORSIA_SERVICE_GENERATION="$bundle_short_version+$bundle_version"
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1
 export CORSIA_DESKTOP_BUNDLE=1
@@ -77,6 +85,11 @@ EOF_NOTES
   fi
 fi
 
+# launchd starts this launcher with no arguments. Scripted invocations retain
+# their explicit arguments, while the launchd default is always loopback.
+if [ "$#" -eq 0 ]; then
+  set -- --host 127.0.0.1
+fi
 service_port="unknown"
 previous_argument=""
 for argument; do
@@ -100,8 +113,41 @@ if [ "$service_port" != "unknown" ]; then
   export BACKEND_PORT="$service_port"
 fi
 exec >>"$state_dir/logs/service.log" 2>&1
-printf 'CORSIA bundled backend startup: state_dir=%s db_path=%s port=%s workspace=%s\n' \
-  "$state_dir" "$state_dir/corsia.db" "$service_port" "${CORSIA_WORKSPACE:-unset}"
+# Refuse to compete with a different CORSIA job. A deliberate refusal exits
+# successfully so KeepAlive does not turn PK4 into a respawn loop.
+launchctl_command="${CORSIA_TEST_LAUNCHCTL:-launchctl}"
+# `launchctl print gui/<uid>` only summarizes the domain. List candidate
+# labels first, then inspect each job's own record before comparing its program
+# with this bundle. Do not start if either inspection is unavailable: a clean
+# exit prevents KeepAlive from racing an uninspectable foreign CORSIA service.
+if ! corsia_jobs="$("$launchctl_command" list 2>/dev/null)"; then
+  printf 'CORSIA bundled backend refused to start: could not inspect CORSIA service list\n'
+  exit 0
+fi
+corsia_labels="$(printf '%s\n' "$corsia_jobs" | awk '$3 ~ /^(com|ai)\.corsia\./ { print $3 }')"
+foreign_corsia_label=""
+while IFS= read -r label; do
+  [ -n "$label" ] || continue
+  if ! job="$("$launchctl_command" print "gui/$(id -u)/$label" 2>/dev/null)"; then
+    printf 'CORSIA bundled backend refused to start: could not inspect CORSIA service %s\n' "$label"
+    exit 0
+  fi
+  program="$(printf '%s\n' "$job" | awk '
+    /^[[:space:]]*(path|program) = / { value=$3; gsub(/^"|"$/, "", value); print value; exit }
+  ')"
+  if [ -z "$program" ] || [ "${program#"$bundle"/}" = "$program" ]; then
+    foreign_corsia_label="$label"
+    break
+  fi
+done <<EOF_CORSIA_LABELS
+$corsia_labels
+EOF_CORSIA_LABELS
+if [ -n "$foreign_corsia_label" ]; then
+  printf 'CORSIA bundled backend refused to start: foreign CORSIA service %s owns this Mac\n' "$foreign_corsia_label"
+  exit 0
+fi
+printf 'CORSIA bundled backend startup: state_dir=%s db_path=%s port=%s workspace=%s generation=%s\n' \
+  "$state_dir" "$state_dir/corsia.db" "$service_port" "${CORSIA_WORKSPACE:-unset}" "$CORSIA_SERVICE_GENERATION"
 printf 'CORSIA bundled backend: git=%s\n' "$(command -v git || echo none)"
 printf '%s' "$config_notes" | while IFS= read -r note; do
   if [ -n "$note" ]; then printf 'CORSIA bundled backend: %s\n' "$note"; fi

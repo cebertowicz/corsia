@@ -156,6 +156,15 @@ async def system_restart(
     return {"ok": True, "mode": mode, "operation_id": operation_id, "message": message}
 
 
+@router.get("/system/operation-active")
+async def system_operation_active():
+    """Expose only whether the durable update/restart lock currently holds."""
+    from automation import self_restart
+    from infra.db_async import run_in_db
+
+    return {"active": await run_in_db(self_restart.in_flight_request) is not None}
+
+
 async def _monitor_restart_process(process, operation_id: str) -> None:
     """Compensate an immediate child exit without joining backend shutdown."""
     poll = getattr(process, "poll", None)

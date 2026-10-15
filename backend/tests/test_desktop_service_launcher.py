@@ -17,6 +17,17 @@ def _bundle_with_recording_python(tmp_path: Path) -> Path:
     resources = tmp_path / "Resources"
     (resources / "bin").mkdir(parents=True)
     (resources / "python" / "bin").mkdir(parents=True)
+    (tmp_path / "Info.plist").write_text(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+        "<plist version=\"1.0\"><dict>"
+        "<key>CFBundleShortVersionString</key><string>1.2.3</string>"
+        "<key>CFBundleVersion</key><string>456</string>"
+        "</dict></plist>\n"
+    )
+    launchctl = resources / "bin" / "launchctl"
+    launchctl.write_text("#!/bin/sh\nexit 0\n")
+    launchctl.chmod(0o755)
     launcher = resources / "bin" / "corsia-service"
     shutil.copy(LAUNCHER, launcher)
     launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR)
@@ -29,6 +40,7 @@ def _bundle_with_recording_python(tmp_path: Path) -> Path:
         "  *uvicorn*)\n"
         '    printf "BACKEND_PORT=%s\\n" "${BACKEND_PORT-unset}"\n'
         '    printf "CORSIA_WORKSPACE=%s\\n" "${CORSIA_WORKSPACE-unset}"\n'
+        '    printf "CORSIA_SERVICE_GENERATION=%s\\n" "${CORSIA_SERVICE_GENERATION-unset}"\n'
         '    printf "PATH=%s\\n" "$PATH"\n'
         '    printf "GIT_CONFIG_NOSYSTEM=%s\\n" "${GIT_CONFIG_NOSYSTEM-unset}"\n'
         '    printf "GIT_TERMINAL_PROMPT=%s\\n" "${GIT_TERMINAL_PROMPT-unset}"\n'
@@ -45,7 +57,12 @@ def _launch(
 ) -> str:
     subprocess.run(
         [str(launcher), *arguments],
-        env={"PATH": "/usr/bin:/bin", "CORSIA_STATE_DIR": str(state), **(env or {})},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "CORSIA_STATE_DIR": str(state),
+            "CORSIA_TEST_LAUNCHCTL": str(launcher.parent / "launchctl"),
+            **(env or {}),
+        },
         check=True,
         timeout=30,
     )
@@ -56,6 +73,18 @@ def _service_file(state: Path, content: str | dict) -> None:
     state.mkdir(parents=True, exist_ok=True)
     text = content if isinstance(content, str) else json.dumps(content)
     (state / "service.json").write_text(text)
+
+
+def test_launcher_starts_without_arguments_on_loopback_and_uses_bundle_generation(tmp_path):
+    launcher = _bundle_with_recording_python(tmp_path)
+    state = tmp_path / "state"
+    _service_file(state, {"workspace": "/Users/someone/corsia", "port": 18788})
+
+    log = _launch(launcher, state)
+
+    assert "BACKEND_PORT=18788" in log
+    assert "CORSIA_SERVICE_GENERATION=1.2.3+456" in log
+    assert "--host 127.0.0.1 --port 18788" in log
 
 
 def test_launcher_exports_the_port_it_serves_on(tmp_path):
@@ -114,7 +143,9 @@ def test_launcher_exports_the_workspace_from_service_json(tmp_path):
     log = _launch(launcher, state, "--host", "127.0.0.1")
 
     assert "CORSIA_WORKSPACE=/Users/someone/corsia" in log
-    assert log.splitlines()[0].endswith("port=47895 workspace=/Users/someone/corsia")
+    assert log.splitlines()[0].endswith(
+        "port=47895 workspace=/Users/someone/corsia generation=1.2.3+456"
+    )
     assert "BACKEND_PORT=47895" in log
     assert "--port 47895" in log
 
@@ -143,7 +174,7 @@ def test_launcher_without_service_json_leaves_the_workspace_to_the_backend(tmp_p
     log = _launch(launcher, tmp_path / "state", "--port", "18788")
 
     assert "CORSIA_WORKSPACE=unset" in log
-    assert log.splitlines()[0].endswith("workspace=unset")
+    assert log.splitlines()[0].endswith("workspace=unset generation=1.2.3+456")
 
 
 def test_launcher_parses_service_json_and_never_executes_it(tmp_path):
@@ -190,6 +221,78 @@ def test_launcher_ignores_and_logs_unknown_keys_without_their_values(tmp_path):
     assert "/evil" not in log and "/elsewhere" not in log
     assert f"state_dir={state} " in log.splitlines()[0]
     assert "CORSIA_WORKSPACE=/w" in log
+
+
+def test_launcher_allows_a_service_from_its_own_bundle(tmp_path):
+    launcher = _bundle_with_recording_python(tmp_path)
+    own_launchctl = tmp_path / "own-launchctl"
+    own_launchctl.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        "  list) printf 'PID\\tStatus\\tLabel\\n123\\t0\\tai.corsia.service\\n' ;;\n"
+        f"  print) printf 'ai.corsia.service = {{\\n\\tprogram = {launcher}\\n}}\\n' ;;\n"
+        "esac\n"
+    )
+    own_launchctl.chmod(0o755)
+
+    log = _launch(
+        launcher,
+        tmp_path / "state",
+        "--port",
+        "18788",
+        env={"CORSIA_TEST_LAUNCHCTL": str(own_launchctl)},
+    )
+
+    assert "BACKEND_PORT=18788" in log
+
+
+def test_launcher_refuses_a_foreign_corsia_job_without_respawning(tmp_path):
+    launcher = _bundle_with_recording_python(tmp_path)
+    foreign_launchctl = tmp_path / "foreign-launchctl"
+    foreign_launchctl.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        "  list) printf 'PID\\tStatus\\tLabel\\n-\\t0\\tcom.corsia.prod\\n' ;;\n"
+        "  print) printf 'com.corsia.prod = {\\n\\tpath = /opt/corsia/bin/corsia\\n}\\n' ;;\n"
+        "esac\n"
+    )
+    foreign_launchctl.chmod(0o755)
+
+    log = _launch(
+        launcher,
+        tmp_path / "state",
+        "--port",
+        "18788",
+        env={"CORSIA_TEST_LAUNCHCTL": str(foreign_launchctl)},
+    )
+
+    assert "foreign CORSIA service com.corsia.prod owns this Mac" in log
+    assert "BACKEND_PORT=" not in log
+
+
+def test_launcher_refuses_when_corsia_service_inspection_fails(tmp_path):
+    for failure in ("list", "print"):
+        launcher = _bundle_with_recording_python(tmp_path / failure)
+        failing_launchctl = tmp_path / f"{failure}-launchctl"
+        failing_launchctl.write_text(
+            "#!/bin/sh\n"
+            'case "$1" in\n'
+            f"  list) [ '{failure}' = list ] && exit 1; printf 'PID\\tStatus\\tLabel\\n-\\t0\\tcom.corsia.prod\\n' ;;\n"
+            "  print) exit 1 ;;\n"
+            "esac\n"
+        )
+        failing_launchctl.chmod(0o755)
+
+        log = _launch(
+            launcher,
+            tmp_path / f"{failure}-state",
+            "--port",
+            "18788",
+            env={"CORSIA_TEST_LAUNCHCTL": str(failing_launchctl)},
+        )
+
+        assert "could not inspect CORSIA service" in log
+        assert "BACKEND_PORT=" not in log
 
 
 def test_launcher_ignores_invalid_values(tmp_path):
