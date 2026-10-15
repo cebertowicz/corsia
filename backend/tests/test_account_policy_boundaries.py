@@ -899,3 +899,11 @@ def test_a_thread_session_without_an_operation_binding_still_refuses_a_moved_acc
         require_session_write(session, "codex")
     assert refused.value.reason == "account_session_mismatch"
     assert session.vendor_account_id == frozen["id"]
+
+
+def test_operation_binding_refuses_a_kind_the_runtime_does_not_isolate():
+    """One owner names operation kinds, so isolation and the write-gate exemption cannot drift."""
+    from connections.account_operation import bind_operation_session
+
+    with pytest.raises(ValueError):
+        bind_operation_session(SimpleNamespace(), SimpleNamespace(), kind="background")
