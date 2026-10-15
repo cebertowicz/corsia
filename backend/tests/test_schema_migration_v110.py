@@ -59,7 +59,7 @@ def test_v110_upgrade_restricts_legacy_endpoints_without_overwriting_explicit_al
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert SCHEMA_VERSION == 117
+    assert SCHEMA_VERSION == 118
     assert (result.migrated, result.from_version, result.to_version) == (True, 109, 117)
     assert endpoint_agent_use("external@legacy-v109/glm-5.3") == "interactive_only"
     assert endpoint_agent_use("external@allowed-v109/glm-5.3") == "allowed"

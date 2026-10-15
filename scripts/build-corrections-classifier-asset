@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Build a hash-verified corrections-classifier asset; never reads training data."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import shutil
+from pathlib import Path
+
+
+def digest(path: Path) -> dict[str, object]:
+    return {"bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--onnx", type=Path, required=True)
+    parser.add_argument("--onnx-data", type=Path, required=True)
+    parser.add_argument("--tokenizer", type=Path, required=True)
+    parser.add_argument("--tokenizer-config", type=Path, required=True)
+    parser.add_argument("--license", type=Path, required=True,
+                        help="full Apache License 2.0 text, copied into the asset as LICENSE")
+    parser.add_argument("--notice", type=Path, required=True,
+                        help="attribution notice, copied into the asset as NOTICE")
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--self-test", type=Path, required=True,
+                        help="JSON list of exactly four synthetic inputs and expected scores")
+    args = parser.parse_args()
+    for source in (args.license, args.notice):
+        if not source.is_file():
+            raise SystemExit(f"missing input: {source}")
+    licence = args.license.read_text(encoding="utf-8")
+    if "Apache License" not in licence or "Version 2.0, January 2004" not in licence \
+            or "END OF TERMS AND CONDITIONS" not in licence:
+        raise SystemExit("--license is not the full Apache License 2.0 text")
+    args.out.mkdir(parents=True, exist_ok=False)
+    files = (args.onnx, args.onnx_data, args.tokenizer, args.tokenizer_config)
+    for source in files:
+        if not source.is_file():
+            raise SystemExit(f"missing input: {source}")
+        shutil.copy2(source, args.out / source.name)
+    shutil.copy2(args.license, args.out / "LICENSE")
+    shutil.copy2(args.notice, args.out / "NOTICE")
+    vectors = json.loads(args.self_test.read_text(encoding="utf-8"))
+    if not isinstance(vectors, list) or len(vectors) != 4:
+        raise SystemExit("self-test must contain exactly four synthetic vectors")
+    names = [source.name for source in files] + ["LICENSE", "NOTICE"]
+    manifest = {
+        "asset_id": "corrections-classifier", "version": args.version,
+        "kind": "classifier", "minimum_onnxruntime": "1.31.0",
+        "input_policy_id": "modernbert-owner-context-v2-2048",
+        "files": {name: digest(args.out / name) for name in names},
+        "heads": [{"name": "correction", "labels": ["not_correction", "correction"], "threshold": 0.595681}],
+        "base_model_license": "Apache-2.0", "self_test": vectors,
+    }
+    (args.out / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    print(hashlib.sha256((args.out / "manifest.json").read_bytes()).hexdigest())
+
+
+if __name__ == "__main__":
+    main()

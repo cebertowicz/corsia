@@ -1,4 +1,4 @@
-"""Schema v116 adds the action drafts table, additively and idempotently."""
+"""Schema v117 adds the action drafts table, additively and idempotently."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from contextlib import closing
 
 from infra.database import initialize_schema
 from infra.database_migrations import MIGRATIONS, migrate_to_current
-from infra.migration_115_to_116_action_drafts import migrate_115_to_116
+from infra.migration_116_to_117_action_drafts import migrate_116_to_117
 from infra.schema import SCHEMA_VERSION
 
 
@@ -16,8 +16,8 @@ def _columns(db) -> list[str]:
 
 
 def test_fresh_schema_has_the_table_and_the_step_is_registered():
-    assert SCHEMA_VERSION == 117
-    assert MIGRATIONS[115] is migrate_115_to_116
+    assert SCHEMA_VERSION == 118
+    assert MIGRATIONS[116] is migrate_116_to_117
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
         assert _columns(db) == [
@@ -27,7 +27,7 @@ def test_fresh_schema_has_the_table_and_the_step_is_registered():
 
 
 def test_startup_migration_creates_the_table_and_keeps_threads(tmp_path):
-    path = tmp_path / "v115.db"
+    path = tmp_path / "v116.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
         db.execute("DROP TABLE action_drafts")
@@ -35,11 +35,11 @@ def test_startup_migration_creates_the_table_and_keeps_threads(tmp_path):
             "INSERT INTO threads (id,user_id,title,created_at,updated_at)"
             " VALUES ('kept','user','Kept','t','t')"
         )
-        db.execute("PRAGMA user_version=115")
+        db.execute("PRAGMA user_version=116")
         db.commit()
     with closing(sqlite3.connect(path)) as db:
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 115, 117)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 116, 118)
         assert "recorded_revision" in _columns(db)
         assert db.execute("SELECT id FROM threads").fetchall() == [("kept",)]
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

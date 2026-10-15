@@ -40,6 +40,7 @@ export type OperatorNotMoving = {
 	next_overdue_at: string | null;
 	overdue_waits: number;
 	paused_by_you: number;
+	set_aside?: number;
 };
 
 export interface OperatorDisplay<Label extends string = string> {

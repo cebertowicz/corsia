@@ -361,8 +361,11 @@ def _idle_rows(idle: close_next_idle.IdleListing) -> Listing:
         seconds = idle.seconds[node_id]
         listed["ends"] = None if seconds is None else text.ends_text(seconds)
         rows.append(listed)
-    pick_up = text.IDLE_PICK_UP if idle.pick_up else None
-    return Listing(rows, idle.total, text.idle_listed_text, pick_up)
+    return Listing(
+        rows, idle.total,
+        lambda shown, total: text.idle_listed_text(shown, total, set_aside=idle.set_aside),
+        text.idle_pick_up(idle.set_aside) if idle.pick_up else None,
+    )
 
 
 def _wait(projection: dict) -> str | None:

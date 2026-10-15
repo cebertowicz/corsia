@@ -15,7 +15,7 @@ def _columns(db) -> list[str]:
 
 
 def test_migration_registered_and_adds_the_review_time_column(tmp_path):
-    assert SCHEMA_VERSION == 117 and MIGRATIONS[104] is migrate_104_to_105
+    assert SCHEMA_VERSION == 118 and MIGRATIONS[104] is migrate_104_to_105
     path = tmp_path / "v104.db"
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)

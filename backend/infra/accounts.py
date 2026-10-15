@@ -32,6 +32,7 @@ import secrets
 import sqlite3
 from datetime import timedelta
 
+from infra import user_profile
 from infra.database import get_db, write_transaction
 from infra.passwords import MIN_PASSWORD_LENGTH, hash_password, verify_password
 from infra.time import utc_now, utc_now_iso
@@ -46,6 +47,10 @@ SERVICE_TTL = timedelta(hours=1)
 
 class AccountError(ValueError):
     """A request about an account is invalid — safe to show the operator."""
+
+
+class FirstAccountExists(AccountError):
+    """A first-run account request lost to an account already in the store."""
 
 
 _UNKNOWN_ACCOUNT_HASH: str | None = None
@@ -132,24 +137,34 @@ def data_owners_without_accounts(
     return [row["user_id"] for row in rows]
 
 
-def create_user(
-    username: str, password: str, *, db: sqlite3.Connection | None = None,
-    first_run_wake: bool = True,
-) -> str:
-    """Create an account and return its id. Raises if the name is taken.
-
-    The first account also gets the workspace conductor; ``first_run_wake``
-    queues that conductor's first-run wake in the same transaction. Only a
-    caller with no person waiting on the conductor (the eval harness)
-    passes False.
-    """
+def _credentials(username: str, password: str) -> tuple[str, str]:
+    """Return the normalized username and the password's stored hash, or raise."""
     name = normalize_username(username)
     _require_password(password)
-    encoded = hash_password(password)
+    return name, hash_password(password)
+
+
+def _create_account(
+    name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
+    require_first: bool, claim_data_owner: bool = False, before_commit=None,
+):
+    """Insert the account (and the first one's conductor) in one transaction.
+
+    ``before_commit`` runs as its last step. Returns the effects owed after
+    the commit, for the caller to run once it has seen the commit succeed.
+    """
     now = utc_now_iso()
     woke = False
     with write_transaction(db, scope="create_user") as conn:
         had_users = has_users(conn)
+        if require_first and had_users:
+            raise FirstAccountExists("setup is already complete")
+        owners = data_owners_without_accounts(conn) if claim_data_owner and not had_users else []
+        if owners and name not in owners:  # any other name strands the existing threads
+            raise AccountError(
+                f"'{name}' owns none of the existing data. Create the first "
+                f"account as one of: {', '.join(owners)}. Add others after."
+            )
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
             raise AccountError(f"account '{name}' already exists")
         conn.execute(
@@ -175,7 +190,12 @@ def create_user(
 
                 seed_first_run_setup_plan(conductor_id, name, db=conn)
                 woke = enqueue_first_run_wake(conductor_id, db=conn)
-    if not had_users:
+        if before_commit is not None:
+            before_commit()
+
+    def announce() -> None:
+        if had_users:
+            return
         from infra import onboarding_events
 
         if woke:
@@ -183,6 +203,63 @@ def create_user(
         onboarding_events.emit("account_created")
         if woke:
             onboarding_events.emit("first_run_wake")
+
+    return announce
+
+
+def create_user(
+    username: str, password: str, *, db: sqlite3.Connection | None = None,
+    first_run_wake: bool = True, require_first: bool = False,
+) -> str:
+    """Create an account and return its id. Raises if the name is taken.
+
+    The first account also gets the workspace conductor; ``first_run_wake``
+    queues that conductor's first-run wake in the same transaction. Only a
+    caller with no person waiting on the conductor (the eval harness)
+    passes False. ``require_first`` atomically refuses if another account
+    already exists. Callers that create the install's first account on behalf of
+    a person use :func:`create_first_account`, which also enforces the
+    data-owner rule.
+    """
+    name, encoded = _credentials(username, password)
+    _create_account(
+        name, encoded, db=db, first_run_wake=first_run_wake, require_first=require_first,
+    )()
+    return name
+
+
+def create_first_account(
+    username: str, password: str, *, call_name: str | None = None, email: str = "",
+    first_run_wake: bool = True,
+) -> str:
+    """Create the install's first account: the one owner behind ``corsia user add`` and setup.
+
+    Refuses atomically (:class:`FirstAccountExists`) once any account exists, and
+    refuses a name outside the existing data owners. With ``call_name`` it also
+    writes the workspace profile: staged before the transaction, published as
+    its last step, undone if the commit fails. A blank ``call_name`` is refused
+    first; an unwritable profile folder raises ``OSError`` with no account made.
+    """
+    from infra import config
+
+    if call_name is not None and not user_profile.one_line(call_name):
+        raise AccountError("name is required")
+    name, encoded = _credentials(username, password)
+    staged = None
+    if call_name is not None:
+        staged = user_profile.stage_user_profile(
+            config.WORKSPACE, call_name, user_profile.mac_timezone(), email,
+        )
+    try:
+        announce = _create_account(
+            name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
+            claim_data_owner=True, before_commit=staged.publish if staged else None,
+        )
+    except BaseException:
+        if staged:
+            staged.undo()
+        raise
+    announce()
     return name
 
 
@@ -241,27 +318,19 @@ def check_password(
     return {"id": row["id"], "name": row["id"]}
 
 
-def lifecycle_token_label(operation_id: str) -> str:
-    """Build the server-owned label for one lifecycle operation."""
-    return f"lifecycle:{operation_id}"
+def purge_expired_tokens(db: sqlite3.Connection | None = None) -> int:
+    """Delete tokens already past their expiry. Housekeeping, not enforcement.
 
-
-def issue_service_token(user_id: str, label: str) -> str:
-    """Mint one short-lived lifecycle credential for an explicit account."""
-    token, _expires_at = issue_token(user_id, kind="service", label=label)
-    return token
-
-
-def issue_lifecycle_service_token(user_id: str, operation_id: str) -> str:
-    """Mint the one-hour drain credential for one server-created operation."""
-    return issue_service_token(user_id, lifecycle_token_label(operation_id))
-
-
-def revoke_lifecycle_service_token(
-    user_id: str, operation_id: str, *, db: sqlite3.Connection | None = None
-) -> int:
-    """Revoke the service credential attached to one settled lifecycle operation."""
-    return revoke_label(user_id, lifecycle_token_label(operation_id), db=db)
+    :func:`resolve_token` already refuses an expired token, so this only keeps
+    the table from growing without bound.
+    """
+    with write_transaction(db, scope="purge_expired_tokens") as conn:
+        cursor = conn.execute(
+            "DELETE FROM auth_tokens"
+            " WHERE expires_at IS NOT NULL AND expires_at <= ?",
+            (utc_now_iso(),),
+        )
+        return cursor.rowcount or 0
 
 
 def issue_token(
@@ -325,56 +394,3 @@ def resolve_token(
     return {
         "id": row["user_id"], "name": row["user_id"], "token_kind": row["kind"],
     }
-
-
-def revoke_token(
-    token: str, *, db: sqlite3.Connection | None = None
-) -> bool:
-    """Delete exactly this token. True iff it existed."""
-    with write_transaction(db, scope="revoke_token") as conn:
-        cursor = conn.execute(
-            "DELETE FROM auth_tokens WHERE token_hash = ?", (token_digest(token),)
-        )
-        return bool(cursor.rowcount)
-
-
-def revoke_label(
-    user_id: str, label: str, *, db: sqlite3.Connection | None = None
-) -> int:
-    """Delete ``user_id``'s tokens carrying ``label``. Returns the count."""
-    with write_transaction(db, scope="revoke_label") as conn:
-        cursor = conn.execute(
-            "DELETE FROM auth_tokens WHERE user_id = ? AND label = ?",
-            (user_id, label),
-        )
-        return cursor.rowcount or 0
-
-
-def list_tokens(
-    user_id: str | None = None, db: sqlite3.Connection | None = None
-) -> list[dict]:
-    """List tokens (never their values) for one user, or for everyone."""
-    sql = (
-        "SELECT user_id, kind, label, created_at, expires_at FROM auth_tokens"
-    )
-    params: tuple = ()
-    if user_id:
-        sql += " WHERE user_id = ?"
-        params = (user_id,)
-    sql += " ORDER BY created_at DESC"
-    return [dict(row) for row in _db(db).execute(sql, params).fetchall()]
-
-
-def purge_expired_tokens(db: sqlite3.Connection | None = None) -> int:
-    """Delete tokens already past their expiry. Housekeeping, not enforcement.
-
-    :func:`resolve_token` already refuses an expired token, so this only keeps
-    the table from growing without bound.
-    """
-    with write_transaction(db, scope="purge_expired_tokens") as conn:
-        cursor = conn.execute(
-            "DELETE FROM auth_tokens"
-            " WHERE expires_at IS NOT NULL AND expires_at <= ?",
-            (utc_now_iso(),),
-        )
-        return cursor.rowcount or 0

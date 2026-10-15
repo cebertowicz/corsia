@@ -28,7 +28,7 @@ def _insert(db, sid: str, name: str, metadata) -> None:
 
 
 def test_the_step_is_registered_and_current():
-    assert SCHEMA_VERSION == 117
+    assert SCHEMA_VERSION == 118
     assert MIGRATIONS[110] is migrate_110_to_111
 
 

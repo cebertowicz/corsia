@@ -29,7 +29,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 117
+SCHEMA_VERSION = 118
 SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
