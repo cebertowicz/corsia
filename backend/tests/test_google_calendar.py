@@ -267,7 +267,7 @@ def test_invite_document_discloses_attendee_notification_and_keeps_from_first():
 
 @pytest.mark.parametrize("value", [
     "a@b.example\\nTitle: x", "a@b.example, c@d.example", "Name <a@b.example>",
-    "a b@c.example", "ab.example", "a@@b.example",
+    "a b@c.example", "ab.example", "a@@b.example", "sam\u202e@example.com", "sam\u200b@example.com",
 ])
 def test_attendee_emails_rejects_non_plain_addresses(value):
     with pytest.raises(ValueError, match="Attendees must be email addresses"):

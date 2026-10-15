@@ -240,6 +240,8 @@ async def test_message_ids_are_url_encoded_into_a_fixed_template(mail):
     ({"to": ["Sam <sam@example.com>"]}, "Recipients must be plain email addresses such as name@example.com."),
     ({"to": ["sam@example.com\nBcc: x@example.com"]},
      "Recipients must be plain email addresses such as name@example.com."),
+    ({"to": ["sam\u202e@example.com"]}, "Recipients must be plain email addresses such as name@example.com."),
+    ({"to": ["sam\u200b@example.com"]}, "Recipients must be plain email addresses such as name@example.com."),
     ({"cc": ["nobody"]}, "Recipients must be plain email addresses such as name@example.com."),
     ({"subject": "  "}, "A draft needs a one-line subject."),
     ({"subject": "Hi\nBcc: x@example.com"}, "A draft needs a one-line subject."),

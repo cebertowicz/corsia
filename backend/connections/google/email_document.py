@@ -8,6 +8,7 @@ A draft is plain text the person reads in the workspace: ``To:``, optional ``Cc:
 from __future__ import annotations
 
 import re
+import unicodedata
 from email import policy
 from email.message import EmailMessage
 from html.parser import HTMLParser
@@ -32,13 +33,20 @@ class DraftRefused(Exception):
     """A request the draft tools refuse; the text is fixed and safe to show."""
 
 
+def is_plain_address(value: str) -> bool:
+    """Whether an address has plain syntax and no Unicode control or format characters."""
+    return bool(_ADDRESS.fullmatch(value)) and not any(
+        unicodedata.category(character) in {"Cc", "Cf"} for character in value
+    )
+
+
 def addresses(value: Any) -> list[str]:
     if value is None:
         return []
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise DraftRefused(BAD_ADDRESS)
     cleaned = [item.strip() for item in value if item.strip()]
-    if not all(_ADDRESS.match(item) for item in cleaned):
+    if not all(is_plain_address(item) for item in cleaned):
         raise DraftRefused(BAD_ADDRESS)
     return cleaned
 
