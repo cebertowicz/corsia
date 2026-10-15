@@ -15,32 +15,39 @@
 	const noBrowser = $derived(status === 'No browser yet');
 	const streamEnded = $derived(status === 'Browser stream ended');
 	const unavailable = $derived(status.startsWith('Browser stream unavailable'));
+	// Over a live page, or the stale frame an ended stream leaves behind.
+	const overPage = $derived(streaming || streamEnded);
 	const retryable = $derived(unavailable || status.startsWith('Browser could not open'));
 </script>
 
 {#if status}
-	<div class="page-status" class:over-page={streaming} role="status">
-		{#if opening}
-			<Spinner size={20} /><span class="sr-only">Opening</span>
-		{:else if noBrowser}
-			<p>Type an address above, or ask the agent to open a page.</p>
-		{:else}
-			<p>{status}</p>
-			{#if streamEnded}<Button size="sm" onclick={onreconnect}>Reconnect</Button>{/if}
-			{#if retryable}<Button size="sm" onclick={unavailable ? onreconnect : onretry}>Try again</Button>{/if}
-		{/if}
+	<div class="page-status" class:over-page={overPage} role="status">
+		<div class="surface" class:pill={overPage}>
+			{#if opening}
+				<Spinner size={20} /><span class="sr-only">Opening</span>
+			{:else if noBrowser}
+				<p>Type an address above, or ask the agent to open a page.</p>
+			{:else}
+				<p>{status}</p>
+			{/if}
+			{#if streamEnded}<Button onclick={onreconnect}>Reconnect</Button>{/if}
+			{#if retryable}<Button onclick={unavailable ? onreconnect : onretry}>Try again</Button>{/if}
+		</div>
 	</div>
 {/if}
 
 <style>
 	.page-status {
-		position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-		gap: 12px; padding: 32px 16px; text-align: center; pointer-events: none;
+		position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center;
+		padding: var(--space-7) var(--space-4); pointer-events: none;
 	}
-	.page-status :global(.btn) { pointer-events: auto; }
-	.page-status p { margin: 0; max-width: 32ch; color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; overflow-wrap: anywhere; }
-	/* Over a live page the status is a pill at the bottom edge, never a cover. */
-	.page-status.over-page { inset: auto 16px 16px; padding: 0; }
-	.page-status.over-page p { max-width: none; padding: 8px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-pill); background: var(--glass-regular-thick); box-shadow: var(--glass-elevation-1); backdrop-filter: var(--glass-blur); }
+	.surface { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-3); max-width: 100%; text-align: center; }
+	.surface :global(.btn) { pointer-events: auto; }
+	.surface p { margin: 0; max-width: 44ch; color: var(--text-secondary); font-size: var(--text-subhead); line-height: 1.5; overflow-wrap: anywhere; }
+	/* Over a live or stale page the whole status sits on one glass surface at the bottom edge, never a cover. */
+	.page-status.over-page { align-items: flex-end; padding: var(--space-4); }
+	.surface.pill { padding: var(--space-2) var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--glass-regular-thick); box-shadow: var(--glass-elevation-1); backdrop-filter: var(--glass-blur); }
+	.surface.pill p { color: var(--text-primary); }
+	@media (max-width: 768px) { .surface :global(.btn) { min-height: 44px; } }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 </style>
