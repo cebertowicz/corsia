@@ -20,6 +20,8 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from core.corrections_asset_download import FLIGHT as CLASSIFIER_DOWNLOAD
+from core.corrections_asset_download import public_state as classifier_state
 from infra import accounts, config, user_profile
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
@@ -174,6 +176,7 @@ def _setup_status() -> dict:
         "model_size_gb": round(DEFAULT_PROFILE.download_size_bytes / 1000**3, 1),
         "required_username": _required_username(),
         "existing_omlx": existing_omlx_requires_consent(),
+        "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
     }
 
 
@@ -205,6 +208,30 @@ async def local_download(request: Request) -> dict | Response:
     from llm.local_setup import begin_local_setup
 
     return await begin_local_setup()
+
+
+@router.get("/classifier", response_model=None)
+async def classifier_status(request: Request) -> dict | Response:
+    """The required corrections classifier's download state; also read after the account exists."""
+    if not _trusted_request(request):
+        return Response(status_code=403)
+    return classifier_state(CLASSIFIER_DOWNLOAD.status())
+
+
+@router.post("/classifier", response_model=None)
+async def classifier_download(request: Request) -> dict | Response:
+    """Start, join or retry the one classifier flight. Takes no path or URL from the caller."""
+    if not _trusted_json_post(request):
+        return Response(status_code=403)
+    return classifier_state(CLASSIFIER_DOWNLOAD.start())
+
+
+@router.post("/classifier/recheck", response_model=None)
+async def classifier_recheck(request: Request) -> dict | Response:
+    """The setup window regained focus: resume a download stopped for space if there is room now."""
+    if not _trusted_json_post(request):
+        return Response(status_code=403)
+    return classifier_state(CLASSIFIER_DOWNLOAD.recheck_space())
 
 
 @router.post("/first-account", response_model=None)

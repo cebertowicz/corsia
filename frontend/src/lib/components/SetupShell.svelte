@@ -6,7 +6,7 @@
 	import { peerFade } from '$lib/popoverMotion';
 
 	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip'; state: 'current' | 'todo' | 'done' };
-	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number };
+	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number; action?: { label: string; onclick: () => void } };
 
 	interface Props {
 		steps: SetupStep[];

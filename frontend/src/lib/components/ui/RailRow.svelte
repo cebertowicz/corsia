@@ -13,6 +13,8 @@
 		meta?: string;
 		/** 0 to 1: a hairline under the text. */
 		progress?: number;
+		/** The row's own fix, an inline text action on its own line under the message. It is the row's only click target. */
+		action?: { label: string; onclick: () => void };
 		/** The row's own icon, for `current` and `todo`. */
 		icon?: Snippet;
 		/** The approved setup-step icon when a custom snippet is unnecessary. */
@@ -20,7 +22,7 @@
 		onclick?: () => void;
 	}
 
-	const { label, state = 'todo', meta, progress, icon, iconName, onclick }: Props = $props();
+	const { label, state = 'todo', meta, progress, icon, iconName, action, onclick }: Props = $props();
 	const interactive = $derived(!!onclick && state !== 'todo' && state !== 'current');
 	const hasDetails = $derived(Boolean(meta || progress !== undefined));
 
@@ -73,13 +75,16 @@
 				{/if}
 			</span>
 		</span>
+		{#if action}
+			<button type="button" class="act" aria-label={`${action.label}: ${label}`} onclick={action.onclick} in:tokenFade out:tokenFade><span class="act-label">{action.label}</span></button>
+		{/if}
 	</span>
 {/snippet}
 
 {#if interactive}
 	<button type="button" class="row {state}" in:railMotion out:railMotion {onclick}>{@render inner()}</button>
 {:else}
-	<div class="row {state}" in:railMotion out:railMotion aria-current={state === 'current' ? 'step' : undefined}>{@render inner()}</div>
+	<div class="row {state}" class:has-action={!!action} in:railMotion out:railMotion aria-current={state === 'current' ? 'step' : undefined}>{@render inner()}</div>
 {/if}
 
 <style>
@@ -125,6 +130,17 @@
 	.details-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1px; }
 	.meta { color: var(--text-tertiary); font-size: var(--text-caption); line-height: 1.2; }
 	.row.error .meta { color: var(--red-text); }
+	/* A row that carries its own fix keeps its message in secondary text; only its dot is red. */
+	.row.has-action .meta { color: var(--text-secondary); }
+	/* Inline text action as setup's other fixes: accent text, no box. The button itself is the 44px hit area; the ring sits on the label so the row's clipping never cuts it. */
+	.act {
+		align-self: flex-start; display: flex; align-items: center; min-height: 44px; margin-left: calc(var(--space-2) * -1); padding: 0 var(--space-2);
+		background: none; border: none; border-radius: var(--radius-sm); font-family: inherit; font-size: var(--text-footnote);
+		font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer;
+	}
+	.act:hover { background: var(--accent-wash); }
+	.act:focus-visible { outline: none; }
+	.act:focus-visible .act-label { outline: 2px solid var(--accent-line); outline-offset: 2px; border-radius: var(--radius-sm); }
 	.hair { display: block; height: calc(var(--space-1) / 2); margin-top: var(--space-1); border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
 	.hair i { display: block; height: 100%; background: var(--accent-line); border-radius: inherit; transition: width var(--dur-standard) var(--ease-material); }
 	@media (prefers-reduced-motion: reduce) { .details { transition: opacity var(--dur-tight) var(--ease-snap); } .details.open { grid-template-rows: 1fr; } .hair i { transition: none; } }
