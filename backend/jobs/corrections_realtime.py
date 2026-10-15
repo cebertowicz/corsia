@@ -287,6 +287,9 @@ def startup_scan() -> None:
 async def shutdown() -> None:
     """Cancel and join the worker, then stop the model child; later arrivals wait for the next startup."""
     global _TASK, _CHILD, _STOPPING
+    if _TASK is not None and _TASK.get_loop() is not asyncio.get_running_loop():
+        # Waiting on another loop's task never finishes; refuse loudly like the other owned tasks.
+        raise RuntimeError("corrections classifier worker is attached to a different loop")
     _STOPPING = True
     task, _TASK = _TASK, None
     if task is not None:
