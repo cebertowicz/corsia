@@ -154,11 +154,15 @@ async def test_callback_with_the_wrong_state_is_refused_and_single_use(google, c
     async with _http() as http:
         wrong = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": "forged"})
         assert wrong.status_code == 400
-        # The pending sign-in is consumed by the failed attempt: even the right state is now dead.
+        assert google.token_forms == []
+        # A forged callback must not cancel the person's sign-in in progress.
+        right = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+        assert right.status_code == 200
+        # The right state is single-use.
         again = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
         assert again.status_code == 400
-    assert google.token_forms == []
-    assert key_store.resolve_google() is None
+    assert len(google.token_forms) == 1
+    assert key_store.resolve_google() is not None
 
 
 async def test_callback_with_a_mismatched_pkce_verifier_is_refused(google, conductor, client_file):

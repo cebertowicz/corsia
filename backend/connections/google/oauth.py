@@ -77,8 +77,9 @@ def read_client_file(raw_path: object) -> tuple[str, str]:
 
     if not isinstance(raw_path, str) or not raw_path.strip():
         raise GoogleSignInError(NEEDS_CLIENT_FILE)
-    path = Path(raw_path.strip()).expanduser()
     try:
+        # Check and read the same resolved file, so a symlink can't swap in another one.
+        path = Path(raw_path.strip()).expanduser().resolve()
         if forbidden_path({"path": str(path)}, for_write=False) or path.suffix != ".json":
             raise GoogleSignInError(BAD_CLIENT_FILE)
         if not path.is_file() or path.stat().st_size > CLIENT_FILE_MAX_BYTES:
@@ -140,15 +141,21 @@ async def start_sign_in(client_file: object = None) -> str:
 
 
 def _take_pending(state: object) -> _Pending:
-    """Consume the pending sign-in if ``state`` is its state and it hasn't expired."""
+    """Consume the pending sign-in if ``state`` is its state and it hasn't expired.
+
+    A wrong state leaves it pending: any page can make the browser GET the
+    loopback callback, and that must not cancel the person's sign-in.
+    """
     global _pending
-    pending, _pending = _pending, None
+    pending = _pending
     if (
         pending is None
         or not isinstance(state, str)
         or not secrets.compare_digest(state.encode(), pending.state.encode())
-        or time.monotonic() >= pending.expires_at
     ):
+        raise GoogleSignInError(DENIED)
+    _pending = None
+    if time.monotonic() >= pending.expires_at:
         raise GoogleSignInError(DENIED)
     return pending
 
