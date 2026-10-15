@@ -88,19 +88,34 @@ class _Stage:
 
 
 def _declaring_step_seq(db, thread_id: str, turn_id: str, call_id: str) -> int | None:
-    """The transcript position of the one Assistant Step of this turn that declared ``call_id``."""
+    """Where the model response that declared ``call_id`` starts in this turn's transcript.
+
+    Claude Code persists a parallel batch as one row per call, sharing the
+    provider's message id; a steer can land between those rows. The model wrote
+    every call in the response before it could see that steer, so the response's
+    first row is the position that counts.
+    """
     from core.message_row import assistant_calls, call_id as declared_id
 
     steps = db.execute(
-        "SELECT seq, metadata FROM messages WHERE thread_id=? AND role='assistant'"
+        "SELECT seq, metadata, json_extract(metadata, '$.provider_message_id') AS response"
+        " FROM messages WHERE thread_id=? AND role='assistant'"
         " AND json_valid(metadata) AND json_extract(metadata, '$.turn_id')=?",
         (thread_id, turn_id),
     ).fetchall()
     found = [
-        step["seq"] for step in steps
+        step for step in steps
         if any(declared_id(call) == call_id for call in assistant_calls(dict(step)))
     ]
-    return found[0] if len(found) == 1 and isinstance(found[0], int) else None
+    if len(found) != 1 or not isinstance(found[0]["seq"], int):
+        return None
+    response = found[0]["response"]
+    if not response:
+        return found[0]["seq"]
+    return min(
+        step["seq"] for step in steps
+        if step["response"] == response and isinstance(step["seq"], int)
+    )
 
 
 def _utc(value: str) -> datetime | None:

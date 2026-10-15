@@ -50,16 +50,17 @@ def _deliver(db, turn_id):
         db.commit()
 
 
-def _declare(db, turn_id, call_id=CALL, thread_id=THREAD):
+def _declare(db, turn_id, call_id=CALL, thread_id=THREAD, response=None):
     """Persist the Assistant Step that declares one tool call."""
     from infra.queries import insert_message
 
-    insert_message(
-        thread_id, "assistant", "",
-        {"turn_id": turn_id,
-         "llm_tool_calls": [{"id": call_id, "function": {"name": "email_send", "arguments": "{}"}}]},
-        db=db,
-    )
+    metadata = {
+        "turn_id": turn_id,
+        "llm_tool_calls": [{"id": call_id, "function": {"name": "email_send", "arguments": "{}"}}],
+    }
+    if response:
+        metadata["provider_message_id"] = response
+    insert_message(thread_id, "assistant", "", metadata, db=db)
     db.commit()
 
 
@@ -288,6 +289,36 @@ async def test_message_delivered_after_the_declaring_step_cannot_approve_the_cal
     _bind(deleg_db, "t1", deliver=False)  # the declaring step is written first
     _deliver(deleg_db, "t1")              # the person's row reaches the model afterwards
     assert _text(await _gate(draft)) == action_gate.NOT_PERSON
+
+
+@pytest.mark.asyncio
+async def test_steer_between_rows_of_one_parallel_batch_cannot_approve_its_later_call(
+    deleg_db, workspace,
+):
+    """Claude Code writes one row per call of a batch; a steer landing between them was unseen."""
+    from tools import action_gate
+
+    draft = _draft(deleg_db, workspace)
+    _admit(deleg_db, "t1")
+    _declare(deleg_db, "t1", "call-0", response="msg-1")   # call A's row
+    _deliver(deleg_db, "t1")                                 # the steer lands while A is held
+    _declare(deleg_db, "t1", CALL, response="msg-1")         # call B, same model response
+    _bind(deleg_db, "t1", deliver=False, declare=False)
+    assert _text(await _gate(draft)) == action_gate.NOT_PERSON
+
+
+@pytest.mark.asyncio
+async def test_person_message_before_a_later_response_approves_its_call(deleg_db, workspace):
+    """A response written after the person's row saw it, whatever earlier responses did."""
+    from tools.action_gate import Approved
+
+    draft = _draft(deleg_db, workspace)
+    _admit(deleg_db, "t1")
+    _declare(deleg_db, "t1", "call-0", response="msg-1")
+    _deliver(deleg_db, "t1")
+    _declare(deleg_db, "t1", CALL, response="msg-2")
+    _bind(deleg_db, "t1", deliver=False, declare=False)
+    assert isinstance(await _gate(draft), Approved)
 
 
 @pytest.mark.asyncio
