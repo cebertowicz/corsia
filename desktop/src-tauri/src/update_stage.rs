@@ -241,13 +241,13 @@ async fn download_archive_with_limits<F>(
 where
     F: FnOnce(&Path) -> Result<u64, String>,
 {
-    let response = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .connect_timeout(connect_timeout)
         .build()
-        .map_err(|error| StageError::Fetch(error.to_string()))?
-        .get(url.clone())
-        .send()
+        .map_err(|error| StageError::Fetch(error.to_string()))?;
+    let response = tokio::time::timeout(stall_timeout, client.get(url.clone()).send())
         .await
+        .map_err(|_| StageError::Fetch(format!("no response within {stall_timeout:?}")))?
         .map_err(|error| StageError::Fetch(error.to_string()))?;
     if !response.status().is_success() {
         return Err(StageError::Fetch(format!(
@@ -873,6 +873,33 @@ mod tests {
             |_| Ok(u64::MAX),
         ));
         assert!(matches!(result, Err(StageError::Fetch(reason)) if reason.contains("size cap")));
+        assert!(!archive.exists());
+    }
+
+    #[test]
+    fn response_header_stall_refuses_without_creating_archive() {
+        use std::{io::Read, net::TcpListener, thread};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            thread::sleep(Duration::from_millis(150));
+        });
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("archive");
+        let result = tauri::async_runtime::block_on(download_archive_with_limits(
+            &format!("http://{address}/archive").parse().unwrap(),
+            &archive,
+            3,
+            Duration::from_secs(1),
+            Duration::from_millis(25),
+            |_| Ok(u64::MAX),
+        ));
+
+        assert!(matches!(result, Err(StageError::Fetch(reason)) if reason.contains("no response")));
         assert!(!archive.exists());
     }
 
