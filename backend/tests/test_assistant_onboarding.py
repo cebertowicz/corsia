@@ -79,6 +79,8 @@ def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
 
     assert "`mcp_sources`" in first_run
     assert "/api/mcp/import" in first_run
+    assert "Import all, some (name them), or none?" in first_run
+    assert "one pair for each server they approved and no other" in first_run
     assert "**The Assistant:**" in first_run
     assert "never offer the Assistant" in first_run
     assert "Set up Google tools" in first_run
