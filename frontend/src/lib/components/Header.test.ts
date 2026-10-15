@@ -242,17 +242,20 @@ describe('Header glass layers', () => {
 	};
 	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
 
-	it('keeps the phone header blur off the layer that carries the fade mask', () => {
-		// A mask fades whatever its layer draws, blur included: on the masked layer
-		// WebKit shows the transcript through the title row.
+	it('keeps the phone header blur opaque through the controls, then fades it out below them', () => {
 		const tint = rule(phone, '.shell-header::before');
 		expect(tint).toMatch(/bottom: -24px;/);
 		expect(tint).toMatch(/-webkit-mask-image: linear-gradient/);
 		expect(tint).toMatch(/mask-image: linear-gradient/);
+		expect(tint).toContain('color-mix(in srgb, var(--header-top-base) 45%, transparent) 50%');
+		expect(tint).toContain('color-mix(in srgb, var(--header-top-base) 15%, transparent) 80%');
 		expect(tint).toMatch(/-webkit-backdrop-filter: none;/);
 		const blur = rule(phone, '.shell-header::after');
+		expect(blur).toMatch(/inset: 0 0 -24px;/);
 		expect(blur).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
+		expect(blur).toMatch(/-webkit-mask-image: linear-gradient/);
+		expect(blur).toMatch(/mask-image: linear-gradient/);
+		expect(blur).toMatch(/rgba\(0, 0, 0, 1\) calc\(100% - 24px\)/);
 		expect(blur).toMatch(/z-index: -2;/);
-		expect(blur).not.toMatch(/mask/);
 	});
 });

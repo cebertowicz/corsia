@@ -280,9 +280,8 @@
 			background-image: linear-gradient(
 				180deg,
 				color-mix(in srgb, var(--header-top-base) 70%, transparent) 0%,
-				color-mix(in srgb, var(--header-top-base) 70%, transparent) calc(100% - 24px),
-				color-mix(in srgb, var(--header-top-base) 45%, transparent) calc(100% - 12px),
-				color-mix(in srgb, var(--header-top-base) 15%, transparent) calc(100% - 5px),
+				color-mix(in srgb, var(--header-top-base) 45%, transparent) 50%,
+				color-mix(in srgb, var(--header-top-base) 15%, transparent) 80%,
 				transparent 100%
 			);
 			-webkit-mask-image: linear-gradient(
@@ -299,15 +298,29 @@
 				rgba(0, 0, 0, 0.5) calc(100% - 5px),
 				transparent 100%
 			);
-			/* The fade mask also fades the blur, so WebKit lets the transcript show
-			   through the title row; the blur lives unmasked on ::after instead. */
+			/* Tint and blur use the same below-controls fade geometry. Keeping blur off
+			   this layer leaves the title row full-strength while ::after ramps it out. */
 			backdrop-filter: none;
 			-webkit-backdrop-filter: none;
 		}
 		.shell-header::after {
-			content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+			content: ''; position: absolute; inset: 0 0 -24px; z-index: -2; pointer-events: none;
 			backdrop-filter: var(--glass-blur);
 			-webkit-backdrop-filter: var(--glass-blur);
+			-webkit-mask-image: linear-gradient(
+				180deg,
+				rgba(0, 0, 0, 1) 0%,
+				rgba(0, 0, 0, 1) calc(100% - 24px),
+				rgba(0, 0, 0, 0.5) calc(100% - 5px),
+				transparent 100%
+			);
+			mask-image: linear-gradient(
+				180deg,
+				rgba(0, 0, 0, 1) 0%,
+				rgba(0, 0, 0, 1) calc(100% - 24px),
+				rgba(0, 0, 0, 0.5) calc(100% - 5px),
+				transparent 100%
+			);
 		}
 		.h-left { justify-self: start; }
 		.h-right { justify-self: end; margin-left: 0; }
