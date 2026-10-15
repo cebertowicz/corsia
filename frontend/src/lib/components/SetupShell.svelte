@@ -228,6 +228,8 @@
 	/* The pill clips the exiting label while it shrinks; scoped here so the shared pill keeps its touch-target ::after. */
 	:global(.primary-action .btn.pill) { overflow: hidden; }
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
+	:global(.setup-accent-text-action) { align-self: flex-start; }
+	:global(.setup-accent-text-action .btn.chip) { margin-inline: calc(var(--space-2) * -1); }
 	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
 	.job-region { overflow: hidden; }
 	.job-region-inner { min-height: 0; overflow: hidden; }

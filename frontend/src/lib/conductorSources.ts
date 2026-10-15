@@ -97,17 +97,17 @@ export type LocalSetupResult = {
 	message?: string;
 	next_action?: string;
 	progress?: string[];
-	code?: 'consent_required';
+	code?: 'consent_required' | 'replace_consent_required';
 };
 
-export async function setupLocalSource(t: string, consentExisting = false): Promise<LocalSetupResult> {
+export async function setupLocalSource(t: string, consentExisting = false, consentReplace = false): Promise<LocalSetupResult> {
 	const response = await fetch('/api/providers/local/setup', {
 		method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify({ consent_existing: consentExisting }),
+		body: JSON.stringify({ consent_existing: consentExisting, ...(consentReplace ? { consent_replace: true } : {}) }),
 	});
 	const body = await response.json().catch(() => null);
 	const code = body?.detail?.code ?? body?.code;
-	if (response.status === 409 && code === 'consent_required') return { ok: false, code };
+	if (response.status === 409 && (code === 'consent_required' || code === 'replace_consent_required')) return { ok: false, code };
 	if (!response.ok) throw new Error(`local setup ${response.status}`);
 	return body;
 }

@@ -791,20 +791,33 @@ class TestRecheck:
         assert response.status_code == 409
         assert response.json() == {"detail": {"code": "consent_required"}}
 
-    def test_local_setup_route_records_accepted_existing_omlx_consent(self, isolated_db, client, monkeypatch):
-        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: True)
+    def test_broken_existing_omlx_requires_second_replacement_consent(self, isolated_db, client, monkeypatch):
         persisted = []
+        calls = []
+        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: not persisted)
+        replace_probes = []
+        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_replace_consent", lambda: replace_probes.append(True) or True)
         monkeypatch.setattr("llm.local_setup_ownership.record_existing_omlx_consent", lambda: persisted.append(True))
 
         async def begin(**kwargs):
+            calls.append(kwargs)
             return {"ok": True, "in_progress": True}
 
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
-        response = client.post("/api/providers/local/setup", json={"consent_existing": True})
-
-        assert response.status_code == 200
-        assert response.json() == {"ok": True, "in_progress": True}
+        no_reuse = client.post("/api/providers/local/setup")
+        reuse_only = client.post("/api/providers/local/setup", json={"consent_existing": True})
+        assert replace_probes == [True]
+        assert no_reuse.status_code == 409
+        assert no_reuse.json() == {"detail": {"code": "consent_required"}}
+        assert reuse_only.status_code == 409
+        assert reuse_only.json() == {"detail": {"code": "replace_consent_required"}}
         assert persisted == [True]
+        assert calls == []
+
+        accepted = client.post("/api/providers/local/setup", json={"consent_replace": True})
+        assert accepted.status_code == 200
+        assert accepted.json() == {"ok": True, "in_progress": True}
+        assert calls == [{"no_subscription_only": False, "automatic": False, "profile_id": None}]
 
     def test_local_setup_status_route_returns_the_flight_record(self, isolated_db, client, monkeypatch):
         import asyncio

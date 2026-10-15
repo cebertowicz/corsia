@@ -19,7 +19,7 @@ let component: ReturnType<typeof mount> | null = null;
 let omlx: Partial<ModelSource> = {};
 let calls: string[] = [];
 let setupBodies: unknown[] = [];
-let setupResponses: Array<'consent' | 'failure' | 'ok'> = [];
+let setupResponses: Array<'consent' | 'replace' | 'failure' | 'ok'> = [];
 
 beforeEach(() => {
 	host = document.createElement('div');
@@ -42,6 +42,7 @@ beforeEach(() => {
 			setupBodies.push(JSON.parse(String(init?.body)));
 			const response = setupResponses.shift();
 			if (response === 'consent') return { ok: false, status: 409, json: async () => ({ detail: { code: 'consent_required' } }) };
+			if (response === 'replace') return { ok: false, status: 409, json: async () => ({ detail: { code: 'replace_consent_required' } }) };
 			if (response === 'failure') return { ok: false, status: 500, json: async () => ({}) };
 		}
 		return { ok: true, json: async () => ({}) };
@@ -130,6 +131,18 @@ describe('the picker\'s Local group', () => {
 
 		expect(setupBodies).toEqual([{ consent_existing: false }, { consent_existing: true }]);
 		expect(calls.filter((call) => call === 'GET /api/providers/sources')).toHaveLength(3);
+	});
+
+	it('requires Reinstall after reuse consent finds a broken oMLX', async () => {
+		omlx = { setup_error: 'disk full', setup_kind: 'setup' };
+		await render();
+		setupResponses = ['consent', 'replace', 'ok'];
+		button('Try again')!.click();
+		await vi.waitFor(() => expect(get(toasts)[0]?.action?.label).toBe('Use existing oMLX'));
+		await toasts.runAction(get(toasts)[0]!.id);
+		await vi.waitFor(() => expect(get(toasts)[0]?.action?.label).toBe('Reinstall'));
+		await toasts.runAction(get(toasts)[0]!.id);
+		expect(setupBodies).toEqual([{ consent_existing: false }, { consent_existing: true }, { consent_existing: false, consent_replace: true }]);
 	});
 
 	it('shows a setup failure if the picker consent action cannot complete', async () => {

@@ -103,6 +103,23 @@ def existing_omlx_requires_consent() -> bool:
     )
 
 
+def existing_omlx_requires_replace_consent() -> bool:
+    """Whether an already-consented foreign oMLX must be explicitly replaced.
+
+    Unlike the initial consent predicate, this runs only after the person has
+    authorized read-only adoption. It therefore may establish that the
+    PATH-present foreign entry point is a broken leftover. CORSIA-owned installs
+    retain their existing repair path without another prompt.
+    """
+    path = shutil.which("omlx")
+    return bool(
+        path
+        and not marker_path().exists()
+        and consent_marker_path().exists()
+        and _is_broken_leftover(path)
+    )
+
+
 def installed_omlx() -> str | None:
     """The working ``omlx`` on PATH, or None when it is absent or a broken leftover."""
     path = shutil.which("omlx")

@@ -68,6 +68,76 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Create your account');
 	});
 
+	it('returns a signed-in person to another model source after Not now', async () => {
+		if (component) await unmount(component);
+		calls = [];
+		token.set('signed-in');
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/providers/local/setup') return json({ code: 'replace_consent_required' }, 409);
+			if (url === '/api/providers/sources/recheck') return json({ sources: [
+				{ source: 'omlx', name: 'Local model', state: 'needs_setup' },
+				{ source: 'claude-code', name: 'Claude Code', state: 'needs_auth' },
+			] });
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		expect(Array.from(host.querySelectorAll('.row.done')).some((row) => row.textContent?.includes('Your account'))).toBe(true);
+		expect(host.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Not now')?.click();
+		await settle();
+
+		expect(calls).toContain('/api/providers/local/setup');
+		expect(host.textContent).toContain('Choose an AI model');
+		expect(host.textContent).toContain('Claude Code');
+		expect(host.textContent).toContain("oMLX doesn't start");
+		expect(host.textContent).toContain('Reinstall');
+		expect(host.textContent).not.toContain('Create your account');
+	});
+
+	it('keeps one current rail mark and shows repair in the rail as soon as Reinstall starts', async () => {
+		if (component) await unmount(component);
+		let downloads = 0;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/local-download') {
+				downloads += 1;
+				return downloads === 1 ? json({ code: 'replace_consent_required' }, 409) : json({ ok: true, in_progress: true, stage: 'Installing' });
+			}
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		expect(Array.from(host.querySelectorAll('.row.done')).some((row) => row.textContent?.includes('Welcome'))).toBe(true);
+		expect(host.querySelectorAll('.row.current')).toHaveLength(1);
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
+		await settle();
+		expect(host.querySelectorAll('.row.current')).toHaveLength(1);
+		expect(host.querySelector('.row.current')?.textContent).toContain('AI model');
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Reinstall')?.click();
+		await settle();
+		expect(host.textContent).toContain('Create your account');
+		expect(host.querySelector('.job-region')?.textContent).toContain('Example model');
+		expect(host.querySelector('.job-region')?.textContent).toContain('Installing');
+		expect(host.querySelectorAll('.row.current')).toHaveLength(1);
+		expect(host.querySelector('.row.current')?.textContent).toContain('Your account');
+	});
+
 	it('starts existing oMLX adoption only after Use it consents', async () => {
 		if (component) await unmount(component);
 		calls = [];
@@ -88,6 +158,28 @@ describe('SetupScreen', () => {
 		await settle();
 		expect(calls).toEqual(['/api/setup/status', '/api/setup/local-download']);
 		expect(bodies).toEqual(['{"consent_existing":true}']);
+	});
+
+	it('shows replacement consent copy exactly once after reuse finds a broken oMLX', async () => {
+		if (component) await unmount(component);
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input); calls.push(url);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: true, model_name: 'Example model', model_size_gb: 30 });
+			if (url === '/api/setup/local-download') return json({ code: 'replace_consent_required' }, 409);
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+		await settle();
+
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+		await settle();
+		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
+		await settle();
+
+		const replacementCopy = 'CORSIA can reinstall oMLX and download Example model (30 GB). Reinstalling replaces that oMLX and changes its settings.';
+		expect(Array.from(host.querySelectorAll('p')).filter((paragraph) => paragraph.textContent?.trim() === replacementCopy)).toHaveLength(1);
+		expect(host.querySelector('.consent-actions button')?.textContent?.trim()).toBe('Not now');
 	});
 
 	it('shows the existing oMLX choice when local download reports consent required', async () => {
