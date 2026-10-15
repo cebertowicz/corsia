@@ -355,6 +355,129 @@ def test_a_document_ask_holds_the_task_until_the_user_acts(db):
     assert shown["artifacts"][0]["attention_state"] == "cleared"
 
 
+def test_withdrawing_a_document_ask_clears_its_plan_and_review_state(db):
+    from plans import user_ask
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="pending", external_id="withdrawn.md")
+    hold = db.execute(
+        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
+    ).fetchone()
+
+    mutate(
+        node.plan_id, "resolve_blocker", {
+            "node_id": node.id, "hold_id": hold["id"],
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    assert _open_holds(db, node.id) == 0
+    assert user_ask.raised_asks(db, ask) == []
+    assert attention.get_attention_state(ask, db=db) == "cleared"
+
+
+@pytest.mark.parametrize("operation", ("fail", "close_node", "archive_node"))
+def test_settling_or_archiving_an_ask_withdraws_its_attention(db, operation):
+    from plans import user_ask
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="pending", external_id=f"{operation}.md")
+    params = {
+        "node_id": node.id,
+        "expected_revision": service._node_row(db, node.id)["revision"],
+    }
+    if operation == "close_node":
+        params["reason"] = "No longer needed"
+    mutate(
+        node.plan_id, operation, params, actor=OWNER, provenance="test.blocked_wait",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    assert user_ask.raised_asks(db, ask) == []
+    assert attention.get_attention_state(ask, db=db) == "cleared"
+
+
+def test_accepting_an_ask_withdraws_its_attention(db):
+    from plans import user_ask
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="review_requested", external_id="accepted.md")
+    mutate(
+        node.plan_id, "accept", {
+            "node_id": node.id, "evidence": "Reviewed", "verification_result": "passed",
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    assert user_ask.raised_asks(db, ask) == []
+    assert attention.get_attention_state(ask, db=db) == "cleared"
+
+
+def test_document_ask_refuses_a_second_node_and_reblocking_is_idempotent(db):
+    from registry import attention
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    first = service.add_node(
+        plan.id, kind="task", title="First review", acceptance_criteria="Reviewed", db=db,
+    )
+    second = service.add_node(
+        plan.id, kind="task", title="Second review", acceptance_criteria="Reviewed", db=db,
+    )
+    ask = _document_ask(db, "one-open-review.md")
+    db.commit()
+
+    def block(node):
+        return mutate(
+            plan.id, "block_node", {
+                "node_id": node.id, "reason_key": "review", "reason": "Review it",
+                "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+                "expected_revision": service._node_row(db, node.id)["revision"],
+            }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+        )
+
+    block(first)
+    block(first)
+
+    assert _open_holds(db, first.id) == 1
+    assert attention.get_attention_state(ask, db=db) == "raised"
+    with pytest.raises(
+        service.PlanInputError, match="withdraw it \\(resolve the blocker\\) and ask again",
+    ) as refusal:
+        block(second)
+    assert "First review" in str(refusal.value)
+    assert _open_holds(db, second.id) == 0
+
+
+def test_reblocking_with_another_document_withdraws_the_previous_ask(db):
+    from plans import user_ask
+    from registry import attention
+
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title="Review", acceptance_criteria="Reviewed", db=db,
+    )
+    first = _document_ask(db, "replace-first.md")
+    second = _document_ask(db, "replace-second.md")
+    db.commit()
+
+    def block(ask: str) -> None:
+        mutate(
+            plan.id, "block_node", {
+                "node_id": node.id, "reason_key": "review", "reason": "Review it",
+                "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+                "expected_revision": service._node_row(db, node.id)["revision"],
+            }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+        )
+
+    block(first)
+    block(second)
+
+    assert user_ask.raised_asks(db, first) == []
+    assert attention.get_attention_state(first, db=db) == "cleared"
+    assert len(user_ask.raised_asks(db, second)) == 1
+    assert _open_holds(db, node.id) == 1
+
+
 def test_answering_a_pending_document_ask_wakes_the_owner_once(db):
     from registry import attention
 

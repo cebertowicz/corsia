@@ -108,6 +108,26 @@ def test_each_thread_reads_its_one_state(db):
     assert [key for key, value in states.items() if value["paused"]] == ["paused"]
 
 
+def test_a_child_review_counts_once_not_again_as_its_parent_rollup(db):
+    owner = _thread(db, "child-review")
+    plan = _plan(db, "child-review")
+    parent = service.add_node(
+        plan.id, kind="phase", title="Review phase", acceptance_criteria="Reviewed", db=db,
+    )
+    child = task(db, plan.id, "Review the document", parent_id=parent.id, assignee="user")
+    _activate(db, plan.id, child.id, HUMAN)
+    plan_update(db, plan.id, "request_review", {
+        "node_id": child.id, "evidence": "Ready for you",
+        "expected_revision": revision(db, child.id),
+    }, actor=HUMAN)
+
+    state = _states(db, [owner.thread_id])[owner.thread_id]
+
+    assert state["attention_items"] == [{
+        "kind": "review", "title": "Review the document", "node_id": child.id,
+    }]
+
+
 def test_what_the_user_owes_outranks_a_pause(db):
     """Pause contract rule 5 (#1972): the chat list, the header and the agent's
     summary all say the user's move before they say paused."""

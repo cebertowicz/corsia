@@ -41,7 +41,7 @@ NOT_ASKABLE = (
 _ENDS_ASK = {
     "answer": "answered", "acknowledge": "acknowledged",
     "dismiss": "dismissed", "supersede": "replaced",
-    "retire": "retired",
+    "retire": "retired", "withdraw": "withdrawn",
 }
 _PROVENANCE = "user.ask_cleared"
 #: What an agent may ask the user to review: the viewers that carry a review bar.
@@ -63,7 +63,8 @@ def raised_asks(db, artifact_id: str) -> list:
     """The user holds that wait on this artifact, newest first, with their asking agent."""
     return db.execute(
         f"""SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
-                  n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name
+                  n.id AS node_id, n.title AS task_title,
+                  p.owner_id AS asker_id, t.title AS asker_name
              FROM plan_node_artifact_links l
              JOIN plan_nodes n ON n.id = l.node_id
              JOIN plans p ON p.id = n.plan_id
@@ -236,7 +237,15 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
         )
     if identity["type"] not in ASKABLE_TYPES or identity["state"] != "active":
         raise service.PlanInputError(NOT_ASKABLE)
-    return ask.strip()
+    ask = ask.strip()
+    existing = raised_asks(db, ask)
+    if existing and all(str(row["node_id"]) != node_id for row in existing):
+        task = str(existing[0]["task_title"] or existing[0]["node_id"])
+        raise service.PlanInputError(
+            f"this document already has an open review request on task {task!r}; "
+            "withdraw it (resolve the blocker) and ask again"
+        )
+    return ask
 
 
 def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenance: str) -> None:
@@ -248,6 +257,7 @@ def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenan
         node_id, artifact_id, "attention", actor_id=actor_id, provenance=provenance, db=db,
     )
     attention.raise_attention(artifact_id, db=db)
+
 
 
 def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None) -> int:

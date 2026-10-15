@@ -125,8 +125,12 @@ def _plan_attention_items(presented: dict) -> list[dict]:
     """Every actionable plan ask, using the chat list's existing attention shape."""
     items = []
     work = node_states.work_ids(presented["nodes"])
+    parents = node_states.parent_ids(presented["nodes"])
     for node in presented["nodes"]:
-        if node["id"] not in work or node["folded"] or not node["requires_user_action"]:
+        if (
+            node["id"] not in work or node["id"] in parents or node["folded"]
+            or not node["requires_user_action"]
+        ):
             continue
         review = node["review"]
         if review is None:

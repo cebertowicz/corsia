@@ -25,7 +25,7 @@ ATTENTION_DEFERRED = "deferred"
 ATTENTION_CLEARED = "cleared"
 
 #: Explicit clearing actions (AC-4.2). Closing a viewer is NOT one of these.
-CLEAR_OUTCOMES = frozenset({"answer", "acknowledge", "dismiss", "supersede", "defer"})
+CLEAR_OUTCOMES = frozenset({"answer", "acknowledge", "dismiss", "supersede", "defer", "withdraw"})
 RETIRE_OUTCOME = "retire"
 
 DEFER_CONDITION_TYPES = frozenset({"deadline", "event", "milestone", "dependency"})

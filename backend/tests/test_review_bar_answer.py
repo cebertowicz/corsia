@@ -47,6 +47,25 @@ def _ask(db, artifact_id: str, *, title: str = "Review the proposal") -> str:
     return node.id
 
 
+def _legacy_duplicate_ask(db, artifact_id: str, *, title: str) -> str:
+    """Seed a duplicate from before one-open-ask validation existed."""
+    plan = service.ensure_plan("thread", "owner", db=db)
+    node = service.add_node(
+        plan.id, kind="task", title=title, acceptance_criteria="Reviewed", db=db,
+    )
+    holds.block_hold(
+        node.id, reason_key="review", reason=f"Please read: {title}",
+        owner_kind="user", owner_id=artifact_id,
+        expected_revision=service._node_row(db, node.id)["revision"],
+        actor_id="owner", provenance="test.review_bar.legacy", db=db,
+    )
+    user_ask.attach(
+        db, node.id, artifact_id, actor_id="owner", provenance="test.review_bar.legacy",
+    )
+    db.commit()
+    return node.id
+
+
 def _comment(db, artifact_id: str, **kwargs) -> None:
     add_comment(db, artifact_id, author_kind="user", author="Steve", author_id=None, **kwargs)
 
@@ -212,7 +231,7 @@ def test_request_changes_with_round_feedback_needs_no_note(db):
 def test_one_answer_releases_every_ask_on_the_artifact(db):
     artifact = seed_document(db, "owner", name="proposal.md")
     first = _ask(db, artifact, title="Review the proposal")
-    second = _ask(db, artifact, title="Check the numbers")
+    second = _legacy_duplicate_ask(db, artifact, title="Check the numbers")
 
     _answer(db, artifact, "approved")
 

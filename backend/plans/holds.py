@@ -154,10 +154,22 @@ def clear(
     """
 
     node = _validate_node(db, node_id, expected_revision)
+    hold = db.execute(
+        """SELECT h.owner_id FROM plan_node_holds h
+           JOIN plan_node_artifact_links l
+             ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
+           WHERE h.id=? AND h.node_id=? AND h.kind=? AND h.owner_kind='user'
+             AND h.cleared_at IS NULL""",
+        (hold_id, node_id, expected_kind),
+    ).fetchone()
     clear_write(
         node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
         provenance=provenance, db=db,
     )
+    if expected_kind == "blocked" and hold is not None and hold["owner_id"] is not None:
+        from plans import ask_withdrawal
+
+        ask_withdrawal.clear_withdrawn_attention(db, str(hold["owner_id"]))
     from plans import admission
 
     admission.reconcile_plan(
@@ -279,6 +291,16 @@ def block_hold(
             "a blocker anyone but the user clears is a wait, not a hold; "
             "block_node arms it with a deadline"
         )
+    if owner_kind == "user" and owner_id is not None:
+        node = _validate_node(db, node_id, expected_revision)
+        existing = db.execute(
+            """SELECT id FROM plan_node_holds
+               WHERE node_id=? AND kind='blocked' AND owner_kind='user'
+                 AND owner_id=? AND cleared_at IS NULL""",
+            (node_id, owner_id),
+        ).fetchone()
+        if existing is not None:
+            return node
     return place_hold(
         node_id,
         kind="blocked",
