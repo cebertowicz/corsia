@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from connections.google import oauth
+from connections.google import handover, oauth
 from connections.google.client import GoogleError
 from infra.auth import require_user
 from infra.db_async import run_in_db
@@ -46,7 +46,10 @@ async def connect(request: Request, _user: dict = Depends(require_user)) -> dict
     except ValueError:
         client_file = None
     try:
-        url = await oauth.start_sign_in(client_file)
+        url = await oauth.start_sign_in(
+            client_file,
+            normal_start_blocked=lambda: handover.normal_sign_in_blocked(_user["id"]),
+        )
     except GoogleError as exc:
         raise HTTPException(400, str(exc)) from None
     return {"url": url}

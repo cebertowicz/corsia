@@ -42,22 +42,34 @@ def _legacy_candidates(user_id: str) -> list[str]:
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id,agent_domains FROM threads WHERE user_id=? AND title='Assistant' "
+            "SELECT id,agent_domains,lifecycle_state FROM threads WHERE user_id=? AND title='Assistant' "
             "AND COALESCE(agent_enabled,0)=1 AND agent_responsibility=? AND agent_notes=? "
             "AND COALESCE(lifecycle_state,'active') != 'purged'",
             (user_id, LEGACY_ASSISTANT_RESPONSIBILITY, LEGACY_ASSISTANT_NOTES),
         ).fetchall()
-        candidates: list[str] = []
+        active: list[str] = []
+        archived: list[str] = []
         for row in rows:
             try:
                 domains = json.loads(row["agent_domains"] or "[]")
             except (TypeError, json.JSONDecodeError):
                 continue
-            if domains == LEGACY_ASSISTANT_DOMAINS:
-                candidates.append(str(row["id"]))
-        return candidates
+            if domains != LEGACY_ASSISTANT_DOMAINS:
+                continue
+            target = archived if row["lifecycle_state"] == "archived" else active
+            target.append(str(row["id"]))
+        return active or archived
     finally:
         db.close()
+
+
+def normal_sign_in_blocked(user_id: str) -> bool:
+    """Whether a normal CORSIA sign-in would strand one selected legacy home."""
+    for thread_id in _legacy_candidates(user_id):
+        home = gws_agent_home.existing_home_for(thread_id)
+        if home is not None and home.exists():
+            return True
+    return False
 
 
 def _select_assistant(user_id: str) -> _Assistant:
@@ -124,4 +136,5 @@ async def start(actor_thread_id: str) -> str:
     return await oauth.start_sign_in(
         after_exchange=after_exchange,
         store_failure_text=CLEANUP_FAILED,
+        is_handover=True,
     )

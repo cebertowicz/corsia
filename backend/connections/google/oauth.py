@@ -50,6 +50,15 @@ NEEDS_CLIENT_FILE = (
 BAD_CLIENT_FILE = "That file isn't a Google Desktop app client file. Pass the path of the downloaded client JSON."
 DENIED = "Google sign-in was refused or has expired. Call google_connect for a new link."
 MISSING_SCOPES = "The person didn't allow every permission. Call google_connect and ask them to allow all of them."
+LEGACY_ASSISTANT_HANDOVER_REQUIRED = (
+    "An old Assistant Google sign-in is still available. "
+    "Call google_adopt_assistant_sign_in instead of google_connect to move it safely."
+)
+HANDOVER_PENDING = (
+    "An Assistant Google handover is already waiting for the person's Allow click. "
+    "Complete it or wait up to 10 minutes, then call google_adopt_assistant_sign_in again; "
+    "do not call google_connect."
+)
 
 
 class GoogleSignInError(GoogleError):
@@ -66,6 +75,7 @@ class _Pending:
     expires_at: float
     after_exchange: Callable[[], Awaitable[None]] | None = None
     store_failure_text: str | None = None
+    is_handover: bool = False
 
 
 _pending: _Pending | None = None
@@ -136,12 +146,27 @@ def connected_email() -> str | None:
     return None
 
 
-def _begin(client_file: object) -> str:
-    """Sync part of starting a sign-in: refuse if connected, read the client, remember the state."""
+def _begin(
+    client_file: object,
+    after_exchange: Callable[[], Awaitable[None]] | None,
+    store_failure_text: str | None,
+    is_handover: bool,
+    normal_start_blocked: Callable[[], bool] | None,
+) -> str:
+    """Sync part of starting a sign-in and atomically retain its callback state."""
     global _pending
     email = connected_email()
     if email:
         raise GoogleSignInError(f"Google is already connected as {email}.")
+    if (
+        not is_handover
+        and _pending is not None
+        and time.monotonic() < _pending.expires_at
+        and _pending.is_handover
+    ):
+        raise GoogleSignInError(HANDOVER_PENDING)
+    if not is_handover and normal_start_blocked is not None and normal_start_blocked():
+        raise GoogleSignInError(LEGACY_ASSISTANT_HANDOVER_REQUIRED)
     credentials = read_client_file(client_file) if client_file else _stored_client()
     if credentials is None:
         raise GoogleSignInError(NEEDS_CLIENT_FILE)
@@ -151,6 +176,7 @@ def _begin(client_file: object) -> str:
         state=secrets.token_urlsafe(32), verifier=verifier, client_id=credentials[0],
         client_secret=credentials[1], redirect_uri=redirect_uri(),
         expires_at=time.monotonic() + PENDING_SECONDS,
+        after_exchange=after_exchange, store_failure_text=store_failure_text, is_handover=is_handover,
     )
     _pending = pending
     return AUTH_URL + "?" + urlencode({
@@ -165,13 +191,18 @@ async def start_sign_in(
     *,
     after_exchange: Callable[[], Awaitable[None]] | None = None,
     store_failure_text: str | None = None,
+    is_handover: bool = False,
+    normal_start_blocked: Callable[[], bool] | None = None,
 ) -> str:
     """The URL the person opens to sign in. The client's id and secret never leave the backend."""
-    url = await run_in_db(_begin, client_file)
-    if _pending is not None:
-        _pending.after_exchange = after_exchange
-        _pending.store_failure_text = store_failure_text
-    return url
+    return await run_in_db(
+        _begin,
+        client_file,
+        after_exchange,
+        store_failure_text,
+        is_handover,
+        normal_start_blocked,
+    )
 
 
 def _take_pending(state: object) -> _Pending:

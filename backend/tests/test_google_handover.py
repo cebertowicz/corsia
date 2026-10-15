@@ -16,7 +16,7 @@ from infra import key_store
 from infra.conductor import set_conductor
 from infra.database import get_db
 from tests.registry_helpers import make_session
-from tools.google_account import GoogleAdoptAssistantSignInTool
+from tools.google_account import GoogleAdoptAssistantSignInTool, GoogleConnectTool
 
 REFRESH = "1//handover-refresh-canary"
 SECRET = "handover-client-secret-canary"
@@ -145,6 +145,80 @@ async def test_success_cancels_archives_removes_home_then_saves_google(legacy_as
 
 
 @pytest.mark.asyncio
+async def test_google_connect_refuses_while_eligible_assistant_home_exists(legacy_assistant, handover_env):
+    conductor, assistant, client = legacy_assistant
+
+    result = await GoogleConnectTool().execute(_thread_id=conductor, client_file=str(client))
+
+    assert result == (
+        "Error: An old Assistant Google sign-in is still available. "
+        "Call google_adopt_assistant_sign_in instead of google_connect to move it safely."
+    )
+    assert _legacy_state(assistant, client) == ("active", "active", True)
+    assert key_store.resolve_google() is None
+    assert not oauth.has_stored_client()
+
+
+@pytest.mark.asyncio
+async def test_google_connect_cannot_replace_live_handover_pending(legacy_assistant, handover_env):
+    conductor, assistant, client = legacy_assistant
+    state = await _start(legacy_assistant, handover_env)
+
+    result = await GoogleConnectTool().execute(_thread_id=conductor, client_file=str(client))
+
+    assert result == (
+        "Error: An Assistant Google handover is already waiting for the person's Allow click. "
+        "Complete it or wait up to 10 minutes, then call google_adopt_assistant_sign_in again; "
+        "do not call google_connect."
+    )
+    await oauth.complete_sign_in("code", state)
+    assert _legacy_state(assistant, client) == ("archived", "cancelled", False)
+    assert key_store.resolve_google() is not None
+
+
+@pytest.mark.asyncio
+async def test_google_connect_after_completed_handover_reports_connected(legacy_assistant, handover_env):
+    conductor, _, client = legacy_assistant
+    state = await _start(legacy_assistant, handover_env)
+    await oauth.complete_sign_in("code", state)
+
+    result = await GoogleConnectTool().execute(_thread_id=conductor, client_file=str(client))
+
+    assert result == f"Error: Google is already connected as {EMAIL}."
+
+
+@pytest.mark.asyncio
+async def test_handover_prefers_active_assistant_over_archived_candidate(legacy_assistant, handover_env):
+    conductor, archived_assistant, archived_client = legacy_assistant
+    db = get_db()
+    db.execute("UPDATE threads SET lifecycle_state='archived' WHERE id=?", (archived_assistant,))
+    active_assistant = make_session(db, prefix="assistant", title="Assistant")
+    db.execute(
+        "UPDATE threads SET agent_enabled=1,agent_responsibility=?,agent_domains=?,agent_notes=? WHERE id=?",
+        (
+            handover.LEGACY_ASSISTANT_RESPONSIBILITY,
+            json.dumps(handover.LEGACY_ASSISTANT_DOMAINS),
+            handover.LEGACY_ASSISTANT_NOTES,
+            active_assistant,
+        ),
+    )
+    db.commit()
+    active_client = handover_env[1] / active_assistant / "config" / "desktop-client.json"
+    active_client.parent.mkdir(parents=True)
+    active_client.write_text(
+        json.dumps({"installed": {"client_id": CLIENT_ID, "client_secret": SECRET}}), encoding="utf-8",
+    )
+
+    state = _pending_state(await handover.start(conductor), handover_env[0])
+    await oauth.complete_sign_in("code", state)
+
+    assert archived_client.exists()
+    assert not active_client.exists()
+    row = db.execute("SELECT lifecycle_state FROM threads WHERE id=?", (active_assistant,)).fetchone()
+    assert row[0] == "archived"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("code,denied", [(None, False), ("code", True)], ids=["cancelled", "denied"])
 async def test_cancelled_or_denied_oauth_leaves_legacy_assistant_intact(
     legacy_assistant, handover_env, code, denied,
@@ -205,6 +279,30 @@ async def test_key_store_failure_leaves_no_sign_in_and_a_retry_is_idempotent(
 
     monkeypatch.setattr(oauth, "_store", original_store)
     state = _pending_state(await handover.start(conductor), handover_env[0])
+    await oauth.complete_sign_in("code", state)
+    assert key_store.resolve_google() is not None
+
+
+@pytest.mark.asyncio
+async def test_key_store_failure_allows_normal_connect_after_retiring_assistant(
+    legacy_assistant, handover_env, monkeypatch,
+):
+    conductor, assistant, client = legacy_assistant
+    state = await _start(legacy_assistant, handover_env)
+    original_store = oauth._store
+
+    def fail_store(*args, **kwargs):
+        raise RuntimeError("store unavailable")
+
+    monkeypatch.setattr(oauth, "_store", fail_store)
+    with pytest.raises(oauth.GoogleSignInError, match="No CORSIA sign-in was saved"):
+        await oauth.complete_sign_in("code", state)
+    assert _legacy_state(assistant, client) == ("archived", "cancelled", False)
+    assert key_store.resolve_google() is None
+
+    monkeypatch.setattr(oauth, "_store", original_store)
+    result = json.loads(await GoogleConnectTool().execute(_thread_id=conductor))
+    state = _pending_state(result["url"], handover_env[0])
     await oauth.complete_sign_in("code", state)
     assert key_store.resolve_google() is not None
 

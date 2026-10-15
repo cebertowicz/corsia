@@ -65,8 +65,14 @@ class GoogleConnectTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         if refusal := await _designated(kwargs):
             return refusal
+        actor = kwargs.get("_thread_id")
+        assert isinstance(actor, str)
+        user_id = await run_in_db(conductor_user, actor)
         try:
-            url = await oauth.start_sign_in(kwargs.get("client_file"))
+            url = await oauth.start_sign_in(
+                kwargs.get("client_file"),
+                normal_start_blocked=lambda: handover.normal_sign_in_blocked(user_id),
+            )
         except GoogleError as exc:
             return f"Error: {exc}"
         except Exception:
