@@ -22,6 +22,7 @@ use serde::Serialize;
 use tauri::Manager;
 
 mod first_run;
+mod update_stage;
 
 const DEFAULT_SERVICE_PORT: u16 = 47_895;
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -508,6 +509,16 @@ fn sync_window_chrome(window: &tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    match update_stage::update_stage_argument() {
+        Ok(Some(operation_id)) => std::process::exit(update_stage::run(context, operation_id)),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("usage error: {error}");
+            std::process::exit(update_stage::USAGE_ERROR);
+        }
+    }
+
     tauri::Builder::default()
         // The backend owns persistent service logs under CORSIA_STATE_DIR. Keep
         // native diagnostics on stdout so an existing macOS app-log path cannot
@@ -601,7 +612,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 

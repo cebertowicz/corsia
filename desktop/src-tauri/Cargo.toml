@@ -27,9 +27,18 @@ tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 libc = "0.2"
 signal-hook = "0.3"
+base64 = "0.22"
+flate2 = "1"
+futures-util = "0.3"
+minisign-verify = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+semver = "1"
+tar = "0.4"
+tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
 base64 = "0.22"
+tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Direct objc2 deps for the traffic-light positioning workaround.
