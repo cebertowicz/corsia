@@ -366,18 +366,15 @@
 	}
 	.rail-kbd {
 		font-family: var(--font-mono, 'SF Mono', monospace); font-size: var(--text-caption);
-		color: var(--text-tertiary); background: var(--bg-tertiary);
-		border: 1px solid var(--border); border-radius: var(--radius-2xs); padding: 0 5px;
+		color: var(--text-tertiary);
 	}
 	.rail-scope {
-		padding: 12px 14px 4px; margin-top: 4px;
-		border-top: 1px solid var(--border-subtle);
+		padding: 12px 14px 4px 18px; margin-top: 4px;
 	}
 	.rail-scope-btn, .rail-scope-here {
-		display: flex; align-items: center; gap: 7px;
+		display: flex; align-items: center; gap: 13px;
 		background: none; border: none; padding: 2px 0;
-		font-size: var(--text-caption); font-weight: 700; letter-spacing: 0.08em;
-		text-transform: uppercase; color: var(--text-tertiary);
+		font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary);
 	}
 	.rail-scope-btn { cursor: pointer; }
 	.rail-scope-btn:hover { color: var(--text-secondary); }

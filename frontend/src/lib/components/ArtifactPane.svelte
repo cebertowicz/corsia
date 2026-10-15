@@ -389,7 +389,7 @@
 
 	.browse {
 		display: flex; align-items: center; gap: 8px; width: 100%;
-		margin-top: 6px; padding: 8px; border: none; border-top: 1px solid var(--border-subtle);
+		margin-top: 2px; padding: 8px; border: none;
 		background: none; cursor: pointer; font: inherit;
 		font-size: var(--text-subhead); color: var(--text-tertiary); text-align: left;
 	}

@@ -25,7 +25,7 @@
 <style>
 	.ask-open {
 		flex: none; border: 0; border-radius: var(--radius-xs); background: transparent;
-		color: var(--text-tertiary); padding: var(--space-1) var(--space-2);
+		color: var(--text-tertiary); padding: var(--space-1) 2px var(--space-1) var(--space-2);
 		font: inherit; font-size: var(--text-caption); cursor: pointer;
 	}
 	/* Hover colour is for a pointer: a tap on touch leaves :hover stuck on the last thing tapped. */
