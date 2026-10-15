@@ -390,8 +390,10 @@
 		:global(html[data-theme="light"]) .sidebar::before {
 			background: color-mix(in srgb, var(--bg-secondary) 75%, transparent);
 		}
+		/* The same clearance as the header row (app.css), so the first rail row sits below
+		   the iOS 27 top-edge blur too; 0 with no top inset. */
 		.shell-top-pad {
-			height: var(--safe-top);
+			height: calc(var(--safe-top) + var(--edge-blur-clearance));
 		}
 	}
 </style>
