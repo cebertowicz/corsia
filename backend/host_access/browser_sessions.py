@@ -44,6 +44,7 @@ class BrowserSessionOwner:
         self.socket_dir = identity.socket_dir_for_namespace(namespace, instance_key)
         self.close_timeout = max(0.01, float(close_timeout))
         self._native: browser_cli.NativeExecutable | None = None
+        self._chrome: str | None = None
         self._native_lock = asyncio.Lock()
         self._owner_lock = asyncio.Lock()
         self._sessions: dict[str, BrowserRuntime] = {}
@@ -185,6 +186,8 @@ class BrowserSessionOwner:
                 if await asyncio.to_thread(browser_cli.resolve_native, self.binary) != (path, fingerprint):
                     raise identity.BrowserIdentityChanged(_EXECUTABLE_CHANGED)
                 self._native = browser_cli.NativeExecutable(path, fingerprint, version)
+                self._chrome, source = await asyncio.to_thread(browser_cli.chrome_executable)
+                logger.info("agent-browser launches Chrome from %s (%s)", self._chrome or "its default", source)
             except identity.BrowserIdentityError as exc:
                 # Setup refusal precedes admission; it never enters cleanup state.
                 raise BrowserSetupError(str(exc)) from exc
@@ -192,6 +195,7 @@ class BrowserSessionOwner:
     def _session_argv(self, runtime: BrowserRuntime, args: Sequence[str]) -> tuple[str, ...]:
         assert self._native is not None
         return (self._native.path, "--session", runtime.record.session,
+                *(("--executable-path", self._chrome) if self._chrome else ()),
                 *(("--headed",) if runtime.record.show_window else ()), "--json", *args)
 
     async def _observe(self, runtime: BrowserRuntime, peer_socket: socket.socket | None = None) -> identity.Observation:
