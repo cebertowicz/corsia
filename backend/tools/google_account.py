@@ -43,11 +43,12 @@ class GoogleConnectTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Start the person's Google sign-in for email and calendar. Returns a URL for the person "
-            "to open; they sign in and click Allow in their own browser, and the token never reaches "
-            "you. Pass client_file, the path of the Desktop app OAuth client JSON they downloaded "
-            "from Google Cloud, unless a client was saved by an earlier sign-in. Give the person the "
-            "link, then call google_status to confirm."
+            "Call google_status first. If it returns needs_action, follow it before calling "
+            "google_connect. If it says not_connected, this tool starts the person's Google sign-in "
+            "for email and calendar and returns a URL for the person to open; they sign in and click "
+            "Allow in their own browser, and the token never reaches you. Pass client_file, the path "
+            "of the Desktop app OAuth client JSON they downloaded from Google Cloud, unless a client "
+            "was saved by an earlier sign-in."
         )
 
     @property
@@ -139,7 +140,8 @@ class GoogleStatusTool(Tool):
     def description(self) -> str:
         return (
             "The Google sign-in's state: email, granted scopes, status (connected, needs_sign_in "
-            "or not_connected), poller_state and last_success_at."
+            "or not_connected), poller_state and last_success_at. When sign-in is rejected, "
+            "needs_action gives the recovery steps."
         )
 
     @property

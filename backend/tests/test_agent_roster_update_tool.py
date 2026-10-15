@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 
 import pytest
 
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from infra.database import get_db
 from tests.registry_helpers import make_session
 from tools.agent_roster_update import AgentRosterEntryTool, AgentRosterUpdateTool
@@ -24,7 +30,7 @@ def _project_and_threads():
         target = make_session(db, project_id="roster-project", prefix="target")
         ordinary = make_session(db, project_id="roster-project", prefix="ordinary")
         foreign = make_session(db, prefix="workspace-target")
-        assert set_conductor("roster-project", conductor, db=db)
+        assert set_project_conductor("roster-project", conductor, db=db)
         return conductor, target, ordinary, foreign
     finally:
         db.close()

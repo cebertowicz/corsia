@@ -1,6 +1,14 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 import json
 import os
 import sys
@@ -59,13 +67,13 @@ def _mk_project() -> str:
 def _set_project_conductor(project_id: str, conductor_thread_id: str) -> None:
     from infra import conductor
 
-    conductor.set_conductor(project_id, conductor_thread_id)
+    conductor.set_scope_coordinator(project_id, conductor_thread_id)
 
 
 def _set_workspace_conductor(conductor_thread_id: str) -> None:
     from infra import conductor
 
-    conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread_id)
+    corsia_agent.set_corsia_agent(conductor_thread_id)
 
 
 def _archive_session(thread_id: str) -> None:
@@ -1320,9 +1328,9 @@ class TestArtifactOwnershipTransfer:
         target_project = _mk_project()
         owner = _mk_session(source_project)
         subscriber = _mk_session(target_project)
-        target_conductor = _mk_session(target_project)
+        target_scope_coordinator = _mk_session(target_project)
         rescue = _mk_session(target_project)
-        _set_project_conductor(target_project, target_conductor)
+        _set_project_conductor(target_project, target_scope_coordinator)
         ext = _pr_ext()
         _register_pr(integration_client, owner, ext)
         assert _release_pr(integration_client, ext, actor=owner).status_code == 200
@@ -1333,7 +1341,7 @@ class TestArtifactOwnershipTransfer:
         )
 
         r = _rehome_pr(
-            integration_client, ext, new_owner=rescue, actor=target_conductor,
+            integration_client, ext, new_owner=rescue, actor=target_scope_coordinator,
             authority="source-scope-conductor",
             reason="subscriber scope cannot rescue source artifact",
         )

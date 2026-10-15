@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from pathlib import Path
 import sqlite3
 
@@ -40,7 +46,7 @@ def test_initialize_project_designates_project_conductor(project_environment):
     """Project creation uses the caller-owned user id and stated model for its conductor."""
     from api import project_scaffolding
     from infra import accounts
-    from infra.conductor import get_conductor
+    from infra.conductor import get_scope_coordinator
 
     db, _peer, _workspace, _repo = project_environment
     accounts.create_user("owner", "long-enough-password", db=db)
@@ -49,7 +55,7 @@ def test_initialize_project_designates_project_conductor(project_environment):
         db, name="Created", user_id="owner", conductor_model="claude-code/sonnet",
     )
 
-    conductor_id = get_conductor(project["id"], db=db)
+    conductor_id = get_project_conductor(project["id"], db=db)
     row = db.execute(
         "SELECT user_id,title,project_id,model FROM threads WHERE id=?",
         (conductor_id,),
@@ -65,7 +71,7 @@ def test_initialize_project_designates_project_conductor(project_environment):
 def test_initialize_project_enforces_its_fresh_scaffolded_shared_tree(project_environment):
     from api import project_scaffolding
     from infra import accounts
-    from infra.conductor import get_conductor
+    from infra.conductor import get_scope_coordinator
     from infra.settings import get_setting
     from registry import service
     from registry.shared_principals import artifact_owner
@@ -77,7 +83,7 @@ def test_initialize_project_enforces_its_fresh_scaffolded_shared_tree(project_en
         db, name="Created", user_id="owner", conductor_model=None,
     )
 
-    conductor = get_conductor(project["id"], db=db)
+    conductor = get_project_conductor(project["id"], db=db)
     shared_index = workspace / "projects" / "created" / "shared" / "INDEX.md"
     artifact = service.find_file_identity(str(shared_index), db=db)
     assert get_setting(f"shared_ownership:{project['id']}", db=db)

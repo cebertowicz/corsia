@@ -272,11 +272,22 @@ _system_cache: dict = {"data": None, "ts": 0.0}
 _SYSTEM_CACHE_TTL = 5  # seconds
 
 
-@router.get("/system")
-async def system_status(user: dict = Depends(require_user)):
-    """Return cached system performance metrics and live GitHub poller state."""
+def _live_platform_status() -> dict:
+    """The non-cached poller state included in each system status response."""
     from events.connectors.github_notifications import poller_status
     from events.connectors.github_pr_quiet_watch import quiet_watch_status
+    from events.connectors.gmail_poller import poller_status as gmail_poller_status
+
+    return {
+        "github_notifications": poller_status(),
+        "gmail_poller": gmail_poller_status(),
+        "pr_quiet_watch": quiet_watch_status(),
+    }
+
+
+@router.get("/system")
+async def system_status(user: dict = Depends(require_user)):
+    """Return cached system performance metrics and live platform poller state."""
 
     now = time.monotonic()
     if (
@@ -285,8 +296,7 @@ async def system_status(user: dict = Depends(require_user)):
     ):
         return {
             **_system_cache["data"],
-            "github_notifications": poller_status(),
-            "pr_quiet_watch": quiet_watch_status(),
+            **_live_platform_status(),
             "network_setup": _network_setup(),
         }
 
@@ -347,7 +357,6 @@ async def system_status(user: dict = Depends(require_user)):
     _system_cache["ts"] = time.monotonic()
     return {
         **result,
-        "github_notifications": poller_status(),
-        "pr_quiet_watch": quiet_watch_status(),
+        **_live_platform_status(),
         "network_setup": _network_setup(),
     }

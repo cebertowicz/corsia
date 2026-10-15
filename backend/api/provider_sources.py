@@ -56,7 +56,7 @@ def _harness_source(provider: str) -> dict[str, Any]:
     view = row_state(get_connection(provider))
     fix = {"not_installed": install, "needs_auth": login,
            "unverified": CHECK_AGAIN}.get(view["state"])
-    from connections.conductor_account import source_account_view
+    from connections.corsia_agent_account import source_account_view
 
     # The first-run card's account lines (the picker's account rows for this vendor)
     # and the conductor's binding when its account was removed or turned off.

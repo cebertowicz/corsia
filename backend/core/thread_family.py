@@ -72,6 +72,10 @@ def _delete_one_thread_rows(
     from thread import runtime_boundary
 
     thread_id = str(thread["id"])
+    # No schedule outlives its owner: a script schedule would otherwise keep
+    # claiming runs for a thread that no longer exists, and its row would
+    # block the thread's own deletion.
+    db.execute("DELETE FROM automation_schedules WHERE thread_id = ?", (thread_id,))
     delete_thread_checkpoints(db, thread_id)
     delete_thread_continuity(db, thread_id)
     delete_thread_turns(db, thread_id)

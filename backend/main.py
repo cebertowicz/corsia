@@ -51,6 +51,7 @@ from api import (
     doc_comment_thread_views_router,
     cc_attach_router,
     conductor_router,
+    corsia_agent_router,
     context_bootloader_router,
     delegation_router,
     delegation_docs_router,
@@ -147,6 +148,7 @@ app.include_router(registry_ownership_router)
 app.include_router(attention_router)
 app.include_router(cc_attach_router)
 app.include_router(conductor_router)
+app.include_router(corsia_agent_router)
 app.include_router(context_bootloader_router)
 app.include_router(delegation_router)
 app.include_router(delegation_docs_router)

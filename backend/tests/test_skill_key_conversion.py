@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from loguru import logger
 
+from core.role_context_sources import RoleName
 from core.skill_validation import validate_skill_text
 from infra.settings import get_setting
 from tests.project_ref_helpers import project_ref, select_workspace
@@ -152,7 +154,7 @@ def test_a_pass_with_an_unresolved_root_is_not_recorded_and_converts_it_later(tm
     monkeypatch.setattr(skill_key_conversion, "role_directory", unresolved)
     first = skill_key_conversion.convert_legacy_skill_keys(workspace, db=db)
 
-    assert first is not None and first.unresolved_roots == 4 and first.converted == 0
+    assert first is not None and first.unresolved_roots == len(get_args(RoleName)) * 2 and first.converted == 0
     assert get_setting(skill_key_conversion.COMPLETED_SETTING, db=db) is None
     assert role_skill.read_text(encoding="utf-8") == LEGACY
 

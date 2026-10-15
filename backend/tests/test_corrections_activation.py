@@ -102,7 +102,7 @@ def test_conductor_figure_is_rounded_for_people(isolated_db, monkeypatch):
         version, owner_user_id="owner", weeks=7, before_count=24 / 7, after_count=4.0,
     )
     monkeypatch.setattr(
-        "core.agent_roster_queries.workspace_conductor_contact",
+        "core.agent_roster_queries.corsia_agent_contact",
         lambda _owner, _db: ({"id": "conductor"}, None),
     )
     sent = []
@@ -127,9 +127,9 @@ def test_notice_is_marked_only_after_acceptance_and_is_not_resent(isolated_db, m
     assert corrections_activation.complete_backfill(
         version, owner_user_id="owner", weeks=13, before_count=1.0, after_count=2.0,
     )
-    monkeypatch.setattr(corrections_activation, "workspace_conductor_contact", None, raising=False)
+    monkeypatch.setattr(corrections_activation, "corsia_agent_contact", None, raising=False)
     monkeypatch.setattr(
-        "core.agent_roster_queries.workspace_conductor_contact",
+        "core.agent_roster_queries.corsia_agent_contact",
         lambda _owner, _db: ({"id": "conductor"}, None),
     )
     calls = []

@@ -74,8 +74,8 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Requesting checkpoint",
     ),
     "bulletin_disposition": _Entry(
-        "plans", status="substrate", authority="workspace-conductor",
-        summary="Record a workspace conductor disposition for a System bulletin",
+        "plans", status="substrate", authority="corsia-agent",
+        summary="Record a CORSIA agent disposition for a System bulletin",
         activity="Recording bulletin disposition",
     ),
     "agent_roster": _Entry(
@@ -84,33 +84,33 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Reading roster",
     ),
     "agent_roster_entry": _Entry(
-        "delegation", status="active", authority="conductor-roster-read",
+        "delegation", status="active", authority="coordination-roster-read",
         summary="Read one scoped roster entry and its current revision",
         activity="Reading roster entry",
     ),
     "agent_roster_update": _Entry(
-        "delegation", status="active", authority="conductor-roster-write",
-        summary="Edit an agent roster entry in the current designated conductor scope",
+        "delegation", status="active", authority="coordination-roster-write",
+        summary="Edit an agent roster entry in the current coordination scope",
         activity="Updating roster",
     ),
     "corsia_api": _Entry(
-        "conductor", status="active", authority="conductor-api",
-        summary="Call CORSIA API routes as a designated conductor, except the person-only list",
+        "coordination", status="active", authority="coordination-api",
+        summary="Call CORSIA API routes as the CORSIA agent or a project conductor, except the person-only list",
         activity="Calling CORSIA API",
     ),
-    "conductor_instruction_file_create": _Entry(
-        "conductor", status="active", authority="conductor-instruction-write",
+    "coordination_instruction_file_create": _Entry(
+        "coordination", status="active", authority="coordination-instruction-write",
         summary="Create and attach agent responsibility files or thread skills",
         activity="Installing instruction file",
     ),
-    "conductor_instruction_file_read": _Entry(
-        "conductor", status="active", authority="conductor-instruction-read",
+    "coordination_instruction_file_read": _Entry(
+        "coordination", status="active", authority="coordination-instruction-read",
         summary="List or read an agent's attached instruction file with its revision",
         activity="Reading instruction file",
     ),
-    "conductor_instruction_file_replace": _Entry(
-        "conductor", status="active", authority="conductor-instruction-write",
-        summary="Replace one attached instruction file in the designated conductor scope",
+    "coordination_instruction_file_replace": _Entry(
+        "coordination", status="active", authority="coordination-instruction-write",
+        summary="Replace one attached instruction file in the current coordination scope",
         activity="Updating instruction file",
     ),
     "read_tool_result": _Entry(

@@ -22,7 +22,7 @@
 	<div class="feature-row">
 		<div class="feature-info">
 			<span class="feature-name">Check for maintainer bulletins</span>
-			<span class="feature-desc">When on, CORSIA checks a public file once a day for signed notes from its maintainers about System changes. Your workspace conductor reviews each note and is told to ask you before changing anything you decided. Turning this off does not stop the notice your conductor gets when an update changes System instructions.</span>
+			<span class="feature-desc">When on, CORSIA checks a public file once a day for signed notes from its maintainers about System changes. The CORSIA agent reviews each note and is told to ask you before changing anything you decided. Turning this off does not stop the notice your conductor gets when an update changes System instructions.</span>
 		</div>
 		<Toggle
 			checked={$coreSettings?.live_bulletins?.enabled === true}

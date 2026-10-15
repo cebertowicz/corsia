@@ -15,7 +15,7 @@ ToolCategory = Literal[
     "history",
     "memory",
     "projects",
-    "conductor",
+    "coordination",
     "delegation",
     "plans",
     "automations",

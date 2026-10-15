@@ -47,7 +47,7 @@ export function usageSourceRows(usage: ContextUsage): ContextSheetSourceRow[] {
 			statusLabel: 'Included',
 			statusClass: 'included',
 			deltaLabel: '',
-			countLabel: usage.history_messages > 0 ? pluralCount(usage.history_messages, 'Message') : '',
+			countLabel: usage.history_messages > 0 ? pluralCount(usage.history_messages, 'message') : '',
 			tokenCount,
 			tokenLabel: promptTokenLabel(tokenCount),
 		});

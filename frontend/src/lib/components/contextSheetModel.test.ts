@@ -437,7 +437,7 @@ describe('contextSheetSnapshotModel', () => {
 				id: 'usage:conversation-history',
 				category: 'History',
 				label: 'Conversation history',
-				countLabel: '23 Messages',
+				countLabel: '23 messages',
 				tokenLabel: '23k tokens',
 			}),
 			expect.objectContaining({
