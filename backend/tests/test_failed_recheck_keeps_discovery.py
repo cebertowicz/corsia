@@ -94,7 +94,7 @@ async def test_a_recheck_that_cannot_finish_keeps_the_models_and_the_last_verdic
     assert projection["resets_at"] == RESET
     assert last_check and last_check["outcome"] == "unknown"
     if isinstance(outcome, BaseException):
-        assert last_check["error"] == "Claude Code usage read failed"
+        assert last_check["error"] == f"claude-code usage read failed: {outcome}"
 
 
 async def test_a_usage_read_that_fails_alone_keeps_the_models(limited_added_account, monkeypatch):

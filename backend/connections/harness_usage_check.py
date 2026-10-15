@@ -116,14 +116,14 @@ async def _check(provider: str, account_id: str) -> None:
         if context is None or context.receipt is None:
             return  # No current login to read for: the next sign-in schedules its own check.
         receipt = context.receipt
-        if not context.is_default:
-            await _check_added(provider, receipt, context=context)
+        if not context.is_default and provider != "claude-code":
+            await _check_added(provider, receipt)
             return
         binary = await _binary_for(provider)
         if binary is None:
             await _check_failed(provider, receipt, "Harness connection is unavailable")
         elif provider == "claude-code":
-            await _check_claude(binary, receipt)
+            await _check_claude(binary, receipt, **({} if context.is_default else {"context": context}))
         else:
             await _check_codex(binary, receipt)
     except Exception as exc:
@@ -153,19 +153,8 @@ async def _check_failed(provider: str, receipt, error: str) -> None:
     await run_in_db(harness_usage.record_check_failed, error=error, provider=provider, receipt=receipt)
 
 
-async def _check_added(provider: str, receipt, *, context) -> None:
-    """Read one added account without changing its catalog or account generation."""
-    if provider == "claude-code":
-        binary = await _binary_for(provider)
-        if binary is None:
-            await _check_failed(provider, receipt, "Harness connection is unavailable")
-            return
-        try:
-            await _check_claude(binary, receipt, context=context)
-        except Exception:  # The receipt fence below decides whether this read remains current.
-            await _check_failed(provider, receipt, "Claude Code usage read failed")
-        return
-
+async def _check_added(provider: str, receipt) -> None:
+    """An added account's usage is read by its own refresh, in its own home and login."""
     from connections import harness_models
 
     result = await harness_models.refresh_provider(provider, reason="usage-recheck", account_id=receipt.account_id,
