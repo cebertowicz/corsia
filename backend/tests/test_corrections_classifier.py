@@ -84,7 +84,6 @@ def layout(monkeypatch, tmp_path):
     pins: dict[str, str] = {}
     monkeypatch.setattr(corrections_asset_pins, "PINNED_MANIFESTS", pins)
     monkeypatch.setenv("CORSIA_CORRECTIONS_ASSET_DIR", str(tmp_path / "corrections-classifier"))
-    monkeypatch.setattr(corrections_realtime, "_STATE", {})
     return pins
 
 
@@ -122,8 +121,7 @@ def test_highest_verified_pin_wins_and_a_broken_newer_asset_keeps_the_older_one_
     selected = corrections_realtime._manifest()
 
     assert selected.version == "v1"
-    assert corrections_realtime._STATE["selected_version"] == "v1"
-    assert corrections_realtime._STATE["versions"] == [
+    assert corrections_realtime._LAST_VERSIONS == [
         {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
         {
             "location": "corrections-classifier-v2", "version": None, "state": "failed",
@@ -158,8 +156,9 @@ def test_the_installed_directory_alone_keeps_working(layout, tmp_path):
 
     layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
 
-    assert corrections_realtime._manifest().version == "v1"
-    assert [item["state"] for item in corrections_realtime._STATE["versions"]] == ["ready"]
+    selected = corrections_realtime._manifest()
+    assert selected.version == "v1"
+    assert [item["state"] for item in corrections_realtime._LAST_VERSIONS] == ["ready"]
 
 
 def test_a_directory_name_never_decides_the_version(layout, tmp_path):
@@ -180,8 +179,9 @@ def test_an_unpinned_sibling_directory_is_never_looked_at(layout, tmp_path):
     layout["v1"] = _install(tmp_path / "corrections-classifier", "v1")
     _install(tmp_path / "corrections-classifier-v9", "v9")
 
-    assert corrections_realtime._manifest().version == "v1"
-    assert [item["location"] for item in corrections_realtime._STATE["versions"]] == ["corrections-classifier"]
+    selected = corrections_realtime._manifest()
+    assert selected.version == "v1"
+    assert [item["location"] for item in corrections_realtime._LAST_VERSIONS] == ["corrections-classifier"]
 
 
 def test_nothing_installed_reads_absent_and_nothing_verified_reads_failed(layout, tmp_path):
@@ -195,7 +195,6 @@ def test_nothing_installed_reads_absent_and_nothing_verified_reads_failed(layout
     _install(tmp_path / "corrections-classifier", "v1")
     with pytest.raises(AssetError, match="no verified"):
         corrections_realtime._manifest()
-    assert corrections_realtime._STATE["selected_version"] is None
     assert corrections_realtime._installed() is True
 
 
@@ -247,6 +246,18 @@ def test_wrong_input_policy_is_refused(tmp_path):
 
     with pytest.raises(AssetError, match="supported corrections asset"):
         AssetManifest.load(_manifest(tmp_path, policy="other"))
+
+
+def test_manifest_threshold_must_match_the_core_policy(tmp_path):
+    from core.corrections_classifier import AssetError, AssetManifest
+
+    path = _manifest(tmp_path)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["heads"][0]["threshold"] = 0.5
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+    with pytest.raises(AssetError, match="threshold"):
+        AssetManifest.load(path)
 
 
 def test_child_prohibits_outbound_connections_and_enables_ort_telemetry_opt_out(monkeypatch, tmp_path):

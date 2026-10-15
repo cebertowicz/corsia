@@ -15,9 +15,11 @@ Classifier state (``state``)::
     unavailable                  manifest verified, a child starts                  loading
     loading                      child replied ready (self-test passed) and a call  ready
                                  succeeded
-    loading|ready                two load failures for one message: load timeout,   unavailable (reason
-                                 self-test mismatch, memory ceiling while loading,  kept; retried at the
-                                 exit before any reply                              next arrival/startup)
+    loading|ready                verify, self-test, ABI or import failure           failed (not retryable;
+                                                                                     waits for another asset
+                                                                                     version or restart)
+    loading|ready                load timeout, memory ceiling or child exit         unavailable (reason kept;
+                                                                                     retried at next arrival/startup)
     ready                        child restarted after idle exit or a message       ready
                                  failure, and the restart loaded
     loading|ready                two failures of a loaded child on one input        unchanged; an
@@ -66,6 +68,8 @@ QUEUE_SIZE = 256
 SCAN_BATCH = 20
 ATTEMPTS_PER_KIND = 2
 _VERSION_LABEL = re.compile(r"v([0-9]+)")
+# Selection is recomputed from pinned assets on every load attempt; the worker copies it into its snapshot.
+_LAST_VERSIONS: list[dict[str, str | None]] = []
 
 
 def _clock() -> float:
@@ -123,7 +127,10 @@ def _manifest() -> AssetManifest:
         versions.append({"location": directory.name, "version": manifest.version, "state": "ready", "reason": None})
     if verified:
         selected = max(verified, key=lambda item: item[:2])[2]
-        return selected, versions
+        global _LAST_VERSIONS
+        _LAST_VERSIONS = versions
+        return selected
+    _LAST_VERSIONS = versions
     if not versions:
         raise AssetError("classifier asset is absent")
     raise AssetError(f"no verified corrections classifier asset: {versions[0]['reason']}")
@@ -138,11 +145,15 @@ class CorrectionsWorker:
         self.call_seconds = 0.0
         self.task: asyncio.Task[None] | None = None
         self.child: ClassifierChild | None = None
+        self.child_version: str | None = None
+        self.children: dict[str, ClassifierChild] = {}
+        self.active_manifest: AssetManifest | None = None
         self.stopping = False
         self.state = "absent"
         self.reason: str | None = "asset not verified"
         self.version: ClassifierVersion | None = None
         self.versions: list[dict[str, str | None]] = []
+        self.failed_version: str | None = None
         self.scan = "idle"
         self.held_reason: str | None = None
         self.dropped_arrivals = 0
@@ -200,14 +211,28 @@ class CorrectionsWorker:
         try:
             selected = await asyncio.to_thread(_manifest)
         except AssetError as error:
+            self.versions = _LAST_VERSIONS
             self._set("failed" if _installed() else "absent", str(error))
             return None
-        if isinstance(selected, tuple):
-            manifest, self.versions = selected
-        else:  # Test doubles for the single-manifest worker contract.
-            manifest = selected
-            self.versions = [{"location": manifest.path.parent.name if hasattr(manifest, "path") else "test", "version": manifest.version, "state": "ready", "reason": None}]
-        self.version = manifest.classifier_version()
+        manifest = selected
+        self.versions = _LAST_VERSIONS or [
+            {"location": manifest.path.parent.name if hasattr(manifest, "path") else "test", "version": manifest.version, "state": "ready", "reason": None}
+        ]
+        if self.failed_version == manifest.version:
+            reason = f"asset {manifest.version} failed deterministic startup checks"
+            self.versions = [
+                {**item, "state": "failed", "reason": reason} if item["version"] == manifest.version else item
+                for item in self.versions
+            ]
+            if self.active_manifest is not None:
+                return self.active_manifest
+            self._set("failed", reason)
+            return None
+        if self.failed_version is not None:
+            self.failed_version = None
+        self.versions = _LAST_VERSIONS or [
+            {"location": manifest.path.parent.name if hasattr(manifest, "path") else "test", "version": manifest.version, "state": "ready", "reason": None}
+        ]
         if self.state in ("absent", "failed"):
             self._set("unavailable", "asset verified; the model has not run yet")
         return manifest
@@ -220,6 +245,8 @@ class CorrectionsWorker:
         await asyncio.to_thread(child.close)
         if self.child is child:
             self.child = None
+            self.child_version = None
+        self.children = {key: value for key, value in self.children.items() if value is not child}
 
     async def _classify(self, candidate: CorrectionCandidate) -> bool:
         """Record one candidate; True when a fact, scored or unreadable, was written.
@@ -232,19 +259,45 @@ class CorrectionsWorker:
         outages: list[str] = []
         failures: list[str] = []
         self.call_seconds = 0.0
+        fallback_child = self.child if self.child_version != manifest.version else None
+        fallback_version = self.child_version if fallback_child is not None else None
+        if fallback_child is not None:
+            self.child = ClassifierChild(manifest)
+            self.child_version = manifest.version
+            self.children[manifest.version] = self.child
         while len(outages) < ATTEMPTS_PER_KIND and len(failures) < ATTEMPTS_PER_KIND:
             if self.child is None:
                 self.child = ClassifierChild(manifest)
+                self.child_version = manifest.version
+                self.children[manifest.version] = self.child
             child = self.child
             if self.state != "ready" and not (child.loaded and child.running):
                 self._set("loading", "starting the model and its self-test")
             try:
                 await asyncio.to_thread(child.ensure_loaded)
             except ClassifierUnavailable as error:
-                outages.append(str(error))
+                reason = str(error)
                 logger.warning("corrections classifier did not load: {}", error)
                 await self._drop_child()
+                if fallback_child is not None:
+                    self.child, self.child_version = fallback_child, fallback_version
+                    if reason.startswith("load error:"):
+                        self.failed_version = manifest.version
+                        return await self._classify(candidate)
+                    self._set("ready", None)
+                    return False
+                if reason.startswith("load error:"):
+                    self.failed_version = manifest.version
+                    self._set("failed", reason)
+                    return False
+                outages.append(reason)
                 continue
+            if fallback_child is not None:
+                await asyncio.to_thread(fallback_child.close)
+                self.children = {key: value for key, value in self.children.items() if value is not fallback_child}
+                fallback_child = None
+            self.active_manifest = manifest
+            self.version = manifest.classifier_version()
             call_started = _clock()
             try:
                 result = await asyncio.to_thread(child.classify, list(candidate.context), candidate.content)
@@ -399,8 +452,11 @@ class CorrectionsWorker:
         if task is not None:
             task.cancel()
             await asyncio.wait([task])
-        child, self.child = self.child, None
-        if child is not None:
+        children, self.children = list(self.children.values()), {}
+        self.child = None
+        self.child_version = None
+        self.active_manifest = None
+        for child in children:
             # A load or call may still run in a worker thread: kill without its lock, then reap.
             child.kill()
             await asyncio.to_thread(child.close)

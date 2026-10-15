@@ -27,8 +27,15 @@ def _version():
     )
 
 
-def _manifest():
-    return SimpleNamespace(version="v1", classifier_version=lambda head="correction": _version())
+def _manifest(version="v1"):
+    from core.corrections_recording import ClassifierVersion
+
+    return SimpleNamespace(
+        version=version,
+        classifier_version=lambda head="correction": ClassifierVersion(
+            "corrections-classifier", version, head, 0.595681, "modernbert-owner-context-v2-2048",
+        ),
+    )
 
 
 def _result():
@@ -135,14 +142,18 @@ class _CountingChild:
 
     def __init__(self, manifest):
         self.manifest = manifest
+        self.loaded = self.running = True
         _CountingChild.live += 1
         _CountingChild.peak = max(_CountingChild.peak, _CountingChild.live)
         _CountingChild.built.append(manifest.version)
 
+    def ensure_loaded(self):
+        return None
+
     def classify(self, context, owner):
         return SimpleNamespace(
             label="not_correction", truncated=False, original_tokens=4,
-            version=self.manifest.checker_version(),
+            version=self.manifest.classifier_version(),
         )
 
     def close(self, *, kill=False):
@@ -157,7 +168,7 @@ class _CountingChild:
 
 
 @pytest.mark.asyncio
-async def test_inflight_classification_keeps_its_starting_version(monkeypatch):
+async def test_inflight_classification_keeps_its_starting_version(worker, monkeypatch):
     import threading
 
     from jobs import corrections_realtime
@@ -168,6 +179,15 @@ async def test_inflight_classification_keeps_its_starting_version(monkeypatch):
     current = [_manifest("v1")]
 
     class Child(_CountingChild):
+        loaded = running = True
+
+        def __init__(self, manifest):
+            super().__init__(manifest)
+            self.loaded = self.running = True
+
+        def ensure_loaded(self):
+            return None
+
         def classify(self, context, owner):
             started.set()
             release.wait(timeout=1)
@@ -180,91 +200,82 @@ async def test_inflight_classification_keeps_its_starting_version(monkeypatch):
     _CountingChild.reset()
     monkeypatch.setattr(corrections_realtime, "_manifest", lambda: current[0])
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", Child)
-    monkeypatch.setattr(corrections_realtime, "_record", record)
+    monkeypatch.setattr(corrections_realtime, "record_classification", record)
 
-    task = asyncio.create_task(corrections_realtime._classify(_candidate()))
+    task = asyncio.create_task(worker._classify(_candidate()))
     await asyncio.to_thread(started.wait, 1)
     current[0] = _manifest("v2")
     release.set()
     await task
 
     assert captured == ["v1"]
-    assert set(corrections_realtime._CHILDREN) == {"corrections-classifier:v1:correction"}
 
 
 @pytest.mark.asyncio
-async def test_a_superseded_child_stops_before_the_newer_one_starts(monkeypatch):
-    import threading
-
+async def test_a_newer_selected_version_replaces_the_old_child(worker, monkeypatch):
     from jobs import corrections_realtime
 
-    started = threading.Event()
-    release = threading.Event()
-    captured = []
-    current = [_manifest("v1")]
-
-    class Child(_CountingChild):
-        def classify(self, context, owner):
-            if self.manifest.version == "v1" and not started.is_set():
-                started.set()
-                release.wait(timeout=1)
-            return super().classify(context, owner)
-
-    async def record(candidate, result):
-        captured.append(result.version.version)
-        return True
-
     _CountingChild.reset()
+    current = [_manifest("v1")]
     monkeypatch.setattr(corrections_realtime, "_manifest", lambda: current[0])
-    monkeypatch.setattr(corrections_realtime, "ClassifierChild", Child)
-    monkeypatch.setattr(corrections_realtime, "_record", record)
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
+    monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
 
-    first = asyncio.create_task(corrections_realtime._classify(_candidate()))
-    await asyncio.to_thread(started.wait, 1)
+    await worker._classify(_candidate())
     current[0] = _manifest("v2")
-    second = asyncio.create_task(corrections_realtime._classify(_candidate()))
-    await asyncio.sleep(0.05)
-    assert _CountingChild.built == ["v1"]
-    release.set()
-    await asyncio.gather(first, second)
+    await worker._classify(_candidate())
 
-    assert captured == ["v1", "v2"]
+    assert _CountingChild.built == ["v1", "v2"]
     assert _CountingChild.closed == ["v1"]
-    assert _CountingChild.peak == 1
-    assert set(corrections_realtime._CHILDREN) == {"corrections-classifier:v2:correction"}
+    # A version switch briefly holds the candidate beside the serving child until its self-test passes.
+    assert _CountingChild.peak == 2
 
 
 @pytest.mark.asyncio
-async def test_a_resident_child_is_reused_not_rebuilt_on_every_call(monkeypatch):
+async def test_failed_newer_startup_keeps_the_older_ready_version_serving(worker, monkeypatch):
+    from core.corrections_child import ClassifierUnavailable
+    from jobs import corrections_realtime
+
+    current = [_manifest("v1")]
+    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: current[0])
+    monkeypatch.setattr(
+        corrections_realtime,
+        "_LAST_VERSIONS",
+        [
+            {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
+            {"location": "corrections-classifier-v2", "version": "v2", "state": "ready", "reason": None},
+        ],
+    )
+    recorded = AsyncMock()
+    monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
+
+    assert await worker._classify(_candidate("v1")) is True
+    current[0] = _manifest("v2")
+    ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError")]
+
+    assert await worker._classify(_candidate("v2")) is True
+
+    state = worker.snapshot()
+    assert state["version"] == "v1"
+    assert state["state"] == "ready"
+    assert {item["version"]: item["state"] for item in state["versions"]} == {"v1": "ready", "v2": "failed"}
+    assert recorded.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_resident_child_is_reused_not_rebuilt_on_every_call(worker, monkeypatch):
     from jobs import corrections_realtime
 
     monkeypatch.setattr(corrections_realtime, "_manifest", lambda: _manifest("v1"))
     monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
-    monkeypatch.setattr(corrections_realtime, "_record", AsyncMock(return_value=True))
+    monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
     _CountingChild.reset()
 
     for _ in range(3):
-        await corrections_realtime._classify(_candidate())
+        await worker._classify(_candidate())
 
     assert _CountingChild.built == ["v1"]
     assert _CountingChild.live == 1
-
-
-@pytest.mark.asyncio
-async def test_catch_up_is_owed_only_for_a_child_this_call_created(monkeypatch):
-    from jobs import corrections_realtime
-
-    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: _manifest("v1"))
-    monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
-    monkeypatch.setattr(corrections_realtime, "_record", AsyncMock(return_value=True))
-    _CountingChild.reset()
-
-    await corrections_realtime._classify(_candidate())
-    assert corrections_realtime._SCAN_OWED is True
-
-    corrections_realtime._SCAN_OWED = False
-    await corrections_realtime._classify(_candidate())
-    assert corrections_realtime._SCAN_OWED is False
 
 
 @pytest.mark.asyncio
@@ -288,20 +299,23 @@ async def test_verified_manifest_alone_never_reports_ready(worker, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_two_load_failures_leave_the_message_pending_and_say_unavailable(worker, monkeypatch):
+async def test_deterministic_startup_failure_never_respawns_for_later_owner_messages(worker, monkeypatch):
     from core.corrections_child import ClassifierUnavailable
     from jobs import corrections_realtime
 
-    ScriptedChild.loads = [ClassifierUnavailable("load timeout"), ClassifierUnavailable("load error:AssetError")]
+    ScriptedChild.loads = [ClassifierUnavailable("load error:AssertionError")]
     recorded = AsyncMock()
     monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
     monkeypatch.setattr(corrections_realtime, "record_unreadable", recorded)
 
-    assert await worker._classify(_candidate()) is False
+    assert await worker._classify(_candidate("first")) is False
+    for message_id in ("second", "third", "fourth"):
+        assert await worker._classify(_candidate(message_id)) is False
 
     assert recorded.await_count == 0
-    assert (worker.state, worker.reason) == ("unavailable", "load error:AssetError")
-    assert all(child.closed for child in ScriptedChild.created) and worker.child is None
+    assert (worker.state, worker.reason) == ("failed", "asset v1 failed deterministic startup checks")
+    assert len(ScriptedChild.created) == 1
+    assert ScriptedChild.created[0].closed and worker.child is None
 
 
 @pytest.mark.asyncio
@@ -753,7 +767,10 @@ async def test_shutdown_cancels_the_worker_kills_the_child_and_owes_later_arriva
     monkeypatch.setattr(corrections_realtime, "_startup_worker", blocked_worker)
     monkeypatch.setattr(corrections_realtime, "cleanup_staging", lambda: None)
     child = ScriptedChild(None)
+    older_child = ScriptedChild(None)
     worker.child = child
+    worker.child_version = "v2"
+    worker.children = {"v1": older_child, "v2": child}
     corrections_realtime.startup_scan()
     task = worker.task
     await started.wait()
@@ -762,7 +779,8 @@ async def test_shutdown_cancels_the_worker_kills_the_child_and_owes_later_arriva
 
     assert task is not None and task.cancelled()
     assert child.killed and child.closed
-    assert worker.child is None
+    assert older_child.killed and older_child.closed
+    assert worker.child is None and worker.children == {}
 
     corrections_realtime.notify("arrived-during-shutdown")
 

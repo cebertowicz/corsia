@@ -23,6 +23,7 @@ from core.corrections_recording import ClassifierVersion
 
 ASSET_ID = "corrections-classifier"
 INPUT_POLICY_ID = "modernbert-owner-context-v2-2048"
+CORRECTION_THRESHOLD = 0.595681
 _HASH_CHUNK_BYTES = 1024 * 1024
 # One in-process self-test at a time: a second would load a second model session.
 _SELF_TEST_LOCK = threading.Lock()
@@ -95,6 +96,8 @@ class AssetManifest:
             raise AssetError("manifest does not describe the supported corrections asset")
         if "correction" not in manifest.heads or len(manifest.self_test) != 4:
             raise AssetError("manifest is missing the correction head or four self-test vectors")
+        if float(manifest.heads["correction"].get("threshold", -1)) != CORRECTION_THRESHOLD:
+            raise AssetError("manifest correction threshold does not match the supported policy")
         return manifest
 
     def verify_files(self) -> None:
