@@ -84,13 +84,30 @@
 	{/each}
 	{#if keyOpen}
 		<Field variant="chip" layout="stacked" label="API key">
-			<select aria-label="Provider" value={providerName} onchange={(event) => onProviderName((event.currentTarget as HTMLSelectElement).value)}>
+			<select
+				aria-label="Provider"
+				value={providerName}
+				onchange={(event) => onProviderName((event.currentTarget as HTMLSelectElement).value)}
+			>
 				{#each providers.filter((provider) => provider.type === 'cloud') as provider}
 					<option value={provider.name}>{provider.label}</option>
 				{/each}
 			</select>
-			<input type="password" aria-label="API key" placeholder="Paste your key" value={apiKey} oninput={(event) => onApiKey((event.currentTarget as HTMLInputElement).value)} />
-			<Button variant="chip" size="sm" onclick={onSaveApiKey} disabled={!apiKey.trim() || savingKey}>{savingKey ? 'Saving…' : 'Save'}</Button>
+			<input
+				type="password"
+				aria-label="API key"
+				placeholder="Paste your key"
+				value={apiKey}
+				oninput={(event) => onApiKey((event.currentTarget as HTMLInputElement).value)}
+			/>
+			<Button
+				variant="chip"
+				size="sm"
+				onclick={onSaveApiKey}
+				disabled={!apiKey.trim() || savingKey}
+			>
+				{savingKey ? 'Saving…' : 'Save'}
+			</Button>
 		</Field>
 	{:else}
 		<div class="setup-accent-text-action">

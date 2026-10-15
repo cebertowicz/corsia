@@ -12,6 +12,7 @@
 	import { updateProvider, loadProviders, providers } from '$lib/stores/providers';
 	import { on } from '$lib/ws/events';
 	import { connect } from '$lib/ws';
+	import { requestLocalDownload, type LocalDownloadStart } from '$lib/setupLocalDownload';
 
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; }
 	const { onExistingAccount, onAccountCreated, onFinished }: Props = $props();
@@ -129,18 +130,10 @@
 			page = 'error';
 		}
 	}
-	type LocalDownloadStart = 'started' | 'consent_required' | 'replace_consent_required' | 'failed';
 	async function startLocalDownload(consentExisting = false, consentReplace = false): Promise<LocalDownloadStart> {
-		localPendingStage = null;
-		if (!localWanted && !consentExisting && !consentReplace) return 'started';
-		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting, ...(consentReplace ? { consent_replace: true } : {}) }) });
-		const result = await response.json().catch(() => null);
-		if (response.status === 409 && (result?.code === 'consent_required' || result?.code === 'replace_consent_required')) return result.code;
-		if (response.ok && result?.ok !== false) {
-			localPendingStage = typeof result?.stage === 'string' ? result.stage : null;
-			return 'started';
-		}
-		return 'failed';
+		const { outcome, stage } = await requestLocalDownload(localWanted, consentExisting, consentReplace);
+		localPendingStage = stage;
+		return outcome;
 	}
 	async function beginSetup() {
 		if (status.existing_omlx) {
@@ -192,9 +185,15 @@
 				? await setupLocalSource(current, !replacing, replacing)
 				: await startLocalDownload(!replacing, replacing);
 			const code = typeof start === 'string' ? start : start.code;
-			if (code === 'replace_consent_required') needsReplacementConsent = true;
-			else if ((typeof start === 'string' ? start === 'started' : start.ok)) { localRepairDeferred = false; localDownloadPending = true; localStartSucceeded = true; }
-			else localStartError = 'The local model couldn’t start.';
+			if (code === 'replace_consent_required') {
+				needsReplacementConsent = true;
+			} else if (typeof start === 'string' ? start === 'started' : start.ok) {
+				localRepairDeferred = false;
+				localDownloadPending = true;
+				localStartSucceeded = true;
+			} else {
+				localStartError = 'The local model couldn’t start.';
+			}
 		} catch {
 			localStartError = 'The local model couldn’t start.';
 		} finally {
@@ -208,7 +207,6 @@
 	function validateConfirmation() {
 		confirmationError = confirmation && password !== confirmation ? 'Passwords don’t match.' : '';
 	}
-
 	async function createAccount() {
 		validateConfirmation();
 		if (!name.trim() || !username.trim() || usernameError || password.length < 8 || confirmationError || accountBusy) return;
@@ -236,7 +234,6 @@
 		} catch { accountError = 'CORSIA couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
-
 	async function refreshSources() {
 		const current = get(token);
 		if (!current) return;
@@ -296,8 +293,6 @@
 			localSetupBusy = false;
 		}
 	}
-
-
 	async function saveApiKey() {
 		if (!apiKey.trim() || savingKey) return;
 		savingKey = true; sourceError = '';
@@ -314,7 +309,6 @@
 		return on('models_updated', () => { if (page === 'models') void refreshSources(); });
 	});
 </script>
-
 <SetupShell {steps} {jobs} page={page} title={shellView.title} lede={shellView.lede} primary={shellView.primary} mark={shellView.mark} onPrimary={shellView.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'hard-stop'}
@@ -346,7 +340,13 @@
 			{#if accountError}<Message variant="err">{accountError}</Message>{/if}
 		</form>
 	{:else if page === 'models' && (existingOmlxConsent || replaceOmlxConsent)}
-		<SetupOmlxConsent replace={replaceOmlxConsent} modelLabel={downloadModelLabel} modelSize={modelSize} busy={localSetupBusy} onDecision={decideExistingOmlx} />
+		<SetupOmlxConsent
+			replace={replaceOmlxConsent}
+			modelLabel={downloadModelLabel}
+			modelSize={modelSize}
+			busy={localSetupBusy}
+			onDecision={decideExistingOmlx}
+		/>
 	{:else if page === 'models'}
 		<SetupModelSourceChooser
 			{sources}

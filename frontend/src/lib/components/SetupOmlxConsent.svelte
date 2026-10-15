@@ -28,7 +28,9 @@
 		</ul>
 		<p>It won’t change your oMLX.</p>
 	{/if}
-	<div class="consent-actions setup-accent-text-action"><Button variant="chip" onclick={() => onDecision(false)} disabled={busy}>Not now</Button></div>
+	<div class="consent-actions setup-accent-text-action">
+		<Button variant="chip" onclick={() => onDecision(false)} disabled={busy}>Not now</Button>
+	</div>
 </div>
 
 <style>
