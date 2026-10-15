@@ -5,7 +5,7 @@ from pathlib import Path
 
 from connections.account_policy import AccountAdmissionError, chosen_account_id, require_claim, require_launch
 from connections.account_receipts import account_receipt
-from connections.account_runtime import homes_for, session_homes
+from connections.account_runtime import homes_for, is_operation_session, session_homes
 from connections.vendor_accounts import get_account, resolve_account_id
 from infra.database import get_db
 
@@ -83,7 +83,13 @@ def require_session_write(session, provider: str) -> str | None:
     account = getattr(session, "vendor_account_id", None) if bound else None
     db = get_db()
     try:
+        # The chosen-account re-check guards a live thread continuation from being
+        # retargeted mid-thread. An operation session (checkpoint or detached) was
+        # already admitted through the operation owner for its explicit account and
+        # carries the requester's thread id only for attribution, so it is not a
+        # thread continuation and is exempt from this re-check.
         if (bound and thread_id and turn_id is None and not getattr(session, "checkpoint_id", None)
+                and not is_operation_session(session)
                 and chosen_account_id(thread_id, provider, db=db) != account):
             raise AccountAdmissionError("account_session_mismatch")
         row = get_account(account, db=db) if account is not None else None
