@@ -48,6 +48,9 @@ def _forget(schedule_id: str, _task: asyncio.Task) -> None:
 
 async def drive(now: str, *, db=None) -> int:
     """Recover interrupted runs and start due ones; return how many started."""
+    for schedule_id, task in tuple(_in_flight.items()):
+        if task.done():
+            _in_flight.pop(schedule_id, None)
     capacity = SCRIPT_RUN_CAP - len(_in_flight)
     claims = await run_in_db_unless_owned(
         db, claim_due, now, capacity, set(_in_flight), db,

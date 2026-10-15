@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -292,6 +293,19 @@ async def test_concurrency_cap_limits_started_runs(tmp_path, monkeypatch):
         _register(db, tmp_path)
     _use_run(monkeypatch, _run('{"series":"cost","value":1}\n'))
     assert await _settle_all(db, T0) == script_runner.SCRIPT_RUN_CAP
+    assert await _settle_all(db, T0) == script_runner.SCRIPT_RUN_CAP
+
+
+@pytest.mark.asyncio
+async def test_concurrency_cap_reclaims_completed_task_before_claiming(tmp_path, monkeypatch):
+    db = _db()
+    for _ in range(script_runner.SCRIPT_RUN_CAP):
+        _register(db, tmp_path)
+    completed = asyncio.create_task(asyncio.sleep(0))
+    await completed
+    script_runner._in_flight["completed"] = completed
+    _use_run(monkeypatch, _run('{"series":"cost","value":1}\n'))
+
     assert await _settle_all(db, T0) == script_runner.SCRIPT_RUN_CAP
 
 
