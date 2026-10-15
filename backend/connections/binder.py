@@ -282,3 +282,47 @@ def bind_owner(envelope: EventEnvelope, *, repair_owner: str | None = None,
     """Envelope-shaped wrapper over :func:`bind_owner_for`."""
     return bind_owner_for(envelope.artifact_ref, envelope.facts,
                           envelope.connector, repair_owner=repair_owner, db=db)
+
+
+# ── Rules that follow a conductor designation ───────────────────────────────
+
+WORKSPACE_DESIGNATION_SCOPE = "designation:workspace"
+
+
+def ensure_designation_rule(
+    *, connector: str, fact: str, value: str, precedence: int = 100, db=None,
+) -> Rule | None:
+    """Create (once) a rule that routes to the workspace conductor and follows it.
+
+    Returns None while no workspace conductor is designated. The rule's scope
+    marks it as designation-following; ``repoint_designation_rules`` moves it
+    when ``infra.conductor.set_conductor`` moves the designation.
+    """
+    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+
+    with write_transaction(db, scope="ensure_designation_rule") as _db:
+        existing = _db.execute(
+            "SELECT * FROM connection_rules WHERE scope=? AND connector=? "
+            "AND fact=? AND value=? AND enabled=1",
+            (WORKSPACE_DESIGNATION_SCOPE, connector, fact, str(value)),
+        ).fetchone()
+        if existing is not None:
+            return _row_to_rule(existing)
+        conductor = get_conductor(WORKSPACE_SCOPE, db=_db)
+        if not conductor:
+            return None
+        return create_rule(
+            connector=connector, fact=fact, value=value,
+            destination_thread_id=conductor, scope=WORKSPACE_DESIGNATION_SCOPE,
+            precedence=precedence, db=_db,
+        )
+
+
+def repoint_designation_rules(thread_id: str, *, db) -> int:
+    """Point every workspace-designation rule at ``thread_id``; return the count."""
+    cursor = db.execute(
+        "UPDATE connection_rules SET destination_thread_id=?, updated_at=? "
+        "WHERE scope=? AND destination_thread_id<>?",
+        (thread_id, _now(), WORKSPACE_DESIGNATION_SCOPE, thread_id),
+    )
+    return cursor.rowcount
