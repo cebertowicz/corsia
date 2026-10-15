@@ -31,6 +31,38 @@ async def drop_child(worker: CorrectionsWorker) -> None:
     worker.children = {key: value for key, value in worker.children.items() if value is not child}
 
 
+async def recover_load_failure(
+    worker: CorrectionsWorker,
+    manifest,
+    fallback_child,
+    fallback_version: str | None,
+    reason: str,
+) -> bool | None:
+    """Restore a serving fallback or record a terminal deterministic startup failure."""
+    if reason.startswith("load error:"):
+        worker._mark_version_failed(manifest.version, reason)
+        if fallback_child is not None:
+            worker.child, worker.child_version = fallback_child, fallback_version
+            worker.children[fallback_version] = fallback_child
+            logger.warning(
+                "corrections classifier kept version {} serving after {} failed: {}",
+                fallback_version, manifest.version, reason,
+            )
+            return False
+        worker._set("failed", reason)
+        return False
+    if fallback_child is not None:
+        worker.child, worker.child_version = fallback_child, fallback_version
+        worker.children[fallback_version] = fallback_child
+        worker._set("ready", reason)
+        logger.warning(
+            "corrections classifier kept version {} serving while {} was unavailable: {}",
+            fallback_version, manifest.version, reason,
+        )
+        return False
+    return None
+
+
 async def classify(
     worker: CorrectionsWorker,
     candidate: CorrectionCandidate,
@@ -72,27 +104,11 @@ async def classify(
             reason = str(error)
             logger.warning("corrections classifier did not load: {}", error)
             await drop_child(worker)
-            if reason.startswith("load error:"):
-                worker._mark_version_failed(manifest.version, reason)
-                if fallback_child is not None:
-                    worker.child, worker.child_version = fallback_child, fallback_version
-                    worker.children[fallback_version] = fallback_child
-                    logger.warning(
-                        "corrections classifier kept version {} serving after {} failed: {}",
-                        fallback_version, manifest.version, reason,
-                    )
-                    return False
-                worker._set("failed", reason)
-                return False
-            if fallback_child is not None:
-                worker.child, worker.child_version = fallback_child, fallback_version
-                worker.children[fallback_version] = fallback_child
-                worker._set("ready", reason)
-                logger.warning(
-                    "corrections classifier kept version {} serving while {} was unavailable: {}",
-                    fallback_version, manifest.version, reason,
-                )
-                return False
+            resolution = await recover_load_failure(
+                worker, manifest, fallback_child, fallback_version, reason,
+            )
+            if resolution is not None:
+                return resolution
             outages.append(reason)
             continue
         if fallback_child is not None:

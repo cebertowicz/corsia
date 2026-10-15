@@ -190,7 +190,7 @@ class CorrectionsWorker:
         from automation.update_failure_notice import tell_corrections_classifier_failure_detached
 
         failed = next((item for item in self.versions if item["state"] == "failed"), None)
-        version = self.failed_versions and next(reversed(self.failed_versions))
+        version = next(reversed(tuple(self.failed_versions)), None)
         version = version or (failed or {}).get("version") or (failed or {}).get("location") or "unknown"
         reason = self.reason or "classifier asset failed"
         reader = self.reader_reason or reason
