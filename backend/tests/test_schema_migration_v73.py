@@ -21,7 +21,7 @@ def test_fresh_schema_is_v73_with_edit_items_and_delivery_outcome():
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
 
-        assert SCHEMA_VERSION == 117
+        assert SCHEMA_VERSION == 118
         assert "delivery_outcome" in _columns(db, "doc_feedback_batches")
         assert {
             "batch_id",
