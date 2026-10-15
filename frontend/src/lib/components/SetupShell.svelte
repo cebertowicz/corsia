@@ -1,8 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { Button, RailRow, RailSection } from '$lib/components/ui';
+	import { peerFade } from '$lib/popoverMotion';
 
 	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip'; state: 'current' | 'todo' | 'done' };
 	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number };
@@ -10,6 +11,7 @@
 	interface Props {
 		steps: SetupStep[];
 		jobs?: SetupJob[];
+		page: string;
 		title: string;
 		lede?: string;
 		primary?: { label: string; disabled?: boolean; loading?: boolean; note?: string };
@@ -19,9 +21,22 @@
 		children?: Snippet;
 	}
 
-	const { steps, jobs = [], title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
+	const { steps, jobs = [], page, title, lede, primary, mark = false, onPrimary, secondary, children }: Props = $props();
 	let shownJobs = $state<SetupJob[]>(untrack(() => jobs));
 	let jobRegionOpen = $state(untrack(() => jobs.length > 0));
+	let sceneHeading = $state<HTMLHeadingElement | null>(null);
+	let mounted = false;
+
+	$effect(() => {
+		const scene = page;
+		if (!mounted) {
+			mounted = true;
+			return;
+		}
+		void tick().then(() => {
+			if (page === scene) sceneHeading?.focus();
+		});
+	});
 
 	$effect(() => {
 		if (jobs.length > 0) {
@@ -82,18 +97,24 @@
 	</aside>
 	<main class="pane">
 		<div class="drag" data-tauri-drag-region></div>
-		<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1>{title}</h1></header>
-		{#if lede}<p class="lede">{lede}</p>{/if}
-		<div class="body">{@render children?.()}</div>
-		<footer>
-			<div>{@render secondary?.()}</div>
-			{#if primary}
-				<div class="primary-action">
-					{#if primary.disabled && primary.note}<span class="footer-note">{primary.note}</span>{/if}
-					<Button variant="pill" disabled={primary.disabled} loading={primary.loading} onclick={onPrimary}>{primary.label}</Button>
-				</div>
-			{/if}
-		</footer>
+		<div class="pane-scenes">
+			{#key page}
+				<section class="pane-scene" data-setup-page={page} in:peerFade out:peerFade onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
+					<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
+					{#if lede}<p class="lede">{lede}</p>{/if}
+					<div class="body">{@render children?.()}</div>
+					<footer>
+						<div>{@render secondary?.()}</div>
+						{#if primary}
+							<div class="primary-action">
+								{#if primary.disabled && primary.note}<span class="footer-note">{primary.note}</span>{/if}
+								<Button variant="pill" disabled={primary.disabled} loading={primary.loading} onclick={onPrimary}>{primary.label}</Button>
+							</div>
+						{/if}
+					</footer>
+				</section>
+			{/key}
+		</div>
 	</main>
 </div>
 
@@ -103,6 +124,8 @@
 	.traffic-space { height: calc(var(--space-7) + var(--space-5)); }
 	.pane { position: relative; flex: 1; min-width: 0; min-height: 100dvh; display: flex; flex-direction: column; padding: calc(var(--space-8) + var(--space-4)) var(--space-4) var(--space-6); }
 	.drag { position: absolute; inset: 0 0 auto; height: var(--space-8); }
+	.pane-scenes { display: grid; flex: 1; min-height: 0; }
+	.pane-scene { grid-area: 1 / 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 	header { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); }
 	.mark { width: var(--space-5); height: var(--space-5); }
 	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }

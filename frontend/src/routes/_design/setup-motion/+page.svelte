@@ -44,7 +44,7 @@
 		<Button variant="chip" onclick={advanceJobCount}>Advance background jobs</Button>
 		<RailRow label="Pressable rail row" state="idle" onclick={() => {}} />
 	</div>
-	<SetupShell {steps} {jobs} title="Setup motion fixture" lede="Test-only setup rail and press evidence." primary={{ label: 'Fixture action' }} />
+	<SetupShell {steps} {jobs} page="setup-motion" title="Setup motion fixture" lede="Test-only setup rail and press evidence." primary={{ label: 'Fixture action' }} />
 </div>
 
 <style>

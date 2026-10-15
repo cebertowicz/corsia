@@ -62,9 +62,46 @@ async function assertDoneChecksSettled(page: Page) {
 	await expect.poll(() => checks.evaluateAll((paths) => paths.every((path) => Number.parseFloat(getComputedStyle(path).strokeDashoffset) === 0))).toBe(true);
 }
 
+async function waitForRailAnimationsSettled(page: Page) {
+	const rail = page.locator('.rail');
+	await expect.poll(() => rail.evaluate((element) => Array.from(element.querySelectorAll<HTMLElement>('.job-region, .job-row')).flatMap((node) => node.getAnimations()).filter((animation) => animation.playState === 'running').length)).toBe(0);
+}
+
+async function waitForPaneAnimationsSettled(page: Page) {
+	const pane = page.locator('.pane');
+	await expect.poll(() => pane.evaluate((element) => element.getAnimations({ subtree: true }).filter((animation) => animation.playState === 'running').length)).toBe(0);
+}
+
+async function paneCrossfade(page: Page) {
+	return page.locator('.pane').evaluate((pane) => {
+		const scenes = Array.from(pane.querySelectorAll<HTMLElement>('.pane-scene'));
+		return scenes.map((scene) => {
+			const box = scene.getBoundingClientRect();
+			const footer = scene.querySelector('footer')?.getBoundingClientRect();
+			return {
+				title: scene.querySelector('h1')?.textContent,
+				opacity: Number.parseFloat(getComputedStyle(scene).opacity),
+				transform: getComputedStyle(scene).transform,
+				inert: scene.inert,
+				box: { x: box.x, y: box.y, width: box.width, height: box.height },
+				footerY: footer?.y,
+			};
+		});
+	});
+}
+
+async function waitForPaneCrossfade(page: Page) {
+	await expect.poll(async () => {
+		const scenes = await paneCrossfade(page);
+		return scenes.length === 2 && scenes.every((scene) => scene.opacity > 0 && scene.opacity < 1);
+	}).toBe(true);
+	return paneCrossfade(page);
+}
+
 async function openModelStep(page: Page) {
 	await page.addInitScript(() => localStorage.setItem('corsia_theme', 'auto'));
 	await page.goto('/');
+	await waitForPaneAnimationsSettled(page);
 	await page.getByRole('button', { name: 'Get started' }).click();
 	await page.locator('input[autocomplete="name"]').fill('First Person');
 	await page.locator('input[autocomplete="username"]').fill('first');
@@ -72,9 +109,12 @@ async function openModelStep(page: Page) {
 	await page.locator('input[autocomplete="new-password"]').nth(1).fill('correct-password');
 	await page.getByRole('button', { name: 'Continue' }).click();
 	await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toBeVisible();
+	await waitForPaneAnimationsSettled(page);
+	await waitForRailAnimationsSettled(page);
 }
 
 async function assertSetupState(page: Page, state: SetupState) {
+	await waitForPaneAnimationsSettled(page);
 	const start = page.getByRole('button', { name: 'Start using CORSIA' });
 	if (state === 'ready') {
 		await expect(start).toBeEnabled();
@@ -85,7 +125,7 @@ async function assertSetupState(page: Page, state: SetupState) {
 	await expect(start).toBeDisabled();
 	if (state === 'downloading') {
 		await expect(page.getByText('Downloading in the background')).toBeVisible();
-		const job = page.locator('.job-row');
+		const job = page.locator('.job-row:not([inert])');
 		await waitForJobSettled(page, job);
 		await expect(job).toHaveCSS('opacity', '1');
 		await expect.poll(() => job.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(0);
@@ -138,6 +178,7 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 			events.emit('models_updated', {});
 		});
 		await assertSetupState(page, 'ready');
+		await waitForRailAnimationsSettled(page);
 		await page.screenshot({ path: testInfo.outputPath('setup-model-this-computer-ready-light-1280x900.png'), scale: 'css' });
 		await page.getByRole('button', { name: 'Start using CORSIA' }).click();
 		await expect(page.getByRole('heading', { name: 'Choose an AI model' })).not.toBeVisible();
@@ -154,11 +195,14 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		});
 		const shell = page.locator('.setup-shell');
 		await shell.evaluate((element) => element.setAttribute('data-persistence-probe', 'welcome'));
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+		await expect(page.getByLabel('Setup progress').getByText('Welcome', { exact: true }).locator('..').locator('..').locator('svg')).toBeVisible();
+		await page.screenshot({ path: testInfo.outputPath('setup-welcome-current-rail-light-1280x900.png'), scale: 'css' });
 		await page.getByRole('button', { name: 'Get started' }).click();
 		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
 		await expect(shell).toHaveAttribute('data-persistence-probe', 'welcome');
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-		const job = page.locator('.job-row');
+		const job = page.locator('.job-row:not([inert])');
 		const motion = await page.evaluate(async () => {
 			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 			const region = document.querySelector<HTMLElement>('.job-region');
@@ -181,12 +225,85 @@ test.describe('@surface:first-run-model-model-source evidence', () => {
 		await page.screenshot({ path: testInfo.outputPath('setup-model-get-started-background-job-light-1280x900.png'), scale: 'css' });
 	});
 
+	test('records stacked, focused pane crossfades through setup', async ({ page }, testInfo) => {
+		test.setTimeout(60_000);
+		await serveSetupState(page, 'ready');
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.addInitScript(() => localStorage.setItem('corsia_theme', 'auto'));
+		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+		await page.goto('/');
+		await page.locator('html').evaluate((element) => element.style.setProperty('--dur-tight', '1000ms'));
+		const welcome = page.getByRole('heading', { name: 'Welcome to CORSIA' });
+		await expect(welcome).toBeVisible();
+		await waitForPaneAnimationsSettled(page);
+		const welcomePaintedAt = await page.evaluate(() => performance.now());
+		await page.waitForTimeout(300);
+		expect(await page.evaluate((start) => performance.now() - start, welcomePaintedAt)).toBeGreaterThanOrEqual(300);
+		await page.screenshot({ path: testInfo.outputPath('setup-welcome-visible-before-start-light-1280x900.png'), scale: 'css' });
+		await page.getByRole('button', { name: 'Get started' }).click();
+		const welcomeToAccount = await waitForPaneCrossfade(page);
+		expect(welcomeToAccount).toHaveLength(2);
+		expect(welcomeToAccount.map((scene) => scene.title).sort()).toEqual(['Create your account', 'Welcome to CORSIA']);
+		for (const scene of welcomeToAccount) {
+			expect(scene.opacity).toBeGreaterThan(0);
+			expect(scene.opacity).toBeLessThan(1);
+			expect(scene.box).toEqual(welcomeToAccount[0].box);
+			expect(scene.footerY).toBe(welcomeToAccount[0].footerY);
+		}
+		expect(welcomeToAccount.find((scene) => scene.title === 'Welcome to CORSIA')?.inert).toBe(true);
+		expect(welcomeToAccount.find((scene) => scene.title === 'Create your account')?.inert).toBe(false);
+		await page.screenshot({ path: testInfo.outputPath('setup-welcome-account-mid-crossfade-light-1280x900.png'), scale: 'css' });
+		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeFocused();
+		await waitForPaneAnimationsSettled(page);
+
+		for (const [locator, value] of [
+			[page.locator('input[autocomplete="name"]'), 'First Person'],
+			[page.locator('input[autocomplete="username"]'), 'first'],
+			[page.locator('input[autocomplete="new-password"]').nth(0), 'correct-password'],
+			[page.locator('input[autocomplete="new-password"]').nth(1), 'correct-password'],
+		] as const) await locator.fill(value);
+		await page.getByRole('button', { name: 'Continue' }).click();
+		const accountToModels = await waitForPaneCrossfade(page);
+		expect(accountToModels).toHaveLength(2);
+		expect(accountToModels.map((scene) => scene.title).sort()).toEqual(['Choose an AI model', 'Create your account']);
+		for (const scene of accountToModels) {
+			expect(scene.opacity).toBeGreaterThan(0);
+			expect(scene.opacity).toBeLessThan(1);
+			expect(scene.box).toEqual(accountToModels[0].box);
+			expect(scene.footerY).toBe(accountToModels[0].footerY);
+		}
+		expect(accountToModels.find((scene) => scene.title === 'Create your account')?.inert).toBe(true);
+		expect(accountToModels.find((scene) => scene.title === 'Choose an AI model')?.inert).toBe(false);
+		await page.screenshot({ path: testInfo.outputPath('setup-account-models-mid-crossfade-light-1280x900.png'), scale: 'css' });
+		await expect(page.getByRole('heading', { name: 'Choose an AI model' })).toBeFocused();
+	});
+
+	test('keeps reduced-motion setup changes as fade-only pane crossfades', async ({ page }) => {
+		await serveSetupState(page, 'ready');
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/');
+		await page.locator('html').evaluate((element) => element.style.setProperty('--dur-tight', '1000ms'));
+		await expect(page.getByRole('heading', { name: 'Welcome to CORSIA' })).toBeVisible();
+		await waitForPaneAnimationsSettled(page);
+		await page.getByRole('button', { name: 'Get started' }).click();
+		const scenes = await waitForPaneCrossfade(page);
+		expect(scenes).toHaveLength(2);
+		for (const scene of scenes) {
+			expect(scene.opacity).toBeGreaterThan(0);
+			expect(scene.opacity).toBeLessThan(1);
+			expect(scene.transform).toBe('none');
+			expect(scene.box).toEqual(scenes[0].box);
+		}
+		await expect(page.getByRole('heading', { name: 'Create your account' })).toBeFocused();
+	});
+
 	test('captures a settled visible job row with animations enabled', async ({ page }, testInfo) => {
 		await serveSetupState(page, 'downloading');
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 		await openModelStep(page);
-		const job = page.locator('.job-row');
+		const job = page.locator('.job-row:not([inert])');
 		await waitForJobSettled(page, job);
 		await assertDoneChecksSettled(page);
 		await expect(job).toHaveCSS('opacity', '1');

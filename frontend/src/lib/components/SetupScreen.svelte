@@ -37,7 +37,7 @@
 	let savingKey = $state(false);
 
 	const steps = $derived<SetupStep[]>([
-		{ label: 'Welcome', icon: 'check', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
+		{ label: 'Welcome', icon: 'sparkle', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
 		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' ? 'done' : 'todo' },
 		{ label: 'AI model', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
@@ -232,7 +232,7 @@
 	});
 </script>
 
-<SetupShell {steps} {jobs} title={shellView.title} lede={shellView.lede} primary={shellView.primary} mark={shellView.mark} onPrimary={shellView.onPrimary}>
+<SetupShell {steps} {jobs} page={page} title={shellView.title} lede={shellView.lede} primary={shellView.primary} mark={shellView.mark} onPrimary={shellView.onPrimary}>
 	{#snippet secondary()}
 		{#if page === 'hard-stop'}
 			<Button variant="chip" onclick={readStatus}>Check again</Button>
