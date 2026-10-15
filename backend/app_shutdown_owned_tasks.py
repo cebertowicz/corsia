@@ -15,6 +15,7 @@ async def shutdown_owned_tasks(
 ):
     """Cancel and join exact background and finite startup tasks, and stop held vendor sign-ins."""
     from connections.account_controls import stop_all_signins
+    from jobs.corrections_realtime import shutdown as stop_corrections_classifier
     from llm.local_setup import flight_task
 
     owned_tasks = [
@@ -47,6 +48,8 @@ async def shutdown_owned_tasks(
     # A held vendor login must not outlive the backend: Codex's would keep its one callback port.
     exact_tasks.append(stop_all_signins())
     exact_labels.append("account sign-in")
+    exact_tasks.append(stop_corrections_classifier())
+    exact_labels.append("corrections classifier")
     results, pending_cancel = await join_cleanup(exact_tasks)
     for label, result in zip(exact_labels, results, strict=True):
         if isinstance(result, BaseException) and not isinstance(
