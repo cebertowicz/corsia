@@ -23,6 +23,8 @@ pub const USAGE_ERROR: i32 = 64;
 pub const MAX_ARCHIVE_BYTES: u64 = 1_024 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const STALL_TIMEOUT: Duration = Duration::from_secs(20);
+const ARCHIVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const STAGING_HEADROOM_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub fn update_stage_argument() -> Result<Option<String>, String> {
     parse_update_stage_args(&env::args_os().skip(1).collect::<Vec<_>>())
@@ -125,13 +127,6 @@ async fn stage_in_work<R: tauri::Runtime>(
         .await
         .map_err(|error| StageError::Fetch(error.to_string()))?
         .ok_or_else(|| StageError::Fetch("release manifest contained no candidate".into()))?;
-    if !candidate_is_newer(&update.current_version, &update.version)? {
-        return Err(StageError::Fetch(format!(
-            "refusing replay or downgrade: candidate {} is not newer than installed {}",
-            update.version, update.current_version,
-        )));
-    }
-
     let archive = staging_root.join("CORSIA.app.tar.gz");
     download_archive(&update.download_url, &archive).await?;
     verify_archive(&archive, &update.signature).map_err(StageError::Fetch)?;
@@ -147,8 +142,11 @@ async fn stage_in_work<R: tauri::Runtime>(
         staged_bundle,
         expand_archive,
         verify_bundle_identity,
+        |extracted| {
+            ensure_staged_bundle_version(&update.current_version, &update.version, extracted)
+                .map_err(StageError::Fetch)
+        },
     )
-    .map_err(StageError::Build)
 }
 
 fn cleanup_after_failure<T>(
@@ -163,43 +161,59 @@ fn cleanup_after_failure<T>(
     result
 }
 
-fn stage_extracted_bundle<E, V>(
+fn stage_extracted_bundle<E, V, C>(
     current_bundle: &Path,
     archive: &Path,
     staging_root: &Path,
     staged_bundle: &Path,
     expand: E,
     verify_identity: V,
-) -> Result<PathBuf, String>
+    verify_version: C,
+) -> Result<PathBuf, StageError>
 where
     E: FnOnce(&Path, &Path) -> Result<(), String>,
     V: FnOnce(&Path, &Path) -> Result<(), String>,
+    C: FnOnce(&Path) -> Result<(), StageError>,
 {
-    expand(archive, staging_root)?;
-    fs::remove_file(archive).map_err(|error| error.to_string())?;
+    expand(archive, staging_root).map_err(StageError::Build)?;
+    fs::remove_file(archive).map_err(|error| StageError::Build(error.to_string()))?;
     let extracted_bundle = staging_root.join("CORSIA.app");
     if !extracted_bundle.is_dir() {
-        return Err("update archive did not contain CORSIA.app".into());
+        return Err(StageError::Build("update archive did not contain CORSIA.app".into()));
     }
-    verify_identity(current_bundle, &extracted_bundle)?;
-    fs::rename(&extracted_bundle, staged_bundle).map_err(|error| error.to_string())?;
-    fs::remove_dir(staging_root).map_err(|error| error.to_string())?;
+    verify_version(&extracted_bundle)?;
+    verify_identity(current_bundle, &extracted_bundle).map_err(StageError::Build)?;
+    fs::rename(&extracted_bundle, staged_bundle)
+        .map_err(|error| StageError::Build(error.to_string()))?;
+    fs::remove_dir(staging_root).map_err(|error| StageError::Build(error.to_string()))?;
     Ok(staged_bundle.to_path_buf())
 }
 
 async fn download_archive(url: &reqwest::Url, path: &Path) -> Result<(), StageError> {
-    download_archive_with_limits(url, path, MAX_ARCHIVE_BYTES, REQUEST_TIMEOUT, STALL_TIMEOUT).await
+    download_archive_with_limits(
+        url,
+        path,
+        MAX_ARCHIVE_BYTES,
+        ARCHIVE_CONNECT_TIMEOUT,
+        STALL_TIMEOUT,
+        available_disk_space,
+    )
+    .await
 }
 
-async fn download_archive_with_limits(
+async fn download_archive_with_limits<F>(
     url: &reqwest::Url,
     path: &Path,
     max_bytes: u64,
-    request_timeout: Duration,
+    connect_timeout: Duration,
     stall_timeout: Duration,
-) -> Result<(), StageError> {
+    available_space: F,
+) -> Result<(), StageError>
+where
+    F: FnOnce(&Path) -> Result<u64, String>,
+{
     let response = reqwest::Client::builder()
-        .timeout(request_timeout)
+        .connect_timeout(connect_timeout)
         .build()
         .map_err(|error| StageError::Fetch(error.to_string()))?
         .get(url.clone())
@@ -220,6 +234,15 @@ async fn download_archive_with_limits(
             "archive Content-Length exceeds size cap".into(),
         ));
     }
+    let staging_parent = path
+        .parent()
+        .ok_or_else(|| StageError::Fetch("archive path has no staging parent".into()))?;
+    let content_length = response.content_length();
+    ensure_staging_capacity(
+        content_length.unwrap_or(max_bytes),
+        available_space(staging_parent).map_err(StageError::Fetch)?,
+    )
+    .map_err(StageError::Fetch)?;
     let mut file = File::create(path).map_err(|error| StageError::Fetch(error.to_string()))?;
     let mut bytes = 0_u64;
     let mut stream = response.bytes_stream();
@@ -228,7 +251,7 @@ async fn download_archive_with_limits(
             .await
             .map_err(|_| {
                 let _ = fs::remove_file(path);
-                StageError::Fetch("archive download stalled".into())
+                StageError::Fetch(format!("archive download stalled after {bytes} bytes"))
             })?;
         let Some(chunk) = next else { break };
         let chunk = chunk.map_err(|error| {
@@ -244,17 +267,73 @@ async fn download_archive_with_limits(
         }
         file.write_all(&chunk)
             .map_err(|error| StageError::Fetch(error.to_string()))?;
+        if content_length.is_some_and(|expected| bytes == expected) {
+            break;
+        }
     }
     file.sync_all()
         .map_err(|error| StageError::Fetch(error.to_string()))
 }
 
-fn candidate_is_newer(current: &str, candidate: &str) -> Result<bool, StageError> {
-    let current = Version::parse(current)
-        .map_err(|error| StageError::Fetch(format!("invalid installed version: {error}")))?;
-    let candidate = Version::parse(candidate)
-        .map_err(|error| StageError::Fetch(format!("invalid candidate version: {error}")))?;
-    Ok(candidate > current)
+fn ensure_staged_bundle_version(
+    installed_version: &str,
+    manifest_version: &str,
+    extracted_bundle: &Path,
+) -> Result<(), String> {
+    let installed = Version::parse(installed_version)
+        .map_err(|error| format!("invalid installed version: {error}"))?;
+    let manifest = Version::parse(manifest_version)
+        .map_err(|error| format!("invalid candidate version: {error}"))?;
+    let bundle = bundle_short_version(extracted_bundle)?;
+    if bundle != manifest {
+        return Err(format!(
+            "refusing update: signed bundle version {bundle} does not match manifest {manifest}"
+        ));
+    }
+    if bundle <= installed {
+        return Err(format!(
+            "refusing replay or downgrade: signed bundle version {bundle} is not newer than installed {installed}"
+        ));
+    }
+    Ok(())
+}
+
+fn bundle_short_version(bundle: &Path) -> Result<Version, String> {
+    let plist_path = bundle.join("Contents/Info.plist");
+    let plist = plist::Value::from_file(&plist_path).map_err(|error| error.to_string())?;
+    let version = plist
+        .as_dictionary()
+        .and_then(|dictionary| dictionary.get("CFBundleShortVersionString"))
+        .and_then(plist::Value::as_string)
+        .ok_or_else(|| "bundle Info.plist omitted CFBundleShortVersionString".to_string())?;
+    Version::parse(version).map_err(|error| format!("invalid bundle version: {error}"))
+}
+
+fn ensure_staging_capacity(archive_bytes: u64, available_bytes: u64) -> Result<(), String> {
+    let required_bytes = archive_bytes
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(STAGING_HEADROOM_BYTES))
+        .ok_or_else(|| "archive size exceeds staging capacity calculation".to_string())?;
+    if available_bytes < required_bytes {
+        return Err(format!(
+            "not enough free disk space: need {required_bytes}, have {available_bytes}"
+        ));
+    }
+    Ok(())
+}
+
+fn available_disk_space(path: &Path) -> Result<u64, String> {
+    use std::{ffi::CString, mem::MaybeUninit, os::unix::ffi::OsStrExt};
+
+    let path = CString::new(path.as_os_str().as_bytes()).map_err(|error| error.to_string())?;
+    let mut stat = MaybeUninit::<libc::statvfs>::uninit();
+    if unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    let stat = unsafe { stat.assume_init() };
+    (stat.f_bavail as u64)
+        .checked_mul(stat.f_frsize as u64)
+        .ok_or_else(|| "free disk space value overflowed".to_string())
 }
 
 fn verify_archive(archive: &Path, signature: &str) -> Result<(), String> {
@@ -494,12 +573,52 @@ mod tests {
         assert!(decode_updater_signature(&encoded).is_ok());
     }
 
+    fn write_bundle_version(bundle: &Path, version: &str) {
+        let contents = bundle.join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(
+            contents.join("Info.plist"),
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>CFBundleShortVersionString</key><string>{version}</string></dict></plist>"
+            ),
+        )
+        .unwrap();
+    }
+
     #[test]
-    fn only_newer_candidates_are_accepted_for_staging() {
-        assert!(candidate_is_newer("1.2.3", "1.2.4").unwrap());
-        assert!(!candidate_is_newer("1.2.3", "1.2.3").unwrap());
-        assert!(!candidate_is_newer("1.2.3", "1.2.2").unwrap());
-        assert!(candidate_is_newer("not-a-version", "1.2.4").is_err());
+    fn staged_bundle_version_must_match_the_manifest_and_exceed_installed() {
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("CORSIA.app");
+
+        write_bundle_version(&bundle, "1.2.4");
+        assert!(ensure_staged_bundle_version("1.2.3", "1.2.4", &bundle).is_ok());
+
+        write_bundle_version(&bundle, "1.2.2");
+        assert!(matches!(
+            ensure_staged_bundle_version("1.2.3", "1.2.4", &bundle),
+            Err(reason) if reason.contains("does not match")
+        ));
+
+        write_bundle_version(&bundle, "1.2.3");
+        assert!(matches!(
+            ensure_staged_bundle_version("1.2.3", "1.2.4", &bundle),
+            Err(reason) if reason.contains("does not match")
+        ));
+        assert!(matches!(
+            ensure_staged_bundle_version("1.2.3", "1.2.3", &bundle),
+            Err(reason) if reason.contains("not newer")
+        ));
+
+        write_bundle_version(&bundle, "1.2.4");
+        assert!(matches!(
+            ensure_staged_bundle_version("1.2.3", "1.2.5", &bundle),
+            Err(reason) if reason.contains("does not match")
+        ));
+        write_bundle_version(&bundle, "not-a-version");
+        assert!(matches!(
+            ensure_staged_bundle_version("1.2.3", "1.2.4", &bundle),
+            Err(reason) if reason.contains("invalid bundle version")
+        ));
     }
 
     fn developer_identity() -> SigningIdentity {
@@ -619,6 +738,7 @@ mod tests {
                     &staged,
                     |_, _| Err("forced expand failure".into()),
                     |_, _| Ok(()),
+                    |_| Ok(()),
                 )
             } else {
                 stage_extracted_bundle(
@@ -635,15 +755,48 @@ mod tests {
                         assert!(!staged.exists());
                         Err("forced identity failure".into())
                     },
+                    |_| Ok(()),
                 )
-            }
-            .map_err(StageError::Build);
+            };
             let result = cleanup_after_failure(result, &staged, &staging_root);
 
             assert!(result.is_err());
             assert!(!staging_root.exists());
             assert!(!staged.exists());
         }
+    }
+
+    #[test]
+    fn extracted_version_refusal_removes_work_and_staged_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let current = temp.path().join("CORSIA.app");
+        let staging_root = temp.path().join("CORSIA.app.work");
+        let staged = temp.path().join("CORSIA.app.staged");
+        let archive = staging_root.join("archive");
+        fs::create_dir(&current).unwrap();
+        fs::create_dir(&staging_root).unwrap();
+        fs::write(&archive, b"archive").unwrap();
+
+        let result = stage_extracted_bundle(
+            &current,
+            &archive,
+            &staging_root,
+            &staged,
+            |_, parent| {
+                write_bundle_version(&parent.join("CORSIA.app"), "1.2.2");
+                Ok(())
+            },
+            |_, _| Ok(()),
+            |bundle| {
+                ensure_staged_bundle_version("1.2.3", "1.2.4", bundle)
+                    .map_err(StageError::Fetch)
+            },
+        );
+        let result = cleanup_after_failure(result, &staged, &staging_root);
+
+        assert!(matches!(result, Err(StageError::Fetch(reason)) if reason.contains("does not match")));
+        assert!(!staging_root.exists());
+        assert!(!staged.exists());
     }
 
     #[test]
@@ -668,9 +821,85 @@ mod tests {
             3,
             Duration::from_secs(2),
             Duration::from_secs(1),
+            |_| Ok(u64::MAX),
         ));
         assert!(matches!(result, Err(StageError::Fetch(reason)) if reason.contains("size cap")));
         assert!(!archive.exists());
+    }
+
+    #[test]
+    fn insufficient_staging_space_refuses_before_creating_archive() {
+        use std::{io::Read, net::TcpListener, thread};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nABCD")
+                .unwrap();
+        });
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("CORSIA.app.work/archive");
+        fs::create_dir(archive.parent().unwrap()).unwrap();
+        let result = tauri::async_runtime::block_on(download_archive_with_limits(
+            &format!("http://{address}/archive").parse().unwrap(),
+            &archive,
+            16,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            |_| Ok(0),
+        ));
+        let staged = archive.parent().unwrap().with_extension("staged");
+        let result = cleanup_after_failure(result, &staged, archive.parent().unwrap());
+
+        assert!(matches!(result, Err(StageError::Fetch(reason)) if reason.contains("not enough free disk space")));
+        assert!(!archive.exists());
+        assert!(!archive.parent().unwrap().exists());
+        assert!(!staged.exists());
+    }
+
+    #[test]
+    fn slow_progressing_download_outlives_old_total_timeout() {
+        use std::{
+            io::Read,
+            net::{Shutdown, TcpListener},
+            thread,
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\nA\r\n")
+                .unwrap();
+            stream.flush().unwrap();
+            thread::sleep(Duration::from_millis(200));
+            stream.write_all(b"1\r\nB\r\n").unwrap();
+            stream.flush().unwrap();
+            thread::sleep(Duration::from_millis(200));
+            stream.write_all(b"1\r\nC\r\n0\r\n\r\n").unwrap();
+            stream.flush().unwrap();
+            stream.shutdown(Shutdown::Write).unwrap();
+        });
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("archive");
+        let result = tauri::async_runtime::block_on(download_archive_with_limits(
+            &format!("http://{address}/archive").parse().unwrap(),
+            &archive,
+            3,
+            Duration::from_millis(20),
+            Duration::from_secs(1),
+            |_| Ok(u64::MAX),
+        ));
+
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(fs::read(&archive).unwrap(), b"ABC");
     }
 
     #[test]
@@ -696,6 +925,7 @@ mod tests {
             3,
             Duration::from_secs(2),
             Duration::from_millis(25),
+            |_| Ok(u64::MAX),
         ));
         assert!(matches!(result, Err(StageError::Fetch(reason)) if reason.contains("stalled")));
         assert!(!archive.exists());
