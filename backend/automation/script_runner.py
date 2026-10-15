@@ -156,11 +156,26 @@ async def run_claimed(schedule: Schedule, started_at: str, *, db=None) -> None:
         woken = await run_in_db_unless_owned(
             db, settle, schedule, report, finished_at(started_at), db,
         )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.exception("script schedule {} could not record its run", schedule.id)
+        await run_in_db_unless_owned(
+            db, _record_settle_failure, schedule.id, str(exc), finished_at(started_at), db,
+        )
         return
     if woken:
         await _drive_owner(schedule.thread_id)
+
+
+def _record_settle_failure(schedule_id: str, cause: str, now: str, db) -> None:
+    """Clear a failed settlement claim without misreporting a restart."""
+    with write_transaction(db, scope="script_runner_settle_failure") as connection:
+        store.finish_run(
+            schedule_id,
+            ran_at=now,
+            status="error",
+            error=f"could not record script run: {cause}",
+            db=connection,
+        )
 
 
 def _error_report(schedule: Schedule, message: str) -> RunReport:

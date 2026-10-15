@@ -50,18 +50,18 @@
       "sha256": "c68db4057f658336adfb28baa35ce479478ad3df46ede999876370f045e0075c"
     },
     {
-      "bytes": 1358,
+      "bytes": 424,
       "kind": "context",
       "path": "context/roles/conductor/00-operating-model.md",
       "role": "conductor",
-      "sha256": "cca9a2654436de5af58d311d607946da615292f4e8d0528d052ffcd494972225"
+      "sha256": "658f0483112dd30bc4e183811fb22444732fa34b2ff42ac955a277175b9ae10c"
     },
     {
-      "bytes": 1681,
+      "bytes": 747,
       "kind": "context",
       "path": "context/roles/corsia_agent/00-operating-model.md",
       "role": "corsia_agent",
-      "sha256": "82c785e7c80c126582ceefa6ccbc63231c30620ea8d88dacca1276d72ad5062d"
+      "sha256": "4f7d0fcd09dc7cadcd99543aac9cf4d4daf06f91f41137149f8d3faab259262c"
     },
     {
       "bytes": 730,

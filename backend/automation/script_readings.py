@@ -212,33 +212,8 @@ def wake_message_id(schedule_id: str, series: str | None, day: str) -> str:
     ))
 
 
-def record_series_reading(
-    db: sqlite3.Connection, schedule: Schedule, reading: Reading, *, ts: str,
-) -> None:
-    """The one outcome-event write for a reading.
-
-    TODO(measurement seam, Self-Improvement): ``agent.script_reading`` has no
-    allowlist entry, and the allowlist has no numeric kind, so the event keeps
-    no attributes and the value is not stored on it yet. Once that kind and the
-    agent-defined series registry land, pass ``{"value": reading.value}`` here
-    and let the series' default threshold replace the bounds in ``classify``.
-    """
-    from infra.outcome_events import record_outcome_event
-
-    project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
-    record_outcome_event(
-        db,
-        dedupe_key=f"script:{schedule.id}:{reading.series}:{ts}",
-        event_name="agent.script_reading",
-        source="agent",
-        provenance="agent_recorded",
-        ts=ts,
-        subject_key=f"script:{schedule.id}:{reading.series}",
-        project_id=project,
-        agent_thread_id=schedule.thread_id,
-        attributes=None,
-    )
-
+# TODO(measurement seam, Self-Improvement): do not persist raw readings until
+# the outcome-event allowlist and numeric series registry can retain their values.
 
 def _wake_exists(db: sqlite3.Connection, message_id: str) -> bool:
     return db.execute(
@@ -324,8 +299,8 @@ def emit_report(
 ) -> bool:
     """Write a run's events, notes and wakes and settle it; True if the owner was woken."""
     registered = {s.key: s for s in store.series_of(schedule)}
-    for reading in report.readings:
-        record_series_reading(db, schedule, reading, ts=now)
+    # TODO(measurement seam, Self-Improvement): persist readings only once the
+    # numeric event contract can retain values rather than valueless rows.
     woken = False
     for signal in report.signals:
         woken = _wake(db, schedule, signal, now) or woken

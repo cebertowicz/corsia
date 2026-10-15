@@ -139,12 +139,12 @@ def append_agent_roster_transition(
         for row in (before, after)
     )
     if source is not None and workspace_candidate:
-        from infra.conductor import get_conductor
+        from infra.corsia_agent import get_corsia_agent
         from infra.corsia_agent import CorsiaAgentSettingError
 
         source_values = dict(source)
         try:
-            corsia_agent_id = get_conductor(db=db)
+            corsia_agent_id = get_corsia_agent(db=db)
         except CorsiaAgentSettingError:
             logger.warning(
                 "Skipping corsia-agent contact journal: designation setting is corrupt"

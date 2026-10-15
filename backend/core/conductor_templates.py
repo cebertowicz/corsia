@@ -22,13 +22,15 @@ _RESOURCE_BY_KIND = {
 def _selected_template_kinds(scopes: Sequence[CoordinationScope]) -> tuple[str, ...]:
     """Select each role template once in canonical delivery order.
 
-    A project conductor gets the shared conductor contract and its project
-    template; the CORSIA agent's template is standalone.
+    Both coordinating roles receive the shared contract; project and workspace
+    scope templates then add only their role-specific responsibilities.
     """
     scope_types = {scope.get("scope_type") for scope in scopes}
     selected: list[str] = []
+    if scope_types:
+        selected.append("core")
     if "project" in scope_types:
-        selected += ["core", "project"]
+        selected.append("project")
     if "workspace" in scope_types:
         selected.append("corsia_agent")
     return tuple(selected)

@@ -378,6 +378,25 @@ def test_run_settling_after_owner_deletion_is_dropped(tmp_path):
     assert script_runner.settle(schedule, report, T0, db) is False
 
 
+@pytest.mark.asyncio
+async def test_settlement_failure_records_error_and_clears_claim(tmp_path, monkeypatch):
+    db = _db()
+    _register(db, tmp_path)
+    _use_run(monkeypatch, _run('{"series":"cost","value":1}\n'))
+
+    def fail_settle(*_args, **_kwargs):
+        raise RuntimeError("journal write failed")
+
+    monkeypatch.setattr(script_runner, "settle", fail_settle)
+    assert await _settle_all(db, T0) == 1
+    row = db.execute(
+        "SELECT running_since,last_status,last_error FROM automation_schedules"
+    ).fetchone()
+    assert row["running_since"] is None
+    assert row["last_status"] == "error"
+    assert "journal write failed" in row["last_error"]
+
+
 @pytest.mark.integration
 def test_tool_registers_script_and_lists_its_status(isolated_db, tmp_path, monkeypatch):
     from infra.database import get_db

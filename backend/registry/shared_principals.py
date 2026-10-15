@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Collection
 
 from core.workspace_layout import resolve_project_root
-from infra.conductor import WORKSPACE_SCOPE, get_conductor
+from infra.conductor import WORKSPACE_SCOPE, get_scope_coordinator
 from infra.workspace_paths import WorkspaceReference, workspace_selection_for_root
 from registry.identity_bridge import OWNER_REGISTRATION_STATES
 
@@ -44,7 +44,7 @@ def acting_owner(
 
 def scope_conductor(project_id: str | None, *, db) -> str | None:
     """Return the designated conductor for one project or workspace scope."""
-    return get_conductor(project_id or WORKSPACE_SCOPE, db=db)
+    return get_scope_coordinator(project_id or WORKSPACE_SCOPE, db=db)
 
 
 _REPORTS_NOTHING = frozenset({"owner", "owner_subagent", "unowned"})

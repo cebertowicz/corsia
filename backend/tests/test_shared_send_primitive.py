@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 from unittest.mock import ANY, AsyncMock
 
@@ -546,9 +552,9 @@ def test_tcp_rest_denies_cross_scope_even_for_designated_conductor(
         "sender-a", title="Project A worker", spawned_by=None, project_id="proj-a"
     )
     _insert_session("cond-workspace", title="Workspace conductor", spawned_by=None)
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
-    assert set_conductor("workspace", "cond-workspace") is True
+    assert set_corsia_agent("cond-workspace") is True
     from subagents import cc_runtime
 
     feed = AsyncMock(side_effect=_accept_cc_turn)
@@ -583,9 +589,9 @@ def test_cross_scope_send_to_workspace_reports_workspace_conductor(
     )
     _insert_session("target-ws", title="Workspace worker", spawned_by="parent")
     _insert_session("cond-workspace", title="Workspace conductor", spawned_by=None)
-    from infra.conductor import set_conductor
+    from infra.conductor import set_scope_coordinator
 
-    assert set_conductor("workspace", "cond-workspace") is True
+    assert set_corsia_agent("cond-workspace") is True
 
     from subagents import cc_runtime
 

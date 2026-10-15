@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import copy
 
 import pytest
@@ -11,7 +17,7 @@ from events.movement_report import (
     MalformedMovementReport, MovementReport, deliver_movement_report_sync,
 )
 from events.platform import DEAD_LETTERED, DIGESTED, DUPLICATE, WOKE
-from infra.conductor import WORKSPACE_SCOPE, set_conductor
+from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
 from infra.database import get_db
 from tests.event_routing_helpers import mk_session
 
@@ -55,7 +61,7 @@ def _notes(thread):
 @pytest.fixture
 def workspace(isolated_db):
     thread = mk_session("ws")
-    assert set_conductor(WORKSPACE_SCOPE, thread)
+    assert set_corsia_agent(thread)
     return thread
 
 
@@ -67,7 +73,7 @@ def project(isolated_db):
     db.commit()
     db.close()
     thread = mk_session("proj-conductor")
-    assert set_conductor("proj-1", thread)
+    assert set_project_conductor("proj-1", thread)
     return thread
 
 
@@ -102,7 +108,7 @@ class TestRouting:
     def test_designation_move_reaches_new_owner_next_day(self, workspace):
         deliver_movement_report_sync(_report(day="2026-10-15", breach=True))
         other = mk_session("ws2")
-        assert set_conductor(WORKSPACE_SCOPE, other)
+        assert set_corsia_agent(other)
         out = deliver_movement_report_sync(_report(day="2026-10-16", breach=True))
         assert [(d.outcome, d.thread_id) for d in out] == [(WOKE, other)]
 
@@ -114,7 +120,7 @@ class TestRouting:
     def test_project_designation_follows_the_conductor(self, workspace, project):
         deliver_movement_report_sync(_report(scope="proj-1", day="2026-10-15"))
         other = mk_session("proj-conductor-2")
-        assert set_conductor("proj-1", other)
+        assert set_project_conductor("proj-1", other)
         out = deliver_movement_report_sync(
             _report(scope="proj-1", day="2026-10-16", breach=True))
         assert [(d.outcome, d.thread_id) for d in out] == [(WOKE, other)]

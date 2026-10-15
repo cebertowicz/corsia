@@ -11,9 +11,9 @@ from fastapi import APIRouter, HTTPException
 from infra.auth import authenticate, require_human_user
 from infra.conductor import (
     WORKSPACE_SCOPE,
-    get_conductor,
+    get_scope_coordinator,
     get_coordination_scopes,
-    set_conductor,
+    set_scope_coordinator,
 )
 from infra.database import get_db
 from infra.db_async import run_in_db, run_read
@@ -36,7 +36,7 @@ async def read_designation(user: dict, scope: str) -> dict:
     """Resolve one scope's designated thread and its runtime truth for ``user``."""
 
     def _resolve() -> tuple[str | None, dict | None, list[dict], bool]:
-        sid = get_conductor(scope)
+        sid = get_scope_coordinator(scope)
         if not sid:
             return None, None, [], False
         row = get_thread_for_user(sid, user["id"])
@@ -87,7 +87,7 @@ async def write_designation(user: dict, scope: str, thread_id: str | None) -> di
     def _set() -> str:
         if thread_id is not None and not get_thread_for_user(thread_id, user["id"]):
             return "no_session"
-        return "ok" if set_conductor(scope, thread_id) else "no_scope"
+        return "ok" if set_scope_coordinator(scope, thread_id) else "no_scope"
 
     result = await run_in_db(_set)
     if result == "no_session":

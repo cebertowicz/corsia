@@ -154,10 +154,10 @@ def _refusal(thread: dict, account: dict | None, observed: RefreshObservation | 
 
 
 def _conductor(thread_id: str, user_id: str | None, *, db) -> dict:
-    from infra.conductor import get_conductor
+    from infra.corsia_agent import get_corsia_agent
 
     row = db.execute("SELECT id,user_id,model,pending_model FROM threads WHERE id=?", (thread_id,)).fetchone()
-    if row is None or row["user_id"] != user_id or get_conductor(db=db) != thread_id:
+    if row is None or row["user_id"] != user_id or get_corsia_agent(db=db) != thread_id:
         raise NotCorsiaAgent(thread_id)
     return dict(row)
 
@@ -310,12 +310,12 @@ def source_account_view(provider: str) -> tuple[list[dict], dict | None]:
     from connections.account_policy import permitted_accounts, thread_scope
     from connections.account_profiles import account_label
     from connections.vendor_accounts import list_accounts
-    from infra.conductor import get_conductor
+    from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db
 
     db = get_db()
     try:
-        conductor = get_conductor(db=db)
+        conductor = get_corsia_agent(db=db)
         project = thread_scope(conductor, db=db)["project_id"] if conductor else None
         bound = db.execute("SELECT account_id FROM thread_vendor_accounts WHERE thread_id=? AND provider=?",
                            (conductor, provider)).fetchone() if conductor else None

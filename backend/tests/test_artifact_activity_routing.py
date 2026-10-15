@@ -1,6 +1,14 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
+from infra import corsia_agent
+
 import sqlite3
 from unittest.mock import patch
 
@@ -179,7 +187,7 @@ async def test_no_owner_dead_letters_even_when_workspace_conductor_exists(
     conductor_thread = _mk_session("a2-workspace-conductor")
     from infra import conductor
 
-    conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+    corsia_agent.set_corsia_agent(conductor_thread)
 
     with patch("events.router.delivery.deliver_to_thread") as mock_deliver:
         res = await _route(
@@ -318,7 +326,7 @@ async def test_released_ownerless_pr_dead_letters_even_with_workspace_conductor(
     from infra import conductor
     from registry import models
 
-    conductor.set_conductor(conductor.WORKSPACE_SCOPE, conductor_thread)
+    corsia_agent.set_corsia_agent(conductor_thread)
     models.release_artifact(
         integration=GITHUB_INTEGRATION,
         type=PR_TYPE,

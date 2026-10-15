@@ -7,6 +7,12 @@ card's mark reads only the stored binding and survives the first pick (r15 marks
 end to end: the person's own account, signed in on the card, runs the first turn."""
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
@@ -28,7 +34,7 @@ from connections.corsia_agent_account import (
 )
 from connections.provider_policy import effective_policy, set_policy
 from connections.vendor_accounts import add_account, get_account, set_account_state
-from infra.conductor import WORKSPACE_SCOPE, set_conductor
+from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
 from infra.database import write_transaction
 from infra.time import utc_now_iso
 from vendor_account_fixtures import accounts, receipt_of, set_legacy_policy  # noqa: F401
@@ -55,7 +61,7 @@ def conductor(accounts):
     db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) VALUES (?,'user',NULL,'t','t')",
                (CONDUCTOR,))
     db.commit()
-    assert set_conductor(WORKSPACE_SCOPE, CONDUCTOR, db=db)
+    assert set_corsia_agent(CONDUCTOR, db=db)
     db.commit()
     return db, work, personal
 

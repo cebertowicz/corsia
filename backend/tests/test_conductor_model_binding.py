@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import asyncio
 import json
 
@@ -12,9 +13,9 @@ def _thread_model(db, thread_id):
     return db.execute("SELECT model FROM threads WHERE id=?", (thread_id,)).fetchone()["model"]
 
 
-def test_ensure_scope_conductor_binds_the_stated_model(isolated_db):
+def test_ensure_corsia_agent_binds_the_stated_model(isolated_db):
     from infra import accounts
-    from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor
+    from infra.corsia_agent import ensure_corsia_agent
     from infra.database import get_db
 
     accounts.create_user("newcomer", "long-enough-password")
@@ -22,19 +23,17 @@ def test_ensure_scope_conductor_binds_the_stated_model(isolated_db):
     try:
         db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.commit()
-        thread_id = ensure_scope_conductor(
-            WORKSPACE_SCOPE, "newcomer", model="claude-code/sonnet", db=db,
-        )
+        thread_id = ensure_corsia_agent("newcomer", model="claude-code/sonnet", db=db)
         assert _thread_model(db, thread_id) == "claude-code/sonnet"
     finally:
         db.close()
 
 
 def test_every_caller_must_state_the_model():
-    from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor
+    from infra.corsia_agent import ensure_corsia_agent
 
     with pytest.raises(TypeError, match="model"):
-        ensure_scope_conductor(WORKSPACE_SCOPE, "newcomer")
+        ensure_corsia_agent("newcomer")
 
 
 def test_backfill_deliberately_binds_no_model(monkeypatch, isolated_db):
@@ -54,7 +53,7 @@ def test_backfill_deliberately_binds_no_model(monkeypatch, isolated_db):
     finally:
         db.close()
     calls = []
-    real = conductor.ensure_scope_conductor
+    real = conductor.ensure_project_conductor
 
     def _spy(scope, user_id, **kwargs):
         calls.append((scope, kwargs["model"]))
@@ -66,7 +65,7 @@ def test_backfill_deliberately_binds_no_model(monkeypatch, isolated_db):
         calls.append(("workspace", kwargs["model"]))
         return real_agent(user_id, **kwargs)
 
-    monkeypatch.setattr(conductor, "ensure_scope_conductor", _spy)
+    monkeypatch.setattr(conductor, "ensure_project_conductor", _spy)
     monkeypatch.setattr(conductor, "ensure_corsia_agent", _agent_spy)
 
     conductor.backfill_scope_conductors()
@@ -75,8 +74,8 @@ def test_backfill_deliberately_binds_no_model(monkeypatch, isolated_db):
 
 
 def test_the_first_accounts_workspace_conductor_is_model_less(monkeypatch, isolated_db):
-    import infra.conductor as conductor
     from infra import accounts
+    import infra.corsia_agent as corsia_agent
     from infra.database import get_db
 
     db = get_db()
@@ -86,13 +85,13 @@ def test_the_first_accounts_workspace_conductor_is_model_less(monkeypatch, isola
     finally:
         db.close()
     calls = []
-    real = conductor.ensure_scope_conductor
+    real = corsia_agent.ensure_corsia_agent
 
-    def _spy(scope, user_id, **kwargs):
-        calls.append((scope, kwargs["model"]))
-        return real(scope, user_id, **kwargs)
+    def _spy(user_id, **kwargs):
+        calls.append(("workspace", kwargs["model"]))
+        return real(user_id, **kwargs)
 
-    monkeypatch.setattr(conductor, "ensure_scope_conductor", _spy)
+    monkeypatch.setattr(corsia_agent, "ensure_corsia_agent", _spy)
 
     accounts.create_user("first", "long-enough-password")
 
@@ -109,7 +108,8 @@ def test_human_conductor_model_prefers_the_workspace_conductors_ready_model(
 ):
     import llm.delegation_model as delegation_model
     import llm.model_status as model_status
-    from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor, human_conductor_model
+    from infra.conductor import human_conductor_model
+    from infra.corsia_agent import ensure_corsia_agent
     from infra.database import get_db
 
     ready = {"claude-code/sonnet", "external@x/qwen"}
@@ -128,9 +128,7 @@ def test_human_conductor_model_prefers_the_workspace_conductors_ready_model(
     try:
         db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.commit()
-        thread_id = ensure_scope_conductor(
-            WORKSPACE_SCOPE, "u", model="claude-code/sonnet", db=db,
-        )
+        thread_id = ensure_corsia_agent("u", model="claude-code/sonnet", db=db)
         assert human_conductor_model(db) == "claude-code/sonnet"
         db.execute("UPDATE threads SET model='codex/limited' WHERE id=?", (thread_id,))
         db.commit()
@@ -177,7 +175,8 @@ async def test_human_project_api_keeps_its_first_input_for_model_selection(
     import llm.model_status as model_status
     from api import project_scaffolding, projects
     from auth_fixtures import OWNER_TOKEN, OWNER_USER
-    from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor, get_conductor
+    from infra.conductor import get_project_conductor
+    from infra.corsia_agent import ensure_corsia_agent
     from infra.database import get_db
     from infra.platform_paths import WorkspaceSelection
     from infra.send_service import send_thread_input
@@ -204,8 +203,8 @@ async def test_human_project_api_keeps_its_first_input_for_model_selection(
     try:
         db.execute("DELETE FROM settings WHERE key='corsia_agent_thread_id'")
         db.commit()
-        workspace_conductor = ensure_scope_conductor(
-            WORKSPACE_SCOPE, OWNER_USER, model="codex/unavailable", db=db,
+        workspace_conductor = ensure_corsia_agent(
+            OWNER_USER, model="codex/unavailable", db=db,
         )
         assert workspace_conductor
     finally:
@@ -218,7 +217,7 @@ async def test_human_project_api_keeps_its_first_input_for_model_selection(
 
     db = get_db()
     try:
-        conductor_id = get_conductor(project_id, db=db)
+        conductor_id = get_project_conductor(project_id, db=db)
         thread = db.execute("SELECT * FROM threads WHERE id=?", (conductor_id,)).fetchone()
         assert thread["model"] is None
     finally:
@@ -329,7 +328,7 @@ def test_project_create_returns_the_bound_conductor(monkeypatch, isolated_db, tm
     import llm.delegation_model as delegation_model
     from api import project_scaffolding
     from infra import accounts
-    from infra.conductor import get_conductor
+    from infra.conductor import get_scope_coordinator
     from infra.database import get_db
     from infra.platform_paths import WorkspaceSelection
     from tools.projects import CreateProjectTool
@@ -363,7 +362,7 @@ def test_project_create_returns_the_bound_conductor(monkeypatch, isolated_db, tm
 
     db = get_db()
     try:
-        conductor_id = get_conductor(payload["project_id"], db=db)
+        conductor_id = get_scope_coordinator(payload["project_id"], db=db)
         assert payload["conductor_thread_id"] == conductor_id
         assert payload["conductor_model"] == "claude-code/sonnet"
         assert _thread_model(db, conductor_id) == "claude-code/sonnet"

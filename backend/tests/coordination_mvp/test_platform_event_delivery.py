@@ -10,7 +10,7 @@ from events.envelope import normalize
 from events.platform import (
     DEAD_LETTERED, DIGESTED, DUPLICATE, WOKE, deliver_platform_event_sync,
 )
-from infra.conductor import WORKSPACE_SCOPE, set_conductor
+from infra.conductor import WORKSPACE_SCOPE, set_scope_coordinator
 from infra.database import get_db
 from tests.event_routing_helpers import mk_session
 
@@ -31,7 +31,7 @@ def _mail(message_id="m1", thread_id="t1", **screen):
 @pytest.fixture
 def workspace(isolated_db):
     thread = mk_session("ws")
-    assert set_conductor(WORKSPACE_SCOPE, thread)
+    assert set_scope_coordinator(WORKSPACE_SCOPE, thread)
     assert binder.ensure_designation_rule(
         connector="gmail", fact="label", value="INBOX") is not None
     return thread
@@ -135,7 +135,7 @@ class TestDelivery:
 class TestDesignationRule:
     def test_designation_move_repoints_rule(self, workspace):
         other = mk_session("ws2")
-        assert set_conductor(WORKSPACE_SCOPE, other)
+        assert set_scope_coordinator(WORKSPACE_SCOPE, other)
         [rule] = [r for r in binder.list_rules("gmail") if r.fact == "label"]
         assert rule.destination_thread_id == other
         out = deliver_platform_event_sync("gmail", _mail("m9", "t9", **SCREENED_NOW))
@@ -149,12 +149,12 @@ class TestDesignationRule:
             connector="gmail", fact="from", value="x@example.com",
             destination_thread_id=workspace)
         other = mk_session("ws3")
-        set_conductor(WORKSPACE_SCOPE, other)
+        set_scope_coordinator(WORKSPACE_SCOPE, other)
         rules = {r.id: r for r in binder.list_rules("gmail")}
         assert rules[plain.id].destination_thread_id == workspace
 
     def test_cleared_designation_makes_rule_unroutable(self, workspace):
-        set_conductor(WORKSPACE_SCOPE, None)
+        set_scope_coordinator(WORKSPACE_SCOPE, None)
         assert binder.list_rules("gmail") == []
         out = deliver_platform_event_sync("gmail", _mail("m8", "t8", **SCREENED_NOW))
         assert [d.outcome for d in out] == [DEAD_LETTERED]

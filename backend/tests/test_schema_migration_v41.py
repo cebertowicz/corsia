@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 from contextlib import closing
 import json
 import sqlite3
@@ -116,7 +122,7 @@ def test_startup_migration_heals_scopes_with_membership_safe_owner(tmp_path):
 
 def test_startup_migration_preserves_deliberate_clear(tmp_path):
     """PUT /api/conductor with thread_id null must survive later startups."""
-    from infra.conductor import get_conductor, set_conductor
+    from infra.conductor import get_scope_coordinator, set_scope_coordinator
 
     path = _legacy_v39_db(tmp_path / "legacy-conductor-clear-v39.db")
     with closing(sqlite3.connect(path)) as db:
@@ -124,14 +130,14 @@ def test_startup_migration_preserves_deliberate_clear(tmp_path):
         migrate_to_current(db, SCHEMA_VERSION)
         before = db.execute("SELECT COUNT(*) FROM threads").fetchone()[0]
 
-        assert set_conductor("workspace", None, db=db) is True
-        assert set_conductor("project-owned", None, db=db) is True
+        assert set_corsia_agent(None, db=db) is True
+        assert set_project_conductor("project-owned", None, db=db) is True
 
         # The next startup (and every one after) runs no reconciler: the
         # cleared designations stay cleared and no replacement thread appears.
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
-        assert get_conductor("workspace", db=db) is None
-        assert get_conductor("project-owned", db=db) is None
+        assert get_corsia_agent(db=db) is None
+        assert get_project_conductor("project-owned", db=db) is None
         assert db.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == before
 
 

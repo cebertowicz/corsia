@@ -1,7 +1,7 @@
 """Deliver a platform-produced event to its owner: wake, digest or dead-letter.
 
-The one producer entrypoint for events the platform itself observes (a poller,
-not a webhook). It reuses the existing path: ``normalize`` applies the type's
+The delivery entrypoint for events the platform itself observes (a poller,
+not a webhook); unlike the webhook router, it honors resolved dispositions. It reuses the existing path: ``normalize`` applies the type's
 declared rules, ``resolve_targets`` picks the owner, then each target gets an
 owner wake (``enqueue_event_wake``) when the event is actionable, otherwise an
 owner digest note (``append_thread_context_note``) collapsed by the type's
@@ -24,6 +24,7 @@ from events.resolve import Target, resolve_targets
 from infra.database import write_transaction
 from infra.db_async import run_in_db_unless_owned
 from infra.passive_changes import append_thread_context_note
+from infra.product_events import emit_product_event
 
 WOKE = "woke"
 DIGESTED = "digested"
@@ -129,10 +130,21 @@ def deliver_platform_event_sync(
     collapse_fact = get_manifest(connector).decl(envelope.type).collapse_fact
     with write_transaction(db, scope="deliver_platform_event") as conn:
         targets = resolve_targets(envelope, repair_owner=repair_owner, db=conn)
-        return [
+        deliveries = [
             _deliver_target(conn, envelope, target, collapse_fact)
             for target in targets
         ]
+        for delivery in deliveries:
+            emit_product_event(
+                "event_route", delivery.outcome,
+                properties={
+                    "internal_event": envelope.type,
+                    "thread_id": delivery.thread_id,
+                    "external_id": delivery.event_id,
+                    "reason": delivery.reason,
+                },
+            )
+        return deliveries
 
 
 async def deliver_platform_event(

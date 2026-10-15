@@ -173,11 +173,9 @@ def _create_account(
             (name, encoded, now, now),
         )
         if not had_users:
-            from infra.conductor import WORKSPACE_SCOPE, ensure_scope_conductor
+            from infra.corsia_agent import ensure_corsia_agent
 
-            conductor_id = ensure_scope_conductor(
-                WORKSPACE_SCOPE, name, model=None, db=conn,
-            )
+            conductor_id = ensure_corsia_agent(name, model=None, db=conn)
             if not data_owners_without_accounts(conn):
                 from infra import config
                 from registry.shared_ownership_assignment import enforce_scaffold_ownership

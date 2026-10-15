@@ -193,12 +193,12 @@ class AutomationScheduleTool(Tool):
                             "max": {"type": "number"},
                             "worse": {
                                 "type": "string", "enum": ["up", "down"],
-                                "description": "Which direction is worse.",
+                                "description": "Which direction is worse; recorded but not acted on yet.",
                             },
                             "reduce": {
                                 "type": "string",
                                 "enum": ["last", "mean", "max"],
-                                "description": "How a period's readings reduce; default last.",
+                                "description": "How a period's readings reduce; recorded but not acted on yet (default last).",
                             },
                         },
                         "required": ["key"],

@@ -5,8 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from infra.conductor import WORKSPACE_SCOPE, get_conductor
-from infra.corsia_agent import CorsiaAgentSettingError
+from infra.corsia_agent import CorsiaAgentSettingError, get_corsia_agent
 from infra.delegation_scope import native_endpoint_gap
 from infra.queries import thread_available_sql
 
@@ -38,10 +37,10 @@ def corsia_agent_contact(
     """Return the CORSIA agent contact, or why there is none.
 
     The contact qualifies under the same endpoint rule native delegate_send
-    enforces, so the roster lists the conductor exactly when a send can reach it.
+    enforces, so the roster lists the CORSIA agent exactly when a send can reach it.
     """
     try:
-        conductor_id = get_conductor(WORKSPACE_SCOPE, db=db)
+        conductor_id = get_corsia_agent(db=db)
     except CorsiaAgentSettingError:
         return None, "the CORSIA agent setting is malformed"
     if not conductor_id:
@@ -52,12 +51,12 @@ def corsia_agent_contact(
         (conductor_id,),
     ).fetchone()
     if row is None:
-        return None, f"designated conductor {conductor_id} does not exist"
+        return None, f"designated CORSIA agent {conductor_id} does not exist"
     if row["user_id"] != user_id:
-        return None, "designated conductor belongs to another account"
+        return None, "designated CORSIA agent belongs to another account"
     gap = native_endpoint_gap(dict(row), corsia_agent_id=conductor_id)
     if gap:
-        return None, f"designated conductor {conductor_id} is unreachable: {gap}"
+        return None, f"designated CORSIA agent {conductor_id} is unreachable: {gap}"
     contact = {column: row[column] for column in _CONTACT_COLUMNS}
     contact["agent_responsibility"] = (
         contact["agent_responsibility"] or "Designated CORSIA agent."

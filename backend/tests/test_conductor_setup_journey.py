@@ -1,13 +1,19 @@
 """Mock-mode native dispatch journey through existing creation and roster owners."""
 from __future__ import annotations
 
+from infra.corsia_agent import ensure_corsia_agent, get_corsia_agent, set_corsia_agent
+from infra.conductor import (
+    ensure_project_conductor, get_project_conductor, get_scope_coordinator,
+    set_project_conductor, set_scope_coordinator,
+)
+
 import json
 from types import SimpleNamespace
 
 import pytest
 
 from delegation_fixtures import deleg_db  # noqa: F401
-from infra.conductor import set_conductor
+from infra.conductor import set_scope_coordinator
 from tools.registry import ToolRegistry
 
 
@@ -22,7 +28,7 @@ async def test_fresh_workspace_conductor_discovers_creates_and_reads_agent(deleg
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.setattr(config, "WORKSPACE", workspace)
-    assert set_conductor("workspace", "sender-self", db=deleg_db)
+    assert set_corsia_agent("sender-self", db=deleg_db)
     registry = ToolRegistry()
     _register_agent_roster_tools(SimpleNamespace(tools=registry))
     registry.register(DelegateCreateThreadTool())
