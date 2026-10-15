@@ -113,13 +113,10 @@ async fn stage<R: tauri::Runtime>(
         .await
         .map_err(|error| StageError::Fetch(error.to_string()))?
         .ok_or_else(|| StageError::Fetch("release manifest contained no candidate".into()))?;
-    let current = Version::parse(&update.current_version)
-        .map_err(|error| StageError::Fetch(format!("invalid installed version: {error}")))?;
-    let candidate = Version::parse(&update.version)
-        .map_err(|error| StageError::Fetch(format!("invalid candidate version: {error}")))?;
-    if candidate <= current {
+    if !candidate_is_newer(&update.current_version, &update.version)? {
         return Err(StageError::Fetch(format!(
-            "refusing replay or downgrade: candidate {candidate} is not newer than installed {current}"
+            "refusing replay or downgrade: candidate {} is not newer than installed {}",
+            update.version, update.current_version,
         )));
     }
 
@@ -215,16 +212,35 @@ async fn download_archive_with_limits(
         .map_err(|error| StageError::Fetch(error.to_string()))
 }
 
+fn candidate_is_newer(current: &str, candidate: &str) -> Result<bool, StageError> {
+    let current = Version::parse(current)
+        .map_err(|error| StageError::Fetch(format!("invalid installed version: {error}")))?;
+    let candidate = Version::parse(candidate)
+        .map_err(|error| StageError::Fetch(format!("invalid candidate version: {error}")))?;
+    Ok(candidate > current)
+}
+
 fn verify_archive(archive: &Path, signature: &str) -> Result<(), String> {
     let key = updater_public_key()?;
+    let signature = decode_updater_signature(signature)?;
+    verify_archive_with_key(archive, &key, &signature)
+}
+
+fn decode_updater_signature(signature: &str) -> Result<Signature, String> {
     let signature_text = base64::engine::general_purpose::STANDARD
         .decode(signature)
         .map_err(|error| error.to_string())?;
-    let signature =
-        Signature::decode(std::str::from_utf8(&signature_text).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?;
+    Signature::decode(std::str::from_utf8(&signature_text).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())
+}
+
+fn verify_archive_with_key(
+    archive: &Path,
+    key: &PublicKey,
+    signature: &Signature,
+) -> Result<(), String> {
     let mut verifier = key
-        .verify_stream(&signature)
+        .verify_stream(signature)
         .map_err(|error| error.to_string())?;
     let mut file = File::open(archive).map_err(|error| error.to_string())?;
     let mut buffer = [0_u8; 64 * 1024];
@@ -282,10 +298,14 @@ fn ensure_same_device(installed_parent: &Path, staged: &Path) -> Result<(), Stri
         .map_err(|error| error.to_string())?
         .dev();
     fs::remove_dir(&probe).map_err(|error| error.to_string())?;
-    if installed.dev() != staged_device {
+    if !same_device(installed.dev(), staged_device) {
         return Err("staging directory is not on the installed app device".into());
     }
     Ok(())
+}
+
+fn same_device(installed_device: u64, staged_device: u64) -> bool {
+    installed_device == staged_device
 }
 
 fn expand_archive(archive: &Path, parent: &Path) -> Result<(), String> {
@@ -358,6 +378,58 @@ mod tests {
             (UPDATE_STAGED, FETCH_FAILED, BUILD_FAILED, USAGE_ERROR),
             (0, 41, 42, 64)
         );
+    }
+
+    const TEST_SIGNER_PUBLIC_KEY: &str =
+        "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+    const TEST_SIGNED_ARCHIVE: &str = concat!(
+        "untrusted comment: signature from minisign secret key\n",
+        "RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/",
+        "z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\n",
+        "trusted comment: timestamp:1556193335\tfile:test\n",
+        "y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==",
+    );
+
+    fn test_signature() -> Signature {
+        Signature::decode(TEST_SIGNED_ARCHIVE).unwrap()
+    }
+
+    #[test]
+    fn signed_archive_requires_the_pinned_signer_and_exact_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("archive");
+        fs::write(&archive, b"test").unwrap();
+        let signer = PublicKey::from_base64(TEST_SIGNER_PUBLIC_KEY).unwrap();
+        let signature = test_signature();
+
+        assert!(verify_archive_with_key(&archive, &signer, &signature).is_ok());
+        fs::write(&archive, b"Test").unwrap();
+        assert!(verify_archive_with_key(&archive, &signer, &signature).is_err());
+
+        fs::write(&archive, b"test").unwrap();
+        let other_signer = updater_public_key().unwrap();
+        assert!(verify_archive_with_key(&archive, &other_signer, &signature).is_err());
+    }
+
+    #[test]
+    fn updater_signature_encoding_must_be_valid_base64_and_minisign() {
+        assert!(decode_updater_signature("not base64!").is_err());
+        let encoded = base64::engine::general_purpose::STANDARD.encode(TEST_SIGNED_ARCHIVE);
+        assert!(decode_updater_signature(&encoded).is_ok());
+    }
+
+    #[test]
+    fn only_newer_candidates_are_accepted_for_staging() {
+        assert!(candidate_is_newer("1.2.3", "1.2.4").unwrap());
+        assert!(!candidate_is_newer("1.2.3", "1.2.3").unwrap());
+        assert!(!candidate_is_newer("1.2.3", "1.2.2").unwrap());
+        assert!(candidate_is_newer("not-a-version", "1.2.4").is_err());
+    }
+
+    #[test]
+    fn staging_refuses_a_different_device() {
+        assert!(same_device(7, 7));
+        assert!(!same_device(7, 8));
     }
 
     #[test]
