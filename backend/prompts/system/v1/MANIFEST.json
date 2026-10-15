@@ -213,10 +213,16 @@
       "sha256": "af633cb3a16427eca25e3111641d67d9d2e8a6d03ca28a4493de4e787979dc01"
     },
     {
-      "bytes": 17329,
+      "bytes": 9096,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app.md",
+      "sha256": "60965f60d3039d91eb893b2e12a9228856603af63bc3806b491c0fbd82ad9b63"
+    },
+    {
+      "bytes": 17515,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "e09a7c7af317ad8de168be0c4cf00e4582ee7762626ca3d0a0cb779ea7e2012b"
+      "sha256": "d87cfb88440cc25dbd853256e65b23f0688d9eb6dd33249c132a6b2c9bc0daa4"
     },
     {
       "bytes": 1850,
@@ -249,10 +255,10 @@
       "sha256": "586b814c75cde6491212911ba8c4af4c9131e726585fb2e587a639e000c3a566"
     },
     {
-      "bytes": 4933,
+      "bytes": 5114,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/web-search.md",
-      "sha256": "8ad71d66358d6074814e57cdd575eb78baf1bfe95ed45f61e56c16ac6b222ec2"
+      "sha256": "8c11d102b6b8ca00a143efb88c67eba152d1f68754b980a2bccee34b1f16bb43"
     },
     {
       "bytes": 4450,
@@ -291,10 +297,10 @@
       "sha256": "90ef9c6a26a32624ec249125654b405263f95a4a09030245f0cfe43b4e4b8029"
     },
     {
-      "bytes": 5452,
+      "bytes": 5406,
       "kind": "skill",
       "path": "skills/github/references/agent-account.md",
-      "sha256": "f8715d21e9f62d330290536e4b51efbcc7c2d4859c4e4e7aa910d3bbdd9fea79"
+      "sha256": "5a737798876019404b7802a8aebf33d712658bb21e1df33ce00a325f558bc175"
     },
     {
       "bytes": 5925,
