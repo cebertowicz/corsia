@@ -51,7 +51,7 @@ env -i \
   "$RESOURCES/bin/corsia-service" --host 127.0.0.1 --port "$port" \
   >"$TEMP_ROOT/backend.log" 2>&1 &
 BACKEND_PID=$!
-startup_receipt="CORSIA bundled backend startup: state_dir=$TEMP_ROOT/state db_path=$TEMP_ROOT/state/corsia.db port=$port"
+startup_receipt="CORSIA bundled backend startup: state_dir=$TEMP_ROOT/state db_path=$TEMP_ROOT/state/corsia.db port=$port workspace=$TEMP_ROOT/workspace"
 for _ in $(seq 1 30); do
   if grep -F "$startup_receipt" "$TEMP_ROOT/state/logs/service.log" >/dev/null 2>&1; then break; fi
   sleep 1

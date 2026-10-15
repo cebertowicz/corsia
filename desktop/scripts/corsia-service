@@ -13,6 +13,61 @@ export CORSIA_SERVICE_PATH="${login_path:+$login_path:}$base_path"
 export PATH="$CORSIA_SERVICE_PATH"
 export PYTHONPATH="$resources/python/backend-packages"
 export CORSIA_STATE_DIR="$state_dir"
+
+# service.json (written once by the app shell) names the workspace and port.
+# It is parsed, never sourced, and only those two keys are honoured. An
+# explicit CORSIA_WORKSPACE or --port still wins, which is what tests use.
+service_file_port=""
+config_notes=""
+if [ -f "$state_dir/service.json" ]; then
+  config_notes="$(PYTHONNOUSERSITE=1 "$resources/python/bin/python3" -I -B -c '
+import json, sys
+KEYS = ("workspace", "port")
+def name(value):
+    value = str(value)
+    ok = value.isprintable() and len(value) <= 64
+    return value if ok else "<unprintable name>"
+try:
+    with open(sys.argv[1], "rb") as handle:
+        data = json.loads(handle.read(65536).decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("not a JSON object")
+except Exception as error:
+    print("note=service.json unreadable: " + name(type(error).__name__))
+    sys.exit(0)
+for key in data:
+    if key not in KEYS:
+        print("note=service.json: ignoring unsupported key " + name(key))
+workspace = data.get("workspace")
+if isinstance(workspace, str) and workspace.startswith("/") and workspace.isprintable():
+    print("workspace=" + workspace)
+elif "workspace" in data:
+    print("note=service.json: ignoring an invalid workspace value")
+port = data.get("port")
+if isinstance(port, int) and not isinstance(port, bool) and 0 < port < 65536:
+    print("port=%d" % port)
+elif "port" in data:
+    print("note=service.json: ignoring an invalid port value")
+' "$state_dir/service.json" 2>/dev/null || true)"
+  if [ -z "$config_notes" ]; then config_notes="note=service.json: could not be read"; fi
+  file_workspace=""
+  parsed_notes=""
+  while IFS= read -r line; do
+    case "$line" in
+      workspace=*) file_workspace="${line#workspace=}" ;;
+      port=*) service_file_port="${line#port=}" ;;
+      note=*) parsed_notes="${parsed_notes}${line#note=}
+" ;;
+    esac
+  done <<EOF_NOTES
+$config_notes
+EOF_NOTES
+  config_notes="$parsed_notes"
+  if [ -z "${CORSIA_WORKSPACE:-}" ] && [ -n "$file_workspace" ]; then
+    export CORSIA_WORKSPACE="$file_workspace"
+  fi
+fi
+
 service_port="unknown"
 previous_argument=""
 for argument; do
@@ -25,6 +80,10 @@ for argument; do
   esac
   previous_argument="$argument"
 done
+if [ "$service_port" = "unknown" ] && [ -n "$service_file_port" ]; then
+  service_port="$service_file_port"
+  set -- "$@" --port "$service_port"
+fi
 # The backend finds its own loopback port through BACKEND_PORT (the Claude Code
 # tool bridge URL, scheduled updates, the CLI); unset, it falls back to the
 # default port, which the packaged app does not serve on.
@@ -32,6 +91,9 @@ if [ "$service_port" != "unknown" ]; then
   export BACKEND_PORT="$service_port"
 fi
 exec >>"$state_dir/logs/service.log" 2>&1
-printf 'CORSIA bundled backend startup: state_dir=%s db_path=%s port=%s\n' \
-  "$state_dir" "$state_dir/corsia.db" "$service_port"
+printf 'CORSIA bundled backend startup: state_dir=%s db_path=%s port=%s workspace=%s\n' \
+  "$state_dir" "$state_dir/corsia.db" "$service_port" "${CORSIA_WORKSPACE:-unset}"
+printf '%s' "$config_notes" | while IFS= read -r note; do
+  if [ -n "$note" ]; then printf 'CORSIA bundled backend: %s\n' "$note"; fi
+done
 exec "$resources/python/bin/python3" -m uvicorn main:app --app-dir "$resources/backend" "$@"

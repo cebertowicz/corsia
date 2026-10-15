@@ -55,6 +55,7 @@
 		html[data-theme="dark"] .failure-card { background: var(--card-dark); border: 1px solid var(--border-dark); }
 		html[data-theme="light"] .failure-card { background: var(--card-light); border: 1px solid var(--border-light); }
 		.failure-copy { margin: 0; font-size: 14px; line-height: 1.5; }
+		.failure-copy + .failure-copy { margin-top: 8px; }
 		html[data-theme="dark"] .failure-copy, html[data-theme="dark"] .log-label { color: var(--muted-dark); }
 		html[data-theme="light"] .failure-copy, html[data-theme="light"] .log-label { color: var(--muted-light); }
 		.log-label { display: block; margin-top: 16px; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -94,6 +95,7 @@
 		<section id="failure" class="failure" hidden aria-labelledby="status">
 			<div class="failure-card">
 				<p class="failure-copy">CORSIA couldn’t start.</p>
+				<p id="failure-reason" class="failure-copy" hidden></p>
 				<span class="log-label">Service log</span>
 				<code id="log-path" class="log-path"></code>
 				<div class="actions"><button id="retry" type="button">Try again</button></div>
@@ -107,10 +109,13 @@
 			const status = document.getElementById('status');
 			const failure = document.getElementById('failure');
 			const logPath = document.getElementById('log-path');
+			const reason = document.getElementById('failure-reason');
 			const retry = document.getElementById('retry');
 
-			async function showFailure() {
+			async function showFailure(why) {
 				status.textContent = 'CORSIA couldn’t start';
+				reason.textContent = typeof why === 'string' ? why : '';
+				reason.hidden = !reason.textContent;
 				try {
 					logPath.textContent = await invoke('get_service_log_path');
 				} catch {
@@ -132,8 +137,8 @@
 				try {
 					const startup = await invoke('start_local_service');
 					window.location.replace(startup.url);
-				} catch {
-					await showFailure();
+				} catch (error) {
+					await showFailure(error);
 				}
 			}
 
