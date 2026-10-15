@@ -449,6 +449,32 @@ describe('ContextSheet source owner actions', () => {
 		expect(host.querySelector('.ctx-preview-note')).toBeNull();
 	});
 
+	it('keeps app action counts out of the Tools group header', () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(ContextSheet, {
+			target: host,
+			props: {
+				usage: {
+					model_context_window: 1_000, system_tokens: 0, tool_def_tokens: 100,
+					history_tokens: 0, user_tokens: 0, total_used: 100, utilization: 0.1,
+					was_trimmed: false, history_messages: 0,
+					context_snapshot: { source_inventory: [
+						{ source_id: 'native:tool-index:github', origin_section: 'tools', label: 'github', inclusion: 'included', prompt_tokens: 30, metadata: { provider: 'mcp_index', server_name: 'github', display_name: 'GitHub', tool_count: 46 } },
+						{ source_id: 'native:tool-index:linear', origin_section: 'tools', label: 'linear', inclusion: 'included', prompt_tokens: 10, metadata: { provider: 'mcp_index', server_name: 'linear', display_name: 'Linear', tool_count: 21 } },
+						{ source_id: 'native:tool-definitions', origin_section: 'tools', label: 'CORSIA tools', inclusion: 'included', prompt_tokens: 60, metadata: { provider: 'corsia_tools' } },
+					] },
+				},
+			},
+		});
+		flushSync();
+
+		const tools = [...host.querySelectorAll<HTMLDetailsElement>('.ctx-source-group')]
+			.find((group) => group.querySelector('.ctx-source-summary-main')?.textContent?.includes('Tools'));
+		expect(tools?.querySelector('.ctx-source-group-meta')).toBeNull();
+		expect(tools?.querySelector('summary')?.textContent).not.toMatch(/action/i);
+	});
+
 	it('renders measured usage independently from estimated source attribution', () => {
 		host = document.createElement('div');
 		document.body.appendChild(host);
