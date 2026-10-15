@@ -14,6 +14,7 @@ import json
 import os
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlencode
@@ -25,6 +26,7 @@ from connections.google.client import (
     ACCOUNT_SETTING, STATUS_CONNECTED, TIMEOUT_SECONDS, TOKEN_URL, GoogleError, GoogleRequestFailed,
 )
 from infra import key_store
+from infra.database import write_transaction
 from infra.db_async import run_in_db
 from infra.default_port import DEFAULT_BACKEND_PORT
 from infra.settings import get_setting, set_setting
@@ -62,6 +64,8 @@ class _Pending:
     client_secret: str
     redirect_uri: str
     expires_at: float
+    after_exchange: Callable[[], Awaitable[None]] | None = None
+    store_failure_text: str | None = None
 
 
 _pending: _Pending | None = None
@@ -103,6 +107,27 @@ def _stored_client() -> tuple[str, str] | None:
     return stored[key_store.GOOGLE_CLIENT_ID], stored[key_store.GOOGLE_CLIENT_SECRET]
 
 
+def has_stored_client() -> bool:
+    """Whether a validated Google Desktop client is available without exposing it."""
+    return _stored_client() is not None
+
+
+def sign_in_pending() -> bool:
+    """Whether one Google Allow flow is still live and has not expired."""
+    return _pending is not None and time.monotonic() < _pending.expires_at
+
+
+def _store_client_file(raw_path: object) -> None:
+    client_id, client_secret = read_client_file(raw_path)
+    key_store.set_managed_value(key_store.GOOGLE_CLIENT_ID, client_id)
+    key_store.set_managed_value(key_store.GOOGLE_CLIENT_SECRET, client_secret)
+
+
+async def import_client_file(raw_path: object) -> None:
+    """Save a Desktop OAuth client for a later authorized sign-in without returning it."""
+    await run_in_db(_store_client_file, raw_path)
+
+
 def connected_email() -> str | None:
     """The signed-in address when the sign-in is stored and still accepted, else None."""
     account = get_setting(ACCOUNT_SETTING)
@@ -135,9 +160,18 @@ def _begin(client_file: object) -> str:
     })
 
 
-async def start_sign_in(client_file: object = None) -> str:
+async def start_sign_in(
+    client_file: object = None,
+    *,
+    after_exchange: Callable[[], Awaitable[None]] | None = None,
+    store_failure_text: str | None = None,
+) -> str:
     """The URL the person opens to sign in. The client's id and secret never leave the backend."""
-    return await run_in_db(_begin, client_file)
+    url = await run_in_db(_begin, client_file)
+    if _pending is not None:
+        _pending.after_exchange = after_exchange
+        _pending.store_failure_text = store_failure_text
+    return url
 
 
 def _take_pending(state: object) -> _Pending:
@@ -161,12 +195,14 @@ def _take_pending(state: object) -> _Pending:
 
 
 def _store(pending: _Pending, refresh_token: str, email: str, scopes: list[str]) -> None:
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_ID, pending.client_id)
-    key_store.set_managed_value(key_store.GOOGLE_CLIENT_SECRET, pending.client_secret)
-    key_store.set_managed_value(key_store.GOOGLE_REFRESH_TOKEN, refresh_token)
-    set_setting(ACCOUNT_SETTING, {
-        "email": email, "scopes": scopes, "connected_at": utc_now_iso(), "status": STATUS_CONNECTED,
-    })
+    """Atomically activate the client, refresh token and connected account record."""
+    with write_transaction(None, scope="google_sign_in_store") as db:
+        key_store.set_managed_value(key_store.GOOGLE_CLIENT_ID, pending.client_id, db=db)
+        key_store.set_managed_value(key_store.GOOGLE_CLIENT_SECRET, pending.client_secret, db=db)
+        key_store.set_managed_value(key_store.GOOGLE_REFRESH_TOKEN, refresh_token, db=db)
+        set_setting(ACCOUNT_SETTING, {
+            "email": email, "scopes": scopes, "connected_at": utc_now_iso(), "status": STATUS_CONNECTED,
+        }, db=db)
 
 
 async def complete_sign_in(code: object, state: object) -> str:
@@ -197,7 +233,14 @@ async def complete_sign_in(code: object, state: object) -> str:
         raise GoogleSignInError(DENIED) from None
     if not set(SCOPES) <= set(scopes):
         raise GoogleSignInError(MISSING_SCOPES)
-    await run_in_db(_store, pending, refresh_token, str(email), scopes)
+    if pending.after_exchange is not None:
+        await pending.after_exchange()
+    try:
+        await run_in_db(_store, pending, refresh_token, str(email), scopes)
+    except Exception:
+        if pending.store_failure_text is not None:
+            raise GoogleSignInError(pending.store_failure_text) from None
+        raise
     return str(email)
 
 
