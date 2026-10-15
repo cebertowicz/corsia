@@ -4,14 +4,15 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from plans.node_states import open_user_block_sql
-
 log = logging.getLogger(__name__)
 
 _TABLES = ("artifact_identities", "plan_node_artifact_links", "plan_node_holds")
 
 
-_STALE_REVIEW_ATTENTION_SQL = f"""
+def _stale_review_attention_sql() -> str:
+    from plans.public import open_user_block_sql  # lazy: plans imports infra
+
+    return f"""
     SELECT i.id
       FROM artifact_identities i
      WHERE i.state='active'
@@ -43,7 +44,7 @@ def withdraw_stale_review_attention(conn: sqlite3.Connection) -> int:
     )}
     if not present.issuperset(_TABLES):
         return 0  # an older partial schema holds no review asks to repair
-    artifact_ids = [row[0] for row in conn.execute(_STALE_REVIEW_ATTENTION_SQL)]
+    artifact_ids = [row[0] for row in conn.execute(_stale_review_attention_sql())]
     for artifact_id in artifact_ids:
         attention.withdraw_attention(str(artifact_id), db=conn)
     return len(artifact_ids)
