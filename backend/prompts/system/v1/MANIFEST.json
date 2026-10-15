@@ -183,6 +183,12 @@
       "sha256": "439a391de2f259ea39ce913808296ca144440758f5fcb919581251036116d3a4"
     },
     {
+      "bytes": 18207,
+      "kind": "skill",
+      "path": "skills/attention-watch/SKILL.md",
+      "sha256": "cad09f74deb2d986ebbc25c86ee3f665fd3266f128065dc5ee9934327c1a2765"
+    },
+    {
       "bytes": 3741,
       "kind": "skill",
       "path": "skills/backlog-intake/SKILL.md",
@@ -325,6 +331,12 @@
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
       "sha256": "2228aca35ebdac364be172e2a035a1bdc084adb2c7eb90f30d29311101d7b139"
+    },
+    {
+      "bytes": 8776,
+      "kind": "skill",
+      "path": "skills/time-to-agent/SKILL.md",
+      "sha256": "df423cc8f369cad66b1a8c8a9949e8161751c720dfa7db55343095909a12438c"
     }
   ],
   "version": "v1"
