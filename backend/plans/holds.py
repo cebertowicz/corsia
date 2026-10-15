@@ -285,6 +285,8 @@ def block_hold(
 
     Only the user's own blocker is a hold: one anyone else clears is a wait
     with a deadline (``plans.blocked_wait``), so it never sits unlooked-at.
+    Re-blocking a task on the artifact it already asks about is a no-op: the
+    open hold keeps its original reason rather than recording the new one.
     """
     if owner_kind in WAIT_OWNERS:
         raise service.PlanInputError(

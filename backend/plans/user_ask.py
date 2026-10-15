@@ -240,12 +240,18 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
     ask = ask.strip()
     existing = raised_asks(db, ask)
     if existing and all(str(row["node_id"]) != node_id for row in existing):
-        task = str(existing[0]["task_title"] or existing[0]["node_id"])
-        raise service.PlanInputError(
-            f"this document already has an open review request on task {task!r}; "
-            "withdraw it (resolve the blocker) and ask again"
-        )
+        raise service.PlanInputError(_already_asked(existing[0]))
     return ask
+
+
+def _already_asked(open_ask) -> str:
+    """The one-open-ask refusal, naming the exact hold an agent withdraws in one call."""
+    task = open_ask["task_title"] or open_ask["node_id"]
+    return (
+        f"this document already has an open review request on task {task!r} "
+        f"(node_id {open_ask['node_id']}, hold_id {open_ask['hold_id']}); "
+        "withdraw it (resolve the blocker) and ask again"
+    )
 
 
 def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenance: str) -> None:

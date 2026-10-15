@@ -472,6 +472,17 @@ def test_reblocking_with_another_document_withdraws_the_previous_ask(db):
         )
 
     block(first)
+    stale = service._node_row(db, node.id)["revision"] - 1
+    with pytest.raises(service.PlanError, match="revision"):
+        mutate(
+            plan.id, "block_node", {
+                "node_id": node.id, "reason_key": "review", "reason": "Review it",
+                "owner_kind": "user", "owner_id": None, "ask_artifact_id": second,
+                "expected_revision": stale,
+            }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+        )
+    db.rollback()
+    assert len(user_ask.raised_asks(db, first)) == 1
     block(second)
 
     assert user_ask.raised_asks(db, first) == []
