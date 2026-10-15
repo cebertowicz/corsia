@@ -90,29 +90,70 @@ def app_display_name(server: str) -> str:
     return _APP_DISPLAY_NAMES.get(server.lower(), server)
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_CAMEL = re.compile(r"([a-z])([A-Z])")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s")
+_PURPOSE_TOPICS = 6
+# Generic verbs and filler that say nothing about what a server is for.
+_PURPOSE_STOP = frozenset({
+    "get", "list", "create", "update", "delete", "add", "remove", "read", "write",
+    "search", "post", "patch", "put", "retrieve", "set", "edit", "move", "handle",
+    "run", "show", "a", "an", "the", "of", "to", "or", "and", "by", "for", "in",
+    "api", "mcp", "multiple", "all", "new", "request", "file", "with", "open",
+})
+
+
 def _one_line(value: str) -> str:
-    return re.sub(r"[\x00-\x1f\x7f]+", " ", value).strip()[:_MCP_SUMMARY_CHARS]
+    """Control characters become spaces; the line is capped at the index width."""
+    return _CONTROL.sub(" ", value).strip()[:_MCP_SUMMARY_CHARS]
+
+
+def _first_line(tool: Tool) -> str:
+    """A tool's first description line, as the index and the server listing show it."""
+    lines = (tool.description or "").strip().splitlines()
+    return _one_line(lines[0] if lines else tool.name)
 
 
 def _server_tools(registry: ToolRegistry) -> dict[str, list[Tool]]:
+    """Group the configured MCP tools by server, in each server's own discovery order."""
     grouped: dict[str, list[Tool]] = {}
-    for tool in _user_configured(registry):
+    for tool in _user_configured_in_order(registry):
         server = getattr(tool, "mcp_server_name", None)
         if isinstance(server, str) and server:
             grouped.setdefault(server, []).append(tool)
-    return {name: sorted(tools, key=lambda tool: tool.name) for name, tools in sorted(grouped.items())}
+    return dict(sorted(grouped.items()))
+
+
+def _topics(tools: list[Tool]) -> list[str]:
+    """The words the server's own tool names repeat most: count, then first appearance."""
+    counts: Counter[str] = Counter()
+    first: dict[str, int] = {}
+    for position, tool in enumerate(tools):
+        name = getattr(tool, "mcp_tool_name", None) or tool.name
+        for word in re.split(r"[_\-\s]+", _CAMEL.sub(r"\1_\2", name)):
+            word = word.lower()
+            if word and word not in _PURPOSE_STOP and len(word) >= 3:
+                counts[word] += 1
+                first.setdefault(word, position)
+    return sorted(counts, key=lambda word: (-counts[word], first[word]))[:_PURPOSE_TOPICS]
 
 
 def _server_purpose(name: str, tools: list[Tool]) -> str:
-    config = getattr(tools[0], "mcp_server_config", {})
-    instructions = config.get("purpose") or config.get("instructions") if isinstance(config, dict) else None
+    """What one server is for: an override, its own instructions, one tool, then its names."""
+    config = getattr(tools[0], "mcp_server_config", None) or {}
+    override = config.get("purpose")
+    if isinstance(override, str) and override.strip():
+        return _one_line(override)
+    instructions = getattr(tools[0], "mcp_instructions", None)
     if isinstance(instructions, str) and instructions.strip():
-        return _one_line(instructions.split(".", 1)[0] + ("." if "." in instructions else ""))
+        return _one_line(_SENTENCE_END.split(instructions.strip(), maxsplit=1)[0])
     if len(tools) == 1:
-        return _one_line(tools[0].description.splitlines()[0] if tools[0].description else tools[0].name)
-    ignored = {"get", "list", "create", "update", "delete", "read", "write", "search", "tool", "mcp"}
-    words = [word.lower() for tool in tools for word in re.findall(r"[A-Za-z0-9]+", tool.name) if word.lower() not in ignored]
-    return ", ".join(word for word, _count in Counter(words).most_common(6)) or name
+        return _first_line(tools[0])
+    return ", ".join(_topics(tools)) or _one_line(name)
+
+
+def _server_label(name: str) -> str:
+    return _CONTROL.sub("", name)
 
 
 def pack_index(registry: ToolRegistry) -> str:
@@ -125,8 +166,18 @@ def pack_index(registry: ToolRegistry) -> str:
     servers = _server_tools(registry)
     if servers:
         lines.append('[mcp] Tool servers. Load one with tools_load(server="<name>") to see its tools.')
-        lines.extend(f"- {name}: {len(tools)} tools; {_server_purpose(name, tools)}" for name, tools in servers.items())
+        lines.extend(
+            f"- {_server_label(name)}: {len(tools)} tool{'s' if len(tools) != 1 else ''}; "
+            f"{_server_purpose(name, tools)}"
+            for name, tools in servers.items()
+        )
     return "\n".join(lines)
+
+
+def _user_configured_in_order(registry: ToolRegistry) -> list[Tool]:
+    """Configured tools in registration order, which is each server's discovery order."""
+    tools = (registry.get(name) for name in registry.tool_names)
+    return [tool for tool in tools if tool is not None and tool.user_configured]
 
 
 def _user_configured(registry: ToolRegistry) -> list[Tool]:
@@ -234,8 +285,11 @@ class ToolsLoadTool(Tool):
                     return f"Error: MCP server '{server}' is not connected: {state}."
                 known = ", ".join(servers) or "(none)"
                 return f"Error: MCP server '{server}' is not connected. Known connected servers: {known}."
-            lines = [f"Tools from {server}. Load a tool by exact name with tools_load(names=[\"<tool>\"])."]
-            lines.extend(f"- {tool.name}: {_one_line(tool.description.splitlines()[0] if tool.description else tool.name)}" for tool in tools)
+            lines = [
+                f"Tools on {_server_label(server)}. Load by name with tools_load(names=[...]), "
+                "then call with tool_call.",
+            ]
+            lines.extend(f"- {tool.name}: {_first_line(tool)}" for tool in tools)
             return "\n".join(lines)
         requested = list(pack_members().get(pack, ())) if pack else []
         for name in names or ():

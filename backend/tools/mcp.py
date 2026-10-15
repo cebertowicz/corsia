@@ -23,11 +23,14 @@ class MCPToolWrapper(Tool):
     self_describing_errors = True
 
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30,
-                 *, config: dict | None = None, auth=None):
+                 *, config: dict | None = None, auth=None, instructions: str | None = None):
         config = config or {}
         self._session = session
         self.mcp_server_name = server_name
         self.mcp_server_config = config
+        # The server's own description of itself, from its initialize result.
+        self.mcp_instructions = instructions
+        self.mcp_tool_name = tool_def.name
         self._original_name = tool_def.name
         self._name = public_name(server_name, tool_def.name, config)
         self._auth = auth
@@ -139,14 +142,15 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     else:
         raise MCPConfigError("configure an MCP command or URL")
     session = await stack.enter_async_context(ClientSession(read, write))
-    await session.initialize()
-    return session, auth
+    initialized = await session.initialize()
+    instructions = getattr(initialized, "instructions", None)
+    return session, auth, instructions if isinstance(instructions, str) else None
 
 
 async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
     allowlist = allowed_names(config)
     tool_timeout = timeout_seconds(config, "tool_timeout", 30)
-    session, auth = await _open_session(name, config, stack)
+    session, auth, instructions = await _open_session(name, config, stack)
     discovered = []
     cursor = None
     while True:
@@ -159,7 +163,8 @@ async def _discover_tools(name: str, config: dict, stack: AsyncExitStack):
         cursor = page.nextCursor
     if allowlist is not None and not allowlist.issubset({tool.name for tool in discovered}):
         raise MCPConfigError("server did not advertise every allowed tool; check the pinned allowlist")
-    return [MCPToolWrapper(session, name, tool, tool_timeout, config=config, auth=auth)
+    return [MCPToolWrapper(session, name, tool, tool_timeout, config=config, auth=auth,
+                           instructions=instructions)
             for tool in discovered if allowlist is None or tool.name in allowlist]
 
 

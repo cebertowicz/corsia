@@ -1239,10 +1239,13 @@ describe('held-by-the-harness row', () => {
 		const history = model?.sourceGroups.find((group) => group.id === 'history');
 		const rows = Object.fromEntries((history?.sources ?? []).map((row) => [row.label, row.tokenCount]));
 		expect(rows).toMatchObject({
-			'Conversation history': 450, 'GitHub, looked up': 400, 'Linear, looked up': 150, 'Current message': 50,
+			'Conversation history': 450, 'GitHub, looked up (estimated)': 400, 'Linear, looked up (estimated)': 150, 'Current message': 50,
 		});
 		expect(history?.tokenCount).toBe(1050);
 		expect(usage.total_used).toBe(1050);
+		const looked = (history?.sources ?? []).filter((row) => row.label.includes('looked up'));
+		expect(looked.every((row) => row.wrapLabel === true && row.statusClass === 'included')).toBe(true);
+		expect((history?.sources ?? []).find((row) => row.label === 'Conversation history')?.wrapLabel).toBeUndefined();
 	});
 
 	it('shows History unchanged when nothing was looked up', () => {

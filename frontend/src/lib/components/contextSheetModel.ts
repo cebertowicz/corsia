@@ -42,6 +42,8 @@ export interface ContextSheetSourceRow {
 	kind?: 'instruction' | 'skill';
 	/** An edit on disk the thread has not received; it applies at the next checkpoint. */
 	pendingEdit?: boolean;
+	/** Let the label wrap rather than ellipsise, for a qualifier that must stay readable. */
+	wrapLabel?: boolean;
 }
 
 export interface ContextSheetSourceGroup {

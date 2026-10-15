@@ -16,7 +16,7 @@ from core.effective_context import ContextSourceEntry
 from core.token_estimation import _text_tokens
 from tools.tool_surface import app_display_name
 
-_INDEX_LINE = re.compile(r"^- (?P<name>[^:]+): (?P<count>\d+) tools; .+$", re.MULTILINE)
+_INDEX_LINE = re.compile(r"^- (?P<name>[^:]+): (?P<count>\d+) tools?; .+$", re.MULTILINE)
 
 
 def mcp_index_lines(definitions: Any) -> list[tuple[str, int, str]]:

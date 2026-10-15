@@ -29,15 +29,29 @@ def _result(call_id: str, content: str) -> dict[str, Any]:
     return {"role": "tool", "tool_call_id": call_id, "content": content}
 
 
+def _schema(name: str, size: int = 10) -> dict[str, Any]:
+    return {"name": name, "description": "does a thing " * size, "parameters": {"type": "object"}}
+
+
+def _loaded(*names: str, size: int = 10, missing: str = "") -> str:
+    """A ``names``/``pack`` result in the format ``tools_load`` returns."""
+    text = (
+        f"Loaded {len(names)} tool(s). Call each with "
+        'tool_call(name="<tool>", arguments={...}) using its parameters.\n'
+        + json.dumps([_schema(name, size) for name in names], ensure_ascii=False)
+    )
+    return text + (f"\nError: unknown tools: {missing}" if missing else "")
+
+
 def _history() -> list[dict[str, Any]]:
     return [
         {"role": "user", "content": "check the PR"},
         _call("a", server="github"),
-        _result("a", "Tools from github. " + "definition " * 200),
+        _result("a", "Tools on github. " + "definition " * 200),
         _call("b", names=["mcp_linear_issue"]),
-        _result("b", "[" + '{"name": "mcp_linear_issue"}' * 20 + "]"),
+        _result("b", _loaded("mcp_linear_issue")),
         _call("c", pack="plans"),
-        _result("c", "pack definitions " * 50),
+        _result("c", _loaded("plan_read", "plan_update")),
         _call("d", server="github"),
         _result("d", "Error: server github is not connected"),
         {"role": "assistant", "content": "done"},
@@ -101,17 +115,56 @@ def test_looked_up_tokens_attribute_each_load_to_the_right_app():
     assert loaded == sorted(loaded, key=lambda row: -row["tokens"])
 
 
-def test_names_load_maps_each_name_to_its_server_and_splits_one_result():
+def test_a_mixed_names_and_pack_load_charges_each_schema_to_its_own_app():
+    result = _loaded("artifact_register", "mcp_github_pr", "mcp_linear_issue", "mcp_unknown", size=40)
     history = [
-        _call("x", names=["mcp_github_search", "mcp_linear_issue", "mcp_unknown"]),
-        _result("x", "definitions " * 100),
+        _call("x", pack="artifacts", names=["mcp_github_pr", "mcp_linear_issue"]),
+        _result("x", result),
     ]
-    paired = _estimate_messages_tokens([history[1]], model="m")
+    whole = _estimate_messages_tokens([history[1]], model="m")
 
     loaded = loaded_tool_tokens(history, SERVERS, model="m")
 
-    assert {row["server"] for row in loaded} == {"github", "linear"}
-    assert sum(row["tokens"] for row in loaded) == paired
+    by_server = {row["server"]: row["tokens"] for row in loaded}
+    assert by_server["github"] == _text_tokens(json.dumps(_schema("mcp_github_pr", 40)), "m")
+    assert by_server["linear"] == _text_tokens(json.dumps(_schema("mcp_linear_issue", 40)), "m")
+    assert sum(by_server.values()) < whole * 0.6  # CORSIA schema and header stay in History
+    assert whole - sum(by_server.values()) >= _text_tokens(json.dumps(_schema("artifact_register", 40)), "m")
+
+
+def test_a_load_of_only_corsia_tools_attributes_nothing():
+    history = [_call("x", names=["artifact_register", "plan_read"]), _result("x", _loaded("artifact_register", "plan_read"))]
+
+    assert loaded_tool_tokens(history, SERVERS, model="m") == []
+
+
+def test_the_unknown_name_error_line_after_the_schemas_is_not_charged_to_an_app():
+    plain = [_call("x", names=["mcp_github_pr"]), _result("x", _loaded("mcp_github_pr"))]
+    noisy = [_call("x", names=["mcp_github_pr", "nope"]), _result("x", _loaded("mcp_github_pr", missing="nope"))]
+
+    assert loaded_tool_tokens(noisy, SERVERS, model="m") == loaded_tool_tokens(plain, SERVERS, model="m")
+
+
+def test_a_server_lookup_goes_wholly_to_the_server_named_even_after_it_is_removed():
+    history = [_call("x", server="gone"), _result("x", "Tools on gone. " + "- tool: text\n" * 40)]
+    whole = _estimate_messages_tokens([history[1]], model="m")
+
+    loaded = loaded_tool_tokens(history, SERVERS, model="m")  # "gone" is no longer in the live index
+
+    assert loaded == [{"server": "gone", "display_name": "gone", "tokens": whole}]
+    assert loaded_tool_tokens(history, {}, model="m") == loaded
+
+
+def test_shares_never_exceed_the_result_they_come_from(monkeypatch):
+    import core.loaded_tool_usage as usage
+
+    monkeypatch.setattr(usage, "_text_tokens", lambda text, model: 1000)
+    history = [_call("x", names=["mcp_github_pr", "mcp_linear_issue"]), _result("x", _loaded("mcp_github_pr", "mcp_linear_issue"))]
+    whole = _estimate_messages_tokens([history[1]], model="m")
+
+    loaded = loaded_tool_tokens(history, SERVERS, model="m")
+
+    assert 0 < sum(row["tokens"] for row in loaded) <= whole
 
 
 def test_looked_up_rows_plus_reduced_history_equal_history_tokens():
@@ -125,8 +178,66 @@ def test_looked_up_rows_plus_reduced_history_equal_history_tokens():
     assert reduced + sum(row["tokens"] for row in loaded) == history_tokens
 
 
-def test_no_connected_app_or_history_attributes_nothing():
-    assert loaded_tool_tokens(_history(), {}, model="m") == []
+def test_stored_rows_split_a_mixed_load_the_same_way(isolated_db):
+    from infra.database import get_db, write_transaction
+    from infra.queries import insert_message
+
+    with write_transaction(None, scope="seed_mixed") as db:
+        db.execute(
+            "INSERT INTO threads (id,user_id,model,created_at,updated_at) VALUES (?,?,?,?,?)",
+            ("mixed", "user", "test/model", "t", "t"),
+        )
+        insert_message("mixed", "tool", _loaded("artifact_register", "mcp_github_pr"), {
+            "turn_id": "turn", "name": "tools_load",
+            "arguments": {"names": ["artifact_register", "mcp_github_pr"]},
+        }, db=db)
+    db = get_db()
+    try:
+        rows = db.execute("SELECT role, content, metadata FROM messages WHERE thread_id='mixed'").fetchall()
+    finally:
+        db.close()
+
+    loaded = loaded_tool_tokens(None, SERVERS, rows=rows, model="m")
+
+    assert [row["server"] for row in loaded] == ["github"]
+    assert loaded[0]["tokens"] == _text_tokens(json.dumps(_schema("mcp_github_pr")), "m")
+
+
+def test_message_and_row_paths_share_one_error_verdict(isolated_db):
+    from infra.database import get_db, write_transaction
+    from infra.queries import insert_message
+
+    errors = [
+        ("Error: server github is not connected", {}),
+        ("Tools on github. fine text", {"is_error": True}),
+    ]
+    with write_transaction(None, scope="seed_errors") as db:
+        db.execute(
+            "INSERT INTO threads (id,user_id,model,created_at,updated_at) VALUES (?,?,?,?,?)",
+            ("errors", "user", "test/model", "t", "t"),
+        )
+        for content, extra in errors:
+            insert_message("errors", "tool", content, {
+                "turn_id": "turn", "name": "tools_load", "arguments": {"server": "github"}, **extra,
+            }, db=db)
+    db = get_db()
+    try:
+        rows = db.execute("SELECT role, content, metadata FROM messages WHERE thread_id='errors'").fetchall()
+    finally:
+        db.close()
+    history = [_call("e", server="github"), _result("e", errors[0][0])]
+
+    assert loaded_tool_tokens(None, SERVERS, rows=rows, model="m") == []
+    assert loaded_tool_tokens(history, SERVERS, model="m") == []
+
+
+def test_without_a_live_index_only_server_lookups_are_attributed():
+    loaded = loaded_tool_tokens(_history(), {}, model="m")
+
+    assert [row["server"] for row in loaded] == ["github"]
+
+
+def test_no_history_attributes_nothing():
     assert loaded_tool_tokens([], SERVERS, model="m") == []
     assert loaded_tool_tokens(None, SERVERS, model="m") == []
 
@@ -141,7 +252,7 @@ def _seed_rows(isolated_db, thread_id: str) -> None:
             "VALUES (?,?,?,?,?)", (thread_id, "user", "test/model", "t", "t"),
         )
         insert_message(thread_id, "user", "check the PR", {"turn_id": "turn"}, db=db)
-        insert_message(thread_id, "tool", "Tools from github. " + "definition " * 200, {
+        insert_message(thread_id, "tool", "Tools on github. " + "definition " * 200, {
             "turn_id": "turn", "name": "tools_load", "arguments": {"server": "github"},
         }, db=db)
         insert_message(thread_id, "tool", "pack definitions " * 50, {
@@ -181,10 +292,39 @@ def test_estimate_without_a_checkpoint_reports_lookups_and_leaves_totals_alone(
     assert estimate["continuity_mode"] == "unknown"
 
 
+def test_a_cold_preview_reads_the_stored_rows_once(isolated_db, monkeypatch):
+    from core.context_preview_estimate import estimated_preflight
+    from infra.database import get_db
+
+    import core.context_admission as admission
+    import core.context_preview_estimate as estimate_module
+
+    _seed_rows(isolated_db, "once-thread")
+    reads = []
+    real = admission._delivered_rows
+    monkeypatch.setattr(admission, "_delivered_rows", lambda *a: reads.append(a) or real(*a))
+    monkeypatch.setattr(estimate_module, "_installed_checkpoint_history", lambda *_a, **_k: None)
+    monkeypatch.setattr("tools.mcp_runtime.tool_server_index", lambda: dict(SERVERS))
+    db = get_db()
+    try:
+        estimate = estimated_preflight(
+            "once-thread", model="m", current_user_content="hi", db=db,
+            live_window=258_000, tool_definition_tokens=0,
+            source_collection=type("C", (), {"sources": []})(),
+        )
+    finally:
+        db.close()
+
+    assert len(reads) == 1
+    assert [row["server"] for row in estimate["loaded_tool_tokens"]] == ["github"]
+
+
 def test_provider_resume_estimate_reports_no_lookups(monkeypatch):
     from core.context_preview_estimate import estimated_preflight
 
     class Result:
+        delivered_rows = ()
+
         def to_dict(self):
             return {
                 "status": "allowed", "continuity_mode": "unknown", "model_context_window": 1000,

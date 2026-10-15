@@ -36,14 +36,14 @@
 	{@const detail = source.fullLabel && source.fullLabel !== source.label ? source.fullLabel : source.label}
 	{#snippet main()}
 		<div class="ctx-source-main">
-			<span class="ctx-source-label" title={detail}>{source.label}</span>
+			<span class="ctx-source-label" class:wrap={source.wrapLabel} title={detail}>{source.label}</span>
 			{#if source.tags?.length}
 				<span class="ctx-source-tag">{source.tags.join(' · ')}</span>
 			{/if}
 			{#if source.countLabel}
 				<span class="ctx-source-count-label">{source.countLabel}</span>
-			{:else if source.layer === 'tools'}
-				<!-- Keeps the empty actions cell so CORSIA tools lines up with each app's row. -->
+			{:else if source.layer === 'tools' || source.layer === 'history'}
+				<!-- Keeps the empty count cell so every Tools and History row ends at the same token edge. -->
 				<span class="ctx-source-count-label" aria-hidden="true"></span>
 			{/if}
 			{#if source.deltaLabel}
@@ -275,6 +275,12 @@
 		white-space: nowrap;
 		font-size: var(--text-subhead);
 		color: var(--text-secondary);
+	}
+	/* A label whose last words qualify the figure ("(estimated)") wraps instead of being cut off. */
+	.ctx-source-label.wrap {
+		overflow: visible;
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 	.ctx-source-delta {
 		color: var(--text-secondary);

@@ -316,7 +316,7 @@ async def test_configured_mcp_tools_are_indexed_loadable_and_callable(isolated_d
     })
 
     assert '[mcp] Tool servers. Load one with tools_load(server="<name>") to see its tools.' in index
-    assert "- wiki: 1 tools; Search the team wiki." in index
+    assert "- wiki: 1 tool; Search the team wiki." in index
     assert "- mcp_wiki_search:" not in index
     assert "Longer detail" not in index
     assert "mcp_private_tool" not in index
@@ -339,9 +339,12 @@ async def test_tools_load_server_returns_index_and_reports_missing_server(tmp_pa
     registry.mcp_server_states = {"offline": "connection refused"}
     failed = await loader.execute(server="offline")
 
-    assert "Tools from wiki" in result
-    assert "mcp_wiki_search" in result and "mcp_wiki_read" in result
-    assert "tools_load(names" in result
+    assert result.splitlines()[0] == (
+        "Tools on wiki. Load by name with tools_load(names=[...]), then call with tool_call."
+    )
+    assert result.splitlines()[1:] == [
+        "- mcp_wiki_search: Search the team wiki.", "- mcp_wiki_read: Search the team wiki.",
+    ]
     assert "Known connected servers: wiki" in unknown
     assert "offline" in failed and "connection refused" in failed
 

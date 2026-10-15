@@ -57,11 +57,11 @@ export function usageSourceRows(usage: ContextUsage): ContextSheetSourceRow[] {
 		const name = entry.display_name || entry.server;
 		rows.push({
 			id: `usage:loaded-tool:${entry.server}`, layer: 'history', category: 'History',
-			label: `${name}, looked up`, stableReference: '', status: 'included',
+			label: `${name}, looked up (estimated)`, stableReference: '', status: 'included',
 			reason: 'Estimated cost of tool definitions this conversation looked up, already inside conversation history',
 			ownerSurface: 'conversation-history', ownerLabel: 'Conversation history',
 			actionLabel: '', statusLabel: 'Included', statusClass: 'included', deltaLabel: '',
-			countLabel: '', tokenCount, tokenLabel: promptTokenLabel(tokenCount),
+			countLabel: '', tokenCount, tokenLabel: promptTokenLabel(tokenCount), wrapLabel: true,
 		});
 	}
 	if (usage.user_tokens > 0) {
