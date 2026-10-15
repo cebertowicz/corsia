@@ -16,7 +16,20 @@ Classifier state (``state``)::
     loading|ready                two load/serve outages for one input       unavailable
     loading|ready                newer deterministic startup failure         excluded; next pinned version
                                                                          selected, ready if it loads
-    loading|ready                two input failures                         unchanged; ``unreadable`` fact
+    loading|ready                two input failures                         ready; ``unreadable`` fact
+
+Scan state (``scan``)::
+
+    from                         event                                      to
+    idle                         ready, startup, or dropped arrival          owed
+    owed                         worker starts a pass                         running
+    running                      pass finishes                                idle
+    running                      yields to an arrival or must reselect        owed
+    owed|running                 unavailable pass or worker error             held
+    held                         a recorded/unreadable arrival succeeds       owed
+
+``held`` is represented as ``scan == "owed"`` with ``held_reason`` set. ``owed`` clears
+only when a scan pass finishes; a ``reselect`` result returns it to ``owed`` for the next pass.
 
 An outage writes no fact and keeps the message pending. A deterministic startup
 failure is retained per process in ``failed_versions``. A scan activates only after

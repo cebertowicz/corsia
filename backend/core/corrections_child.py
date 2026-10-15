@@ -3,9 +3,10 @@
 The child owns one ONNX session, refuses network access, checks its memory ceiling and
 answers one request at a time. The parent separates two kinds of failure:
 
-- ``ClassifierUnavailable``: an outage. The model never became ready (load timeout,
-  self-test mismatch, memory ceiling during load, exit before any reply) or the parent was
-  shut down. Nothing is recorded; the message stays pending.
+- ``ClassifierUnavailable``: a retryable outage. The model never became ready (load timeout,
+  a first native exit before any reply) or the parent was shut down. Nothing is recorded; the
+  message stays pending. Deterministic startup failures (a self-test mismatch, a load-time
+  memory-ceiling breach, or a repeated native exit) are marked for version exclusion instead.
 - ``MessageFailed``: a child that loaded and passed its self-test failed on this input
   (``timeout``, ``rss`` or ``child_error``). The child is stopped; the next call starts a
   fresh one.
@@ -80,7 +81,7 @@ def _child_main(connection, manifest_path: str) -> None:
         tokenizer = load_tokenizer(manifest)
         check_self_test(manifest, session, np, tokenizer)
         if _peak_rss_bytes() > RSS_LIMIT_BYTES:
-            connection.send({"error": "rss"})
+            connection.send({"error": "rss", "kind": "deterministic"})
             return
         connection.send({"ready": True})
         while connection.poll(IDLE_SECONDS):
