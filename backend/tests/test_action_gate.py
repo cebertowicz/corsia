@@ -179,6 +179,7 @@ async def test_unknown_foreign_and_wrong_kind_drafts_have_no_draft(deleg_db, wor
     assert _text(await _gate(draft, kind="invite")) == action_gate.NO_DRAFT
     deleg_db.execute("UPDATE action_drafts SET thread_id='other-thread' WHERE id=?",
                      (draft["draft_id"],))
+    deleg_db.commit()
     # No such thread row: the foreign key is off in this fixture, the gate still refuses.
     assert _text(await _gate(draft)) == action_gate.NO_DRAFT
 
