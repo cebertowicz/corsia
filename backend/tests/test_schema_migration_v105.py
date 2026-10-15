@@ -25,7 +25,7 @@ def test_migration_registered_and_adds_the_review_time_column(tmp_path):
         assert "reviewed_at" not in _columns(db)
     with closing(sqlite3.connect(path)) as db:
         initialize_schema(db)
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 117
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 118
         assert "reviewed_at" in _columns(db)
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 

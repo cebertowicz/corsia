@@ -53,7 +53,7 @@ def test_legacy_image_rows_are_retyped_and_only_their_type_changes(tmp_path):
         before = _rows(db)
         migrate_to_current(db, SCHEMA_VERSION)
         after = _rows(db)
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 117
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 118
 
     retyped = {"png", "upper", "logical", "svg"}
     for identity_id in retyped:
