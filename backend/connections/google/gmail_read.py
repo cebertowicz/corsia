@@ -13,8 +13,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from connections.google import client
+from connections.google.email_gmail import GMAIL
 
-API = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+API = f"{GMAIL}/messages"
 MAX_RESULTS = 25
 HEADER_NAMES = ("From", "To", "Cc", "Date", "Subject")
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
