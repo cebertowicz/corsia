@@ -26,6 +26,8 @@ TIMEOUT_SECONDS = 20.0
 NOT_CONNECTED = "Google isn't connected. Call google_connect and give the person the link."
 NEEDS_SIGN_IN = "Google rejected the saved sign-in. Call google_connect and give the person the link."
 UNREACHABLE = "Couldn't reach Google. Try again later."
+# Transport errors raised before any request bytes reach Google.
+_NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
 class GoogleError(Exception):
@@ -43,8 +45,15 @@ class GoogleSignInRejected(GoogleError):
 
 
 class GoogleRequestFailed(GoogleError):
-    def __init__(self, status: int | None = None) -> None:
+    """A Google call failed; ``never_sent`` is True only when it provably had no effect.
+
+    That holds when the connection never opened or Google answered 4xx. A read
+    timeout, a 5xx, or an answer that did not decode leaves the effect unknown.
+    """
+
+    def __init__(self, status: int | None = None, *, never_sent: bool = False) -> None:
         self.status = status
+        self.never_sent = never_sent or (status is not None and 400 <= status < 500)
         super().__init__(UNREACHABLE if status is None else f"Google refused the request (HTTP {status}).")
 
 
@@ -95,8 +104,8 @@ async def request_json(
             response = await http.request(
                 method, url, params=params, json=body, headers={"Authorization": f"Bearer {bearer}"},
             )
-    except httpx.HTTPError:
-        raise GoogleRequestFailed() from None
+    except httpx.HTTPError as exc:
+        raise GoogleRequestFailed(never_sent=isinstance(exc, _NEVER_SENT)) from None
     if response.status_code == 401:
         await run_in_db(_mark_needs_sign_in)
         raise GoogleSignInRejected()
