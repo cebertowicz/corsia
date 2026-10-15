@@ -349,9 +349,7 @@ async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store
     """
     from infra.config import WORKSPACE
     from mcp.client import stdio
-    from tools import mcp
 
-    monkeypatch.setattr(mcp.Path, "home", lambda: tmp_path / "home")
     script = Path(WORKSPACE) / "mcp-secret-fixture.py"
     script.write_text(STDIO_SERVER)
     uv_bin = await asyncio.to_thread(_install_uv, tmp_path / "uv")

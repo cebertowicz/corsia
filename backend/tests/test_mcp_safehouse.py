@@ -1027,9 +1027,7 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
     """
     from infra.config import WORKSPACE
     from mcp.client import stdio
-    from tools import mcp
 
-    monkeypatch.setattr(mcp.Path, "home", lambda: tmp_path / "home")
     host = await asyncio.to_thread(_host_binaries)
     crash_baseline = await asyncio.to_thread(_crash_reports)
     workspace = Path(WORKSPACE)
@@ -1065,9 +1063,11 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
             host.append(f"uvx (test-installed): {shutil.which('uvx')} ({_host_output([str(uv_bin / 'uvx'), '--version'])})")
         cases.extend(await asyncio.to_thread(_npx_probe_cases, profiles))
         cases.extend(await asyncio.to_thread(_toolchain_exec_cases, workspace, tmp_path, profiles))
-        node_app = str(workspace / "node_modules" / ".bin" / "corsia-npx-mcp")
+        node_app = workspace / "direct-node-fixture.js"
+        node_app.write_text(_NODE_MCP_SERVER, encoding="utf-8")
+        node_app.chmod(node_app.stat().st_mode | stat.S_IXUSR)
         for name, command, args, timeout in (
-            ("d-node-direct", "node", [node_app], 30),
+            ("d-node-direct", "node", [str(node_app)], 30),
             ("e-npx-bare", "npx", ["corsia-npx-mcp"], 30),
             ("e-npx-y", "npx", ["-y", "corsia-npx-mcp"], 30),
             ("e-npx-no-install", "npx", ["--no-install", "corsia-npx-mcp"], 30),
