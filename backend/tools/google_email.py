@@ -65,6 +65,11 @@ STILL_SENDING = (
     "Check the person's Sent mail; if it isn't there, save a new draft with email_draft and "
     "show the person."
 )
+AFTER_DRAFT = (
+    "Show the person the draft (link its path), end your turn, and call email_send only when "
+    "their reply says to send it; if they ask for changes, save again with email_draft and "
+    "show them the new version."
+)
 FROM_MISMATCH = (
     "Not sent: the From line doesn't match the connected Google account ({account}). "
     "Save the draft again with email_draft and show the person."
@@ -178,10 +183,10 @@ class EmailDraftTool(Tool):
     def description(self) -> str:
         return (
             "Save an email as a draft document the person can read, with their Gmail signature "
-            "appended. Nothing is sent. Pass draft_id to replace an open draft; every field is "
-            "required again, so send the whole message. Pass reply_to_message_id to thread the "
-            "email under a message. Show the person the draft, end your turn, and call email_send "
-            "only after their reply."
+            "appended. Nothing is sent. Returns draft_id and revision, which email_send needs. "
+            "Pass draft_id to replace an open draft; every field is required again, so send the "
+            "whole message. Pass reply_to_message_id to thread the email under a message. "
+            f"{AFTER_DRAFT}"
         )
 
     @property
@@ -195,7 +200,7 @@ class EmailDraftTool(Tool):
                 "cc": {"type": "array", "items": {"type": "string"}, "description": "Plain cc addresses."},
                 "subject": {"type": "string", "description": "One line."},
                 "body": {"type": "string", "description": "The message text, without a signature."},
-                "reply_to_message_id": {"type": "string", "description": "A Gmail message id to reply under."},
+                "reply_to_message_id": {"type": "string", "description": "The Gmail message id (not the thread id) to reply under."},
             },
             "required": ["to", "subject", "body"],
         }
@@ -262,7 +267,7 @@ class EmailDraftTool(Tool):
         return json.dumps({
             "draft_id": saved["draft_id"], "revision": saved["revision"], "path": relative,
             "from": account.get("email"),
-            "next": "Show the person this draft and end your turn; call email_send only after they reply.",
+            "next": AFTER_DRAFT,
         })
 
 
@@ -282,9 +287,10 @@ class EmailSendTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Send a saved email draft. It goes out only when the person wrote in this turn after the "
-            "draft's last save and revision is the one email_draft returned; otherwise nothing is sent "
-            "and the error says what to do."
+            "Send a saved email draft. Call it only when the person's latest message says to send "
+            "this draft. It goes out only if they wrote after the draft's last save and revision "
+            "matches the one email_draft returned; otherwise nothing is sent and the error says "
+            "what to do."
         )
 
     @property

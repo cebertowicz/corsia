@@ -257,7 +257,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "email_send": _Entry(
         "google", status="active", authority="conductor-api",
-        summary="Send a saved email draft once the person has replied after seeing it",
+        summary="Send a saved email draft after the person says to send it",
         activity="Sending email",
     ),
     "plan_read": _Entry(

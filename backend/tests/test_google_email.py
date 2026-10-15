@@ -491,3 +491,18 @@ def test_record_draft_replaces_the_target_only_when_given(isolated_db):
     row = _row(saved["draft_id"])
     assert json.loads(row["target_json"]) == {"reply_to": "m2"}
     assert row["recorded_revision"] == document_revision(b"three")
+
+
+async def test_the_agent_is_told_to_send_only_when_the_person_says_to(mail):
+    from tools.catalog_entries import TOOL_CATALOG
+
+    sentence = (
+        "Show the person the draft (link its path), end your turn, and call email_send only when "
+        "their reply says to send it; if they ask for changes, save again with email_draft and "
+        "show them the new version."
+    )
+    assert sentence in EmailDraftTool().description
+    assert "Returns draft_id and revision, which email_send needs." in EmailDraftTool().description
+    assert "latest message says to send this draft" in EmailSendTool().description
+    assert (await _draft(mail))["next"] == sentence
+    assert TOOL_CATALOG["email_send"].summary == "Send a saved email draft after the person says to send it"
