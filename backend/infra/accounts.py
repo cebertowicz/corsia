@@ -143,6 +143,7 @@ def _credentials(username: str, password: str) -> tuple[str, str]:
     _require_password(password)
     return name, hash_password(password)
 
+
 def _create_account(
     name: str, encoded: str, *, db: sqlite3.Connection | None, first_run_wake: bool,
     require_first: bool = False, first_run_path: str = "script", claim_data_owner: bool = False,
@@ -214,6 +215,7 @@ def _create_account(
 
     return announce
 
+
 def create_user(
     username: str, password: str, *, db: sqlite3.Connection | None = None,
     first_run_wake: bool = True,
@@ -223,14 +225,12 @@ def create_user(
     The first account also gets the workspace conductor; ``first_run_wake``
     queues that conductor's first-run wake in the same transaction. Only a caller
     with no person waiting on the conductor (the eval harness) passes False.
-    First-account callers use :func:`create_first_account`, which enforces the
-    data-owner rule.
+    First-account callers use :func:`create_first_account`, which enforces the data-owner rule.
     """
     name, encoded = _credentials(username, password)
-    _create_account(
-        name, encoded, db=db, first_run_wake=first_run_wake,
-    )()
+    _create_account(name, encoded, db=db, first_run_wake=first_run_wake)()
     return name
+
 
 def create_first_account(
     username: str, password: str, *, call_name: str | None = None, email: str = "",
@@ -265,6 +265,7 @@ def create_first_account(
         raise
     announce()
     return name
+
 
 def set_password(
     username: str, password: str, *, db: sqlite3.Connection | None = None

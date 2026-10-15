@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 FIRST_RUN_REFERENCE = "skills/conductor-bootstrap/references/first-run.md"
 APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
+#: The whole set of fact reads shares this budget; the first model pick waits no longer.
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "gmail_eligible", "web_search_ready",
@@ -87,6 +88,7 @@ def _your_model(model: str) -> dict[str, Any]:
 
 
 def _web_search_key() -> bool:
+    """Whether a web search key is saved; whether it works is the conductor's to test."""
     from infra.key_store import WEB_SEARCH, resolve_builtin
 
     return resolve_builtin(WEB_SEARCH) is not None
