@@ -7,6 +7,10 @@ import socket
 import pytest
 
 
+def _exit_before_load_reply(_connection, _manifest_path):
+    """Exit without writing the load reply, like a native child crash."""
+
+
 def _manifest(root, *, version="v1", policy="modernbert-owner-context-v2-2048", threshold=0.595681):
     model = root / "model.onnx"
     tokenizer = root / "tokenizer.json"
@@ -675,8 +679,9 @@ def test_pipe_failure_is_an_outage_during_load_and_a_message_failure_after_it(mo
     from core.corrections_child import ClassifierUnavailable, MessageFailed
 
     child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}], recv_error=failure))
-    with pytest.raises(ClassifierUnavailable, match="child_exited"):
+    with pytest.raises(ClassifierUnavailable, match="child_exited") as raised:
         child.ensure_loaded()
+    assert raised.value.cause == "child_exited"
     assert not child.loaded
 
     child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}], send_error=failure))
@@ -684,6 +689,19 @@ def test_pipe_failure_is_an_outage_during_load_and_a_message_failure_after_it(mo
     with pytest.raises(MessageFailed) as raised:
         child.classify([], "synthetic owner")
     assert raised.value.reason == "child_error"
+    assert not child.loaded and not child.running
+
+
+def test_real_child_exit_during_load_carries_its_structured_cause(tmp_path):
+    from core.corrections_child import ClassifierChild, ClassifierUnavailable
+    from core.corrections_classifier import AssetManifest
+
+    child = ClassifierChild(AssetManifest.load(_manifest(tmp_path)), target=_exit_before_load_reply)
+
+    with pytest.raises(ClassifierUnavailable, match="child_exited") as raised:
+        child.ensure_loaded()
+
+    assert (raised.value.kind, raised.value.cause) == ("transient", "child_exited")
     assert not child.loaded and not child.running
 
 

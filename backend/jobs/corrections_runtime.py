@@ -63,6 +63,7 @@ async def classify(
     manifest: AssetManifest,
     *,
     attempts_per_kind: int,
+    has_fallback: bool,
     child_factory,
     clock,
     record_classification,
@@ -83,10 +84,10 @@ async def classify(
             reason = str(error)
             logger.warning("corrections classifier did not load {}: {}", manifest.version, error)
             await drop_child(worker)
-            if error.kind == "transient" and reason == "load child_exited":
+            if error.kind == "transient" and error.cause == "child_exited":
                 consecutive_load_exits += 1
-                if consecutive_load_exits == 2:
-                    error = ClassifierUnavailable(reason, kind="deterministic")
+                if consecutive_load_exits == 2 and has_fallback:
+                    error = ClassifierUnavailable(reason, kind="deterministic", cause=error.cause)
             if error.kind == "deterministic":
                 worker.failed_versions[manifest.version] = reason
                 record_version_state(worker, manifest.version, "failed", reason)

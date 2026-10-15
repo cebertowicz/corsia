@@ -4,9 +4,10 @@ The child owns one ONNX session, refuses network access, checks its memory ceili
 answers one request at a time. The parent separates two kinds of failure:
 
 - ``ClassifierUnavailable``: a retryable outage. The model never became ready (load timeout,
-  a first native exit before any reply) or the parent was shut down. Nothing is recorded; the
-  message stays pending. Deterministic startup failures (a self-test mismatch, a load-time
-  memory-ceiling breach, or a repeated native exit) are marked for version exclusion instead.
+  a native exit before any reply) or the parent was shut down. Nothing is recorded; the message
+  stays pending. Deterministic startup failures (a self-test mismatch or a load-time memory-ceiling
+  breach) are marked for version exclusion instead. A caller may exclude repeated native exits
+  only when another verified version can serve.
 - ``MessageFailed``: a child that loaded and passed its self-test failed on this input
   (``timeout``, ``rss`` or ``child_error``). The child is stopped; the next call starts a
   fresh one.
@@ -39,9 +40,10 @@ CLOSE_JOIN_SECONDS = 1.0
 class ClassifierUnavailable(RuntimeError):
     """The model could not load or answer at all; the message stays pending."""
 
-    def __init__(self, reason: str, *, kind: str = "transient") -> None:
+    def __init__(self, reason: str, *, kind: str = "transient", cause: str | None = None) -> None:
         super().__init__(reason)
         self.kind = kind
+        self.cause = cause
 
 
 class MessageFailed(RuntimeError):
@@ -134,7 +136,11 @@ class ClassifierChild:
             self._start()
             reply = self._exchange(None, LOAD_TIMEOUT_SECONDS)
             if "error" in reply:
-                raise ClassifierUnavailable(f"load {reply['error']}", kind=str(reply.get("kind", "transient")))
+                cause = reply.get("cause")
+                raise ClassifierUnavailable(
+                    f"load {reply['error']}", kind=str(reply.get("kind", "transient")),
+                    cause=str(cause) if cause is not None else None,
+                )
             self.loaded = True
 
     def classify(self, context: list[tuple[str, str]], owner: str, *, head: str = "correction") -> Classification:
@@ -202,7 +208,7 @@ class ClassifierChild:
             reply = (connection.recv() if connection.poll(timeout)
                      else {"error": "timeout", "kind": "transient"})
         except (EOFError, OSError):
-            reply = {"error": "child_exited", "kind": "transient"}
+            reply = {"error": "child_exited", "kind": "transient", "cause": "child_exited"}
         if self._killed:
             raise ClassifierUnavailable("closed")
         if "error" in reply:
