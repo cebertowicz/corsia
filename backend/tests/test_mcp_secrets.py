@@ -342,14 +342,16 @@ def _install_uv(target: Path) -> Path:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store, monkeypatch, tmp_path):
-    """A server script in the app's project directory, run by uv as a person runs it.
+    """A workspace server script passed by absolute path into an app-private launch.
 
     Safehouse confines the app, so its interpreter must sit where the profile
     reaches: uv runs a uv-managed Python and resolves mcp through the app's cache.
     """
     from infra.config import WORKSPACE
     from mcp.client import stdio
+    from tools import mcp
 
+    monkeypatch.setattr(mcp.Path, "home", lambda: tmp_path / "home")
     script = Path(WORKSPACE) / "mcp-secret-fixture.py"
     script.write_text(STDIO_SERVER)
     uv_bin = await asyncio.to_thread(_install_uv, tmp_path / "uv")
@@ -363,7 +365,7 @@ async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store
 
     monkeypatch.setattr(stdio, "_create_platform_compatible_process", capture_process)
     # STDIO_SERVER uses FastMCP, which mcp 2 renamed.
-    config = {"command": "uv", "args": ["run", "--managed-python", "--no-project", "--with", "mcp<2", script.name],
+    config = {"command": "uv", "args": ["run", "--managed-python", "--no-project", "--with", "mcp<2", str(script)],
               "env": {"SERVICE_TOKEN": "synthetic-token-0001", "LOG_LEVEL": "debug"}}
     # A cold start fetches a uv-managed Python and mcp into the app's cache.
     config["connect_timeout"] = 180

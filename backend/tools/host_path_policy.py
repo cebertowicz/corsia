@@ -170,7 +170,7 @@ class ProtectedHostPathPolicy:
             candidate.parent in temporary_roots
             and candidate.suffix == ".sb"
             and candidate.name.startswith(
-                ("corsia-shell-envelope-", "corsia-controlled-git-")
+                ("corsia-shell-envelope-", "corsia-controlled-git-", "corsia-mcp-envelope-")
             )
         ):
             return (

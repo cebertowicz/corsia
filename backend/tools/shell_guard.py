@@ -1075,7 +1075,7 @@ def _terminal_boundary_profile(
     else:
         lines += [path_policy.sandbox_rules(), _NO_CLIPBOARD, unix_socket_sandbox_rules(thread_id)]
         # While the agents' account is in use, the user's own gh credentials are out of reach.
-        if include_agent_account and (rule := agent_account_deny_rule(_sandbox_path, agent_account)) is not None:
+        if (rule := agent_account_deny_rule(_sandbox_path, agent_account)) is not None:
             lines.append(rule)
     lines.extend(
         [

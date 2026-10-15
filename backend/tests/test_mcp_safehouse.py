@@ -125,7 +125,6 @@ def local_app_workspace(monkeypatch, tmp_path) -> Path:
         raise AssertionError("a local MCP app must not receive agent-account scope")
 
     monkeypatch.setattr(shell_guard, "agent_account_ro_dirs", agent_scope_is_forbidden)
-    monkeypatch.setattr(shell_guard, "agent_account_deny_rule", agent_scope_is_forbidden)
     return workspace
 
 
@@ -153,8 +152,9 @@ def test_local_mcp_safehouse_exec_preserves_argv_and_env_scope(local_app_workspa
         } <= set(passed_env.removeprefix("--env-pass=").split(","))
         assert params.env["SERVICE_TOKEN"] == secret
         assert params.env["npm_config_script_shell"] == "/bin/sh"
-        assert params.cwd == local_app_workspace
         cache_dir = Path(params.env["npm_config_cache"]).parent
+        assert params.cwd == cache_dir / "cwd"
+        assert params.cwd.is_dir()
         assert cache_dir.parent.name == "mcp"
         assert not cache_dir.is_relative_to(local_app_workspace)
         assert params.env["UV_CACHE_DIR"] == str(cache_dir / "uv")
@@ -165,6 +165,28 @@ def test_local_mcp_safehouse_exec_preserves_argv_and_env_scope(local_app_workspa
         assert str(cache_dir) in next(option for option in argv if option.startswith("--add-dirs="))
     finally:
         profile_path.unlink(missing_ok=True)
+
+
+def test_local_mcp_profile_keeps_personal_gh_home_denied_without_agent_account_grant(
+    monkeypatch, local_app_workspace, tmp_path,
+):
+    from connections.github_agent import AgentAccountView
+    from tools import shell_environment
+    from tools.mcp import _safehouse_stdio_parameters
+
+    person_home = tmp_path / "person-gh"
+    monkeypatch.setattr(
+        shell_environment.github_agent, "view",
+        lambda: AgentAccountView("ready", home=str(tmp_path / "agents-gh")),
+    )
+    monkeypatch.setattr(shell_environment.github_agent, "default_home_deny", lambda _view: person_home)
+
+    _params, profile_path = _safehouse_stdio_parameters("account-deny", "node", [], {})
+    try:
+        assert f'(deny file-read* file-write* (subpath "{person_home}"))' in profile_path.read_text(encoding="utf-8")
+    finally:
+        profile_path.unlink(missing_ok=True)
+
 
 
 @pytest.mark.parametrize("existing", [None, "--conditions=development"])
@@ -315,6 +337,32 @@ def test_npx_fixture_is_a_local_package(tmp_path):
     link = tmp_path / "node_modules" / ".bin" / "corsia-npx-mcp"
     assert json.loads((package / "package.json").read_text(encoding="utf-8"))["bin"] == "bin/server.js"
     assert link.resolve() == package / "bin" / "server.js"
+
+
+@pytest.mark.skipif(shutil.which("npx") is None, reason="npx is unavailable")
+def test_npx_does_not_resolve_a_workspace_planted_bin_from_the_app_cwd(local_app_workspace):
+    from tools.mcp import _safehouse_stdio_parameters
+
+    params, profile_path = _safehouse_stdio_parameters("npx-private-cwd", "npx", [], {})
+    marker = local_app_workspace / "workspace-bin-ran"
+    try:
+        _write_npx_fixture(Path(params.cwd))
+        _write_npx_fixture(local_app_workspace)
+        planted = local_app_workspace / "node_modules" / "corsia-npx-mcp" / "bin" / "server.js"
+        planted.write_text(
+            f'#!/usr/bin/env node\nrequire("node:fs").writeFileSync({json.dumps(str(marker))}, "ran");\n',
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            ["npx", "--no-install", "corsia-npx-mcp"], cwd=params.cwd,
+            env={**os.environ, **params.env}, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, errors="replace", timeout=_CASE_TIMEOUT, check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert not marker.exists()
+    finally:
+        profile_path.unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(shutil.which("npx") is None, reason="npx is unavailable")
@@ -538,11 +586,13 @@ def _npx_cases(corsia) -> list[_Case]:
 
 
 def _app_envelope(profiles: list[Path], name: str, command: str, args: list[str]):
-    """The argv, env and cwd CORSIA gives one local app, with no app config of its own."""
+    """The argv, env and app-private cwd CORSIA gives one local app."""
     from mcp.client.stdio import get_default_environment
     from tools.mcp import _safehouse_stdio_parameters
 
     params, profile = _safehouse_stdio_parameters(name, command, args, {})
+    if command == "npx":
+        _write_npx_fixture(Path(params.cwd))
     profiles.append(profile)
     return [params.command, *params.args], {**get_default_environment(), **params.env}, Path(params.cwd)
 
@@ -884,7 +934,7 @@ def _raw_cases(workspace: Path, policy: Path, profiles: list[Path]) -> tuple[str
 
 
 def _confinement(
-    report: dict, secret: str, blocked: Path, workspace: Path, launched_argvs: list[list[str]],
+    report: dict, secret: str, blocked: Path, expected_cwd: Path, launched_argvs: list[list[str]],
 ) -> tuple[str, str]:
     """Require real MCP apps to retain the secret only in env and get EPERM outside grants."""
     write = report.get("write")
@@ -896,7 +946,7 @@ def _confinement(
         (report.get("hasSecret") is not True, "secret env missing"),
         (secret in json.dumps(report.get("argv")), "server argv contains secret"),
         (launch_secret, "launched process argv contains secret"),
-        (report.get("cwd") != str(workspace), "launch cwd differs from workspace"),
+        (report.get("cwd") != str(expected_cwd), "launch cwd differs from app-private cwd"),
         (write.get("result") != "denied" or write.get("code") != "EPERM" or not errno_is_eperm, "outside write was not EPERM"),
         (blocked.exists(), "outside target exists"),
     ) if failed]
@@ -930,7 +980,8 @@ async def _run_mcp(
                     case.status, case.detail = "FAIL", errors[name]
                 else:
                     report = json.loads(await registry.get(f"mcp_{name}_inspect").execute())
-                    case.status, case.detail = _confinement(report, secret, blocked, workspace, launch["argvs"])
+                    expected_cwd = Path(launch["envs"][0]["npm_config_cache"]).parent / "cwd"
+                    case.status, case.detail = _confinement(report, secret, blocked, expected_cwd, launch["argvs"])
         except Exception as error:
             case.status, case.detail = "FAIL", f"{type(error).__name__}: {error}"
         errlog.seek(0)
@@ -976,11 +1027,15 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
     """
     from infra.config import WORKSPACE
     from mcp.client import stdio
+    from tools import mcp
 
+    monkeypatch.setattr(mcp.Path, "home", lambda: tmp_path / "home")
     host = await asyncio.to_thread(_host_binaries)
     crash_baseline = await asyncio.to_thread(_crash_reports)
     workspace = Path(WORKSPACE)
     _write_npx_fixture(workspace)
+    planted = workspace / "node_modules" / "corsia-npx-mcp" / "bin" / "server.js"
+    planted.write_text("#!/usr/bin/env node\nprocess.exit(42);\n", encoding="utf-8")
     secret = "synthetic-local-mcp-secret"
     # Each real app below receives its own pre-created HOME target.
     launch: dict = {"dir": tmp_path, "errlog": None, "processes": [], "argvs": [], "envs": []}
@@ -1018,6 +1073,11 @@ async def test_local_mcp_launch_cases_under_safehouse(capsys, isolated_db, monke
             ("e-npx-no-install", "npx", ["--no-install", "corsia-npx-mcp"], 30),
             ("f-uvx", "uvx", ["--from", str(_write_uvx_fixture(workspace)), "corsia-uvx-mcp"], 90),
         ):
+            if command == "npx":
+                from infra.config import STATE_ROOT
+                from tools.mcp import _mcp_cache_dir
+
+                _write_npx_fixture(_mcp_cache_dir(name, workspace, Path(STATE_ROOT)) / "cwd")
             blocked_root = Path.home() / f".corsia-mcp-outside-{name}-{uuid.uuid4().hex[:12]}"
             blocked_root.mkdir()
             try:

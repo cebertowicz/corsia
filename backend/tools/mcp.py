@@ -155,8 +155,14 @@ def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: d
     from infra.config import STATE_ROOT, WORKSPACE
     from tools.shell_guard import execution_envelope_profile, safehouse_exec_argv
 
-    cwd = Path(WORKSPACE).expanduser().resolve(strict=False)
-    cache_dir = _mcp_cache_dir(name, cwd, Path(STATE_ROOT))
+    workspace = Path(WORKSPACE).expanduser().resolve(strict=False)
+    cache_dir = _mcp_cache_dir(name, workspace, Path(STATE_ROOT))
+    # Tool runners resolve project-local configuration and executable shims from
+    # their cwd and its ancestors. Use this app-private directory rather than
+    # the agent-writable workspace; workspace paths remain available by their
+    # existing absolute read/write grant.
+    cwd = cache_dir / "cwd"
+    cwd.mkdir(parents=True, exist_ok=True)
     shim_path = _write_no_proctitle_shim(cache_dir)
     node_options = f"--require {shlex.quote(str(shim_path))}"
     if existing := env.get("NODE_OPTIONS"):
