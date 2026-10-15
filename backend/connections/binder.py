@@ -286,47 +286,51 @@ def bind_owner(envelope: EventEnvelope, *, repair_owner: str | None = None,
 
 # ── Rules that follow a designation ──────────────────────────────────────────
 
-WORKSPACE_DESIGNATION_SCOPE = "designation:workspace"
+DESIGNATION_PREFIX = "designation:"
+WORKSPACE_DESIGNATION_SCOPE = DESIGNATION_PREFIX + "workspace"
 
 
 def ensure_designation_rule(
-    *, connector: str, fact: str, value: str, precedence: int = 100, db=None,
+    *, connector: str, fact: str, value: str, precedence: int = 100,
+    designation: str = "workspace", db=None,
 ) -> Rule | None:
-    """Create (once) a rule that routes to the workspace agent and follows it.
+    """Create (once) a rule that routes to a scope's conductor and follows it.
 
-    The destination is resolved from the current designation whenever rules
-    are read (``list_rules``), so a designation move needs no hook. Returns
-    None while no workspace agent is designated.
+    ``designation`` is ``'workspace'`` (the workspace agent) or a project id
+    (that project's conductor). The destination is resolved from the current
+    designation whenever rules are read (``list_rules``), so a designation
+    move needs no hook. Returns None while the scope has no designee.
     """
+    rule_scope = DESIGNATION_PREFIX + designation
     with write_transaction(db, scope="ensure_designation_rule") as _db:
         existing = _db.execute(
             "SELECT * FROM connection_rules WHERE scope=? AND connector=? "
             "AND fact=? AND value=? AND enabled=1",
-            (WORKSPACE_DESIGNATION_SCOPE, connector, fact, str(value)),
+            (rule_scope, connector, fact, str(value)),
         ).fetchone()
         if existing is not None:
             return _resolve_designation(_row_to_rule(existing), _db)
-        designated = _designated_workspace_thread(_db)
+        designated = _designated_thread(designation, _db)
         if not designated:
             return None
         return create_rule(
             connector=connector, fact=fact, value=value,
-            destination_thread_id=designated, scope=WORKSPACE_DESIGNATION_SCOPE,
+            destination_thread_id=designated, scope=rule_scope,
             precedence=precedence, db=_db,
         )
 
 
-def _designated_workspace_thread(db) -> str | None:
-    from infra.conductor import WORKSPACE_SCOPE, get_conductor
+def _designated_thread(designation: str, db) -> str | None:
+    from infra.conductor import get_conductor
 
-    return get_conductor(WORKSPACE_SCOPE, db=db)
+    return get_conductor(designation, db=db)
 
 
 def _resolve_designation(rule: Rule, db) -> Rule | None:
     """A designation rule pointed at the current designee; None when undesignated."""
-    if rule.scope != WORKSPACE_DESIGNATION_SCOPE:
+    if not rule.scope.startswith(DESIGNATION_PREFIX):
         return rule
-    designated = _designated_workspace_thread(db)
+    designated = _designated_thread(rule.scope[len(DESIGNATION_PREFIX):], db)
     if not designated:
         return None
     return replace(rule, destination_thread_id=designated)

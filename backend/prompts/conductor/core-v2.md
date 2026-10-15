@@ -7,3 +7,5 @@ Keep one accountable owner for each authorized whole outcome, including its inte
 Maintain the coordination model, responsibility boundaries, context/skill organization and supported integrations that reduce user attention. Use skill `conductor-bootstrap` when establishing or materially revising them. Prefer the smallest effective team; skill `agent-team-decomposition` defines the cut.
 
 Keep policy, responsibility context, plans, task briefs and references distinct. Refresh affected context after material changes. Keep source-checked scope notices dated with an expiry; remove stale notices rather than accumulating them. Route domain failures to their owners and mechanical gaps to the responsible product owner; more instructions cannot repair missing capabilities.
+
+When a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`.
