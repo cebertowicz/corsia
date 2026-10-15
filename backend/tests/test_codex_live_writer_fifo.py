@@ -10,7 +10,7 @@ still be queued, in order, and be delivered by the writer's terminal release.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -242,3 +242,85 @@ def test_boot_recovery_releases_a_live_writer_hold_and_delivers_the_input(isolat
 
     claims = [s.successor for s in recovered.settlements if s.successor] + list(recovered.batches)
     assert [i.message_id for c in claims for i in c.items if i.message_id == "head"] == ["head"]
+
+
+def _refuse_successor_while_registered() -> None:
+    """A successor claims the idle thread and is refused while the old handle is still registered."""
+    from infra.input_writes import begin_batch_write, settle_batch_write
+    from infra.time import utc_now_iso
+    from subagents.codex_runtime_errors import CodexLiveTurnBusy
+
+    batch = _claim("window-input", "turn-window")
+    assert batch is not None  # the old Turn's terminal is committed, so the thread is idle
+    begin_batch_write(batch, attempt_id="window-attempt", started_at=utc_now_iso())
+    settle_batch_write(
+        "window-attempt", outcome="proved_no_write",
+        error=CodexLiveTurnBusy("Codex still owns the previous Turn"),
+    )
+    assert _message("window-input")["delivery_state"] == "queued"
+    from core.turn_core import BOOT_EPOCH
+    from infra.thread_driver import finish_turn
+
+    # The refused successor's own Turn ends; the held head blocks every claim behind it.
+    settlement = finish_turn(
+        "turn-window", outcome="error", ended_at=utc_now_iso(),
+        successor_turn_id="turn-z", boot_epoch=BOOT_EPOCH, error="Codex still owns the previous Turn",
+    )
+    assert settlement.successor is None
+
+
+async def _delivered_after_removal() -> dict:
+    """Let the removal's own release run, with a fresh provider session to take the input."""
+    from subagents.codex_runtime_state import drain_live_writer_releases
+
+    fresh = _make_mock_app_session("provider-writer")
+    conn = {"status": "available", "config": {"binary": "codex", "app_server": True}}
+    with (
+        patch("connections.models.get_connection", return_value=conn),
+        patch("subagents.codex_app_server.CodexAppServerSession", return_value=fresh),
+    ):
+        await drain_live_writer_releases()
+    return _message("window-input")
+
+
+@pytest.mark.asyncio
+async def test_process_exit_removal_releases_a_hold_written_before_it(isolated_db) -> None:
+    from subagents import codex_runtime
+
+    live = _active_live(THREAD, _make_mock_app_session("provider-writer"), pending_tool=False)
+    real_retire = codex_runtime._retire_exited_generation
+
+    def retire_after_a_refused_successor(thread_id, exited, session):
+        _refuse_successor_while_registered()  # between the terminal commit and the removal
+        real_retire(thread_id, exited, session)
+
+    with patch.object(codex_runtime, "_retire_exited_generation", retire_after_a_refused_successor):
+        settlement, _error = await codex_runtime._settle_exited_generation(
+            THREAD, live, live.session, 1, "provider died", lambda *_a, **_k: None,
+        )
+    assert settlement is not None
+    assert _message("window-input")["delivery_state"] == "queued"  # held; nothing released it yet
+    assert (await _delivered_after_removal())["delivery_state"] == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_stop_removal_releases_a_hold_written_before_it(isolated_db) -> None:
+    from subagents import codex_runtime
+
+    session = _make_mock_app_session("provider-writer")
+    session._request_terminate = MagicMock()
+    session.revoke_dynamic_tool_admission = MagicMock()
+    session.wait_dynamic_tool_requests_idle = AsyncMock()
+    live = _active_live(THREAD, session, pending_tool=False)
+    real_release = codex_runtime._release_exact_live
+
+    def release_after_a_refused_successor(thread_id, exited):
+        _refuse_successor_while_registered()  # between the terminal commit and the removal
+        real_release(thread_id, exited)
+
+    with patch.object(codex_runtime, "_release_exact_live", release_after_a_refused_successor):
+        assert await codex_runtime.stop(
+            THREAD, expected_turn_id=live.corsia_turn.turn_id,
+        ) is True
+    assert _message("window-input")["delivery_state"] == "queued"
+    assert (await _delivered_after_removal())["delivery_state"] == "delivered"

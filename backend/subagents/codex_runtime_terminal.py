@@ -65,15 +65,10 @@ def preserve_committed_terminal(terminal) -> Iterator[None]:
 
 async def release_and_drive_terminal(ctx, settlement) -> None:
     """Release the completed live generation before starting its successor."""
-    from infra.live_writer_hold import release_live_writer_holds
-
-    finalize_live(ctx.thread_id, ctx.live)
-    released = await run_in_db(release_live_writer_holds, ctx.thread_id)
+    release = finalize_live(ctx.thread_id, ctx.live)
     await drive_turn_settlement(settlement)
-    if released:
-        from infra.thread_execution import drive_thread
-
-        await drive_thread(ctx.thread_id)
+    if release is not None:
+        await release
 
 
 def turn_has_durable_terminal(turn_id: str) -> bool:
