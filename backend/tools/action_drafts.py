@@ -1,4 +1,4 @@
-"""Drafts of outbound actions (email, calendar invites): create, re-record, mark sent.
+"""Drafts of outbound actions (email, calendar invites): create, re-record, claim, mark sent.
 
 The draft's text is a workspace document the person can open. This module records
 the revision (sha256 of the document's bytes) and server time of each save made
@@ -65,15 +65,30 @@ def record_draft(
     return {"draft_id": draft_id, "revision": revision, "recorded_at": now}
 
 
+def _transition(draft_id: str, before: str, after: str, db, **columns) -> None:
+    """Move one draft ``before`` -> ``after``; any other current state is refused."""
+    sets = ", ".join(["state=?", *(f"{name}=?" for name in columns)])
+    with write_transaction(db, scope="action_draft_transition") as conn:
+        cursor = conn.execute(
+            f"UPDATE action_drafts SET {sets} WHERE id=? AND state=?",
+            (after, *columns.values(), draft_id, before),
+        )
+        if cursor.rowcount != 1:
+            raise DraftError(f"The draft is not {before}.")
+
+
+def claim_for_send(draft_id: str, *, db: sqlite3.Connection | None = None) -> None:
+    """Take an open draft for one send, so a parallel or retried call cannot also send it."""
+    _transition(draft_id, "open", "sending", db)
+
+
+def release_claim(draft_id: str, *, db: sqlite3.Connection | None = None) -> None:
+    """Return a claimed draft to open after the send provably did not happen."""
+    _transition(draft_id, "sending", "open", db)
+
+
 def mark_sent(
     draft_id: str, external_id: str | None, *, db: sqlite3.Connection | None = None,
 ) -> None:
-    """Close an open draft as sent, once, keeping the provider's id for it."""
-    with write_transaction(db, scope="action_draft_sent") as conn:
-        cursor = conn.execute(
-            "UPDATE action_drafts SET state='sent', sent_at=?, external_id=?"
-            " WHERE id=? AND state='open'",
-            (utc_now_iso(), external_id, draft_id),
-        )
-        if cursor.rowcount != 1:
-            raise DraftError("There is no open draft with that id.")
+    """Close a claimed draft as sent, once, keeping the provider's id for it."""
+    _transition(draft_id, "sending", "sent", db, sent_at=utc_now_iso(), external_id=external_id)

@@ -10,6 +10,7 @@ The model's judgement is not an input.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from doceditor.document_scope import revision as document_revision
 from infra import config, state
@@ -38,20 +39,26 @@ NOT_SEEN = (
     "draft and end your turn; their reply starts your next one."
 )
 
-# Messages claimed by one turn that a person wrote. Admission stamps
-# ``reply_via_post_update`` only on a row with none of the other markers; the
-# three IS NULL lines keep a row stamped before a marker existed from passing.
+# The person's newest message this call can have seen: written by a person,
+# claimed by this turn, delivered to the model, and ordered in the transcript
+# before the Assistant Step that declared the call. A claim alone is not enough:
+# a steered message can be claimed while a call the model emitted earlier is
+# still pending. Admission stamps ``reply_via_post_update`` only on a row with
+# none of the other markers; the three IS NULL lines keep a row stamped before a
+# marker existed from passing.
 _HUMAN_INPUTS = """
     SELECT created_at FROM messages
     WHERE thread_id = :thread_id AND input_order IS NOT NULL
       AND role = 'user'
       AND active_turn_id = :turn_id
+      AND delivery_state = 'delivered'
+      AND seq IS NOT NULL AND seq < :step_seq
       AND json_valid(metadata)
       AND json_extract(metadata, '$.reply_via_post_update') = 1
       AND json_extract(metadata, '$.sender_kind') IS NULL
       AND json_extract(metadata, '$.completion') IS NULL
       AND json_extract(metadata, '$.routed_event') IS NULL
-    ORDER BY input_order DESC
+    ORDER BY seq DESC
     LIMIT 1
 """
 
@@ -80,8 +87,35 @@ class _Stage:
     human_at: str | None = None
 
 
+def _declaring_step_seq(db, thread_id: str, turn_id: str, call_id: str) -> int | None:
+    """The transcript position of the one Assistant Step of this turn that declared ``call_id``."""
+    from core.message_row import assistant_calls, call_id as declared_id
+
+    steps = db.execute(
+        "SELECT seq, metadata FROM messages WHERE thread_id=? AND role='assistant'"
+        " AND json_valid(metadata) AND json_extract(metadata, '$.turn_id')=?",
+        (thread_id, turn_id),
+    ).fetchall()
+    found = [
+        step["seq"] for step in steps
+        if any(declared_id(call) == call_id for call in assistant_calls(dict(step)))
+    ]
+    return found[0] if len(found) == 1 and isinstance(found[0], int) else None
+
+
+def _utc(value: str) -> datetime | None:
+    """A stored timestamp as naive UTC, or None when it does not parse."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
 def _check_rows(
-    kind: str, thread_id: str, turn_id: str, turn_order: int, draft_id: str,
+    kind: str, thread_id: str, turn_id: str, turn_order: int, call_id: str, draft_id: str,
 ) -> _Stage:
     from infra.database import get_db
 
@@ -94,8 +128,12 @@ def _check_rows(
         ).fetchone()
         if running is None:
             return _Stage(Refusal(NO_TURN))
+        step_seq = _declaring_step_seq(db, thread_id, turn_id, call_id)
+        if step_seq is None:
+            return _Stage(Refusal(NOT_PERSON))
         human = db.execute(
-            _HUMAN_INPUTS, {"thread_id": thread_id, "turn_id": turn_id},
+            _HUMAN_INPUTS,
+            {"thread_id": thread_id, "turn_id": turn_id, "step_seq": step_seq},
         ).fetchone()
         if human is None:
             return _Stage(Refusal(NOT_PERSON))
@@ -136,9 +174,14 @@ async def check_action(kind: str, draft_id: str, revision: str) -> Approved | Re
     identity = state._current_turn_identity.get(None)
     turn_id = getattr(identity, "turn_id", None)
     turn_order = getattr(identity, "turn_order", None)
+    # The id the Assistant Step declared the call under. Natively and under Codex it is
+    # also the invocation id; under Claude Code the invocation id is CORSIA's own.
+    call_id = state._current_provider_call_id.get(None) or state._current_tool_invocation_id.get(None)
     if not isinstance(thread_id, str) or not isinstance(turn_id, str) or turn_order is None:
         return Refusal(NO_TURN)
-    stage = await run_in_db(_check_rows, kind, thread_id, turn_id, turn_order, draft_id)
+    if not isinstance(call_id, str) or not call_id:
+        return Refusal(NOT_PERSON)
+    stage = await run_in_db(_check_rows, kind, thread_id, turn_id, turn_order, call_id, draft_id)
     if stage.refusal is not None or stage.draft is None:
         return stage.refusal or Refusal(NO_DRAFT)
     draft = stage.draft
@@ -147,6 +190,7 @@ async def check_action(kind: str, draft_id: str, revision: str) -> Approved | Re
         return Refusal(CHANGED_OUTSIDE)
     if revision != draft["recorded_revision"]:
         return Refusal(STALE_REVISION)
-    if stage.human_at is None or stage.human_at <= draft["recorded_at"]:
+    person_at, recorded_at = _utc(stage.human_at or ""), _utc(draft["recorded_at"])
+    if person_at is None or recorded_at is None or person_at <= recorded_at:
         return Refusal(NOT_SEEN)
     return Approved(draft, data)

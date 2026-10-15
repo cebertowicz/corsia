@@ -15,7 +15,7 @@ ACTION_DRAFTS_SCHEMA_SQL = """
         path              TEXT NOT NULL,
         target_json       TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(target_json)),
         state             TEXT NOT NULL DEFAULT 'open'
-                          CHECK (state IN ('open', 'sent', 'discarded')),
+                          CHECK (state IN ('open', 'sending', 'sent', 'discarded')),
         recorded_revision TEXT NOT NULL,
         recorded_at       TEXT NOT NULL,
         created_at        TEXT NOT NULL,

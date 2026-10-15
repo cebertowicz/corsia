@@ -50,6 +50,10 @@ def test_kind_and_state_are_constrained():
 
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)
+        db.execute(
+            "INSERT INTO action_drafts (id,thread_id,kind,path,state,"
+            "recorded_revision,recorded_at,created_at) VALUES ('ok','t','email','p','sending','r','t','t')"
+        )
         for kind, state in (("sms", "open"), ("email", "queued")):
             with pytest.raises(sqlite3.IntegrityError):
                 db.execute(
