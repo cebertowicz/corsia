@@ -12,19 +12,20 @@ name: CLA
 # The write-scoped token is safe here because nothing checks out or runs
 # pull request code: the action reads commits and comments through the API.
 # Same-repository pull requests skip the job, which satisfies a required
-# check.
+# check, and so do comments on pull requests that maintainers opened. There is deliberately no
+# allowlist: the action matches it against free-text commit author names.
 
 on:
   issue_comment:
     types: [created]
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    # edited also covers a base-branch change, which fires none of the others.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   actions: write
   contents: write
   pull-requests: write
-  statuses: write
 
 concurrency:
   group: cla-${{ github.event.pull_request.number || github.event.issue.number }}
@@ -38,6 +39,7 @@ jobs:
        github.event.pull_request.head.repo.full_name != github.repository) ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
+       !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) &&
        (contains(github.event.comment.body, 'I have read the CORSIA CLA and I accept it') ||
         github.event.comment.body == 'recheck'))
     runs-on: ubuntu-24.04
@@ -55,7 +57,6 @@ jobs:
           # earlier signers re-accept the new text.
           path-to-signatures: signatures/version1/cla.json
           branch: cla-signatures
-          allowlist: cebertowicz,corsia-bot
           custom-pr-sign-comment: I have read the CORSIA CLA and I accept it
           custom-notsigned-prcomment: >-
             Thanks for your pull request. Before it can be merged, the owner of
