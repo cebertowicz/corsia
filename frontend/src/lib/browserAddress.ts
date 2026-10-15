@@ -2,6 +2,8 @@ const MULTIPART_PUBLIC_SUFFIXES = new Set(['co.uk', 'org.uk', 'ac.uk', 'com.au',
 
 /** The visible address leads with the registrable domain and only elides the middle. */
 export function registrableDomain(hostname: string): string {
+	// An IP address has no registrable domain: its whole host identifies the site.
+	if (hostname.startsWith('[') || /^\d+(\.\d+){3}$/.test(hostname)) return hostname;
 	const labels = hostname.toLowerCase().split('.').filter(Boolean);
 	if (labels.length <= 2) return labels.join('.');
 	const suffix = labels.slice(-2).join('.');
