@@ -148,6 +148,36 @@ async def test_unreadable_fact_names_its_failure_and_a_scored_fact_has_none(isol
     assert pending_candidate_keys(_version(), 20, "owner") == []
 
 
+def test_unreadable_count_reads_one_version_inside_the_measurement_window(isolated_db):
+    from datetime import datetime, timezone
+
+    from core.corrections_recording import ClassifierVersion, CorrectionCandidate
+    from jobs.corrections_recording import _record_fact, unreadable_messages
+
+    db = _db()
+    try:
+        _seed(db)
+    finally:
+        db.close()
+    recent = datetime.now(timezone.utc).isoformat()
+    unreadable = {"label": "unreadable", "truncated": False, "original_tokens": 0, "failure_reason": "timeout"}
+    newer = ClassifierVersion("corrections-classifier", "v2", "correction", 0.5, "modernbert-owner-context-v2-2048")
+
+    def candidate(message_id, created_at):
+        return CorrectionCandidate(message_id, "thread", "project", "x", created_at)
+
+    assert _record_fact(candidate("recent", recent), unreadable, _version())
+    assert _record_fact(candidate("recent", recent), unreadable, newer)  # re-read by a newer version
+    assert _record_fact(candidate("old", "2000-01-01T00:00:00Z"), unreadable, _version())  # outside the window
+
+    db = _db()
+    try:
+        assert unreadable_messages(db, _version()) == 1
+        assert unreadable_messages(db, newer) == 1
+    finally:
+        db.close()
+
+
 def test_one_encoding_round_trips_the_version_identity():
     from core.corrections_recording import decode_version, version_attributes, version_key
 

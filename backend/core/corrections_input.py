@@ -5,7 +5,8 @@ mirrors how its training rows were built:
 
 - context is read from the 40 newest earlier ``user``/``assistant`` rows of the thread
   (newest first by ``created_at`` then ``id``); system wrappers and routed/sent-by-agent
-  deliveries are skipped and the first six others kept; each is stripped, cut to its last
+  deliveries are skipped by the same rule that defines an owner message
+  (``is_wrapper_or_delivery``) and the first six others kept; each is stripped, cut to its last
   1,500 characters and masked; the newest are kept while their total stays within 8,000
   characters; they run oldest first, labelled ``Agent`` or ``User``;
 - the owner message is masked and tokenized after the context, and the token sequence is
@@ -24,6 +25,8 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+from core.corrections_recording import is_wrapper_or_delivery
+
 MAX_OWNER_TOKENS = 1024
 MAX_INPUT_TOKENS = 2048
 CONTEXT_ROWS = 40
@@ -40,10 +43,6 @@ OWNER_MESSAGE_CHARS = 16 * MAX_INPUT_TOKENS
 # both cover every non-pathological message exactly.
 CONTEXT_HEAD_CHARS = 1024
 CONTEXT_TAIL_CHARS = 2000
-CONTEXT_WRAPPER_PREFIXES = (
-    "[EVENT:", "[DELIVERY WARNING", "[PASSIVE CONTEXT DIGEST]", "[AGENT-SEND", "[CORSIA",
-)
-CONTEXT_DELIVERY_MARKERS = ("routed_event", "send_idempotency_key")
 
 MASK = "[MASKED]"
 _PEM = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|$)", re.S)
@@ -76,11 +75,8 @@ def shape_context(rows: Iterable[tuple[str, str, str, Any]]) -> tuple[tuple[str,
     kept: list[tuple[str, str]] = []
     total = 0
     for role, head, tail, metadata in rows:
-        meta = metadata if isinstance(metadata, str) else ""
         lead = (head or "").lstrip()
-        if not lead or lead.startswith(CONTEXT_WRAPPER_PREFIXES) or any(
-            marker in meta for marker in CONTEXT_DELIVERY_MARKERS
-        ):
+        if not lead or is_wrapper_or_delivery(lead, metadata):
             continue
         text = mask((tail or "").strip()[-CONTEXT_MESSAGE_CHARS:])
         if total + len(text) > CONTEXT_TOTAL_CHARS:

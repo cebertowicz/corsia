@@ -328,20 +328,31 @@ def test_self_test_score_mismatch_says_the_answers_were_unexpected(self_test_ass
     assert len(_FakeSession.instances) == 1
 
 
-def test_self_test_errors_never_expose_exception_text_or_type_names(self_test_asset, monkeypatch):
+def test_self_test_logs_the_cause_but_shows_people_only_the_readable_sentence(self_test_asset, monkeypatch):
     import sys
+
+    from loguru import logger
 
     from core.corrections_classifier import AssetError, run_self_test
 
     def explode(*_args, **_kwargs):
-        raise ValueError("secret detail")
+        raise ValueError("session detail")
 
     monkeypatch.setattr(sys.modules["onnxruntime"], "InferenceSession", explode)
-    with pytest.raises(AssetError) as raised:
-        run_self_test(self_test_asset)
+    lines: list[str] = []
+    sink = logger.add(lines.append, format="{level}|{message}", level="ERROR")
+    try:
+        with pytest.raises(AssetError) as raised:
+            run_self_test(self_test_asset)
+    finally:
+        logger.remove(sink)
     assert str(raised.value) == "The corrections classifier could not start on this computer. Retry setup."
-    assert "secret" not in str(raised.value) and "ValueError" not in str(raised.value)
+    assert "session detail" not in str(raised.value) and "ValueError" not in str(raised.value)
     assert raised.value.__cause__ is None and raised.value.__suppress_context__
+    assert any(
+        line.startswith("ERROR|corrections classifier self-test failed: ValueError: session detail")
+        for line in lines
+    )
 
 
 def test_missing_manifest_is_a_readable_incomplete_download(tmp_path):

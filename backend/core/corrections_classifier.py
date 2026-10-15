@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from loguru import logger
+
 from core.corrections_input import tokenize
 from core.corrections_recording import ClassifierVersion
 
@@ -160,7 +162,7 @@ def cleanup_staging() -> None:
         shutil.rmtree(staging)
 
 
-def _open_session(manifest: AssetManifest, ort: Any) -> Any:
+def open_session(manifest: AssetManifest, ort: Any) -> Any:
     """One CPU session with the options both the child and the setup self-test use."""
     ort.disable_telemetry_events()
     options = ort.SessionOptions()
@@ -173,15 +175,17 @@ def _open_session(manifest: AssetManifest, ort: Any) -> Any:
     )
 
 
-def _load_tokenizer(manifest: AssetManifest) -> Any:
+def load_tokenizer(manifest: AssetManifest) -> Any:
+    """The asset's own tokenizer, read from beside its manifest."""
     from tokenizers import Tokenizer
 
     return Tokenizer.from_file(str(manifest.path.parent / "tokenizer.json"))
 
 
-def _score(
+def score_input(
     session: Any, np: Any, tokenizer: Any, context: list[tuple[str, str]], owner: str,
 ) -> tuple[float, bool, int]:
+    """Score one input: the correction probability, whether it was truncated, its token count."""
     ids, truncated, original = tokenize(tokenizer, context, owner)
     logits = session.run(None, {
         "input_ids": np.asarray([ids], dtype=np.int64),
@@ -190,9 +194,10 @@ def _score(
     return float(np.exp(logits[1]) / np.exp(logits).sum()), truncated, original
 
 
-def _check_self_test(manifest: AssetManifest, session: Any, np: Any, tokenizer: Any) -> None:
+def check_self_test(manifest: AssetManifest, session: Any, np: Any, tokenizer: Any) -> None:
+    """Raise ``AssetError`` unless the session reproduces every manifest self-test score."""
     for vector in manifest.self_test:
-        score, _, _ = _score(session, np, tokenizer, list(vector.get("context", [])), str(vector["owner"]))
+        score, _, _ = score_input(session, np, tokenizer, list(vector.get("context", [])), str(vector["owner"]))
         if abs(score - float(vector["expected_score"])) > 1e-4:
             raise AssetError(
                 "classifier self-test did not reproduce the manifest score",
@@ -248,12 +253,15 @@ def run_self_test(asset_dir: Path) -> None:
         import numpy as np
         import onnxruntime as ort
 
-        session = _open_session(manifest, ort)
-        _check_self_test(manifest, session, np, _load_tokenizer(manifest))
+        session = open_session(manifest, ort)
+        check_self_test(manifest, session, np, load_tokenizer(manifest))
     except AssetError as error:
-        # str() is the person-readable sentence; the technical message stays internal.
+        # The technical message goes to the log; the person sees only the readable sentence.
+        logger.warning("corrections classifier self-test refused the asset: {}", error)
         raise AssetError(error.reader or _GENERIC_READER) from None
-    except Exception:
+    except Exception as error:
+        # The cause (ABI, session or tokenizer failure) is logged; asset vectors hold no owner text.
+        logger.exception("corrections classifier self-test failed: {}: {}", type(error).__name__, error)
         raise AssetError(_GENERIC_READER) from None
     finally:
         del session

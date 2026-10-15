@@ -73,7 +73,7 @@ def test_activation_never_replaces_a_corrupt_record_or_says_now_counted(isolated
     from jobs import corrections_activation, corrections_realtime, corrections_recording
 
     completed, told = [], []
-    monkeypatch.setattr(corrections_recording, "_owner_user_ids", lambda: ["owner"])
+    monkeypatch.setattr(corrections_recording, "owner_user_ids", lambda: ["owner"])
     monkeypatch.setattr(
         core_recording, "active_corrections_version", lambda: core_recording.CorruptActivation("KeyError"),
     )

@@ -146,12 +146,12 @@ async def activate_after_backfill(version: ClassifierVersion) -> str:
     """
     from api.measurement_agents import BASELINE_PERIODS
     from core.corrections_recording import CorruptActivation, active_corrections_version
-    from jobs.corrections_recording import _owner_user_ids
+    from jobs.corrections_recording import owner_user_ids
 
-    owners = await run_in_db(_owner_user_ids)
+    owners = await run_in_db(owner_user_ids)
     if len(owners) != 1:
-        logger.warning("corrections activation skipped: expected one durable owner, found {}", len(owners))
-        return "done"
+        # Held, not done: the snapshot must show why this version is never activated here.
+        return f"activation held: expected one owner, found {len(owners)}"
     old_version = await run_in_db(active_corrections_version)
     if isinstance(old_version, CorruptActivation):
         # Never treat an unreadable record as no version: that would replace it silently.

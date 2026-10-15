@@ -118,6 +118,8 @@ async def test_retention_runs_exactly_once_per_day_on_the_nightly_path(
 
     assert nightly._should_run_nightly() is True
     await nightly._run_job_safely()
+
+    # Same day, same window, second check: the gate must hold.
     assert nightly._should_run_nightly() is False
     retention.assert_called_once_with()
 
@@ -126,7 +128,11 @@ async def test_retention_runs_exactly_once_per_day_on_the_nightly_path(
 async def test_retention_runs_exactly_once_per_day_on_the_idle_path(
     run_db, monkeypatch
 ):
-    """The idle trigger must not fire a second sweep the same day."""
+    """The idle trigger must not fire a second sweep the same day.
+
+    This is the dangerous one: idle is continuously true while nobody is using
+    the system, so without the gate the sweep repeats every CHECK_INTERVAL.
+    """
     from jobs import nightly
 
     retention = _install_retention(monkeypatch)
@@ -150,9 +156,12 @@ async def test_claim_is_taken_before_the_sweep_runs(run_db, monkeypatch):
     observed: list[bool] = []
 
     def _retention():
+        # While the sweep is running, today must already be claimed.
         observed.append(nightly._has_run_today())
 
-    monkeypatch.setattr("core.thread_lifecycle.run_lifecycle_retention", _retention)
+    monkeypatch.setattr(
+        "core.thread_lifecycle.run_lifecycle_retention", _retention
+    )
     await nightly._run_job_safely()
 
     assert observed == [True], "the slot must be claimed before the sweep starts"
@@ -172,7 +181,11 @@ async def test_second_scheduler_does_not_repeat_the_sweep(run_db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_unclaimable_day_does_not_sweep(run_db, monkeypatch):
-    """If the claim cannot be written, the destructive sweep must not run."""
+    """If the claim cannot be written, the destructive sweep must NOT run.
+
+    Recording the disposition afterwards meant a write failure left no record,
+    so the next interval swept again -- every CHECK_INTERVAL, forever.
+    """
     from jobs import nightly
 
     retention = _install_retention(monkeypatch)

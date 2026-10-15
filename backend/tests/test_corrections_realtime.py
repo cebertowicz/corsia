@@ -318,7 +318,7 @@ async def test_a_failing_scan_pass_keeps_the_scan_owed_and_the_worker_alive(work
     async def locked(*args, **kwargs):
         raise RuntimeError("database is locked")
 
-    monkeypatch.setattr(corrections_recording, "_next_pending_batch", locked)
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", locked)
     processed = []
     monkeypatch.setattr(corrections_realtime, "candidate_for_message", lambda message_id: processed.append(message_id))
 
@@ -382,7 +382,7 @@ async def test_bounded_scan_passes_measurement_cutoff_to_selector(worker, monkey
         selected.append(kwargs["since"])
         return SimpleNamespace(selected_keys=[], candidates=[])
 
-    monkeypatch.setattr(corrections_recording, "_next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
     monkeypatch.setattr(corrections_realtime, "activate_after_backfill", AsyncMock(return_value="done"))
 
     worker.scan = "owed"
@@ -403,8 +403,8 @@ async def test_completed_capped_scan_activates_and_notifies_once(worker, monkeyp
     async def next_batch(*args, **kwargs):
         return SimpleNamespace(selected_keys=[], candidates=[])
 
-    monkeypatch.setattr(corrections_recording, "_next_pending_batch", next_batch)
-    monkeypatch.setattr(corrections_recording, "_owner_user_ids", lambda: ["owner"])
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_recording, "owner_user_ids", lambda: ["owner"])
     monkeypatch.setattr(core_recording, "active_corrections_version", lambda: None)
     monkeypatch.setattr(corrections_activation, "weekly_correction_figure", lambda version, **_kwargs: 3.0)
     monkeypatch.setattr(corrections_activation, "complete_backfill", complete)
@@ -416,6 +416,28 @@ async def test_completed_capped_scan_activates_and_notifies_once(worker, monkeyp
     assert complete.call_count == 1
     assert complete.call_args.kwargs["weeks"] > 0
     notified.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_activation_without_exactly_one_owner_holds_the_scan_with_its_reason(worker, monkeypatch):
+    from jobs import corrections_activation, corrections_recording
+
+    complete = Mock(return_value=True)
+
+    async def next_batch(*args, **kwargs):
+        return SimpleNamespace(selected_keys=[], candidates=[])
+
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_recording, "owner_user_ids", lambda: ["owner-a", "owner-b"])
+    monkeypatch.setattr(corrections_activation, "complete_backfill", complete)
+
+    worker.scan = "owed"
+    await worker.run()
+
+    assert complete.call_count == 0
+    snapshot = worker.snapshot()
+    assert snapshot["scan"] == "owed"
+    assert snapshot["held_reason"] == "activation held: expected one owner, found 2"
 
 
 def test_startup_cleanup_discards_interrupted_asset_staging(monkeypatch, tmp_path):
@@ -454,7 +476,7 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
         worker.queue.put_nowait(("fresh-arrival", 0.0))
         return True
 
-    monkeypatch.setattr(corrections_recording, "_next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
     monkeypatch.setattr(worker, "_classify", classify)
 
     worker.scan = "owed"
@@ -464,34 +486,76 @@ async def test_backfill_yields_after_one_in_flight_call_when_an_arrival_is_queue
     assert worker.scan == "owed" and worker.held_reason is None
 
 
+def _one_candidate_batch(candidate):
+    return SimpleNamespace(
+        selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)],
+        candidates=[candidate],
+    )
+
+
 @pytest.mark.asyncio
-async def test_backfill_waits_one_call_duration_before_the_next_low_priority_call(worker, monkeypatch):
+async def test_backfill_pauses_one_call_duration_not_counting_a_cold_load(worker, monkeypatch):
     from jobs import corrections_realtime, corrections_recording
 
-    candidate = _candidate()
-    batches = [
-        SimpleNamespace(
-            selected_keys=[SimpleNamespace(created_at=candidate.created_at, message_id=candidate.message_id)],
-            candidates=[candidate],
-        ),
-        SimpleNamespace(selected_keys=[], candidates=[]),
-    ]
-    slept = AsyncMock()
+    batches = [_one_candidate_batch(_candidate()), SimpleNamespace(selected_keys=[], candidates=[])]
+    now = [10.0]
+    paused = []
+
+    class SlowChild(ScriptedChild):
+        def ensure_loaded(self):
+            now[0] += 100.0  # a cold load, which the pause must not count
+            super().ensure_loaded()
+
+        def classify(self, context, owner):
+            now[0] += 3.5
+            return super().classify(context, owner)
 
     async def next_batch(*args, **kwargs):
         return batches.pop(0)
 
-    monkeypatch.setattr(corrections_recording, "_next_pending_batch", next_batch)
-    monkeypatch.setattr(worker, "_classify", AsyncMock(return_value=True))
+    async def wait_for(awaitable, timeout):
+        awaitable.close()
+        paused.append(timeout)
+
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", SlowChild)
+    monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock())
     monkeypatch.setattr(corrections_realtime, "activate_after_backfill", AsyncMock(return_value="done"))
-    monkeypatch.setattr(corrections_realtime.asyncio, "sleep", slept)
-    ticks = iter((10.0, 13.5))
-    monkeypatch.setattr(corrections_realtime, "_clock", lambda: next(ticks))
+    monkeypatch.setattr(corrections_realtime, "_clock", lambda: now[0])
+    monkeypatch.setattr(corrections_realtime.asyncio, "wait_for", wait_for)
 
     await worker._scan_pass()
 
-    slept.assert_awaited_once_with(3.5)
+    assert paused == [3.5]
     assert worker.scan == "idle"
+
+
+@pytest.mark.asyncio
+async def test_an_arrival_queued_during_the_backfill_pause_is_picked_up_at_once(worker, monkeypatch):
+    from jobs import corrections_recording
+
+    paused = asyncio.Event()
+
+    async def next_batch(*args, **kwargs):
+        return _one_candidate_batch(_candidate())
+
+    async def classify(candidate):
+        worker.call_seconds = 30.0  # a pause this long alone would break the 5 s live-message bound
+        paused.set()
+        return True
+
+    monkeypatch.setattr(corrections_recording, "next_pending_batch", next_batch)
+    monkeypatch.setattr(worker, "_classify", classify)
+
+    worker.scan = "owed"
+    worker.task = asyncio.create_task(worker._scan_pass())
+    await paused.wait()
+    started = asyncio.get_running_loop().time()
+    worker.notify("fresh-arrival")
+    await asyncio.wait_for(asyncio.shield(worker.task), timeout=1.0)
+
+    assert asyncio.get_running_loop().time() - started < 1.0
+    assert worker.scan == "owed" and worker.queue.qsize() == 1
 
 
 @pytest.mark.asyncio

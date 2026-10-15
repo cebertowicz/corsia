@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.corrections_classifier import (
-    AssetManifest, Classification, _check_self_test, _load_tokenizer, _open_session, _score,
+    AssetManifest, Classification, check_self_test, load_tokenizer, open_session, score_input,
     load_pinned_manifest,
 )
 from core.corrections_recording import ClassifierVersion
@@ -72,9 +72,9 @@ def _child_main(connection, manifest_path: str) -> None:
 
         manifest = load_pinned_manifest(Path(manifest_path).parent)
         manifest.verify_files()
-        session = _open_session(manifest, ort)
-        tokenizer = _load_tokenizer(manifest)
-        _check_self_test(manifest, session, np, tokenizer)
+        session = open_session(manifest, ort)
+        tokenizer = load_tokenizer(manifest)
+        check_self_test(manifest, session, np, tokenizer)
         if _peak_rss_bytes() > RSS_LIMIT_BYTES:
             connection.send({"error": "rss"})
             return
@@ -84,7 +84,7 @@ def _child_main(connection, manifest_path: str) -> None:
             if request == {"op": "close"}:
                 return
             version = manifest.classifier_version(str(request.get("head", "correction")))
-            score, truncated, original = _score(session, np, tokenizer, request["context"], request["owner"])
+            score, truncated, original = score_input(session, np, tokenizer, request["context"], request["owner"])
             if _peak_rss_bytes() > RSS_LIMIT_BYTES:
                 connection.send({"error": "rss"})
                 return

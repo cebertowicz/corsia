@@ -45,6 +45,7 @@ lose it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from typing import Any
 
@@ -52,10 +53,12 @@ from loguru import logger
 
 from core.corrections_child import ClassifierChild, ClassifierUnavailable, MessageFailed
 from core.corrections_classifier import AssetError, AssetManifest, asset_root, cleanup_staging, load_pinned_manifest
-from core.corrections_recording import LABEL_UNREADABLE, CorrectionCandidate
+from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
-from jobs.corrections_recording import candidate_for_message, record_classification, record_unreadable
+from jobs.corrections_recording import (
+    candidate_for_message, record_classification, record_unreadable, unreadable_messages,
+)
 
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
@@ -77,12 +80,14 @@ class CorrectionsWorker:
 
     def __init__(self) -> None:
         self.queue: asyncio.Queue[tuple[str, float]] = asyncio.Queue(maxsize=QUEUE_SIZE)
+        self.arrived = asyncio.Event()
+        self.call_seconds = 0.0
         self.task: asyncio.Task[None] | None = None
         self.child: ClassifierChild | None = None
         self.stopping = False
         self.state = "absent"
         self.reason: str | None = "asset not verified"
-        self.version: str | None = None
+        self.version: ClassifierVersion | None = None
         self.scan = "idle"
         self.held_reason: str | None = None
         self.dropped_arrivals = 0
@@ -122,7 +127,7 @@ class CorrectionsWorker:
             "state": self.state,
             "reason": self.reason,
             "retryable": self.state != "failed",
-            "version": self.version,
+            "version": self.version.version if self.version else None,
             "scan": self.scan,
             "scan_owed": self.scan != "idle",
             "held_reason": self.held_reason,
@@ -141,7 +146,7 @@ class CorrectionsWorker:
             present = (asset_root() / "manifest.json").is_file()
             self._set("failed" if present else "absent", str(error))
             return None
-        self.version = manifest.version
+        self.version = manifest.classifier_version()
         if self.state in ("absent", "failed"):
             self._set("unavailable", "asset verified; the model has not run yet")
         return manifest
@@ -165,6 +170,7 @@ class CorrectionsWorker:
             return False
         outages: list[str] = []
         failures: list[str] = []
+        self.call_seconds = 0.0
         while len(outages) < ATTEMPTS_PER_KIND and len(failures) < ATTEMPTS_PER_KIND:
             if self.child is None:
                 self.child = ClassifierChild(manifest)
@@ -178,6 +184,7 @@ class CorrectionsWorker:
                 logger.warning("corrections classifier did not load: {}", error)
                 await self._drop_child()
                 continue
+            call_started = _clock()
             try:
                 result = await asyncio.to_thread(child.classify, list(candidate.context), candidate.content)
             except MessageFailed as error:
@@ -189,6 +196,8 @@ class CorrectionsWorker:
                 outages.append(str(error))
                 await self._drop_child()
                 continue
+            finally:
+                self.call_seconds += _clock() - call_started
             await record_classification(candidate, result)
             self._set("ready", None)
             return True
@@ -235,7 +244,7 @@ class CorrectionsWorker:
         from datetime import timezone
 
         from jobs.corrections_activation import measurement_window_start
-        from jobs.corrections_recording import _next_pending_batch
+        from jobs.corrections_recording import next_pending_batch
 
         manifest = await self._verified_manifest()
         if manifest is None:
@@ -244,21 +253,22 @@ class CorrectionsWorker:
         version = manifest.classifier_version()
         before = None
         while self.queue.empty():
-            batch = await _next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
+            batch = await next_pending_batch(version, SCAN_BATCH, before, since=cutoff.isoformat())
             if not batch.selected_keys:
                 return await activate_after_backfill(version)
             before = (batch.selected_keys[-1].created_at, batch.selected_keys[-1].message_id)
             for candidate in batch.candidates:
                 if not self.queue.empty():
                     return "yielded"
-                started_at = _clock()
                 if not await self._classify(candidate):
                     # Unrecorded work must not reach activation.
                     return f"classifier {self.state}: {self.reason}"
-                elapsed = _clock() - started_at
+                self.arrived.clear()
                 if not self.queue.empty():
                     return "yielded"
-                await asyncio.sleep(elapsed)
+                # Pause one call's duration (a cold load not counted); a queued arrival ends it at once.
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self.arrived.wait(), self.call_seconds)
         return "yielded"
 
     async def run(self) -> None:
@@ -307,6 +317,7 @@ class CorrectionsWorker:
             self.dropped_arrivals += 1
             logger.warning("corrections classifier arrival queue is full; scan is owed")
             return
+        self.arrived.set()
         self._start_task(self.run())
 
     def startup(self) -> None:
@@ -363,18 +374,12 @@ async def shutdown() -> None:
 def state_snapshot(db: Any = None) -> dict[str, object]:
     """Return the visible local-asset state without loading a model on demand.
 
-    With a database connection it also counts the recorded ``unreadable`` messages.
+    With a database connection it also counts the current version's ``unreadable``
+    messages in the Measurement window.
     """
     snapshot = WORKER.snapshot()
     if db is not None:
-        from core.corrections_recording import CORRECTION_EVENT
-
-        row = db.execute(
-            """SELECT COUNT(*) FROM outcome_events
-               WHERE event_name=? AND retracted_at IS NULL AND json_extract(attributes,'$.label')=?""",
-            (CORRECTION_EVENT, LABEL_UNREADABLE),
-        ).fetchone()
-        snapshot["unreadable_messages"] = int(row[0])
+        snapshot["unreadable_messages"] = unreadable_messages(db, WORKER.version) if WORKER.version else 0
     return snapshot
 
 

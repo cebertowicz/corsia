@@ -14,6 +14,7 @@ from core.corrections_recording import (
     dedupe_key,
     fact_attributes,
     subject_key,
+    version_match_sql,
 )
 from infra.db_async import run_in_db
 from jobs.corrections_scanning import PendingCandidateKey, hydrate_candidates, pending_candidate_keys
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     from core.corrections_classifier import Classification
 
 
-def _owner_user_ids() -> list[str]:
+def owner_user_ids() -> list[str]:
     """Return each durable account owner whose messages can be scoped independently."""
     from infra.database import get_db
 
@@ -107,6 +108,26 @@ async def record_unreadable(candidate: CorrectionCandidate, version: ClassifierV
     return await run_in_db(_record_fact, candidate, classification, version)
 
 
+def unreadable_messages(db, version: ClassifierVersion) -> int:
+    """Count this version's ``unreadable`` messages in the Measurement window, each once.
+
+    The ``(event_name, ts)`` index bounds the read to the window's correction facts.
+    """
+    from jobs.corrections_activation import measurement_window_start
+
+    version_filter, version_params = version_match_sql("e", version)
+    row = db.execute(
+        f"""SELECT COUNT(DISTINCT e.subject_key) FROM outcome_events e
+           WHERE e.event_name=:event AND e.ts >= :since AND e.retracted_at IS NULL
+             AND {version_filter} AND json_extract(e.attributes,'$.label')=:label""",
+        {
+            **version_params, "event": CORRECTION_EVENT, "label": LABEL_UNREADABLE,
+            "since": measurement_window_start().isoformat(),
+        },
+    ).fetchone()
+    return int(row[0])
+
+
 @dataclass(slots=True)
 class _PendingBatch:
     """One selected page and its hydrated owner-authored candidates."""
@@ -115,13 +136,13 @@ class _PendingBatch:
     candidates: list[CorrectionCandidate]
 
 
-async def _next_pending_batch(
+async def next_pending_batch(
     version: ClassifierVersion, batch_size: int, before: tuple[str, str] | None,
     *, since: str | None = None,
 ) -> _PendingBatch:
     """Globally select keys before reading the bounded classifier inputs."""
     keys: list[PendingCandidateKey] = []
-    for owner_user_id in await run_in_db(_owner_user_ids):
+    for owner_user_id in await run_in_db(owner_user_ids):
         keys.extend(
             await run_in_db(
                 pending_candidate_keys, version, batch_size, owner_user_id, before, since,

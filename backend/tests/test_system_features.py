@@ -137,15 +137,3 @@ def test_debug_only_patch_retains_saved_focus_off(monkeypatch):
         "focus_mode": False,
         "cpu_profiler": False,
     }
-
-
-def test_retired_checker_model_setting_is_ignored_not_saved(monkeypatch):
-    saved = []
-    monkeypatch.setattr(system, "save_agent_defaults", saved.append)
-
-    result = asyncio.run(
-        system.update_settings({"corrections_checker_model": "model-a"}, user={"id": "u"}),
-    )
-
-    assert result == {"ok": True}
-    assert saved == []

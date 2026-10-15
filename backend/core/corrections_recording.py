@@ -179,6 +179,15 @@ def _metadata(value: object) -> Mapping[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def is_wrapper_or_delivery(text: str, metadata: object) -> bool:
+    """Whether a stored row is a system wrapper or a routed or agent-sent delivery.
+
+    The one rule both owner messages and classifier context use, matched by metadata key.
+    """
+    parsed = _metadata(metadata)
+    return text.startswith(SYSTEM_WRAPPER_PREFIXES) or any(key in parsed for key in OWNER_MESSAGE_METADATA_KEYS)
+
+
 def is_owner_authored_message(
     *, role: object, content: object, metadata: object,
 ) -> bool:
@@ -189,10 +198,7 @@ def is_owner_authored_message(
     """
     if role != "user" or not isinstance(content, str) or not content.strip():
         return False
-    parsed = _metadata(metadata)
-    if any(key in parsed for key in OWNER_MESSAGE_METADATA_KEYS):
-        return False
-    return not content.startswith(SYSTEM_WRAPPER_PREFIXES)
+    return not is_wrapper_or_delivery(content, metadata)
 
 
 def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
