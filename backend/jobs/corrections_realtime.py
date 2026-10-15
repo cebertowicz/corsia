@@ -178,6 +178,10 @@ class CorrectionsWorker:
             return None
         reason = self.transient_versions.get(manifest.version)
         if reason is not None:
+            if self.child is not None and not self.child.running:
+                logger.info("corrections classifier idle restart reopens newer-version load attempts")
+                self.transient_versions.clear()
+                return manifest
             record_version_state(self, manifest.version, "unavailable", reason)
             if self.active_manifest is not None:
                 return self.active_manifest

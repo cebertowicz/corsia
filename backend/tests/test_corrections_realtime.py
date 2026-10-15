@@ -323,6 +323,35 @@ async def test_transient_newer_load_failure_serves_with_old_child_and_holds_the_
 
 
 @pytest.mark.asyncio
+async def test_idle_fallback_restart_reopens_the_newer_version_load_attempt(worker, monkeypatch):
+    from core.corrections_child import ClassifierUnavailable
+    from jobs import corrections_realtime
+
+    current = [_manifest("v1")]
+
+    def selected():
+        return current[0], [
+            {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
+            {"location": "corrections-classifier-v2", "version": "v2", "state": "ready", "reason": None},
+        ]
+
+    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
+    monkeypatch.setattr(corrections_realtime, "record_classification", AsyncMock(return_value=True))
+
+    assert await worker._classify(_candidate("v1")) is True
+    current[0] = _manifest("v2")
+    ScriptedChild.loads = [ClassifierUnavailable("load timeout"), ClassifierUnavailable("load timeout")]
+    assert await worker._classify(_candidate("fallback")) is True
+
+    worker.child.running = False  # The old process exited after its idle timeout.
+    assert await worker._classify(_candidate("after-idle-restart")) is True
+
+    assert worker.child_version == "v2"
+    assert "v2" not in worker.transient_versions
+    assert len(ScriptedChild.created) == 4
+
+
+@pytest.mark.asyncio
 async def test_a_resident_child_is_reused_not_rebuilt_on_every_call(worker, monkeypatch):
     from jobs import corrections_realtime
 
