@@ -59,6 +59,31 @@ def test_tampered_asset_file_is_refused(tmp_path):
         manifest.verify_files()
 
 
+def test_verified_files_are_hashed_once_until_they_change(monkeypatch, tmp_path):
+    import os
+
+    from core import corrections_classifier
+    from core.corrections_classifier import AssetError, AssetManifest
+
+    path = _manifest(tmp_path)
+    manifest = AssetManifest.load(path)
+    hashes = []
+    real_sha256 = corrections_classifier.hashlib.sha256
+    monkeypatch.setattr(corrections_classifier.hashlib, "sha256", lambda *a: hashes.append(1) or real_sha256(*a))
+
+    manifest.verify_files()
+    first = len(hashes)
+    manifest.verify_files()
+    assert first == 2 and len(hashes) == first
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"MODEL")
+    stat = model.stat()
+    os.utime(model, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    with pytest.raises(AssetError, match="sha256"):
+        manifest.verify_files()
+
+
 def test_wrong_manifest_pin_is_refused(tmp_path):
     from core.corrections_classifier import AssetError, AssetManifest
 

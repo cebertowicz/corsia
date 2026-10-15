@@ -24,6 +24,10 @@ MAX_INPUT_TOKENS = 2048
 RSS_LIMIT_BYTES = int(2.5 * 1024**3)
 CALL_TIMEOUT_SECONDS = 30.0
 IDLE_SECONDS = 10 * 60
+_HASH_CHUNK_BYTES = 1024 * 1024
+# Verified file stats per manifest: a file is re-hashed only when its stat changes,
+# so a call never re-reads the whole model.
+_VERIFIED: dict[Path, tuple[tuple[str, int, int], ...]] = {}
 
 
 class AssetError(RuntimeError):
@@ -91,12 +95,24 @@ class AssetManifest:
 
     def verify_files(self) -> None:
         root = self.path.parent
+        stats = []
         for name, details in self.files.items():
             candidate = root / name
             if not candidate.is_file() or candidate.stat().st_size != int(details["bytes"]):
                 raise AssetError(f"asset file {name} is absent or has the wrong size")
-            if hashlib.sha256(candidate.read_bytes()).hexdigest() != details["sha256"]:
+            stat = candidate.stat()
+            stats.append((name, stat.st_size, stat.st_mtime_ns))
+        if _VERIFIED.get(self.path) == tuple(stats):
+            return
+        _VERIFIED.pop(self.path, None)
+        for name, details in self.files.items():
+            digest = hashlib.sha256()
+            with (root / name).open("rb") as handle:
+                while chunk := handle.read(_HASH_CHUNK_BYTES):
+                    digest.update(chunk)
+            if digest.hexdigest() != details["sha256"]:
                 raise AssetError(f"asset file {name} has a sha256 mismatch")
+        _VERIFIED[self.path] = tuple(stats)
 
     def checker_version(self, head: str = "correction") -> ClassifierVersion:
         try:
