@@ -173,6 +173,21 @@ def test_nested_nodes_are_quiet_unless_they_are_assigned_to_the_user(db):
     ]
 
 
+def test_a_nested_node_blocked_on_a_user_ask_writes_a_card(db):
+    plan = _plan(db)
+    parent = service.add_node(
+        plan.id, kind="phase", title="Parent", acceptance_criteria="Parent DOD", db=db,
+    )
+    db.commit()
+    nested = _task(db, plan.id, title="Review the draft", parent_id=parent.id)
+
+    _block(db, plan.id, nested.id)
+
+    assert [(card["kind"], card["node_id"], card["title"]) for card in _cards(db)] == [
+        ("blocked", nested.id, "Review the draft"),
+    ]
+
+
 @pytest.mark.parametrize("owner", ["child", "root"], ids=["hidden-subagent", "archived-thread"])
 def test_hidden_or_archived_thread_owners_are_excluded(db, owner):
     plan = _plan(db, owner)
