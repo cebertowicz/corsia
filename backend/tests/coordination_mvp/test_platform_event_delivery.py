@@ -152,3 +152,9 @@ class TestDesignationRule:
         set_conductor(WORKSPACE_SCOPE, other)
         rules = {r.id: r for r in binder.list_rules("gmail")}
         assert rules[plain.id].destination_thread_id == workspace
+
+    def test_cleared_designation_makes_rule_unroutable(self, workspace):
+        set_conductor(WORKSPACE_SCOPE, None)
+        assert binder.list_rules("gmail") == []
+        out = deliver_platform_event_sync("gmail", _mail("m8", "t8", **SCREENED_NOW))
+        assert [d.outcome for d in out] == [DEAD_LETTERED]

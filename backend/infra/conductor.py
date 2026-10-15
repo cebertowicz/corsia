@@ -313,11 +313,6 @@ def set_conductor(scope: str, thread_id: str | None, db=None) -> bool:
                 (thread_id, now, scope),
             )
 
-        if scope == WORKSPACE_SCOPE and thread_id is not None:
-            from connections.binder import repoint_designation_rules
-
-            repoint_designation_rules(thread_id, db=_db)
-
         invalidated = tuple(
             designated
             for designated in dict.fromkeys((previous, thread_id))
