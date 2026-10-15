@@ -25,6 +25,12 @@ for argument; do
   esac
   previous_argument="$argument"
 done
+# The backend finds its own loopback port through BACKEND_PORT (the Claude Code
+# tool bridge URL, scheduled updates, the CLI); unset, it falls back to the
+# default port, which the packaged app does not serve on.
+if [ "$service_port" != "unknown" ]; then
+  export BACKEND_PORT="$service_port"
+fi
 exec >>"$state_dir/logs/service.log" 2>&1
 printf 'CORSIA bundled backend startup: state_dir=%s db_path=%s port=%s\n' \
   "$state_dir" "$state_dir/corsia.db" "$service_port"
