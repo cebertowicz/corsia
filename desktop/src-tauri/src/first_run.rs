@@ -170,6 +170,7 @@ pub fn git_init(
         .arg(workspace)
         .args(["init", "--quiet"])
         .env("PATH", path)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|error| format!("could not run git: {error}"))?;

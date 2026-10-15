@@ -3,11 +3,9 @@
 set -euo pipefail
 
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-readonly APP="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/CORSIA.app"
+readonly SOURCE_APP="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/CORSIA.app"
 readonly DMG_DIR="$ROOT/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
 readonly DMG="$DMG_DIR/CORSIA-smoke-aarch64.dmg"
-readonly RESOURCES="$APP/Contents/Resources"
-readonly PYTHON="$RESOURCES/python/bin/python3"
 readonly TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/corsia-bundle-smoke.XXXXXX")"
 
 success=false
@@ -27,20 +25,63 @@ for argument in "$@"; do
   esac
 done
 if "$reuse_build"; then
-  [ -d "$APP" ] || { echo "error: no built app at $APP" >&2; exit 1; }
+  [ -d "$SOURCE_APP" ] || { echo "error: no built app at $SOURCE_APP" >&2; exit 1; }
 else
   if "$skip_dmg"; then
     "$ROOT/desktop/scripts/build-macos-bundle.sh" --skip-dmg
   else
     "$ROOT/desktop/scripts/build-macos-bundle.sh"
   fi
-  "$ROOT/desktop/scripts/sign-macos-bundle.sh" - "$APP"
+  "$ROOT/desktop/scripts/sign-macos-bundle.sh" - "$SOURCE_APP"
 fi
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
   rm -f "$DMG"
-  diskutil image create from --format UDZO --volumeName CORSIA "$APP" "$DMG"
+  diskutil image create from --format UDZO --volumeName CORSIA "$SOURCE_APP" "$DMG"
 fi
+
+# Test the exact shipped resource layout after relocation rather than the build path.
+readonly APP="$TEMP_ROOT/relocated/CORSIA.app"
+mkdir -p "$(dirname "$APP")"
+ditto "$SOURCE_APP" "$APP"
+readonly RESOURCES="$APP/Contents/Resources"
+readonly PYTHON="$RESOURCES/python/bin/python3"
+readonly GIT="$RESOURCES/bin/git"
+readonly GIT_HTTP="$RESOURCES/libexec/git-core/git-remote-http"
+
+assert_system_libraries() {
+  local binary="$1"
+  if otool -L "$binary" | tail -n +2 | grep -Ev '^[[:space:]]*(/System/Library/|/usr/lib/)'; then
+    echo "error: $binary links a non-system library" >&2
+    exit 1
+  fi
+}
+[ -x "$GIT" ] || { echo "error: bundled git is missing" >&2; exit 1; }
+[ -x "$GIT_HTTP" ] || { echo "error: bundled HTTPS git helper is missing" >&2; exit 1; }
+[ -f "$RESOURCES/licenses/git/COPYING" ] || { echo "error: bundled Git license is missing" >&2; exit 1; }
+[ -f "$RESOURCES/licenses/git/SOURCE" ] || { echo "error: bundled Git source notice is missing" >&2; exit 1; }
+"$GIT" --version
+assert_system_libraries "$GIT"
+assert_system_libraries "$GIT_HTTP"
+
+# The fail-closed shim would win before /usr/bin/git if resource resolution regressed.
+mkdir -p "$TEMP_ROOT/empty-home" "$TEMP_ROOT/git-workspace" "$TEMP_ROOT/no-system-git"
+printf '#!/bin/sh\necho "/usr/bin/git must not run" >&2\nexit 99\n' > "$TEMP_ROOT/no-system-git/git"
+chmod 0755 "$TEMP_ROOT/no-system-git/git"
+env -i HOME="$TEMP_ROOT/empty-home" \
+  PATH="$RESOURCES/bin:$TEMP_ROOT/no-system-git:/usr/bin:/bin" \
+  GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+  git -C "$TEMP_ROOT/git-workspace" init --quiet
+touch "$TEMP_ROOT/git-workspace/smoke"
+env -i HOME="$TEMP_ROOT/empty-home" \
+  PATH="$RESOURCES/bin:$TEMP_ROOT/no-system-git:/usr/bin:/bin" \
+  GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+  git -C "$TEMP_ROOT/git-workspace" add smoke
+env -i HOME="$TEMP_ROOT/empty-home" \
+  PATH="$RESOURCES/bin:$TEMP_ROOT/no-system-git:/usr/bin:/bin" \
+  GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+  git -C "$TEMP_ROOT/git-workspace" -c user.name=CORSIA -c user.email=corsia@local commit --quiet -m smoke
+printf 'bundled-git-uncompressed-kib=%s\n' "$(du -sk "$GIT" "$RESOURCES/libexec/git-core" "$RESOURCES/share/git-core/templates" "$RESOURCES/licenses/git" | awk '{sum += $1} END {print sum}')"
 
 port="$($PYTHON -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 mkdir -p "$TEMP_ROOT/home" "$TEMP_ROOT/workspace" "$TEMP_ROOT/state"

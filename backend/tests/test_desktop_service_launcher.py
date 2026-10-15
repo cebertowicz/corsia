@@ -29,6 +29,9 @@ def _bundle_with_recording_python(tmp_path: Path) -> Path:
         "  *uvicorn*)\n"
         '    printf "BACKEND_PORT=%s\\n" "${BACKEND_PORT-unset}"\n'
         '    printf "CORSIA_WORKSPACE=%s\\n" "${CORSIA_WORKSPACE-unset}"\n'
+        '    printf "PATH=%s\\n" "$PATH"\n'
+        '    printf "GIT_CONFIG_NOSYSTEM=%s\\n" "${GIT_CONFIG_NOSYSTEM-unset}"\n'
+        '    printf "GIT_TERMINAL_PROMPT=%s\\n" "${GIT_TERMINAL_PROMPT-unset}"\n'
         '    printf "ARGS=%s\\n" "$*" ;;\n'
         f'  *) exec "{sys.executable}" "$@" ;;\n'
         "esac\n"
@@ -61,6 +64,17 @@ def test_launcher_exports_the_port_it_serves_on(tmp_path):
     log = _launch(launcher, tmp_path / "state", "--host", "127.0.0.1", "--port", "18788")
 
     assert "BACKEND_PORT=18788" in log
+
+
+def test_launcher_prefers_its_bundled_git_and_disables_system_config(tmp_path):
+    launcher = _bundle_with_recording_python(tmp_path)
+
+    log = _launch(launcher, tmp_path / "state", "--port", "18788")
+
+    resources = launcher.parent.parent
+    assert f"PATH={resources / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin" in log
+    assert "GIT_CONFIG_NOSYSTEM=1" in log
+    assert "GIT_TERMINAL_PROMPT=0" in log
 
 
 def test_launcher_exports_the_port_given_as_one_argument(tmp_path):

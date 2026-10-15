@@ -11,6 +11,10 @@ login_path="$(PYTHONPATH="$resources/backend" "$resources/python/bin/python3" -c
 base_path="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export CORSIA_SERVICE_PATH="${login_path:+$login_path:}$base_path"
 export PATH="$CORSIA_SERVICE_PATH"
+# The bundle owns Git. Avoid host system configuration and credential prompts
+# when backend guidance history or spawned harnesses run it.
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_TERMINAL_PROMPT=0
 export PYTHONPATH="$resources/python/backend-packages"
 export CORSIA_STATE_DIR="$state_dir"
 

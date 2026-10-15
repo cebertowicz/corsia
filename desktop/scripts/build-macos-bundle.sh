@@ -13,6 +13,13 @@ readonly OMLX_VERSION="0.7.0"
 readonly OMLX_WHEEL="omlx-${OMLX_VERSION}-cp311-cp311-macosx_15_0_universal2.whl"
 readonly OMLX_URL="https://github.com/jundot/omlx/releases/download/v${OMLX_VERSION}/${OMLX_WHEEL}"
 readonly OMLX_SHA256="a25b0fbf86579512ced2a45b9aba420a51e6e8f3ee9ea3832ea1b9111d2cc4a7"
+# Build Git from its upstream release instead of copying Apple's CLT binary. Runtime
+# prefix discovery makes helpers and templates follow the executable after CORSIA.app moves.
+readonly GIT_VERSION="2.53.0"
+readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
+readonly GIT_URL="https://mirrors.edge.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
+readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
+readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
 
 skip_dmg=false
 for argument in "$@"; do
@@ -28,10 +35,31 @@ fetch_verified() {
   curl --fail --location --retry 3 --silent --show-error "$url" --output "$file"
   echo "${digest}  ${file}" | shasum --algorithm 256 --check --status || fail "SHA-256 mismatch for $(basename "$file")"
 }
+build_git_runtime() {
+  local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
+  fetch_verified "$GIT_URL" "$archive" "$GIT_SHA256"
+  tar -xJf "$archive" -C "$BUILD_ROOT"
+  make -C "$GIT_SOURCE" -j2 prefix=/git-runtime RUNTIME_PREFIX=YesPlease \
+    NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease \
+    NO_BASH_COMPLETION=YesPlease
+
+  # Keep only the client, HTTPS helper, aliases, and init templates needed by
+  # CORSIA's documented Git operations. Built-in commands run from `git`.
+  mkdir -p "$BUNDLE_ROOT/bin" "$BUNDLE_ROOT/libexec/git-core" \
+    "$BUNDLE_ROOT/share/git-core/templates" "$BUNDLE_ROOT/licenses/git"
+  install -m 0755 "$GIT_SOURCE/git" "$BUNDLE_ROOT/bin/git"
+  install -m 0755 "$GIT_SOURCE/git-remote-http" "$BUNDLE_ROOT/libexec/git-core/git-remote-http"
+  ln -s git-remote-http "$BUNDLE_ROOT/libexec/git-core/git-remote-https"
+  rsync -a --delete "$GIT_SOURCE/templates/blt/" "$BUNDLE_ROOT/share/git-core/templates/"
+  install -m 0644 "$GIT_SOURCE/COPYING" "$BUNDLE_ROOT/licenses/git/COPYING"
+  printf 'Git %s source\nURL: %s\nSHA-256: %s\nBuild: RUNTIME_PREFIX=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease\n' \
+    "$GIT_VERSION" "$GIT_URL" "$GIT_SHA256" > "$BUNDLE_ROOT/licenses/git/SOURCE"
+}
 
 [ "$(uname -s)" = "Darwin" ] || fail "macOS is required"
 [ "$(uname -m)" = "arm64" ] || fail "Apple silicon is required"
 command -v npm >/dev/null || fail "npm is required"
+command -v make >/dev/null || fail "make is required to build bundled Git"
 build_number="$(git -C "$ROOT" rev-list --count HEAD)"
 app_version="${CORSIA_APP_VERSION:-0.1.0-dev.$build_number}"
 macos_short_version="${CORSIA_MACOS_SHORT_VERSION:-0.1.0}"
@@ -61,6 +89,7 @@ fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"
 PYTHONPATH="$BUNDLE_ROOT/python/backend-packages" "$PYTHON" -m pip check
 PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 
+build_git_runtime
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"
