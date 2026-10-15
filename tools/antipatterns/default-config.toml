@@ -6,6 +6,17 @@ exclude_globs = [
     "**/node_modules/**",
     "**/dist/**",
     "**/build/**",
+    # Generated native-toolchain build trees (Cargo writes `target/` next to
+    # the crate, so the desktop app's is `desktop/src-tauri/target/`). A tree
+    # like that is not author code: it holds the whole dependency graph plus,
+    # for a bundled app, a copy of the Python runtime — measured 70,266 files
+    # under one worktree's `target/`, 59% of a whole-repo `--all` scan, and a
+    # 400-file sample of them produced 35 error-severity findings from
+    # vendored code. Both forms because the `--all` walker matches with
+    # fnmatch, where a leading `**/` needs a parent directory: `target/**`
+    # covers a crate at the repo root.
+    "**/target/**",
+    "target/**",
     "**/.mypy_cache/**",
     "**/.pytest_cache/**",
     "**/.ruff_cache/**",
