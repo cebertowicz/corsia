@@ -92,12 +92,6 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
 
     browser_control.pane_connected(thread_id, connection_token, report)
 
-    async def send_control() -> None:
-        report({
-            "type": "control",
-            "has_control": browser_control.holds_control(thread_id, connection_token),
-        })
-
     async def from_stream() -> None:
         async for message in stream:
             if not frames.offer(message):
