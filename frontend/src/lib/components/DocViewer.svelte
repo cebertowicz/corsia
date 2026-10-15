@@ -21,17 +21,17 @@
 	import { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
 	import { canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentsInDocumentOrder, type CanvasScrollTarget } from '$lib/docCanvasComments';
-	import { loadViewerContent, viewerContent, type ViewerContent } from '$lib/docViewerLoading';
+	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
-		docSaveDrafts, draftKey, effectiveDraftTarget, existingDraft, seedDraft,
+		effectiveDraftTarget, existingDraft, seedDraft,
 		enrichDraftTarget, setDraftText, flushDraft,
 	} from '$lib/stores/docSaveQueue';
-	import { docSaveGhost } from '$lib/stores/docSaveGhost.svelte';
+	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
@@ -40,7 +40,6 @@
 	import DocViewerStatus from './DocViewerStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
 	import { toasts } from '$lib/stores/toast';
-	import { shouldReloadPresenceEdit } from '$lib/docPresence';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import type { ScrollOrigin } from '$lib/cm/comment-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
@@ -79,6 +78,7 @@
 	let liveUnavailable = $state<ViewerContent['liveUnavailable']>(null);
 	let loadedArtifactId = $state<string | null>(null);
 	let readonly = $state(false);
+	let confirming = $state(false);
 	let freshness = $state<DocumentFreshness | null>(null);
 	const focusedComment = $derived($focusedDocComment);
 
@@ -86,11 +86,7 @@
 	let suggestionBusyId = $state<string | null>(null);
 	let feedbackStatus = $state<DocViewerStatus>();
 
-	// Reactive save state for the currently loaded target, sourced from the
-	// per-tab-instance save queue — never a single shared "current doc" flag.
-	const currentDraftKey = $derived(target ? draftKey(target) : null);
-	const currentDraft = $derived(currentDraftKey ? $docSaveDrafts[currentDraftKey] : undefined);
-	const saveError = $derived(currentDraft?.status === 'error' ? currentDraft.error : '');
+	const save = createDocSaveState(() => target);
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
@@ -106,8 +102,6 @@
 		});
 	});
 
-	const saveGhost = docSaveGhost(() => currentDraft?.status);
-	const saveStatus = $derived(saveGhost.current);
 	const commentRetryToast = createCommentRetryToast(toasts);
 
 	let presenceRanges = $state<PresenceRange[]>([]);
@@ -115,7 +109,7 @@
 
 	// The comments pane derives orphaning from the text currently on screen (and a refused accept)
 	// so a comment never remains highlighted after an in-editor edit changes it.
-	$effect(() => syncActiveDocumentEditor({ target, draft: currentDraft, docState, artifactId: loadedArtifactId, text: editText, readonly }));
+	$effect(() => syncActiveDocumentEditor({ target, draft: save.draft, docState, artifactId: loadedArtifactId, text: editText, readonly: readonly || confirming }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
@@ -146,7 +140,7 @@
 	const accent = $derived($projects.find((project) => project.id === target?.projectId)?.accent_color ?? null);
 	const images = createDocViewerImages({
 		onOpenImage: () => onOpenImage, root: () => docRoot, comments: () => listedComments, artifactId: () => loadedArtifactId,
-		target: () => target, readOnly: () => readonly, text: () => editText, session: () => liveSession, accent: () => accent,
+		target: () => target, readOnly: () => readonly || confirming, text: () => editText, session: () => liveSession, accent: () => accent,
 		feedback: () => feedbackStatus?.feedback(), showInText: focusInText });
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
@@ -196,14 +190,16 @@
 		editText = content.text;
 		loadedArtifactId = content.artifactId;
 		readonly = !content.writable;
+		confirming = false;
 		freshness = content.freshness;
+		const shown = docState === 'ready';
 		docState = 'ready';
 		legacyAwaitingSave = !content.live && Boolean(existingDraft(d)?.editText !== existingDraft(d)?.savedText);
-		onSignal?.({ status: 'ready', artifactId: content.artifactId, revision: content.revision, writable: content.writable, instanceId: d.instanceId });
+		onSignal?.({ status: 'ready', artifactId: content.artifactId, revision: content.revision, writable: content.writable, shown, instanceId: d.instanceId });
 		reloadDocumentFeedback(content.artifactId, seq, () => loadSeq, feedbackStatus);
 	}
 	$effect(() => {
-		if (!legacyAwaitingSave || !currentDraft || currentDraft.status !== 'saved') return;
+		if (!legacyAwaitingSave || !save.draft || save.draft.status !== 'saved') return;
 		legacyAwaitingSave = false;
 		reloadNonce += 1;
 	});
@@ -211,12 +207,7 @@
 		const d = target;
 		if (!d || liveSession) return Promise.resolve(null);
 		const seq = loadSeq;
-		return prepareDocumentReload(
-			d,
-			() => seq === loadSeq && shouldReloadPresenceEdit(existingDraft(d)),
-			effectiveDraftTarget(d).artifactId,
-			(response, fallbackArtifactId) => applyViewerContent(d, viewerContent(response, fallbackArtifactId), ++loadSeq),
-		);
+		return prepareDocumentReload(d, () => seq === loadSeq, (content) => applyViewerContent(d, content, ++loadSeq));
 	}
 	$effect(() => {
 		const key = targetKey;
@@ -243,19 +234,17 @@
 			draftController.select(null);
 			commentUI.close();
 			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
-			const existing = existingDraft(d);
-			const dirty = Boolean(existing && existing.editText !== existing.savedText);
-			// These fields describe the mounted target, not its predecessor. Unsaved
-			// local text wins over server content, but not over write authority: it
-			// stays visible and read-only until the loader re-checks write access.
+			// These fields describe the mounted target, not its predecessor.
 			loadedArtifactId = effectiveDraftTarget(d).artifactId;
-			readonly = dirty;
-			if (existing) editText = existing.editText;
+			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
+			readonly = opened.unsaved;
+			confirming = opened.confirming;
+			if (opened.text !== null) editText = opened.text;
 			freshness = null;
 			loadError = '';
 			openRefusal = null; liveUnavailable = null;
-			docState = dirty ? 'ready' : 'loading';
-			signal(dirty ? { status: 'ready', artifactId: loadedArtifactId, writable: false } : { status: 'loading' });
+			docState = opened.text === null ? 'loading' : 'ready';
+			signal(opened.signal);
 			void loadViewerContent({
 				target: d, isCurrent: () => seq === loadSeq,
 				onReady: (content) => { liveUnavailable = content.liveUnavailable; applyViewerContent(d, content, seq); },
@@ -268,9 +257,10 @@
 					if (e instanceof ImageFileError) { signal({ status: 'loading', renderer: 'image' }); return; }
 					openRefusal = docOpenRefusal(e);
 					loadError = e instanceof Error ? e.message : String(e);
-					docState = openRefusal || dirty ? 'ready' : 'error';
-					if (existing) editText = existing.editText;
+					docState = openRefusal || opened.unsaved ? 'ready' : 'error';
+					if (opened.text !== null) editText = opened.text;
 					readonly = Boolean(openRefusal);
+					confirming = false;
 					// A 404 means the document is gone, which the tab shows as its
 					// explicit unavailable state rather than a raw load error.
 					signal({ status: /(^|\s)404(\s|$)/.test(loadError) ? 'unavailable' : 'error' });
@@ -280,12 +270,12 @@
 
 	$effect(() => {
 		const text = editText;
-		if (docState !== 'ready' || !target || readonly || openRefusal) return;
+		if (docState !== 'ready' || !target || readonly || confirming || openRefusal) return;
 		setDraftText(target, text);
 	});
 
 	function flushNow() {
-		if (target && !readonly) void flushDraft(target);
+		if (target && !readonly && !confirming) void flushDraft(target);
 	}
 
 	onDestroy(() => teardownDocumentViewer(target, flushNow, releaseDocEditor));
@@ -307,10 +297,11 @@
 		title={target?.name ?? 'Document'}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
+		saveStatus={save.status}
 		bind:this={feedbackStatus}
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
-		readonly={readonly && !openRefusal}
+		readonly={readonly && !confirming && !openRefusal}
 		commentCount={commentStatus.commentCount}
 		orphanedCount={commentStatus.orphanedCount}
 		artifactId={loadedArtifactId}
@@ -354,14 +345,14 @@
 		onSuggestionHover={commentUI.hover}
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
-		readOnly={readonly || suggestionBusyId !== null}
+		readOnly={readonly || confirming || suggestionBusyId !== null}
 		imageBase={target}
 		onOpenImage={onOpenImage ? (request) => images.open(request) : undefined}
 		tabInstanceId={target?.instanceId ?? null}
 		{onDocumentPlace}
-		{saveError}
-		{saveStatus}
+		saveError={save.error}
 		pendingSel={draftController.pending}
+		commentSheetOpen={commentUI.sheetModalOpen}
 		onStartComment={draftController.start}
 	/>
 	<DocCommentSurface
@@ -389,10 +380,11 @@
 		onAgree={threadActions.agree}
 		{target}
 		artifactId={loadedArtifactId}
-		readOnly={readonly}
+		readOnly={readonly || confirming}
 		onSuggestionBusy={(busy, id) => suggestionBusyId = busy ? id ?? '' : null}
 		onSuggestionAccepted={(text) => { if (!liveSession) editText = text; }}
 		onDocumentChanged={reload}
+		onSheetModalChange={(open) => commentUI.sheetModalOpen = open}
 		images={images.groups}
 		{covered}
 	/>
