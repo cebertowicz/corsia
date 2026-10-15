@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +127,10 @@ def stage(
 
     entry_id = int(entry["entry_id"])
     try:
-        decision = validate_decision(placement)
+        decision = replace(
+            validate_decision(placement),
+            originating_subjects=_originating_subjects(db, thread_id),
+        )
         place = thread_place(db, thread_id)
         destination = map_destination(place, decision)
         if require is not None and destination.kind != require:
@@ -177,11 +180,20 @@ def stage(
     }
 
 
+def _originating_subjects(db: sqlite3.Connection, thread_id: str) -> tuple[str, ...]:
+    """Delegate active-turn subject discovery to the lesson subsystem."""
+    from core.lesson_corrections import current_owner_subjects
+
+    return current_owner_subjects(db, thread_id)
+
+
 def _stored(decision: Decision) -> dict[str, Any]:
     """The answer as the mark keeps it; an answer without a trial is unchanged."""
     stored = asdict(decision)
     if stored["trial"] is None:
         del stored["trial"]
+    if not stored["originating_subjects"]:
+        del stored["originating_subjects"]
     return stored
 
 
@@ -221,8 +233,24 @@ def _stage_trial(
 
     if room is not None:
         raise InvalidDecision("room does not go with a trial; call again without room")
+    from core.lesson_corrections import incident_detail_flags, record_placement_check
+    from core.placement_outcomes import entry_text
+
     admission = admit(db, thread_id, entry, place, decision, destination)
-    return {"placement": _stored(decision), "room": None, "hold": admission.hold}
+    flags = incident_detail_flags(decision.text, entry_text(entry))
+    if flags:
+        record_placement_check(
+            db, thread_id=thread_id, history_epoch=int(entry["history_epoch"]),
+            entry_id=int(entry["entry_id"]), revision=int(entry["revision"]), flags=flags,
+            override_reason=decision.trial.incident_detail_reason if decision.trial else None,
+        )
+    return {
+        "placement": _stored(decision), "room": None, "hold": admission.hold,
+        "placement_check": {
+            "flags": list(flags),
+            "override_reason": decision.trial.incident_detail_reason if decision.trial else None,
+        },
+    }
 
 
 def _check_publishable(
@@ -250,7 +278,16 @@ def _check_publishable(
 
 def load(answer: dict[str, Any]) -> tuple[Decision, Room | None]:
     """The stored answer as the worker acts on it; ``InvalidDecision`` if malformed."""
-    decision = validate_decision(answer.get("placement"))
+    raw = answer.get("placement")
+    if not isinstance(raw, dict):
+        raise InvalidDecision("stored placement must be an object")
+    raw = dict(raw)
+    subjects = raw.pop("originating_subjects", [])
+    from core.lesson_corrections import merge_subjects
+
+    if not isinstance(subjects, list):
+        raise InvalidDecision("stored originating_subjects must be a list")
+    decision = replace(validate_decision(raw), originating_subjects=merge_subjects(subjects))
     room = answer.get("room")
     if room is None:
         return decision, None

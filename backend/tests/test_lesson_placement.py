@@ -811,3 +811,40 @@ async def test_a_full_lesson_budget_captures_the_next_trial(env: Env) -> None:
     assert "retire or promote a trial lesson you no longer need" in reply
     assert not _skill(env).exists() and _offered(env) == []
     assert plans.open_capture_review_counts(env.db) == {THREAD: 1}
+
+
+async def test_duplicate_watch_placement_merges_each_turns_subjects_on_one_record(env: Env) -> None:
+    def start(turn_id: str, *message_ids: str) -> None:
+        env.db.execute(
+            """INSERT INTO active_turns(
+                id,thread_id,execution_epoch,model,status,started_at,boot_epoch,usage_receipts_json
+            ) VALUES (?,? ,0,'test/model','running','now','boot','{}')""", (turn_id, THREAD),
+        )
+        first_order = int(env.db.execute(
+            "SELECT COALESCE(max(input_order), 0) + 1 FROM messages WHERE thread_id=?", (THREAD,),
+        ).fetchone()[0])
+        for order, message_id in enumerate(message_ids, first_order):
+            env.db.execute(
+                """INSERT INTO messages(
+                    id,thread_id,role,content,created_at,input_order,active_turn_id
+                ) VALUES (?,?,'user','Please correct this.','now',?,?)""",
+                (message_id, THREAD, order, turn_id),
+            )
+        env.db.commit()
+
+    start("turn-one", "first", "second")
+    first = _entry(env)
+    _place(env, first, _answer(trial={"state": "watch"}))
+    await _drain(env.worker)
+    watch = lesson_files.read_trial(_skill(env).read_text())
+    assert watch.lesson.state == "watch"
+
+    env.db.execute("UPDATE active_turns SET status='completed' WHERE id='turn-one'")
+    start("turn-two", "third")
+    second = _entry(env, text="the same correction recurred")
+    _place(env, second, _answer(duplicate_of="- same lesson"))
+    await _drain(env.worker)
+
+    promoted = lesson_files.read_trial(_skill(env).read_text())
+    assert promoted.lesson.id == watch.lesson.id
+    assert promoted.lesson.originating_subjects == ("message:first", "message:second", "message:third")

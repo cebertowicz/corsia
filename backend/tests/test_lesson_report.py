@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from core.lesson_report import ReportScope, read_report
+from core.lesson_report import ReportScope, _correction_inventory, read_report
 from plans import closure, public
 from tests.test_lesson_report_inventory import source
 from tests.test_lesson_review_history import db, review  # noqa: F401 - shared real-schema fixture
@@ -98,3 +98,23 @@ def test_due_work_is_visible_when_selected_period_has_no_calls(db):
     assert result["rows"][0]["due"] is True
     assert result["rows"][0]["indexed"]["calls"] == 0
     assert result["rows"][0]["indexed"]["efficacy"] is None
+
+
+def test_report_joins_late_correction_facts_and_hides_stale_unrecurred_watches(db):
+    db.execute(
+        """INSERT INTO outcome_events(
+            id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes
+        ) VALUES ('fact','key','measurement.correction','corsia','agent_recorded',
+                  '2026-09-20T00:00:00+00:00','now','message:new',?)""",
+        (json.dumps({"label": "correction"}),),
+    )
+    rows = _correction_inventory([
+        {"id": "current", "version": "v", "state": "watch", "review_after": "2026-09-01",
+         "originating_subjects": ["message:new"]},
+        {"id": "stale", "version": "v", "state": "watch", "review_after": "2026-09-01",
+         "originating_subjects": ["message:old"]},
+    ], "2026-10-02T12:00:00Z", {"message:new": {"id": "fact", "ts": "2026-09-20T00:00:00+00:00"}})
+
+    assert rows[0]["correction_status"] == "linked"
+    assert rows[0]["recurrence_count"] == 1
+    assert [row["id"] for row in rows] == ["current"]

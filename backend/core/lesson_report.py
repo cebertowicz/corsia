@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 from collections import Counter
 from dataclasses import dataclass
+from datetime import timedelta
 import hashlib
 import json
 from threading import Event
@@ -18,7 +19,11 @@ from core.lesson_report_inventory import build_inventory
 from core.lesson_report_offers import PAGE_SIZE, DeferredOffers, DetailRequest, snapshot_fingerprint
 from core.lesson_report_reads import read_bodies
 from core.lesson_report_receipts import offer_counts, read_offer_evidence
+from core.lesson_trials import parse_instant
 from plans import public as plans
+
+# A stale watch is omitted from list reads, never retired or otherwise mutated.
+WATCH_HIDE_AFTER = timedelta(days=30)
 
 
 @dataclass(frozen=True)
@@ -87,7 +92,7 @@ def _cursor(fingerprint: str, query: dict[str, Any], offset: int) -> str:
 
 def _summary(row: dict[str, Any], offers: DeferredOffers, body_reads: int) -> dict[str, Any]:
     """One row summary from its period offers and in-period body-read count."""
-    return {key: row[key] for key in (
+    summary = {key: row[key] for key in (
         "kind", "id", "version", "name", "activated", "state", "source_status", "owner_ids",
         "due", "review_after", "open_reviews", "lifecycle_reason",
         "review_due", "due_work", "review_due_unknown",
@@ -98,6 +103,9 @@ def _summary(row: dict[str, Any], offers: DeferredOffers, body_reads: int) -> di
           "next_call": (
         f"lesson_report(lesson_id={json.dumps(row['id'])}, version={json.dumps(row['version'])})"
     )}
+    if "correction_status" in row:
+        summary.update({key: row[key] for key in ("correction_status", "recurrence_count")})
+    return summary
 
 
 def _page_summaries(page: list[dict[str, Any]], period: dict[str, Any],
@@ -105,6 +113,55 @@ def _page_summaries(page: list[dict[str, Any]], period: dict[str, Any],
     """Summaries for one page only, grouping reads by exact identity once."""
     reads_by_identity = Counter((read["id"], read["version"]) for read in reads) if page else Counter()
     return [_summary(row, period["offers"], reads_by_identity[(row["id"], row["version"])]) for row in page]
+
+
+def _correction_inventory(
+    inventory: list[dict[str, Any]], now: str, facts: dict[str, dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Attach collected correction facts and omit stale, un-recurred watches."""
+    instant = parse_instant(now)
+    cutoff = instant - WATCH_HIDE_AFTER if instant else None
+    visible = []
+    for row in inventory:
+        if "originating_subjects" not in row:
+            visible.append(row)
+            continue
+        linked = [
+            {"subject": subject, **facts[subject]}
+            for subject in row.get("originating_subjects", ()) if subject in facts
+        ]
+        row["correction_status"] = "linked" if linked else "no correction"
+        row["correction_facts"] = linked
+        row["recurrence_count"] = len(linked)
+        due = parse_instant(row.get("review_after"))
+        has_recent_anchor = any(
+            cutoff is not None and (parse_instant(fact["ts"]) or cutoff) > cutoff for fact in linked
+        )
+        if row.get("state") == "watch" and cutoff and due and due <= cutoff and not has_recent_anchor:
+            continue
+        visible.append(row)
+    return visible
+
+
+def _correction_facts_for_scope(db, thread_ids: tuple[str, ...]) -> dict[str, dict[str, str]]:
+    """Snapshot correction facts for the already-authorized owner scope."""
+    if not thread_ids:
+        return {}
+    marks = ", ".join("?" for _ in thread_ids)
+    rows = db.execute(
+        f"""SELECT id, subject_key, ts, attributes FROM outcome_events
+            WHERE event_name='measurement.correction' AND retracted_at IS NULL
+              AND agent_thread_id IN ({marks})""", thread_ids,
+    ).fetchall()
+    found = {}
+    for row in rows:
+        try:
+            attributes = json.loads(row["attributes"])
+        except (TypeError, ValueError):
+            continue
+        if attributes.get("label") == "correction" and row["subject_key"]:
+            found[str(row["subject_key"])] = {"id": str(row["id"]), "ts": str(row["ts"])}
+    return found
 
 
 def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
@@ -127,8 +184,11 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
     retained = offers["retained"] + boundaries
     bodies = read_bodies(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
                          facts=sources + retained)
+    from core.lesson_corrections import placement_check_counts
     return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
-            "retained": retained, "period": period, "bodies": bodies}
+            "retained": retained, "period": period, "bodies": bodies,
+            "correction_facts": _correction_facts_for_scope(db, scope.thread_ids),
+            "placement_checks": placement_check_counts(db, scope.thread_ids)}
 
 
 def detail_request(lesson_id: str | None, version: str | None, cursor: str | None,
@@ -167,7 +227,9 @@ def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[st
             page.extend(fetch(start, end))
         position += length
     result["detail"] = _summary(row, offers, len(bodies)) | {
-        "current_source": row["current_source"], "references": page,
+        "current_source": row["current_source"],
+        **({"correction_facts": row["correction_facts"]} if "correction_facts" in row else {}),
+        "references": page,
         "reference_count": total, "source_bytes": None,
         "carrying_cost": {"descriptor_tokens": None, "body_tokens": None,
                           "reason": "period calls do not bind descriptor/body estimates to an exact installed version"},
@@ -229,13 +291,24 @@ def read_report(
         db, scope=scope, sources=sources, detail=detail_request(lesson_id, version, cursor, evidence))
     history, missing_owners = data["history"], data["missing_owners"]
     boundaries, retained, period = data["boundaries"], data["retained"], data["period"]
+    correction_facts = data.get("correction_facts", _correction_facts_for_scope(db, scope.thread_ids) if db is not None else {})
+    placement_checks = data.get("placement_checks")
+    if placement_checks is None:
+        from core.lesson_corrections import placement_check_counts
+        placement_checks = placement_check_counts(db, scope.thread_ids) if db is not None else {
+            "owner": "Self-Improvement Infrastructure", "retirement_condition": None,
+            "fires": None, "overrides": None,
+        }
     bodies = data["bodies"]
     bodies = bodies | {"reads": identify_recorded_reads(bodies["reads"], blob_reader, sources)}
     reads = [read for read in bodies["reads"] if scope.from_ts <= read["created_at"] < scope.to_ts]
     unidentified = [read for read in reads if read["version"] is None]
     inventory = build_inventory(history=history, sources=sources,
                                 retained=retained + bodies["reads"], now=now)
+    inventory = _correction_inventory(inventory, now, correction_facts)
     coverage = _coverage(inventory, period, reads, unidentified, missing_owners, bodies)
+    if placement_checks["fires"] or any("originating_subjects" in row for row in inventory):
+        coverage["placement_checks"] = placement_checks
     coverage.update(source_coverage or {})
     snapshot = {"rows": inventory, "period": period, "reads": reads, "coverage": coverage}
     fingerprint = snapshot_fingerprint(snapshot, _canonical)
