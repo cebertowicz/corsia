@@ -242,13 +242,11 @@ describe('Header glass layers', () => {
 	};
 	const phone = headerSource.slice(headerSource.indexOf('@media (max-width: 768px)'));
 
-	it('keeps the phone header blur off the layer that carries the fade mask', () => {
-		// A mask fades whatever its layer draws, blur included: on the masked layer
-		// WebKit shows the transcript through the title row.
-		expect(rule(phone, '.shell-header::before')).toMatch(/-webkit-backdrop-filter: none;/);
-		const blur = rule(phone, '.shell-header::after');
-		expect(blur).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
-		expect(blur).toMatch(/z-index: -2;/);
-		expect(blur).not.toMatch(/mask/);
+	it('keeps the phone header blur on the masked layer so it fades out at the bottom', () => {
+		// An unmasked blur layer ends in a hard line across the transcript.
+		expect(rule(phone, '.shell-header::before')).not.toMatch(/backdrop-filter: none;/);
+		const base = rule(headerSource, '.shell-header::before');
+		expect(base).toMatch(/-webkit-backdrop-filter: var\(--glass-blur\);/);
+		expect(base).toMatch(/mask-image: linear-gradient/);
 	});
 });

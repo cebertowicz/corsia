@@ -274,6 +274,9 @@
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
+		/* The blur stays on this masked layer so it fades out with no hard edge.
+		   Known trade-off: the mask also thins the blur, so the transcript can
+		   show faintly through the title row. */
 		.shell-header::before {
 			background-image: linear-gradient(
 				180deg,
@@ -282,15 +285,6 @@
 				color-mix(in srgb, var(--header-top-base) 15%, transparent) 80%,
 				transparent 100%
 			);
-			/* The fade mask also fades the blur, so WebKit lets the transcript show
-			   through the title row; the blur lives unmasked on ::after instead. */
-			backdrop-filter: none;
-			-webkit-backdrop-filter: none;
-		}
-		.shell-header::after {
-			content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none;
-			backdrop-filter: var(--glass-blur);
-			-webkit-backdrop-filter: var(--glass-blur);
 		}
 		.h-left { justify-self: start; }
 		.h-right { justify-self: end; margin-left: 0; }
