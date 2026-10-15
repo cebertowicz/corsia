@@ -239,6 +239,14 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
         agent.tools.register(tool_type())
     agent.tools.register(ModelSourcesTool())
     agent.tools.register(GitHubAgentAccountTool())
+    _register_google_tools(agent)
+
+
+def _register_google_tools(agent: CORSIAAgent) -> None:
+    from tools.google_account import GoogleConnectTool, GoogleStatusTool
+
+    agent.tools.register(GoogleConnectTool())
+    agent.tools.register(GoogleStatusTool())
 
 
 def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:
