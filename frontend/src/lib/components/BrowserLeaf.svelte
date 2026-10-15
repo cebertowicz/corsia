@@ -385,8 +385,7 @@
 	.password-notice { position: absolute; z-index: 1; bottom: 16px; left: 50%; display: inline-flex; gap: 8px; width: max-content; height: 44px; align-items: center; padding: 0 16px; border: 1px solid color-mix(in srgb, var(--border) 72%, transparent); border-radius: var(--radius-pill); background: var(--glass-regular-thick); box-shadow: var(--glass-elevation-1), var(--glass-rim); backdrop-filter: var(--glass-blur); transform: translateX(-50%); }
 	.password-notice.top { top: 10px; bottom: auto; }
 	.password-notice svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
-	canvas { transition: opacity 160ms ease; }
+	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; transition: opacity 160ms ease; }
 	.browser-page.ended canvas { opacity: 0.4; }
-	canvas { flex: 1; min-height: 0; width: 100%; outline: none; touch-action: none; }
 	@media (prefers-reduced-motion: reduce) { canvas, .browser-page::after, .agent-field-marker, .agent-field-marker.shown { transition: none; } }
 </style>
