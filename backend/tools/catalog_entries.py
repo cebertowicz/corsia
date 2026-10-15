@@ -240,6 +240,16 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Connect and check the agents' own GitHub account",
         activity="Checking the agents' GitHub account",
     ),
+    "email_search": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Search the person's Gmail: headers only, no body text",
+        activity="Searching mail",
+    ),
+    "email_read": _Entry(
+        "google", status="active", authority="conductor-api",
+        summary="Read one email after the local screen; a flagged message returns no body",
+        activity="Reading mail",
+    ),
     "google_connect": _Entry(
         "google", status="active", authority="conductor-api",
         summary="Start the person's Google sign-in and get the link they open",

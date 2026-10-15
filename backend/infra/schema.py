@@ -2,6 +2,7 @@
 from __future__ import annotations
 from infra.accounts_schema import ACCOUNTS_SCHEMA_SQL
 from infra.action_drafts_schema import ACTION_DRAFTS_SCHEMA_SQL
+from infra.email_screens_schema import EMAIL_SCREENS_SCHEMA_SQL
 from infra.artifact_identity_schema import ARTIFACT_IDENTITY_SCHEMA_SQL
 from infra.bulletin_schema import BULLETIN_SCHEMA_SQL
 from infra.connection_schema import CONNECTION_SCHEMA_SQL
@@ -29,7 +30,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 116
+SCHEMA_VERSION = 117
 SCHEMA_SQL = f"""
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -113,7 +114,7 @@ SCHEMA_SQL = f"""
     {STAGING_SCHEMA_SQL}
     {CONTINUITY_SCHEMA_SQL}
     {PRESENCE_SCHEMA_SQL}
-    {THREAD_UPDATES_SCHEMA_SQL}{ACTION_DRAFTS_SCHEMA_SQL}
+    {THREAD_UPDATES_SCHEMA_SQL}{ACTION_DRAFTS_SCHEMA_SQL}{EMAIL_SCREENS_SCHEMA_SQL}
     {OUTCOME_EVENTS_SCHEMA_SQL}
     {PROVIDER_AVAILABILITY_TABLE_SQL};
     CREATE TABLE IF NOT EXISTS model_profiles (
