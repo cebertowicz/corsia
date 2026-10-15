@@ -28,4 +28,11 @@ describe('retryLocalSetup', () => {
 
 		expect(await retryLocalSetup('setup')).toEqual({ ok: false, code: 'consent_required' });
 	});
+
+	it('passes explicit consent when the picker action is affirmed', async () => {
+		vi.mocked(setupLocalSource).mockResolvedValue({ ok: true });
+
+		expect(await retryLocalSetup('setup', true)).toEqual({ ok: true });
+		expect(setupLocalSource).toHaveBeenCalledWith('token', true);
+	});
 });

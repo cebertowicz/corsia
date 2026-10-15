@@ -144,13 +144,8 @@ def test_post_setup_returns_complete_code(client, path):
     assert response.json() == {"code": "setup_complete"}
 
 
-def test_status_uses_the_marker_only_consent_prompt_predicate(client, monkeypatch):
-    monkeypatch.setattr(setup_api, "existing_omlx_needs_consent_prompt", lambda: True)
-    monkeypatch.setattr(
-        setup_api,
-        "existing_omlx_requires_consent",
-        lambda: pytest.fail("pre-auth status must not execute the POST consent gate"),
-    )
+def test_status_uses_the_same_existing_omlx_consent_predicate_as_setup(client, monkeypatch):
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
 
     response = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
 
@@ -192,26 +187,34 @@ def test_local_download_requires_consent_before_starting_an_existing_omlx(client
     assert response.json() == {"code": "consent_required"}
 
 
-def test_local_download_starts_existing_omlx_only_after_consent(client, monkeypatch):
-    from llm import local_setup
+def test_broken_leftover_requires_consent_then_starts_setup_after_consent(client, monkeypatch, tmp_path):
+    from llm import local_setup, local_setup_ownership
 
-    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", lambda: True)
-    persisted = []
-    monkeypatch.setattr(setup_api, "record_existing_omlx_consent", lambda: persisted.append(True))
+    leftover = tmp_path / "omlx"
+    leftover.write_text("#!/nonexistent\n", encoding="utf-8")
+    consented = tmp_path / "consented"
+    monkeypatch.setattr(local_setup_ownership.shutil, "which", lambda name: str(leftover) if name == "omlx" else None)
+    monkeypatch.setattr(local_setup_ownership, "marker_path", lambda: tmp_path / "owned")
+    monkeypatch.setattr(local_setup_ownership, "consent_marker_path", lambda: consented)
+    monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: pytest.fail("consent check must not execute oMLX"))
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", local_setup_ownership.existing_omlx_requires_consent)
     calls = 0
 
     async def begin_local_setup():
         nonlocal calls
         calls += 1
-        return {"ok": True, "in_progress": True, "stage": "Checking your oMLX"}
+        return {"ok": True, "in_progress": True, "stage": "Repairing oMLX"}
 
     monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
-    response = _post(client, "/api/setup/local-download", {"consent_existing": True})
+    refused = _post(client, "/api/setup/local-download")
+    accepted = _post(client, "/api/setup/local-download", {"consent_existing": True})
 
-    assert response.status_code == 200
-    assert response.json()["stage"] == "Checking your oMLX"
+    assert refused.status_code == 409
+    assert refused.json() == {"code": "consent_required"}
+    assert accepted.status_code == 200
+    assert accepted.json()["stage"] == "Repairing oMLX"
+    assert consented.exists()
     assert calls == 1
-    assert persisted == [True]
 
 
 def test_omlx_presence_check_runs_no_command(monkeypatch):

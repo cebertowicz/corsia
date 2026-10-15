@@ -88,32 +88,18 @@ def omlx_present() -> bool:
     return shutil.which("omlx") is not None
 
 
-def existing_omlx_needs_consent_prompt() -> bool:
-    """Whether pre-auth status should show the existing-oMLX consent choice.
+def existing_omlx_requires_consent() -> bool:
+    """Whether setup must ask before inspecting a pre-existing oMLX.
 
-    This is deliberately marker-only: status must not execute an oMLX binary
-    before consent. The POST gate performs the broken-leftover classification.
+    This deliberately checks only PATH and CORSIA's ownership/consent markers.
+    In particular, it must not execute oMLX before the person has consented;
+    a broken leftover follows the same consent journey and is repaired after
+    that consent by local setup.
     """
     return bool(
         shutil.which("omlx")
         and not marker_path().exists()
         and not consent_marker_path().exists()
-    )
-
-
-def existing_omlx_requires_consent() -> bool:
-    """Whether setup must ask before inspecting a usable pre-existing oMLX.
-
-    Setup-owned and previously consented installations are safe to resume. A
-    broken leftover is repaired as a new setup, so it never needs consent. This
-    performs no settings read or network request before consent.
-    """
-    omlx = shutil.which("omlx")
-    return bool(
-        omlx
-        and not marker_path().exists()
-        and not consent_marker_path().exists()
-        and not _is_broken_leftover(omlx)
     )
 
 

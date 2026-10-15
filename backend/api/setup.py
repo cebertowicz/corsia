@@ -25,7 +25,6 @@ from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
 from infra.time import utc_storage_iso_to_api
 from llm.local_setup_ownership import (
-    existing_omlx_needs_consent_prompt,
     existing_omlx_requires_consent,
     record_existing_omlx_consent,
 )
@@ -174,7 +173,7 @@ def _setup_status() -> dict:
         "model_name": DEFAULT_PROFILE.display_name,
         "model_size_gb": round(DEFAULT_PROFILE.download_size_bytes / 1000**3, 1),
         "required_username": _required_username(),
-        "existing_omlx": existing_omlx_needs_consent_prompt(),
+        "existing_omlx": existing_omlx_requires_consent(),
     }
 
 
