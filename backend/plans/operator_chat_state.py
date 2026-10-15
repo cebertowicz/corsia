@@ -127,8 +127,13 @@ def _plan_attention_items(presented: dict) -> list[dict]:
     work = node_states.work_ids(presented["nodes"])
     parents = node_states.parent_ids(presented["nodes"])
     for node in presented["nodes"]:
+        # A container's need is its leaves' rollup, already counted at each leaf.
+        container = node_states.is_container(
+            {"state": node["state"], "spawned_thread_id": (node["child"] or {}).get("thread_id")},
+            node["id"] in parents,
+        )
         if (
-            node["id"] not in work or node["id"] in parents or node["folded"]
+            node["id"] not in work or container or node["folded"]
             or not node["requires_user_action"]
         ):
             continue

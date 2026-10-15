@@ -397,20 +397,22 @@ def test_settling_or_archiving_an_ask_withdraws_its_attention(db, operation):
     assert attention.get_attention_state(ask, db=db) == "cleared"
 
 
-def test_accepting_an_ask_withdraws_its_attention(db):
+def test_accepting_a_task_with_an_open_ask_is_refused(db):
+    """The user's open review gates acceptance; the agent withdraws it first."""
     from plans import user_ask
     from registry import attention
 
     node, ask = _ask_held_node(db, state="review_requested", external_id="accepted.md")
-    mutate(
-        node.plan_id, "accept", {
-            "node_id": node.id, "evidence": "Reviewed", "verification_result": "passed",
-            "expected_revision": service._node_row(db, node.id)["revision"],
-        }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
-    )
+    with pytest.raises(service.PlanError, match="unresolved blocking"):
+        mutate(
+            node.plan_id, "accept", {
+                "node_id": node.id, "evidence": "Reviewed", "verification_result": "passed",
+                "expected_revision": service._node_row(db, node.id)["revision"],
+            }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+        )
 
-    assert user_ask.raised_asks(db, ask) == []
-    assert attention.get_attention_state(ask, db=db) == "cleared"
+    assert len(user_ask.raised_asks(db, ask)) == 1
+    assert attention.get_attention_state(ask, db=db) == "raised"
 
 
 def test_document_ask_refuses_a_second_node_and_reblocking_is_idempotent(db):

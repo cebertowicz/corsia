@@ -259,7 +259,6 @@ def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenan
     attention.raise_attention(artifact_id, db=db)
 
 
-
 def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None) -> int:
     """Release the tasks this ask held once its attention lifecycle ends.
 

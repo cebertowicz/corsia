@@ -158,17 +158,9 @@ def _require_dependencies_settled(connection, node) -> None:
 
 def _require_no_active_causes(connection, node) -> None:
     hold = connection.execute(
-        """SELECT h.kind FROM plan_node_holds h
-           WHERE h.node_id=? AND h.cleared_at IS NULL
-             AND NOT (
-                 h.kind='blocked' AND h.owner_kind='user' AND h.owner_id IS NOT NULL
-                 AND EXISTS (
-                     SELECT 1 FROM plan_node_artifact_links l
-                      WHERE l.node_id=h.node_id AND l.artifact_id=h.owner_id
-                        AND l.role='attention'
-                 )
-             )
-           ORDER BY CASE h.kind WHEN 'blocked' THEN 0 ELSE 1 END LIMIT 1""",
+        """SELECT kind FROM plan_node_holds
+           WHERE node_id=? AND cleared_at IS NULL
+           ORDER BY CASE kind WHEN 'blocked' THEN 0 ELSE 1 END LIMIT 1""",
         (node["id"],),
     ).fetchone()
     if hold is not None and hold["kind"] == "blocked":
