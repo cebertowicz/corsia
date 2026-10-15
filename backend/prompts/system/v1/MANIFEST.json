@@ -57,11 +57,11 @@
       "sha256": "658f0483112dd30bc4e183811fb22444732fa34b2ff42ac955a277175b9ae10c"
     },
     {
-      "bytes": 747,
+      "bytes": 856,
       "kind": "context",
       "path": "context/roles/corsia_agent/00-operating-model.md",
       "role": "corsia_agent",
-      "sha256": "4f7d0fcd09dc7cadcd99543aac9cf4d4daf06f91f41137149f8d3faab259262c"
+      "sha256": "33a8d6359786e2644ed7749f7aeac428ebe9e4eed8196de80ecccad8eba98f94"
     },
     {
       "bytes": 730,

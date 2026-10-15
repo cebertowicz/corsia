@@ -82,9 +82,9 @@ def test_ensure_scope_conductor_designates_project_thread(isolated_db):
         db.close()
 
 
-def test_backfill_scope_conductors_heals_missing_workspace_and_project(isolated_db):
+def test_backfill_coordination_scopes_heals_missing_workspace_and_project(isolated_db):
     from infra import accounts
-    from infra.conductor import WORKSPACE_SCOPE, backfill_scope_conductors, get_project_conductor
+    from infra.conductor import WORKSPACE_SCOPE, backfill_coordination_scopes, get_project_conductor
     from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db
 
@@ -96,7 +96,7 @@ def test_backfill_scope_conductors_heals_missing_workspace_and_project(isolated_
         _insert_project(db, "project-a", "Project A", "/workspace/projects/a")
         db.commit()
 
-        healed = backfill_scope_conductors(db=db)
+        healed = backfill_coordination_scopes(db=db)
 
         assert [scope for scope, _thread_id in healed] == [WORKSPACE_SCOPE, "project-a"]
         assert get_corsia_agent(db=db) is not None

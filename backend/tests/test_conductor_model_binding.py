@@ -68,7 +68,7 @@ def test_backfill_deliberately_binds_no_model(monkeypatch, isolated_db):
     monkeypatch.setattr(conductor, "ensure_project_conductor", _spy)
     monkeypatch.setattr(conductor, "ensure_corsia_agent", _agent_spy)
 
-    conductor.backfill_scope_conductors()
+    conductor.backfill_coordination_scopes()
 
     assert calls == [("workspace", None), ("p1", None)]
 

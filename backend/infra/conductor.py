@@ -191,7 +191,7 @@ def ensure_project_conductor(
             _db.close()
 
 
-def backfill_scope_conductors(db=None) -> list[tuple[str, str]]:
+def backfill_coordination_scopes(db=None) -> list[tuple[str, str]]:
     """Heal scopes that predate creation-time designations, once per install.
 
     The CORSIA agent is owned by the install's first account. Each healed
@@ -210,7 +210,7 @@ def backfill_scope_conductors(db=None) -> list[tuple[str, str]]:
     _db = db or get_db()
     try:
         healed: list[tuple[str, str]] = []
-        with write_transaction(_db, scope="conductor_backfill") as conn:
+        with write_transaction(_db, scope="coordination_backfill") as conn:
             first_user = conn.execute(
                 "SELECT id FROM users ORDER BY created_at, id LIMIT 1"
             ).fetchone()
