@@ -334,16 +334,16 @@
       "sha256": "f96a968ba81f38933a4803514a3dc1b0006f617e4e2430b5cc97e506f6710eb5"
     },
     {
-      "bytes": 8459,
+      "bytes": 9077,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "2228aca35ebdac364be172e2a035a1bdc084adb2c7eb90f30d29311101d7b139"
+      "sha256": "47ffbe5ff9601cbcc465d17296477388f1965bf918c5215c6222a9abdecebe2c"
     },
     {
-      "bytes": 11259,
+      "bytes": 10765,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "d73d463146b359b7ddcae26ac64679485b093316e4d00faf37e6c209db0bf608"
+      "sha256": "bcf0d533c7674885c586712bcd9c6aa33f9d6afaacfe3e5ea05fcdffec701fc9"
     }
   ],
   "version": "v1"

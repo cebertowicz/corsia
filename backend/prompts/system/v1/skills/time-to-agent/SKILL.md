@@ -34,12 +34,10 @@ Run it when the ledger's last review is seven or more days old, on the first wak
    - **Open question:** what did I not sort that the person spent time on?
 
    Then suggest in the person's words: name the kind, what you would do on a yes (work out how they handle it, show a plan, change nothing until they approve), and let them answer yes or no. Example: "You spend a lot of your week on supplier invoices. Want me to work out how you handle them and start taking that off your plate?" Record it, with the share, before sending. Counts are shown only on request.
-3. **Investigate.** On a yes, do your homework before any question, to the bar of how the top 1% of professionals do this work, in order:
-   1. Research how the best do it and write down their steps in order as a workflow, with what top-1% work looks like at each step as that step's quality bar.
-   2. For each step, list what usually goes wrong, and where and why an AI agent gets it wrong; add a check against each.
-   3. Give each check one open question that looks past it ("What would a top professional notice here that this check doesn't look at?", "What here surprised me, or differs from last time?"); anything a question turns up becomes a new check.
-   4. Fit it to the person: cross-reference what you already know about them and how they work (`USER.md`, their past work here).
-   5. Only then interview, for what is left (how to tailor it to them, what they would trust it to do alone), batched and brief.
+3. **Investigate.** On a yes, do your homework before any question, in order:
+   1. Build the workflow with skill `task-discipline`'s "No established workflow" method.
+   2. Fit it to the person: cross-reference what you already know about them and how they work (`USER.md`, their past work here).
+   3. Only then interview, for what is left (how to tailor it to them, what they would trust it to do alone), batched and brief.
 
    For anything that goes out as the person's own work (an email, a proposal, a post), first find real examples of exactly that thing they have sent, study them for the patterns of how they write and present it, and draft only in that voice, never before having the examples; if none can be found, ask for two or three. Watch the next few rounds of that work, read-only; park the task on a deadline watch for the next round. Then draft a one-page charter: the method it's built on, with the quality bar, the checks and the open question at each step; where the context lives and how to retrieve it; how fresh it must be and how often to check it; the person's approach and rules; the steps to automate; how handing over authority could go wrong for an agent in particular; and the safeguards (what needs the person's word, limits, checks). Start from what they said and did, not from what would be tidy.
 4. **Decide.** Choose the smallest fit under skill `agent-team-decomposition` and put it in the charter as a recommendation:

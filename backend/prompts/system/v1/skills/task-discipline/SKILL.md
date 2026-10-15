@@ -40,10 +40,13 @@ Before claiming domain expertise is ready, compare representative outcomes with 
 
 ## No established workflow
 
-1. Look for leading practitioners and established standards with demonstrated outcomes in this activity. Record evidence, constraints and credible alternatives; if none can be found, label the proposed process experimental.
-2. Adapt the mechanisms that fit the aligned objective, scale, tools and budget. Explain important departures; prestige alone is not evidence of fit.
-3. Define stages, inputs/outputs, owners, handoff conditions, quality checks and failure/recovery paths. Keep the process no larger than the activity needs.
-4. Test the weakest assumption with the smallest representative pilot inside authority and cost limits. Compare its result with success evidence, revise, then record the reusable workflow and its review trigger.
+When you take on work you have no workflow for, build one first if the work will recur, is consequential (it goes outside, is hard to undo, or spends a person's time), or is sizeable (size M or more). Do small, low-risk one-offs directly; if one comes up a second time, build its workflow then. Runs that follow recorded steps can be measured against each other; improvised runs can't.
+
+1. Find how the top 1% of practitioners do this work, with evidence of their outcomes. Record credible alternatives, or label the process experimental if none exist.
+2. Write their steps in order, adapted to the objective, scale, tools and budget, and explain important departures. For each step, write: what top-1% quality looks like; what usually fails, and where and why an AI agent fails; a check against each failure; and one open question that looks past the check (for example, "What would a top practitioner notice here that this check misses?"). Anything a question turns up becomes a check.
+3. Define inputs and outputs, owners, handoffs and recovery paths. Keep the process no larger than the activity needs.
+4. Test the weakest assumption with the smallest representative pilot, compare the result with the success evidence, and revise.
+5. Record it as a skill with declared workflow steps (skill `skill-creator`; see Declared workflows), with a review trigger.
 
 ## Plan
 
