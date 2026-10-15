@@ -170,16 +170,11 @@ def clear(
         provenance=provenance, detail={"ended": "withdrawn"} if withdrawn else None, db=db,
     )
     if expected_kind == "blocked" and hold is not None and hold["owner_id"] is not None:
-        if withdrawn:
-            from plans import ask_withdrawal
+        from plans import ask_withdrawal
 
-            ask_withdrawal.clear_withdrawn_attention(db, str(hold["owner_id"]))
-        else:
-            from registry import attention
-
-            attention.clear_attention(
-                str(hold["owner_id"]), outcome="acknowledge", db=db,
-            )
+        ask_withdrawal.clear_ended_ask_attention(
+            db, str(hold["owner_id"]), withdrawn=withdrawn,
+        )
     from plans import admission
 
     admission.reconcile_plan(

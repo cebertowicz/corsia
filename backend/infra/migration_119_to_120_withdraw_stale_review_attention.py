@@ -8,6 +8,8 @@ from plans.node_states import open_user_block_sql
 
 log = logging.getLogger(__name__)
 
+_TABLES = ("artifact_identities", "plan_node_artifact_links", "plan_node_holds")
+
 
 _STALE_REVIEW_ATTENTION_SQL = f"""
     SELECT i.id
@@ -36,6 +38,11 @@ def withdraw_stale_review_attention(conn: sqlite3.Connection) -> int:
     """Use attention's canonical writer for stale raised review asks, once each."""
     from registry import attention
 
+    present = {str(row[0]) for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    )}
+    if not present.issuperset(_TABLES):
+        return 0  # an older partial schema holds no review asks to repair
     artifact_ids = [row[0] for row in conn.execute(_STALE_REVIEW_ATTENTION_SQL)]
     for artifact_id in artifact_ids:
         attention.withdraw_attention(str(artifact_id), db=conn)

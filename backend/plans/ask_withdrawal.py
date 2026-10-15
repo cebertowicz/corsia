@@ -34,16 +34,22 @@ def withdraw_node_asks(
             provenance=provenance, detail={"ended": "withdrawn"}, db=db,
         )
     for artifact_id in dict.fromkeys(str(row["artifact_id"]) for row in rows):
-        clear_withdrawn_attention(db, artifact_id)
+        clear_ended_ask_attention(db, artifact_id)
     return len(rows)
 
 
-def clear_withdrawn_attention(db, artifact_id: str) -> None:
-    """Clear the artifact pile entry only after its last open ask is withdrawn."""
+def clear_ended_ask_attention(db, artifact_id: str, *, withdrawn: bool = True) -> None:
+    """Clear the artifact pile entry only after its last open ask ends.
+
+    An agent ending its own ask withdraws it; the user resolving it acknowledges it.
+    """
     from plans import user_ask
 
     if user_ask.raised_asks(db, artifact_id):
         return
     from registry import attention
 
-    attention.withdraw_attention(artifact_id, db=db)
+    if withdrawn:
+        attention.withdraw_attention(artifact_id, db=db)
+    else:
+        attention.clear_attention(artifact_id, outcome="acknowledge", db=db)

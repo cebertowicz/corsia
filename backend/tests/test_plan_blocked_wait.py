@@ -408,6 +408,41 @@ def test_user_resolving_a_document_ask_acknowledges_it_not_withdraws(db):
     assert "detail" not in json.loads(cleared["payload_json"])
 
 
+def test_user_resolving_one_legacy_duplicate_ask_keeps_the_other_open(db, monkeypatch):
+    from plans import user_ask
+    from registry import attention
+
+    first, ask = _ask_held_node(db, state="pending", external_id="legacy-duplicate.md")
+    second = service.add_node(
+        first.plan_id, kind="task", title="Review again", acceptance_criteria="Reviewed", db=db,
+    )
+    # Asks placed before one-open-ask-per-document can still share a document.
+    real_raised = user_ask.raised_asks
+    monkeypatch.setattr(user_ask, "raised_asks", lambda _db, _ask: [])
+    mutate(
+        first.plan_id, "block_node", {
+            "node_id": second.id, "reason_key": "review", "reason": "Review it",
+            "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
+            "expected_revision": service._node_row(db, second.id)["revision"],
+        }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
+    )
+    monkeypatch.setattr(user_ask, "raised_asks", real_raised)
+    assert len(user_ask.raised_asks(db, ask)) == 2
+    hold = db.execute(
+        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (second.id,),
+    ).fetchone()
+
+    mutate(
+        first.plan_id, "resolve_blocker", {
+            "node_id": second.id, "hold_id": hold["id"],
+            "expected_revision": service._node_row(db, second.id)["revision"],
+        }, actor=USER, provenance="test.user_answer", mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    assert _open_holds(db, first.id) == 1
+    assert attention.get_attention_state(ask, db=db) == "raised"
+
+
 @pytest.mark.parametrize("operation", ("fail", "close_node", "archive_node"))
 def test_settling_or_archiving_an_ask_withdraws_its_attention(db, operation):
     from plans import user_ask
