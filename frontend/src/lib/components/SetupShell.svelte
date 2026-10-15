@@ -103,18 +103,24 @@
 					<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
 					<div class="body">{@render children?.()}</div>
-					<footer>
-						<div>{@render secondary?.()}</div>
-						{#if primary}
-							<div class="primary-action">
-								{#if primary.disabled && primary.note}<span class="footer-note">{primary.note}</span>{/if}
-								<Button variant="pill" disabled={primary.disabled} loading={primary.loading} onclick={onPrimary}>{primary.label}</Button>
-							</div>
-						{/if}
-					</footer>
 				</section>
 			{/key}
 		</div>
+		<footer>
+			<div>{@render secondary?.()}</div>
+			{#if primary}
+				<div class="primary-action">
+					{#if primary.disabled && primary.note}<span class="footer-note">{primary.note}</span>{/if}
+					<Button variant="pill" disabled={primary.disabled} loading={primary.loading} onclick={onPrimary}>
+						<span class="primary-label-stack">
+							{#key primary.label}
+								<span class="primary-label" in:fade={{ duration: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 0 }} out:fade={{ duration: Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dur-tight')) || 0 }}>{primary.label}</span>
+							{/key}
+						</span>
+					</Button>
+				</div>
+			{/if}
+		</footer>
 	</main>
 </div>
 
@@ -129,10 +135,14 @@
 	header { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); }
 	.mark { width: var(--space-5); height: var(--space-5); }
 	h1 { margin: 0; font-size: var(--text-title2); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
+	.pane-scene h1:focus { outline: none; }
 	.lede { max-width: calc(var(--space-8) * 9); margin: var(--space-3) 0 0; color: var(--text-secondary); line-height: var(--lh-normal); }
 	.body { flex: 1; min-height: 0; margin-top: var(--space-5); padding-bottom: var(--space-6); }
 	footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--space-7); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
+	.primary-label-stack { display: grid; grid-template-areas: 'label'; }
+	.primary-label { grid-area: label; }
+	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
 	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
 	.job-region { overflow: hidden; }
 	.job-region-inner { min-height: 0; overflow: hidden; }
