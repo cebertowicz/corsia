@@ -2,9 +2,10 @@
 
 An executor is idle when nothing holds its slot and none of its open tasks is
 ready: everything it owes is waiting, paused or blocked. Rather than list
-those in plan order, the block lists waits with an end first, soonest first,
-then waits with no end, then paused and blocked work, each in plan order. It
-tells the agent to start a waiting task that can move now, except in a paused
+those in plan order, the block lists work the agent set aside first, in plan
+order; then other waits with an end, soonest first; then waits with no end,
+then paused and blocked work, each in plan order. It tells the agent to start
+a waiting task that can move now, except in a paused
 plan or when a wait ends within ``IMMINENT_SECONDS``: that wait is about to
 report, and the agent should let it.
 
@@ -21,6 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+
+from plans import operator_scheduled
 
 #: Held conditions: the task is open but cannot move until its cause clears.
 HELD_CONDITIONS = frozenset({"paused", "blocked", "waiting"})
@@ -41,6 +44,7 @@ class IdleListing:
     projections: dict[str, dict]
     seconds: dict[str, float | None]
     total: int
+    set_aside: int
     pick_up: bool
 
 
@@ -62,6 +66,7 @@ def idle_listing(
         seconds[str(row["id"])] for row in tasks
         if projections[str(row["id"])]["condition"] == "waiting"
     ]
+    set_aside = sum(_set_aside(projections[str(row["id"])]) for row in tasks)
     order = sorted(
         range(len(tasks)),
         key=lambda index: _key(
@@ -74,6 +79,7 @@ def idle_listing(
         projections=projections,
         seconds=seconds,
         total=len(tasks),
+        set_aside=set_aside,
         pick_up=plan["state"] == "active" and bool(waits) and not imminent,
     )
 
@@ -87,16 +93,16 @@ def ready_first(tasks: list, projections: dict[str, dict]) -> list:
 
 
 def release_wait(projection: dict, row) -> dict:
-    """Return the optional row field that releases its primary self-scheduled wait."""
-    causes = projection["causes"]
-    if not causes or causes[0].get("scheduled_reason") is None:
+    """Return the optional row field that releases the task's self-scheduled wait."""
+    cause = next((cause for cause in projection["causes"] if operator_scheduled.is_set_aside(cause)), None)
+    if cause is None:
         return {}
     return {
         "release_wait": {
             "operation": "resolve_watch",
             "params": {
                 "node_id": str(row["id"]),
-                "watch_id": causes[0]["watch_id"],
+                "watch_id": cause["watch_id"],
                 "expected_revision": int(row["revision"]),
             },
         },
@@ -104,12 +110,19 @@ def release_wait(projection: dict, row) -> dict:
 
 
 def _key(projection: dict, seconds: float | None, index: int) -> tuple:
-    """Order idle rows: timed waits soonest first, untimed waits, then other held work."""
+    """Order self-set-aside work, timed waits, untimed waits, then other held work."""
+    if _set_aside(projection):
+        return (0, 0.0, index)
     if projection["condition"] != "waiting":
-        return (2, 0.0, index)
+        return (3, 0.0, index)
     if seconds is None:
-        return (1, 0.0, index)
-    return (0, seconds, index)
+        return (2, 0.0, index)
+    return (1, seconds, index)
+
+
+def _set_aside(projection: dict) -> bool:
+    """Whether any waiting cause records that this executor set the task aside."""
+    return any(operator_scheduled.is_set_aside(cause) for cause in projection["causes"])
 
 
 def _seconds_left(projection: dict, now: datetime) -> float | None:
