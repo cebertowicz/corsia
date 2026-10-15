@@ -26,10 +26,18 @@ NOT_PERSON = (
 )
 NO_DRAFT = "Not sent: there is no open draft with that id in this conversation."
 ALREADY_DONE = "Not sent: that draft was already sent or discarded."
-CHANGED_OUTSIDE = (
-    "Not sent: the draft was changed outside the draft tools. Save it with email_draft, "
-    "show the person, and wait for their reply."
-)
+DRAFT_TOOL_BY_KIND = {"email": "email_draft", "invite": "calendar_draft_invite"}
+
+
+def _changed_outside(kind: str) -> str:
+    return (
+        "Not sent: the draft was changed outside the draft tools. Save it with "
+        f"{DRAFT_TOOL_BY_KIND[kind]}, show the person, and wait for their reply."
+    )
+
+
+# Keep the public email constant byte-identical for existing callers and tests.
+CHANGED_OUTSIDE = _changed_outside("email")
 STALE_REVISION = (
     "Not sent: the draft has changed since you read it. Read it again, show the person, "
     "and wait for their reply."
@@ -202,7 +210,7 @@ async def check_action(kind: str, draft_id: str, revision: str) -> Approved | Re
     draft = stage.draft
     data = _read_bytes(draft["path"])
     if data is None or document_revision(data) != draft["recorded_revision"]:
-        return Refusal(CHANGED_OUTSIDE)
+        return Refusal(_changed_outside(kind))
     if revision != draft["recorded_revision"]:
         return Refusal(STALE_REVISION)
     person_at, recorded_at = _utc(stage.human_at or ""), _utc(draft["recorded_at"])
