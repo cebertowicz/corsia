@@ -27,7 +27,7 @@ from llm.isolated_structured import (
     IsolatedStructuredUnavailableError,
 )
 from tests.registry_helpers import make_session
-from tools.google_email import UNSCREENED, EmailReadTool, EmailSearchTool, flagged_text
+from tools.google_email_read import UNSCREENED, EmailReadTool, EmailSearchTool, flagged_text
 
 ACCOUNT = "person@example.com"
 BODY_CANARY = "canary-body-text-7731"
