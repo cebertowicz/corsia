@@ -26,6 +26,7 @@
 	const h = $derived($canvasHeader);
 	const isTakeover = $derived(h != null);
 	const scopeTitle = $derived($uiScope?.name ?? 'Workspace');
+	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
 	const isConductorThread = $derived(conductorThreadId != null && $activeThreadId === conductorThreadId);
 
 	// isConductor only when no thread is active at all (home/conductor landing).
@@ -140,7 +141,7 @@
 			</button>
 		{/if}
 		{#if activeView === 'chat' && !isTakeover && ($activeThread || isConductorThread)}
-			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? 'Conductor settings' : 'Thread settings'} aria-label={isConductorThread ? 'Conductor settings' : 'Thread settings'}>
+			<button class="h-icon" class:active={$threadSettingsOpen} onclick={openThreadSettings} title={isConductorThread ? `${designatedName} settings` : 'Thread settings'} aria-label={isConductorThread ? `${designatedName} settings` : 'Thread settings'}>
 				{@render gearIcon()}
 			</button>
 		{:else if activeView === 'activity' && $uiScope && !$projectSettingsOpen}

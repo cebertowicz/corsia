@@ -89,12 +89,12 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "agent_roster_update": _Entry(
         "delegation", status="active", authority="coordination-roster-write",
-        summary="Edit an agent roster entry in the current designated conductor scope",
+        summary="Edit an agent roster entry in the current coordination scope",
         activity="Updating roster",
     ),
     "corsia_api": _Entry(
         "coordination", status="active", authority="coordination-api",
-        summary="Call CORSIA API routes as a designated conductor, except the person-only list",
+        summary="Call CORSIA API routes as the CORSIA agent or a project conductor, except the person-only list",
         activity="Calling CORSIA API",
     ),
     "coordination_instruction_file_create": _Entry(
@@ -109,7 +109,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "coordination_instruction_file_replace": _Entry(
         "coordination", status="active", authority="coordination-instruction-write",
-        summary="Replace one attached instruction file in the designated conductor scope",
+        summary="Replace one attached instruction file in the current coordination scope",
         activity="Updating instruction file",
     ),
     "read_tool_result": _Entry(

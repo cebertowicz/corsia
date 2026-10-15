@@ -106,6 +106,15 @@ describe('Header', () => {
 		expect(opened).toBe(true);
 	});
 
+	it('labels the settings gear CORSIA settings for the workspace scope\'s designated thread', () => {
+		threads.set([]);
+		activeThreadId.set('agent-1');
+		uiScope.set(null);
+		render('chat', 'agent-1');
+		expect(host.querySelector('[aria-label="CORSIA settings"]')).not.toBeNull();
+		expect(host.querySelector('[aria-label="Conductor settings"]')).toBeNull();
+	});
+
 	const agentThread = {
 		id: 'thread-1', user_id: 'u', profile: 'personal', title: 'Bugs', model: null,
 		created_at: 'now', updated_at: 'now', project_id: 'prj-atlas',

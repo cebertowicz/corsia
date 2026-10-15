@@ -61,9 +61,9 @@ Create `shared/INDEX.md` listing the categories the project will use, each with 
 
 ## 5. Team
 
-Apply skill `agent-team-decomposition`: the conductor plus the fewest owners whose continuity saves more attention than it costs; finite work stays a thread. Give each agent a `RESPONSIBILITY.md` naming its outcome, authority, boundaries, inputs and cadence, measures, and sources, plus its own `shared/<domain>/` category. Create threads with `delegate_create_thread`, promote them with revisioned `agent_roster_update`, and create/attach their responsibility and thread skills with `coordination_instruction_file_create`; require its next-turn delivery receipt. Apply skill `conductor-api` for these tools and conductor API setup.
+Apply skill `agent-team-decomposition`: the conductor plus the fewest owners whose continuity saves more attention than it costs; finite work stays a thread. Give each agent a `RESPONSIBILITY.md` naming its outcome, authority, boundaries, inputs and cadence, measures, and sources, plus its own `shared/<domain>/` category. Create threads with `delegate_create_thread`, promote them with revisioned `agent_roster_update`, and create/attach their responsibility and thread skills with `coordination_instruction_file_create`; require its next-turn delivery receipt. Apply skill `coordination-api` for these tools and conductor API setup.
 
-Choose models only from what the catalog reports ready and record tier defaults within the workspace spawn policy. Every designated conductor can change authorized model profiles and setup through `corsia_api` (skill `conductor-api`). Host-access approvals, credentials, sign-in and the person's own decisions remain person-only: direct the person to their CORSIA surface.
+Choose models only from what the catalog reports ready and record tier defaults within the workspace spawn policy. The CORSIA agent and every project conductor can change authorized model profiles and setup through `corsia_api` (skill `coordination-api`). Host-access approvals, credentials, sign-in and the person's own decisions remain person-only: direct the person to their CORSIA surface.
 
 ## 6. Verify the first turn
 

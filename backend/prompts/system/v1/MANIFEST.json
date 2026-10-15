@@ -7,10 +7,10 @@
       "sha256": "38ff342f6bc8ea0db369b0ed061e7670a7e9d861f01f02b66e65c28a64b83081"
     },
     {
-      "bytes": 5976,
+      "bytes": 6058,
       "kind": "context",
       "path": "context/20-CONTEXT-WORK-STATE.md",
-      "sha256": "50b0c0fa5940932fb712b27fac93e5d94380d31b2e4848ab61c3139f76909376"
+      "sha256": "c060283fe1bcfc602f3988ca0fc6cb0b3d931c2f58bca3a1f3874a9ce5c9c0b9"
     },
     {
       "bytes": 3478,
@@ -43,11 +43,11 @@
       "sha256": "e1e3eb13deff650b55ae30558962fcf57eef9ad2d227241c00751c2b9c0d26a0"
     },
     {
-      "bytes": 3245,
+      "bytes": 3293,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "4594c28b73bf38650fc3e131db7df95adcb948de29ac291ef29e688184806a19"
+      "sha256": "c68db4057f658336adfb28baa35ce479478ad3df46ede999876370f045e0075c"
     },
     {
       "bytes": 1358,
@@ -130,10 +130,10 @@
       "sha256": "ba40df587f5fb1538f7e6c8901f86f8aa0a4a956d814886d3972dbc336bc75ac"
     },
     {
-      "bytes": 7555,
+      "bytes": 7558,
       "kind": "skill",
       "path": "skills/assistant-onboarding/SKILL.md",
-      "sha256": "bfea104dee8148bb8ac14cd45fe1cd63082e83db9445777ea29951ed197ef149"
+      "sha256": "b16b50506e46b75aa4d3650b8cb6e49983d40f1bcefbee776795514eb5334c4b"
     },
     {
       "bytes": 4519,
@@ -196,16 +196,10 @@
       "sha256": "46dbae3937f7f532d33a216c4db64f3b85aeeecd606e3575841cfede0cede84e"
     },
     {
-      "bytes": 6787,
-      "kind": "skill",
-      "path": "skills/conductor-api/SKILL.md",
-      "sha256": "80dee31f609a576c168ac0d6c68c82e9d5de6f278da00ad6bf61ecd040b6897e"
-    },
-    {
-      "bytes": 8400,
+      "bytes": 8424,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "0ff2a8eb6cd6b06b36c07e7a7f08900e5b93dd5c25cf2b8f41c0722ef583ce7f"
+      "sha256": "ee6d8bb63a240d43a671b839a49df6719db10067cc01ccac03d5b2d6beed533e"
     },
     {
       "bytes": 2766,
@@ -214,16 +208,16 @@
       "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
     },
     {
-      "bytes": 2707,
+      "bytes": 2710,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-agent.md",
-      "sha256": "af633cb3a16427eca25e3111641d67d9d2e8a6d03ca28a4493de4e787979dc01"
+      "sha256": "592240d36f01706c044460cde164df00e3339d3fffb64f8bfe4b2cec6126d2ba"
     },
     {
-      "bytes": 17328,
+      "bytes": 17331,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "86ffe84ba18ca606a7ce02a93816d3ab94a07c9ac42f55999f670b7cec0a4450"
+      "sha256": "3fd1b9d4913bd739ec04bf630ba11824212937b4c89d40f9818746da1857f7d0"
     },
     {
       "bytes": 1850,
@@ -266,6 +260,12 @@
       "kind": "skill",
       "path": "skills/context-stewardship/SKILL.md",
       "sha256": "cd4ebb24a0a98445ad5a85de24f9be6413cb1a413cc7663afb5f474820e949bc"
+    },
+    {
+      "bytes": 6783,
+      "kind": "skill",
+      "path": "skills/coordination-api/SKILL.md",
+      "sha256": "764b55e5663be4f84f0bdfaab35684fbde2abc5768b692d7c753377b9365fbb2"
     },
     {
       "bytes": 4113,

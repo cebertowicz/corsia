@@ -1,8 +1,8 @@
-"""Conductor-only reads of CORSIA's own captured backend log records.
+"""CORSIA-agent and conductor reads of CORSIA's own captured backend log records.
 
 The tool is registered on the shared registry, so it is listed for every
 thread; the current thread from ``ToolRegistry`` must be a designated
-conductor (workspace or any project) or the call is refused. The response is
+CORSIA agent or a project conductor, or the call is refused. The response is
 bounded to ``MAX_RESPONSE_BYTES`` of UTF-8 JSON and says when it was cut.
 """
 
@@ -113,7 +113,7 @@ def _require_conductor(thread_id: str) -> None:
         raise LogReadError(
             "not_conductor: log_read is only for the CORSIA agent or a "
             "designated project conductor. This is final: do not retry or "
-            "request a host lease; ask your conductor to read the logs"
+            "request a host lease; ask the CORSIA agent or your project's conductor to read the logs"
         )
 
 
@@ -129,7 +129,7 @@ class LogReadTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Conductors only. Read CORSIA's own backend log records (the "
+            "CORSIA agent and project conductors only. Read CORSIA's own backend log records (the "
             "platform server's warnings, errors and info lines) without a host "
             "lease; other threads get a not_conductor error. Records come "
             "newest first as time (UTC), level, logger, message, exception and "

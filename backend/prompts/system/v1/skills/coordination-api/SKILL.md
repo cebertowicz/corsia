@@ -1,14 +1,14 @@
 ---
-name: conductor-api
-description: Use when a designated conductor (workspace or project) needs to inspect or change CORSIA through corsia_api, create or promote an agent, or install its responsibility file, thread skill or supporting scripts. Covers route boundaries, retry safety and next-turn delivery. Not for human authentication or host-access authority.
+name: coordination-api
+description: Use when the CORSIA agent or a project conductor needs to inspect or change CORSIA through corsia_api, create or promote an agent, or install its responsibility file, thread skill or supporting scripts. Covers route boundaries, retry safety and next-turn delivery. Not for human authentication or host-access authority.
 corsia:
   handler:
     kind: instruction
 ---
 
-# Conductor API and agent setup
+# Coordination API and agent setup
 
-Load `corsia_api` from the `coordination` pack. It calls the real API handlers in-process with your server-bound identity; no credential is needed. Every designated conductor, workspace or project, has full API access except the person-only list below. Other agents do not have the API tool. A project conductor's reach is not limited to its project: the API acts for the whole user, every project and the workspace's settings included. As a project conductor, change only your own project unless the person asked for more.
+Load `corsia_api` from the `coordination` pack. It calls the real API handlers in-process with your server-bound identity; no credential is needed. The CORSIA agent and every project conductor have full API access except the person-only list below. Other agents do not have the API tool. A project conductor's reach is not limited to its project: the API acts for the whole user, every project and the workspace's settings included. As a project conductor, change only your own project unless the person asked for more.
 
 Use it for authorized setup, operations and inspection: projects, agents, model profiles, providers and models, network servers, accounts and bindings, MCP servers, key checks, documents and costs. Before a write, read the target and know its route schema. API access never grants authority to choose a new effect for the user. Prefer a purpose-built native tool when one already owns the operation.
 

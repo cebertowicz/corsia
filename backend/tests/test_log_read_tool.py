@@ -137,5 +137,5 @@ def test_log_read_is_catalogued_in_the_host_pack():
     assert "other threads receive a final not_conductor refusal" in entry.summary
     assert is_reachable("log_read")
     description = LogReadTool().description
-    assert description.startswith("Conductors only.")
+    assert description.startswith("CORSIA agent and project conductors only.")
     assert "not_conductor" in description and "backend.log" in description

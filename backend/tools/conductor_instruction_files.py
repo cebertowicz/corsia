@@ -108,7 +108,7 @@ class ConductorInstructionFileReadTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "For the designated conductor only: omit path to list a target thread's "
+            "For the CORSIA agent or a project conductor only: omit path to list a target thread's "
             "attached instruction files and revisions, or provide one returned path to "
             "read its content. Use its revision with coordination_instruction_file_replace."
         )
@@ -178,7 +178,7 @@ class ConductorInstructionFileReplaceTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "For the designated conductor only: replace one existing attached instruction "
+            "For the CORSIA agent or a project conductor only: replace one existing attached instruction "
             "file after reading it with coordination_instruction_file_read. Copy the returned "
             "path and SHA-256 revision exactly. This cannot create, attach, move, delete, "
             "or change an instruction file's mission or authority."

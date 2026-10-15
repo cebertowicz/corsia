@@ -176,7 +176,7 @@ class ConductorInstructionFileCreateTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Load skill conductor-api for setup. For the designated same-scope conductor: create and attach a target thread's "
+            "Load skill coordination-api for setup. For the CORSIA agent or a project conductor in the same scope: create and attach a target thread's "
             "RESPONSIBILITY.md, or install its thread skill and optional scripts/references. "
             "Use expected_revision='absent' for creation; copy the returned bundle revision "
             "for later edits. Same desired state retries are idempotent. Returns verified next-turn "
@@ -205,7 +205,7 @@ class ConductorInstructionFileCreateTool(Tool):
                       **kwargs: Any) -> str:
         actor = kwargs.get("_thread_id")
         if not isinstance(actor, str) or not actor:
-            return "Error: current thread identity is unavailable; retry from a live conductor turn."
+            return "Error: current thread identity is unavailable; retry from a live CORSIA agent or conductor turn."
         if not re.fullmatch(r"absent|[0-9a-f]{64}", expected_revision) or not content.strip():
             return "Error: use expected_revision='absent' or the returned bundle revision, and nonempty content."
         try:

@@ -20,7 +20,7 @@ Requests and collected responses are limited to 32 KiB, and each request has a 3
 
 | Step | Surface and acceptance |
 | --- | --- |
-| Discover | System skills index includes `conductor-api`; tool descriptions direct setup to it. |
+| Discover | System skills index includes `coordination-api`; tool descriptions direct setup to it. |
 | Inspect | The CORSIA agent reads its roster through native dispatch and the real API handler. |
 | Create | Existing delegation creates a visible thread using a catalog-valid model. |
 | Promote | Revisioned roster update enables the agent and supplies its approved responsibility. |

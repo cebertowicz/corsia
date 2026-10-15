@@ -29,8 +29,8 @@ async def test_fresh_workspace_conductor_discovers_creates_and_reads_agent(deleg
     skills = skill_context_sources(thread_id="sender-self", project_id=None,
                                     workspace=workspace, db=deleg_db)
     index = next(row for row in skills if row.source_id == "dynamic:skills-index")
-    assert "conductor-api" in index.prompt_content
-    assert "conductor-api" in registry.get("corsia_api").description
+    assert "coordination-api" in index.prompt_content
+    assert "coordination-api" in registry.get("corsia_api").description
     assert registry.get("coordination_instruction_file_create") is not None
 
     binding = state._current_thread_id.set("sender-self")
