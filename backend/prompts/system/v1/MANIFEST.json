@@ -130,10 +130,10 @@
       "sha256": "ba40df587f5fb1538f7e6c8901f86f8aa0a4a956d814886d3972dbc336bc75ac"
     },
     {
-      "bytes": 3310,
+      "bytes": 3404,
       "kind": "skill",
       "path": "skills/assistant-onboarding/SKILL.md",
-      "sha256": "95eb6775c34e32bee22e62623d554603f3aa4276ec39558f7b6d6e1fe13b3049"
+      "sha256": "24f3cb32f5ca23cb069035bb650c6c3f4bfd7eb283d752525a010f08f6b327da"
     },
     {
       "bytes": 4519,

@@ -10,7 +10,7 @@ corsia:
 
 The first-run Assistant option is retired: CORSIA handles email and calendar itself through its `google` tool pack. Never create an Assistant agent, attach Assistant skills, or set up `gws` for anyone. When the person wants email or calendar connected and has no Assistant, load pack `google` with `tools_load`, call `google_connect` and post its link.
 
-An Assistant made before that keeps working unchanged until the person asks CORSIA to take over. Do not edit its skills, its schedule or its Google home, and leave its files below where they are.
+An Assistant made before that keeps working unchanged until the person asks CORSIA to take over. Its skills, schedule and Google home are its own to change: never change them yourself (if it asks you, tell it to make the change in its own thread), and leave its files below where they are.
 
 ## Take over from the Assistant
 
