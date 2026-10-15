@@ -33,6 +33,7 @@ from api.version import router as version_router
 from api.webhooks import router as webhooks_router
 from api.cc_attach import router as cc_attach_router
 from api.conductor import router as conductor_router
+from api.corsia_agent import router as corsia_agent_router
 from api.context_bootloader import router as context_bootloader_router
 from api.delegation import router as delegation_router
 from api.delegation_docs import router as delegation_docs_router
@@ -77,6 +78,7 @@ __all__ = [
     "webhooks_router",
     "cc_attach_router",
     "conductor_router",
+    "corsia_agent_router",
     "delegation_router",
     "delegation_docs_router",
     "delegation_model_router",

@@ -19,11 +19,11 @@ from connections import account_controls, harness_models, harness_usage
 from connections.account_discovery_types import AccountRefreshResult
 from connections.account_evidence import mark_discovery
 from connections.account_policy import chosen_account_id, select_account, turn_account
-from connections.conductor_account import (
+from connections.corsia_agent_account import (
     FirstRunBind,
-    NotWorkspaceConductor,
+    NotCorsiaAgent,
     RefreshObservation,
-    bind_conductor_account,
+    bind_corsia_agent_account,
     source_accounts,
 )
 from connections.provider_policy import effective_policy, set_policy
@@ -94,7 +94,7 @@ def _switches(db):
 
 
 def _marked(provider="codex"):
-    return [line["account_id"] for line in source_accounts(provider) if line["conductor_binding"]]
+    return [line["account_id"] for line in source_accounts(provider) if line["corsia_agent_binding"]]
 
 
 @pytest.mark.parametrize("path", ["first_binding", "move"])
@@ -106,7 +106,7 @@ def test_only_a_ready_refresh_writes_a_first_binding_or_a_move(conductor, path, 
     before, policy = _bindings(db), effective_policy(None, "codex", db=db)
     _make(outcome, db, personal)
 
-    result = bind_conductor_account(CONDUCTOR, personal["id"], user_id="user", observed=_observed(db, personal))
+    result = bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user", observed=_observed(db, personal))
 
     assert result == {"bound": outcome == "ready", "reason": None if outcome == "ready" else outcome}
     assert _bindings(db) == ({"codex": personal["id"]} if outcome == "ready" else before)
@@ -132,7 +132,7 @@ def test_a_bind_on_a_replaced_refresh_is_stale_and_writes_nothing(conductor, new
         out = set_account_state(personal["id"], "signed_out", expected_revision=get_account(personal["id"])["revision"])
         set_account_state(personal["id"], "signed_in", expected_revision=out["revision"])
 
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user", observed=observed) == {
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user", observed=observed) == {
         "bound": False, "reason": "stale"}
     assert _bindings(db) == {}
 
@@ -140,7 +140,7 @@ def test_a_bind_on_a_replaced_refresh_is_stale_and_writes_nothing(conductor, new
 def test_a_person_choosing_an_account_they_already_have_reads_its_current_models(conductor):
     db, _work, personal = conductor
     _discover(db, personal)
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user") == {"bound": True, "reason": None}
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user") == {"bound": True, "reason": None}
     assert _bindings(db) == {"codex": personal["id"]}
 
 
@@ -159,8 +159,8 @@ def test_a_conductor_that_has_started_refuses_the_bind(conductor, why):
         db.execute(f"UPDATE threads SET {column}=? WHERE id=?", (value, CONDUCTOR))
     db.commit()
 
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user") == {
-        "bound": False, "reason": "conductor_started"}
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user") == {
+        "bound": False, "reason": "corsia_agent_started"}
     assert _bindings(db) == {}
 
 
@@ -173,7 +173,7 @@ def test_a_missing_account_refuses_the_bind(conductor, how):
         set_account_state(personal["id"], "removed", expected_revision=get_account(personal["id"])["revision"])
         account_id = personal["id"]
 
-    assert bind_conductor_account(CONDUCTOR, account_id, user_id="user") == {
+    assert bind_corsia_agent_account(CONDUCTOR, account_id, user_id="user") == {
         "bound": False, "reason": "account_missing"}
     assert _bindings(db) == {}
 
@@ -183,7 +183,7 @@ def test_an_account_turned_off_for_the_workspace_is_not_permitted(conductor):
     _discover(db, personal)
     set_legacy_policy(None, "codex", allowlist=[work["id"]], db=db)
 
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user", observed=_observed(db, personal)) == {
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user", observed=_observed(db, personal)) == {
         "bound": False, "reason": "not_permitted"}
     assert _bindings(db) == {}
 
@@ -196,8 +196,8 @@ def test_only_this_users_workspace_conductor_can_be_bound(conductor, thread):
         target, user = "destination", "user"
     else:
         target, user = CONDUCTOR, "someone-else"
-    with pytest.raises(NotWorkspaceConductor):
-        bind_conductor_account(target, personal["id"], user_id=user)
+    with pytest.raises(NotCorsiaAgent):
+        bind_corsia_agent_account(target, personal["id"], user_id=user)
     assert _bindings(db) == {}
 
 
@@ -223,7 +223,7 @@ def test_mark_b_with_rollover_off_the_marked_account_is_bound_after_the_pick(con
     _discover(db, work)
     _discover(db, personal)
     set_legacy_policy(None, "codex", switch_on_limit=False, db=db)
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user")["bound"]
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user")["bound"]
     assert _marked() == [personal["id"]]
 
     _pick()
@@ -241,7 +241,7 @@ def test_mark_c_with_rollover_on_the_pick_keeps_a_usable_binding_and_moves_a_lim
     # A rollover destination's vendor has said it is allowed: a move never rests on unknown usage.
     harness_usage.record_allowed(provider="codex", receipt=receipt_of("codex", work["id"], db=db),
                                  source="discovery", db=db)
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user")["bound"]
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user")["bound"]
     assert _marked() == [personal["id"]]
     if limited:
         harness_usage.record_limited(provider="codex", receipt=receipt_of("codex", personal["id"], db=db),
@@ -263,7 +263,7 @@ def _bound_personal(db, work, personal, *, rollover):
                       default_account_id=work["id"], db=db)
     harness_usage.record_allowed(provider="codex", receipt=receipt_of("codex", work["id"], db=db),
                                  source="discovery", db=db)
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user")["bound"]
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user")["bound"]
 
 
 def _lose(db, personal, how):
@@ -348,7 +348,7 @@ def test_mark_f_before_the_pick_use_this_account_rebinds_a_lost_binding_to_the_o
     _lose(db, personal, how)
     assert _marked() == []
 
-    assert bind_conductor_account(CONDUCTOR, work["id"], user_id="user") == {"bound": True, "reason": None}
+    assert bind_corsia_agent_account(CONDUCTOR, work["id"], user_id="user") == {"bound": True, "reason": None}
     assert _marked() == [work["id"]]
     _pick()
 
@@ -384,13 +384,13 @@ def test_mark_d_a_turned_off_account_is_refused_but_one_left_out_of_a_saved_orde
     revision = effective_policy(None, "codex", db=db)["revision"]
     set_policy(None, "codex", rollover=True, order=[work["id"]], disabled=[personal["id"]],
                expected_revision=revision, db=db)
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user", observed=_observed(db, personal)) == {
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user", observed=_observed(db, personal)) == {
         "bound": False, "reason": "not_permitted"}
     assert _bindings(db) == {}
 
     set_policy(None, "codex", rollover=True, order=[work["id"]], disabled=[],
                expected_revision=revision + 1, db=db)
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user", observed=_observed(db, personal)) == {
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user", observed=_observed(db, personal)) == {
         "bound": True, "reason": None}
     assert _bindings(db) == {"codex": personal["id"]}
 
@@ -403,9 +403,9 @@ def test_mark_e_an_explicit_choice_binds_that_account_with_or_without_a_model(co
     _discover(db, personal)
     # The model-less conductor: a card line's "Use this account" and the picker's explicit
     # account row each go through the bind step, then the pick runs on the account it names.
-    assert bind_conductor_account(CONDUCTOR, work["id"], user_id="user")["bound"]
+    assert bind_corsia_agent_account(CONDUCTOR, work["id"], user_id="user")["bound"]
     assert _marked() == [work["id"]]
-    assert bind_conductor_account(CONDUCTOR, personal["id"], user_id="user")["bound"]
+    assert bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user")["bound"]
     assert _marked() == [personal["id"]]
     _pick(account_id=personal["id"])
     assert chosen_account_id(CONDUCTOR, "codex", db=db) == personal["id"]
@@ -435,11 +435,11 @@ def test_the_bind_route_returns_bound_and_reason_and_404s_any_other_thread(condu
     db, work, personal = conductor
     _discover(db, personal)
 
-    assert api.post(f"/api/threads/{CONDUCTOR}/conductor-account",
+    assert api.post(f"/api/threads/{CONDUCTOR}/corsia-agent-account",
                     json={"account_id": work["id"]}).json() == {"bound": False, "reason": "unchecked"}
-    assert api.post(f"/api/threads/{CONDUCTOR}/conductor-account",
+    assert api.post(f"/api/threads/{CONDUCTOR}/corsia-agent-account",
                     json={"account_id": personal["id"]}).json() == {"bound": True, "reason": None}
-    assert api.post("/api/threads/destination/conductor-account",
+    assert api.post("/api/threads/destination/corsia-agent-account",
                     json={"account_id": personal["id"]}).status_code == 404
     assert _bindings(db) == {"codex": personal["id"]}
 
@@ -460,7 +460,7 @@ def test_source_accounts_are_the_pickers_rows_with_the_stored_binding_marked(con
     _discover(db, personal)
     removed = set_account_state(add_account("codex", "Gone")["id"], "removed", expected_revision=0)
     set_legacy_policy(None, "codex", allowlist=[work["id"], personal["id"]], db=db)
-    bind_conductor_account(CONDUCTOR, personal["id"], user_id="user")
+    bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user")
 
     lines = {line["account_id"]: line for line in source_accounts("codex")}
 
@@ -468,8 +468,8 @@ def test_source_accounts_are_the_pickers_rows_with_the_stored_binding_marked(con
     assert set(lines) == {work["id"], personal["id"]}
     assert lines[personal["id"]] == {"account_id": personal["id"], "label": lines[personal["id"]]["label"],
                                      "label_verified": False, "identified": True, "state": "ready",
-                                     "resets_at": None, "conductor_binding": True}
-    assert (lines[work["id"]]["state"], lines[work["id"]]["conductor_binding"]) == ("unchecked", False)
+                                     "resets_at": None, "corsia_agent_binding": True}
+    assert (lines[work["id"]]["state"], lines[work["id"]]["corsia_agent_binding"]) == ("unchecked", False)
 
 
 def test_a_limited_source_account_names_when_it_is_back(conductor):
@@ -493,7 +493,7 @@ def test_needs_auth_source_projects_the_default_as_signed_out_without_mutating_i
     assert default_account("claude-code", db=db)["state"] == "legacy"
     assert line["state"] == "signed_out"
     # The bind path reads the same state the card shows.
-    assert bind_conductor_account(CONDUCTOR, default["id"], user_id="user") == {
+    assert bind_corsia_agent_account(CONDUCTOR, default["id"], user_id="user") == {
         "bound": False, "reason": "not_ready"}
 
 
@@ -542,7 +542,7 @@ def test_the_sources_payload_names_no_lost_binding_while_the_bound_account_is_us
     db, _work, personal = conductor
     _discover(db, personal)
     assert provider_sources._harness_source("codex")["lost_binding"] is None
-    bind_conductor_account(CONDUCTOR, personal["id"], user_id="user")
+    bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user")
     assert provider_sources._harness_source("codex")["lost_binding"] is None
 
 
@@ -551,14 +551,14 @@ def test_the_sources_payload_names_a_removed_bound_account_as_the_lost_binding(c
 
     db, _work, personal = conductor
     _discover(db, personal)
-    bind_conductor_account(CONDUCTOR, personal["id"], user_id="user")
+    bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user")
     set_account_state(personal["id"], "removed", expected_revision=get_account(personal["id"])["revision"])
 
     source = provider_sources._harness_source("codex")
 
     assert source["lost_binding"] == {"label": source["lost_binding"]["label"], "reason": "removed"}
     assert source["lost_binding"]["label"] and personal["id"] not in {line["account_id"] for line in source["accounts"]}
-    assert not any(line["conductor_binding"] for line in source["accounts"])
+    assert not any(line["corsia_agent_binding"] for line in source["accounts"])
 
 
 def test_the_sources_payload_names_a_turned_off_bound_account_as_the_lost_binding(conductor):
@@ -566,7 +566,7 @@ def test_the_sources_payload_names_a_turned_off_bound_account_as_the_lost_bindin
 
     db, work, personal = conductor
     _discover(db, personal)
-    bind_conductor_account(CONDUCTOR, personal["id"], user_id="user")
+    bind_corsia_agent_account(CONDUCTOR, personal["id"], user_id="user")
     set_policy(None, "codex", rollover=False, order=[work["id"]], disabled=[personal["id"]],
                expected_revision=effective_policy(None, "codex", db=db)["revision"], db=db)
     db.commit()
@@ -677,7 +677,7 @@ async def test_a_conductor_started_during_sign_in_reads_bind_refused(conductor, 
 
     operation, _ = await _signin(monkeypatch, db, personal, refresh)
 
-    assert (operation.public()["outcome"], operation.public()["bind_reason"]) == ("bind_refused", "conductor_started")
+    assert (operation.public()["outcome"], operation.public()["bind_reason"]) == ("bind_refused", "corsia_agent_started")
     assert _bindings(db) == {}
 
 
@@ -699,7 +699,7 @@ async def test_j7_the_personal_account_signed_in_on_the_card_runs_the_first_turn
 
     db, work, personal = conductor
     _discover(db, work)
-    assert bind_conductor_account(CONDUCTOR, work["id"], user_id="user")["bound"]
+    assert bind_corsia_agent_account(CONDUCTOR, work["id"], user_id="user")["bound"]
     assert _marked() == [work["id"]]
 
     operation, _ = await _signin(monkeypatch, db, personal, _refresh_to("ready", db, personal))

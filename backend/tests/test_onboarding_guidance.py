@@ -160,4 +160,33 @@ def test_every_settings_link_in_first_run_opens_a_real_section_and_anchor():
 def test_first_run_stays_within_its_body_size():
     # Its size after the fuller conductor-role intro and the MCP import consent step (#690),
     # rounded up; #674 tracks the real cap.
-    assert len(FIRST_RUN.read_bytes()) <= 17400
+    assert len(FIRST_RUN.read_bytes()) <= 17600  # +the router to first-run-app.md
+
+
+FIRST_RUN_APP = BOOTSTRAP_SKILL.parent / "references/first-run-app.md"
+HANDOFF = "That's everything. So, what's taking up your time this week?"
+
+
+def test_first_run_routes_the_app_path_to_its_own_reference():
+    assert "`first_run_path`" in FIRST_RUN.read_text(encoding="utf-8")
+    assert "references/first-run-app.md" in FIRST_RUN.read_text(encoding="utf-8")
+
+
+def test_app_path_sends_the_message_then_seven_steps_and_ends_on_the_handoff():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    steps = app.split("## The steps, in this order", 1)[1].split("## The hand-off", 1)[0]
+    titles = re.findall(r"^\d\. \*\*([^*]+)\*\*", steps, flags=re.MULTILINE)
+
+    assert app.index("I'm CORSIA, your assistant.") < app.index("## The steps")
+    assert len(titles) == 7
+    assert titles[0] == "About you."
+    assert app.split("## The hand-off", 1)[1].strip().startswith("After the last step that applies, post exactly `" + HANDOFF + "`")
+    assert "never skill `assistant-onboarding`" in steps
+    assert "no setup task list" in app
+    assert "Read nothing until a yes" in steps
+
+
+def test_app_path_reads_no_other_app_settings_before_a_yes():
+    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    assert "mcp_sources" not in app
+    assert "none of another app's settings" in app

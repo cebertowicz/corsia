@@ -32,8 +32,8 @@ Coordinate on durable work objects; keep status there instead of pushing routine
 
 Use a peer interrupt only for a concrete necessary action, missing input or actionable failure when no sufficient shared or event-driven route exists. No acknowledgements, FYIs or duplicate completion notices. Parent-child briefs and returns remain required.
 
-Reach several agents with one shared notice at their common scope, which they receive on their next turn (its conductor places it; anyone else proposes the exact text, evidence and expiry to them), never one message per agent: every message wakes a turn and spends capacity. Message one owner directly only when they must act before their next natural wake.
+Reach several agents with one shared notice at their common scope, which they receive on their next turn (its conductor, or the CORSIA agent at workspace scope, places it; anyone else proposes the exact text, evidence and expiry to them), never one message per agent: every message wakes a turn and spends capacity. Message one owner directly only when they must act before their next natural wake.
 
 ## Durable knowledge
 
-When a correction or durable fact arrives, place it for its next audience (skill `memory-placement`). Shared documents need an owner, authority/status, source or verified-at date, and review trigger. Use the scope's existing category/index; propose a missing category to its conductor. Preserve authoritative history when retiring stale material, and distinguish drafts from decisions.
+When a correction or durable fact arrives, place it for its next audience (skill `memory-placement`). Shared documents need an owner, authority/status, source or verified-at date, and review trigger. Use the scope's existing category/index; propose a missing category to its conductor or, at workspace scope, the CORSIA agent. Preserve authoritative history when retiring stale material, and distinguish drafts from decisions.

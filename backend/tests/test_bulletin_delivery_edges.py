@@ -71,7 +71,7 @@ def _start(monkeypatch: pytest.MonkeyPatch, bulletin_id: str, *, withdrawn: bool
     content, signature, public = _signed_bulletin(bulletin_id=bulletin_id, withdrawn=withdrawn)
     monkeypatch.setattr(bulletins, "PUBLIC_KEYS", (public,))
     _use_transport(monkeypatch, _feed_transport(content, signature))
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: conductor)
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: conductor)
     return public
 
 
@@ -184,7 +184,7 @@ def test_live_fetch_delay_is_clamped_to_one_day() -> None:
 def test_rollback_to_an_acknowledged_system_identity_is_announced(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_ledger()
     mk_session("rollback-conductor")
-    monkeypatch.setattr("infra.conductor.get_conductor", lambda *_args, **_kwargs: "rollback-conductor")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda *_args, **_kwargs: "rollback-conductor")
     identities = {name: bulletins.SystemIdentity(name, name, (("a", name),)) for name in ("a0", "a1", "a2")}
     current = identities["a0"]
     monkeypatch.setattr(bulletins, "system_identity", lambda: current)

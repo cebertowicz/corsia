@@ -275,7 +275,7 @@ class TestSpawn:
         _seed_parent(child_db)
         monkeypatch.setattr(
             role_context_sources,
-            "get_conductor_scopes",
+            "get_coordination_scopes",
             lambda _thread_id, db=None: [
                 {"scope": "workspace", "scope_type": "workspace"}
             ],

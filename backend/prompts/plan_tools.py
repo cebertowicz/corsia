@@ -33,12 +33,12 @@ USER_TASKS_DESCRIPTION = (
 
 #: The next steps after a thread cannot mutate another agent's plan.
 FOREIGN_PLAN_MUTATION = (
-    "Only a designated conductor may append a top-level task to another agent's "
+    "Only the CORSIA agent or a project conductor may append a top-level task to another agent's "
     "plan. Instead, depend on the lane's node (plan_update add_dependency after "
     "plan_read(thread_id=...)), ask the lane for a review, or file it to the "
     "backlog under the lane's label."
 )
-#: The target plan must exist before a conductor can append work to it.
+#: The target plan must exist before the CORSIA agent or a conductor can append work to it.
 FOREIGN_PLAN_MISSING = (
     "No plan has that id. To add to another agent's plan, use the id "
     "plan_read(thread_id=...) returns; an agent with no plan must create one first."

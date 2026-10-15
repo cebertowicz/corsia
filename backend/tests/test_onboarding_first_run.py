@@ -570,8 +570,9 @@ class TestPending:
         assert _pending(_conductor()) is False
 
     @pytest.mark.asyncio
-    async def test_the_route_reports_it_for_the_workspace_scope_only(self, fresh_install, monkeypatch):
+    async def test_the_corsia_agent_route_reports_it_and_a_project_route_never_does(self, fresh_install, monkeypatch):
         from api import conductor as conductor_routes
+        from api import corsia_agent as corsia_agent_routes
         from infra import accounts
         from infra.conductor import set_conductor
 
@@ -580,15 +581,16 @@ class TestPending:
 
         monkeypatch.setattr(conductor_routes, "read_runtime_truth", truth)
         monkeypatch.setattr(conductor_routes, "authenticate", lambda _t: {"id": "newcomer"})
+        monkeypatch.setattr(corsia_agent_routes, "authenticate", lambda _t: {"id": "newcomer"})
         accounts.create_user("newcomer", SECRET_ENOUGH)
         conductor_id = _conductor()
 
-        body = await conductor_routes.get_conductor_route(token="caller", scope="workspace")
+        body = await corsia_agent_routes.get_corsia_agent_route(token="caller")
         assert body["thread_id"] == conductor_id
         assert body["first_run_pending"] is True
 
         _mark_update(conductor_id, "report")
-        body = await conductor_routes.get_conductor_route(token="[REDACTED]", scope="workspace")
+        body = await corsia_agent_routes.get_corsia_agent_route(token="[REDACTED]")
         assert body["first_run_pending"] is False
 
         from infra.database import write_transaction
