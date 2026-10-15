@@ -28,6 +28,7 @@ duckdb==1.5.3
 fastapi==0.137.0
 fastuuid==0.14.0
 filelock==3.29.0
+flatbuffers==25.12.19
 frozenlist==1.8.0
 fsspec==2025.9.0
 h11==0.16.0
@@ -69,6 +70,7 @@ multidict==6.7.1
 nest-asyncio2==1.7.2
 numpy==2.4.6
 openai==2.30.0
+onnxruntime==1.31.0
 opentelemetry-api==1.42.1
 opentelemetry-sdk==1.42.1
 opentelemetry-semantic-conventions==0.63b1
@@ -79,6 +81,7 @@ pillow-heif==1.7.0
 platformdirs==4.10.0
 pluggy==1.6.0
 propcache==0.5.2
+protobuf==7.36.2
 psutil==7.2.2
 pycparser==3.0
 pycrdt==0.14.8

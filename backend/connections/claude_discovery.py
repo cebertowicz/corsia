@@ -16,10 +16,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import secrets
 from typing import Any, NoReturn
 
-from connections import claude_control_io, claude_usage, source_state
+from connections import claude_usage, source_state
 from connections.claude_context_probe import read_context_usage
 from connections.harness_process import killed_on_exit
 from infra.db_async import run_in_db
@@ -49,7 +48,6 @@ def claude_control_command(binary: str) -> list[str]:
     ]
 
 
-
 async def run_claude_control(
     binary: str, frames: list[dict[str, Any]], *, operation: str, context=None,
 ) -> bytes:
@@ -59,9 +57,8 @@ async def run_claude_control(
         from subagents.cc_env import apply_claude_config_dir
 
         apply_claude_config_dir(env, context.source_home)
-    session = secrets.token_hex(6)
-    phase = claude_control_io.ControlPhase()
-    payload, expected = claude_control_io.prepare_control_request(frames)
+    # Serialize before spawning so an invalid frame cannot leave a child process behind.
+    payload = "".join(json.dumps(frame) + "\n" for frame in frames).encode()
     process = await asyncio.create_subprocess_exec(
         *claude_control_command(binary), stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -69,29 +66,8 @@ async def run_claude_control(
     )
     try:
         async with killed_on_exit(process):
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    claude_control_io.communicate(process, payload, expected, phase), timeout=30,
-                )
-            except asyncio.TimeoutError:
-                phase.snapshot_timeout(process)
-                raise
+            stdout, stderr = await asyncio.wait_for(process.communicate(payload), timeout=30)
     except asyncio.TimeoutError:
-        replies = phase.replies_observed
-        log.warning(
-            "claude_control_timeout operation=%s scope=%s session=%s stdin_written=%s "
-            "stdin_drain_completed=%s stdin_close_completed=%s "
-            "stdout_eof_completed=%s stderr_eof_completed=%s "
-            "usage_reply_observed=%s usage_response_subtype=%s usage_verdict=%s "
-            "catalog_reply_observed=%s context_reply_observed=%s end_session_reply_observed=%s "
-            "process_exited_at_timeout=%s returncode_at_timeout=%s",
-            claude_control_io.log_operation(operation), claude_control_io.log_scope(context),
-            session, phase.stdin_written, phase.stdin_drain_completed, phase.stdin_close_completed,
-            phase.stdout_eof_completed, phase.stderr_eof_completed,
-            replies["usage"], phase.usage_response_subtype, phase.usage_verdict,
-            replies["catalog"], replies["context"], replies["end"],
-            phase.process_exited_at_timeout, phase.returncode_at_timeout,
-        )
         raise RuntimeError(f"Claude Code {operation} timed out") from None
     if process.returncode:
         # A signed-out CLI reports on stdout; fall back to it so the reason shows.
