@@ -125,6 +125,148 @@ async def test_present_but_unpinned_asset_is_failed_and_not_retryable(worker, mo
     assert "pin" in state["reason"]
 
 
+class _CountingChild:
+    """Stands in for a ~1 GiB model process: tracks how many are resident at once."""
+
+    live = 0
+    peak = 0
+    built: list[str] = []
+    closed: list[str] = []
+
+    def __init__(self, manifest):
+        self.manifest = manifest
+        _CountingChild.live += 1
+        _CountingChild.peak = max(_CountingChild.peak, _CountingChild.live)
+        _CountingChild.built.append(manifest.version)
+
+    def classify(self, context, owner):
+        return SimpleNamespace(
+            label="not_correction", truncated=False, original_tokens=4,
+            version=self.manifest.checker_version(),
+        )
+
+    def close(self, *, kill=False):
+        _CountingChild.live -= 1
+        _CountingChild.closed.append(self.manifest.version)
+
+    @classmethod
+    def reset(cls):
+        cls.live = cls.peak = 0
+        cls.built = []
+        cls.closed = []
+
+
+@pytest.mark.asyncio
+async def test_inflight_classification_keeps_its_starting_version(monkeypatch):
+    import threading
+
+    from jobs import corrections_realtime
+
+    started = threading.Event()
+    release = threading.Event()
+    captured = []
+    current = [_manifest("v1")]
+
+    class Child(_CountingChild):
+        def classify(self, context, owner):
+            started.set()
+            release.wait(timeout=1)
+            return super().classify(context, owner)
+
+    async def record(candidate, result):
+        captured.append(result.version.version)
+        return True
+
+    _CountingChild.reset()
+    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: current[0])
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", Child)
+    monkeypatch.setattr(corrections_realtime, "_record", record)
+
+    task = asyncio.create_task(corrections_realtime._classify(_candidate()))
+    await asyncio.to_thread(started.wait, 1)
+    current[0] = _manifest("v2")
+    release.set()
+    await task
+
+    assert captured == ["v1"]
+    assert set(corrections_realtime._CHILDREN) == {"corrections-classifier:v1:correction"}
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_child_stops_before_the_newer_one_starts(monkeypatch):
+    import threading
+
+    from jobs import corrections_realtime
+
+    started = threading.Event()
+    release = threading.Event()
+    captured = []
+    current = [_manifest("v1")]
+
+    class Child(_CountingChild):
+        def classify(self, context, owner):
+            if self.manifest.version == "v1" and not started.is_set():
+                started.set()
+                release.wait(timeout=1)
+            return super().classify(context, owner)
+
+    async def record(candidate, result):
+        captured.append(result.version.version)
+        return True
+
+    _CountingChild.reset()
+    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: current[0])
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", Child)
+    monkeypatch.setattr(corrections_realtime, "_record", record)
+
+    first = asyncio.create_task(corrections_realtime._classify(_candidate()))
+    await asyncio.to_thread(started.wait, 1)
+    current[0] = _manifest("v2")
+    second = asyncio.create_task(corrections_realtime._classify(_candidate()))
+    await asyncio.sleep(0.05)
+    assert _CountingChild.built == ["v1"]
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert captured == ["v1", "v2"]
+    assert _CountingChild.closed == ["v1"]
+    assert _CountingChild.peak == 1
+    assert set(corrections_realtime._CHILDREN) == {"corrections-classifier:v2:correction"}
+
+
+@pytest.mark.asyncio
+async def test_a_resident_child_is_reused_not_rebuilt_on_every_call(monkeypatch):
+    from jobs import corrections_realtime
+
+    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: _manifest("v1"))
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
+    monkeypatch.setattr(corrections_realtime, "_record", AsyncMock(return_value=True))
+    _CountingChild.reset()
+
+    for _ in range(3):
+        await corrections_realtime._classify(_candidate())
+
+    assert _CountingChild.built == ["v1"]
+    assert _CountingChild.live == 1
+
+
+@pytest.mark.asyncio
+async def test_catch_up_is_owed_only_for_a_child_this_call_created(monkeypatch):
+    from jobs import corrections_realtime
+
+    monkeypatch.setattr(corrections_realtime, "_manifest", lambda: _manifest("v1"))
+    monkeypatch.setattr(corrections_realtime, "ClassifierChild", _CountingChild)
+    monkeypatch.setattr(corrections_realtime, "_record", AsyncMock(return_value=True))
+    _CountingChild.reset()
+
+    await corrections_realtime._classify(_candidate())
+    assert corrections_realtime._SCAN_OWED is True
+
+    corrections_realtime._SCAN_OWED = False
+    await corrections_realtime._classify(_candidate())
+    assert corrections_realtime._SCAN_OWED is False
+
+
 @pytest.mark.asyncio
 async def test_verified_manifest_alone_never_reports_ready(worker, monkeypatch):
     from jobs import corrections_realtime

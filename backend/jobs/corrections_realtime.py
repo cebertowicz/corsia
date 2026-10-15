@@ -46,13 +46,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from core.corrections_child import ClassifierChild, ClassifierUnavailable, MessageFailed
-from core.corrections_classifier import AssetError, AssetManifest, asset_root, cleanup_staging, load_pinned_manifest
+from core.corrections_classifier import ASSET_ID, AssetError, AssetManifest, asset_root, cleanup_staging, load_pinned_manifest
 from core.corrections_recording import ClassifierVersion, CorrectionCandidate
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
@@ -63,16 +65,68 @@ from jobs.corrections_recording import (
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
 ATTEMPTS_PER_KIND = 2
+_VERSION_LABEL = re.compile(r"v([0-9]+)")
 
 
 def _clock() -> float:
     return time.monotonic()
 
 
+def version_number(label: str) -> int:
+    """Order a pinned version label; only `v<number>` is accepted."""
+    match = _VERSION_LABEL.fullmatch(label)
+    if match is None:
+        raise AssetError(f"classifier version {label!r} is not of the form v<number>")
+    return int(match.group(1))
+
+
+def _candidate_roots() -> list[Path]:
+    from core import corrections_asset_pins
+
+    root = asset_root()
+    siblings = (
+        root.parent / f"{ASSET_ID}-{version}"
+        for version in sorted(corrections_asset_pins.PINNED_MANIFESTS, key=version_number, reverse=True)
+    )
+    return [root, *(path for path in siblings if path != root)]
+
+
+def _installed() -> bool:
+    return any((path / "manifest.json").is_file() for path in _candidate_roots())
+
+
+
 def _manifest() -> AssetManifest:
-    manifest = load_pinned_manifest(asset_root())
-    manifest.verify_files()
-    return manifest
+    """Select the highest verified pinned asset version; an older verified one keeps serving.
+
+    Layout: `asset_root()` stays where it is and holds whichever version is installed
+    there; a second version installs to the sibling `corrections-classifier-<version>`
+    beside it, one candidate per pinned version and no directory scanning. Each candidate
+    is accepted only through `load_pinned_manifest` and `verify_files`, so a directory's
+    name never decides which version it is. The highest declared `v<number>` wins and a
+    tie goes to `asset_root()`. Every present candidate, ready or failed with its reason,
+    is reported in the state under `versions`, with the winner as `selected_version`.
+    """
+    verified: list[tuple[int, int, AssetManifest]] = []
+    versions: list[dict[str, str | None]] = []
+    for order, directory in enumerate(_candidate_roots()):
+        if not (directory / "manifest.json").is_file():
+            continue
+        try:
+            manifest = load_pinned_manifest(directory)
+            manifest.verify_files()
+            number = version_number(manifest.version)
+        except (AssetError, OSError) as error:
+            versions.append({"location": directory.name, "version": None, "state": "failed", "reason": str(error)})
+            continue
+        verified.append((number, -order, manifest))
+        versions.append({"location": directory.name, "version": manifest.version, "state": "ready", "reason": None})
+    if verified:
+        selected = max(verified, key=lambda item: item[:2])[2]
+        return selected, versions
+    if not versions:
+        raise AssetError("classifier asset is absent")
+    raise AssetError(f"no verified corrections classifier asset: {versions[0]['reason']}")
 
 
 class CorrectionsWorker:
@@ -88,6 +142,7 @@ class CorrectionsWorker:
         self.state = "absent"
         self.reason: str | None = "asset not verified"
         self.version: ClassifierVersion | None = None
+        self.versions: list[dict[str, str | None]] = []
         self.scan = "idle"
         self.held_reason: str | None = None
         self.dropped_arrivals = 0
@@ -128,6 +183,8 @@ class CorrectionsWorker:
             "reason": self.reason,
             "retryable": self.state != "failed",
             "version": self.version.version if self.version else None,
+            "selected_version": self.version.version if self.version else None,
+            "versions": self.versions,
             "scan": self.scan,
             "scan_owed": self.scan != "idle",
             "held_reason": self.held_reason,
@@ -141,11 +198,15 @@ class CorrectionsWorker:
 
     async def _verified_manifest(self) -> AssetManifest | None:
         try:
-            manifest = await asyncio.to_thread(_manifest)
+            selected = await asyncio.to_thread(_manifest)
         except AssetError as error:
-            present = (asset_root() / "manifest.json").is_file()
-            self._set("failed" if present else "absent", str(error))
+            self._set("failed" if _installed() else "absent", str(error))
             return None
+        if isinstance(selected, tuple):
+            manifest, self.versions = selected
+        else:  # Test doubles for the single-manifest worker contract.
+            manifest = selected
+            self.versions = [{"location": manifest.path.parent.name if hasattr(manifest, "path") else "test", "version": manifest.version, "state": "ready", "reason": None}]
         self.version = manifest.classifier_version()
         if self.state in ("absent", "failed"):
             self._set("unavailable", "asset verified; the model has not run yet")
