@@ -10,7 +10,6 @@ import time
 from typing import Literal, Sequence, TypeAlias
 
 from host_access import browser_cli, browser_control, browser_identity as identity, browser_reporting
-from host_access.browser_streaming import StreamPortResult, prepare_stream_port
 from host_access.browser_session_state import (
     BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
     BrowserSessionError as BrowserSessionError, BrowserSessionRecord,
@@ -63,27 +62,16 @@ class BrowserSessionOwner:
     async def run(self, thread_id: str, args: Sequence[str], *,
                   lease_id: str | None = None, timeout: float = 30.0,
                   show_window: bool | None = None, control_token: str | None = None,
-                  session: SessionAdmission = "any", pane_navigation: bool = False) -> str:
-        """Run one command through the shared-browser command path."""
-        if pane_navigation and control_token is None:
-            raise BrowserSessionError("pane navigation requires a connected pane")
+                  session: SessionAdmission = "any") -> str:
+        """Run one command through the shared-browser command path; a control token marks a pane's own command."""
         from host_access.browser_session_commands import run
         return await run(self, thread_id, args, lease_id=lease_id, timeout=timeout,
-                         show_window=show_window, session=session, pane_navigation=pane_navigation)
+                         show_window=show_window, session=session, pane=control_token is not None)
 
-    async def stream_port(self, thread_id: str) -> StreamPortResult:
-        """Prepare an existing session's private stream through the same command path."""
+    async def has_session(self, thread_id: str) -> bool:
+        """Report whether this thread has a browser for a pane to show."""
         async with self._owner_lock:
-            runtime = self._sessions.get(thread_id)
-        if runtime is None:
-            return StreamPortResult()
-        try:
-            await self._pin_native()
-            return await prepare_stream_port(lambda args: self._run_admitted(
-                runtime, args, lease_id=runtime.record.lease_id, timeout=10.0,
-            ))
-        except (BrowserSessionError, BrowserSessionCleanupError, BrowserSetupError) as exc:
-            return StreamPortResult(error=str(exc))
+            return thread_id in self._sessions
 
     async def _run_admitted(self, runtime: BrowserRuntime, args: Sequence[str], *,
                             lease_id: str | None, timeout: float) -> tuple[CommandResult, bool]:
@@ -240,6 +228,7 @@ class BrowserSessionOwner:
         runtime = self._sessions.get(thread_id)
         if runtime is None:
             return "Browser session is already closed."
+        browser_control.browser_closed(thread_id)
         await self._close_runtime(runtime)
         return "Browser session closed."
 

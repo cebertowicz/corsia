@@ -5,7 +5,7 @@ import json
 import pytest
 from fastapi import WebSocketDisconnect
 
-from tests.test_browser_pane import FakePane, FakeStream
+from tests.test_browser_pane import FakePane, screencast  # noqa: F401 - autouse fixture: no real page screencast
 from ws import browser_stream
 
 
@@ -46,7 +46,7 @@ async def test_navigation_does_not_block_input_and_its_result_is_delivered(monke
     ]])
     try:
         with pytest.raises(WebSocketDisconnect):
-            await asyncio.wait_for(browser_stream._relay(pane, FakeStream(), 'thread', 'user'), 1)
+            await asyncio.wait_for(browser_stream._relay(pane, 'thread', 'user'), 1)
         assert input_received.is_set()
         assert any(result.get('type') == 'navigate_result' and result.get('error') is None for result in (json.loads(message) for message in pane.text))
         assert browser_stream._runners == {}
@@ -73,12 +73,8 @@ async def test_one_runner_keeps_one_waiting_navigation_and_the_newest_appearance
     async def match_pane(_thread_id, appearance, _connection_token):
         commands.append(appearance.width)
 
-    async def repaint(*_args):
-        pass
-
     monkeypatch.setattr(browser_stream.browser_pane, "open_url", open_url)
     monkeypatch.setattr(browser_stream.browser_pane, "match_pane", match_pane)
-    monkeypatch.setattr(browser_stream.browser_pane, "repaint", repaint)
 
     class Pane(FakePane):
         async def receive_text(self):
@@ -104,7 +100,7 @@ async def test_one_runner_keeps_one_waiting_navigation_and_the_newest_appearance
         {"type": "navigate", "url": "https://example.test/second"},
         {"type": "navigate", "url": "https://example.test/third"},
     ]])
-    relay = asyncio.create_task(browser_stream._relay(pane, FakeStream(), "thread", "user"))
+    relay = asyncio.create_task(browser_stream._relay(pane, "thread", "user"))
     try:
         await asyncio.wait_for(first_started.wait(), 1)
         release_first.set()
@@ -155,7 +151,7 @@ async def test_relay_exit_keeps_running_navigation_alive(monkeypatch):
     ]])
     try:
         with pytest.raises(WebSocketDisconnect):
-            await asyncio.wait_for(browser_stream._relay(pane, FakeStream(), "thread", "user"), 1)
+            await asyncio.wait_for(browser_stream._relay(pane, "thread", "user"), 1)
         navigation = browser_stream._runners["thread"]
         assert not cancelled.is_set()
         release.set()
@@ -197,7 +193,7 @@ async def test_navigation_result_overflow_closes_stalled_pane(monkeypatch, caplo
         {"type": "navigate", "url": "https://example.test"},
     ]])
     try:
-        await asyncio.wait_for(browser_stream._relay(pane, FakeStream(), "thread", "user"), 1)
+        await asyncio.wait_for(browser_stream._relay(pane, "thread", "user"), 1)
         assert pane.closed == [1013]
         assert "browser pane navigation failed" not in caplog.text
     finally:

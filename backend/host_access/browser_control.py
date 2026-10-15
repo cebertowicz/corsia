@@ -1,16 +1,20 @@
-"""Shared-browser password guard and pane-presence state."""
+"""Shared-browser password guard and pane-presence state, including each pane's screencast."""
 from __future__ import annotations
 
 import asyncio
 import importlib
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 from urllib.parse import urlparse
 
 from host_access.browser_cdp import PasswordProbe
+from host_access.browser_screencast import PaneScreencast
 from host_access.browser_session_state import BrowserSessionError
 from infra import state
 from infra.database import get_db
+
+log = logging.getLogger(__name__)
 
 PASSWORD_PAGE = (
     "This page asks for a password, so it is the person's to complete. They already see a notice on the "
@@ -19,6 +23,10 @@ PASSWORD_PAGE = (
 )
 PASSWORD_CHECK_FAILED = "This page couldn't be checked"
 Probe = Callable[[str | None, frozenset[int]], Awaitable[PasswordProbe]]
+# AR6: while an episode is open and a pane is connected, the probe re-runs this many seconds after the
+# person's last input, and at least this often.
+REPROBE_AFTER_INPUT = 0.5
+REPROBE_EVERY = 2.0
 
 
 @dataclass
@@ -29,21 +37,35 @@ class PasswordEpisode:
     host: str
     seen_nodes: frozenset[int]
     node_id: str | None = None
+    # The episode's one re-probe loop, and the person's latest input that it waits to pause (AR6).
+    reprobe: asyncio.Task | None = field(default=None, repr=False)
+    last_input: float | None = None
+    input_seen: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
 
 _panes: dict[str, set[str]] = {}
 _pane_reports: dict[str, dict[str, Callable[[dict], None]]] = {}
+# Each connected pane's probe of the shared page, over the page endpoint it already holds.
+_pane_probes: dict[str, dict[str, Probe]] = {}
 _episodes: dict[str, PasswordEpisode] = {}
 # A completed password episode remains read-guarded until the document loader changes.
 _guarded_visits: dict[str, PasswordEpisode] = {}
 _probe_locks: dict[str, asyncio.Lock] = {}
+_screencasts: dict[str, dict[str, PaneScreencast]] = {}
+# agent-browser commands that change the page's device metrics; a screenshot changes them while it captures.
+_METRICS_COMMANDS = {("screenshot",), ("set", "viewport"), ("set", "device")}
 
 
-def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict], None] | None = None) -> None:
-    """Record a shared pane and its relay callback without granting exclusive page control."""
+def pane_connected(thread_id: str, connection_token: str, report: Callable[[dict], None] | None = None,
+                   probe: Probe | None = None) -> None:
+    """Record a shared pane, its relay callback and its page probe without granting exclusive page control."""
     _panes.setdefault(thread_id, set()).add(connection_token)
     if report is not None:
         _pane_reports.setdefault(thread_id, {})[connection_token] = report
+    if probe is not None:
+        _pane_probes.setdefault(thread_id, {})[connection_token] = probe
+        if (episode := _episodes.get(thread_id)) is not None:
+            _start_reprobe(thread_id, episode)
 
 
 def pane_disconnected(thread_id: str, connection_token: str) -> None:
@@ -53,6 +75,13 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
         reports.pop(connection_token, None)
         if not reports:
             del _pane_reports[thread_id]
+    probes = _pane_probes.get(thread_id)
+    if probes is not None:
+        probes.pop(connection_token, None)
+        if not probes:
+            del _pane_probes[thread_id]
+            if (episode := _episodes.get(thread_id)) is not None:
+                _stop_reprobe(episode)
     connections = _panes.get(thread_id)
     if connections is None:
         return
@@ -64,6 +93,41 @@ def pane_disconnected(thread_id: str, connection_token: str) -> None:
 def has_pane(thread_id: str) -> bool:
     """Return whether a person can currently see this thread's shared browser."""
     return bool(_panes.get(thread_id))
+
+
+def screencast_started(thread_id: str, connection_token: str, cast: PaneScreencast) -> None:
+    _screencasts.setdefault(thread_id, {})[connection_token] = cast
+
+
+def screencast_ended(thread_id: str, connection_token: str, cast: PaneScreencast) -> None:
+    casts = _screencasts.get(thread_id, {})
+    if casts.get(connection_token) is cast:
+        del casts[connection_token]
+        if not casts:
+            del _screencasts[thread_id]
+
+
+def screencasts(thread_id: str) -> list[PaneScreencast]:
+    """Every pane screencast showing this thread's one shared page."""
+    return list(_screencasts.get(thread_id, {}).values())
+
+
+def page_command_starting(thread_id: str, args: tuple[str, ...]) -> None:
+    """Hold the thread's pane pictures while a command changes the page's metrics."""
+    if _changes_metrics(args):
+        for cast in screencasts(thread_id):
+            cast.hold()
+
+
+async def page_command_finished(thread_id: str, args: tuple[str, ...]) -> None:
+    """Restart the thread's pane screencasts after a command that changed the page's metrics."""
+    if _changes_metrics(args):
+        for cast in screencasts(thread_id):
+            await cast.restart()
+
+
+def _changes_metrics(args: tuple[str, ...]) -> bool:
+    return args[:1] in _METRICS_COMMANDS or args[:2] in _METRICS_COMMANDS
 
 
 async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...]) -> None:
@@ -83,23 +147,85 @@ async def require_page_access(thread_id: str, probe: Probe, args: tuple[str, ...
             _guarded_visits.pop(thread_id, None)
             guarded = None
         if prior is not None and prior.visit != result.visit:
-            await _settle_episode(thread_id, prior)
-            _episodes.pop(thread_id, None)
-            _publish_password_page(thread_id, False)
+            await _end_episode(thread_id, prior)
             prior = None
         if result.visible_nodes:
             episode = _episode_for(thread_id, result, prior)
             _guarded_visits[thread_id] = episode
             await _open_episode(thread_id, episode)
+            _start_reprobe(thread_id, episode)
             _publish_password_page(thread_id, True)
             ending = " Post nothing in chat." if has_pane(thread_id) else " If you reply, use one short line; don't restate the task or say you made it."
             raise BrowserSessionError(PASSWORD_PAGE + ending)
         if prior is not None:
-            await _settle_episode(thread_id, prior)
-            _episodes.pop(thread_id, None)
-            _publish_password_page(thread_id, False)
+            await _end_episode(thread_id, prior)
         if guarded is not None:
             _refuse_password_read(guarded, args)
+
+
+def person_input(thread_id: str) -> None:
+    """Note the person's pane input, so an open episode re-probes once that input pauses (AR6)."""
+    episode = _episodes.get(thread_id)
+    if episode is not None and episode.reprobe is not None:
+        episode.last_input = asyncio.get_running_loop().time()
+        episode.input_seen.set()
+
+
+def browser_closed(thread_id: str) -> None:
+    """Stop an open episode's re-probe once the thread's browser has closed."""
+    if (episode := _episodes.get(thread_id)) is not None:
+        _stop_reprobe(episode)
+
+
+def _start_reprobe(thread_id: str, episode: PasswordEpisode) -> None:
+    if _pane_probes.get(thread_id) and (episode.reprobe is None or episode.reprobe.done()):
+        episode.reprobe = asyncio.create_task(_reprobe_loop(thread_id, episode))
+
+
+def _stop_reprobe(episode: PasswordEpisode) -> None:
+    task, episode.reprobe = episode.reprobe, None
+    if task is not None and task is not asyncio.current_task():
+        task.cancel()
+
+
+async def _reprobe_loop(thread_id: str, episode: PasswordEpisode) -> None:
+    """Re-run the probe once the person's input pauses and every REPROBE_EVERY seconds, until the episode ends."""
+    clock = asyncio.get_running_loop().time
+    while True:
+        next_probe = clock() + REPROBE_EVERY
+        while True:
+            # Cleared before the deadline is read, so input arriving after this always moves it.
+            episode.input_seen.clear()
+            due = next_probe if episode.last_input is None else min(next_probe, episode.last_input + REPROBE_AFTER_INPUT)
+            try:
+                await asyncio.wait_for(episode.input_seen.wait(), max(0.0, due - clock()))
+            except TimeoutError:
+                break
+        episode.last_input = None
+        if not await _reprobe(thread_id, episode):
+            return
+
+
+async def _reprobe(thread_id: str, episode: PasswordEpisode) -> bool:
+    """Probe once for an open episode; return whether it is still open and its loop should go on."""
+    async with _probe_locks.setdefault(thread_id, asyncio.Lock()):
+        probes = list(_pane_probes.get(thread_id, {}).values())
+        if _episodes.get(thread_id) is not episode or not probes or _step_ended(episode):
+            return False
+        try:
+            result = await probes[0](episode.visit, episode.seen_nodes)
+        except Exception as exc:
+            # A page mid-navigation can fail one probe. The episode stays open, as an agent command's
+            # failed probe fails closed, and the next interval probes again.
+            log.info("password re-probe for %s failed: %s", thread_id, exc)
+            return True
+        if result.visit == episode.visit and result.visible_nodes:
+            episode.seen_nodes = episode.seen_nodes | result.visible_nodes
+            return True
+        if (guarded := _guarded_visits.get(thread_id)) is not None and guarded.visit != result.visit:
+            _guarded_visits.pop(thread_id, None)
+        await _end_episode(thread_id, episode)
+        return False
 
 
 def _episode_for(thread_id: str, result: PasswordProbe, prior: PasswordEpisode | None) -> PasswordEpisode:
@@ -125,6 +251,26 @@ async def _open_episode(thread_id: str, episode: PasswordEpisode) -> None:
         )
     finally:
         db.close()
+
+
+async def _end_episode(thread_id: str, episode: PasswordEpisode) -> None:
+    _stop_reprobe(episode)
+    await _settle_episode(thread_id, episode)
+    _episodes.pop(thread_id, None)
+    _publish_password_page(thread_id, False)
+
+
+def _step_ended(episode: PasswordEpisode) -> bool:
+    """Whether the person declined the episode's step or it otherwise closed (AR7)."""
+    if episode.node_id is None:
+        return False
+    public = importlib.import_module("plans.public")
+    db = get_db()
+    try:
+        node = public.node_row(db, episode.node_id)
+    finally:
+        db.close()
+    return node["archived_at"] is not None or node["state"] in public.TERMINAL_STATES
 
 
 async def _settle_episode(thread_id: str, episode: PasswordEpisode) -> None:

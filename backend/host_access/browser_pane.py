@@ -2,16 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Awaitable, Callable
 
-from host_access import browser_cdp, browser_cli
-from host_access.browser_streaming import StreamPortResult
+from host_access import browser_cdp, browser_cli, browser_control, browser_screencast
 from host_access.processes import PROCESS_OWNER
 
-__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "repaint", "stream_port", "watch_page_metadata"]
+__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "clear_page_endpoint", "go", "is_open", "key_event", "match_pane", "mouse_event", "open_url", "page_info", "password_probe", "screencast", "watch_page_metadata"]
 
 HISTORY_ACTIONS = frozenset({"back", "forward", "reload"})
 _page_endpoints: dict[tuple[str, str], str] = {}
@@ -49,8 +46,26 @@ def clear_page_endpoint(thread_id: str, connection_token: str) -> None:
     _page_endpoints.pop((thread_id, connection_token), None)
 
 
-async def stream_port(thread_id: str) -> StreamPortResult:
-    return await PROCESS_OWNER.browser_sessions().stream_port(thread_id)
+async def is_open(thread_id: str) -> bool:
+    return await PROCESS_OWNER.browser_sessions().has_session(thread_id)
+
+
+async def screencast(thread_id: str, connection_token: str, deliver: Callable[[str], object]) -> None:
+    """Show the shared page in this pane until it leaves, restarting after each page-metrics change."""
+    endpoint = await _page_endpoint(thread_id, connection_token, "This page couldn't be shown")
+    cast = browser_screencast.PaneScreencast(endpoint, deliver)
+    browser_control.screencast_started(thread_id, connection_token, cast)
+    try:
+        await cast.run()
+    finally:
+        browser_control.screencast_ended(thread_id, connection_token, cast)
+
+
+async def password_probe(thread_id: str, connection_token: str, known_visit: str | None,
+                         known_nodes: frozenset[int]) -> browser_cdp.PasswordProbe:
+    """Probe the shared page for a password field over this pane's page endpoint."""
+    endpoint = await _page_endpoint(thread_id, connection_token, browser_control.PASSWORD_CHECK_FAILED)
+    return await browser_cdp.page_password_probe(endpoint, known_visit, known_nodes)
 
 
 async def _page_endpoint(thread_id: str, connection_token: str, error: str) -> str:
@@ -89,7 +104,6 @@ async def open_url(thread_id: str, url: str, connection_token: str | None = None
     return await PROCESS_OWNER.browser_sessions().run(
         thread_id, ("open", url), control_token=connection_token,
         session="new" if connection_token is None else "existing",
-        pane_navigation=connection_token is not None,
     )
 
 
@@ -114,21 +128,16 @@ async def go(thread_id: str, action: str, connection_token: str) -> str:
     if action not in HISTORY_ACTIONS:
         raise ValueError(f"unknown browser action: {action}")
     return await PROCESS_OWNER.browser_sessions().run(
-        thread_id, (action,), control_token=connection_token, session="existing", pane_navigation=True,
+        thread_id, (action,), control_token=connection_token, session="existing",
     )
-
-
-async def repaint(thread_id: str, connection_token: str) -> None:
-    """Make Chrome draw the page afresh: after a size or theme change it may send no frame until the page changes."""
-    with tempfile.TemporaryDirectory() as folder:
-        await PROCESS_OWNER.browser_sessions().run(
-            thread_id, ("screenshot", str(Path(folder) / "repaint.jpg")),
-            control_token=connection_token, session="existing",
-        )
 
 
 async def match_pane(thread_id: str, appearance: PaneAppearance, connection_token: str) -> None:
     """Show the open browser's page at the pane's size, pixel density and CORSIA theme."""
+    # Every pane on this thread shows the one shared page, so each captures at the new size from the
+    # restart that follows the viewport command and sends the resized picture at once.
+    for cast in browser_control.screencasts(thread_id):
+        cast.capture_at(round(appearance.width * appearance.scale), round(appearance.height * appearance.scale))
     owner = PROCESS_OWNER.browser_sessions()
     for args in (("set", "viewport", str(appearance.width), str(appearance.height), f"{appearance.scale:g}"),
                  ("set", "media", appearance.scheme)):

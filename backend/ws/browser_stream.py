@@ -1,4 +1,4 @@
-"""Authenticated relay between the browser pane and agent-browser's loopback stream."""
+"""Authenticated relay between the browser pane and the shared page it shows."""
 from __future__ import annotations
 
 import asyncio
@@ -6,9 +6,9 @@ import contextlib
 import json
 import logging
 import secrets
+from functools import partial
 from typing import Callable
 
-import websockets
 from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import WebSocketException
 
@@ -33,25 +33,25 @@ async def browser_stream_endpoint(ws: WebSocket, thread_id: str) -> None:
     if not _user_owns_thread(thread_id, user["id"]):
         await ws.close(code=1008)
         return
-    outcome = await browser_pane.stream_port(thread_id)
-    if outcome.no_session:
+    if not await browser_pane.is_open(thread_id):
         await ws.send_json({"type": "browser_state", "state": "no_browser_yet"})
         await ws.close()
         return
-    if outcome.error:
-        await ws.send_json({"type": "browser_state", "state": "error", "reason": outcome.error})
-        await ws.close()
-        return
     try:
-        async with websockets.connect(f"ws://127.0.0.1:{outcome.port}", max_size=None, close_timeout=1) as stream:
-            await _relay(ws, stream, thread_id, user["id"])
+        await _relay(ws, thread_id, user["id"])
     except WebSocketDisconnect:
         pass
+    except (BrowserSessionError, ProcessOwnerError) as exc:
+        await _close_with_error(ws, str(exc))
     except (OSError, WebSocketException):
-        # The pane may already be gone; its own close handler then clears its control state.
-        with contextlib.suppress(Exception):
-            await ws.send_json({"type": "browser_state", "state": "error", "reason": "browser stream connection failed"})
-            await ws.close()
+        await _close_with_error(ws, "browser stream connection failed")
+
+
+async def _close_with_error(ws: WebSocket, reason: str) -> None:
+    # The pane may already be gone; its own close handler then clears its control state.
+    with contextlib.suppress(Exception):
+        await ws.send_json({"type": "browser_state", "state": "error", "reason": reason})
+        await ws.close()
 
 
 async def _authenticate_pane_stream(ws: WebSocket) -> dict | None:
@@ -78,8 +78,8 @@ def _user_owns_thread(thread_id: str, user_id: str) -> bool:
         db.close()
 
 
-async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
-    """Proxy shared page frames and pane input for one authenticated connection."""
+async def _relay(pane: WebSocket, thread_id: str, user_id: str) -> None:
+    """Relay shared page frames and pane input for one authenticated connection."""
     connection_token = secrets.token_urlsafe(18)
 
     frames = PaneFrames()
@@ -90,13 +90,12 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
         if not frames.control(message):
             overflow.set()
 
-    browser_control.pane_connected(thread_id, connection_token, report)
+    browser_control.pane_connected(thread_id, connection_token, report,
+                                   partial(browser_pane.password_probe, thread_id, connection_token))
 
-    async def from_stream() -> None:
-        async for message in stream:
-            if not frames.offer(message):
-                overflow.set()
-                return
+    async def from_page() -> None:
+        # A frame only replaces the unsent frame, so frames never fill the bounded queue.
+        await browser_pane.screencast(thread_id, connection_token, frames.offer)
 
     async def from_pane() -> None:
         while True:
@@ -114,8 +113,10 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                 # CDP serializes pointer and key delivery on the page target, so typing cannot
                 # overtake the click that focuses its field.
                 await browser_pane.mouse_event(thread_id, data, connection_token)
+                browser_control.person_input(thread_id)
             elif kind == "input_keyboard":
                 await browser_pane.key_event(thread_id, data, connection_token)
+                browser_control.person_input(thread_id)
 
     async def metadata_events() -> None:
         async def emit(message: dict) -> None:
@@ -128,10 +129,9 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
 
     tasks: set[asyncio.Task] = set()
     try:
-        await stream.send(json.dumps({"type": "screencast_start"}))
         # Shared panes have no control-holder state.
         tasks = {
-            asyncio.create_task(from_stream()),
+            asyncio.create_task(from_page()),
             asyncio.create_task(from_pane()),
             asyncio.create_task(metadata_events()),
             asyncio.create_task(frames.send(pane.send_text)),
@@ -206,7 +206,6 @@ async def _run_pending(thread_id: str) -> None:
             connection_token, appearance = queued
             try:
                 await browser_pane.match_pane(thread_id, appearance, connection_token)
-                await browser_pane.repaint(thread_id, connection_token)
             except (BrowserSessionError, ProcessOwnerError) as exc:
                 log.warning("browser pane %s kept its old appearance: %s", thread_id, exc)
         else:
@@ -231,6 +230,9 @@ async def _navigate(thread_id: str, connection_token: str, data: dict) -> dict:
         return {"type": "navigate_result", "error": result}
     try:
         current_url, title = await browser_pane.page_info(thread_id, connection_token)
-    except (BrowserSessionError, ProcessOwnerError):
+    except (BrowserSessionError, ProcessOwnerError) as exc:
+        # The navigation succeeded but its session ended before the labels were read; the
+        # metadata watch labels whatever page a reopened pane shows.
+        log.warning("browser pane %s navigated but could not read the page labels: %s", thread_id, exc)
         current_url, title = (str(url) if action is None else None), None
     return {"type": "navigate_result", "error": None, "url": current_url, "title": title}

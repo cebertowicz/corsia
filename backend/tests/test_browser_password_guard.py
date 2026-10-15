@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from host_access import browser_cdp, browser_control
@@ -9,12 +11,14 @@ from host_access.browser_session_state import BrowserSessionError
 def clean_password_guard():
     browser_control._panes.clear()
     browser_control._pane_reports.clear()
+    browser_control._pane_probes.clear()
     browser_control._episodes.clear()
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
     yield
     browser_control._panes.clear()
     browser_control._pane_reports.clear()
+    browser_control._pane_probes.clear()
     browser_control._episodes.clear()
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
@@ -142,3 +146,139 @@ async def test_password_probe_failure_fails_closed():
 
     with pytest.raises(BrowserSessionError, match="couldn't be checked"):
         await browser_control.require_page_access("thread", broken_probe, ("snapshot",))
+
+
+class SignInPage:
+    """A single-document sign-in page whose password field hides once the person submits it."""
+
+    def __init__(self, failures=0):
+        self.submitted = False
+        self.failures = failures
+        self.agent_probes = 0
+        self.pane_probes = 0
+        self.probed = asyncio.Event()
+
+    def _probe(self):
+        return PasswordProbe("visit-one", "example.test", frozenset() if self.submitted else frozenset({42}))
+
+    async def agent_probe(self, _visit, _known):
+        self.agent_probes += 1
+        return self._probe()
+
+    async def pane_probe(self, _visit, _known):
+        self.pane_probes += 1
+        self.probed.set()
+        if self.failures:
+            self.failures -= 1
+            raise BrowserSessionError("This page couldn't be checked")
+        return self._probe()
+
+
+@pytest.fixture
+def steps(monkeypatch):
+    """Record the person's step opening and settling; the step stays open unless a test ends it."""
+    recorded = {"opened": [], "settled": [], "ended": False}
+
+    async def open_episode(_thread_id, episode):
+        episode.node_id = "password-step"
+        recorded["opened"].append(episode.visit)
+
+    async def settle_episode(_thread_id, episode):
+        recorded["settled"].append(episode.node_id)
+
+    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
+    monkeypatch.setattr(browser_control, "_settle_episode", settle_episode)
+    monkeypatch.setattr(browser_control, "_step_ended", lambda _episode: recorded["ended"])
+    monkeypatch.setattr(browser_control, "_publish_password_page", lambda _thread_id, _visible: None)
+    return recorded
+
+
+async def _agent_meets_password_page(page):
+    browser_control.pane_connected("thread", "pane", None, page.pane_probe)
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await browser_control.require_page_access("thread", page.agent_probe, ("snapshot",))
+    episode = browser_control._episodes["thread"]
+    assert episode.reprobe is not None
+    return episode, episode.reprobe
+
+
+async def _probed(page, count):
+    while page.pane_probes < count:
+        page.probed.clear()
+        await page.probed.wait()
+
+
+@pytest.mark.asyncio
+async def test_a_single_document_sign_in_settles_after_the_person_types_with_no_agent_command(steps):
+    page = SignInPage()
+    episode, loop = await _agent_meets_password_page(page)
+    clock = asyncio.get_running_loop().time
+    for _ in range(3):
+        browser_control.person_input("thread")
+    # The person presses Enter and the page hides its field without navigating.
+    page.submitted = True
+    typed = clock()
+    browser_control.person_input("thread")
+    await asyncio.wait_for(loop, 2.5)
+    assert clock() - typed >= browser_control.REPROBE_AFTER_INPUT
+    assert steps["settled"] == ["password-step"]
+    assert not browser_control.password_page("thread")
+    assert page.agent_probes == 1
+    # The loop ended itself after settling; nothing is left running.
+    assert loop.done() and not loop.cancelled() and episode.reprobe is None
+
+
+@pytest.mark.asyncio
+async def test_the_reprobe_keeps_the_episode_open_while_the_field_shows_and_stops_when_the_pane_leaves(steps, monkeypatch):
+    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+    page = SignInPage()
+    episode, loop = await _agent_meets_password_page(page)
+    await asyncio.wait_for(_probed(page, 3), 1)
+    assert browser_control.password_page("thread") and steps["settled"] == []
+    browser_control.pane_disconnected("thread", "pane")
+    await asyncio.gather(loop, return_exceptions=True)
+    assert loop.cancelled() and episode.reprobe is None
+    # The step stays open; the agent's next command probes again.
+    assert browser_control.password_page("thread")
+    # A pane that comes back resumes the episode's re-probe, and a closed browser stops it.
+    browser_control.pane_connected("thread", "pane", None, page.pane_probe)
+    resumed = episode.reprobe
+    assert resumed is not None and resumed is not loop
+    browser_control.browser_closed("thread")
+    await asyncio.gather(resumed, return_exceptions=True)
+    assert resumed.cancelled() and episode.reprobe is None
+
+
+@pytest.mark.asyncio
+async def test_the_reprobe_stops_without_probing_once_the_person_declines_the_step(steps, monkeypatch):
+    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+    page = SignInPage()
+    _episode, loop = await _agent_meets_password_page(page)
+    steps["ended"] = True
+    await asyncio.wait_for(loop, 1)
+    assert page.pane_probes == 0 and steps["settled"] == []
+    # AR7: the page stays guarded while its field shows.
+    assert browser_control.password_page("thread")
+
+
+@pytest.mark.asyncio
+async def test_an_agent_command_that_settles_the_episode_stops_its_reprobe(steps):
+    page = SignInPage()
+    episode, loop = await _agent_meets_password_page(page)
+    page.submitted = True
+    await browser_control.require_page_access("thread", page.agent_probe, ("snapshot",))
+    await asyncio.gather(loop, return_exceptions=True)
+    assert loop.cancelled() and episode.reprobe is None
+    assert steps["settled"] == ["password-step"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reprobe_keeps_the_episode_open_until_a_probe_succeeds(steps, monkeypatch):
+    monkeypatch.setattr(browser_control, "REPROBE_EVERY", 0.01)
+    page = SignInPage(failures=2)
+    page.submitted = True
+    _episode, loop = await _agent_meets_password_page(SignInPage())
+    browser_control.pane_connected("thread", "pane", None, page.pane_probe)
+    await asyncio.wait_for(loop, 1)
+    assert page.pane_probes == 3
+    assert steps["settled"] == ["password-step"]

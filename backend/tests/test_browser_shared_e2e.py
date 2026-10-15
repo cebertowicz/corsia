@@ -6,6 +6,7 @@ CORSIA_BROWSER_E2E=1 ... python -m pytest backend/tests/test_browser_shared_e2e.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from contextlib import contextmanager
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,12 +17,11 @@ from threading import Thread
 import tempfile
 import time
 
-import websockets
 from uuid import uuid4
 
 import pytest
 
-from host_access import browser_cdp, browser_control
+from host_access import browser_cdp, browser_control, browser_screencast
 from host_access.browser_sessions import BrowserSessionOwner
 
 
@@ -220,11 +220,30 @@ async def test_shared_pane_cdp_shortcut_sequence_submits_a_form():
         await owner.close_thread(thread_id)
 
 
-async def next_frame(stream) -> None:
-    while True:
-        message = await asyncio.wait_for(stream.recv(), timeout=5)
-        if '"type":"frame"' in message or '"type": "frame"' in message:
-            return
+@contextlib.asynccontextmanager
+async def pane_screencast(endpoint: str):
+    """Run the pane's own screencast of the page, yielding a reader of its next frame's metadata."""
+    frames: asyncio.Queue[dict] = asyncio.Queue()
+    cast = browser_screencast.PaneScreencast(endpoint, lambda message: frames.put_nowait(json.loads(message)))
+    running = asyncio.create_task(cast.run())
+
+    async def next_frame() -> dict:
+        arrived = asyncio.ensure_future(frames.get())
+        await asyncio.wait({arrived, running}, timeout=5, return_when=asyncio.FIRST_COMPLETED)
+        if not arrived.done():
+            arrived.cancel()
+            # A screencast that ended explains the missing frame better than a timeout.
+            assert not running.done(), running.exception() if not running.cancelled() else "cancelled"
+            raise AssertionError("no frame within 5 s")
+        frame = arrived.result()
+        assert frame["type"] == "frame" and frame["data"], frame
+        return frame["metadata"]
+
+    try:
+        yield cast, frames, next_frame
+    finally:
+        running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
 
 
 @pytest.mark.integration
@@ -238,22 +257,69 @@ async def test_shared_pane_input_to_frame_latency_reports_distribution():
     try:
         with fixture_server() as origin:
             assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=True, session="new")).startswith("Error:")
-            port = await owner.stream_port(thread_id)
-            assert port.port is not None, port.error
-            async with websockets.connect(f"ws://127.0.0.1:{port.port}", max_size=None) as stream:
-                await stream.send('{"type":"screencast_start"}')
-                # agent-browser may not repaint a static page until it receives a visual command.
-                with tempfile.TemporaryDirectory() as folder:
-                    assert not (await owner.run(thread_id, ("screenshot", f"{folder}/initial.jpg"), session="existing")).startswith("Error:")
-                await next_frame(stream)
+            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            async with pane_screencast(endpoint) as (_cast, frames, next_frame):
+                # Starting a screencast sends the current picture without any page change.
+                await next_frame()
                 samples = []
                 for index in range(15):
+                    while not frames.empty():
+                        frames.get_nowait()
                     started = time.perf_counter_ns()
-                    await stream.send(f'{{"type":"input_mouse","eventType":"mouseMoved","x":{300 + index},"y":24,"button":"none","clickCount":0}}')
-                    await next_frame(stream)
+                    await browser_cdp.dispatch_mouse_event(endpoint, {
+                        "eventType": "mouseMoved", "x": 300 + index, "y": 24, "button": "none", "clickCount": 0})
+                    await next_frame()
                     samples.append((time.perf_counter_ns() - started) / 1_000_000)
         ordered = sorted(samples)
         p95 = ordered[round((len(ordered) - 1) * .95)]
         print(f"input_to_frame_ms samples={len(samples)} median={statistics.median(samples):.1f} p95={p95:.1f}")
+    finally:
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pane_screencast_follows_a_viewport_change_and_an_agent_screenshot():
+    """The pane keeps getting frames after its size changes and while the agent takes screenshots."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-screencast-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-screencast", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            # Headless, as the pane's browser opens by default: a visible window under an emulated
+            # viewport can skip the frame for a one-glyph change, which says nothing about the stream.
+            assert not (await owner.run(thread_id, ("open", f"{origin}/plain.html"), show_window=False, session="new")).startswith("Error:")
+            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            async with pane_screencast(endpoint) as (cast, frames, next_frame):
+                shown = (await next_frame())["deviceWidth"]
+                # Registered as the pane's cast, so the command path restarts it as it does in the app.
+                browser_control.screencast_started(thread_id, "pane", cast)
+                try:
+                    # 419 is narrower than Chrome's smallest window, so its frames hold the page beside
+                    # the window's overflow; the pane must still get the page's own size.
+                    for width, height in ((419, 653), (542, 845), (419, 745)):
+                        cast.capture_at(width * 2, height * 2)
+                        assert not (await owner.run(thread_id, ("set", "viewport", str(width), str(height), "2"), session="existing")).startswith("Error:")
+                        # A frame sent before the command shows the page at its earlier size. Then the
+                        # restart sends the current picture at once, at the new size, with no page change
+                        # to prompt it.
+                        while (seen := (await next_frame())["deviceWidth"]) != width:
+                            assert seen == shown, (seen, shown, width)
+                        shown = width
+                        # The agent's screenshot still works mid-screencast, and the pane keeps streaming after it.
+                        with tempfile.TemporaryDirectory() as folder:
+                            shot = f"{folder}/agent.jpg"
+                            assert not (await owner.run(thread_id, ("screenshot", shot), session="existing")).startswith("Error:")
+                            assert os.path.getsize(shot) > 0
+                        while not frames.empty():
+                            frames.get_nowait()
+                        await browser_cdp.dispatch_mouse_event(endpoint, {
+                            "eventType": "mouseMoved", "x": 30 + width % 7, "y": 24, "button": "none", "clickCount": 0})
+                        # A page change after the screenshot still reaches the pane, and the screenshot's
+                        # temporary capture size never does.
+                        assert (await next_frame())["deviceWidth"] == width
+                finally:
+                    browser_control.screencast_ended(thread_id, "pane", cast)
     finally:
         await owner.close_thread(thread_id)

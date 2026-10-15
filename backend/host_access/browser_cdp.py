@@ -28,14 +28,23 @@ class PasswordProbe:
 class CdpClient:
     """Small request/response CDP client; the session owner supplies its endpoint."""
 
-    def __init__(self, endpoint: str) -> None:
+    def __init__(self, endpoint: str, *, max_size: int | None = 2**20) -> None:
         self.endpoint = endpoint
+        self._max_size = max_size
         self._next_id = 0
 
-    async def call(self, method: str, **params: object) -> dict:
+    def next_request(self) -> int:
+        """The id of the next send, for a reader that must know its answer before send returns."""
+        return self._next_id + 1
+
+    async def send(self, method: str, **params: object) -> int:
+        """Send one command without reading its response; the caller's reader receives it."""
         self._next_id += 1
-        request_id = self._next_id
-        await self.socket.send(json.dumps({"id": request_id, "method": method, "params": params}))
+        await self.socket.send(json.dumps({"id": self._next_id, "method": method, "params": params}))
+        return self._next_id
+
+    async def call(self, method: str, **params: object) -> dict:
+        request_id = await self.send(method, **params)
         while True:
             response = json.loads(await self.socket.recv())
             if response.get("id") != request_id:
@@ -48,7 +57,7 @@ class CdpClient:
             return result
 
     async def __aenter__(self) -> CdpClient:
-        self.socket = await websockets.connect(self.endpoint, max_size=2**20, open_timeout=3, close_timeout=1)
+        self.socket = await websockets.connect(self.endpoint, max_size=self._max_size, open_timeout=3, close_timeout=1)
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -57,7 +66,11 @@ class CdpClient:
 
 async def password_probe(run: RunCommand, known_visit: str | None, known_nodes: frozenset[int]) -> PasswordProbe:
     """Find visible password controls in CDP DOM state, preserving this visit's reveal-toggle nodes."""
-    endpoint = await _endpoint(run)
+    return await page_password_probe(await _endpoint(run), known_visit, known_nodes)
+
+
+async def page_password_probe(endpoint: str, known_visit: str | None, known_nodes: frozenset[int]) -> PasswordProbe:
+    """Run the password probe on a page endpoint already held, as a connected pane holds one."""
     async with CdpClient(endpoint) as cdp:
         frame = await cdp.call("Page.getFrameTree")
         loader = _loader_id(frame)

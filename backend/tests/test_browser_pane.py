@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 from types import SimpleNamespace
 
@@ -13,18 +14,25 @@ from host_access.browser_sessions import BrowserSessionOwner
 from tools import browser_runtime
 from ws import browser_stream
 
+# The real screencast owner, before the autouse fixture replaces it.
+_SCREENCAST = browser_pane.screencast
+
 
 @pytest.fixture(autouse=True)
 def _no_browser_guard_state():
     browser_control._panes.clear()
+    browser_control._pane_probes.clear()
     browser_control._episodes.clear()
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
+    browser_control._screencasts.clear()
     yield
     browser_control._panes.clear()
+    browser_control._pane_probes.clear()
     browser_control._episodes.clear()
     browser_control._guarded_visits.clear()
     browser_control._probe_locks.clear()
+    browser_control._screencasts.clear()
 
 
 class FakePane:
@@ -56,18 +64,29 @@ class FakePane:
         self.closed.append(code)
 
 
-class FakeStream:
-    def __init__(self):
-        self.sent = []
+class IdleScreencast:
+    """Stands in for a pane's page screencast, recording which panes it served and when each ended."""
 
-    async def send(self, message):
-        self.sent.append(message)
+    def __init__(self, frames=()):
+        self.frames = list(frames)
+        self.started = []
+        self.stopped = []
 
-    def __aiter__(self):
-        return self
+    async def __call__(self, thread_id, connection_token, deliver):
+        self.started.append((thread_id, connection_token))
+        try:
+            for frame in self.frames:
+                deliver(json.dumps(frame))
+            await asyncio.Future()
+        finally:
+            self.stopped.append((thread_id, connection_token))
 
-    async def __anext__(self):
-        await asyncio.Future()
+
+@pytest.fixture(autouse=True)
+def screencast(monkeypatch):
+    cast = IdleScreencast()
+    monkeypatch.setattr(browser_pane, "screencast", cast)
+    return cast
 
 
 def test_open_url_accepts_http_and_https_only():
@@ -135,7 +154,7 @@ class RenderedOwner:
 
 
 @pytest.mark.asyncio
-async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp_target(monkeypatch):
+async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp_target(monkeypatch, screencast):
     click = [{"type": "input_mouse", "eventType": kind, "x": 5, "y": 6, "button": "left", "clickCount": 1}
              for kind in ("mousePressed", "mouseReleased")]
     keys = [
@@ -163,12 +182,19 @@ async def test_relay_delivers_click_shortcut_text_then_enter_in_order_on_one_cdp
     monkeypatch.setattr(browser_pane.browser_cdp, "dispatch_mouse_event", recorder("mouse"))
     monkeypatch.setattr(browser_pane.browser_cdp, "dispatch_key_event", recorder("key"))
     monkeypatch.setattr(browser_pane.browser_cdp, "watch_page_metadata", no_metadata)
-    stream = FakeStream()
+    connected, inputs = [], []
+    pane_connected = browser_control.pane_connected
+    monkeypatch.setattr(browser_control, "pane_connected", lambda *args: connected.append(args) or pane_connected(*args))
+    monkeypatch.setattr(browser_control, "person_input", inputs.append)
     with pytest.raises(WebSocketDisconnect):
-        await browser_stream._relay(pane, stream, "thread-1", "user-1")
-    # Every person event reached the page target in the order typed; none went through the
-    # unacknowledged stream, so nothing could overtake the shortcut, the text or the submit.
-    assert stream.sent == [json.dumps({"type": "screencast_start"})]
+        await browser_stream._relay(pane, "thread-1", "user-1")
+    # Every person event reached the page target in the order typed, so nothing could overtake
+    # the shortcut, the text or the submit.
+    assert len(screencast.started) == 1
+    # Each one is noted for an open password episode's re-probe, which uses this pane's own probe.
+    assert inputs == ["thread-1"] * len(click + keys)
+    [(_thread, token, _report, probe)] = connected
+    assert probe.func is browser_pane.password_probe and probe.args == ("thread-1", token)
     assert delivered == [
         ("mouse", "ws://page.test/current", "mousePressed", None),
         ("mouse", "ws://page.test/current", "mouseReleased", None),
@@ -284,11 +310,7 @@ async def test_pane_resizes_are_matched_one_at_a_time_latest_first(monkeypatch):
         fitted.append((appearance.width, appearance.height))
         await release.wait()
 
-    async def repaint(thread_id, token):
-        pass
-
     monkeypatch.setattr(browser_stream.browser_pane, "match_pane", match_pane)
-    monkeypatch.setattr(browser_stream.browser_pane, "repaint", repaint)
     sizes = [{"type": "appearance", "width": w, "height": 600, "scale": 2, "scheme": "dark"} for w in (400, 500, 600)]
     pane = SimpleNamespace(sent=[], messages=[json.dumps(size) for size in sizes])
 
@@ -304,23 +326,12 @@ async def test_pane_resizes_are_matched_one_at_a_time_latest_first(monkeypatch):
     async def send_json(payload):
         pane.sent.append(payload)
 
-    class Stream:
-        async def send(self, _message):
-            pass
-
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            await asyncio.sleep(1)
-            raise StopAsyncIteration
-
     async def send_text(payload):
         pane.sent.append(json.loads(payload))
 
     pane.receive_text, pane.send_json, pane.send_text = receive_text, send_json, send_text
     with pytest.raises(browser_stream.WebSocketDisconnect):
-        await browser_stream._relay(pane, Stream(), "thread-1", "user-1")
+        await browser_stream._relay(pane, "thread-1", "user-1")
     # The first fit runs; the two that arrive meanwhile collapse into the latest one.
     assert fitted == [(400, 600), (600, 600)]
 
@@ -333,12 +344,7 @@ async def test_a_newer_pane_size_supersedes_an_older_connections(monkeypatch):
         fitted.append((token, appearance.height))
         await release.wait()
 
-    async def repaint(thread_id, token):
-        repainted.append(token)
-
-    repainted = []
     monkeypatch.setattr(browser_stream.browser_pane, "match_pane", match_pane)
-    monkeypatch.setattr(browser_stream.browser_pane, "repaint", repaint)
     size = {"width": 400, "scale": 1, "scheme": "light"}
     browser_stream._request_match("thread-1", "old-pane", {**size, "height": 1030})
     await asyncio.sleep(0)
@@ -348,8 +354,6 @@ async def test_a_newer_pane_size_supersedes_an_older_connections(monkeypatch):
     await browser_stream._runners["thread-1"]
     assert fitted == [("old-pane", 1030), ("new-pane", 830)]
     assert "thread-1" not in browser_stream._runners
-    # Each applied appearance is redrawn, since Chrome may send no frame for it on a static page.
-    assert repainted == ["old-pane", "new-pane"]
 
 
 @pytest.mark.asyncio
@@ -414,76 +418,222 @@ async def test_navigate_accepts_an_authenticated_shared_pane(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stream_port_distinguishes_no_session_from_failure(monkeypatch):
+async def test_has_session_reports_only_an_open_browser():
     owner = BrowserSessionOwner(namespace="corsia-pane-test")
-    assert (await owner.stream_port("thread-1")).no_session
-
-    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session"))
-    owner._sessions["thread-1"] = runtime
-    monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
-    monkeypatch.setattr(owner, "_observe", lambda _runtime: asyncio.sleep(0, result=SimpleNamespace(alive=True, artifacts_absent=True)))
-    monkeypatch.setattr(owner, "_observe_attempt", lambda _runtime: asyncio.sleep(0))
-    monkeypatch.setattr(owner, "_session_argv", lambda _runtime, args: args)
-
-    async def invoke(args, **_kwargs):
-        if args == ("stream", "status"):
-            return CommandResult(0, '{"success":true,"data":{"enabled":false,"port":null}}', "")
-        return CommandResult(1, "", "failed")
-
-    monkeypatch.setattr(owner, "_invoke", invoke)
-    failed = await owner.stream_port("thread-1")
-    assert failed.port is None
-    assert failed.error == "browser stream could not be enabled"
-
-
-def _streaming_owner(monkeypatch, responses):
-    owner = BrowserSessionOwner(namespace="corsia-pane-test")
+    assert not await owner.has_session("thread-1")
     owner._sessions["thread-1"] = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session"))
-    calls = []
+    assert await owner.has_session("thread-1")
+
+
+def _authenticated_pane(monkeypatch, *, open_browser):
+    monkeypatch.setattr(browser_stream, "authenticate", lambda _token: {"id": "user-1"})
+    monkeypatch.setattr(browser_stream, "_user_owns_thread", lambda *_args: True)
+    monkeypatch.setattr(browser_pane, "is_open", lambda _thread_id: asyncio.sleep(0, result=open_browser))
+    monkeypatch.setattr(browser_pane, "watch_page_metadata", lambda *_args: asyncio.Future())
+    return FakePane()
+
+
+@pytest.mark.asyncio
+async def test_stream_says_no_browser_yet_without_starting_a_screencast(monkeypatch, screencast):
+    pane = _authenticated_pane(monkeypatch, open_browser=False)
+    await browser_stream.browser_stream_endpoint(pane, "thread-1")
+    assert pane.json == [{"type": "browser_state", "state": "no_browser_yet"}]
+    assert pane.closed == [None]
+    assert screencast.started == []
+
+
+@pytest.mark.asyncio
+async def test_a_screencast_chrome_refuses_closes_the_pane_with_its_reason(monkeypatch):
+    pane = _authenticated_pane(monkeypatch, open_browser=True)
+    pane.receive_text = lambda: asyncio.Future()
+
+    async def refused(_thread_id, _token, _deliver):
+        raise BrowserSessionError("This page couldn't be shown")
+
+    monkeypatch.setattr(browser_pane, "screencast", refused)
+    await asyncio.wait_for(browser_stream.browser_stream_endpoint(pane, "thread-1"), 1)
+    assert pane.json == [{"type": "browser_state", "state": "error", "reason": "This page couldn't be shown"}]
+    assert pane.closed == [None]
+    assert not browser_control.has_pane("thread-1")
+
+
+@pytest.mark.asyncio
+async def test_relay_shows_page_frames_and_stops_the_screencast_when_the_pane_leaves(monkeypatch):
+    frame = {"type": "frame", "data": "jpeg", "metadata": {"deviceWidth": 400, "deviceHeight": 600}}
+    cast = IdleScreencast([frame])
+    monkeypatch.setattr(browser_pane, "screencast", cast)
+    monkeypatch.setattr(browser_pane, "watch_page_metadata", lambda *_args: asyncio.Future())
+    pane, left = FakePane(), asyncio.Event()
+
+    async def receive_text():
+        await left.wait()
+        raise WebSocketDisconnect()
+
+    pane.receive_text = receive_text
+    relay = asyncio.create_task(browser_stream._relay(pane, "thread-1", "user-1"))
+    while not pane.text:
+        await asyncio.sleep(0)
+    assert [json.loads(text) for text in pane.text] == [frame]
+    assert cast.stopped == []
+    left.set()
+    with pytest.raises(WebSocketDisconnect):
+        await asyncio.wait_for(relay, 1)
+    assert len(cast.started) == 1 and cast.stopped == cast.started
+
+
+class RecordedScreencast:
+    """A pane screencast that records its capture size, holds and restarts into a shared log."""
+
+    def __init__(self, endpoint, log):
+        self.endpoint, self.log, self.ended = endpoint, log, asyncio.Event()
+
+    async def run(self):
+        await self.ended.wait()
+
+    def capture_at(self, width, height):
+        self.log.append(("capture_at", self.endpoint, width, height))
+
+    def hold(self):
+        self.log.append(("hold", self.endpoint))
+
+    async def restart(self):
+        self.log.append(("restart", self.endpoint))
+
+
+@pytest.mark.asyncio
+async def test_match_pane_sizes_every_screencast_on_the_thread_before_the_viewport_command(monkeypatch):
+    log = []
+
+    class Owner:
+        async def run(self, _thread_id, args, **_kwargs):
+            log.append(args[:2])
+            return "ok"
+
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: Owner())
+    for thread_id, token in (("thread-1", "pane-1"), ("thread-1", "pane-2"), ("thread-2", "pane-3")):
+        browser_control.screencast_started(thread_id, token, RecordedScreencast(token, log))
+    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"), "pane-1")
+    # The page is shared, so every pane on its thread captures at the new device size, starting with
+    # the restart that the viewport command triggers.
+    assert log == [("capture_at", "pane-1", 1360, 2060), ("capture_at", "pane-2", 1360, 2060),
+                   ("set", "viewport"), ("set", "media")]
+
+
+@pytest.mark.asyncio
+async def test_each_pane_screencast_is_listed_only_while_it_runs(monkeypatch):
+    async def page_endpoint(_thread_id, token, _error):
+        return f"page-{token}"
+
+    monkeypatch.setattr(browser_pane, "_page_endpoint", page_endpoint)
+    monkeypatch.setattr(browser_pane.browser_screencast, "PaneScreencast", lambda endpoint, _deliver: RecordedScreencast(endpoint, []))
+    first = asyncio.create_task(_SCREENCAST("thread-1", "pane-1", lambda _message: None))
+    second = asyncio.create_task(_SCREENCAST("thread-1", "pane-2", lambda _message: None))
+    while len(browser_control.screencasts("thread-1")) < 2:
+        await asyncio.sleep(0)
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)
+    [remaining] = browser_control.screencasts("thread-1")
+    assert remaining.endpoint == "page-pane-2"
+    remaining.ended.set()
+    await second
+    assert browser_control.screencasts("thread-1") == []
+    assert browser_control._screencasts == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("args", "restarted"), [
+    (("screenshot", "/tmp/shot.jpg"), True),
+    (("set", "viewport", "400", "600", "2"), True),
+    (("set", "device", "iPhone 15"), True),
+    (("set", "media", "dark"), False),
+    (("click", "@e1"), False),
+    (("snapshot", "-i"), False),
+])
+async def test_a_page_metrics_command_holds_then_restarts_each_pane_screencast_on_its_thread(args, restarted):
+    log = []
+    browser_control.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
+    browser_control.screencast_started("thread-2", "pane-2", RecordedScreencast("pane-2", log))
+    browser_control.page_command_starting("thread-1", args)
+    await browser_control.page_command_finished("thread-1", args)
+    assert log == ([("hold", "pane-1"), ("restart", "pane-1")] if restarted else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_the_command_path_holds_pane_screencasts_during_an_agent_screenshot_and_restarts_them_after(monkeypatch, fails):
+    owner = BrowserSessionOwner(namespace="corsia-pane-test")
+    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session"))
+    log = []
+
+    async def run_admitted(_runtime, args, **_kwargs):
+        log.append(("command", args[0]))
+        if fails:
+            raise BrowserSessionError("The browser stopped")
+        return CommandResult(0, '{"success":true,"data":{}}', ""), False
+
+    async def page_access(*_args):
+        pass
+
+    monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
     monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
-    monkeypatch.setattr(owner, "_observe", lambda _runtime: asyncio.sleep(0, result=SimpleNamespace(alive=True, artifacts_absent=True)))
-    monkeypatch.setattr(owner, "_observe_attempt", lambda _runtime: asyncio.sleep(0))
-    monkeypatch.setattr(owner, "_close_runtime", lambda runtime: asyncio.sleep(0, result=calls.append("reset")))
-    monkeypatch.setattr(owner, "_session_argv", lambda _runtime, args: args)
+    monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
+    monkeypatch.setattr(owner, "_run_admitted", run_admitted)
+    monkeypatch.setattr(browser_control, "require_page_access", page_access)
+    browser_control.screencast_started("thread-1", "pane-1", RecordedScreencast("pane-1", log))
+    with pytest.raises(BrowserSessionError) if fails else contextlib.nullcontext():
+        await owner.run("thread-1", ("screenshot", "/tmp/shot.jpg"), session="existing")
+    # A held pane shows nothing until the restart, so a failed command restarts it too.
+    assert log == [("hold", "pane-1"), ("command", "screenshot"), ("restart", "pane-1")]
 
-    async def invoke(args, **_kwargs):
-        calls.append(args)
-        return responses.pop(0)
 
-    monkeypatch.setattr(owner, "_invoke", invoke)
-    return owner, calls
+def _password_page_owner(monkeypatch, opened):
+    """A session owner on a page with a visible password field, recording any step the guard opens."""
+    owner = BrowserSessionOwner(namespace="corsia-pane-test")
+    runtime = BrowserRuntime(BrowserSessionRecord("thread-1", "test-session"))
+    answers = {("get", "url"): {"url": "https://login.example.test/"}, ("get", "title"): {"title": "Sign in"},
+               ("set", "viewport"): {}, ("set", "media"): {}}
+
+    async def run_admitted(_runtime, args, **_kwargs):
+        return CommandResult(0, json.dumps({"success": True, "data": answers[tuple(args[:2])]}), ""), False
+
+    async def password_field(_run, _visit, _known):
+        return browser_control.PasswordProbe("visit-1", "login.example.test", frozenset({42}))
+
+    async def open_episode(_thread_id, episode):
+        episode.node_id = "password-step"
+        opened.append(episode.visit)
+
+    monkeypatch.setattr(browser_runtime.browser_cli, "check_local_mode", lambda _args: None)
+    monkeypatch.setattr(owner, "_pin_native", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(owner, "_admit", lambda *_args, **_kwargs: asyncio.sleep(0, result=runtime))
+    monkeypatch.setattr(owner, "_run_admitted", run_admitted)
+    monkeypatch.setattr(browser_pane.browser_cdp, "password_probe", password_field)
+    monkeypatch.setattr(browser_control, "_open_episode", open_episode)
+    monkeypatch.setattr(browser_control.state, "broadcast_to_thread", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(browser_pane.PROCESS_OWNER, "browser_sessions", lambda: owner)
+    return owner
 
 
 @pytest.mark.asyncio
-async def test_stream_port_reuses_a_stream_the_daemon_already_enabled(monkeypatch):
-    owner, calls = _streaming_owner(monkeypatch, [
-        CommandResult(0, '{"success":true,"data":{"enabled":true,"port":4567}}', ""),
-    ])
-    result = await owner.stream_port("thread-1")
-    assert (result.port, result.error) == (4567, None)
-    assert calls == [("stream", "status")]
+async def test_the_pane_reads_its_labels_and_sizes_a_password_page_without_the_agent_guard(monkeypatch):
+    opened = []
+    owner = _password_page_owner(monkeypatch, opened)
+    # The person navigated their pane to a sign-in page: its address and tab label are theirs to see,
+    # and their pane still sizes the page. No agent asked, so no password step opens.
+    assert await browser_pane.page_info("thread-1", "pane-1") == ("https://login.example.test/", "Sign in")
+    await browser_pane.match_pane("thread-1", browser_pane.PaneAppearance(680, 1030, 2.0, "dark"), "pane-1")
+    assert opened == []
+    # The agent's own read of the same page is refused and opens the person's step.
+    with pytest.raises(BrowserSessionError, match="asks for a password"):
+        await owner.run("thread-1", ("get", "url"), session="existing")
+    assert opened == ["visit-1"]
 
 
 @pytest.mark.asyncio
-async def test_stream_port_enables_streaming_when_it_is_off(monkeypatch):
-    owner, calls = _streaming_owner(monkeypatch, [
-        CommandResult(0, '{"success":true,"data":{"enabled":false,"port":null}}', ""),
-        CommandResult(0, '{"success":true,"data":{"enabled":true}}', ""),
-        CommandResult(0, '{"success":true,"data":{"enabled":true,"port":4567}}', ""),
-    ])
-    result = await owner.stream_port("thread-1")
-    assert (result.port, result.error) == (4567, None)
-    assert calls == [("stream", "status"), ("stream", "enable"), ("stream", "status")]
+@pytest.mark.parametrize("args", [("snapshot",), ("eval", "document.title"), ("get", "value", "42"), ("screenshot", "/tmp/x.png")])
+async def test_a_pane_command_is_only_navigation_labels_or_page_size(monkeypatch, args):
+    owner = _password_page_owner(monkeypatch, [])
+    with pytest.raises(BrowserSessionError, match="only navigates"):
+        await owner.run("thread-1", args, control_token="pane-1", session="existing")
 
 
-@pytest.mark.asyncio
-async def test_timed_out_stream_enable_resets_the_session_like_any_command(monkeypatch):
-    owner, calls = _streaming_owner(monkeypatch, [
-        CommandResult(0, '{"success":true,"data":{"enabled":false,"port":null}}', ""),
-        CommandResult(-1, "", "", timed_out=True),
-    ])
-    result = await owner.stream_port("thread-1")
-    assert result.error == "browser stream could not be enabled"
-    assert calls == [("stream", "status"), ("stream", "enable"), "reset"]
-    assert owner._sessions["thread-1"].record.terminal_state == "resetting"
-    assert owner.active_command_count() == 0
