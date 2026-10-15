@@ -1,63 +1,18 @@
-"""Arrival-driven correction recording for the verified local ONNX asset.
-
-One owner, ``CorrectionsWorker`` (the module singleton ``WORKER``), holds all worker state.
-Every classifier state change goes through ``CorrectionsWorker._set``, which logs it and
-updates the snapshot; the scan status changes only through ``_owe``, ``_hold`` and
-``_finish_scan``.
-
-Classifier state (``state``)::
-
-    from                         event                                              to
-    any                          manifest.json missing                              absent
-    any                          manifest unpinned, malformed, wrong size/checksum  failed (reinstall)
-    absent|failed                manifest verified before any child has run         unavailable ("not
-                                                                                    run yet")
-    unavailable                  manifest verified, a child starts                  loading
-    loading                      child replied ready (self-test passed) and a call  ready
-                                 succeeded
-    loading|ready                verify, self-test, ABI or import failure           failed (not retryable;
-                                                                                     waits for another asset
-                                                                                     version or restart)
-    loading|ready                load timeout, memory ceiling or child exit         unavailable (reason kept;
-                                                                                     retried at next arrival/startup)
-    ready                        child restarted after idle exit or a message       ready
-                                 failure, and the restart loaded
-    loading|ready                two failures of a loaded child on one input        unchanged; an
-                                 (timeout, rss, child_error)                        ``unreadable`` fact
-
-``ready`` is never set by manifest verification alone. An outage records nothing and
-leaves the message pending; an unreadable input is an outcome, recorded with its
-``failure_reason``, and the worker moves on.
-
-Scan status (``scan``: idle | owed | running, plus ``held_reason``)::
-
-    from      event                                                              to
-    idle      startup; an arrival not queued (queue full, stopping); the         owed
-              classifier becomes ready from another state; the worker task died
-    owed      the arrival queue is empty and nothing holds the scan              running
-    running   the pass found nothing pending and activation ran                  idle
-    running   a live arrival is waiting                                          owed
-    running   outage, absent or failed asset, pass error, corrupt activation      owed, held_reason
-    held      an arrival is recorded (scored or unreadable), or startup          owed, hold cleared
-
-``owed`` is cleared only when a pass finishes, so an error can delay the scan but never
-lose it.
-"""
+"""Arrival-driven correction recording with one worker-owned classifier state machine."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import re
 import time
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from core.corrections_child import ClassifierChild, ClassifierUnavailable, MessageFailed
-from core.corrections_classifier import ASSET_ID, AssetError, AssetManifest, asset_root, cleanup_staging, load_pinned_manifest
+from core.corrections_classifier import AssetError, AssetManifest, cleanup_staging
 from core.corrections_recording import ClassifierVersion, CorrectionCandidate
+from jobs.corrections_assets import installed as _installed, select_manifest, version_number
 from infra.db_async import run_in_db
 from jobs.corrections_activation import activate_after_backfill, retry_pending_activation_notice
 from jobs.corrections_recording import (
@@ -67,74 +22,23 @@ from jobs.corrections_recording import (
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
 ATTEMPTS_PER_KIND = 2
-_VERSION_LABEL = re.compile(r"v([0-9]+)")
-# Selection is recomputed from pinned assets on every load attempt; the worker copies it into its snapshot.
 _LAST_VERSIONS: list[dict[str, str | None]] = []
-
 
 def _clock() -> float:
     return time.monotonic()
 
-
-def version_number(label: str) -> int:
-    """Order a pinned version label; only `v<number>` is accepted."""
-    match = _VERSION_LABEL.fullmatch(label)
-    if match is None:
-        raise AssetError(f"classifier version {label!r} is not of the form v<number>")
-    return int(match.group(1))
-
-
-def _candidate_roots() -> list[Path]:
-    from core import corrections_asset_pins
-
-    root = asset_root()
-    siblings = (
-        root.parent / f"{ASSET_ID}-{version}"
-        for version in sorted(corrections_asset_pins.PINNED_MANIFESTS, key=version_number, reverse=True)
-    )
-    return [root, *(path for path in siblings if path != root)]
-
-
-def _installed() -> bool:
-    return any((path / "manifest.json").is_file() for path in _candidate_roots())
-
-
-
 def _manifest() -> AssetManifest:
-    """Select the highest verified pinned asset version; an older verified one keeps serving.
-
-    Layout: `asset_root()` stays where it is and holds whichever version is installed
-    there; a second version installs to the sibling `corrections-classifier-<version>`
-    beside it, one candidate per pinned version and no directory scanning. Each candidate
-    is accepted only through `load_pinned_manifest` and `verify_files`, so a directory's
-    name never decides which version it is. The highest declared `v<number>` wins and a
-    tie goes to `asset_root()`. Every present candidate, ready or failed with its reason,
-    is reported in the state under `versions`, with the winner as `selected_version`.
-    """
-    verified: list[tuple[int, int, AssetManifest]] = []
-    versions: list[dict[str, str | None]] = []
-    for order, directory in enumerate(_candidate_roots()):
-        if not (directory / "manifest.json").is_file():
-            continue
+    global _LAST_VERSIONS
+    try:
+        manifest, _LAST_VERSIONS = select_manifest()
+        return manifest
+    except AssetError:
+        # Preserve the selection diagnostics for the system state snapshot.
         try:
-            manifest = load_pinned_manifest(directory)
-            manifest.verify_files()
-            number = version_number(manifest.version)
-        except (AssetError, OSError) as error:
-            versions.append({"location": directory.name, "version": None, "state": "failed", "reason": str(error)})
-            continue
-        verified.append((number, -order, manifest))
-        versions.append({"location": directory.name, "version": manifest.version, "state": "ready", "reason": None})
-    if verified:
-        selected = max(verified, key=lambda item: item[:2])[2]
-        global _LAST_VERSIONS
-        _LAST_VERSIONS = versions
-        return selected
-    _LAST_VERSIONS = versions
-    if not versions:
-        raise AssetError("classifier asset is absent")
-    raise AssetError(f"no verified corrections classifier asset: {versions[0]['reason']}")
-
+            _, _LAST_VERSIONS = select_manifest()
+        except AssetError:
+            pass
+        raise
 
 class CorrectionsWorker:
     """The one owner of the arrival queue, the model child and both state machines."""
@@ -249,10 +153,7 @@ class CorrectionsWorker:
         self.children = {key: value for key, value in self.children.items() if value is not child}
 
     async def _classify(self, candidate: CorrectionCandidate) -> bool:
-        """Record one candidate; True when a fact, scored or unreadable, was written.
-
-        False means an outage: nothing was recorded and the message stays pending.
-        """
+        """Record one candidate, or leave it pending on an outage."""
         manifest = await self._verified_manifest()
         if manifest is None:
             return False
@@ -457,13 +358,10 @@ class CorrectionsWorker:
         self.child_version = None
         self.active_manifest = None
         for child in children:
-            # A load or call may still run in a worker thread: kill without its lock, then reap.
             child.kill()
             await asyncio.to_thread(child.close)
 
-
 WORKER = CorrectionsWorker()
-
 
 async def _startup_worker() -> None:
     try:
@@ -472,33 +370,24 @@ async def _startup_worker() -> None:
         logger.exception("corrections activation notice retry failed; the next startup retries it")
     await WORKER.run()
 
-
 def notify(message_id: str) -> None:
     """Queue one arrival for the worker; see ``notify_if_owner`` for the send-path guard."""
     WORKER.notify(message_id)
-
 
 def startup_scan() -> None:
     """Discard interrupted staging and start the one arrival-first worker."""
     WORKER.startup()
 
-
 async def shutdown() -> None:
     """Cancel and join the worker, then stop the model child; later arrivals wait for the next startup."""
     await WORKER.shutdown()
 
-
 def state_snapshot(db: Any = None) -> dict[str, object]:
-    """Return the visible local-asset state without loading a model on demand.
-
-    With a database connection it also counts the current version's ``unreadable``
-    messages in the Measurement window.
-    """
+    """Return state and, with a DB, the current version's unreadable-message count."""
     snapshot = WORKER.snapshot()
     if db is not None:
         snapshot["unreadable_messages"] = unreadable_messages(db, WORKER.version) if WORKER.version else 0
     return snapshot
-
 
 def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
     """Best-effort post-admission trigger for one ``AcceptedInput``; it can never delay or fail a send."""

@@ -438,7 +438,8 @@ def test_runtime_refuses_an_unpinned_asset_in_the_installed_location(monkeypatch
     root = tmp_path / "corrections-classifier"
     root.mkdir()
     path = _manifest(root)
-    monkeypatch.setattr(corrections_realtime, "asset_root", lambda: root)
+    from jobs import corrections_assets
+    monkeypatch.setattr(corrections_assets, "asset_root", lambda: root)
     monkeypatch.setitem(corrections_asset_pins.PINNED_MANIFESTS, "v1", "0" * 64)
     with pytest.raises(AssetError, match="sha256 does not match"):
         corrections_realtime._manifest()

@@ -106,7 +106,8 @@ async def test_absent_asset_records_nothing_and_says_absent(worker, monkeypatch,
     from jobs import corrections_realtime
 
     monkeypatch.setattr(corrections_realtime, "_manifest", _absent())
-    monkeypatch.setattr(corrections_realtime, "asset_root", lambda: tmp_path / "missing")
+    from jobs import corrections_assets
+    monkeypatch.setattr(corrections_assets, "asset_root", lambda: tmp_path / "missing")
     recorded = AsyncMock()
     monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
 
@@ -122,7 +123,8 @@ async def test_present_but_unpinned_asset_is_failed_and_not_retryable(worker, mo
     from jobs import corrections_realtime
 
     (tmp_path / "manifest.json").write_text("invalid", encoding="utf-8")
-    monkeypatch.setattr(corrections_realtime, "asset_root", lambda: tmp_path)
+    from jobs import corrections_assets
+    monkeypatch.setattr(corrections_assets, "asset_root", lambda: tmp_path)
     monkeypatch.setattr(corrections_realtime, "_manifest", _absent("manifest sha256 does not match the source pin"))
 
     assert await worker._classify(_candidate()) is False
