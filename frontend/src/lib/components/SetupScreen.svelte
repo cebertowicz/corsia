@@ -45,11 +45,11 @@
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localProgress = $derived(local?.download_percent == null ? undefined : local.download_percent / 100);
-	const localStage = $derived(local?.setup_stage || 'Downloading');
+	const localJobMeta = $derived(local?.download_percent == null ? local?.setup_stage || 'Downloading' : `${local.download_percent}%`);
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
 	const localJob = $derived<SetupJob | undefined>(
 		localDownloading
-			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: localStage, progress: localProgress }
+			? { label: status.model_name || local?.name || 'Local model', state: 'busy', meta: localJobMeta, progress: localProgress }
 			: local?.setup_error || localStartError
 				? { label: status.model_name || local?.name || 'Local model', state: 'error', meta: 'Couldn’t download' }
 				: undefined,
@@ -263,7 +263,9 @@
 
 	function sourceMeta(source: ModelSource): string {
 		if (source.source === 'omlx') {
-			if (source.setup_downloading || source.setup_stage) return source.setup_stage || 'Downloading';
+			if (source.setup_downloading || source.setup_stage) {
+				return source.download_percent == null && source.setup_stage ? source.setup_stage : 'Downloading in the background';
+			}
 			if (source.setup_error || localStartError) return 'Download needs attention';
 			return `Local model · ${modelSize}`;
 		}

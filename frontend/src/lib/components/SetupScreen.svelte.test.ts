@@ -362,7 +362,8 @@ describe('SetupScreen', () => {
 		const text = host.textContent ?? '';
 		expect(text).toContain('Claude Code');
 		expect(text).toContain('Codex');
-		expect(text).toContain('Downloading');
+		expect(text).toContain('Downloading in the background');
+		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('42%');
 		expect(text).toContain('Ready when the download finishes. You can close this window; CORSIA keeps going.');
 		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', true);
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
@@ -376,7 +377,7 @@ describe('SetupScreen', () => {
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			if (url === '/api/setup/first-account') return json({ token: '[REDACTED]', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
-				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: 42 },
+				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null },
 				{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ state: 'ready' }] },
 			] });
 			return json({ sources: [] });
