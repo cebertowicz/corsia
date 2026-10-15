@@ -21,13 +21,16 @@ Classifier state (``state``)::
     ready                        newer child passes startup and replaces old child  ready
     ready                        newer child deterministic startup failure           ready (old child serves;
                                                                                     failed version is recorded)
+    ready                        newer child exhausts transient startup budget       ready (old child serves;
+                                                                                    new version held until restart)
     loading|ready                two failures of a loaded child on one input        unchanged; an
                                  (timeout, rss, child_error)                        ``unreadable`` fact
 
 ``ready`` is never set by manifest verification alone. An outage records nothing and
 leaves the message pending; an unreadable input is an outcome, recorded with its
-``failure_reason``, and the worker moves on. A deterministic failure is retained per
-version, so a later owner message never starts the same broken child again.
+``failure_reason``, and the worker moves on. A deterministic failure or bounded
+transient failure is retained per version, so later owner messages never cold-load a
+broken or unavailable newer child while its older child can still serve.
 
 Scan status (``scan``: idle | owed | running, plus ``held_reason``)::
 
@@ -63,7 +66,7 @@ from jobs.corrections_activation import activate_after_backfill, retry_pending_a
 from jobs.corrections_recording import (
     candidate_for_message, record_classification, record_unreadable, unreadable_messages,
 )
-from jobs.corrections_runtime import classify
+from jobs.corrections_runtime import classify, record_version_state
 
 QUEUE_SIZE = 256
 SCAN_BATCH = 20
@@ -93,6 +96,7 @@ class CorrectionsWorker:
         self.version: ClassifierVersion | None = None
         self.versions: list[dict[str, str | None]] = []
         self.failed_versions: dict[str, str] = {}
+        self.transient_versions: dict[str, str] = {}
         self.failure_notice_tasks: set[asyncio.Task] = set()
         self.scan = "idle"
         self.held_reason: str | None = None
@@ -166,24 +170,23 @@ class CorrectionsWorker:
             return None
         reason = self.failed_versions.get(manifest.version)
         if reason is not None:
-            self._mark_version_failed(manifest.version, reason)
+            record_version_state(self, manifest.version, "failed", reason)
             if self.active_manifest is not None:
                 return self.active_manifest
             self.reader_reason = reason
             self._set("failed", reason)
             return None
+        reason = self.transient_versions.get(manifest.version)
+        if reason is not None:
+            record_version_state(self, manifest.version, "unavailable", reason)
+            if self.active_manifest is not None:
+                return self.active_manifest
+            self._set("unavailable", reason)
+            return None
         if self.state in ("absent", "failed"):
             self.reader_reason = None
             self._set("unavailable", "asset verified; the model has not run yet")
         return manifest
-
-    def _mark_version_failed(self, version: str, reason: str) -> None:
-        """Retain a deterministic startup failure on the worker, not in a module cache."""
-        self.failed_versions[version] = reason
-        self.versions = [
-            {**item, "state": "failed", "reason": reason} if item["version"] == version else item
-            for item in self.versions
-        ]
 
     def _notice_failed_state(self) -> None:
         """Route one owner-visible failure notice through the durable update-notice path."""
@@ -325,6 +328,7 @@ class CorrectionsWorker:
     def startup(self) -> None:
         """Discard interrupted staging, release any hold, owe the scan and start the worker."""
         self.stopping = False
+        self.transient_versions.clear()
         cleanup_staging()
         self._release_hold()
         self.scan = "owed"

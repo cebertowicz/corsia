@@ -292,6 +292,37 @@ async def test_failed_newer_startup_keeps_the_older_ready_version_serving_withou
 
 
 @pytest.mark.asyncio
+async def test_transient_newer_load_failure_serves_with_old_child_and_holds_the_new_version(worker, monkeypatch):
+    from core.corrections_child import ClassifierUnavailable
+    from jobs import corrections_realtime
+
+    current = [_manifest("v1")]
+
+    def selected():
+        return current[0], [
+            {"location": "corrections-classifier", "version": "v1", "state": "ready", "reason": None},
+            {"location": "corrections-classifier-v2", "version": "v2", "state": "ready", "reason": None},
+        ]
+
+    recorded = AsyncMock()
+    monkeypatch.setattr(corrections_realtime, "select_manifest", selected)
+    monkeypatch.setattr(corrections_realtime, "record_classification", recorded)
+
+    assert await worker._classify(_candidate("v1")) is True
+    current[0] = _manifest("v2")
+    ScriptedChild.loads = [ClassifierUnavailable("load timeout"), ClassifierUnavailable("load timeout")]
+
+    assert await worker._classify(_candidate("first-v2")) is True
+    assert await worker._classify(_candidate("second-v2")) is True
+
+    assert [call.args[1].version.version for call in recorded.await_args_list] == ["v1", "v1", "v1"]
+    assert len(ScriptedChild.created) == 3  # v1 plus the new version's two bounded load attempts
+    assert worker.snapshot()["versions"][-1] == {
+        "location": "corrections-classifier-v2", "version": "v2", "state": "unavailable", "reason": "load timeout",
+    }
+
+
+@pytest.mark.asyncio
 async def test_a_resident_child_is_reused_not_rebuilt_on_every_call(worker, monkeypatch):
     from jobs import corrections_realtime
 

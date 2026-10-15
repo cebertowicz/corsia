@@ -31,6 +31,34 @@ async def drop_child(worker: CorrectionsWorker) -> None:
     worker.children = {key: value for key, value in worker.children.items() if value is not child}
 
 
+def record_version_state(worker: CorrectionsWorker, version: str, state: str, reason: str) -> None:
+    """Keep a version-level startup outcome in the worker's diagnostic snapshot."""
+    worker.versions = [
+        {**item, "state": state, "reason": reason} if item["version"] == version else item
+        for item in worker.versions
+    ]
+
+
+def restore_transient_fallback(
+    worker: CorrectionsWorker,
+    manifest,
+    fallback_child,
+    fallback_version: str,
+    reason: str,
+):
+    """Hold a transiently unavailable newer version and resume its ready predecessor."""
+    worker.transient_versions[manifest.version] = reason
+    record_version_state(worker, manifest.version, "unavailable", reason)
+    worker.child, worker.child_version = fallback_child, fallback_version
+    worker.children[fallback_version] = fallback_child
+    worker._set("ready", reason)
+    logger.warning(
+        "corrections classifier kept version {} serving while {} was unavailable: {}",
+        fallback_version, manifest.version, reason,
+    )
+    return worker.active_manifest
+
+
 async def recover_load_failure(
     worker: CorrectionsWorker,
     manifest,
@@ -40,7 +68,8 @@ async def recover_load_failure(
 ) -> bool | None:
     """Restore a serving fallback or record a terminal deterministic startup failure."""
     if reason.startswith("load error:"):
-        worker._mark_version_failed(manifest.version, reason)
+        worker.failed_versions[manifest.version] = reason
+        record_version_state(worker, manifest.version, "failed", reason)
         if fallback_child is not None:
             worker.child, worker.child_version = fallback_child, fallback_version
             worker.children[fallback_version] = fallback_child
@@ -50,15 +79,6 @@ async def recover_load_failure(
             )
             return False
         worker._set("failed", reason)
-        return False
-    if fallback_child is not None:
-        worker.child, worker.child_version = fallback_child, fallback_version
-        worker.children[fallback_version] = fallback_child
-        worker._set("ready", reason)
-        logger.warning(
-            "corrections classifier kept version {} serving while {} was unavailable: {}",
-            fallback_version, manifest.version, reason,
-        )
         return False
     return None
 
@@ -73,19 +93,13 @@ async def classify(
     record_classification,
     record_unreadable,
 ) -> bool:
-    """Record one candidate, retaining the serving child if a newer version cannot start.
-
-    ``False`` leaves the candidate pending. A deterministic newer-version failure is
-    recorded once on the worker and never retried until a different pinned version wins.
-    """
+    """Record one candidate, retaining a serving older child if a newer version cannot start."""
     manifest = await worker._verified_manifest()
-    if manifest is None:
-        return False
+    if manifest is None: return False
     outages: list[str] = []
     failures: list[str] = []
     worker.call_seconds = 0.0
-    fallback_child = worker.child if worker.child_version != manifest.version else None
-    fallback_version = worker.child_version if fallback_child is not None else None
+    fallback_child, fallback_version = (worker.child, worker.child_version) if worker.child_version != manifest.version else (None, None)
     if fallback_child is not None:
         worker.child = child_factory(manifest)
         worker.child_version = manifest.version
@@ -110,6 +124,12 @@ async def classify(
             if resolution is not None:
                 return resolution
             outages.append(reason)
+            if len(outages) == attempts_per_kind and fallback_child is not None:
+                manifest = restore_transient_fallback(
+                    worker, manifest, fallback_child, str(fallback_version), reason,
+                )
+                fallback_child, fallback_version = None, None
+                outages.clear()
             continue
         if fallback_child is not None:
             await asyncio.to_thread(fallback_child.close)
@@ -126,6 +146,9 @@ async def classify(
             await drop_child(worker)
             continue
         except ClassifierUnavailable as error:
+            if worker.transient_versions and worker.active_manifest is manifest:
+                logger.info("corrections classifier idle restart reopens newer-version load attempts")
+                worker.transient_versions.clear()
             outages.append(str(error))
             await drop_child(worker)
             continue
