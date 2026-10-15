@@ -137,52 +137,6 @@ def _utc(value: str) -> datetime | None:
     return parsed
 
 
-def _human_turn_in_db(db, thread_id: str, turn_id: str, turn_order: int, call_id: str) -> tuple[Refusal | None, str | None]:
-    """Return this call's admitted human-input timestamp, or the established refusal."""
-    running = db.execute(
-        "SELECT 1 FROM active_turns WHERE id=? AND thread_id=? AND turn_order=?"
-        " AND status='running'",
-        (turn_id, thread_id, turn_order),
-    ).fetchone()
-    if running is None:
-        return Refusal(NO_TURN), None
-    step_seq = _declaring_step_seq(db, thread_id, turn_id, call_id)
-    if step_seq is None:
-        return Refusal(NOT_PERSON), None
-    human = db.execute(
-        _HUMAN_INPUTS,
-        {"thread_id": thread_id, "turn_id": turn_id, "step_seq": step_seq},
-    ).fetchone()
-    return (None, human["created_at"]) if human is not None else (Refusal(NOT_PERSON), None)
-
-
-def _check_human_turn_rows(
-    thread_id: str, turn_id: str, turn_order: int, call_id: str,
-) -> Refusal | None:
-    """Confirm this exact declared call is in a live turn with a person's input."""
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        return _human_turn_in_db(db, thread_id, turn_id, turn_order, call_id)[0]
-    finally:
-        db.close()
-
-
-async def check_human_turn() -> Refusal | None:
-    """Pass only for a declared call in a live turn that contains a person message."""
-    thread_id = state._current_thread_id.get(None)
-    identity = state._current_turn_identity.get(None)
-    turn_id = getattr(identity, "turn_id", None)
-    turn_order = getattr(identity, "turn_order", None)
-    call_id = state._current_provider_call_id.get(None) or state._current_tool_invocation_id.get(None)
-    if not isinstance(thread_id, str) or not isinstance(turn_id, str) or turn_order is None:
-        return Refusal(NO_TURN)
-    if not isinstance(call_id, str) or not call_id:
-        return Refusal(NOT_PERSON)
-    return await run_in_db(_check_human_turn_rows, thread_id, turn_id, turn_order, call_id)
-
-
 def _check_rows(
     kind: str, thread_id: str, turn_id: str, turn_order: int, call_id: str, draft_id: str,
 ) -> _Stage:
@@ -190,9 +144,22 @@ def _check_rows(
 
     db = get_db()
     try:
-        refusal, human_at = _human_turn_in_db(db, thread_id, turn_id, turn_order, call_id)
-        if refusal is not None:
-            return _Stage(refusal)
+        running = db.execute(
+            "SELECT 1 FROM active_turns WHERE id=? AND thread_id=? AND turn_order=?"
+            " AND status='running'",
+            (turn_id, thread_id, turn_order),
+        ).fetchone()
+        if running is None:
+            return _Stage(Refusal(NO_TURN))
+        step_seq = _declaring_step_seq(db, thread_id, turn_id, call_id)
+        if step_seq is None:
+            return _Stage(Refusal(NOT_PERSON))
+        human = db.execute(
+            _HUMAN_INPUTS,
+            {"thread_id": thread_id, "turn_id": turn_id, "step_seq": step_seq},
+        ).fetchone()
+        if human is None:
+            return _Stage(Refusal(NOT_PERSON))
         row = db.execute(
             "SELECT * FROM action_drafts WHERE id=? AND thread_id=? AND kind=?",
             (draft_id, thread_id, kind),
@@ -201,7 +168,7 @@ def _check_rows(
             return _Stage(Refusal(NO_DRAFT))
         if row["state"] != "open":
             return _Stage(Refusal(ALREADY_DONE))
-        return _Stage(draft=dict(row), human_at=human_at)
+        return _Stage(draft=dict(row), human_at=human["created_at"])
     finally:
         db.close()
 
