@@ -170,10 +170,6 @@ def with_source_refs(text: str, source_refs: list[dict[str, Any]]) -> str:
     return _with_lesson(text, source_refs=_refs(source_refs))
 
 
-def with_originating_subjects(text: str, subjects: tuple[str, ...]) -> str:
-    """The same lesson with deduplicated source subjects; its behavior stays unchanged."""
-    return _with_lesson(text, originating_subjects=list(dict.fromkeys(subjects)))
-
 
 def raw_sha256(data: bytes) -> str:
     """The exact-bytes version of a lesson file, as a guidance read records it."""

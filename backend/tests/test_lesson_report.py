@@ -100,21 +100,16 @@ def test_due_work_is_visible_when_selected_period_has_no_calls(db):
     assert result["rows"][0]["indexed"]["efficacy"] is None
 
 
-def test_report_joins_late_correction_facts_and_hides_stale_unrecurred_watches(db):
-    db.execute(
-        """INSERT INTO outcome_events(
-            id,dedupe_key,event_name,source,provenance,ts,observed_ts,subject_key,attributes
-        ) VALUES ('fact','key','measurement.correction','corsia','agent_recorded',
-                  '2026-09-20T00:00:00+00:00','now','message:new',?)""",
-        (json.dumps({"label": "correction"}),),
-    )
+def test_report_hides_only_old_watches_without_a_recent_correction_anchor():
     rows = _correction_inventory([
-        {"id": "current", "version": "v", "state": "watch", "review_after": "2026-09-01",
-         "originating_subjects": ["message:new"]},
-        {"id": "stale", "version": "v", "state": "watch", "review_after": "2026-09-01",
-         "originating_subjects": ["message:old"]},
+        {"id": "old", "version": "v", "state": "watch", "originating_subjects": [],
+         "reviews": [{"opened_at": "2026-08-23T00:00:00Z"}]},
+        {"id": "recent", "version": "v", "state": "watch", "originating_subjects": [],
+         "reviews": [{"opened_at": "2026-09-22T00:00:00Z"}]},
+        {"id": "recurred", "version": "v", "state": "watch", "originating_subjects": ["message:new"],
+         "reviews": [{"opened_at": "2026-08-23T00:00:00Z"}]},
     ], "2026-10-02T12:00:00Z", {"message:new": {"id": "fact", "ts": "2026-09-20T00:00:00+00:00"}})
 
-    assert rows[0]["correction_status"] == "linked"
-    assert rows[0]["recurrence_count"] == 1
-    assert [row["id"] for row in rows] == ["current"]
+    assert [row["id"] for row in rows] == ["recent", "recurred"]
+    assert rows[1]["correction_status"] == "linked"
+    assert rows[1]["recurrence_count"] == 1

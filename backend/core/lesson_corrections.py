@@ -6,6 +6,7 @@ join the fact on a later report read without a repair job.
 """
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -134,7 +135,6 @@ def correction_facts(db: sqlite3.Connection, subjects: Iterable[str]) -> dict[st
     found: dict[str, dict[str, str]] = {}
     for row in rows:
         try:
-            import json
             attributes = json.loads(row["attributes"])
         except (TypeError, ValueError):
             continue

@@ -133,39 +133,28 @@ def _correction_inventory(
         row["correction_status"] = "linked" if linked else "no correction"
         row["correction_facts"] = linked
         row["recurrence_count"] = len(linked)
-        due = parse_instant(row.get("review_after"))
+        activated = min(
+            (value for review in row.get("reviews", ())
+             if (value := parse_instant(review.get("opened_at"))) is not None),
+            default=None,
+        )
+        first_anchor = min(
+            (value for fact in linked if (value := parse_instant(fact["ts"])) is not None),
+            default=None,
+        )
+        created = activated or first_anchor
         has_recent_anchor = any(
             cutoff is not None and (parse_instant(fact["ts"]) or cutoff) > cutoff for fact in linked
         )
-        if row.get("state") == "watch" and cutoff and due and due <= cutoff and not has_recent_anchor:
+        if row.get("state") == "watch" and cutoff and created and created <= cutoff and not has_recent_anchor:
             continue
         visible.append(row)
     return visible
 
 
-def _correction_facts_for_scope(db, thread_ids: tuple[str, ...]) -> dict[str, dict[str, str]]:
-    """Snapshot correction facts for the already-authorized owner scope."""
-    if not thread_ids:
-        return {}
-    marks = ", ".join("?" for _ in thread_ids)
-    rows = db.execute(
-        f"""SELECT id, subject_key, ts, attributes FROM outcome_events
-            WHERE event_name='measurement.correction' AND retracted_at IS NULL
-              AND agent_thread_id IN ({marks})""", thread_ids,
-    ).fetchall()
-    found = {}
-    for row in rows:
-        try:
-            attributes = json.loads(row["attributes"])
-        except (TypeError, ValueError):
-            continue
-        if attributes.get("label") == "correction" and row["subject_key"]:
-            found[str(row["subject_key"])] = {"id": str(row["id"]), "ts": str(row["ts"])}
-    return found
-
 
 def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
-                   detail: DetailRequest | None = None,
+                   detail: DetailRequest | None = None, now: str = "",
                    cancellation_event: Event | None = None) -> dict[str, Any]:
     """Materialize scoped database evidence without Git or external work.
 
@@ -184,10 +173,14 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
     retained = offers["retained"] + boundaries
     bodies = read_bodies(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
                          facts=sources + retained)
-    from core.lesson_corrections import placement_check_counts
+    from core.lesson_corrections import correction_facts, merge_subjects, placement_check_counts
+
+    inventory = build_inventory(history=history, sources=sources,
+                                retained=retained + bodies["reads"], now=now)
+    subjects = merge_subjects(*(row.get("originating_subjects", ()) for row in inventory))
     return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
             "retained": retained, "period": period, "bodies": bodies,
-            "correction_facts": _correction_facts_for_scope(db, scope.thread_ids),
+            "correction_facts": correction_facts(db, subjects),
             "placement_checks": placement_check_counts(db, scope.thread_ids)}
 
 
@@ -288,17 +281,11 @@ def read_report(
     from core.lesson_report_reads import identify_recorded_reads
 
     data = collected if collected is not None else collect_report(
-        db, scope=scope, sources=sources, detail=detail_request(lesson_id, version, cursor, evidence))
+        db, scope=scope, sources=sources, detail=detail_request(lesson_id, version, cursor, evidence), now=now)
     history, missing_owners = data["history"], data["missing_owners"]
     boundaries, retained, period = data["boundaries"], data["retained"], data["period"]
-    correction_facts = data.get("correction_facts", _correction_facts_for_scope(db, scope.thread_ids) if db is not None else {})
-    placement_checks = data.get("placement_checks")
-    if placement_checks is None:
-        from core.lesson_corrections import placement_check_counts
-        placement_checks = placement_check_counts(db, scope.thread_ids) if db is not None else {
-            "owner": "Self-Improvement Infrastructure", "retirement_condition": None,
-            "fires": None, "overrides": None,
-        }
+    correction_facts = data["correction_facts"]
+    placement_checks = data["placement_checks"]
     bodies = data["bodies"]
     bodies = bodies | {"reads": identify_recorded_reads(bodies["reads"], blob_reader, sources)}
     reads = [read for read in bodies["reads"] if scope.from_ts <= read["created_at"] < scope.to_ts]
