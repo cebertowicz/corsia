@@ -97,6 +97,12 @@ Follow `project-skills/sdlc-process` (contributor edition) and
   Issue: #<number> (design approved: <link to approval comment>)
   ```
 
+- **CLA:** the GitHub account behind each commit accepts `CLA.md` once, as
+  `CONTRIBUTING.md` describes. Your agent may post the
+  acceptance comment for the account it runs under, which binds that
+  account's owner. Before the first commit, set `git config user.email` to
+  the account's `<id>+<login>@users.noreply.github.com` address; a commit
+  authored with an email no GitHub account owns cannot pass the check.
 - **Scope:** one issue per PR. Include `Closes #<n>` only when the PR fully
   resolves the issue.
 - **Evidence:** link the approval comment and give targeted test results.
