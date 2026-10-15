@@ -58,6 +58,24 @@ def _report(limits: object, *, available: bool = True) -> dict:
     return {"rate_limits_available": available, "rate_limits": limits}
 
 
+def test_unknown_claude_usage_logs_only_fixed_shape_categories(monkeypatch, caplog):
+    recorded = []
+    monkeypatch.setattr(harness_usage, "record_usage", lambda **kwargs: recorded.append(kwargs))
+
+    claude_usage.apply_usage_response({
+        "rate_limits_available": "private-non-boolean",
+        "rate_limits": "private-malformed-limits",
+        "account_id": "private-account-id",
+    }, receipt=None)
+
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "connections.claude_usage"]
+    assert messages == [
+        "Claude Code usage unknown rate_limits_type=string rate_limits_available=present",
+    ]
+    assert recorded and recorded[0]["check_error"] == "Claude Code returned malformed plan usage"
+
+
 async def drain():
     """Wait for every wake already scheduled, and every wake those schedule, to finish.
 

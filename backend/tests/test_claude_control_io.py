@@ -1,4 +1,4 @@
-"""Producer-path contracts for Claude control-session diagnostic capture."""
+"""Contracts retained after removing temporary Claude timeout diagnostics."""
 from __future__ import annotations
 
 import asyncio
@@ -35,30 +35,13 @@ def _control_harness(tmp_path, name: str, body: str) -> str:
     return str(script)
 
 
-def _barrier_harness(tmp_path, name: str, body: str) -> tuple[str, Path, Path]:
+def _barrier_harness(tmp_path, name: str, body: str) -> tuple[str, Path]:
     ready = tmp_path / f"{name}-ready"
-    release = tmp_path / f"{name}-release"
     binary = _control_harness(
         tmp_path, name,
-        f"{body}\necho $$ > '{ready}'\nwhile [ ! -e '{release}' ]; do sleep 0.01; done",
+        f"{body}\necho $$ > '{ready}'\nwhile :; do sleep 0.01; done",
     )
-    return binary, ready, release
-
-
-def _start_timeout_after_ready(monkeypatch, module, ready: Path) -> None:
-    original_wait_for = asyncio.wait_for
-
-    async def timeout_after_ready(awaitable, timeout):
-        task = asyncio.ensure_future(awaitable)
-        await _wait_for_path(ready)
-        return await original_wait_for(task, timeout=0.1 if timeout == 30 else timeout)
-
-    monkeypatch.setattr(module.asyncio, "wait_for", timeout_after_ready)
-
-
-def _timeout_log(caplog) -> str:
-    return [record.getMessage() for record in caplog.records
-            if record.getMessage().startswith("claude_control_timeout")][-1]
+    return binary, ready
 
 
 def _usage_frame() -> list[dict]:
@@ -66,155 +49,22 @@ def _usage_frame() -> list[dict]:
              "request": {"subtype": "get_usage"}}]
 
 
-def test_control_log_scope_is_opaque_per_scoped_account_generation():
-    from connections import claude_control_io
-
-    account_id = "synthetic-account-id"
-    receipt = type("Receipt", (), {"account_id": account_id, "account_revision": 4, "login_seq": 7})()
-    context = type("Context", (), {"receipt": receipt})()
-
-    scope = claude_control_io.log_scope(context)
-    assert scope.startswith("scoped-")
-    assert account_id not in scope
-    assert claude_control_io.log_scope(None) == "default"
-
-
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("reply", "expected", "subtype", "verdict"), [
-    ('{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":25}}}}}', True, "success", "allowed"),
-    ('{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":100}}}}}', True, "success", "limited"),
-    ('{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits_available":false,"account_id":"private-account-id","path":"/private/source","private":"do-not-log"}}}', True, "success", "unknown"),
-    ('{"response":{"request_id":"corsia-usage","subtype":"success","response":"private-malformed-payload"}}', True, "success", "unknown"),
-    ('{"response":{"request_id":"corsia-usage","subtype":"error","error":"private-error"}}', True, "error", "none"),
-    ('{"response":{"request_id":"corsia-usage","subtype":"unexpected","response":"private-other"}}', True, "other", "none"),
-    ('{"response":{"request_id":"corsia-usage"', False, "none", "none"),
-    (None, False, "none", "none"),
-], ids=("usage-allowed", "usage-limited", "usage-unavailable", "usage-malformed", "usage-error", "usage-other", "malformed-envelope", "no-usage-reply"))
-async def test_timeout_logs_fixed_usage_response_and_lifecycle_facts_before_cleanup(
-        tmp_path, monkeypatch, caplog, reply, expected, subtype, verdict):
+async def test_control_timeout_preserves_error_and_reaps_its_harness(tmp_path, monkeypatch):
     from connections import claude_discovery
 
-    body = f"printf '%s\\n' '{reply}'" if reply else ":"
-    binary, ready, release = _barrier_harness(tmp_path, "usage", body)
-    _start_timeout_after_ready(monkeypatch, claude_discovery, ready)
+    binary, ready = _barrier_harness(tmp_path, "timeout", ":")
+    original_wait_for = asyncio.wait_for
 
+    async def timeout_after_ready(awaitable, timeout):
+        task = asyncio.ensure_future(awaitable)
+        await _wait_for_path(ready)
+        return await original_wait_for(task, timeout=0.1 if timeout == 30 else timeout)
+
+    monkeypatch.setattr(claude_discovery.asyncio, "wait_for", timeout_after_ready)
     with pytest.raises(RuntimeError, match="Claude Code get_usage timed out"):
         await claude_discovery.run_claude_control(binary, _usage_frame(), operation="get_usage")
-
-    release.touch()
-    message = _timeout_log(caplog)
-    assert f"usage_reply_observed={expected}" in message
-    assert f"usage_response_subtype={subtype}" in message
-    assert f"usage_verdict={verdict}" in message
-    assert "stdin_drain_completed=True" in message
-    assert "stdin_close_completed=True" in message
-    assert "stdout_eof_completed=False" in message
-    assert "stderr_eof_completed=False" in message
-    assert "process_exited_at_timeout=False" in message
-    assert "returncode_at_timeout=None" in message
-    assert "do-not-log" not in message
-    assert "private-account-id" not in message
-    assert "/private/source" not in message
-    assert "utilization" not in message
-    assert "private-malformed-payload" not in message
-    assert "private-error" not in message
-    assert "private-other" not in message
-
-
-@pytest.mark.asyncio
-async def test_timeout_records_completed_stdout_and_stderr_eof(tmp_path, monkeypatch, caplog):
-    from connections import claude_discovery
-
-    ready = tmp_path / "closed-pipes-ready"
-    release = tmp_path / "closed-pipes-release"
-    reply = '{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":25}}}}}'
-    binary = _control_harness(
-        tmp_path, "closed-pipes",
-        f"printf '%s\\n' '{reply}'; echo $$ > '{ready}'; exec 1>&-; exec 2>&-; while [ ! -e '{release}' ]; do sleep 0.01; done",
-    )
-    _start_timeout_after_ready(monkeypatch, claude_discovery, ready)
-
-    with pytest.raises(RuntimeError, match="Claude Code get_usage timed out"):
-        await claude_discovery.run_claude_control(binary, _usage_frame(), operation="get_usage")
-
-    release.touch()
-    message = _timeout_log(caplog)
-    assert "stdin_drain_completed=True" in message
-    assert "stdin_close_completed=True" in message
-    assert "stdout_eof_completed=True" in message
-    assert "stderr_eof_completed=True" in message
-
-
-@pytest.mark.asyncio
-async def test_catalog_and_end_replies_do_not_imply_usage_reply(tmp_path, monkeypatch, caplog):
-    from connections import claude_discovery
-
-    catalog = '{"response":{"request_id":"corsia-model-list","subtype":"success"}}'
-    end = '{"response":{"request_id":"corsia-end","subtype":"success"}}'
-    binary, ready, release = _barrier_harness(
-        tmp_path, "catalog-end", f"printf '%s\\n%s\\n' '{catalog}' '{end}'",
-    )
-    _start_timeout_after_ready(monkeypatch, claude_discovery, ready)
-    frames = [
-        {"type": "control_request", "request_id": "corsia-model-list",
-         "request": {"subtype": "list_models"}},
-        {"type": "control_request", "request_id": "corsia-usage",
-         "request": {"subtype": "get_usage"}},
-        {"type": "control_request", "request_id": "corsia-end",
-         "request": {"subtype": "end_session"}},
-    ]
-
-    with pytest.raises(RuntimeError, match="Claude Code list_models timed out"):
-        await claude_discovery.run_claude_control(binary, frames, operation="list_models")
-
-    release.touch()
-    message = _timeout_log(caplog)
-    assert "catalog_reply_observed=True" in message
-    assert "usage_reply_observed=False" in message
-    assert "context_reply_observed=False" in message
-    assert "end_session_reply_observed=True" in message
-
-
-def test_observer_never_raises_or_retains_non_utf8_or_malformed_usage():
-    from connections import claude_control_io
-
-    phase = claude_control_io.ControlPhase()
-    expected = {"corsia-usage": "usage"}
-    for data in (
-        b"\xff",
-        b'{"response":{"request_id":"corsia-usage","subtype":"success","response":"private"}}',
-        b'{"response":{"request_id":"corsia-usage","subtype":"success","response":{"rate_limits":{"five_hour":{"utilization":100,"resets_at":1e999}}}}}',
-        b'{"response":{"request_id":"corsia-usage","subtype":[]}}',
-        b"[]",
-    ):
-        claude_control_io.observe_control_reply(data, expected, phase)
-
-    assert phase.usage_response_subtype == "other"
-    assert phase.usage_verdict == "none"
-
-
-@pytest.mark.asyncio
-async def test_timeout_snapshots_an_exited_process_with_pipes_held(tmp_path, monkeypatch, caplog):
-    from connections import claude_discovery, harness_process
-
-    ready = tmp_path / "exited-ready"
-    release = tmp_path / "exited-release"
-    child = tmp_path / "exited-child"
-    binary = _control_harness(
-        tmp_path, "exited-parent",
-        f"(while [ ! -e '{release}' ]; do sleep 0.01; done) & echo $! > '{child}'; : > '{ready}'; exit 0",
-    )
-    monkeypatch.setattr(harness_process, "REAP_SECONDS", 0.1)
-    _start_timeout_after_ready(monkeypatch, claude_discovery, ready)
-
-    with pytest.raises(RuntimeError, match="Claude Code get_usage timed out"):
-        await claude_discovery.run_claude_control(binary, _usage_frame(), operation="get_usage")
-
-    release.touch()
-    await _wait_for_pid_exit(child)
-    message = _timeout_log(caplog)
-    assert "process_exited_at_timeout=True" in message
-    assert "returncode_at_timeout=0" in message
+    await _wait_for_pid_exit(ready)
 
 
 @pytest.mark.asyncio
@@ -258,7 +108,7 @@ async def test_control_reader_drains_stderr_and_preserves_nonzero_error(tmp_path
 async def test_cancelled_control_reader_reaps_its_harness(tmp_path):
     from connections import claude_discovery
 
-    binary, ready, _release = _barrier_harness(tmp_path, "cancelled", "trap '' TERM")
+    binary, ready = _barrier_harness(tmp_path, "cancelled", "trap '' TERM")
     task = asyncio.create_task(claude_discovery.run_claude_control(
         binary, _usage_frame(), operation="get_usage",
     ))

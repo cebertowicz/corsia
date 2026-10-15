@@ -111,7 +111,7 @@ def read(
         if bucket == "paused" and (plan["state"] == "paused" or _user_pause(causes)):
             paused_by_user += 1
         if bucket == "waiting":
-            set_aside += any(operator_scheduled.is_set_aside(cause) for cause in causes)
+            set_aside += operator_scheduled.only_set_aside(causes)
             found = deadline_range(causes)
             if found is not None:
                 deadlines.append(found)

@@ -135,6 +135,30 @@ def test_set_aside_work_leads_external_waits_in_plan_order_and_says_to_pick_it_u
     assert all("release_wait" in item for item in block["open_tasks"][:3])
 
 
+def test_set_aside_work_that_something_else_also_holds_is_not_offered_for_pick_up(db):
+    from plans import holds
+
+    plan = owner_plan(db)
+    current = task(db, plan.id, "Current work")
+    held = task(db, plan.id, "Parked, then blocked on sign-off")
+    external = task(db, plan.id, "External wait")
+    select(db, plan.id, current.id)
+    _watch(db, plan.id, held.id, timedelta(hours=2), reason="After review")
+    holds.place_hold(
+        held.id, kind="blocked", reason_key="signoff", reason="Waiting for sign-off",
+        owner_kind="user", owner_id=None, expected_revision=revision(db, held.id),
+        actor_id="owner", provenance="test.set_aside_and_held", db=db,
+    )
+    _watch(db, plan.id, external.id, timedelta(hours=1))
+
+    block = next_block(_watch(db, plan.id, current.id, timedelta(hours=12), reason="After draft"))
+
+    assert row_ids(block) == [current.id, external.id, held.id]
+    assert block["open_tasks_listed"] == idle_listed(3, 3, set_aside=1)
+    assert block["idle"] == text.idle_pick_up(1)
+    assert ["release_wait" in item for item in block["open_tasks"]] == [True, False, False]
+
+
 def test_a_legacy_user_hold_is_listed_to_its_agent_and_can_be_released(db):
     from plans import holds
 
@@ -183,7 +207,7 @@ def test_a_wait_ending_within_fifteen_minutes_keeps_the_list_and_drops_the_pick_
     assert "idle" not in block
 
 
-def test_a_paused_plan_with_set_aside_work_suppresses_the_pick_up_line(db):
+def test_a_paused_plan_offers_no_set_aside_work_and_no_pick_up_line(db):
     from plans import service
 
     plan = owner_plan(db)
@@ -196,7 +220,8 @@ def test_a_paused_plan_with_set_aside_work_suppresses_the_pick_up_line(db):
 
     block = close_next.executor_next(db, plan.id, "owner")
 
-    assert block["open_tasks_listed"] == idle_listed(1, 1, set_aside=1)
+    assert block["open_tasks_listed"] == idle_listed(1, 1)
+    assert "release_wait" not in block["open_tasks"][0]
     assert "idle" not in block
 
 
