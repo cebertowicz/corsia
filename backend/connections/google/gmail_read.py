@@ -42,7 +42,8 @@ def check_message_id(value: object) -> str:
     return value.strip()
 
 
-def _headers(payload: dict[str, Any]) -> dict[str, str]:
+def headers_from_payload(payload: dict[str, Any]) -> dict[str, str]:
+    """Keep the permitted Gmail metadata headers in the lower-case tool shape."""
     found: dict[str, str] = {}
     for item in payload.get("headers") or []:
         name = str(item.get("name", "")).lower()
@@ -70,7 +71,7 @@ async def search(query: str, max_results: int) -> list[Message]:
             },
         )
         return Message(str(ref["id"]), str(data.get("threadId") or ref.get("threadId") or ""),
-                       _headers(data.get("payload") or {}))
+                       headers_from_payload(data.get("payload") or {}))
 
     return list(await asyncio.gather(*(one(ref) for ref in refs)))
 
@@ -105,4 +106,4 @@ async def fetch(message_id: str) -> Message:
         "GET", f"{API}/{mid}", params={"format": "full", "fields": "id,threadId,payload"},
     )
     payload = data.get("payload") or {}
-    return Message(mid, str(data.get("threadId") or ""), _headers(payload), body_text(payload))
+    return Message(mid, str(data.get("threadId") or ""), headers_from_payload(payload), body_text(payload))

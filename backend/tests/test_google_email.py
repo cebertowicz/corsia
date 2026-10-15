@@ -349,7 +349,7 @@ async def test_a_sign_in_google_refuses_before_the_send_leaves_the_draft_open(ma
     saved = await _draft(mail)
     mail.fake.refresh_status = 400
     out = await _send(mail, saved)
-    assert out.startswith("Error: Not sent: Google rejected the saved sign-in.")
+    assert out == f"Error: Not sent: {google_client.SIGN_IN_RECOVERY}"
     assert mail.sent_requests() == []
     assert _row(saved["draft_id"])["state"] == "open"
 

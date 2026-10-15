@@ -24,7 +24,13 @@ STATUS_NEEDS_SIGN_IN = "needs_sign_in"
 TIMEOUT_SECONDS = 20.0
 
 NOT_CONNECTED = "Google isn't connected. Call google_connect and give the person the link."
-NEEDS_SIGN_IN = "Google rejected the saved sign-in. Call google_connect and give the person the link."
+SIGN_IN_RECOVERY = (
+    'Google rejected the saved sign-in. Sign-ins for a project in Testing expire after 7 days: '
+    'if the Audience page of the OAuth consent screen in Google Cloud shows Testing, ask the person '
+    'to publish their app "In production", keeping the same project. Then call google_connect and '
+    'give them the link.'
+)
+NEEDS_SIGN_IN = SIGN_IN_RECOVERY
 UNREACHABLE = "Couldn't reach Google. Try again later."
 # Transport errors raised before any request bytes reach Google.
 _NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)

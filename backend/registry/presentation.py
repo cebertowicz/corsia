@@ -60,12 +60,14 @@ _DESCRIPTORS: dict[tuple[str, str], PresentationDescriptor] = {
 }
 
 #: Identities that are never pane rows: implementation continuation handles,
-#: and plan decisions, which are answered in their chip and kept on their plan
-#: node (#1820). Kept alongside the descriptor table because both encode "what
-#: a type is", not pane-projection control flow.
+#: plan decisions, which are answered in their chip and kept on their plan
+#: node (#1820), and the per-thread routing identities the Gmail binder
+#: registers for delivered mail. Kept alongside the descriptor table because
+#: both encode "what a type is", not pane-projection control flow.
 NON_PANE_TYPES: frozenset[tuple[str, str]] = frozenset({
     ("claude-code", "session"),
     ("codex", "thread"),
+    ("gmail", "email-thread"),
     ("local", "plan-decision"),
 })
 

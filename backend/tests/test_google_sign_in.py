@@ -207,7 +207,9 @@ async def test_not_connected_text_and_status_shape(google, conductor):
 
 async def test_connect_when_connected_and_without_a_client_file(google, conductor, client_file):
     out = await GoogleConnectTool().execute(_thread_id=conductor)
-    assert out.startswith("Error: Google needs the person's OAuth client file")
+    assert out == f"Error: {oauth.NEEDS_CLIENT_FILE}"
+    assert "If none exists yet, create it in the person's own Google project" in out
+    assert "Never create a second project or client when one already exists." in out
     _, state = await _start(google, conductor, client_file)
     async with _http() as http:
         await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
@@ -215,6 +217,7 @@ async def test_connect_when_connected_and_without_a_client_file(google, conducto
     assert out == f"Error: Google is already connected as {EMAIL}."
     status = json.loads(await GoogleStatusTool().execute(_thread_id=conductor))
     assert status["status"] == "connected" and status["email"] == EMAIL
+    assert "needs_action" not in status
 
 
 async def test_a_file_that_is_not_a_client_is_refused_without_echo(google, conductor, tmp_path):
@@ -250,7 +253,9 @@ async def test_no_token_or_secret_reaches_any_output_or_log(google, conductor, c
         await google_client.get_json("https://gmail.googleapis.com/gmail/v1/users/me/labels")
     outputs.append(str(rejected.value))
     outputs.append(await GoogleStatusTool().execute(_thread_id=conductor))
-    assert json.loads(outputs[-1])["status"] == "needs_sign_in"
+    status = json.loads(outputs[-1])
+    assert status["status"] == "needs_sign_in"
+    assert status["needs_action"] == google_client.SIGN_IN_RECOVERY
     captured = capsys.readouterr()
     outputs.extend([caplog.text, captured.out, captured.err])
     for text in outputs:
