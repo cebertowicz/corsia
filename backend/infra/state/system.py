@@ -7,6 +7,7 @@ import asyncio
 __all__ = [
     "_drain",
     "_github_ownership_login_task",
+    "_gmail_poller_task",
     "_nightly_job_task",
     "_thread_driver_failure",
 ]
@@ -15,5 +16,6 @@ __all__ = [
 _drain: dict | None = None  # { "reason": str, "started_at": float }
 
 _github_ownership_login_task: asyncio.Task | None = None
+_gmail_poller_task: asyncio.Task | None = None
 _nightly_job_task: asyncio.Task | None = None  # nightly fact extraction
 _thread_driver_failure: str | None = None

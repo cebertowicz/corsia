@@ -42,8 +42,8 @@ CLIENT_FILE_MAX_BYTES = 16_384
 CALLBACK_PATH = "/api/google/oauth/callback"
 
 NEEDS_CLIENT_FILE = (
-    "Google needs the person's OAuth client file. Pass client_file: the path of the Desktop app "
-    "client JSON they downloaded from Google Cloud."
+    "Ask the person for the Desktop OAuth client JSON already downloaded for this setup. "
+    "Never create a new Google Cloud project or client. Pass client_file: its path."
 )
 BAD_CLIENT_FILE = "That file isn't a Google Desktop app client file. Pass the path of the downloaded client JSON."
 DENIED = "Google sign-in was refused or has expired. Call google_connect for a new link."
@@ -206,9 +206,22 @@ def account_status() -> dict:
     account = get_setting(ACCOUNT_SETTING)
     if not account or key_store.resolve_google() is None:
         return {"email": None, "scopes": [], "status": "not_connected", "poller_state": None, "last_success_at": None}
-    return {
+    status = account.get("status", STATUS_CONNECTED)
+    result = {
         "email": account.get("email"), "scopes": account.get("scopes", []),
-        "status": account.get("status", STATUS_CONNECTED),
-        # The mail poller is a later change; these stay empty until it exists.
-        "poller_state": None, "last_success_at": None,
+        "status": status,
+        "poller_state": None,
+        "last_success_at": None,
     }
+    try:
+        from events.connectors.gmail_poller import poller_status
+
+        poller = poller_status()
+        result["poller_state"] = poller["state"]
+        result["last_success_at"] = poller["last_success_at"]
+    except ImportError:
+        # Keep sign-in status usable while the optional mail connector is absent.
+        pass
+    if status == client.STATUS_NEEDS_SIGN_IN:
+        result["needs_action"] = client.SIGN_IN_RECOVERY
+    return result

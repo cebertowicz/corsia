@@ -5,6 +5,7 @@ import sys
 
 from events.connectors.github_notifications import notifications_poll_loop
 from events.connectors.github_pr_quiet_watch import pr_quiet_watch_loop
+from events.connectors.gmail_poller import gmail_poll_loop
 from infra import state
 from infra.cpu_sampler import apply_cpu_profiler, stop_cpu_sampler
 from infra.otel_logs.lifecycle import start_corsia_logs, stop_corsia_logs
@@ -34,6 +35,7 @@ RUNTIME_LOOP_TASKS: tuple[tuple[str, str], ...] = (
     ("presence sweep", "_presence_sweep_task"),
     ("cc idle retirement", "_cc_idle_retirement_task"),
     ("github notifications", "_github_notifications_task"),
+    ("gmail poller", "_gmail_poller_task"),
     ("pr quiet watch", "_pr_quiet_watch_task"),
     ("request timing flush", "_request_timing_flush_task"),
     ("live bulletin feed", "_live_bulletin_task"),
@@ -125,6 +127,7 @@ async def _start_runtime_services() -> None:
     state._presence_sweep_task = asyncio.create_task(presence_sweep_loop())
     state._cc_idle_retirement_task = asyncio.create_task(idle_retirement_loop())
     state._github_notifications_task = asyncio.create_task(notifications_poll_loop())
+    state._gmail_poller_task = asyncio.create_task(gmail_poll_loop())
     state._pr_quiet_watch_task = asyncio.create_task(pr_quiet_watch_loop())
     from infra.request_timing import start_flush_loop
 

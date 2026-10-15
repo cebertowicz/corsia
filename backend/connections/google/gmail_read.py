@@ -42,13 +42,19 @@ def check_message_id(value: object) -> str:
     return value.strip()
 
 
-def _headers(payload: dict[str, Any]) -> dict[str, str]:
+def headers_from_payload(payload: dict[str, Any]) -> dict[str, str]:
+    """Keep the permitted Gmail metadata headers in the lower-case tool shape."""
     found: dict[str, str] = {}
     for item in payload.get("headers") or []:
         name = str(item.get("name", "")).lower()
         if name in {n.lower() for n in HEADER_NAMES} and name not in found:
             found[name] = str(item.get("value", ""))
     return found
+
+
+def _headers(payload: dict[str, Any]) -> dict[str, str]:
+    """Backward-compatible internal spelling for callers in this module."""
+    return headers_from_payload(payload)
 
 
 async def search(query: str, max_results: int) -> list[Message]:
