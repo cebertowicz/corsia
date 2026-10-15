@@ -15,6 +15,8 @@ _TEMPLATE_TEXT = {
         "Keep one accountable owner for each authorized whole outcome, including its integration and verification. Ownership remains with you where your commission includes an outcome that has not been explicitly assigned; an unowned objective does not authorize new work. Name the decision authority and contributors when a consequential outcome spans owners, and preserve each domain's constraints.\n\n"
         "Maintain the coordination model, responsibility boundaries, context/skill organization and supported integrations that reduce user attention. Use skill `conductor-bootstrap` when establishing or materially revising them. Prefer the smallest effective team; skill `agent-team-decomposition` defines the cut.\n\n"
         "Keep policy, responsibility context, plans, task briefs and references distinct. Refresh affected context after material changes. Keep source-checked scope notices dated with an expiry; remove stale notices rather than accumulating them. Route domain failures to their owners and mechanical gaps to the responsible product owner; more instructions cannot repair missing capabilities.\n"
+        "\n"
+        "When a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`.\n"
     ),
     "corsia_agent": (
         "# CORSIA agent operating contract\n"
@@ -37,6 +39,7 @@ _TEMPLATE_TEXT = {
         "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost per accepted result) and improve their context and skills, carrying what one agent or project learns to the rest. A project's coordination belongs to its own conductor.\n"
         "- Daily health check: on a wake whose payload kind is `corsia_agent.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do; otherwise say nothing.\n"
         "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): when GitHub is set up and the person allowed agents to post, search CORSIA's open issues first and add to a match, otherwise file one. Give steps, expected vs actual and the CORSIA version. State technical facts only: no personal data, names, paths or conversation text, because the repository is public.\n"
+        "- Movement digest: when a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`.\n"
     ),
     "project": (
         "# Project conductor responsibilities\n\n"
@@ -51,8 +54,8 @@ _TEMPLATE_TEXT = {
 }
 
 _TEMPLATE_SHA256 = {
-    "core": "ee8f9e475e2e5b17b17886c3a4caacdf737279f30536391fed0b0720cc542e86",
-    "corsia_agent": "9cc6a9e82aef61d6ec703ed12366cf6073b637b6e79a746392d8bf2ac1e817c4",
+    "core": "15d34696c8c0477ec922f9c4a6b802d93e223085702ca0ccff223f1ad0c38a0d",
+    "corsia_agent": "b372c981ab015f025ca0b61d04444cd37e3f680b9a6367d6b24e482c999f774f",
     "project": "d6e7b3af3b98c20666dae82b40646bfb84d86109c5374fcf7a740454a1c466ae",
 }
 
