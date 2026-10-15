@@ -13,7 +13,6 @@ user clears that ask, the holds it placed clear and the agent is told
 
 from __future__ import annotations
 
-from plans.user_ask_cards import ask_holds
 from dataclasses import dataclass
 
 import plans.service as service

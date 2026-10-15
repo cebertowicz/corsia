@@ -8,7 +8,17 @@ from plans.node_states import open_user_block_sql
 
 
 def ask_holds(db, hold_ids) -> dict[str, dict]:
-    """Return asked artifacts and their current review state in bounded batches."""
+    """The user asks among ``hold_ids``, by hold id, read by primary key in bounded batches.
+
+    Each is ``{artifact_id, open, raised_in, answer}``: the artifact asked about,
+    whether the ask is still open, where the agent raised it (``turn_id``,
+    ``tool_invocation_id``, ``provider_call_id``; empty for a hold placed before
+    they were recorded) and what its ending recorded (``verdict``,
+    ``feedback_counts``, ``ended``; empty when it recorded none). A hold an agent
+    restated by re-blocking reads as its newest successor on the same task, so an
+    earlier card never claims an answer the user did not give. A hold that is not
+    a user ask, or does not exist, is absent.
+    """
     ids = list(dict.fromkeys(hold_ids))
     if not ids:
         return {}
@@ -22,6 +32,7 @@ def ask_holds(db, hold_ids) -> dict[str, dict]:
         ids,
     ).fetchall()
     cleared = [row["clearance_event_id"] for row in rows if row["clearance_event_id"]]
+    # holds.clear_write keeps the ending detail under its own ``detail`` key.
     answers = {
         event_id: detail
         for event_id, payload in _event_payloads(db, cleared).items()
@@ -104,6 +115,7 @@ def _event_payloads(db, event_ids: list[str]) -> dict[str, dict]:
 
 
 def _placed_raised_in(db, hold_ids: list[str], node_ids) -> dict[str, dict]:
+    """Where each hold was raised, from its ``hold_placed`` event, found by the task's event index."""
     if not node_ids:
         return {}
     marks = ",".join("?" * len(node_ids))
