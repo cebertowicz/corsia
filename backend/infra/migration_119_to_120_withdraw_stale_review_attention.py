@@ -10,6 +10,12 @@ _TABLES = ("artifact_identities", "plan_node_artifact_links", "plan_node_holds")
 
 
 def _stale_review_attention_sql() -> str:
+    """Raised attention an ended user ask left behind, and nothing else.
+
+    It takes positive evidence: a user ask on the item ended and none is open.
+    Attention a parent review approved or deferred (``disposition_outcome``) or
+    a raised plan decision holds stays raised: neither has an ask behind it.
+    """
     from plans.public import open_user_block_sql  # lazy: plans imports infra
 
     return f"""
@@ -17,7 +23,16 @@ def _stale_review_attention_sql() -> str:
       FROM artifact_identities i
      WHERE i.state='active'
        AND json_extract(i.metadata, '$.attention_state')='raised'
+       AND json_extract(i.metadata, '$.disposition_outcome') IS NULL
        AND COALESCE(json_extract(i.metadata, '$.plan_decision.state'), '') != 'raised'
+       AND EXISTS (
+           SELECT 1
+             FROM plan_node_artifact_links l
+             JOIN plan_node_holds h ON h.node_id=l.node_id
+            WHERE l.artifact_id=i.id AND l.role='attention'
+              AND h.kind='blocked' AND h.owner_kind='user'
+              AND h.owner_id=l.artifact_id AND h.cleared_at IS NOT NULL
+       )
        AND NOT EXISTS (
            SELECT 1
              FROM plan_node_artifact_links l

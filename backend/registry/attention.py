@@ -208,9 +208,12 @@ def _clear_attention(
             patch, db=_db,
         )
         _record_closeout(identity, outcome, _db)
-        # Attention owns every way an ask stops being raised. Plans owns what
-        # that lifecycle means for a linked task; its public hook is a no-op for
-        # ordinary artifacts and decisions, and ``defer`` keeps the hold.
+        # Attention owns this one state write; who ends the ask decides the
+        # order. The user ends it here, and this hook tells Plans, which clears
+        # the linked task's hold. A task ends its own ask in Plans
+        # (``plans.ask_withdrawal``), which clears the hold first and then calls
+        # here, so the hook finds no open hold and does nothing. It is a no-op
+        # for ordinary artifacts and decisions, and ``defer`` keeps the hold.
         plans_public.ask_cleared(
             str(row["id"]), outcome, db=_db, release=answer.release() if answer else None,
         )

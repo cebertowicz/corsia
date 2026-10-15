@@ -495,19 +495,24 @@ def test_document_ask_refuses_a_second_node_and_reblocking_is_idempotent(db):
     ask = _document_ask(db, "one-open-review.md")
     db.commit()
 
-    def block(node):
+    def block(node, reason="Review it"):
         return mutate(
             plan.id, "block_node", {
-                "node_id": node.id, "reason_key": "review", "reason": "Review it",
+                "node_id": node.id, "reason_key": "review", "reason": reason,
                 "owner_kind": "user", "owner_id": None, "ask_artifact_id": ask,
                 "expected_revision": service._node_row(db, node.id)["revision"],
             }, actor=OWNER, provenance="test.blocked_wait", mutation_id=uuid.uuid4().hex, db=db,
         )
 
     block(first)
-    block(first)
+    block(first, reason="Review the revised draft")
 
     assert _open_holds(db, first.id) == 1
+    # The re-block's new reason reaches the user on that one hold.
+    assert db.execute(
+        "SELECT reason FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL",
+        (first.id,),
+    ).fetchone()["reason"] == "Review the revised draft"
     assert attention.get_attention_state(ask, db=db) == "raised"
     with pytest.raises(
         service.PlanInputError, match="withdraw it \\(resolve the blocker\\) and ask again",

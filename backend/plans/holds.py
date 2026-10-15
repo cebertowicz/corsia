@@ -290,8 +290,10 @@ def block_hold(
 
     Only the user's own blocker is a hold: one anyone else clears is a wait
     with a deadline (``plans.blocked_wait``), so it never sits unlooked-at.
-    Re-blocking a task on the artifact it already asks about is a no-op: the
-    open hold keeps its original reason rather than recording the new one.
+    Re-blocking a task on the artifact it already asks about keeps one open
+    hold for that ask: the same reason writes nothing, and a new reason
+    replaces the hold (holds are immutable) so the user reads the agent's
+    latest words. The ask itself stays raised throughout.
     """
     if owner_kind in WAIT_OWNERS:
         raise service.PlanInputError(
@@ -301,14 +303,18 @@ def block_hold(
     if owner_kind == "user" and owner_id is not None:
         node = _validate_node(db, node_id, expected_revision)
         existing = db.execute(
-            """SELECT id FROM plan_node_holds
+            """SELECT id,reason_key,reason FROM plan_node_holds
                WHERE node_id=? AND kind='blocked' AND owner_kind='user'
                  AND owner_id=? AND cleared_at IS NULL""",
             (node_id, owner_id),
         ).fetchone()
-        if existing is not None:
+        if existing is not None and (existing["reason_key"], existing["reason"]) == (
+            reason_key, reason,
+        ):
             return node
-    return place_hold(
+    else:
+        existing = None
+    node = place_hold(
         node_id,
         kind="blocked",
         reason_key=reason_key,
@@ -321,6 +327,13 @@ def block_hold(
         db=db,
         raised_in=raised_in,
     )
+    if existing is not None:
+        # The replaced hold ends here, not through ``clear``: its ask goes on.
+        clear_write(
+            node_id, str(existing["id"]), expected_kind="blocked", actor_id=actor_id,
+            provenance=provenance, detail={"ended": "restated"}, db=db,
+        )
+    return node
 
 
 def block(

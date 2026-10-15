@@ -102,3 +102,35 @@ def test_withdraws_only_stale_review_attention_and_is_idempotent():
         assert withdraw_stale_review_attention(db) == 0
     finally:
         db.close()
+
+
+def test_keeps_attention_no_ended_ask_left_behind():
+    db = _db()
+    try:
+        # A parent review approved this to the user after the child's ask ended.
+        approved = _artifact(db, "approved.md")
+        node, hold = _raise_ask(db, approved)
+        holds.clear(
+            node.id, hold, expected_kind="blocked",
+            expected_revision=service._node_row(db, node.id)["revision"],
+            actor_id="owner", provenance="test.clear", db=db,
+        )
+        models.update_metadata(
+            "workspace", "document", "approved.md",
+            {"attention_state": "raised", "disposition_outcome": "approve_to_user"}, db=db,
+        )
+        # A parent review's deferral that its watch raised again.
+        reraised = _artifact(db, "reraised.md")
+        models.update_metadata(
+            "workspace", "document", "reraised.md",
+            {"attention_state": "raised", "disposition_outcome": "defer_until"}, db=db,
+        )
+        # Raised with no ask ever linked: no evidence it is stale.
+        unlinked = _artifact(db, "unlinked.md")
+        attention.raise_attention(unlinked, db=db)
+
+        assert withdraw_stale_review_attention(db) == 0
+        for artifact_id in (approved, reraised, unlinked):
+            assert attention.get_attention_state(artifact_id, db=db) == "raised"
+    finally:
+        db.close()
