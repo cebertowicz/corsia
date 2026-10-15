@@ -26,6 +26,7 @@
 	let email = $state('');
 	let folder = $state('~/CORSIA');
 	let accountBusy = $state(false);
+	let accountComplete = $state(Boolean(get(token)));
 	let accountError = $state('');
 	let confirmationError = $state('');
 	let sources = $state<ModelSource[]>([]);
@@ -43,7 +44,7 @@
 
 	const steps = $derived<SetupStep[]>([
 		{ label: 'Welcome', icon: 'sparkle', state: page === 'welcome' || page === 'hard-stop' || page === 'checking' ? 'current' : 'done' },
-		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
+		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : accountComplete ? 'done' : 'todo' },
 		{ label: 'AI model', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
 	]);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
@@ -91,8 +92,15 @@
 			case 'error':
 				return { title: 'CORSIA couldn’t start', lede: statusError || accountError || 'Try again.', primary: { label: 'Try again' }, onPrimary: !get(token) ? readStatus : createAccount };
 			case 'models':
-				if (replaceOmlxConsent) return { title: "The oMLX on this computer doesn't start", lede: `CORSIA can reinstall it and download ${downloadModelLabel} (${status.model_size_gb ?? '…'} GB). Reinstalling replaces that oMLX and changes its settings.` };
-			if (existingOmlxConsent) return { title: 'Use your oMLX?', lede: 'Your oMLX is already on this computer.' };
+				if (replaceOmlxConsent || existingOmlxConsent) {
+					const replacing = replaceOmlxConsent;
+					return {
+						title: replacing ? "The oMLX on this computer doesn't start" : 'Use your oMLX?',
+						lede: replacing ? undefined : 'Your oMLX is already on this computer.',
+						primary: { label: replacing ? 'Reinstall' : 'Use it', disabled: localSetupBusy, loading: localSetupBusy },
+						onPrimary: () => void decideExistingOmlx(true),
+					};
+				}
 				return { title: 'Choose an AI model', lede: 'Your agents need at least one. You can add more later in Settings.', primary: { label: 'Start using CORSIA', disabled: !canFinish, note: finishNote }, onPrimary: onFinished };
 		}
 	});
@@ -158,18 +166,22 @@
 
 	async function decideExistingOmlx(useIt: boolean) {
 		if (!useIt) {
+			const current = get(token);
 			existingOmlxConsent = false;
 			localRepairDeferred = replaceOmlxConsent;
 			replaceOmlxConsent = false;
 			localWanted = false;
-			page = 'account';
+			page = current ? 'models' : 'account';
+			if (current) void refreshSources();
 			return;
 		}
 		const replacing = replaceOmlxConsent;
 		localSetupBusy = true;
+		if (replacing) localDownloadPending = true;
 		localStartError = '';
 		let returnToModels = false;
 		let needsReplacementConsent = false;
+		let localStartSucceeded = false;
 		try {
 			const current = get(token);
 			returnToModels = Boolean(current);
@@ -178,12 +190,13 @@
 				: await startLocalDownload(!replacing, replacing);
 			const code = typeof start === 'string' ? start : start.code;
 			if (code === 'replace_consent_required') needsReplacementConsent = true;
-			else if ((typeof start === 'string' ? start === 'started' : start.ok)) { localRepairDeferred = false; localDownloadPending = true; }
+			else if ((typeof start === 'string' ? start === 'started' : start.ok)) { localRepairDeferred = false; localDownloadPending = true; localStartSucceeded = true; }
 			else localStartError = 'The local model couldn’t start.';
 		} catch {
 			localStartError = 'The local model couldn’t start.';
 		} finally {
 			localSetupBusy = false;
+			if (!localStartSucceeded) localDownloadPending = false;
 			existingOmlxConsent = false;
 			replaceOmlxConsent = needsReplacementConsent;
 			page = needsReplacementConsent || returnToModels ? 'models' : 'account';
@@ -212,7 +225,7 @@
 			if (!response.ok) throw new Error(`account ${response.status}`);
 			const result = await response.json();
 			onAccountCreated();
-			token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() });
+			token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); accountComplete = true;
 			// A session opened here has no socket until something connects it; the app shell only connects on mount.
 			connect();
 			await refreshSources();
@@ -283,7 +296,7 @@
 	function sourceMeta(source: ModelSource): string {
 		if (source.source === 'omlx') {
 			if (source.setup_downloading || source.setup_stage) return source.setup_stage || 'Downloading';
-			if (localRepairDeferred) return "oMLX doesn't start";
+			if (localRepairDeferred) return 'Not started';
 			if (source.setup_error || localStartError) return 'Download needs attention';
 			return `Local model · ${modelSize}`;
 		}

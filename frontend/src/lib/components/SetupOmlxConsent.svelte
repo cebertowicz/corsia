@@ -28,15 +28,12 @@
 		</ul>
 		<p>It won’t change your oMLX.</p>
 	{/if}
-	<div class="consent-actions">
-		<Button variant="chip" onclick={() => onDecision(false)} disabled={busy}>Not now</Button>
-		<Button variant="chip" onclick={() => onDecision(true)} loading={busy} disabled={busy}>{replace ? 'Reinstall' : 'Use it'}</Button>
-	</div>
+	<Button variant="chip" onclick={() => onDecision(false)} disabled={busy}>Not now</Button>
 </div>
 
 <style>
 	.sources { display: flex; flex-direction: column; gap: var(--space-4); max-width: calc(var(--space-8) * 9); color: var(--text-secondary); }
 	.consent p { margin: 0; }
 	.consent ul { margin: 0; padding-left: var(--space-5); }
-	.consent-actions { display: flex; gap: var(--space-2); }
+	/* The deferral deliberately uses the setup accent-text chip directly. */
 </style>
