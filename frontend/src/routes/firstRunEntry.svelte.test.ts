@@ -57,7 +57,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 beforeEach(() => {
 	conductor._resetFirstRunLandingForTests();
-	conductor.workspaceConductorId.set(null);
+	conductor.corsiaAgentId.set(null);
 	user.set(null);
 	token.set('fixture-session');
 	activeThreadId.set(null);
@@ -137,7 +137,7 @@ describe('first-run entry across auth readiness', () => {
 		expect(host.querySelector('.auth-gate')).not.toBeNull();
 		resolveLookup();
 		await settle();
-		expect(get(conductor.workspaceConductorId)).toBeNull();
+		expect(get(conductor.corsiaAgentId)).toBeNull();
 		expect(paths.filter(path => path === '/api/corsia-agent')).toHaveLength(0);
 		expect(landSpy).not.toHaveBeenCalled();
 		const preAuthLandingAttempts = landSpy.mock.calls.length;
@@ -154,7 +154,7 @@ describe('first-run entry across auth readiness', () => {
 			landingAttempts: landSpy.mock.calls.length, preAuthLandingAttempts, preAuthThreadListReads,
 		}));
 		expect(get(activeThreadId)).toBe('fixture-conductor');
-		expect(get(conductor.workspaceConductorId)).toBe('fixture-conductor');
+		expect(get(conductor.corsiaAgentId)).toBe('fixture-conductor');
 		expect(historyReads('fixture-conductor')).toHaveLength(1);
 	});
 

@@ -56,7 +56,7 @@ async def drive(now: str, *, db=None) -> int:
         db, claim_due, now, capacity, set(_in_flight), db,
     )
     for schedule in claims:
-        task = asyncio.create_task(run_claimed(schedule, now, db=db))
+        task = asyncio.create_task(run_claimed(schedule, now))
         _in_flight[schedule.id] = task
         task.add_done_callback(partial(_forget, schedule.id))
     return len(claims)
@@ -134,7 +134,7 @@ def _report_owner_gone(connection, schedule: Schedule, row) -> None:
     )
 
 
-def finished_at(_started_at: str) -> str:
+def finished_at() -> str:
     """The time a run is recorded as having finished: when it settled, not when it began."""
     return store.utc_now()
 
@@ -154,12 +154,12 @@ async def run_claimed(schedule: Schedule, started_at: str, *, db=None) -> None:
         report = _error_report(schedule, f"the runner failed: {exc}")
     try:
         woken = await run_in_db_unless_owned(
-            db, settle, schedule, report, finished_at(started_at), db,
+            db, settle, schedule, report, finished_at(), db,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("script schedule {} could not record its run", schedule.id)
         await run_in_db_unless_owned(
-            db, _record_settle_failure, schedule.id, str(exc), finished_at(started_at), db,
+            db, _record_settle_failure, schedule.id, str(exc), finished_at(), db,
         )
         return
     if woken:

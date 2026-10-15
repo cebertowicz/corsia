@@ -352,10 +352,10 @@
       "sha256": "1522a82dd5122f41e3c3312c0fdb191fb2eb735e49d2e78f2229d593e59890bc"
     },
     {
-      "bytes": 10765,
+      "bytes": 10786,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "bcf0d533c7674885c586712bcd9c6aa33f9d6afaacfe3e5ea05fcdffec701fc9"
+      "sha256": "6ee213639aee49999d660d688054059329c167ae5044872bd0e3d8befc0e56c7"
     }
   ],
   "version": "v1"

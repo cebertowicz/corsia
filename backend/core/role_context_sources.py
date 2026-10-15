@@ -31,7 +31,7 @@ class RoleContextResolution:
     """Inferred roles, designation evidence, and their delivered context sources."""
 
     roles: tuple[RoleName, ...]
-    conductor_scopes: tuple[CoordinationScope, ...]
+    coordination_scopes: tuple[CoordinationScope, ...]
     scope_roots: tuple[RoleScopeRoot, ...]
     sources: tuple[ContextSourceEntry, ...]
 
@@ -42,17 +42,17 @@ class RoleContextResolution:
             "receives_agent_role": "agent" in self.roles,
             "is_conductor": "conductor" in self.roles,
             "is_corsia_agent": "corsia_agent" in self.roles,
-            "conductor_scopes": [dict(scope) for scope in self.conductor_scopes],
+            "coordination_scopes": [dict(scope) for scope in self.coordination_scopes],
         }
 
 
-def _conductor_scopes(
+def _coordination_scopes(
     thread_id: str,
     db,
     *,
     strict_db: bool,
 ) -> tuple[CoordinationScope, ...]:
-    """Read current conductor designations, optionally requiring full schema."""
+    """Read current coordination designations, optionally requiring full schema."""
     if db is None:
         # DB-less reconstruction callers intentionally operate without live
         # identity state. They must remain ordinary rather than opening the
@@ -96,7 +96,7 @@ def infer_thread_roles(
     thread_id: str,
     *,
     db,
-    conductor_scopes: tuple[CoordinationScope, ...] | None = None,
+    coordination_scopes: tuple[CoordinationScope, ...] | None = None,
     strict_db: bool = False,
 ) -> tuple[RoleName, ...]:
     """Infer the Agent, Conductor and CORSIA agent roles from existing state.
@@ -106,9 +106,9 @@ def infer_thread_roles(
     ``ROLE_ORDER``.
     """
     scopes = (
-        conductor_scopes
-        if conductor_scopes is not None
-        else _conductor_scopes(thread_id, db, strict_db=strict_db)
+        coordination_scopes
+        if coordination_scopes is not None
+        else _coordination_scopes(thread_id, db, strict_db=strict_db)
     )
     scope_types = {scope.get("scope_type") for scope in scopes}
     if scope_types:
@@ -336,13 +336,13 @@ def resolve_role_context(
     strict_db: bool = False,
 ) -> RoleContextResolution:
     """Resolve current roles and optionally load their filesystem context."""
-    conductor_scopes = _conductor_scopes(thread_id, db, strict_db=strict_db)
+    coordination_scopes = _coordination_scopes(thread_id, db, strict_db=strict_db)
     selection_errors: tuple[ContextSourceEntry, ...] = ()
     try:
         roles = infer_thread_roles(
             thread_id,
             db=db,
-            conductor_scopes=conductor_scopes,
+            coordination_scopes=coordination_scopes,
             strict_db=strict_db,
         )
     except sqlite3.OperationalError as error:
@@ -375,7 +375,7 @@ def resolve_role_context(
     )
     return RoleContextResolution(
         roles=roles,
-        conductor_scopes=conductor_scopes,
+        coordination_scopes=coordination_scopes,
         scope_roots=scope_roots,
         sources=sources,
     )

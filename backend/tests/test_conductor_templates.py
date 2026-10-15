@@ -38,12 +38,10 @@ _TEMPLATE_TEXT = {
         "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost per accepted result) and improve their context and skills, carrying what one agent or project learns to the rest. A project's coordination belongs to its own conductor.\n"
         "- Daily health check: on a wake whose payload kind is `corsia_agent.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do; otherwise say nothing.\n"
         "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): when GitHub is set up and the person allowed agents to post, search CORSIA's open issues first and add to a match, otherwise file one. Give steps, expected vs actual and the CORSIA version. State technical facts only: no personal data, names, paths or conversation text, because the repository is public.\n"
-        "- Movement digest: when a movement digest (`measurement.movement_digest`) arrives, use skill `movement-review`.\n"
     ),
     "project": (
         "# Project conductor responsibilities\n\n"
         "You are the designated conductor for this project scope.\n\n"
-        "Recurring work that keeps eating the person's time is yours to find and offer to take over, once per kind and only on their word (skill `time-to-agent`).\n\n"
         "- Elicit and maintain the user's purpose, vision, position and authority, constraints, acceptance evidence and current initiatives. Keep the charter in `context/PROJECT.md` and operating projection in `context/COORDINATION-MODEL.md`; live status stays in plans.\n"
         "- Agree a review horizon and revisit alignment when objectives, evidence or constraints materially change. Resolve conflicting objectives with the user; propagate the resulting direction to affected agents.\n"
         "- Own measures of whole project outcomes and user attention, with quality and rework guardrails. Detect local optimization that damages the combined result. Review team effectiveness and adjust coordination within the commission; do not equate activity or agent count with value.\n"
@@ -57,8 +55,8 @@ _TEMPLATE_TEXT = {
 
 _TEMPLATE_SHA256 = {
     "core": "6542dcd24b13f44e5a09200d2ea7f98448895fbdf2856c5b14731c7f2fd1c89b",
-    "corsia_agent": "68cab5c70cd8824a5a70c38a1787472a738dd8061d93a8d46f0fb0681587b56c",
-    "project": "4619339cc15e5ac7ae47111fd3398952480968285f4c3b4e2cdbdec871ad6a4e",
+    "corsia_agent": "2cee995934c7038a62a6642f94a91a0c1963a9ff1a62c9b8973670f9a8387c88",
+    "project": "f93f36c76de64b8cdd711b6f543d3628f3fc9bfd8365086e45bc543cd1d01d1a",
 }
 
 _V1_TEMPLATE_SHA256 = {

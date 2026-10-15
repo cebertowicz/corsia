@@ -801,7 +801,7 @@ def test_context_registry_composes_agent_then_conductor_context(tmp_path):
     assert collection.agent_facts["receives_agent_role"] is True
     assert collection.agent_facts["is_conductor"] is False
     assert collection.agent_facts["is_corsia_agent"] is True
-    assert collection.agent_facts["conductor_scopes"] == [
+    assert collection.agent_facts["coordination_scopes"] == [
         {"scope": "workspace", "scope_type": "workspace"}
     ]
 

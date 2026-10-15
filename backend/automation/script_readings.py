@@ -232,21 +232,28 @@ def _note(db: sqlite3.Connection, schedule: Schedule, key: str, summary: str) ->
 
 def _wake(db: sqlite3.Connection, schedule: Schedule, signal: Signal, now: str) -> bool:
     """Wake the owner once for this series today; a repeat becomes a note. True if woken."""
+    from events import dead_letter
     from events.delivery import enqueue_event_wake
 
     message_id = wake_message_id(schedule.id, signal.series, local_day(now))
     if _wake_exists(db, message_id):
         _note(db, schedule, signal.series or "run", signal.summary)
         return False
+    payload = {**signal.details, "schedule_id": schedule.id, "next": _WAKE_NEXT}
     try:
         enqueue_event_wake(
             schedule.thread_id, f"script.{signal.kind}", signal.summary,
-            {**signal.details, "schedule_id": schedule.id, "next": _WAKE_NEXT},
+            payload,
             message_id=message_id,
             chip=f"Script {signal.kind.replace('_', ' ')}: {_script_name(schedule)}",
             db=db,
         )
     except ValueError:
+        dead_letter.park(
+            f"script.{signal.kind}",
+            {**payload, "summary": signal.summary, "owner": schedule.thread_id},
+            "owner_inactive", schedule.id, db=db,
+        )
         logger.warning(
             "script schedule {} owner {} unavailable; {} not delivered",
             schedule.id, schedule.thread_id, signal.kind,
@@ -273,7 +280,7 @@ def _note_readings(
     for reading in report.readings:
         series = registered[reading.series]
         if series.min is None and series.max is None:
-            continue  # unbounded: the outcome event is its only record
+            continue  # Raw readings are not persisted yet (see TODOs); a series with no bounds never wakes.
         if classify(series, reading.value) != "ok":
             continue
         unit = f" {series.unit}" if series.unit else ""

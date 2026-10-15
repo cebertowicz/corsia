@@ -40,23 +40,23 @@ def corsia_agent_contact(
     enforces, so the roster lists the CORSIA agent exactly when a send can reach it.
     """
     try:
-        conductor_id = get_corsia_agent(db=db)
+        corsia_agent_id = get_corsia_agent(db=db)
     except CorsiaAgentSettingError:
         return None, "the CORSIA agent setting is malformed"
-    if not conductor_id:
+    if not corsia_agent_id:
         return None, "none designated"
     row = db.execute(
         f"SELECT {','.join(_CONTACT_COLUMNS)},user_id,agent_enabled,"
         "lifecycle_state,archived_reason FROM threads WHERE id=?",
-        (conductor_id,),
+        (corsia_agent_id,),
     ).fetchone()
     if row is None:
-        return None, f"designated CORSIA agent {conductor_id} does not exist"
+        return None, f"designated CORSIA agent {corsia_agent_id} does not exist"
     if row["user_id"] != user_id:
         return None, "designated CORSIA agent belongs to another account"
-    gap = native_endpoint_gap(dict(row), corsia_agent_id=conductor_id)
+    gap = native_endpoint_gap(dict(row), corsia_agent_id=corsia_agent_id)
     if gap:
-        return None, f"designated CORSIA agent {conductor_id} is unreachable: {gap}"
+        return None, f"designated CORSIA agent {corsia_agent_id} is unreachable: {gap}"
     contact = {column: row[column] for column in _CONTACT_COLUMNS}
     contact["agent_responsibility"] = (
         contact["agent_responsibility"] or "Designated CORSIA agent."

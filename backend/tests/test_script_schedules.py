@@ -17,6 +17,8 @@ from infra.schema import SCHEMA_SQL
 
 T0 = "2026-01-01T12:00:00+00:00"
 HOUR = 3600
+_runner_db: sqlite3.Connection | None = None
+_finished_at = T0
 
 
 def _db() -> sqlite3.Connection:
@@ -60,11 +62,22 @@ def _run(stdout: str = "", *, code: int = 0, timed_out: bool = False, stderr: st
 
 @pytest.fixture(autouse=True)
 def _reset_runner(monkeypatch):
+    global _finished_at, _runner_db
     script_runner._in_flight.clear()
-    monkeypatch.setattr(script_runner, "finished_at", lambda started: started)
+    _runner_db = None
+    _finished_at = T0
+    monkeypatch.setattr(script_runner, "finished_at", lambda: _finished_at)
     monkeypatch.setattr(
         script_runner, "_drive_owner", _no_drive, raising=True,
     )
+
+    async def run_with_test_db(owned_db, fn, *args, **kwargs):
+        if owned_db is not None:
+            return fn(*args, **kwargs)
+        assert _runner_db is not None
+        return fn(*args[:-1], _runner_db, **kwargs)
+
+    monkeypatch.setattr(script_runner, "run_in_db_unless_owned", run_with_test_db)
 
 
 async def _no_drive(_thread_id: str) -> None:
@@ -83,6 +96,9 @@ def _use_run(monkeypatch, run: ScriptRun):
 
 
 async def _settle_all(db, now):
+    global _finished_at, _runner_db
+    _runner_db = db
+    _finished_at = now
     started = await script_runner.drive(now, db=db)
     for task in list(script_runner._in_flight.values()):
         await task
@@ -199,6 +215,25 @@ async def test_unbounded_series_never_wakes_or_notes(tmp_path, monkeypatch):
     ).fetchone()[0] == 0
 
 
+def test_rejected_script_wake_is_parked(tmp_path, monkeypatch):
+    from automation import script_readings
+
+    db = _db()
+    schedule = _register(db, tmp_path)
+
+    def reject(*_args, **_kwargs):
+        raise ValueError("event wake target is unavailable")
+
+    monkeypatch.setattr("events.delivery.enqueue_event_wake", reject)
+    assert script_readings._wake(
+        db, schedule, script_readings.Signal("breach", "cost", "over budget"), T0,
+    ) is False
+    parked = db.execute(
+        "SELECT internal_event,reason,external_id FROM dead_letter_events"
+    ).fetchone()
+    assert tuple(parked) == ("script.breach", "owner_inactive", schedule.id)
+
+
 @pytest.mark.asyncio
 async def test_non_finite_reading_is_an_error_not_a_reading(tmp_path, monkeypatch):
     db = _db()
@@ -307,6 +342,21 @@ async def test_concurrency_cap_reclaims_completed_task_before_claiming(tmp_path,
     _use_run(monkeypatch, _run('{"series":"cost","value":1}\n'))
 
     assert await _settle_all(db, T0) == script_runner.SCRIPT_RUN_CAP
+
+
+@pytest.mark.asyncio
+async def test_detached_script_runs_open_their_own_database_connection(tmp_path, monkeypatch):
+    db = _db()
+    _register(db, tmp_path)
+    seen = []
+
+    async def record_run(_schedule, _started_at, *, db=None):
+        seen.append(db)
+
+    monkeypatch.setattr(script_runner, "run_claimed", record_run)
+    assert await script_runner.drive(T0, db=db) == 1
+    await asyncio.gather(*script_runner._in_flight.values())
+    assert seen == [None]
 
 
 @pytest.mark.asyncio
@@ -439,7 +489,7 @@ async def test_run_is_recorded_at_its_finish_time_not_its_start(tmp_path, monkey
     db = _db()
     schedule = _register(db, tmp_path)
     finish = "2026-01-01T12:04:00+00:00"
-    monkeypatch.setattr(script_runner, "finished_at", lambda _started: finish)
+    monkeypatch.setattr(script_runner, "finished_at", lambda: finish)
     _use_run(monkeypatch, _run('{"series":"cost","value":1}\n'))
     await _settle_all(db, T0)
     row = schedules.get(schedule.id, db=db)

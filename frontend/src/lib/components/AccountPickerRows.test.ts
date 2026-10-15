@@ -18,7 +18,7 @@ import AccountPickerRows from './AccountPickerRows.svelte';
 import { token } from '$lib/stores/auth';
 import { activeModelId } from '$lib/stores/models';
 import { activeThreadId } from '$lib/stores/threads';
-import { workspaceConductorId } from '$lib/utils/conductor';
+import { corsiaAgentId } from '$lib/utils/conductor';
 import type { PickerAccount } from '$lib/stores/accountPicker';
 
 const ROW = {
@@ -45,7 +45,7 @@ beforeEach(() => {
 	reloadAccounts.mockClear();
 	reloadModels.mockClear();
 	vi.stubGlobal('fetch', fetchMock);
-	workspaceConductorId.set('cond-1');
+	corsiaAgentId.set('cond-1');
 	activeThreadId.set('cond-1');
 });
 
@@ -55,7 +55,7 @@ afterEach(() => {
 	host.remove();
 	vi.unstubAllGlobals();
 	token.set(null);
-	workspaceConductorId.set(null);
+	corsiaAgentId.set(null);
 	activeThreadId.set(null);
 	activeModelId.set(null);
 });
