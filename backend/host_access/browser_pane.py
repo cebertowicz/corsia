@@ -11,7 +11,7 @@ from host_access import browser_cdp, browser_cli
 from host_access.browser_streaming import StreamPortResult
 from host_access.processes import PROCESS_OWNER
 
-__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "go", "match_pane", "open_url", "page_info", "repaint", "stream_port", "watch_page_metadata"]
+__all__ = ["HISTORY_ACTIONS", "PaneAppearance", "go", "key_event", "match_pane", "open_url", "page_info", "repaint", "stream_port", "watch_page_metadata"]
 
 HISTORY_ACTIONS = frozenset({"back", "forward", "reload"})
 
@@ -52,6 +52,17 @@ async def watch_page_metadata(thread_id: str, connection_token: str, report: Cal
 
 async def stream_port(thread_id: str) -> StreamPortResult:
     return await PROCESS_OWNER.browser_sessions().stream_port(thread_id)
+
+
+async def key_event(thread_id: str, event: dict, connection_token: str) -> None:
+    """Deliver person keyboard input to the shared page with CDP modifier bits intact."""
+    owner = PROCESS_OWNER.browser_sessions()
+    payload = await owner.run(thread_id, ("get", "cdp-url"), control_token=connection_token, session="existing")
+    endpoint = browser_cli.json_object(payload).get("data", {}).get("cdpUrl")
+    if not isinstance(endpoint, str) or not endpoint.startswith("ws"):
+        raise browser_cdp.BrowserSessionError("This page couldn't receive keyboard input")
+    page_endpoint = await asyncio.to_thread(browser_cdp._page_endpoint, endpoint)
+    await browser_cdp.dispatch_key_event(page_endpoint, event)
 
 
 async def open_url(thread_id: str, url: str, connection_token: str | None = None) -> str:

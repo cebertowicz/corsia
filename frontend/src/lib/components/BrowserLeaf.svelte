@@ -209,7 +209,7 @@
 		event.preventDefault();
 		socket.send(JSON.stringify({
 			type: 'input_keyboard', eventType: event.type === 'keydown' ? 'keyDown' : 'keyUp',
-			key: event.key, code: event.code, text: keyText(event), modifiers: keyModifiers(event)
+			key: event.key, code: event.code, keyCode: event.keyCode, text: keyText(event), modifiers: keyModifiers(event)
 		}));
 	}
 

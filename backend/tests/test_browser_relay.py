@@ -34,11 +34,11 @@ async def test_navigation_does_not_block_input_and_its_result_is_delivered(monke
             if json.loads(payload).get('type') == 'navigate_result':
                 navigation_delivered.set()
 
-    class Stream(FakeStream):
-        async def send(self, payload):
-            await super().send(payload)
-            if json.loads(payload).get('type') == 'input_keyboard':
-                input_received.set()
+    async def key_event(_thread_id, payload, _connection_token):
+        assert payload == {'type': 'input_keyboard', 'key': 'a'}
+        input_received.set()
+
+    monkeypatch.setattr(browser_stream.browser_pane, 'key_event', key_event)
 
     pane = Pane([json.dumps(message) for message in [
         {'type': 'take_over'}, {'type': 'navigate', 'url': 'https://example.test'},
@@ -46,7 +46,7 @@ async def test_navigation_does_not_block_input_and_its_result_is_delivered(monke
     ]])
     try:
         with pytest.raises(WebSocketDisconnect):
-            await asyncio.wait_for(browser_stream._relay(pane, Stream(), 'thread', 'user'), 1)
+            await asyncio.wait_for(browser_stream._relay(pane, FakeStream(), 'thread', 'user'), 1)
         assert input_received.is_set()
         assert any(result.get('type') == 'navigate_result' and result.get('error') is None for result in (json.loads(message) for message in pane.text))
         assert browser_stream._runners == {}

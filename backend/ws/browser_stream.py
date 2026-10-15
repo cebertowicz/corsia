@@ -116,8 +116,10 @@ async def _relay(pane: WebSocket, stream, thread_id: str, user_id: str) -> None:
                 _request_navigate(thread_id, connection_token, data, report)
             elif kind == "appearance":
                 _request_match(thread_id, connection_token, data)
-            elif kind in {"input_mouse", "input_keyboard"}:
+            elif kind == "input_mouse":
                 await stream.send(message)
+            elif kind == "input_keyboard":
+                await browser_pane.key_event(thread_id, data, connection_token)
 
     async def metadata_events() -> None:
         async def emit(message: dict) -> None:

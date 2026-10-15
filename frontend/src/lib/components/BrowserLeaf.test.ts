@@ -130,8 +130,8 @@ describe('BrowserLeaf keyboard relay', () => {
 		canvas.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Meta', code: 'MetaLeft', metaKey: true }));
 		canvas.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'a', code: 'KeyA', metaKey: true }));
 		expect(socket.sent.filter(message => message.type === 'input_keyboard')).toEqual([
-			{ type: 'input_keyboard', eventType: 'keyDown', key: 'Meta', code: 'MetaLeft', text: '', modifiers: 4 },
-			{ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', text: '', modifiers: 4 },
+			{ type: 'input_keyboard', eventType: 'keyDown', key: 'Meta', code: 'MetaLeft', keyCode: 0, text: '', modifiers: 4 },
+			{ type: 'input_keyboard', eventType: 'keyDown', key: 'a', code: 'KeyA', keyCode: 0, text: '', modifiers: 4 },
 		]);
 	});
 });

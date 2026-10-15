@@ -33,6 +33,9 @@ document.addEventListener('pointermove', event => { pointer = [event.clientX, ev
 document.querySelector('#agent-button').addEventListener('click', () => { clicks++; document.querySelector('#result').textContent = String(clicks); });
 </script>"""
 
+KEYBOARD = """<!doctype html><title>Keyboard fixture</title>
+<input id=field value=old>"""
+
 # This deliberately loads the real React UMD distribution: the controlled input exercises React's
 # value-setter/event path rather than a lookalike implementation.
 REACT = """<!doctype html><title>React fixture</title>
@@ -59,7 +62,7 @@ window.addEventListener('load', () => {
 
 @contextmanager
 def fixture_server():
-    pages = {"/plain.html": PLAIN.encode(), "/react.html": REACT.encode()}
+    pages = {"/plain.html": PLAIN.encode(), "/keyboard.html": KEYBOARD.encode(), "/react.html": REACT.encode()}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler protocol name
@@ -134,6 +137,26 @@ async def test_shared_agent_actions_preserve_person_focus_caret_and_pointer(fixt
             assert after == {**before, "result": expected}
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
+        await owner.close_thread(thread_id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cdp_keyboard_dispatch_preserves_meta_shortcuts():
+    """The shared pane bypasses agent-browser's modifier-less stream input."""
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"shared-keyboard-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-shared-keyboard", instance_key=uuid4().hex)
+    try:
+        with fixture_server() as origin:
+            assert not (await owner.run(thread_id, ("open", f"{origin}/keyboard.html"), show_window=True, session="new")).startswith("Error:")
+            endpoint = page_endpoint(await owner.run(thread_id, ("get", "cdp-url"), session="existing"))
+            await cdp_value(owner, thread_id, "document.querySelector('#field').focus(); null")
+            await browser_cdp.dispatch_key_event(endpoint, {"eventType": "keyDown", "key": "Meta", "code": "MetaLeft", "keyCode": 91, "text": "", "modifiers": 4})
+            await browser_cdp.dispatch_key_event(endpoint, {"eventType": "keyDown", "key": "a", "code": "KeyA", "keyCode": 65, "text": "", "modifiers": 4})
+            assert await cdp_value(owner, thread_id, "[field.selectionStart, field.selectionEnd]") == [0, 3]
+    finally:
         await owner.close_thread(thread_id)
 
 

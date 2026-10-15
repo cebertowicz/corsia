@@ -20,3 +20,33 @@ async def test_box_accepts_agent_browser_031s_direct_data_shape():
         return CommandResult(0, '{"data":{"x":1,"y":2,"width":3,"height":4}}', "")
 
     assert await browser_cdp._box(run, "@e2") == {"x": 1, "y": 2, "width": 3, "height": 4}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_key_event_preserves_meta_modifier_and_text(monkeypatch):
+    calls = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        async def call(self, method, **params):
+            calls.append((method, params))
+            return {}
+
+    monkeypatch.setattr(browser_cdp, "CdpClient", lambda _endpoint: Client())
+
+    await browser_cdp.dispatch_key_event("websocket-endpoint", {
+        "eventType": "keyDown", "key": "a", "code": "KeyA", "keyCode": 65, "text": "", "modifiers": 4,
+    })
+    await browser_cdp.dispatch_key_event("websocket-endpoint", {
+        "eventType": "keyDown", "key": "Enter", "code": "Enter", "keyCode": 13, "text": "\r", "modifiers": 0,
+    })
+
+    assert calls == [
+        ("Input.dispatchKeyEvent", {"type": "rawKeyDown", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "modifiers": 4}),
+        ("Input.dispatchKeyEvent", {"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "modifiers": 0, "text": "\r"}),
+    ]

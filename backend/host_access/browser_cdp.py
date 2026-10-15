@@ -89,6 +89,31 @@ async def watch_page_metadata(endpoint: str, report: Callable[[dict], Awaitable[
                 await _report_page_metadata(cdp, report)
 
 
+async def dispatch_key_event(endpoint: str, event: dict) -> None:
+    """Send a pane key event through CDP so Chrome receives its modifier state."""
+    event_type = event.get("eventType")
+    key = event.get("key")
+    code = event.get("code")
+    key_code = event.get("keyCode")
+    modifiers = event.get("modifiers", 0)
+    if (event_type not in {"keyDown", "keyUp"} or not isinstance(key, str)
+            or not isinstance(code, str) or not isinstance(key_code, int) or not isinstance(modifiers, int)):
+        raise BrowserSessionError("This page couldn't receive keyboard input")
+    text = event.get("text") if event_type == "keyDown" else None
+    is_text = isinstance(text, str) and bool(text)
+    params: dict[str, object] = {
+        "type": "keyDown" if is_text else "rawKeyDown" if event_type == "keyDown" else event_type,
+        "key": key,
+        "code": code,
+        "windowsVirtualKeyCode": key_code,
+        "modifiers": modifiers,
+    }
+    if is_text:
+        params["text"] = text
+    async with CdpClient(endpoint) as cdp:
+        await cdp.call("Input.dispatchKeyEvent", **params)
+
+
 async def _report_page_metadata(cdp: CdpClient, report: Callable[[dict], Awaitable[None]], url: object = None) -> None:
     """Read page metadata in direct response to a CDP navigation event, never by polling."""
     if not isinstance(url, str):

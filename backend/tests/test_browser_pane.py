@@ -116,20 +116,28 @@ async def test_stream_does_not_close_a_pane_that_left_before_auth():
 
 
 @pytest.mark.asyncio
-async def test_relay_forwards_person_input_without_a_turn_handoff():
+async def test_relay_forwards_mouse_and_delivers_keyboard_through_cdp_without_a_turn_handoff(monkeypatch):
     pane = FakePane([
         json.dumps({"type": "input_mouse", "x": 1}),
         json.dumps({"type": "input_keyboard", "key": "a"}),
         json.dumps({"type": "unexpected"}),
     ])
+    keyboard = []
+
+    async def key_event(thread_id, event, connection_token):
+        keyboard.append((thread_id, event, connection_token))
+
+    monkeypatch.setattr(browser_stream.browser_pane, "key_event", key_event)
     stream = FakeStream()
     with pytest.raises(WebSocketDisconnect):
         await browser_stream._relay(pane, stream, "thread-1", "user-1")
     assert stream.sent == [
         json.dumps({"type": "screencast_start"}),
         json.dumps({"type": "input_mouse", "x": 1}),
-        json.dumps({"type": "input_keyboard", "key": "a"}),
     ]
+    assert len(keyboard) == 1
+    assert keyboard[0][:2] == ("thread-1", {"type": "input_keyboard", "key": "a"})
+    assert isinstance(keyboard[0][2], str) and keyboard[0][2]
     assert not browser_control.has_pane("thread-1")
 
 
