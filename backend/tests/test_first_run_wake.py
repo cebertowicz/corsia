@@ -7,6 +7,7 @@ model, only while no Turn has read it.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -94,7 +95,7 @@ class TestFirstModelChoice:
 
         await _new_install_picks("claude-code/sonnet")
 
-        facts_for.assert_awaited_once_with("claude-code/sonnet")
+        facts_for.assert_awaited_once_with("claude-code/sonnet", "script")
         row = _wake_row()
         assert row["content"] == first_run_wake.render(FACTS, first_run_wake.instructions())
         assert (row["delivery_state"], row["target_model"]) == ("queued", "claude-code/sonnet")
@@ -140,7 +141,7 @@ class TestFirstModelChoice:
 
         facts = await first_run_wake.setup_facts("claude-code/sonnet")
 
-        assert set(facts) == set(first_run_wake.UNAVAILABLE_READS)
+        assert set(facts) == {"first_run_path", "your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key"}
         assert facts["host_access_reviewer"] == {
             "unavailable": first_run_wake.UNAVAILABLE_READS["host_access_reviewer"],
         }
@@ -180,7 +181,7 @@ class TestFirstModelChoice:
         from onboarding import first_run_wake
 
         reference = system_resource_source(first_run_wake.FIRST_RUN_REFERENCE).read_text()
-        assert all(f"`{name}`" in reference for name in first_run_wake.UNAVAILABLE_READS)
+        assert all(f"`{name}`" in reference for name in ("your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key"))
 
 
 class TestOnlyAnUnreadWakeChanges:
@@ -203,14 +204,154 @@ class TestOnlyAnUnreadWakeChanges:
     ])
     def test_fill_touches_only_the_held_wake(self, fresh_install, state, error):
         from infra.database import write_transaction
-        from infra.onboarding_events import fill_held_first_run_wake, has_held_first_run_wake
+        from infra.onboarding_events import fill_held_first_run_wake, held_first_run_path
 
         conductor_id = self._queue(state, error)
         before = _wake_row()["content"]
         with write_transaction(None, scope="test_fill") as db:
-            held = has_held_first_run_wake(conductor_id, db=db)
+            held = held_first_run_path(conductor_id, db=db)
             filled = fill_held_first_run_wake(conductor_id, "inline", db=db)
 
         held_now = (state, error) == ("queued", "no_model_selected")
-        assert (held, filled) == (held_now, held_now)
+        assert (held, filled) == (("script" if held_now else None), held_now)
         assert _wake_row()["content"] == ("inline" if held_now else before)
+
+
+class TestAppPath:
+    def test_app_reference_predicate_handles_a_missing_and_present_resource(self, monkeypatch, tmp_path):
+        from infra import system_package
+        from onboarding import first_run_wake
+
+        monkeypatch.setattr(system_package, "system_resource_source", lambda _path: tmp_path / "missing.md")
+        assert first_run_wake.app_reference_served() is False
+        present = tmp_path / "present.md"
+        present.write_text("app path", encoding="utf-8")
+        monkeypatch.setattr(system_package, "system_resource_source", lambda _path: present)
+        assert first_run_wake.app_reference_served() is True
+
+    @pytest.mark.asyncio
+    async def test_served_app_path_uses_only_app_facts_and_both_references(self, monkeypatch):
+        from onboarding import first_run_wake
+
+        app_facts = {
+            "first_run_path": "app", "harness_ready": ["codex"], "gmail_eligible": True,
+            "web_search_ready": False, "github_ready": False, "own_omlx_source": False,
+            "setup": {"setup_decisions": []},
+            "user_profile": {"name": "Pat", "work": None, "place": None, "check_first": None, "answer_style": None},
+        }
+        monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
+        monkeypatch.setattr(first_run_wake, "setup_facts", AsyncMock(return_value=app_facts))
+        monkeypatch.setattr(first_run_wake, "instructions", lambda path="script": f"{path} instructions")
+
+        wake = await first_run_wake.render_for("codex/gpt-5.6-terra", "app")
+
+        assert first_run_wake.APP_INLINE_SUMMARY in wake
+        assert "app instructions" in wake
+        assert set(app_facts) == first_run_wake.APP_FACT_KEYS
+        assert not any(key in wake for key in ("mcp_sources", "your_model", "model_sources", "host_access_reviewer"))
+
+    @pytest.mark.asyncio
+    async def test_unserved_app_path_falls_back_to_script_facts_and_warns_once(self, monkeypatch, caplog):
+        from onboarding import first_run_wake
+
+        script_facts = {"first_run_path": "app", **FACTS}
+        monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: False)
+        monkeypatch.setattr(first_run_wake, "setup_facts", AsyncMock(return_value=script_facts))
+        monkeypatch.setattr(first_run_wake, "instructions", lambda path="script": "script instructions")
+
+        wake = await first_run_wake.render_for("codex/gpt-5.6-terra", "app")
+
+        assert "script instructions" in wake and "first_run-app.md" not in wake
+        assert script_facts["first_run_path"] == "app"
+        warnings = [record for record in caplog.records if record.name == first_run_wake.__name__]
+        assert len(warnings) == 1 and first_run_wake.APP_REFERENCE in warnings[0].message
+
+    @pytest.mark.asyncio
+    async def test_app_facts_are_private_and_use_an_addressless_github_decision(self, monkeypatch, tmp_path):
+        from infra import config
+        from onboarding import first_run_wake
+
+        profile = tmp_path / "context" / "50-USER-PROFILE.md"
+        profile.parent.mkdir()
+        profile.write_text("- **Preferred name:** Pat\x01 " + "n" * 130 + "\n- **Email:** person@gmail.com\n", encoding="utf-8")
+        monkeypatch.setattr(config, "WORKSPACE", tmp_path)
+        monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
+            "sources": [{"source": "claude-code", "state": "ready"}],
+            "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
+        })
+        monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
+        monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=True))
+        monkeypatch.setattr(first_run_wake, "app_reference_served", lambda: True)
+        monkeypatch.setattr(first_run_wake, "instructions", lambda path="script": "safe instructions")
+
+        facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
+        wake = first_run_wake.render(facts, "safe instructions")
+
+        assert facts["gmail_eligible"] is True
+        assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "work": None, "place": None, "check_first": None, "answer_style": None}
+        assert "the address you give me in chat" in wake
+        assert not any(value in wake for value in ("person@gmail.com", "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles"))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failed, expected", [
+        ("model_sources", ("harness_ready", "github_ready")),
+        ("gmail_eligible", ("gmail_eligible",)),
+        ("web_search_ready", ("web_search_ready",)),
+        ("own_omlx_source", ("own_omlx_source",)),
+        ("setup", ("setup",)),
+        ("user_profile", ("user_profile",)),
+    ])
+    async def test_each_app_fact_read_names_its_unavailable_recovery(self, monkeypatch, failed, expected):
+        from onboarding import first_run_wake
+
+        def fail():
+            raise OSError("unavailable")
+
+        monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
+            "sources": [], "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
+        })
+        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: False)
+        monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
+        monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
+        monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
+        monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(return_value=False))
+        if failed == "model_sources":
+            monkeypatch.setattr(first_run_wake, "_model_sources", fail)
+        elif failed == "gmail_eligible":
+            monkeypatch.setattr(first_run_wake, "_gmail_eligible", fail)
+        elif failed == "web_search_ready":
+            monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
+        elif failed == "own_omlx_source":
+            monkeypatch.setattr(first_run_wake, "_own_omlx_source", fail)
+        elif failed == "setup":
+            monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(side_effect=OSError("unavailable")))
+        else:
+            monkeypatch.setattr(first_run_wake, "_app_user_profile", fail)
+
+        facts = await first_run_wake.setup_facts("codex/gpt-5.6-terra", "app")
+
+        for name in expected:
+            assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[name]}
+
+    async def test_app_setup_decisions_omit_projects_consent_and_address(self, monkeypatch):
+        from onboarding import first_run_wake, setup_decisions
+
+        facts = setup_decisions.Facts(session_apps=("Claude Code",), email="person@gmail.com")
+        monkeypatch.setattr(setup_decisions, "read_facts", AsyncMock(return_value=facts))
+
+        decisions = (await first_run_wake._app_setup())["setup_decisions"]
+
+        assert len(decisions) == 1  # GitHub only; no projects consent
+        assert "person@gmail.com" not in json.dumps(decisions)
+        assert "Claude Code" not in json.dumps(decisions)
+
+    # This base does not yet serve the app reference; validate its fact contract when Agent Substrate ships it.
+    @pytest.mark.skipif(not __import__("onboarding.first_run_wake", fromlist=["app_reference_served"]).app_reference_served(), reason="first-run-app.md is not served on this base")
+    def test_served_app_reference_names_the_app_fact_keys(self):
+        import re
+
+        from onboarding import first_run_wake
+
+        paragraph = first_run_wake.instructions("app").split("**Facts to read from `## Setup facts`**", 1)[1].split("**How you talk.**", 1)[0]
+        keys = {key.split(".", 1)[0] for key in re.findall(r"`([^`]+)`", paragraph)}
+        assert keys == first_run_wake.APP_FACT_KEYS - {"first_run_path"}

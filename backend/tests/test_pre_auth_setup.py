@@ -160,6 +160,22 @@ def test_local_download_uses_existing_single_flight(client, monkeypatch):
     assert calls == 2
 
 
+def test_first_account_route_uses_the_app_path(client, monkeypatch):
+    calls = []
+    original = accounts.create_first_account
+
+    def capture(*args, **kwargs):
+        calls.append(kwargs["first_run_path"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(accounts, "create_first_account", capture)
+    response = _post(client, "/api/setup/first-account", {
+        "name": "First Person", "username": "first", "password": "[REDACTED]",
+    })
+    assert response.status_code == 200
+    assert calls == ["app"]
+
+
 def test_first_account_issues_normal_browser_session(client, workspace):
     response = _post(client, "/api/setup/first-account", {
         "name": "First Person",

@@ -39,6 +39,13 @@ def _add(monkeypatch, *, tty: bool, answer: str = "") -> int:
     )
 
 
+def test_profile_name_is_sanitized_and_bounded(first_account):
+    path = first_account / PROFILE
+    path.parent.mkdir()
+    path.write_text("- **Preferred name:** Pat\x01 " + "x" * 130 + "\n", encoding="utf-8")
+    assert user_profile.profile_name(first_account) == "Pat " + "x" * 116
+
+
 def test_the_seeded_profile_reaches_agents_as_workspace_context(first_account, monkeypatch):
     from core.workspace_context_sources import workspace_context_source_entries
 
