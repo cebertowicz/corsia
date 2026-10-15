@@ -65,6 +65,10 @@ STILL_SENDING = (
     "Check the person's Sent mail; if it isn't there, save a new draft with email_draft and "
     "show the person."
 )
+FROM_MISMATCH = (
+    "Not sent: the From line doesn't match the connected Google account ({account}). "
+    "Save the draft again with email_draft and show the person."
+)
 UNCONFIRMED = (
     "Google didn't confirm the send, so the email may have gone out. Don't send this draft "
     "again: check the person's Sent mail first."
@@ -231,7 +235,9 @@ class EmailDraftTool(Tool):
         target = await _reply_target(str(reply_id)) if reply_id else None
         signature = await _signature()
         account = await run_in_db(oauth.account_status)
-        text = compose_document(to, cc, subject, body, signature)
+        if not account.get("email"):
+            raise DraftRefused(google_client.NOT_CONNECTED)
+        text = compose_document(account["email"], to, cc, subject, body, signature)
 
         if existing is not None:
             path = _workspace_root() / existing["path"]
@@ -319,6 +325,14 @@ class EmailSendTool(Tool):
             parsed = parse_document(verdict.data.decode("utf-8"))
             if parsed is None:
                 return f"Error: {BAD_DOCUMENT}"
+            if parsed["from"] is not None:
+                # Display only: the sender is always the connected account, never this line.
+                account = await run_in_db(oauth.account_status)
+                connected = account.get("email")
+                if not connected:
+                    return f"Error: Not sent: {google_client.NOT_CONNECTED}"
+                if parsed["from"].lower() != str(connected).lower():
+                    return f"Error: {FROM_MISMATCH.format(account=connected)}"
             target = json.loads(verdict.draft.get("target_json") or "{}")
             target = target if isinstance(target, dict) else {}
             raw = urlsafe_b64encode(build_message(parsed, target).as_bytes()).decode("ascii")

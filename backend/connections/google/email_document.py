@@ -18,7 +18,7 @@ SIGNATURE_DELIMITER = "-- "
 
 # A plain address: no display name, quotes, brackets, separators or whitespace.
 _ADDRESS = re.compile(r"""^[^\s,;<>"()\[\]\\@]+@[^\s,;<>"()\[\]\\@]+$""")
-_HEADERS = ("to", "cc", "subject")
+_HEADERS = ("from", "to", "cc", "subject")
 
 NEEDS_RECIPIENT = "A draft needs at least one recipient."
 BAD_ADDRESS = "Recipients must be plain email addresses such as name@example.com."
@@ -93,9 +93,14 @@ def signature_text(html: str) -> str:
     return parser.text()
 
 
-def compose_document(to: list[str], cc: list[str], subject: str, body: str, signature: str) -> str:
-    """The draft document: header lines, a blank line, the body, then the signature."""
-    head = [f"To: {', '.join(to)}"]
+def compose_document(
+    sender: str, to: list[str], cc: list[str], subject: str, body: str, signature: str,
+) -> str:
+    """The draft document: header lines, a blank line, the body, then the signature.
+
+    ``From:`` shows the person which account sends; the send never reads it to choose one.
+    """
+    head = [f"From: {sender}", f"To: {', '.join(to)}"]
     if cc:
         head.append(f"Cc: {', '.join(cc)}")
     head.append(f"Subject: {subject}")
@@ -106,7 +111,10 @@ def compose_document(to: list[str], cc: list[str], subject: str, body: str, sign
 
 
 def parse_document(text: str) -> dict | None:
-    """The headers and exact body of a draft document, or None when it isn't one."""
+    """The headers and exact body of a draft document, or None when it isn't one.
+
+    ``from`` is None for a document saved before the line existed.
+    """
     head, separator, body = text.replace("\r\n", "\n").partition("\n\n")
     if not separator:
         return None
@@ -126,7 +134,7 @@ def parse_document(text: str) -> dict | None:
         return None
     if not to:
         return None
-    return {"to": to, "cc": cc, "subject": found["subject"], "body": body}
+    return {"from": found.get("from"), "to": to, "cc": cc, "subject": found["subject"], "body": body}
 
 
 def build_message(parsed: dict, target: dict) -> EmailMessage:

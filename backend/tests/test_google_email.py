@@ -164,7 +164,7 @@ async def test_draft_writes_a_document_with_the_signature_and_records_its_bytes(
     assert f".threads/{mail.thread}/working/email-drafts/" in str(document)
     text = document.read_text()
     assert text == (
-        "To: sam@example.com\nCc: pat@example.com\nSubject: Lunch\n\n"
+        f"From: {EMAIL}\nTo: sam@example.com\nCc: pat@example.com\nSubject: Lunch\n\n"
         "Noon works?\n\n-- \nSam Lee\nCORSIA & Co\n"
     )
     row = _row(saved["draft_id"])
@@ -355,6 +355,35 @@ async def test_a_lost_claim_race_sends_nothing(mail, approve, monkeypatch):
     assert mail.sent_requests() == []
 
 
+async def test_a_from_line_that_is_not_the_connected_account_sends_nothing(mail, approve):
+    saved = await _draft(mail)
+    path = mail.workspace / saved["path"]
+    path.write_text(path.read_text().replace(f"From: {EMAIL}", "From: someone.else@example.com"))
+    out = await _send(mail, saved)
+    assert out == (
+        f"Error: Not sent: the From line doesn't match the connected Google account ({EMAIL}). "
+        "Save the draft again with email_draft and show the person."
+    )
+    assert mail.sent_requests() == []
+    assert _row(saved["draft_id"])["state"] == "open"
+
+
+async def test_from_is_compared_without_case_and_never_chooses_the_sender(mail, approve):
+    saved = await _draft(mail)
+    path = mail.workspace / saved["path"]
+    path.write_text(path.read_text().replace(f"From: {EMAIL}", f"From: {EMAIL.upper()}"))
+    assert json.loads(await _send(mail, saved))["sent_message_id"] == "sent-1"
+    assert "from" not in {key.lower() for key in _mime(mail.sends[0]).keys()}
+
+
+async def test_a_document_without_a_from_line_still_sends(mail, approve):
+    saved = await _draft(mail)
+    path = mail.workspace / saved["path"]
+    path.write_text(path.read_text().replace(f"From: {EMAIL}\n", "", 1))
+    assert "From:" not in path.read_text().split("\n\n")[0]
+    assert json.loads(await _send(mail, saved))["sent_message_id"] == "sent-1"
+
+
 async def test_a_document_that_is_not_in_draft_format_is_refused_before_the_claim(mail, approve):
     saved = await _draft(mail)
     path = mail.workspace / saved["path"]
@@ -431,9 +460,10 @@ def test_signature_html_becomes_plain_text():
 
 def test_a_document_round_trips_and_keeps_the_body_exactly():
     text = email_document.compose_document(
-        ["a@example.com", "b@example.com"], ["c@example.com"], "Hi", "Line one.\n\nLine two.", "Sam",
+        "me@example.com", ["a@example.com", "b@example.com"], ["c@example.com"], "Hi", "Line one.\n\nLine two.", "Sam",
     )
     parsed = email_document.parse_document(text)
+    assert parsed["from"] == "me@example.com"
     assert parsed["to"] == ["a@example.com", "b@example.com"] and parsed["cc"] == ["c@example.com"]
     assert parsed["subject"] == "Hi"
     assert parsed["body"] == "Line one.\n\nLine two.\n\n-- \nSam\n"
@@ -442,6 +472,7 @@ def test_a_document_round_trips_and_keeps_the_body_exactly():
 @pytest.mark.parametrize("text", [
     "",
     "To: a@example.com\nSubject: s\nno blank line",
+    "From: a@example.com\nFrom: b@example.com\nTo: c@example.com\nSubject: s\n\nbody\n",
     "To: a@example.com\nBcc: b@example.com\nSubject: s\n\nbody\n",
     "To: a@example.com\nTo: b@example.com\nSubject: s\n\nbody\n",
     "To: a@example.com\n\nbody\n",
