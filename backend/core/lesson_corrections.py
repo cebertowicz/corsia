@@ -104,16 +104,16 @@ def placement_check_counts(db: sqlite3.Connection, thread_ids: tuple[str, ...]) 
     if not thread_ids:
         fires = overrides = 0
     else:
-        marks = ", ".join("?" for _ in thread_ids)
+        # One JSON parameter keeps scope=all inside SQLite's bound-parameter limit.
         row = db.execute(
             f"""SELECT count(*) AS fires, sum(overridden) AS overrides FROM (
                     SELECT thread_id, history_epoch, entry_id, revision, check_name,
                            max(CASE WHEN override_reason IS NOT NULL THEN 1 ELSE 0 END) AS overridden
                     FROM lesson_placement_checks
-                    WHERE thread_id IN ({marks}) AND check_name=?
+                    WHERE thread_id IN (SELECT value FROM json_each(?)) AND check_name=?
                     GROUP BY thread_id, history_epoch, entry_id, revision, check_name
                 )""",
-            (*thread_ids, CHECK_NAME),
+            (json.dumps(list(thread_ids)), CHECK_NAME),
         ).fetchone()
         fires, overrides = int(row["fires"] or 0), int(row["overrides"] or 0)
     return {"owner": CHECK_OWNER, "retirement_condition": CHECK_RETIREMENT_CONDITION,
@@ -125,12 +125,12 @@ def correction_facts(db: sqlite3.Connection, subjects: Iterable[str]) -> dict[st
     keys = merge_subjects(subjects)
     if not keys:
         return {}
-    marks = ", ".join("?" for _ in keys)
     rows = db.execute(
-        f"""SELECT id, subject_key, ts, attributes
+        """SELECT id, subject_key, ts, attributes
             FROM outcome_events
-            WHERE event_name=? AND retracted_at IS NULL AND subject_key IN ({marks})""",
-        (CORRECTION_EVENT, *keys),
+            WHERE event_name=? AND retracted_at IS NULL
+              AND subject_key IN (SELECT value FROM json_each(?))""",
+        (CORRECTION_EVENT, json.dumps(list(keys))),
     ).fetchall()
     found: dict[str, dict[str, str]] = {}
     for row in rows:

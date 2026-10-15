@@ -175,7 +175,7 @@ async def classify(
             continue
         except ClassifierUnavailable as error:
             if worker.transient_versions and worker.active_manifest is manifest:
-                logger.info("corrections classifier idle restart reopens newer-version load attempts")
+                logger.info("corrections classifier child stopped mid-call; reopening newer-version load attempts")
                 worker.transient_versions.clear()
             outages.append(str(error))
             await drop_child(worker)

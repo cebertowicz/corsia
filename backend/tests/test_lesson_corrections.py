@@ -66,3 +66,9 @@ def test_placement_check_counts_one_observation_with_multiple_flags_once():
 
     assert placement_check_counts(db, ("thread",))["fires"] == 1
     assert placement_check_counts(db, ("thread",))["overrides"] == 1
+    # scope=all can name more threads, and lessons more subjects, than SQLite binds.
+    many = tuple(f"thread-{index}" for index in range(40_000))
+    assert placement_check_counts(db, (*many, "thread"))["fires"] == 1
+    db.execute("CREATE TABLE outcome_events (id TEXT, event_name TEXT, retracted_at TEXT, "
+               "subject_key TEXT, ts TEXT, attributes TEXT)")
+    assert correction_facts(db, tuple(f"message:{index}" for index in range(40_000))) == {}

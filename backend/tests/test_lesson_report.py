@@ -108,7 +108,7 @@ def test_report_hides_only_old_watches_without_a_recent_correction_anchor():
          "reviews": [{"opened_at": "2026-09-22T00:00:00Z"}]},
         {"id": "recurred", "version": "v", "state": "watch", "originating_subjects": ["message:new"],
          "reviews": [{"opened_at": "2026-08-23T00:00:00Z"}]},
-    ], "2026-10-02T12:00:00Z", {"message:new": {"id": "fact", "ts": "2026-09-20T00:00:00+00:00"}})
+    ], {"message:new": {"id": "fact", "ts": "2026-09-20T00:00:00+00:00"}})
 
     assert [row["id"] for row in rows] == ["old", "recent", "recurred"]
     assert [row["id"] for row in _list_inventory(rows, "2026-10-02T12:00:00Z")] == ["recent", "recurred"]

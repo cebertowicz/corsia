@@ -116,7 +116,7 @@ def _page_summaries(page: list[dict[str, Any]], period: dict[str, Any],
 
 
 def _correction_inventory(
-    inventory: list[dict[str, Any]], now: str, facts: dict[str, dict[str, str]],
+    inventory: list[dict[str, Any]], facts: dict[str, dict[str, str]],
 ) -> list[dict[str, Any]]:
     """Attach collected correction facts; list filtering follows detail and coverage."""
     for row in inventory:
@@ -296,7 +296,7 @@ def read_report(
     unidentified = [read for read in reads if read["version"] is None]
     inventory = build_inventory(history=history, sources=sources,
                                 retained=retained + bodies["reads"], now=now)
-    inventory = _correction_inventory(inventory, now, correction_facts)
+    inventory = _correction_inventory(inventory, correction_facts)
     coverage = _coverage(inventory, period, reads, unidentified, missing_owners, bodies)
     if placement_checks["fires"] or any("originating_subjects" in row for row in inventory):
         coverage["placement_checks"] = placement_checks
