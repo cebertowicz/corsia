@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.corrections_input import CONTEXT_HEAD_CHARS, CONTEXT_ROWS, CONTEXT_TAIL_CHARS, owner_text, shape_context
 from core.corrections_recording import (
     CORRECTION_EVENT,
     MESSAGE_SUBJECT_PREFIX,
-    CheckerVersion,
+    ClassifierVersion,
     CorrectionCandidate,
     is_owner_authored_message,
     owner_message_sql_predicate,
+    version_match_sql,
 )
 from core.measurement_scope import scope_cte
 
@@ -27,7 +29,7 @@ class PendingCandidateKey:
 
 
 def pending_candidate_keys(
-    version: CheckerVersion, batch_size: int, owner_user_id: str,
+    version: ClassifierVersion, batch_size: int, owner_user_id: str,
     before: tuple[str, str] | None = None, since: str | None = None,
 ) -> list[PendingCandidateKey]:
     """Read one owner's pending ordering keys without projecting message content."""
@@ -36,6 +38,7 @@ def pending_candidate_keys(
     db = get_db()
     try:
         owner_filter, owner_filter_params = owner_message_sql_predicate()
+        version_filter, version_filter_params = version_match_sql("e", version)
         rows = db.execute(
             scope_cte() + f"""
             SELECT m.rowid,m.id,m.thread_id,t.project_id,m.created_at
@@ -51,27 +54,19 @@ def pending_candidate_keys(
                 SELECT 1 FROM outcome_events e
                 WHERE e.event_name=:correction_event
                   AND e.subject_key=:message_prefix || m.id AND e.retracted_at IS NULL
-                  AND json_extract(e.attributes,'$.asset_id')=:asset_id
-                  AND json_extract(e.attributes,'$.asset_version')=:asset_version
-                  AND json_extract(e.attributes,'$.head')=:head
-                  AND json_extract(e.attributes,'$.threshold')=:threshold
-                  AND json_extract(e.attributes,'$.input_policy_id')=:input_policy_id
+                  AND {version_filter}
               )
             ORDER BY m.created_at DESC,m.id DESC LIMIT :scan_limit
             """,
             {
                 **owner_filter_params,
+                # The same identity the dedupe key hashes, filtered before LIMIT.
+                **version_filter_params,
                 "user_id": owner_user_id,
                 "scope_project": "all",
                 "scope_agent": None,
-                # The same identity the dedupe key hashes, filtered before LIMIT.
                 "correction_event": CORRECTION_EVENT,
                 "message_prefix": MESSAGE_SUBJECT_PREFIX,
-                "asset_id": version.asset_id,
-                "asset_version": version.version,
-                "head": version.head,
-                "threshold": f"{version.threshold:.6f}",
-                "input_policy_id": version.input_policy_id,
                 "scan_limit": batch_size,
                 "before_created_at": before[0] if before else None,
                 "before_message_id": before[1] if before else None,
@@ -89,7 +84,11 @@ def pending_candidate_keys(
 
 
 def hydrate_candidates(keys: list[PendingCandidateKey]) -> list[CorrectionCandidate]:
-    """Fetch content only for the globally selected candidate keys."""
+    """Fetch content only for the globally selected candidate keys.
+
+    Context rows are read as a bounded head and tail, never in full, and shaped by the
+    input policy the model was trained on (``core.corrections_input``).
+    """
     from infra.database import get_db
 
     db = get_db()
@@ -104,15 +103,19 @@ def hydrate_candidates(keys: list[PendingCandidateKey]) -> list[CorrectionCandid
             ):
                 continue
             preceding = db.execute(
-                """SELECT role,content FROM messages
-                   WHERE thread_id=? AND (created_at < ? OR (created_at=? AND rowid < ?))
-                   ORDER BY created_at DESC,rowid DESC LIMIT 6""",
-                (key.thread_id, key.created_at, key.created_at, key.rowid),
+                """SELECT role,substr(content,1,:head),substr(content,-:tail),metadata FROM messages
+                   WHERE thread_id=:thread AND role IN ('user','assistant')
+                     AND (created_at < :created OR (created_at=:created AND id < :message))
+                   ORDER BY created_at DESC,id DESC LIMIT :rows""",
+                {
+                    "head": CONTEXT_HEAD_CHARS, "tail": CONTEXT_TAIL_CHARS, "rows": CONTEXT_ROWS,
+                    "thread": key.thread_id, "created": key.created_at, "message": key.message_id,
+                },
             ).fetchall()
-            context = tuple((str(row[0]), str(row[1])) for row in reversed(preceding))
             candidates.append(CorrectionCandidate(
                 message_id=key.message_id, thread_id=key.thread_id, project_id=key.project_id,
-                content=message[1], created_at=key.created_at, context=context,
+                content=owner_text(message[1]), created_at=key.created_at,
+                context=shape_context(preceding),
             ))
         return candidates
     finally:

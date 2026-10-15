@@ -123,20 +123,22 @@ def _settings_snapshot() -> dict:
     from infra.database import get_db
     from tools.browser import browser_available
 
+    from jobs.corrections_realtime import state_snapshot as corrections_classifier_state
+
     db = get_db()
     try:
         context_rows = [
             row.to_dict() for row in workspace_context_files(config.WORKSPACE, db=db)
         ]
         live_bulletins = bulletins.live_preferences(db)
+        corrections_classifier = corrections_classifier_state(db)
     finally:
         db.close()
-    from jobs.corrections_realtime import state_snapshot as corrections_classifier_state
 
     return {
         "workspace_context_files": context_rows,
         "host_access_auto_approve": get_host_access_auto_approve(),
-        "corrections_classifier": corrections_classifier_state(),
+        "corrections_classifier": corrections_classifier,
         "host_access_reviewer_fallback": get_host_access_reviewer_fallback(),
         "features": _features_snapshot(flags),
         "capabilities": {"browser_automation": browser_available()},

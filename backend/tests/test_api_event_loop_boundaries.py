@@ -122,6 +122,7 @@ async def test_settings_snapshot_never_blocks_the_event_loop(monkeypatch):
     import api.system as api_system
     import core.workspace_context_sources as context_sources
     import infra.database as database
+    import jobs.corrections_realtime as corrections_realtime
     import tools.browser as browser
 
     class _Db:
@@ -144,6 +145,7 @@ async def test_settings_snapshot_never_blocks_the_event_loop(monkeypatch):
     monkeypatch.setattr(context_sources, "workspace_context_files", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(database, "get_db", lambda: _Db())
     monkeypatch.setattr(browser, "browser_available", lambda: False)
+    monkeypatch.setattr(corrections_realtime, "state_snapshot", lambda _db=None: {})
 
     delay, result = await asyncio.gather(
         _heartbeat_delay(),

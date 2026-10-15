@@ -27,9 +27,9 @@ def _seed(db, *, message_id="owner-message", created_at="2026-10-01T00:01:00Z"):
 
 
 def _version():
-    from core.corrections_recording import CheckerVersion
+    from core.corrections_recording import ClassifierVersion
 
-    return CheckerVersion("corrections-classifier", "v1", "correction", 0.595681, "modernbert-owner-context-v2-2048")
+    return ClassifierVersion("corrections-classifier", "v1", "correction", 0.595681, "modernbert-owner-context-v2-2048")
 
 
 def test_owner_message_filter_excludes_agents_and_system_wrappers():
@@ -66,7 +66,88 @@ async def test_scan_hydrates_recent_context_and_uses_versioned_dedupe(isolated_d
     candidates = hydrate_candidates(keys)
 
     assert [candidate.message_id for candidate in candidates] == ["owner-message"]
-    assert candidates[0].context == (("assistant", "Prior answer."),)
+    assert candidates[0].context == (("Agent", "Prior answer."),)
+
+
+@pytest.mark.asyncio
+async def test_context_is_shaped_and_bounded_like_the_training_rows(isolated_db):
+    from core.corrections_input import CONTEXT_MESSAGE_CHARS, OWNER_MESSAGE_CHARS
+    from jobs.corrections_scanning import hydrate_candidates, pending_candidate_keys
+
+    db = _db()
+    try:
+        _seed(db, created_at="2026-10-01T00:09:00Z")
+        rows = [
+            ("a1", "assistant", "  oldest  ", "{}"),
+            ("u1", "user", "x" * 5000 + "END", "{}"),
+            ("w1", "user", "[EVENT: tick] wrapped", "{}"),
+            ("r1", "user", "routed", '{"routed_event": "e"}'),
+            ("t1", "tool", "tool output", "{}"),
+            ("a2", "assistant", "newest", "{}"),
+        ]
+        for index, (message_id, role, content, metadata) in enumerate(rows):
+            db.execute(
+                "INSERT INTO messages (id,thread_id,role,content,metadata,created_at) VALUES (?,?,?,?,?,?)",
+                (message_id, "thread", role, content, metadata, f"2026-10-01T00:0{index + 2}:00Z"),
+            )
+        db.execute("UPDATE messages SET content=? WHERE id='owner-message'", ("y" * (OWNER_MESSAGE_CHARS + 10),))
+        db.commit()
+    finally:
+        db.close()
+
+    candidate = hydrate_candidates(pending_candidate_keys(_version(), 20, "owner"))[0]
+
+    # Wrappers, routed deliveries and non-chat roles are skipped; oldest first; Agent/User labels.
+    assert [role for role, _ in candidate.context] == ["Agent", "Agent", "User", "Agent"]
+    assert candidate.context[1] == ("Agent", "oldest")
+    assert candidate.context[2] == ("User", ("x" * 5000 + "END")[-CONTEXT_MESSAGE_CHARS:])
+    assert len(candidate.content) == OWNER_MESSAGE_CHARS
+
+
+def test_context_keeps_the_newest_six_within_the_total_character_cap():
+    from core.corrections_input import shape_context
+
+    rows = [("user", f"m{index}", f"m{index}", "{}") for index in range(8)]
+    assert [text for _, text in shape_context(rows)] == ["m5", "m4", "m3", "m2", "m1", "m0"]
+    # Prose, not one long run: the mask replaces a long unbroken token before the cap counts it.
+    big = [("assistant", "a", "word " * 300, "{}")] * 6
+    assert len(shape_context(big)) == 5  # 5 x 1,499 fits 8,000; a sixth would not
+
+
+@pytest.mark.asyncio
+async def test_unreadable_fact_names_its_failure_and_a_scored_fact_has_none(isolated_db):
+    from jobs.corrections_recording import _record_fact
+    from jobs.corrections_scanning import hydrate_candidates, pending_candidate_keys
+
+    db = _db()
+    try:
+        _seed(db)
+    finally:
+        db.close()
+    candidate = hydrate_candidates(pending_candidate_keys(_version(), 20, "owner"))[0]
+    with pytest.raises(ValueError):
+        _record_fact(candidate, {"label": "unreadable", "truncated": False, "original_tokens": 0, "failure_reason": "none"}, _version())
+    with pytest.raises(ValueError):
+        _record_fact(candidate, {"label": "correction", "truncated": False, "original_tokens": 3, "failure_reason": "rss"}, _version())
+    assert _record_fact(candidate, {"label": "unreadable", "truncated": False, "original_tokens": 0, "failure_reason": "timeout"}, _version())
+
+    db = _db()
+    try:
+        attributes = json.loads(db.execute("SELECT attributes FROM outcome_events").fetchone()[0])
+    finally:
+        db.close()
+    assert (attributes["label"], attributes["failure_reason"]) == ("unreadable", "timeout")
+    # The message is no longer pending for this version.
+    assert pending_candidate_keys(_version(), 20, "owner") == []
+
+
+def test_one_encoding_round_trips_the_version_identity():
+    from core.corrections_recording import decode_version, version_attributes, version_key
+
+    version = _version()
+    assert decode_version(version_attributes(version)) == version
+    assert version_key(version) == "corrections-classifier:v1:correction:0.595681:modernbert-owner-context-v2-2048"
+    assert version.__class__("a", "v", "h", 0.1234567, "p").threshold == 0.123457
 
 
 @pytest.mark.asyncio
@@ -127,7 +208,7 @@ def test_only_send_thread_input_calls_the_corrections_admission_hook():
             if any(
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
-                and node.func.id == "notify_corrections"
+                and node.func.id == "notify_if_owner"
                 for node in ast.walk(function)
             ):
                 callers.append((path.relative_to(backend).as_posix(), function.name))

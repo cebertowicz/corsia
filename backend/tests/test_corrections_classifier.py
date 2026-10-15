@@ -27,8 +27,29 @@ def _manifest(root, *, policy="modernbert-owner-context-v2-2048"):
     return path
 
 
+class _FakeTokenizer:
+    """Two ids for any text; accepts the truncation settings ``tokenize`` applies per call."""
+
+    def encode(self, _text, add_special_tokens=False):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(ids=[1, 2])
+
+    def no_padding(self):
+        pass
+
+    def no_truncation(self):
+        pass
+
+    def enable_truncation(self, *_args, **_kwargs):
+        pass
+
+    def num_special_tokens_to_add(self, _pair):
+        return 2
+
+
 def test_training_format_keeps_context_before_the_owner_message():
-    from core.corrections_classifier import build_text
+    from core.corrections_input import build_text
 
     assert build_text([("assistant", "I shipped it."), ("user", "Earlier.")], "That is wrong.") == (
         "[assistant] I shipped it.\n[user] Earlier.\n[OWNER] That is wrong."
@@ -41,7 +62,7 @@ def test_verified_manifest_builds_the_named_correction_head(tmp_path):
     path = _manifest(tmp_path)
     manifest = AssetManifest.load(path, expected_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
     manifest.verify_files()
-    version = manifest.checker_version()
+    version = manifest.classifier_version()
 
     assert (version.asset_id, version.version, version.head, version.threshold) == (
         "corrections-classifier", "v1", "correction", 0.595681,
@@ -99,7 +120,7 @@ def test_wrong_input_policy_is_refused(tmp_path):
 
 
 def test_child_prohibits_outbound_connections_and_enables_ort_telemetry_opt_out(monkeypatch, tmp_path):
-    from core.corrections_classifier import _disable_child_network
+    from core.corrections_child import _disable_child_network
 
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("CORSIA_STATE_DIR", str(tmp_path / "state"))
@@ -118,18 +139,15 @@ def test_child_self_test_mismatch_refuses_to_serve(monkeypatch, tmp_path):
     import sys
     from types import SimpleNamespace
 
-    from core.corrections_classifier import _child_main
+    from core.corrections_child import _child_main
 
     path = _manifest(tmp_path)
     value = json.loads(path.read_text(encoding="utf-8"))
     value["self_test"][0]["expected_score"] = 0.9
     path.write_text(json.dumps(value), encoding="utf-8")
 
-    tokenizer = SimpleNamespace(
-        from_file=lambda _path: SimpleNamespace(
-            encode=lambda _text, add_special_tokens=False: SimpleNamespace(ids=[1, 2]),
-        ),
-    )
+    tokenizer = SimpleNamespace(from_file=lambda _path: _FakeTokenizer())
+
     class Exp(list):
         def sum(self):
             return sum(self)
@@ -189,9 +207,7 @@ def self_test_asset(monkeypatch, tmp_path):
         ExecutionMode=SimpleNamespace(ORT_SEQUENTIAL="sequential"),
         InferenceSession=lambda *_a, **_kw: _FakeSession(),
     )
-    tokenizer = SimpleNamespace(from_file=lambda _path: SimpleNamespace(
-        encode=lambda _text, add_special_tokens=False: SimpleNamespace(ids=[1, 2]),
-    ))
+    tokenizer = SimpleNamespace(from_file=lambda _path: _FakeTokenizer())
     monkeypatch.setitem(sys.modules, "onnxruntime", onnx)
     monkeypatch.setitem(sys.modules, "tokenizers", SimpleNamespace(Tokenizer=tokenizer))
     monkeypatch.setitem(sys.modules, "numpy", numpy)
@@ -335,6 +351,45 @@ def test_missing_manifest_is_a_readable_incomplete_download(tmp_path):
         run_self_test(tmp_path)
 
 
+def _word_tokenizer():
+    """A real ``tokenizers`` pipeline with ModernBERT's single-sequence template."""
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import WhitespaceSplit
+    from tokenizers.processors import TemplateProcessing
+
+    vocab = {"[UNK]": 0, "[CLS]": 1, "[SEP]": 2, "[OWNER]": 3, "[Agent]": 4, "word": 5, "last": 6}
+    tokenizer = Tokenizer(WordLevel(vocab, unk_token="[UNK]"))
+    tokenizer.pre_tokenizer = WhitespaceSplit()
+    tokenizer.post_processor = TemplateProcessing(
+        single="[CLS] $A [SEP]", special_tokens=[("[CLS]", 1), ("[SEP]", 2)],
+    )
+    # A saved truncation setting must not leak into the call.
+    tokenizer.enable_truncation(16, direction="right")
+    return tokenizer
+
+
+def test_left_truncation_keeps_the_owner_tail_between_cls_and_sep():
+    from core.corrections_input import MAX_INPUT_TOKENS, MAX_OWNER_TOKENS, tokenize
+
+    tokenizer = _word_tokenizer()
+
+    ids, truncated, original = tokenize(tokenizer, [("Agent", "word " * 3000)], "word last")
+    assert (truncated, original, len(ids)) == (True, 3006, MAX_OWNER_TOKENS)
+    assert ids[0] == 1 and ids[-4:] == [3, 5, 6, 2]
+
+    # A long owner message widens the window to hold all of it, up to the input cap.
+    ids, truncated, _ = tokenize(tokenizer, [("Agent", "word " * 3000)], "word " * 1500 + "last")
+    assert truncated and len(ids) == 1502 + 2  # [OWNER], 1,500 words and "last", plus specials
+    assert ids[:2] == [1, 3] and ids[-2:] == [6, 2]
+    ids, truncated, _ = tokenize(tokenizer, [], "word " * 4000 + "last")
+    assert truncated and len(ids) == MAX_INPUT_TOKENS
+    assert ids[0] == 1 and ids[-2:] == [6, 2]
+
+    ids, truncated, original = tokenize(tokenizer, [("Agent", "word")], "last")
+    assert (ids, truncated, original) == ([1, 4, 5, 3, 6, 2], False, 6)
+
+
 class _FakeConnection:
     def __init__(self, replies, *, send_error=None, recv_error=None):
         self.replies = list(replies)
@@ -355,6 +410,9 @@ class _FakeConnection:
             raise self.recv_error
         return self.replies.pop(0)
 
+    def close(self):
+        pass
+
 
 class _FakeProcess:
     def __init__(self, **_kwargs):
@@ -366,6 +424,9 @@ class _FakeProcess:
     def is_alive(self):
         return not self.killed
 
+    def terminate(self):
+        self.killed = True
+
     def kill(self):
         self.killed = True
 
@@ -374,15 +435,16 @@ class _FakeProcess:
 
 
 def _child_with(monkeypatch, tmp_path, connection):
-    from core import corrections_classifier as module
+    from core import corrections_child as module
+    from core.corrections_classifier import AssetManifest
 
     monkeypatch.setattr(module, "Process", _FakeProcess)
-    monkeypatch.setattr(module, "Pipe", lambda: (connection, object()))
-    return module.ClassifierChild(module.AssetManifest.load(_manifest(tmp_path)))
+    monkeypatch.setattr(module, "Pipe", lambda: (connection, _FakeConnection([])))
+    return module.ClassifierChild(AssetManifest.load(_manifest(tmp_path)))
 
 
-def test_first_call_waits_for_the_model_load_under_its_own_bound(monkeypatch, tmp_path):
-    from core.corrections_classifier import CALL_TIMEOUT_SECONDS, LOAD_TIMEOUT_SECONDS
+def test_load_and_call_each_wait_under_their_own_bound(monkeypatch, tmp_path):
+    from core.corrections_child import CALL_TIMEOUT_SECONDS, LOAD_TIMEOUT_SECONDS
 
     version = {"asset_id": "corrections-classifier", "version": "v1", "head": "correction",
                "threshold": 0.5, "input_policy_id": "modernbert-owner-context-v2-2048"}
@@ -392,6 +454,8 @@ def test_first_call_waits_for_the_model_load_under_its_own_bound(monkeypatch, tm
     ])
     child = _child_with(monkeypatch, tmp_path, connection)
 
+    child.ensure_loaded()
+    child.ensure_loaded()  # already loaded: no second load
     result = child.classify([("assistant", "synthetic")], "synthetic owner")
 
     assert result.label == "correction"
@@ -399,14 +463,55 @@ def test_first_call_waits_for_the_model_load_under_its_own_bound(monkeypatch, tm
     assert LOAD_TIMEOUT_SECONDS > CALL_TIMEOUT_SECONDS
 
 
-@pytest.mark.parametrize("failure", [EOFError(), BrokenPipeError()])
-def test_pipe_failure_surfaces_as_unavailable_not_a_raw_error(monkeypatch, tmp_path, failure):
-    from core.corrections_classifier import ClassifierUnavailable
+def test_a_call_before_load_is_an_outage_not_a_message_failure(monkeypatch, tmp_path):
+    from core.corrections_child import ClassifierUnavailable
 
-    for connection in (
-        _FakeConnection([{"ready": True}], recv_error=failure),
-        _FakeConnection([{"ready": True}], send_error=failure),
-    ):
-        child = _child_with(monkeypatch, tmp_path, connection)
-        with pytest.raises(ClassifierUnavailable, match="child_exited"):
-            child.classify([], "synthetic owner")
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([]))
+
+    with pytest.raises(ClassifierUnavailable, match="not loaded"):
+        child.classify([], "synthetic owner")
+
+
+@pytest.mark.parametrize("failure", [EOFError(), BrokenPipeError()])
+def test_pipe_failure_is_an_outage_during_load_and_a_message_failure_after_it(monkeypatch, tmp_path, failure):
+    from core.corrections_child import ClassifierUnavailable, MessageFailed
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}], recv_error=failure))
+    with pytest.raises(ClassifierUnavailable, match="child_exited"):
+        child.ensure_loaded()
+    assert not child.loaded
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}], send_error=failure))
+    child.ensure_loaded()
+    with pytest.raises(MessageFailed) as raised:
+        child.classify([], "synthetic owner")
+    assert raised.value.reason == "child_error"
+    assert not child.loaded and not child.running
+
+
+@pytest.mark.parametrize(("reply", "reason"), [
+    ({"error": "timeout"}, "timeout"), ({"error": "rss"}, "rss"), ({"error": "error:ValueError"}, "child_error"),
+])
+def test_a_failed_call_names_its_kind_and_stops_the_child(monkeypatch, tmp_path, reply, reason):
+    from core.corrections_child import MessageFailed
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"ready": True}, reply]))
+    child.ensure_loaded()
+
+    with pytest.raises(MessageFailed) as raised:
+        child.classify([], "synthetic owner")
+
+    assert raised.value.reason == reason
+    assert not child.running
+
+
+def test_a_load_error_is_an_outage(monkeypatch, tmp_path):
+    from core.corrections_child import ClassifierUnavailable
+
+    child = _child_with(monkeypatch, tmp_path, _FakeConnection([{"error": "rss"}]))
+
+    with pytest.raises(ClassifierUnavailable, match="load rss"):
+        child.ensure_loaded()
+    assert not child.loaded and not child.running
+
+

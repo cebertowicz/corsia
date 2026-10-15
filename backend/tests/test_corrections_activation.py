@@ -2,9 +2,9 @@ from datetime import datetime, timezone
 
 
 def _version(version="v1"):
-    from core.corrections_recording import CheckerVersion
+    from core.corrections_recording import ClassifierVersion
 
-    return CheckerVersion(
+    return ClassifierVersion(
         "corrections-classifier", version, "correction", 0.595681,
         "modernbert-owner-context-v2-2048",
     )
@@ -52,8 +52,69 @@ def test_measurement_helper_keeps_old_version_until_new_backfill_completes(isola
     assert active_corrections_version() == new
 
 
-async def _in_db(function, *args, **kwargs):
-    return function(*args, **kwargs)
+def test_malformed_activation_record_is_corrupt_not_absent(isolated_db):
+    from core.corrections_recording import (
+        ACTIVE_VERSION_SETTING, CorruptActivation, active_corrections_version,
+    )
+    from infra.settings import set_setting
+    from jobs.corrections_activation import complete_backfill
+
+    assert complete_backfill(_version(), owner_user_id="owner", weeks=13, before_count=None, after_count=4)
+    set_setting(ACTIVE_VERSION_SETTING, {"key": "no-such-activation"})
+
+    assert isinstance(active_corrections_version(), CorruptActivation)
+
+
+def test_activation_never_replaces_a_corrupt_record_or_says_now_counted(isolated_db, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from core import corrections_recording as core_recording
+    from jobs import corrections_activation, corrections_realtime, corrections_recording
+
+    completed, told = [], []
+    monkeypatch.setattr(corrections_recording, "_owner_user_ids", lambda: ["owner"])
+    monkeypatch.setattr(
+        core_recording, "active_corrections_version", lambda: core_recording.CorruptActivation("KeyError"),
+    )
+    monkeypatch.setattr(corrections_activation, "complete_backfill", lambda *a, **k: completed.append(1))
+
+    async def tell(version):
+        told.append(version)
+
+    monkeypatch.setattr(corrections_activation, "tell_conductor_about_activation", tell)
+    manifest = SimpleNamespace(classifier_version=_version)
+
+    outcome = asyncio.run(corrections_realtime._activate_after_backfill(manifest))
+
+    assert outcome == "activation record unreadable"
+    assert completed == [] and told == []
+
+
+def test_conductor_figure_is_rounded_for_people(isolated_db, monkeypatch):
+    import asyncio
+
+    from events import delivery
+    from jobs import corrections_activation
+
+    version = _version()
+    corrections_activation.complete_backfill(
+        version, owner_user_id="owner", weeks=7, before_count=24 / 7, after_count=4.0,
+    )
+    monkeypatch.setattr(
+        "core.agent_roster_queries.workspace_conductor_contact",
+        lambda _owner, _db: ({"id": "conductor"}, None),
+    )
+    sent = []
+
+    async def accepted(thread_id, kind, detail, *args, **kwargs):
+        sent.append(detail)
+        return True
+
+    monkeypatch.setattr(delivery, "deliver_to_thread", accepted)
+    asyncio.run(corrections_activation.tell_conductor_about_activation(version))
+
+    assert "moved from 3.4 to 4.0" in sent[0]
 
 
 def test_notice_is_marked_only_after_acceptance_and_is_not_resent(isolated_db, monkeypatch):

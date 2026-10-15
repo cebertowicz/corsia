@@ -7,7 +7,6 @@ from collections.abc import Awaitable
 from functools import wraps
 from typing import Any, Callable
 
-from infra.corrections_admission import notify_corrections
 from infra.db_async import run_in_db
 from infra.send_broadcast import broadcast_input_row
 from infra.send_post_admission import (
@@ -23,6 +22,7 @@ from infra.thread_driver import InputAdmission
 from infra.thread_input_types import HeldAdmission
 from infra.time import utc_now_iso
 from llm.resolution import ExecutionTarget, resolve_execution_target
+
 
 def _drain_admitted(function):
     """Count ingress until its durable admission decision has committed."""
@@ -360,7 +360,12 @@ async def send_thread_input(
         delivery_options=options,
         continuation=continuation,
     )
-    notify_corrections(admission.accepted.message_id, role=role, content=text, metadata=metadata, duplicate=admission.accepted.duplicate)
+    from jobs.corrections_realtime import notify_if_owner
+
+    notify_if_owner(
+        admission.accepted.message_id, role=role, content=text, metadata=metadata,
+        duplicate=admission.accepted.duplicate,
+    )
     return await _deliver_admission(
         admission, thread_row,
         delivery_intent=delivery_intent,

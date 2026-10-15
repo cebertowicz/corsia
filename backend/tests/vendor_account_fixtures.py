@@ -352,9 +352,7 @@ def isolated_shutdown_tasks(monkeypatch):
     for attribute in ("_github_ownership_login_task", *(attr for _, attr in RUNTIME_LOOP_TASKS)):
         monkeypatch.setattr(state, attribute, None, raising=False)
     # The session app's classifier worker runs on its own loop; a test shutdown must not join it.
-    for attribute in ("_TASK", "_CHILD"):
-        monkeypatch.setattr(corrections_realtime, attribute, None)
-    monkeypatch.setattr(corrections_realtime, "_STOPPING", False)
+    monkeypatch.setattr(corrections_realtime, "WORKER", corrections_realtime.CorrectionsWorker())
 
 
 @pytest.fixture

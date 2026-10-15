@@ -6,7 +6,10 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 
-from core.corrections_recording import ACTIVATIONS_SETTING, ACTIVE_VERSION_SETTING
+from core.corrections_recording import (
+    ACTIVATIONS_SETTING, ACTIVE_VERSION_SETTING, ClassifierVersion, version_attributes, version_key,
+    version_match_sql,
+)
 
 
 def measurement_window_start(now: datetime | None = None) -> datetime:
@@ -17,18 +20,15 @@ def measurement_window_start(now: datetime | None = None) -> datetime:
     return current - timedelta(weeks=BASELINE_PERIODS + 1)
 
 
-def _version_key(version) -> str:
-    return f"{version.asset_id}:{version.version}:{version.head}:{version.threshold:.6f}:{version.input_policy_id}"
-
-
 def complete_backfill(
-    version, *, owner_user_id: str, weeks: int, before_count: float | None, after_count: float,
+    version: ClassifierVersion, *, owner_user_id: str, weeks: int, before_count: float | None,
+    after_count: float,
 ) -> bool:
     """Atomically activate a fully backfilled version exactly once."""
     from infra.database import write_transaction
     from infra.settings import get_setting, set_setting
 
-    key = _version_key(version)
+    key = version_key(version)
     with write_transaction(None, scope="complete_corrections_classifier_backfill") as db:
         activations = get_setting(ACTIVATIONS_SETTING, db=db) or {}
         if key in activations:
@@ -38,10 +38,7 @@ def complete_backfill(
             "weeks": weeks,
             "before_count": before_count,
             "after_count": after_count,
-            "version": {
-                "asset_id": version.asset_id, "version": version.version, "head": version.head,
-                "threshold": version.threshold, "input_policy_id": version.input_policy_id,
-            },
+            "version": version_attributes(version),
             "conductor_told_at": None,
         }
         set_setting(ACTIVATIONS_SETTING, activations, db=db)
@@ -49,37 +46,36 @@ def complete_backfill(
     return True
 
 
-def weekly_correction_figure(version, *, since: str, weeks: int) -> float:
-    """Return the bounded-window weekly correction figure for one full version."""
-    from core.corrections_recording import CORRECTION_EVENT
+def weekly_correction_figure(version: ClassifierVersion, *, since: str, weeks: int) -> float:
+    """Return the bounded-window weekly correction figure for one full version.
+
+    Only ``correction`` facts count; ``unreadable`` and ``not_correction`` never do.
+    """
+    from core.corrections_recording import CORRECTION_EVENT, LABEL_CORRECTION
     from infra.database import get_db
 
+    version_filter, version_params = version_match_sql("e", version)
     db = get_db()
     try:
         row = db.execute(
-            """SELECT COUNT(*) FROM outcome_events
-               WHERE event_name=? AND retracted_at IS NULL AND ts >= ?
-                 AND json_extract(attributes, '$.asset_id')=?
-                 AND json_extract(attributes, '$.asset_version')=?
-                 AND json_extract(attributes, '$.head')=?
-                 AND json_extract(attributes, '$.threshold')=?
-                 AND json_extract(attributes, '$.input_policy_id')=?
-                 AND json_extract(attributes, '$.label')='correction'""",
-            (CORRECTION_EVENT, since, version.asset_id, version.version, version.head,
-             f"{version.threshold:.6f}", version.input_policy_id),
+            f"""SELECT COUNT(*) FROM outcome_events e
+               WHERE e.event_name=:event AND e.retracted_at IS NULL AND e.ts >= :since
+                 AND {version_filter}
+                 AND json_extract(e.attributes, '$.label')=:label""",
+            {**version_params, "event": CORRECTION_EVENT, "since": since, "label": LABEL_CORRECTION},
         ).fetchone()
         return int(row[0]) / weeks
     finally:
         db.close()
 
 
-async def tell_conductor_about_activation(version) -> None:
+async def tell_conductor_about_activation(version: ClassifierVersion) -> None:
     """Send one accepted notice; persist the mark only after delivery accepts it."""
     from core.agent_roster_queries import workspace_conductor_contact
     from infra.database import get_db
     from infra.settings import get_setting
 
-    key = _version_key(version)
+    key = version_key(version)
 
     def load():
         db = get_db()

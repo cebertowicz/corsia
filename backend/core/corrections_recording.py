@@ -13,11 +13,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from loguru import logger
+
 CORRECTION_EVENT = "measurement.correction"
 MESSAGE_SUBJECT_PREFIX = "message:"
 LABEL_CORRECTION = "correction"
 LABEL_NOT_CORRECTION = "not_correction"
-LABELS = (LABEL_CORRECTION, LABEL_NOT_CORRECTION)
+# A healthy, self-tested classifier failed twice on this one input; Measurement never counts it.
+LABEL_UNREADABLE = "unreadable"
+LABELS = (LABEL_CORRECTION, LABEL_NOT_CORRECTION, LABEL_UNREADABLE)
+FAILURE_REASONS = ("none", "timeout", "rss", "child_error")
 SYSTEM_WRAPPER_PREFIXES = (
     "[EVENT:",
     "[DELIVERY WARNING",
@@ -43,14 +48,58 @@ FACT_KEYS = (
 
 
 @dataclass(frozen=True)
-class CheckerVersion:
-    """The immutable local-asset identity that makes one fact comparable."""
+class ClassifierVersion:
+    """The immutable local-asset identity that makes one fact comparable.
+
+    The threshold is held at the six decimals it is persisted with, so a version read
+    back from storage equals the one that wrote it.
+    """
 
     asset_id: str
     version: str
     head: str
     threshold: float
     input_policy_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "threshold", round(float(self.threshold), 6))
+
+
+def version_attributes(version: ClassifierVersion) -> dict[str, str]:
+    """The one persisted encoding of a version.
+
+    Fact attributes, the pending-candidate and weekly-figure SQL matches, the
+    activation record, the activation key and the dedupe key all use it.
+    """
+    return {
+        "asset_id": version.asset_id,
+        "asset_version": version.version,
+        "head": version.head,
+        "threshold": f"{version.threshold:.6f}",
+        "input_policy_id": version.input_policy_id,
+    }
+
+
+def decode_version(attributes: Mapping[str, Any]) -> ClassifierVersion:
+    """Read a persisted version back; KeyError, TypeError or ValueError when malformed."""
+    return ClassifierVersion(
+        str(attributes["asset_id"]), str(attributes["asset_version"]), str(attributes["head"]),
+        float(attributes["threshold"]), str(attributes["input_policy_id"]),
+    )
+
+
+def version_key(version: ClassifierVersion) -> str:
+    """The activation-ledger key for one version."""
+    return ":".join(version_attributes(version).values())
+
+
+def version_match_sql(alias: str, version: ClassifierVersion) -> tuple[str, dict[str, str]]:
+    """SQL matching ``alias.attributes`` to one version, with its named parameters."""
+    params = {f"version_{key}": value for key, value in version_attributes(version).items()}
+    clause = " AND ".join(
+        f"json_extract({alias}.attributes,'$.{name[len('version_'):]}')=:{name}" for name in params
+    )
+    return clause, params
 
 
 @dataclass(frozen=True)
@@ -69,26 +118,36 @@ ACTIVATIONS_SETTING = "corrections_classifier_activations"
 ACTIVE_VERSION_SETTING = "corrections_classifier_active_version"
 
 
-def active_corrections_version() -> CheckerVersion | None:
-    """The sole version Measurement may read; a filling version never leaks through."""
+@dataclass(frozen=True)
+class CorruptActivation:
+    """The activation record exists but cannot be read; never the same as no version."""
+
+    reason: str
+
+
+def active_corrections_version() -> ClassifierVersion | CorruptActivation | None:
+    """The sole version Measurement may read; a filling version never leaks through.
+
+    None means no version has been activated yet. A record that exists but is malformed is
+    logged and returned as ``CorruptActivation`` so no caller mistakes it for absence.
+    """
     from infra.database import get_db
     from infra.settings import get_setting
 
     db = get_db()
     try:
-        active = get_setting(ACTIVE_VERSION_SETTING, db=db) or {}
-        key = active.get("key")
-        activations = get_setting(ACTIVATIONS_SETTING, db=db) or {}
-        activation = activations.get(key) if isinstance(key, str) else None
-        saved = activation.get("version") if isinstance(activation, dict) else None
-        if not isinstance(saved, dict):
+        active = get_setting(ACTIVE_VERSION_SETTING, db=db)
+        if active is None:
             return None
-        return CheckerVersion(
-            str(saved["asset_id"]), str(saved["version"]), str(saved["head"]),
-            float(saved["threshold"]), str(saved["input_policy_id"]),
-        )
-    except (KeyError, TypeError, ValueError):
-        return None
+        key = active["key"]
+        activation = (get_setting(ACTIVATIONS_SETTING, db=db) or {})[key]
+        version = decode_version(activation["version"])
+        if version_key(version) != key:
+            raise ValueError("activation key does not match its version")
+        return version
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        logger.error("corrections activation record is unreadable: {}", type(error).__name__)
+        return CorruptActivation(type(error).__name__)
     finally:
         db.close()
 
@@ -98,12 +157,10 @@ def subject_key(message_id: str) -> str:
     return MESSAGE_SUBJECT_PREFIX + message_id
 
 
-def dedupe_key(message_id: str, version: CheckerVersion) -> str:
-    """Stable idempotency key for one message under one checker version."""
+def dedupe_key(message_id: str, version: ClassifierVersion) -> str:
+    """Stable idempotency key for one message under one classifier version."""
     payload = json.dumps(
-        {"message_id": message_id, "asset_id": version.asset_id,
-         "version": version.version, "head": version.head,
-         "threshold": version.threshold, "input_policy_id": version.input_policy_id},
+        {"message_id": message_id, **version_attributes(version)},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -164,22 +221,25 @@ def owner_message_sql_predicate(alias: str = "m") -> tuple[str, dict[str, str]]:
 def fact_attributes(
     candidate: CorrectionCandidate,
     classification: Mapping[str, Any],
-    version: CheckerVersion,
+    version: ClassifierVersion,
     *,
     classified_at: str | None = None,
 ) -> dict[str, Any]:
-    """Shape one local-classifier fact without retaining message content."""
+    """Shape one local-classifier fact without retaining message content.
+
+    ``failure_reason`` is ``none`` on a scored fact and names the failure on an
+    ``unreadable`` one.
+    """
+    label, reason = str(classification["label"]), str(classification["failure_reason"])
+    if label not in LABELS or reason not in FAILURE_REASONS or (label == LABEL_UNREADABLE) == (reason == "none"):
+        raise ValueError(f"inconsistent correction fact: label {label}, failure {reason}")
     return {
         "message_id": candidate.message_id,
         "thread_id": candidate.thread_id,
-        "label": classification["label"],
-        "asset_id": version.asset_id,
-        "asset_version": version.version,
-        "head": version.head,
-        "threshold": f"{version.threshold:.6f}",
-        "input_policy_id": version.input_policy_id,
+        "label": label,
+        **version_attributes(version),
         "truncated": "true" if classification["truncated"] else "false",
         "original_tokens": int(classification["original_tokens"]),
-        "failure_reason": str(classification.get("failure_reason", "none")),
+        "failure_reason": reason,
         "classified_at": classified_at or datetime.now(timezone.utc).isoformat(),
     }

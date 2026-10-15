@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from core.corrections_recording import (
     CORRECTION_EVENT,
     FACT_KEYS,
-    CheckerVersion,
+    ClassifierVersion,
     CorrectionCandidate,
     dedupe_key,
     fact_attributes,
@@ -37,7 +37,7 @@ def _owner_user_ids() -> list[str]:
 def _record_fact(
     candidate: CorrectionCandidate,
     classification: dict[str, str | int | bool],
-    version: CheckerVersion,
+    version: ClassifierVersion,
 ) -> bool:
     """Write one versioned local-classifier fact in its own transaction."""
     from infra.database import write_transaction
@@ -73,7 +73,7 @@ class _PendingBatch:
 
 
 async def _next_pending_batch(
-    version: CheckerVersion, batch_size: int, before: tuple[str, str] | None,
+    version: ClassifierVersion, batch_size: int, before: tuple[str, str] | None,
     *, since: str | None = None,
 ) -> _PendingBatch:
     """Globally select keys before reading the bounded classifier inputs."""
