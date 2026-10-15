@@ -158,7 +158,8 @@ async def _activate_after_backfill(manifest: AssetManifest) -> None:
 
 
 async def _catch_up_scan() -> None:
-    """Queue only the bounded Measurement window after startup or a dropped arrival."""
+    """Read the bounded window, yielding it whenever a live arrival is waiting."""
+    global _SCAN_OWED
     from datetime import timezone
     from jobs.corrections_activation import measurement_window_start
     from jobs.corrections_recording import _next_pending_batch
@@ -191,26 +192,44 @@ async def _catch_up_scan() -> None:
             current.append(candidate)
         for candidate in current:
             if not _QUEUE.empty():
+                _SCAN_OWED = True
                 return
+            started_at = time.monotonic()
             await _classify(candidate)
+            elapsed = time.monotonic() - started_at
+            if not _QUEUE.empty():
+                _SCAN_OWED = True
+                return
+            await asyncio.sleep(elapsed)
+    if not _QUEUE.empty():
+        _SCAN_OWED = True
 
 
-async def _drain() -> None:
+async def _process_arrival(message_id: str, enqueued_at: float) -> None:
+    started_at = time.monotonic()
+    try:
+        _STATE["queue_delay_ms"] = (started_at - enqueued_at) * 1000
+        candidate = await run_in_db(_candidate, message_id)
+        if candidate is not None:
+            await _classify(candidate)
+    finally:
+        _STATE["service_time_ms"] = (time.monotonic() - started_at) * 1000
+        _QUEUE.task_done()
+
+
+async def _worker() -> None:
+    """One owner: arrivals first, then owed scan/backfill, never competing tasks."""
     global _SCAN_OWED
     while True:
-        message_id, enqueued_at = await _QUEUE.get()
-        started_at = time.monotonic()
         try:
-            _STATE["queue_delay_ms"] = (started_at - enqueued_at) * 1000
-            candidate = await run_in_db(_candidate, message_id)
-            if candidate is not None:
-                await _classify(candidate)
-        finally:
-            _STATE["service_time_ms"] = (time.monotonic() - started_at) * 1000
-            _QUEUE.task_done()
-        if _SCAN_OWED and _QUEUE.empty():
+            message_id, enqueued_at = _QUEUE.get_nowait()
+        except asyncio.QueueEmpty:
+            if not _SCAN_OWED:
+                return
             _SCAN_OWED = False
             await _catch_up_scan()
+            continue
+        await _process_arrival(message_id, enqueued_at)
 
 
 def notify(message_id: str) -> None:
@@ -219,7 +238,7 @@ def notify(message_id: str) -> None:
     try:
         _QUEUE.put_nowait((message_id, time.monotonic()))
         if _TASK is None or _TASK.done():
-            _TASK = asyncio.create_task(_drain())
+            _TASK = asyncio.create_task(_worker())
     except asyncio.QueueFull:
         _SCAN_OWED = True
         dropped = _STATE.get("dropped_arrivals")
@@ -230,11 +249,12 @@ def notify(message_id: str) -> None:
 
 
 def startup_scan() -> None:
-    """Discard interrupted staging and begin catch-up without blocking startup."""
-    global _TASK
+    """Discard interrupted staging and start the one arrival-first worker."""
+    global _TASK, _SCAN_OWED
     _cleanup_staging()
+    _SCAN_OWED = True
     if _TASK is None or _TASK.done():
-        _TASK = asyncio.create_task(_catch_up_scan())
+        _TASK = asyncio.create_task(_worker())
 
 
 def state_snapshot() -> dict[str, object]:

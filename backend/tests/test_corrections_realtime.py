@@ -267,3 +267,25 @@ async def test_inference_runs_outside_a_database_write_transaction(monkeypatch):
     monkeypatch.setattr(corrections_realtime, "_record", AsyncMock(return_value=True))
 
     await corrections_realtime._classify(_candidate())
+
+
+@pytest.mark.asyncio
+async def test_one_worker_processes_arrival_queued_during_startup_scan(monkeypatch):
+    from jobs import corrections_realtime
+
+    processed = []
+
+    async def scan():
+        corrections_realtime._QUEUE.put_nowait(("during-startup", 0.0))
+
+    async def process(message_id, enqueued_at):
+        processed.append(message_id)
+        corrections_realtime._QUEUE.task_done()
+
+    monkeypatch.setattr(corrections_realtime, "_catch_up_scan", scan)
+    monkeypatch.setattr(corrections_realtime, "_process_arrival", process)
+    monkeypatch.setattr(corrections_realtime, "_SCAN_OWED", True)
+
+    await corrections_realtime._worker()
+
+    assert processed == ["during-startup"]
