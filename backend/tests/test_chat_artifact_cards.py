@@ -231,6 +231,37 @@ def test_a_withdrawn_round_reads_withdrawn_not_answered(db):
     assert ask_cards(db, {hold_id: ask})[hold_id]["state"] == "withdrawn"
 
 
+def test_a_restated_round_follows_its_successor_until_it_withdraws(db):
+    from plans import holds
+
+    plan_id, node_id = _node(db)
+    ask = document_ask(db, "owner")
+    first = _ask(db, plan_id, node_id, ask)
+    mutate(
+        plan_id, "block_node", {
+            "node_id": node_id, "reason_key": "needs_review", "reason": "read the revision",
+            "owner_kind": "user", "ask_artifact_id": ask,
+            "expected_revision": service._node_row(db, node_id)["revision"],
+        }, actor=PlanActor("owner", "user", "p"), provenance="test.restate",
+        mutation_id=uuid.uuid4().hex, db=db,
+    )
+    second = db.execute(
+        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node_id,),
+    ).fetchone()["id"]
+
+    assert ask_cards(db, {first: ask})[first]["state"] == "needs_review"
+
+    holds.clear(
+        node_id, second, expected_kind="blocked",
+        expected_revision=service._node_row(db, node_id)["revision"], actor_id="owner",
+        provenance="test.withdraw", db=db,
+    )
+
+    cards = ask_cards(db, {first: ask, second: ask})
+    assert cards[first]["state"] == "withdrawn"
+    assert cards[second]["state"] == "withdrawn"
+
+
 def test_a_recorded_verdict_and_feedback_counts_survive_in_the_card(db):
     plan_id, node_id = _node(db)
     ask = document_ask(db, "owner")

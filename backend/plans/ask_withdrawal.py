@@ -5,6 +5,26 @@ from __future__ import annotations
 from plans.node_states import open_user_block_sql
 
 
+def end_ask(
+    db, node_id: str, hold_id: str, artifact_id: str, *, actor_id: str | None, provenance: str,
+) -> bool:
+    """End one ask as its actor did, then close its artifact attention if it was last.
+
+    A user acting on their own wait acknowledges it; every other actor, including
+    a system migration, withdraws it. This is the only ending rule for an ask.
+    """
+    from plans import holds
+    from plans.boundary import is_user_audit_id
+
+    withdrawn = not is_user_audit_id(actor_id)
+    holds.clear_write(
+        node_id, hold_id, expected_kind="blocked", actor_id=actor_id,
+        provenance=provenance, detail={"ended": "withdrawn"} if withdrawn else None, db=db,
+    )
+    clear_ended_ask_attention(db, artifact_id, withdrawn=withdrawn)
+    return withdrawn
+
+
 def withdraw_node_asks(
     db, node_id: str, *, actor_id: str | None, provenance: str,
     keep_artifact_id: str | None = None,
@@ -16,8 +36,6 @@ def withdraw_node_asks(
     other open ask still refers to the artifact (legacy duplicate asks remain
     visible rather than being silently removed).
     """
-    from plans import holds
-
     rows = db.execute(
         f"""SELECT h.id AS hold_id, h.owner_id AS artifact_id
               FROM plan_node_holds h
@@ -29,12 +47,10 @@ def withdraw_node_asks(
         (node_id, keep_artifact_id, keep_artifact_id),
     ).fetchall()
     for row in rows:
-        holds.clear_write(
-            node_id, str(row["hold_id"]), expected_kind="blocked", actor_id=actor_id,
-            provenance=provenance, detail={"ended": "withdrawn"}, db=db,
+        end_ask(
+            db, node_id, str(row["hold_id"]), str(row["artifact_id"]),
+            actor_id=actor_id, provenance=provenance,
         )
-    for artifact_id in dict.fromkeys(str(row["artifact_id"]) for row in rows):
-        clear_ended_ask_attention(db, artifact_id)
     return len(rows)
 
 

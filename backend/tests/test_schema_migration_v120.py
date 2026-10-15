@@ -1,6 +1,7 @@
 """Schema 119 -> 120 withdraws stale review attention at startup."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 
@@ -13,6 +14,7 @@ from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 from plans import holds, service
 from plans.boundary import PlanActor, mutate
 from registry import attention, models
+from tests.plan_writer_authorizer import raw_plan_seed
 
 
 OWNER = PlanActor("owner", "user", "project")
@@ -100,6 +102,61 @@ def test_withdraws_only_stale_review_attention_and_is_idempotent():
         assert attention.get_attention_state(decision, db=db) == "raised"
         assert attention.get_attention_state(deferred, db=db) == "deferred"
         assert withdraw_stale_review_attention(db) == 0
+    finally:
+        db.close()
+
+
+def test_repairs_open_asks_on_retired_nodes_without_touching_live_ones():
+    db = _db()
+    try:
+        retired = []
+        for state, external_id in (("failed", "failed.md"), ("closed", "closed.md"), ("archived", "archived.md")):
+            artifact_id = _artifact(db, external_id)
+            node, hold_id = _raise_ask(db, artifact_id)
+            with raw_plan_seed(db):
+                if state == "archived":
+                    db.execute("UPDATE plan_nodes SET archived_at='t' WHERE id=?", (node.id,))
+                else:
+                    db.execute("UPDATE plan_nodes SET state=? WHERE id=?", (state, node.id))
+            retired.append((artifact_id, hold_id))
+        live = _artifact(db, "live.md")
+        live_node, live_hold = _raise_ask(db, live)
+        db.commit()
+
+        migrate_119_to_120(db)
+
+        for artifact_id, hold_id in retired:
+            row = db.execute(
+                "SELECT cleared_at,clearance_event_id FROM plan_node_holds WHERE id=?", (hold_id,),
+            ).fetchone()
+            payload = db.execute(
+                "SELECT payload_json FROM plan_node_events WHERE id=?", (row["clearance_event_id"],),
+            ).fetchone()["payload_json"]
+            assert row["cleared_at"] is not None
+            assert json.loads(payload)["detail"] == {"ended": "withdrawn"}
+            assert attention.get_attention_state(artifact_id, db=db) == "cleared"
+        assert db.execute(
+            "SELECT cleared_at FROM plan_node_holds WHERE id=?", (live_hold,),
+        ).fetchone()["cleared_at"] is None
+        assert attention.get_attention_state(live, db=db) == "raised"
+
+        events_before = db.execute("SELECT COUNT(*) FROM plan_node_events").fetchone()[0]
+        migrate_119_to_120(db)
+        assert db.execute("SELECT COUNT(*) FROM plan_node_events").fetchone()[0] == events_before
+
+        replacement = service.add_node(
+            live_node.plan_id, kind="task", title="Ask again", acceptance_criteria="Reviewed", db=db,
+        )
+        mutate(
+            live_node.plan_id, "block_node", {
+                "node_id": replacement.id, "reason_key": "review", "reason": "Review it",
+                "owner_kind": "user", "ask_artifact_id": retired[0][0],
+                "expected_revision": service._node_row(db, replacement.id)["revision"],
+            }, actor=OWNER, provenance="test.stale_attention", mutation_id=uuid.uuid4().hex, db=db,
+        )
+        assert db.execute(
+            "SELECT COUNT(*) FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (replacement.id,),
+        ).fetchone()[0] == 1
     finally:
         db.close()
 

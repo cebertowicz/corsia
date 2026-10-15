@@ -460,7 +460,68 @@ def test_settling_or_archiving_an_ask_withdraws_its_attention(db, operation):
         mutation_id=uuid.uuid4().hex, db=db,
     )
 
+    [hold] = db.execute(
+        "SELECT clearance_event_id FROM plan_node_holds WHERE node_id=?", (node.id,),
+    ).fetchall()
+    payload = json.loads(db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE id=?", (hold["clearance_event_id"],),
+    ).fetchone()["payload_json"])
+    metadata = json.loads(db.execute(
+        "SELECT metadata FROM artifact_identities WHERE id=?", (ask,),
+    ).fetchone()["metadata"])
     assert user_ask.raised_asks(db, ask) == []
+    assert attention.get_attention_state(ask, db=db) == "cleared"
+    assert payload["detail"] == {"ended": "withdrawn"}
+    assert metadata["attention_outcome"] == "withdraw"
+
+
+def test_user_wont_do_acknowledges_its_open_ask_without_withdrawing(db):
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="pending", external_id="wont-do.md")
+    hold = db.execute(
+        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
+    ).fetchone()
+
+    mutate(
+        node.plan_id, "close_node", {
+            "node_id": node.id,
+            "reason": "Won't do", "expected_revision": service._node_row(db, node.id)["revision"],
+        }, actor=USER, provenance="test.user_settle", mutation_id=uuid.uuid4().hex, db=db,
+    )
+
+    payload = json.loads(db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE id=(SELECT clearance_event_id FROM plan_node_holds WHERE id=?)",
+        (hold["id"],),
+    ).fetchone()["payload_json"])
+    metadata = json.loads(db.execute(
+        "SELECT metadata FROM artifact_identities WHERE id=?", (ask,),
+    ).fetchone()["metadata"])
+    assert attention.get_attention_state(ask, db=db) == "cleared"
+    assert "detail" not in payload
+    assert metadata["attention_outcome"] == "acknowledge"
+
+
+def test_system_clearing_an_ask_withdraws_it(db):
+    from plans import holds
+    from registry import attention
+
+    node, ask = _ask_held_node(db, state="pending", external_id="system-clear.md")
+    hold = db.execute(
+        "SELECT id FROM plan_node_holds WHERE node_id=? AND cleared_at IS NULL", (node.id,),
+    ).fetchone()
+
+    holds.clear(
+        node.id, hold["id"], expected_kind="blocked",
+        expected_revision=service._node_row(db, node.id)["revision"],
+        actor_id=None, provenance="test.system_clear", db=db,
+    )
+
+    payload = json.loads(db.execute(
+        "SELECT payload_json FROM plan_node_events WHERE id=(SELECT clearance_event_id FROM plan_node_holds WHERE id=?)",
+        (hold["id"],),
+    ).fetchone()["payload_json"])
+    assert payload["detail"] == {"ended": "withdrawn"}
     assert attention.get_attention_state(ask, db=db) == "cleared"
 
 
