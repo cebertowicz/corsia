@@ -29,15 +29,16 @@ function render() {
 }
 
 describe('looked-up rows in the History group', () => {
-	it('wraps only the looked-up label, so its "(estimated)" is never cut off', () => {
+	it('gives every History label the shared two-line rule', () => {
 		render();
 		const labels = [...host.querySelectorAll('.ctx-source-label')];
 
-		expect(labels.map((label) => [label.textContent, label.classList.contains('wrap')])).toEqual([
-			['Conversation history', false],
-			['GitHub, looked up (estimated)', true],
-			['Current message', false],
+		expect(labels.map((label) => label.textContent)).toEqual([
+			'Conversation history',
+			'GitHub, looked up (estimated)',
+			'Current message',
 		]);
+		expect(labels.every((label) => !label.classList.contains('wrap'))).toBe(true);
 	});
 
 	it('shows no status chip and keeps the count cell so token figures share one edge', () => {

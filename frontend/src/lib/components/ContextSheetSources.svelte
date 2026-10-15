@@ -36,7 +36,7 @@
 	{@const detail = source.fullLabel && source.fullLabel !== source.label ? source.fullLabel : source.label}
 	{#snippet main()}
 		<div class="ctx-source-main">
-			<span class="ctx-source-label" class:wrap={source.id.startsWith('usage:loaded-tool:')} title={detail}>{source.label}</span>
+			<span class="ctx-source-label" title={detail}>{source.label}</span>
 			{#if source.tags?.length}
 				<span class="ctx-source-tag">{source.tags.join(' · ')}</span>
 			{/if}
@@ -93,7 +93,7 @@
 							<span>{group.category}</span>
 							<span class="ctx-source-count">{group.sources.length}</span>
 						</span>
-						{#if group.countLabel || group.deltaLabel}
+						{#if (group.countLabel && group.id !== 'tools') || group.deltaLabel}
 							<span class="ctx-source-group-meta">
 								{#if group.deltaLabel}
 									<span class="ctx-source-delta">{group.deltaLabel}</span>
@@ -271,17 +271,14 @@
 	.ctx-source-label {
 		min-width: 0;
 		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
 		font-size: var(--text-subhead);
 		color: var(--text-secondary);
 	}
-	/* A label whose last words qualify the figure ("(estimated)") wraps instead of being cut off. */
-	.ctx-source-label.wrap {
-		overflow: visible;
-		white-space: normal;
-		overflow-wrap: anywhere;
-	}
+
 	.ctx-source-delta {
 		color: var(--text-secondary);
 		font-family: var(--font-mono);
