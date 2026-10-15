@@ -795,7 +795,8 @@ class TestRecheck:
         persisted = []
         calls = []
         monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_consent", lambda: not persisted)
-        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_replace_consent", lambda: True)
+        replace_probes = []
+        monkeypatch.setattr("llm.local_setup_ownership.existing_omlx_requires_replace_consent", lambda: replace_probes.append(True) or True)
         monkeypatch.setattr("llm.local_setup_ownership.record_existing_omlx_consent", lambda: persisted.append(True))
 
         async def begin(**kwargs):
@@ -805,6 +806,7 @@ class TestRecheck:
         monkeypatch.setattr("llm.local_setup.begin_local_setup", begin)
         no_reuse = client.post("/api/providers/local/setup")
         reuse_only = client.post("/api/providers/local/setup", json={"consent_existing": True})
+        assert replace_probes == [True]
         assert no_reuse.status_code == 409
         assert no_reuse.json() == {"detail": {"code": "consent_required"}}
         assert reuse_only.status_code == 409

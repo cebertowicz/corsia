@@ -200,15 +200,19 @@ async def local_download(request: Request) -> dict | Response:
         body = LocalDownloadRequest.model_validate(await request.json())
     except (ValidationError, ValueError):
         return Response(status_code=422)
+    needs_replace_consent = False
     if existing_omlx_requires_consent():
         if not body.consent_existing:
             return JSONResponse(status_code=409, content={"code": "consent_required"})
         record_existing_omlx_consent()
         # Reuse consent is read-only. A newly discovered broken leftover must
         # be acknowledged in a second request before setup can repair it.
-        if existing_omlx_requires_replace_consent():
+        needs_replace_consent = existing_omlx_requires_replace_consent()
+        if needs_replace_consent:
             return JSONResponse(status_code=409, content={"code": "replace_consent_required"})
-    if existing_omlx_requires_replace_consent() and not body.consent_replace:
+    else:
+        needs_replace_consent = existing_omlx_requires_replace_consent()
+    if needs_replace_consent and not body.consent_replace:
         return JSONResponse(status_code=409, content={"code": "replace_consent_required"})
     from llm.local_setup import begin_local_setup
 

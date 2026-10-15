@@ -198,6 +198,14 @@ def test_broken_leftover_requires_second_replacement_consent_before_setup(client
     monkeypatch.setattr(local_setup_ownership, "consent_marker_path", lambda: consented)
     monkeypatch.setattr(local_setup_ownership, "_is_broken_leftover", lambda _path: True)
     monkeypatch.setattr(setup_api, "existing_omlx_requires_consent", local_setup_ownership.existing_omlx_requires_consent)
+    replace_probes = 0
+
+    def requires_replace_consent():
+        nonlocal replace_probes
+        replace_probes += 1
+        return True
+
+    monkeypatch.setattr(setup_api, "existing_omlx_requires_replace_consent", requires_replace_consent)
     calls = 0
 
     async def begin_local_setup():
@@ -208,6 +216,7 @@ def test_broken_leftover_requires_second_replacement_consent_before_setup(client
     monkeypatch.setattr(local_setup, "begin_local_setup", begin_local_setup)
     refused = _post(client, "/api/setup/local-download")
     reuse_only = _post(client, "/api/setup/local-download", {"consent_existing": True, "consent_replace": True})
+    assert replace_probes == 1
     no_replace = _post(client, "/api/setup/local-download")
     assert refused.status_code == 409
     assert refused.json() == {"code": "consent_required"}

@@ -147,14 +147,18 @@ async def setup_local_source(
         record_existing_omlx_consent,
     )
 
+    needs_replace_consent = False
     if existing_omlx_requires_consent():
         if not consent_existing:
             raise HTTPException(status_code=409, detail={"code": "consent_required"})
         record_existing_omlx_consent()
         # Initial reuse consent is read-only; replacement needs a second action.
-        if existing_omlx_requires_replace_consent():
+        needs_replace_consent = existing_omlx_requires_replace_consent()
+        if needs_replace_consent:
             raise HTTPException(status_code=409, detail={"code": "replace_consent_required"})
-    if existing_omlx_requires_replace_consent() and not consent_replace:
+    else:
+        needs_replace_consent = existing_omlx_requires_replace_consent()
+    if needs_replace_consent and not consent_replace:
         raise HTTPException(status_code=409, detail={"code": "replace_consent_required"})
     try:
         return await begin_local_setup(
