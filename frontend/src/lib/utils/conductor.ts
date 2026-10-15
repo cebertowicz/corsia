@@ -111,3 +111,8 @@ export async function fetchCorsiaAgent(token: string | null): Promise<CorsiaAgen
 	else if (lookup.kind === 'absent') corsiaAgentId.set(null);
 	return lookup;
 }
+
+/** Read the scope's designated thread: a project's conductor, or the workspace's CORSIA agent. */
+export function fetchScopeTarget(token: string | null, scope: UiScope | null): Promise<CoordinationLookup> {
+	return scope ? fetchConductor(token, scope) : fetchCorsiaAgent(token);
+}

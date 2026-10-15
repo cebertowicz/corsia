@@ -4,6 +4,7 @@ import {
 	conductorScopeParam,
 	fetchConductor,
 	fetchCorsiaAgent,
+	fetchScopeTarget,
 	firstRunLanding,
 	landOnFirstRun,
 	corsiaAgentId,
@@ -173,6 +174,22 @@ describe('fetchConductor', () => {
 
 		await expect(fetchCorsiaAgent(null)).resolves.toEqual({ kind: 'unknown' });
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe('fetchScopeTarget', () => {
+	it('reads the CORSIA agent for the workspace and the conductor for a project', async () => {
+		globalThis.fetch = vi.fn(async () => ({
+			ok: true,
+			json: async () => ({ thread_id: null, target: null }),
+		})) as unknown as typeof fetch;
+
+		await fetchScopeTarget('tok', null);
+		await fetchScopeTarget('tok', { id: 'proj-123', name: 'CORSIA', color: '#7c5cff' });
+
+		const urls = vi.mocked(globalThis.fetch).mock.calls.map((call) => String(call[0]));
+		expect(urls[0]).toMatch(/^\/api\/corsia-agent\?/);
+		expect(urls[1]).toMatch(/^\/api\/conductor\?.*&scope=proj-123$/);
 	});
 });
 

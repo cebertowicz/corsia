@@ -23,7 +23,7 @@
 	import { closeSettingsBack, settingsOpenRequest } from '$lib/stores/settingsNavigation';
 	import { closeMeasurementSurface, measurementViewRequested } from '$lib/measurementSurfaceNavigation';
 	import type { Thread } from '$lib/stores/threads';
-	import { fetchConductor, fetchCorsiaAgent, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
+	import { fetchScopeTarget, landOnFirstRun, type CoordinationLookup } from '$lib/utils/conductor';
 	import type ChatPanel from '$lib/components/ChatPanel.svelte';
 	import HomePageView from '$lib/components/HomePageView.svelte';
 	import { docLens, selectedDocId } from '$lib/stores/documentsSurface';
@@ -123,7 +123,7 @@
 	async function goConductor(): Promise<boolean> {
 		sidebarOpen = false;
 		paneOpen.set(false);
-		conductorLookup = await ($uiScope ? fetchConductor($token, $uiScope) : fetchCorsiaAgent($token));
+		conductorLookup = await fetchScopeTarget($token, $uiScope);
 		if (conductorLookup.kind === 'target') {
 			const target = conductorLookup.target;
 			if ('reasoning_effort' in target) reasoningEffort.set(target.reasoning_effort ?? null);
@@ -142,7 +142,7 @@
 		if (!authenticated) return;
 		let active = true;
 		const firstRunIntent = selectionIntent;
-		void (scope ? fetchConductor(t, scope) : fetchCorsiaAgent(t)).then((lookup) => {
+		void fetchScopeTarget(t, scope).then((lookup) => {
 			if (!active) return;
 			conductorLookup = lookup;
 			const ownsFirstRunSelection = () =>
@@ -424,7 +424,7 @@
 		const filtered = reconcileThreadModelSnapshots(data.threads as Thread[]);
 		filtered.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 		threads.set(filtered);
-		void ($uiScope ? fetchConductor(t, $uiScope) : fetchCorsiaAgent(t)); // the list omits the target; re-read its model too
+		void fetchScopeTarget(t, $uiScope); // the list omits the target; re-read its model too
 	}
 
 	function handleKeydown(e: KeyboardEvent) {

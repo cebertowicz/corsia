@@ -4,7 +4,7 @@
 	import { activeThread, activeThreadId } from '$lib/stores/threads';
 	import { token } from '$lib/stores/auth';
 	import { uiScope } from '$lib/stores/uiScope';
-	import { fetchConductor, type ConductorTarget } from '$lib/utils/conductor';
+	import { fetchScopeTarget, type ConductorTarget } from '$lib/utils/conductor';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import SkillScopePanel from './SkillScopePanel.svelte';
 
@@ -22,7 +22,7 @@
 		const threadId = $activeThreadId;
 		conductorTarget = null;
 		conductorLoading = true;
-		fetchConductor($token, $uiScope).then((lookup) => {
+		fetchScopeTarget($token, $uiScope).then((lookup) => {
 			if (active) {
 				// Absent and unknown both leave the settings unavailable to retry:
 				// only a matching target can back this view.
