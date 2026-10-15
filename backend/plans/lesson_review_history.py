@@ -14,7 +14,7 @@ def _project(row, reason: str | None, *, settled_at: str | None,
     subject, separator, sha = identity.rpartition(":")
     if kind == lesson_reviews.LESSON_PREFIX and separator:
         candidate, state_separator, state = subject.rpartition(":")
-        if state_separator and state in {"trial", "watch"}:
+        if state_separator and state == "watch":
             subject = candidate
     superseded = {
         lesson_reviews.SUPERSEDED_BY_VERSION: "version",

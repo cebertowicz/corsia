@@ -219,7 +219,7 @@ async def test_a_hypothesis_becomes_a_reviewed_trial_the_next_install_offers(env
     assert trial.lesson.source_refs == tuple(TURN)
     [review] = _reviews(env)
     assert (review["state"], review["title"]) == ("pending", "Review trial lesson: cite-the-head")
-    assert review["key"] == f"lesson:{trial.lesson.id}:trial:{trial.behavioral_sha256}"
+    assert review["key"] == f"lesson:{trial.lesson.id}:{trial.behavioral_sha256}"
     assert trial.lesson.review_ref == f"plan-node:{review['id']}"
     description = env.db.execute("SELECT description FROM plan_nodes WHERE id=?", (review["id"],)).fetchone()[0]
     assert f'lesson_report(lesson_id="{trial.lesson.id}", version="{trial.behavioral_sha256}")' in description
@@ -726,7 +726,7 @@ def _one_open_review_offers(env: Env) -> None:
     """The file names the lesson's one open review, and the next install offers it."""
     trial = _trial(env)
     [review] = _open(_reviews(env, f"lesson:{trial.lesson.id}:"))
-    assert review["key"] == f"lesson:{trial.lesson.id}:trial:{trial.behavioral_sha256}"
+    assert review["key"] == f"lesson:{trial.lesson.id}:{trial.behavioral_sha256}"
     assert trial.lesson.review_ref == f"plan-node:{review['id']}"
     assert [(lesson["id"], lesson["behavioral_sha256"]) for lesson in _offered(env)] == [
         (trial.lesson.id, trial.behavioral_sha256),
@@ -877,4 +877,5 @@ async def test_duplicate_watch_placement_merges_each_turns_subjects_on_one_recor
     assert promoted.lesson.originating_subjects == ("message:first", "message:second", "message:third")
     reviews = {review["id"]: review for review in _reviews(env)}
     assert reviews[watch.lesson.review_node_id]["state"] == "closed"
+    assert reviews[watch.lesson.review_node_id]["key"] == f"lesson:{watch.lesson.id}:watch:{watch.behavioral_sha256}"
     assert reviews[promoted.lesson.review_node_id]["title"] == "Review trial lesson: cite-the-head"

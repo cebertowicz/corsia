@@ -12,7 +12,8 @@ liveness wake carries by node id once the owner's executor slot is free.
 Neither path completes the review; that is the owner's.
 
 One open review per version and lifecycle state, found again by its namespaced key
-(``lesson:<id>:<state>:<behavioral_sha256>`` or ``capture:<id>:<capture_hash>``), so a
+(``lesson:<id>:<behavioral_sha256>`` for a trial, ``lesson:<id>:watch:<behavioral_sha256>``
+for a watch, or ``capture:<id>:<capture_hash>``), so a
 retry or appended evidence creates nothing. A settled review is history: the
 same version placed again after its review closed gets a new one, under the
 same key. A new version, a capture completed into a trial, or a change of
@@ -46,7 +47,13 @@ class LessonOwnerError(service.PlanError):
 
 
 def lesson_key(lesson_id: str, behavioral_sha256: str, state: str = "trial") -> str:
-    """The idempotency key of one lesson version in one lifecycle state."""
+    """The idempotency key of one lesson version in one lifecycle state.
+
+    A trial keeps the original key, so reviews opened before watches existed
+    are still found; only a watch names its state.
+    """
+    if state == "trial":
+        return f"{LESSON_PREFIX}:{lesson_id}:{behavioral_sha256}"
     return f"{LESSON_PREFIX}:{lesson_id}:{state}:{behavioral_sha256}"
 
 
