@@ -509,3 +509,29 @@ def test_the_reviewer_unavailable_reason_is_holder_safe():
     from host_access.failure_reasons import is_holder_safe
 
     assert is_holder_safe("reviewer_unavailable")
+
+
+def test_an_account_admission_refusal_gets_a_correctable_cause_and_guidance():
+    """A moved thread must not leave the holder with a bare stage and no next step.
+
+    The account admission refusal names the account that cannot pay; the holder
+    needs the account-level correction, not a retry of the same application.
+    """
+    from connections.account_policy import AccountAdmissionError
+    from host_access.failure_reasons import (
+        CAUSE_GUIDANCE,
+        classify_failure,
+        is_holder_safe,
+        lease_failure_reason,
+    )
+
+    exc = AccountAdmissionError("account_session_mismatch")
+    assert classify_failure(exc) == "reviewer_account_unavailable"
+    reason = lease_failure_reason(exc, review_recorded=False)
+    assert reason == "application_reviewer_failure: reviewer_account_unavailable"
+    assert is_holder_safe(reason)
+    guidance = CAUSE_GUIDANCE["reviewer_account_unavailable"]
+    assert "reviewer" in guidance and "account" in guidance
+    # The fixed guidance is ours: never the exception text or the class name.
+    assert "account_session_mismatch" not in guidance
+    assert "AccountAdmissionError" not in reason
