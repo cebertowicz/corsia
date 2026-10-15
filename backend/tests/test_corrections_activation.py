@@ -51,3 +51,43 @@ def test_measurement_helper_keeps_old_version_until_new_backfill_completes(isola
     assert active_corrections_version() == new
     assert not complete_backfill(new, owner_user_id="owner", weeks=13, before_count=4, after_count=5)
     assert active_corrections_version() == new
+
+
+async def _in_db(function, *args, **kwargs):
+    return function(*args, **kwargs)
+
+
+def test_notice_is_marked_only_after_acceptance_and_is_not_resent(isolated_db, monkeypatch):
+    import asyncio
+
+    from events import delivery
+    from jobs import corrections_activation
+
+    version = _version()
+    assert corrections_activation.complete_backfill(
+        version, owner_user_id="owner", weeks=13, before_count=1.0, after_count=2.0,
+    )
+    monkeypatch.setattr(corrections_activation, "workspace_conductor_contact", None, raising=False)
+    monkeypatch.setattr(
+        "core.agent_roster_queries.workspace_conductor_contact",
+        lambda _owner, _db: ({"id": "conductor"}, None),
+    )
+    calls = []
+
+    async def rejected(*args, **kwargs):
+        calls.append((args, kwargs))
+        return False
+
+    monkeypatch.setattr(delivery, "deliver_to_thread", rejected)
+    asyncio.run(corrections_activation.tell_conductor_about_activation(version))
+    assert len(calls) == 1
+
+    async def accepted(*args, **kwargs):
+        calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(delivery, "deliver_to_thread", accepted)
+    asyncio.run(corrections_activation.tell_conductor_about_activation(version))
+    asyncio.run(corrections_activation.tell_conductor_about_activation(version))
+
+    assert len(calls) == 2

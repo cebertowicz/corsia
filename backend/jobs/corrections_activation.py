@@ -62,21 +62,7 @@ def _active_version():
         db.close()
 
 
-def active_correction_count() -> int | None:
-    """Use the saved active-version figure for a version-switch notice."""
-    from infra.database import get_db
-    from infra.settings import get_setting
-
-    db = get_db()
-    try:
-        active = get_setting(ACTIVE_VERSION_SETTING, db=db) or {}
-        key = active.get("key")
-        activations = get_setting(ACTIVATIONS_SETTING, db=db) or {}
-        activation = activations.get(key) if isinstance(key, str) else None
-        value = activation.get("after_count") if isinstance(activation, dict) else None
-        return value if isinstance(value, int) else None
-    finally:
-        db.close()
+# The recorder's active_corrections_version() is the sole public version reader.
 
 
 def complete_backfill(
