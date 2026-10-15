@@ -23,7 +23,6 @@ from tools.host_access_external import external_agent_sandbox_rules
 from tools.base_git_paths import base_branch_selector_paths, base_git_control_paths, base_git_identity_paths
 from tools.host_path_policy import current_protected_host_path_policy
 from tools.repo_worktree_guidance import branch_pinned_worktree_guidance
-from tools.safehouse_launch import direct_safehouse_argv, safehouse_prefix
 from tools.shell_argv import command_tokens, direct_argv
 from tools.sandbox_config import (
     get_allowed_dirs_ro,
@@ -975,9 +974,10 @@ def _canonical_paths(paths: list[Path]) -> list[Path]:
 
 
 def _safehouse_executable() -> Path:
-    if executable := shutil.which("safehouse"):
-        return Path(executable).expanduser().resolve(strict=False)
-    raise FileNotFoundError("Agent Safehouse is unavailable")
+    executable = shutil.which("safehouse")
+    if executable is None:
+        raise FileNotFoundError("Agent Safehouse is unavailable")
+    return Path(executable).expanduser().resolve(strict=False)
 
 
 def safehouse_argv(
@@ -993,31 +993,40 @@ def safehouse_argv(
     policies: list[RepoPolicy] | None = None,
 ) -> list[str]:
     """Build one direct Safehouse argv from the spawn's account view."""
-    return [
-        *safehouse_prefix(
-            cwd, append_profile, shell_env_pass_names(), executable=_safehouse_executable,
-            sandbox_dirs_rw=get_sandbox_add_dirs_rw, allowed_dirs_ro=get_allowed_dirs_ro,
-            agent_account_dirs=agent_account_ro_dirs, leased=leased, agent_account=agent_account, gws_home=gws_home, thread_id=thread_id, policies=policies,
-        ),
-        "/bin/bash", "--noprofile", "--norc", "-c", command,
+    canonical_cwd = Path(cwd).expanduser().resolve(strict=False)
+    canonical_profile = Path(append_profile).expanduser().resolve(strict=False)
+    argv = [
+        str(_safehouse_executable()),
+        f"--workdir={canonical_cwd}" if leased else "--workdir=",
+        "--trust-workdir-config=false",
     ]
-
-
-def safehouse_exec_argv(
-    command: str,
-    args: list[str],
-    cwd: str | Path,
-    append_profile: str | Path,
-    *,
-    env_pass_names: set[str],
-    additional_dirs_rw: list[Path] | None = None,
-) -> list[str]:
-    """Build a scope-neutral Safehouse argv that execs an app without a shell."""
-    return direct_safehouse_argv(
-        command, args, cwd, append_profile, env_pass_names=env_pass_names,
-        executable=_safehouse_executable, sandbox_dirs_rw=get_sandbox_add_dirs_rw, allowed_dirs_ro=get_allowed_dirs_ro,
-        agent_account_dirs=agent_account_ro_dirs, additional_dirs_rw=additional_dirs_rw,
+    if leased:
+        # Safehouse 0.11.1 otherwise installs a terminal deny for
+        # ``<workdir>/.safehouse``. Workdir configuration is explicitly
+        # untrusted below, so that file is not live lease authority.
+        argv.append("--allow-workdir-config-writes")
+    else:
+        if rw := ":".join(map(str, _canonical_paths([*get_sandbox_add_dirs_rw(thread_id, policies=policies), *([gws_home] if gws_home else [])]))):
+            argv.append(f"--add-dirs={rw}")
+        read_only = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account)]
+        if ro := ":".join(map(str, _canonical_paths(read_only))):
+            argv.append(f"--add-dirs-ro={ro}")
+    argv.extend(
+        [
+            f"--enable={'docker' if leased else 'ssh'},agent-browser",
+            f"--append-profile={canonical_profile}",
+            f"--env-pass={shell_env_pass_names()}",
+            "--",
+            "/bin/bash",
+            "--noprofile",
+            "--norc",
+            "-c",
+            command,
+        ]
     )
+    return argv
+
+
 def _terminal_boundary_profile(
     profile_path: Path,
     cwd: Path,
@@ -1025,7 +1034,6 @@ def _terminal_boundary_profile(
     leased: bool,
     external_agent: bool = False,
     agent_account: AgentAccountView | None = None,
-    include_agent_account: bool = True,
     thread_id: str | None = None,
 ) -> str:
     """Render the protected or reviewed lease boundary."""
@@ -1112,7 +1120,6 @@ def execution_envelope_profile(
     controlled_operation: str | None = None,
     policies: list[RepoPolicy] | None = None,
     agent_account: AgentAccountView | None = None,
-    include_agent_account: bool = True,
     thread_id: str | None = None,
 ) -> str:
     """Render protected or reviewed-leased rules around one repo renderer."""
@@ -1124,7 +1131,6 @@ def execution_envelope_profile(
         leased=leased,
         external_agent=external_agent,
         agent_account=agent_account,
-        include_agent_account=include_agent_account,
         thread_id=thread_id,
     )
     if leased:

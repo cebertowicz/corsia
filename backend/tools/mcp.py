@@ -1,12 +1,7 @@
 """Canonical MCP sessions and native tools, shared by every harness."""
 
 import asyncio
-import hashlib
-import os
-import shlex
-import tempfile
 from contextlib import AsyncExitStack
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -116,92 +111,6 @@ class MCPToolWrapper(Tool):
             await asyncio.gather(call, return_exceptions=True)
 
 
-_SAFEHOUSE_MCP_ERROR = "local MCP apps require Safehouse"
-_SAFEHOUSE_INHERITED_ENV = {"HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"}
-_NO_PROCTITLE_SHIM = """const descriptor = Object.getOwnPropertyDescriptor(process, 'title');
-if (!descriptor?.configurable) {
-  throw new Error('CORSIA MCP preload cannot safely disable process.title');
-}
-const get = typeof descriptor.get === 'function' ? descriptor.get : () => descriptor.value;
-Object.defineProperty(process, 'title', {get, set(){}, configurable:true});
-"""
-
-
-def _mcp_app_id(name: str) -> str:
-    """Return a stable path-safe identity for one configured MCP app."""
-    return hashlib.sha256(name.encode("utf-8")).hexdigest()
-
-
-def _mcp_cache_dir(name: str, workspace: Path, state_root: Path) -> Path:
-    """Return an app-private cache that cannot overlap CORSIA workspace or state."""
-    from infra.platform_paths import APPLICATION_ID
-
-    cache_dir = (Path.home() / "Library" / "Caches" / APPLICATION_ID / "mcp" / _mcp_app_id(name)).resolve(strict=False)
-    if any(
-        cache_dir == root or cache_dir.is_relative_to(root) or root.is_relative_to(cache_dir)
-        for root in (workspace.resolve(strict=False), state_root.resolve(strict=False))
-    ):
-        raise MCPConfigError("local MCP cache must be outside CORSIA workspace and state")
-    return cache_dir
-
-
-def _write_no_proctitle_shim(cache_dir: Path) -> Path:
-    """Rewrite the app-local Node preload before every Safehouse launch."""
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    shim_path = cache_dir / "no-proctitle.cjs"
-    shim_path.write_text(_NO_PROCTITLE_SHIM, encoding="utf-8")
-    return shim_path
-
-
-def _safehouse_stdio_parameters(name: str, command: str, args: list[str], env: dict[str, str]):
-    """Build a scope-neutral direct-exec Safehouse launch for one local app."""
-    from mcp import StdioServerParameters
-
-    from infra.config import STATE_ROOT, WORKSPACE
-    from tools.shell_guard import execution_envelope_profile, safehouse_exec_argv
-
-    workspace = Path(WORKSPACE).expanduser().resolve(strict=False)
-    cache_dir = _mcp_cache_dir(name, workspace, Path(STATE_ROOT))
-    # Tool runners resolve project-local configuration and executable shims from
-    # their cwd and its ancestors. Use this app-private directory rather than
-    # the agent-writable workspace; workspace paths remain available by their
-    # existing absolute read/write grant.
-    cwd = cache_dir / "cwd"
-    cwd.mkdir(parents=True, exist_ok=True)
-    shim_path = _write_no_proctitle_shim(cache_dir)
-    node_options = f"--require {shlex.quote(str(shim_path))}"
-    if existing := env.get("NODE_OPTIONS"):
-        node_options = f"{node_options} {existing}"
-    server_env = {
-        # npm runs a package bin through a bare `sh`, and libuv's PATH search
-        # stops at the first sandbox-denied entry (EPERM) before reaching /bin.
-        "npm_config_script_shell": "/bin/sh",
-        **env,
-        "npm_config_cache": str(cache_dir / "npm"),
-        "UV_CACHE_DIR": str(cache_dir / "uv"),
-        "XDG_CACHE_HOME": str(cache_dir / "xdg"),
-        "NODE_OPTIONS": node_options,
-    }
-    descriptor, raw_profile = tempfile.mkstemp(prefix="corsia-mcp-envelope-", suffix=".sb")
-    profile_path = Path(raw_profile).resolve(strict=False)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as profile:
-            profile.write(execution_envelope_profile(
-                command, cwd, profile_path, leased=False, include_agent_account=False,
-            ))
-        argv = safehouse_exec_argv(
-            command, args, cwd, profile_path,
-            env_pass_names=set(server_env) | _SAFEHOUSE_INHERITED_ENV,
-            additional_dirs_rw=[cache_dir],
-        )
-    except (FileNotFoundError, OSError):
-        profile_path.unlink(missing_ok=True)
-        raise MCPConfigError(_SAFEHOUSE_MCP_ERROR) from None
-    return StdioServerParameters(
-        command=argv[0], args=argv[1:], env=server_env, cwd=cwd,
-    ), profile_path
-
-
 async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from mcp import ClientSession, StdioServerParameters
 
@@ -218,14 +127,9 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         from mcp.client.stdio import stdio_client
 
         env = {**(config.get("env") or {}), **secret_env}
-        params, profile_path = await asyncio.to_thread(
-            _safehouse_stdio_parameters, name, config["command"], config.get("args", []), env,
-        )
-        stack.callback(profile_path.unlink, missing_ok=True)
-        try:
-            read, write = await stack.enter_async_context(stdio_client(params))
-        except OSError:
-            raise MCPConfigError(_SAFEHOUSE_MCP_ERROR) from None
+        params = StdioServerParameters(command=config["command"],
+                                       args=config.get("args", []), env=env or None)
+        read, write = await stack.enter_async_context(stdio_client(params))
     elif config.get("url"):
         from mcp.client.streamable_http import streamable_http_client
 

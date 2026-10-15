@@ -10,11 +10,8 @@ here is synthetic.
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 import re
-import subprocess
 import sys
 import textwrap
 from contextlib import AsyncExitStack
@@ -330,43 +327,12 @@ STDIO_SERVER = textwrap.dedent('''
 ''')
 
 
-def _install_uv(target: Path) -> Path:
-    """Install uv for this test only and return the bin directory that holds it."""
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--target", str(target), "uv"],
-        check=True, capture_output=True, timeout=180,
-    )
-    return target / "bin"
-
-
-@pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store, monkeypatch, tmp_path):
-    """A workspace server script passed by absolute path into an app-private launch.
-
-    Safehouse confines the app, so its interpreter must sit where the profile
-    reaches: uv runs a uv-managed Python and resolves mcp through the app's cache.
-    """
-    from infra.config import WORKSPACE
-    from mcp.client import stdio
-
-    script = Path(WORKSPACE) / "mcp-secret-fixture.py"
+async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store, tmp_path):
+    script = tmp_path / "server.py"
     script.write_text(STDIO_SERVER)
-    uv_bin = await asyncio.to_thread(_install_uv, tmp_path / "uv")
-    monkeypatch.setenv("PATH", f"{uv_bin}{os.pathsep}{os.environ.get('PATH', '')}")
-    launched: list[list[str]] = []
-    create_process = stdio._create_platform_compatible_process
-
-    async def capture_process(command, args, *rest, **kwargs):
-        launched.append([command, *args])
-        return await create_process(command, args, *rest, **kwargs)
-
-    monkeypatch.setattr(stdio, "_create_platform_compatible_process", capture_process)
-    # STDIO_SERVER uses FastMCP, which mcp 2 renamed.
-    config = {"command": "uv", "args": ["run", "--managed-python", "--no-project", "--with", "mcp<2", str(script)],
+    config = {"command": sys.executable, "args": [str(script)],
               "env": {"SERVICE_TOKEN": "synthetic-token-0001", "LOG_LEVEL": "debug"}}
-    # A cold start fetches a uv-managed Python and mcp into the app's cache.
-    config["connect_timeout"] = 180
     mcp_import.save_import({"svc": config})
     saved = json.loads(_settings_text())["mcpServers"]["svc"]
     assert "synthetic" not in json.dumps(saved)
@@ -376,8 +342,6 @@ async def test_a_stdio_server_starts_with_its_resolved_secret(isolated_db, store
         errors = await connect_mcp_servers({"svc": saved}, registry, stack)
         assert errors == {}
         result = await registry.get("mcp_svc_seen").execute()
-    secret = config["env"]["SERVICE_TOKEN"]
-    assert launched and not any(secret in json.dumps(argv) for argv in launched)
     assert result == "LOG_LEVEL=debug,SERVICE_TOKEN=synthetic-token-0001"
 
 
