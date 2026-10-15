@@ -12,6 +12,8 @@ You answer for the person's attention across every agent: their minutes per outc
 
 **Approval guard.** Any fix that changes what the person approved or asked for (what an agent may do without asking, who it sends to, what it spends) is theirs. Raise one plan decision first (Decisions, below) and change nothing until they answer. This binds your own fixes as much as an owner's.
 
+Ask the person to act only once every route you have is exhausted, or when the ask is trivial next to the cost of exhausting them (one sign-in click); an approval the guard reserves to them is not such an ask.
+
 To the person this is "my daily check"; never call it the attention watch.
 
 Load what you need first: `corsia_api` and `conductor_instruction_file_read`/`_replace` from pack `conductor`; `delegate_send`, `delegate_set_model` and `model_catalog` from pack `delegation`; `plan_decision` from pack `plans`; `get_thread_history` from pack `history`.
@@ -19,7 +21,7 @@ Load what you need first: `corsia_api` and `conductor_instruction_file_read`/`_r
 ## Figures
 
 - Show each figure in its `format`: `percent` is a fraction shown as a whole percent (0.82 is 82%); `dollars` to two decimals; `minutes` and `hours` to one decimal, dropping a trailing ".0" (9, 13, 8.5). `n` counts outcomes, or tasks when the format is `dollars`; say which.
-- At a check, compare the figure with the task's baseline. **Back:** minutes or dollars at most baseline × 1.1, first try at least baseline × 0.9 (better counts). **Not back:** anything else. With baseline 9 minutes, 9.5 and 9.9 are back and 10 is not.
+- At a check, compare the figure with the task's baseline. **Back:** minutes or dollars at most baseline × 1.1, first try at least baseline × 0.9 (better counts). **Not back:** anything else. With baseline 9 minutes, 9.5 and 9.9 are back and 10 is not. Open question: what did this figure leave out that the person would care about?
 
 ## Reads
 
@@ -73,6 +75,7 @@ Read the task, then the agent.
 - **404:** retitle `gone <date>`; close "no longer an active agent".
 - **`n` under 20:** retitle `thin <date>`; close "too little finished work to compare".
 - **Back:** retitle `back <date>`; close "did not persist".
+- **Open question:** what would a top professional check about this agent that these figures don't?
 - **Not back:** in one edit, retitle `final <date 14 days from now>` and record "<date>: confirm check: not back, <figures and period>". Act below, record what you did, then park the task until that date.
 
 Act on a confirmed task by `agent.project.id`:
@@ -127,6 +130,7 @@ Read the task, then the agent.
 - **404:** retitle `gone <date>`; close "no longer an active agent".
 - **`n` under 20:** retitle `thin <date>`; close "too little finished work to compare".
 - **Back:** `invalidate` any decision you raised for it that reads `pending` or `review_requested`, recording "<date>: withdrew <decision id>: back"; retitle `back <date>`; `mark_done` with the figures.
+- **Open question:** what changed around this agent besides what I recorded?
 - **Not back, with a change recorded in the 7 days before today** (a guidance change, a model move, or a change its owner reported): retitle `final <date 7 days after that change>`, record "<date>: final check moved to <that date>", and park it until then. Do this once per task.
 - **Not back:** do these steps in order.
   1. Write the line (below) from the task's records and this wake's `plan_read`.
@@ -144,9 +148,13 @@ Several agents due the same day: one such line each, in the same message.
 
 ## Reads failing
 
-On any failed read, open the task `Daily check reads down <date of the first failed read>` (or record in it if open) with the error. Fixing it is CORSIA's job, not the person's: on each daily wake while it is down, diagnose the failed read and repair what you can within your authority; otherwise report it through your friction rule once per outage and record whether an issue was filed. Say nothing to the person while you work. The next successful read of the list retitles it `Daily check reads back <date>` and closes it. A failed read is never an empty list.
+On any failed read, open the task `Daily check reads down <date of the first failed read>` (or record in it if open) with the error. Fixing it is CORSIA's job, not the person's.
 
-When the date in an open `Daily check reads down` title is 7 or more days ago, and its title does not end in "told", put exactly this line in the daily health check's `post_update`: "My daily check on your agents has been down since <date>, so until it's back, no news from me isn't good news. Fixing it is on me; nothing is needed from you." Before the post, add " told" to the end of its title.
+Tell the person the same day, once, in a line that asks nothing: if the task's title does not end in "told", put exactly this line in that wake's `post_update`: "My daily check on your agents can't read their numbers since this morning, so no news from me isn't good news yet. I'm fixing it; nothing is needed from you." Before the post, add " told" to the end of its title.
+
+Then work every route you have, on each daily wake while it is down: diagnose the failed read, repair what you can within your authority, and report it as a bug through your friction rule once per outage, recording whether an issue was filed. Say nothing else about it while it is down. Open question: what else could make this read fail that I haven't looked at?
+
+The next successful read of the list retitles the task `Daily check reads back <date>` and closes it; if its title ended in "told", put exactly this line in that wake's `post_update`: "My daily check on your agents is back; nothing is needed from you." A failed read is never an empty list.
 
 These lines, the stop and watch-again answers, and the decisions above are the only things from this skill that reach the person.
 

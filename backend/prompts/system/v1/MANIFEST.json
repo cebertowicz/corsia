@@ -190,10 +190,10 @@
       "sha256": "439a391de2f259ea39ce913808296ca144440758f5fcb919581251036116d3a4"
     },
     {
-      "bytes": 18370,
+      "bytes": 19086,
       "kind": "skill",
       "path": "skills/attention-watch/SKILL.md",
-      "sha256": "149db4941419be0db3b3f62219803396866cfb20a754335020c7fefdc1c75f00"
+      "sha256": "238f3392ad7cc1c197187f31886455bf7ce73d83e374698e9bf5b0d7f092222e"
     },
     {
       "bytes": 3741,
@@ -340,10 +340,10 @@
       "sha256": "2228aca35ebdac364be172e2a035a1bdc084adb2c7eb90f30d29311101d7b139"
     },
     {
-      "bytes": 10428,
+      "bytes": 11168,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "ca2db14c3d117c723b6ef596b61dbbbf2bbae09dfc62f1edd03b908ce4418157"
+      "sha256": "58cdf1896c28cf819e231a77fba2d965f969281318547bf15ab3c39bae7e09eb"
     }
   ],
   "version": "v1"
