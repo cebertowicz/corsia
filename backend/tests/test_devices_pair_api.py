@@ -6,7 +6,7 @@ import hmac
 import json
 from pathlib import Path
 
-import api.devices as devices_api
+import pytest
 from fastapi.testclient import TestClient
 from spake2 import SPAKE2_Symmetric
 
@@ -26,27 +26,61 @@ def _client_pairing(code: str) -> SPAKE2_Symmetric:
     return SPAKE2_Symmetric(secret, idSymmetric=PAIRING_IDENTITY)
 
 
-def test_python_spake2_accepts_rust_04_public_vector():
-    """Rust 0.4's recorded public message remains parseable by Python 0.9.
-
-    The fixture records public SPAKE2 messages from the interop prototype.
-    It intentionally does not claim an equality check for the recorded derived
-    key: reproducing that value would require the private ephemeral scalar
-    from the original Rust process, which is not part of a public vector.
-    """
+def _rust_vector() -> dict:
+    """Rust spake2 0.4's seeded vector, from fixtures/spake2-vector-gen."""
     fixture = Path(__file__).with_name("fixtures") / "spake2-rust-0.4-vector.json"
-    vector = json.loads(fixture.read_text())
-    password = hashlib.sha256(PAIRING_IDENTITY + b"\0" + vector["code"].encode()).digest()
-    assert password.hex() == vector["pw_hex"]
-    assert bytes.fromhex(vector["identity_hex"]) == PAIRING_IDENTITY
+    return json.loads(fixture.read_text())
 
-    rust_message = bytes.fromhex(vector["python_first"]["rust_message_hex"])
-    assert rust_message.startswith(b"S")
-    pairing = SPAKE2_Symmetric(password, idSymmetric=PAIRING_IDENTITY)
-    pairing.start()
-    assert len(pairing.finish(rust_message)) == 32
-    assert len(bytes.fromhex(vector["python_first"]["derived_key_hex"])) == 32
-    assert len(bytes.fromhex(vector["rust_first"]["derived_key_hex"])) == 32
+
+def _seeded_pairing(code: str, entropy_hex: str) -> SPAKE2_Symmetric:
+    """A Python peer whose only randomness is the vector's 64 entropy bytes."""
+    entropy = [bytes.fromhex(entropy_hex)]
+
+    def entropy_f(count: int) -> bytes:
+        assert entropy and count == len(entropy[0]), "spake2 must draw the fixture bytes once"
+        return entropy.pop()
+
+    secret = hashlib.sha256(PAIRING_IDENTITY + b"\0" + code.encode()).digest()
+    return SPAKE2_Symmetric(secret, idSymmetric=PAIRING_IDENTITY, entropy_f=entropy_f)
+
+
+@pytest.mark.parametrize("order", ["python_first", "rust_first"])
+def test_python_spake2_derives_rust_04_vector_key(order):
+    """Python 0.9 and Rust 0.4 agree on the exact key for one seeded exchange.
+
+    The generator gives the Rust peer a ChaCha20 seed and computes the
+    message the Python peer must send from the same entropy this test feeds
+    Python. Its derived key is the Rust peer's finish(python_message).
+    """
+    vector = _rust_vector()
+    secret = hashlib.sha256(PAIRING_IDENTITY + b"\0" + vector["code"].encode()).digest()
+    assert secret.hex() == vector["pw_hex"]
+    assert bytes.fromhex(vector["identity_hex"]) == PAIRING_IDENTITY
+    exchange = vector[order]
+    python_message = bytes.fromhex(exchange["python_message_hex"])
+    rust_message = bytes.fromhex(exchange["rust_message_hex"])
+    # The symmetric transcript sorts the two messages; cover both branches.
+    assert (python_message[1:] < rust_message[1:]) is (order == "python_first")
+
+    pairing = _seeded_pairing(vector["code"], exchange["python_entropy_hex"])
+
+    assert pairing.start() == python_message
+    assert pairing.finish(rust_message) == bytes.fromhex(exchange["derived_key_hex"])
+
+
+def test_python_spake2_wrong_code_disagrees_with_rust_04_vector():
+    vector = _rust_vector()
+    wrong = vector["wrong_code"]
+    exchange = vector[wrong["exchange"]]
+    pairing = _seeded_pairing(wrong["code"], exchange["python_entropy_hex"])
+
+    wrong_message = pairing.start()
+    key = pairing.finish(bytes.fromhex(exchange["rust_message_hex"]))
+
+    assert wrong_message == bytes.fromhex(wrong["python_message_hex"])
+    assert wrong_message != bytes.fromhex(exchange["python_message_hex"])
+    assert key != bytes.fromhex(exchange["derived_key_hex"])
+    assert key != bytes.fromhex(wrong["rust_derived_key_hex"])
 
 
 def _enable_pairing() -> str:

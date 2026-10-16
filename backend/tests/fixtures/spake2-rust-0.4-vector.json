@@ -1,18 +1,29 @@
 {
-  "producer": "rust spake2 0.4.0",
+  "producer": "rust spake2 0.4.0 (spake2-vector-gen)",
+  "rng": "rand_chacha 0.3 ChaCha20Rng::from_seed",
   "code": "K7QX",
   "pw_hex": "e2df188b39f2a6ec9638bdec0a1bd09714a15ecf9fee4a1ff9f5d9d08b2808f1",
   "identity_hex": "636f727369612d706169722d7631",
   "python_first": {
-    "python_message_hex": "5301a813a43bfa92fa6f6277aef54f3be4bc559579a75f97161a97fe09ef3dd648",
-    "rust_message_hex": "53938b2ea33965e4128e10c8c27f14fa1acb136db45f716a99e13a9a0053805ed5",
-    "derived_key_hex": "55af82671125e34d2bf27b29287fdfbb6cb3cfaca2962618194eb0986df05bfb"
+    "python_seed_hex": "9999999999999999999999999999999999999999999999999999999999999999",
+    "python_entropy_hex": "e0b002b7e94170136c3d90f85287d953e5ab7da349092189d4d324a037218337825f1b2ef83db40b066e27c36198330f0ee0954a1319391340f0d00a4b0df3f7",
+    "rust_seed_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "python_message_hex": "531412a5eceda93c395e55c8fb26e83274a036606807f3e41c2154175b54e42e76",
+    "rust_message_hex": "53f3beca55cf3041ceddcd8ac9aa5c1cad9e1734a4a5093eb9934e76c328db91d1",
+    "derived_key_hex": "d1cff6e3453c5becbc814318a44bdca35ed9b8366ed26d7b0501c70ec009dfa2"
   },
   "rust_first": {
-    "derived_key_hex": "84ce409adc18420374ae8918765c345c6652e092b125bf2458e520dcd522974c"
+    "python_seed_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "python_entropy_hex": "0c222d59aa9891e94b669692ce4e0f89dac09b5d8c4a8f7a52abb360c1b862e4db55557103406ef05e7011fef606445c3f0dd7e9f4cb212d662fb96b398ec8e3",
+    "rust_seed_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+    "python_message_hex": "53d8cb46e1104bd78d9cc5b6ffaefe49f1f8f80673b790f7bfff29da99d98539bd",
+    "rust_message_hex": "532d48ad759c38f68782de779208ac0440d28191e2ecbdaaae158894a05788b1f2",
+    "derived_key_hex": "005071fab558c21bb23c1806278cf833f953e5f762aea6b50a25be14b8c1e321"
   },
   "wrong_code": {
-    "python_code": "ZZZZ",
-    "keys_differ": true
+    "code": "ZZZZ",
+    "exchange": "python_first",
+    "python_message_hex": "5333abbb4dcf88ecad6db422e84c5e542b0b98e28baa7ffe56256483afe3f17e0b",
+    "rust_derived_key_hex": "9f30607b4489ff8ad9cab239c66e8311894eb756f70d96b92e77c8ece1cad59d"
   }
 }
