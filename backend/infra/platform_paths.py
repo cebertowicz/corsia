@@ -235,6 +235,24 @@ def restore_adoption_snapshot(state_root: Path, snapshot: Path) -> None:
             shutil.copy2(source, destination)
 
 
+def service_file_state_dir(path: Path) -> Path | None:
+    """The state root ``service.json`` claims; None if absent, ValueError if unusable."""
+    try:
+        data = json.loads(path.read_bytes()[:65536])
+    except FileNotFoundError:
+        return None
+    except Exception as error:
+        raise ValueError(f"{SERVICE_FILE} unreadable") from error
+    if not isinstance(data, dict):
+        raise ValueError(f"{SERVICE_FILE} is not a JSON object")
+    if "state_dir" not in data:
+        return None
+    state_dir = data["state_dir"]
+    if not isinstance(state_dir, str) or not state_dir.startswith("/"):
+        raise ValueError(f"{SERVICE_FILE} has an invalid state_dir")
+    return Path(os.path.realpath(state_dir))
+
+
 def default_state_root(
     *,
     env: Mapping[str, str] | None = None,

@@ -38,14 +38,21 @@ def reasoning_shape_from_discovery(model: dict[str, Any]) -> dict[str, Any] | No
     the same as "this model has none" — both yield None here, but the absent
     case must never be recorded as a positive claim about the model.
     """
-    levels = model.get("reasoning_effort_options")
-    if levels:
+    efforts = model.get("reasoning_efforts")
+    # In oMLX 0.7.1rc1, [] means the template reads reasoning_effort but does
+    # not name standard levels. Its own _reasoning_levels exposes the generic
+    # options in that distinct case. An omitted field is an older server and
+    # must not be conflated with []; its generic custom list is untrusted.
+    if efforts == []:
+        efforts = model.get("reasoning_effort_options")
+    if efforts:
+        levels = [str(level) for level in efforts]
         configured = model.get("configured_reasoning_effort")
         declared = model.get("reasoning_effort_default")
         default = configured if configured in levels else declared
         return {
             "type": "effort_levels",
-            "values": list(levels),
+            "values": levels,
             "default": default if default in levels else levels[0],
         }
 
