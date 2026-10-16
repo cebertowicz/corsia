@@ -5,11 +5,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from loguru import logger
+
+from core.thread_naming import THREAD_TITLE_MAX_CHARS
 from infra.conductor import get_scope_coordinator
 from infra.database import write_transaction
 from infra.passive_changes import append_agent_roster_transition
 from infra.queries import get_thread_for_user
 from infra.time import utc_now_iso
+
+
+ROSTER_FRAME_FIELDS = (
+    "agent_enabled", "agent_responsibility", "agent_paths", "agent_domains",
+    "agent_status", "agent_notes", "title",
+)
 
 
 class RosterChangeError(ValueError):
@@ -93,6 +102,21 @@ def _desired_fields(thread: Any, body: dict[str, Any]) -> tuple:
     )
 
 
+def _desired_name(thread: Any, body: dict[str, Any]) -> str:
+    """The display name (the thread title) after this edit; omitted keeps it."""
+    if "name" not in body:
+        return thread["title"]
+    name = body["name"]
+    if not isinstance(name, str) or not name.strip():
+        raise RosterChangeError("name must be a non-empty string")
+    name = name.strip()
+    if len(name) > THREAD_TITLE_MAX_CHARS:
+        raise RosterChangeError(
+            f"name must be at most {THREAD_TITLE_MAX_CHARS} characters"
+        )
+    return name
+
+
 def change_agent(
     thread_id: str,
     body: dict[str, Any],
@@ -118,11 +142,11 @@ def change_agent(
                 db=db,
             )
 
-        desired = _desired_fields(thread, body)
+        desired = (*_desired_fields(thread, body), _desired_name(thread, body))
         current = (
             thread["agent_enabled"], thread["agent_responsibility"],
             thread["agent_paths"] or "[]", thread["agent_domains"] or "[]",
-            thread["agent_status"], thread["agent_notes"],
+            thread["agent_status"], thread["agent_notes"], thread["title"],
         )
         if desired == current:
             return {"ok": True, "changed": False, "thread_id": thread_id}
@@ -137,7 +161,7 @@ def change_agent(
         updated_at = utc_now_iso()
         db.execute(
             """UPDATE threads SET agent_enabled=?, agent_responsibility=?,
-               agent_paths=?, agent_domains=?, agent_status=?, agent_notes=?,
+               agent_paths=?, agent_domains=?, agent_status=?, agent_notes=?, title=?,
                agent_roster_updated_at=?, updated_at=? WHERE id=?""",
             (*desired, updated_at, updated_at, thread_id),
         )
@@ -150,4 +174,26 @@ def change_agent(
             db, before=thread, after=updated,
             summary=f"Agent responsibility map updated: {thread['title'] or 'Untitled'}",
         )
-        return {"ok": True, "changed": True, "thread_id": thread_id}
+        row = dict(updated)
+    _publish_roster_row(row)
+    return {"ok": True, "changed": True, "thread_id": thread_id}
+
+
+def _publish_roster_row(row: dict[str, Any]) -> None:
+    """Tell the owner's open clients the committed roster fields of one thread.
+
+    Rides the `session_updated` frame that already patches a cached thread row,
+    so promotion and demotion move it between conversations and Agents without
+    a reload. Best-effort: the committed row stays authoritative.
+    """
+    from infra import state
+
+    try:
+        state.broadcast_event(row["id"], row["user_id"], {
+            "type": "session_updated",
+            "thread_id": row["id"],
+            **{key: row[key] for key in ROSTER_FRAME_FIELDS},
+            "updated_at": row["updated_at"],
+        })
+    except Exception as exc:  # noqa: BLE001 - the committed row stays authoritative
+        logger.warning("agent roster update delivery failed: {}", type(exc).__name__)
