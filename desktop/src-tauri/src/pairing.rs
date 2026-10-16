@@ -320,6 +320,14 @@ fn validate_name(name: &str) -> Result<(), PairError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
+
+    fn decode_hex(value: &str) -> Vec<u8> {
+        (0..value.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&value[index..index + 2], 16).unwrap())
+            .collect()
+    }
 
     #[test]
     fn password_is_bound_to_the_protocol_identity() {
@@ -352,5 +360,25 @@ mod tests {
         let expected = confirmation(&key, transcript);
         assert!(verify_confirmation(&key, transcript, &expected).is_ok());
         assert!(verify_confirmation(&key, transcript, &confirmation(&key, b"different")).is_err());
+    }
+
+    #[test]
+    fn committed_spake2_vector_reproduces_the_rust_message_and_shared_key() {
+        let password = Password::new(&pairing_password("K7QX"));
+        let identity = Identity::new(PAIRING_IDENTITY);
+        let mut rng = ChaCha20Rng::from_seed([0xaa; 32]);
+        let (state, message) = Spake2::<Ed25519Group>::start_symmetric_with_rng(
+            &password,
+            &identity,
+            &mut rng,
+        );
+        assert_eq!(
+            message,
+            decode_hex("53f3beca55cf3041ceddcd8ac9aa5c1cad9e1734a4a5093eb9934e76c328db91d1")
+        );
+        assert_eq!(
+            state.finish(&decode_hex("531412a5eceda93c395e55c8fb26e83274a036606807f3e41c2154175b54e42e76")).unwrap(),
+            decode_hex("d1cff6e3453c5becbc814318a44bdca35ed9b8366ed26d7b0501c70ec009dfa2")
+        );
     }
 }
