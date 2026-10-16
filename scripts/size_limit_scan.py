@@ -179,8 +179,11 @@ def measure(
     for relative in tracked_paths(root):
         if not is_source(relative):
             continue
+        path = root / relative
+        if not path.exists():
+            continue
         try:
-            raw = (root / relative).read_bytes()
+            raw = path.read_bytes()
         except OSError:
             unreadable.append(relative)
             continue

@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
 
-from core.corrections_classifier import ASSET_ID, AssetError, AssetManifest, asset_root, load_pinned_manifest
+from core import corrections_classifier
+from core.onnx_asset import AssetError, AssetManifest, load_pinned_manifest
 
 _VERSION_LABEL = re.compile(r"v([0-9]+)")
 
 
 class AssetSelectionError(AssetError):
-    """Selection failed after inspecting every installed candidate.
-
-    The worker retains ``versions`` in its own snapshot, including when no candidate
-    can be selected. ``reader`` stays suitable for the owner-facing failure notice.
-    """
+    """Selection failed after inspecting every installed candidate."""
 
     def __init__(
         self,
@@ -29,6 +27,16 @@ class AssetSelectionError(AssetError):
         self.versions = versions
 
 
+def asset_root() -> Path:
+    """Return the app-owned location for the corrections asset."""
+    overridden = os.environ.get("CORSIA_CORRECTIONS_ASSET_DIR")
+    if overridden:
+        return Path(overridden)
+    from infra.config import STATE_ROOT
+
+    return STATE_ROOT / "assets" / corrections_classifier.CORRECTIONS_SPEC.asset_id
+
+
 def version_number(label: str) -> int:
     """Order a pinned version label; only ``v<number>`` is accepted."""
     match = _VERSION_LABEL.fullmatch(label)
@@ -39,12 +47,11 @@ def version_number(label: str) -> int:
 
 def candidate_roots() -> list[Path]:
     """Return only declared asset locations, newest pin first after the installed root."""
-    from core import corrections_asset_pins
-
     root = asset_root()
+    asset_id = corrections_classifier.CORRECTIONS_SPEC.asset_id
     siblings = (
-        root.parent / f"{ASSET_ID}-{version}"
-        for version in sorted(corrections_asset_pins.PINNED_MANIFESTS, key=version_number, reverse=True)
+        root.parent / f"{asset_id}-{version}"
+        for version in sorted(corrections_classifier.CORRECTIONS_SPEC.pins, key=version_number, reverse=True)
     )
     return [root, *(path for path in siblings if path != root)]
 
@@ -64,8 +71,8 @@ def select_manifest(*, exclude: Mapping[str, str] | None = None) -> tuple[AssetM
         if not (directory / "manifest.json").is_file():
             continue
         try:
-            manifest = load_pinned_manifest(directory)
-            manifest.verify_files()
+            manifest = load_pinned_manifest(directory, corrections_classifier.CORRECTIONS_SPEC)
+            manifest.verify_files(corrections_classifier.CORRECTIONS_SPEC)
             number = version_number(manifest.version)
         except (AssetError, OSError) as error:
             versions.append({"location": directory.name, "version": None, "state": "failed", "reason": str(error)})
