@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{error::Error, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use hmac::{Hmac, Mac};
@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
-use crate::trust::{self, Trust};
+use crate::{
+    classify::{classify_connect_error, classify_tls_against_plain_http, Unreachable},
+    trust::{self, Trust},
+};
 
 const PAIRING_IDENTITY: &[u8] = b"corsia-pair-v1";
 type HmacSha256 = Hmac<Sha256>;
@@ -28,18 +31,31 @@ pub enum PairError {
     TooManyTries,
     Paused,
     Busy,
-    Unreachable,
+    Unreachable(Unreachable),
     TooOld,
     Protocol(String),
 }
 
 impl From<reqwest::Error> for PairError {
     fn from(error: reqwest::Error) -> Self {
-        if error.is_connect() || error.is_timeout() {
-            Self::Unreachable
-        } else {
-            Self::Protocol(error.to_string())
+        if error.is_timeout() {
+            return Self::Unreachable(Unreachable::Network);
         }
+        if error.is_connect() {
+            let mut source = error.source();
+            while let Some(cause) = source {
+                if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+                    return Self::Unreachable(classify_connect_error(io));
+                }
+                source = cause.source();
+            }
+            let message = error.to_string().to_ascii_lowercase();
+            if message.contains("plain http") || message.contains("wrong version") {
+                return Self::Unreachable(classify_tls_against_plain_http());
+            }
+            return Self::Unreachable(Unreachable::Network);
+        }
+        Self::Protocol(error.to_string())
     }
 }
 
@@ -108,7 +124,7 @@ pub async fn pair(host: &str, port: u16, code: &str) -> Result<Paired, PairError
             )
             .await
         }
-        Err(PairError::Unreachable) => pair_pinned(host, port, code).await,
+        Err(PairError::Unreachable(_)) => pair_pinned(host, port, code).await,
         Err(error) => Err(error),
     }
 }
@@ -344,6 +360,22 @@ mod tests {
     #[test]
     fn verified_host_is_canonicalized_like_the_host() {
         assert_eq!(canonical_verified_host("Studio.LOCAL.").unwrap(), "studio.local");
+    }
+
+    #[test]
+    fn connect_failures_keep_the_r4_cause() {
+        assert_eq!(
+            PairError::Unreachable(classify_connect_error(&std::io::Error::from(std::io::ErrorKind::TimedOut))),
+            PairError::Unreachable(Unreachable::Network)
+        );
+        assert_eq!(
+            PairError::Unreachable(classify_connect_error(&std::io::Error::from(std::io::ErrorKind::ConnectionRefused))),
+            PairError::Unreachable(Unreachable::Server)
+        );
+        assert_eq!(
+            PairError::Unreachable(classify_tls_against_plain_http()),
+            PairError::Unreachable(Unreachable::Server)
+        );
     }
 
     #[test]
