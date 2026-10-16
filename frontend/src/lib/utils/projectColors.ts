@@ -52,7 +52,7 @@ export function accentRoles(colour: string, theme: 'light' | 'dark'): { text: st
 	if (!own) return { text: colour, onFill: ON_FILL_LIGHT };
 	const surfaces = ACCENT_TEXT_SURFACES[theme].map((hex) => parseColor(hex)!);
 	const text = toHex(stepToContrast(own, surfaces, theme, 4.5));
-	return { text, onFill: own ? inkOn(colour) : ON_FILL_LIGHT };
+	return { text, onFill: inkOn(colour) };
 }
 
 export const ACCENT_SWATCHES = [

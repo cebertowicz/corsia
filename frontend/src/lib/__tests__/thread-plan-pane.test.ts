@@ -491,6 +491,7 @@ describe("ThreadPlanPane", () => {
     const refreshed = decisionItem({ id: "decision-tail", title: "Refreshed tail decision", source });
     queue.set(queueBody(head, 2, [head, clicked]));
     const payload = envelope("t1");
+    payload.attention = { awaiting_count: 2 };
     const network = routedFetch({
       "/api/plans/operator": () => ok(payload, '"r1"'),
       "/api/attention/queue": () => ok(queueBody(head, 2, [head, refreshed])),
@@ -500,6 +501,7 @@ describe("ThreadPlanPane", () => {
 
     const rows = [...host.querySelectorAll<HTMLButtonElement>(".decision-row")];
     expect(rows).toHaveLength(2);
+    expect(host.querySelector(".decision-indicator")).toBeNull();
     expect(rows[1].textContent).toContain("Stale tail decision");
     rows[1].click();
     await settle();
@@ -552,13 +554,16 @@ describe("ThreadPlanPane", () => {
       source: { ...SOURCE, thread_id: "t2", thread_label: "Another thread" },
     });
     queue.set(queueBody(own, 2, [own, other]));
-    routedFetch({ "/api/plans/operator": () => ok(envelope("t1"), '"r1"') });
+    const payload = envelope("t1");
+    payload.attention = { awaiting_count: 2 };
+    routedFetch({ "/api/plans/operator": () => ok(payload, '"r1"') });
     component = mount(ThreadPlanPane, { target: host, props: { threadId: "t1" } });
     await settle();
 
     const rows = [...host.querySelectorAll<HTMLButtonElement>(".decision-row")];
     expect(rows).toHaveLength(1);
     expect(rows[0].textContent).toContain("Decision for this thread");
+    expect(host.querySelector(".decision-indicator")?.textContent).toContain("1 more decision");
     expect(host.textContent).not.toContain("Decision for another thread");
     __reset();
   });

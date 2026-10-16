@@ -110,19 +110,21 @@
 {/snippet}
 
 <header class="shell-header" class:shell-inset={$sidebarCollapsed} data-tauri-drag-region use:toastTopSurface>
-	<div class="h-zone h-left">
-		<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
-			<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
-		</button>
-		{#if isTakeover && h?.onBack}
-			<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
-				<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-				<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+	<div class="h-leading">
+		<div class="h-zone h-left">
+			<button class="h-icon" onclick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
 			</button>
-		{/if}
-	</div>
+			{#if isTakeover && h?.onBack}
+				<button class="h-back" onclick={back} title={h?.backLabel ?? 'Back'} aria-label={h?.backLabel ?? 'Back'}>
+					<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+					<span class="h-back-label">{h?.backLabel ?? 'Back'}</span>
+				</button>
+			{/if}
+		</div>
 
-	<span class="h-title">{@render titleInner()}</span>
+		<span class="h-title">{@render titleInner()}</span>
+	</div>
 
 	<div class="h-zone h-right">
 		{#if isTakeover && h?.actions?.length}
@@ -176,7 +178,8 @@
 		position: absolute; top: 0; left: 0; right: 0;
 		z-index: 10;
 		height: var(--header-height);
-		padding: 0 12px 0 max(12px, env(titlebar-area-x, 12px));
+		--header-inline-end: 12px;
+		padding: 0 var(--header-inline-end) 0 max(12px, env(titlebar-area-x, 12px));
 		display: flex; align-items: center; gap: 8px;
 		flex-shrink: 0;
 		box-shadow: var(--glass-rim);
@@ -200,6 +203,7 @@
 	.shell-header :global(button) { -webkit-app-region: no-drag; app-region: no-drag; }
 
 	.h-zone { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+	.h-leading { display: flex; align-items: center; min-width: 0; flex: 1; gap: 8px; }
 	.h-right { margin-left: auto; }
 
 	.h-icon {
@@ -233,9 +237,14 @@
 	}
 	.h-scope { overflow: hidden; text-overflow: ellipsis; }
 	/* An expanded document occupies the right canvas column. Keep the chat title
-	   inside its left column, with a visible gap before the document tab strip. */
+	   inside its left column, with a visible gap before the document tab strip.
+	   ChatArtifactSplit publishes the actual computed column width on main. */
+	:global(.app:has(.leaf-col:not(.rail):not(.full))) .h-leading {
+		/* `main` owns the inherited inset. Its right padding is outside this
+		   flex content box, so add it back when reserving the artifact column. */
+		flex: 0 1 calc(100% - var(--artifact-header-inset) + var(--header-inline-end));
+	}
 	:global(.app:has(.leaf-col:not(.rail):not(.full))) .h-title {
-		flex: 0 1 calc(100% - 648px);
 		margin-right: var(--space-2);
 	}
 	.h-cond-glyph { color: var(--accent-scope-text); flex-shrink: 0; }
