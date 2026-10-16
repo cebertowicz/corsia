@@ -1,4 +1,12 @@
-use std::{convert::Infallible, error::Error, net::SocketAddr, sync::Arc};
+use std::{
+    convert::Infallible,
+    error::Error,
+    future::Future,
+    net::SocketAddr,
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{
@@ -14,6 +22,8 @@ use tokio_rustls::TlsConnector;
 use crate::{remote_config::Locator, trust::{self, Trust}};
 
 type ProxyBody = BoxBody<Bytes, Box<dyn Error + Send + Sync>>;
+type ResolveFuture = Pin<Box<dyn Future<Output = Result<(String, u16), ProxyError>> + Send>>;
+type Resolver = Arc<dyn Fn(Locator) -> ResolveFuture + Send + Sync>;
 
 #[derive(Debug)]
 pub enum ProxyError {
@@ -49,6 +59,23 @@ pub async fn start(
     preferred_port: u16,
     on_key_changed: impl Fn() + Send + Sync + 'static,
 ) -> Result<ProxyHandle, ProxyError> {
+    start_with_resolver(
+        locator,
+        trust,
+        preferred_port,
+        on_key_changed,
+        Arc::new(|locator| Box::pin(default_resolve(locator))),
+    )
+    .await
+}
+
+pub async fn start_with_resolver(
+    locator: Locator,
+    trust: Trust,
+    preferred_port: u16,
+    on_key_changed: impl Fn() + Send + Sync + 'static,
+    resolver: Resolver,
+) -> Result<ProxyHandle, ProxyError> {
     let listener = bind_loopback(preferred_port).await?;
     let port = listener.local_addr().map_err(|error| ProxyError::Bind(error.to_string()))?.port();
     let (shutdown_send, mut shutdown_receive) = oneshot::channel();
@@ -57,6 +84,7 @@ pub async fn start(
         trust,
         local_port: port,
         on_key_changed: Arc::new(on_key_changed),
+        resolver,
     });
     tokio::spawn(async move {
         loop {
@@ -86,6 +114,7 @@ struct ProxyState {
     trust: Trust,
     local_port: u16,
     on_key_changed: Arc<dyn Fn() + Send + Sync>,
+    resolver: Resolver,
 }
 
 async fn bind_loopback(preferred_port: u16) -> Result<TcpListener, ProxyError> {
@@ -117,7 +146,10 @@ async fn forward_trusted(
     mut request: Request<Incoming>,
     state: Arc<ProxyState>,
 ) -> Result<Response<ProxyBody>, String> {
-    let (host, port) = resolve_locator(&state.locator).await?;
+    let (host, port) = (state.resolver)(state.locator.clone()).await.map_err(|error| match error {
+        ProxyError::Resolve(message) => message,
+        other => format!("{other:?}"),
+    })?;
     let stream = TcpStream::connect((host.as_str(), port)).await.map_err(|error| error.to_string())?;
     let config = trust::client_config(&state.trust).map_err(|error| error.to_string())?;
     let name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(|error| error.to_string())?;
@@ -137,10 +169,12 @@ async fn forward_trusted(
     Ok(response.map(|body| body.map_err(|error| Box::new(error) as Box<dyn Error + Send + Sync>).boxed()))
 }
 
-async fn resolve_locator(locator: &Locator) -> Result<(String, u16), String> {
+async fn default_resolve(locator: Locator) -> Result<(String, u16), ProxyError> {
     match locator {
-        Locator::Address { host, port } => Ok((host.clone(), *port)),
-        Locator::DnsSd { instance } => Err(format!("DNS-SD locator {instance:?} requires the discovery resolver")),
+        Locator::Address { host, port } => Ok((host, port)),
+        Locator::DnsSd { instance } => crate::discovery::resolve(&instance, Duration::from_secs(5))
+            .await
+            .map_err(|error| ProxyError::Resolve(format!("DNS-SD resolution failed: {error:?}"))),
     }
 }
 
