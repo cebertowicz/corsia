@@ -26,6 +26,8 @@ mod app_paths;
 mod first_run;
 mod lifecycle;
 mod pairing;
+mod remote;
+mod remote_config;
 mod service_management;
 mod startup_failure;
 mod trust;
