@@ -47,7 +47,7 @@ def test_pairing_events_record_outcomes_without_secret_material(monkeypatch):
             _user={"id": "person", "token_kind": "session"},
         )
     )
-    wrong_code = issued["code"]["value"]
+    wrong_code = issued["code"]
     wrong_pairing = SPAKE2_Symmetric(
         hashlib.sha256(PAIRING_IDENTITY + b"\0" + wrong_code.encode()).digest(),
         idSymmetric=PAIRING_IDENTITY,
