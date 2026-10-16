@@ -117,7 +117,18 @@ describe('AppSignInPanel', () => {
 	])('names the %s failure in plain words', (failureClass, text) => {
 		mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: failureClass } }));
 		expect(host.textContent).toContain(text);
-		expect(Boolean(button('Try again'))).toBe(failureClass !== 'permissions');
+		expect(button(failureClass === 'permissions' ? 'Sign in' : 'Try again')).toBeTruthy();
+	});
+
+	it('still offers Sign in after a failure another try would not fix, and starts a fresh sign-in', async () => {
+		vi.stubGlobal('open', vi.fn(() => null));
+		const fetch = vi.fn(async () => reply({ authorization_url: LINK, expires_at: 't', reopened: false }));
+		vi.stubGlobal('fetch', fetch);
+		const { onChange } = mountPanel(linear({ sign_in: { status: 'failed', signed_in: false, failure_class: 'permissions' } }));
+		expect(button('Try again')).toBeUndefined();
+		button('Sign in')!.click();
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/linear/sign-in'), { method: 'POST' }));
+		await vi.waitFor(() => expect(onChange).toHaveBeenCalledWith({ sign_in: expect.objectContaining({ status: 'pending', failure_class: undefined }) }));
 	});
 
 	it("shows the app's own words only for an unknown failure", async () => {
@@ -163,6 +174,26 @@ describe('ConnectedAppsSettings with sign-in', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.textContent).toContain('You can only sign in on the Mac CORSIA runs on.'));
 		expect(button('Sign in')).toBeUndefined();
+	});
+
+	it.each([
+		['open while the app is not signed in', false, 'true'],
+		['collapsed once the app is signed in', true, 'false'],
+	])('keeps a failed row %s', async (_name, signedIn, expanded) => {
+		const app = linear({ state: signedIn ? 'working' : 'needs_sign_in', sign_in: { status: 'failed', signed_in: signedIn, failure_class: 'permissions' } });
+		vi.stubGlobal('fetch', vi.fn(async () => reply({ servers: [app], sign_in_here: true })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.textContent).toContain("Sign-in didn't finish"));
+		const summary = host.querySelector('button.summary') as HTMLButtonElement;
+		expect(summary.getAttribute('aria-expanded')).toBe(expanded);
+		expect(Boolean(button('Sign in'))).toBe(!signedIn);
+		if (signedIn) {
+			summary.click();
+			flushSync();
+			summary.click();
+			flushSync();
+			expect(summary.getAttribute('aria-expanded'), 'the person can close it again').toBe('false');
+		}
 	});
 
 	it('shows a signed-in account on the row', async () => {

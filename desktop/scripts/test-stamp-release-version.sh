@@ -12,14 +12,17 @@ cp "$root/desktop/src-tauri/Cargo.toml" "$temp/desktop/src-tauri/"
 cp "$root/frontend/package.json" "$temp/frontend/"
 cp "$root/desktop/scripts/stamp-release-version.sh" "$temp/desktop/scripts/"
 
-(
-  cd "$temp"
-  desktop/scripts/stamp-release-version.sh v0.1.0
-  node -e 'const fs=require("fs"); for (const path of ["desktop/src-tauri/tauri.conf.json", "frontend/package.json"]) { if (JSON.parse(fs.readFileSync(path)).version !== "0.1.0") process.exit(1); }'
-  grep -Fx 'version = "0.1.0"' desktop/src-tauri/Cargo.toml
-)
+for tag in v0.1.0 v0.4.1-dev.1234; do
+  expected_version="${tag#v}"
+  (
+    cd "$temp"
+    desktop/scripts/stamp-release-version.sh "$tag"
+    node -e 'const fs=require("fs"); for (const path of ["desktop/src-tauri/tauri.conf.json", "frontend/package.json"]) { if (JSON.parse(fs.readFileSync(path)).version !== process.argv[1]) process.exit(1); }' "$expected_version"
+    grep -Fx "version = \"$expected_version\"" desktop/src-tauri/Cargo.toml
+  )
+done
 
-for invalid_tag in v2026.10.14 v0.1.0-dev.1 v1.0.0; do
+for invalid_tag in v2026.10.14 v0.1.0-dev.bad v1.0.0; do
   if (
     cd "$temp"
     desktop/scripts/stamp-release-version.sh "$invalid_tag"

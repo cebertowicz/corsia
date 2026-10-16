@@ -21,9 +21,10 @@ def is_mcp_entry_name(name: str) -> bool:
     return name.startswith(PREFIX) and bool(_ENTRY_PATTERN.match(name[len(PREFIX):]))
 
 
-#: An MCP server's OAuth sign-in (``tools.mcp_oauth_store``): one entry per (app, person) holding the
-#: whole grant, so a refresh rotates the access and refresh token in a single write.
-OAUTH_PREFIX = "mcp-oauth-"
+#: A hosted app's OAuth sign-in (``tools.mcp_oauth_store``): one entry per app holding the whole
+#: grant, so a refresh rotates the access and refresh token in a single write. The double hyphen is
+#: the marker: a credential entry's slugs never hold one, so a server named "oauth" never matches.
+OAUTH_PREFIX = "mcp-oauth--"
 #: A grant carries tokens, client registration and endpoints, so it gets a higher ceiling than a key
 #: (never split: a partial write would leave a half-signed-in server).
 OAUTH_VALUE_MAX = 32 * 1024

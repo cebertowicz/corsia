@@ -13,8 +13,6 @@ CLASSES = frozenset({
     "timed_out", "cancelled", "declined", "not_allowed", "permissions", "app_error", "app_busy",
     "address_mismatch", "unknown",
 })
-# Classes whose screen offers no Try again.
-NO_RETRY = frozenset({"permissions"})
 _BY_PROVIDER_CODE = {
     "access_denied": "declined",
     "unauthorized_client": "not_allowed",

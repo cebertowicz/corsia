@@ -104,6 +104,14 @@ def test_unreachable_manifest_skill_fails(tmp_path: Path):
     assert any("not reachable: orphan-skill" in e for e in compute(tmp_path).errors)
 
 
+def test_asset_only_directory_is_not_a_skill(tmp_path: Path):
+    _build(tmp_path, "nothing named\n", _baseline(),
+           system_references={"retired-skill": {"helper.sh": "echo kept\n"}})
+    result = compute(tmp_path)
+    assert result.errors == []
+    assert "retired-skill" not in result.manifest_skills
+
+
 def test_declared_project_skill_fails(tmp_path: Path):
     _build(tmp_path, "Follow skill `sdlc-process`.\n", _baseline(),
            project_skills={"sdlc-process": "contributor only\n"})

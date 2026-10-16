@@ -36,7 +36,7 @@ class ProjectDiscoveryListTool(Tool):
             "the ordered setup decisions CORSIA built from facts it read (raise "
             "each unchanged, from its task_title's task), and "
             "setup_task_settlements. There the consent is the find-projects decision "
-            "for 'Set up your first agent or project': pass its id. "
+            "for 'Set up your first project': pass its id. "
             "Pass self_check_passed=false when corsia_api could not be reached."
         )
 

@@ -7,14 +7,15 @@ import subprocess
 import httpx
 from fastapi import HTTPException
 
-from llm.local_profiles import setup_command
+#: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
+SETUP_COMMAND = "corsia local setup"
 
 
-def local_setup_error(message: str, profile_id: str) -> dict:
+def local_setup_error(message: str) -> dict:
     return {
         "ok": False,
         "message": message,
-        "next_action": f"Run `{setup_command(profile_id)}` again after fixing this, or add a subscription/API key.",
+        "next_action": f"Run `{SETUP_COMMAND}` again after fixing this, or add a subscription/API key.",
     }
 
 
@@ -54,6 +55,33 @@ class DownloadProgress:
     def __init__(self, now: float) -> None:
         self.step, self.seconds, self.reported_at = self.STEP, self.SECONDS, now
         self.reported_step: int | None = None
+        self.previous_downloaded: float | None = None
+        self.previous_at = now
+        self.bytes_per_second: float | None = None
+        self.last_advance_at = now
+        self.eta_seconds: int | None = None
+        self.stalled = False
+
+    def observe(self, downloaded: object, total: object, now: float) -> None:
+        """Smooth a measured transfer rate; never manufacture an ETA before progress."""
+        if not (isinstance(downloaded, (int, float)) and isinstance(total, (int, float)) and total > 0):
+            self.eta_seconds = None
+            return
+        current = float(downloaded)
+        if self.previous_downloaded is not None:
+            elapsed = now - self.previous_at
+            advanced = current - self.previous_downloaded
+            if elapsed > 0 and advanced > 0:
+                sample = advanced / elapsed
+                self.bytes_per_second = sample if self.bytes_per_second is None else self.bytes_per_second * 0.75 + sample * 0.25
+                self.last_advance_at = now
+                self.stalled = False
+            elif now - self.last_advance_at >= 30:
+                self.stalled = True
+                self.eta_seconds = None
+        self.previous_downloaded, self.previous_at = current, now
+        if self.bytes_per_second and not self.stalled:
+            self.eta_seconds = max(0, round((float(total) - current) / self.bytes_per_second))
 
     def due(self, downloaded: object, total: object, now: float) -> int | None:
         if not (isinstance(downloaded, (int, float)) and isinstance(total, (int, float)) and total):

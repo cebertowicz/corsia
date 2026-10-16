@@ -1,13 +1,9 @@
-"""Connected-app validation errors: a refusal with its agent remedy, and the lifecycle error mapping."""
+"""Connected-app lifecycle error mapping to HTTP refusals."""
 from __future__ import annotations
 
 from fastapi import HTTPException
 
-
-def refusal(detail: str, status: int = 422) -> HTTPException:
-    """Return a connected-app validation error with an explicit safe agent remedy."""
-    headers = {"X-Corsia-Agent-Remedy": detail} if status == 403 else None
-    return HTTPException(status, detail, headers=headers)
+from api.connected_app_access import refusal
 
 
 def app_error(exc: Exception) -> HTTPException:

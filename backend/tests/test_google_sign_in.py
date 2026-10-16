@@ -196,6 +196,17 @@ async def test_refused_when_google_withholds_a_scope(google, conductor, client_f
     assert key_store.resolve_google() is None
 
 
+async def test_connects_when_the_person_declines_drive_docs_and_sheets(google, conductor, client_file):
+    _, state = await _start(google, conductor, client_file)
+    google.scope = " ".join(oauth.REQUIRED_SCOPES)
+    async with _http() as http:
+        response = await http.get("/api/google/oauth/callback", params={"code": "auth-code", "state": state})
+    assert response.status_code == 200
+    assert key_store.resolve_google() is not None
+    status = json.loads(await GoogleStatusTool().execute(_thread_id=conductor))
+    assert set(status["scopes"]) == set(oauth.REQUIRED_SCOPES)
+
+
 async def test_not_connected_text_and_status_shape(google, conductor):
     with pytest.raises(google_client.GoogleNotConnected) as caught:
         await google_client.get_json("https://www.googleapis.com/calendar/v3/users/me/calendarList")

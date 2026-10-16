@@ -8,7 +8,7 @@ import httpx
 import pytest
 from loguru import logger
 
-from auth_fixtures import OWNER_USER, seed_account
+from auth_fixtures import OTHER_USER, OWNER_USER, seed_account
 from connections.app_lifecycle import create_app
 from infra.accounts import token_digest
 from infra.database import get_db
@@ -17,8 +17,11 @@ import tools.mcp_oauth_auth as mcp_oauth_auth
 import tools.mcp_oauth_flow as mcp_oauth_flow
 import tools.mcp_oauth_protocol as mcp_oauth_protocol
 import tools.mcp_oauth_secrets as mcp_oauth_secrets
+import tools.mcp_oauth_store as mcp_oauth_store
 
 SESSION = "signin-test-session-credential"
+#: Another person's session on the same CORSIA, for the tests where a second session signs in.
+OTHER_SESSION = "signin-test-other-session-credential"
 ALL_REACH = {"mode": "all", "project_ids": [], "outside_projects": False}
 
 
@@ -27,14 +30,20 @@ class Env:
         self.fake, self.app_id, self.connects, self.lost = fake, app_id, connects, lost
         self.user_id = OWNER_USER
         self.session_hash = token_digest(SESSION)
+        self.other_user_id = OTHER_USER
+        self.other_session_hash = token_digest(OTHER_SESSION)
 
     def new_app(self, name: str = "Other") -> str:
         return create_app(name, {"url": MCP_URL}, ALL_REACH, db=get_db())["id"]
 
-    async def start(self, *, app_id: str | None = None, config: dict | None = None, metadata_url: str = "") -> dict:
+    async def start(
+        self, *, app_id: str | None = None, config: dict | None = None, metadata_url: str = "", other: bool = False,
+    ) -> dict:
+        """Press Sign in as this test's person, or as the other person's session when ``other``."""
         return await mcp_oauth_flow.start(
             app_id or self.app_id, "Linear", config or {"url": MCP_URL},
-            user_id=self.user_id, session_hash=self.session_hash, metadata_url=metadata_url,
+            user_id=self.other_user_id if other else self.user_id,
+            session_hash=self.other_session_hash if other else self.session_hash, metadata_url=metadata_url,
         )
 
     def audit(self, app_id: str | None = None) -> list[str]:
@@ -63,10 +72,11 @@ async def env(isolated_db, monkeypatch):
 
     monkeypatch.setattr(mcp_oauth_auth, "_report_lost", report)
     seed_account(OWNER_USER, SESSION, kind="session", db=get_db())
+    seed_account(OTHER_USER, OTHER_SESSION, kind="session", db=get_db())
     app_id = create_app("Linear", {"url": MCP_URL}, ALL_REACH, db=get_db())["id"]
     mcp_oauth_flow._flows.clear()
     mcp_oauth_flow._results.clear()
-    mcp_oauth_auth._locks.clear()
+    mcp_oauth_store._locks.clear()
     yield Env(fake, app_id, connects, lost)
     await mcp_oauth_flow.stop_all()
 

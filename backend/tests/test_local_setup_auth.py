@@ -2,7 +2,7 @@
 
 The fake oMLX (``omlx_admin_fixtures``) mirrors 0.7.0. Setup registers a generated
 key first, gives it to oMLX through ``setup-api-key``, then writes
-``skip_api_key_verification`` once, in the same call as the starter settings.
+``skip_api_key_verification`` once, in the same call as the global settings.
 """
 
 from __future__ import annotations
@@ -16,13 +16,14 @@ import httpx
 import pytest
 
 from api.network_servers import _public_server_view
-from llm import local_setup, local_setup_auth, local_setup_operation
+from llm import local_setup, local_setup_auth, local_setup_operation, local_setup_prepare
+from llm.local_model import OMLX_PIN, LocalModel
 from llm.providers import omlx_endpoints as ep
 from omlx_admin_fixtures import KEY, OTHER_KEY, omlx  # noqa: F401
 
 REAL_VERSION_GUARD = local_setup._omlx_supports_loopback_auth
 REAL_OMLX_VERSION = local_setup_auth.omlx_version
-STARTER_WRITE = {
+GLOBAL_WRITE = {
     "max_concurrent_requests": 1, "prefill_priority": "context", "skip_api_key_verification": True,
 }
 SAFE_LEAKS = ("session-", "setup-cookie", "omlx_admin_session=")
@@ -60,19 +61,21 @@ def wiring(monkeypatch, omlx):  # noqa: F811
     async def healthy(port=8000):
         return None
 
-    async def download(_server_id, _progress, _profile=None):
+    async def download(_server_id, _progress, _model=None):
         return None
 
-    async def model_settings(_server_id, _window, _profile=None):
+    async def model_settings(_server_id, _model):
         return None
 
     monkeypatch.setattr(local_setup, "_flight", local_setup._Flight())
     monkeypatch.setattr(local_setup, "_emit", lambda action, **_p: wired.emitted.append(action))
-    monkeypatch.setattr(local_setup, "profile_eligibility", lambda *_args: local_setup.Eligibility(40960, True))
+    monkeypatch.setattr(local_setup, "local_memory_ok", lambda *_args: True)
+    monkeypatch.setattr(local_setup_prepare, "picked_model",
+                        lambda: LocalModel("Jundot/Qwen3.8-27B-oQ4e-mtp", 16_971_681_558, 40960))
     monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: False)
     monkeypatch.setattr(local_setup, "_ensure_omlx", lambda _progress, **_kwargs: None)
     monkeypatch.setattr(local_setup, "_omlx_supports_loopback_auth", lambda: True)
-    monkeypatch.setattr(local_setup, "omlx_version", lambda: "0.7.0")
+    monkeypatch.setattr(local_setup, "omlx_version", lambda: OMLX_PIN)
     monkeypatch.setattr(local_setup_auth, "omlx_version", lambda: "0.7.0")
     monkeypatch.setattr(local_setup, "_run", lambda _command: None)
     monkeypatch.setattr(local_setup, "_wait_for_health", healthy)
@@ -114,7 +117,7 @@ def test_a_fresh_install_stores_the_key_first_then_sets_it_and_the_skip_flag_onc
     assert omlx.key == generated == wiring.registry["key"]
     assert omlx.paths.count("/admin/api/setup-api-key") == 1
     assert omlx.paths.index("/admin/api/setup-api-key") < omlx.paths.index("/admin/api/login")
-    assert omlx.writes("/global-settings") == [STARTER_WRITE]  # one write: starter settings and the flag
+    assert omlx.writes("/global-settings") == [GLOBAL_WRITE]  # one write: global settings and the flag
     assert omlx.skip is True
     assert wiring.emitted == ["started", "completed"]
     _no_secret(caplog.text + json.dumps(result, default=str), generated)
@@ -130,7 +133,7 @@ def test_a_retry_reuses_the_stored_key_and_overwrites_nothing(wiring, omlx):  # 
     assert wiring.registered[1][0] == first_key  # the stored key, not a new one
     assert omlx.key == first_key
     assert omlx.paths.count("/admin/api/setup-api-key") == 2  # the retry asked and got 400
-    assert omlx.writes("/global-settings") == [STARTER_WRITE, STARTER_WRITE]
+    assert omlx.writes("/global-settings") == [GLOBAL_WRITE, GLOBAL_WRITE]
 
 
 def test_a_failed_skip_write_is_not_success_and_the_retry_completes(wiring, omlx):  # noqa: F811
@@ -302,7 +305,8 @@ def test_an_unowned_incompatible_omlx_is_never_configured(wiring, omlx, monkeypa
     assert wiring.registered == [] and omlx.requests == [] and omlx.writes("/global-settings") == []
 
 
-@pytest.mark.parametrize(("initial_version", "broken"), [("0.6.2", False), (None, True)])
+# 0.7.0 keeps auth loopback-only but has no model recommender, so it is updated too.
+@pytest.mark.parametrize(("initial_version", "broken"), [("0.6.2", False), (None, True), ("0.7.0", False)])
 def test_an_incompatible_omlx_owned_by_setup_is_repaired_then_setup_continues(
         wiring, monkeypatch, initial_version, broken):
     state = {"version": initial_version}
@@ -310,12 +314,12 @@ def test_an_incompatible_omlx_owned_by_setup_is_repaired_then_setup_continues(
 
     def repair(_progress, **kwargs):
         repairs.append(kwargs)
-        state["version"] = "0.7.0"
+        state["version"] = OMLX_PIN
 
     monkeypatch.setattr(local_setup, "existing_install_is_foreign", lambda: False)
     monkeypatch.setattr(local_setup, "omlx_version", lambda: state["version"])
     monkeypatch.setattr(local_setup, "_omlx_supports_loopback_auth",
-                        lambda: state["version"] == "0.7.0")
+                        lambda: state["version"] in {"0.7.0", OMLX_PIN})
     monkeypatch.setattr(local_setup, "_ensure_omlx", repair)
 
     result = _run_setup()

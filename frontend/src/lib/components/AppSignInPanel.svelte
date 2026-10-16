@@ -120,7 +120,7 @@
 				{#if blocked && link}<Button onclick={copyLink}>{copied ? 'Copied' : 'Copy sign-in link'}</Button>{/if}
 				<Button loading={busy} onclick={cancel}>Cancel</Button>
 			{:else if failed}
-				{#if !NO_RETRY.has(view.failure_class ?? '')}<Button loading={busy} onclick={signIn}>Try again</Button>{/if}
+				<Button loading={busy} onclick={signIn}>{NO_RETRY.has(view.failure_class ?? '') ? 'Sign in' : 'Try again'}</Button>
 			{:else if view.signed_in}
 				{#if confirmOut}
 					<Button variant="danger" loading={busy} onclick={signOut}>Sign out</Button>

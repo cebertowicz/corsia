@@ -15,6 +15,7 @@
 	import CostPanel from './CostPanel.svelte';
 	import ExternalProviderSettings from './ExternalProviderSettings.svelte';
 	import OmlxServerInfoPanel from './OmlxServerInfoPanel.svelte';
+	import OwnOmlxManagement from './OwnOmlxManagement.svelte';
 	import ProviderEndpointsTab from './ProviderEndpointsTab.svelte';
 	import ProviderSettingsHeader from './ProviderSettingsHeader.svelte';
 	import ProviderStatusCard from './ProviderStatusCard.svelte';
@@ -255,6 +256,9 @@
 						<Button variant="primary" disabled={busy} onclick={() => handleDaemonAction('start')}>Start daemon</Button>
 					{/if}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
+					{#if provider.name === 'omlx'}
+						<OwnOmlxManagement onResult={(message, error) => { clearMessages(); if (error) actionError = message; else actionMessage = message; }} />
+					{/if}
 				{:else}
 					<Button disabled={busy} onclick={handleTestLocal}>{busy ? 'Testing…' : 'Test connection'}</Button>
 				{/if}

@@ -5,9 +5,10 @@ import type { ConnectedApp } from '$lib/api/connectedApps';
 export const SIGN_IN_LEDE = "Signing in lets the agents that can use an app act as you in it. You sign in on the app's own page in your browser, so CORSIA never sees your password.";
 export const NOT_ON_THIS_MAC = 'You can only sign in on the Mac CORSIA runs on. Open CORSIA there and press Sign in.';
 
-/** Whether the row is waiting on, or in the middle of, a sign-in the person has to act on. */
+/** Whether the row is waiting on, or in the middle of, a sign-in the person has to act on. A failed attempt stops needing them once the app is signed in. */
 export function needsSignInAttention(app: ConnectedApp): boolean {
-	return app.state === 'needs_sign_in' || app.sign_in?.status === 'pending' || app.sign_in?.status === 'failed';
+	const view = app.sign_in;
+	return app.state === 'needs_sign_in' || view?.status === 'pending' || (view?.status === 'failed' && !view.signed_in);
 }
 
 /** The lede line shows while any row still needs a first sign-in. */
@@ -29,6 +30,7 @@ export function signInStateLine(app: ConnectedApp, signedOutHere: boolean): stri
 	return null;
 }
 
+/** Failures that another try won't fix; the row offers a fresh Sign in rather than Try again. */
 export const NO_RETRY = new Set(['permissions']);
 
 /** The sentence in the open row for a failed sign-in. `words` is the app's own text, shown only for an unknown class. */
