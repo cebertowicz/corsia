@@ -52,7 +52,7 @@ Released 2026-10-16.
 ### Connected Apps and Google
 
 - MCP servers imported from your other AI tools arrive as connected apps waiting for your approval. Settings › Connected apps lets you approve, decline, reconnect or remove each one and choose which projects it works in.
-- Apps running on your Mac cannot read CORSIA's private state or stored keys.
+- Connected apps that CORSIA runs on your Mac are sandboxed away from CORSIA's private state and stored keys.
 - Google sign-in is held by CORSIA itself and gives agents email and calendar tools. An agent sends an email or invite only from the exact draft open in its document, and only after your latest message.
 - The context sheet shows what each connected app costs in context.
 
