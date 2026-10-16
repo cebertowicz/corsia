@@ -42,14 +42,15 @@ def migrate_120_to_121(conn: sqlite3.Connection) -> None:
         if not isinstance(name, str) or not name.strip() or not isinstance(config, dict):
             raise ValueError("configured MCP servers must have a name and object config")
         app_id = str(uuid.uuid4())
+        _rekey_references(conn, old_name=name, app_id=app_id, config=config)
+        normalized = _canonical_key_refs(config)
         conn.execute(
             "INSERT INTO connected_apps("
             "id,name,config_json,state,state_since,reach_mode,outside_projects,created_at,updated_at"
             ") VALUES (?,?,?,?,?,?,?,?,?)",
-            (app_id, name, json.dumps(config, separators=(",", ":"), sort_keys=True),
+            (app_id, name, json.dumps(normalized, separators=(",", ":"), sort_keys=True),
              "disconnected", now, "all", 0, now, now),
         )
-        _rekey_references(conn, old_name=name, app_id=app_id, config=config)
 
     updated = dict(tools)
     updated.pop("mcpServers")
@@ -57,6 +58,22 @@ def migrate_120_to_121(conn: sqlite3.Connection) -> None:
         "UPDATE settings SET value=? WHERE key='tools'",
         (json.dumps(updated, separators=(",", ":"), sort_keys=True),),
     )
+
+
+def _canonical_key_refs(config: dict) -> dict:
+    """Move legacy secret lists into the one durable connected-app key shape."""
+    refs: list[dict[str, str]] = []
+    for field, kind in (("secret_env", "env"), ("secret_headers", "header")):
+        names = config.get(field, [])
+        if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names):
+            raise ValueError("configured MCP credential references are invalid")
+        refs.extend({"kind": kind, "name": name} for name in names)
+    if len({(ref["kind"], ref["name"]) for ref in refs}) != len(refs):
+        raise ValueError("configured MCP credential references are invalid")
+    return {
+        **{key: value for key, value in config.items() if key not in {"secret_env", "secret_headers"}},
+        "key_refs": refs,
+    }
 
 
 def _rekey_references(

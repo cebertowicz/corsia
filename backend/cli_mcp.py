@@ -2,13 +2,9 @@
 
 import argparse
 import json
-from pathlib import Path
 import sys
 from typing import Any
 from urllib.parse import quote
-
-from tools import mcp_secrets
-from tools.mcp_config import MCPConfigError, allowed_names, http_options, timeout_seconds
 
 
 SERVERS_ROUTE = "/api/mcp/servers"
@@ -101,43 +97,14 @@ def approve_mcp_server(args: argparse.Namespace) -> int:
     return _call_server_api("POST", _server_path(args.server_id, "/approve"))
 
 
-def configure_mcp(args) -> int:
-    """Validate and replace MCP server configuration.
-
-    Credential-named env and header values go to the key store; the saved
-    config keeps references. Bearer values are never persisted.
-    """
-    from infra.database import write_transaction
-    from infra.settings import get_setting, set_setting
-
-    try:
-        servers = json.loads(Path(args.file).expanduser().read_text())
-        if not isinstance(servers, dict):
-            raise MCPConfigError("configuration must be an object keyed by server name")
-        for name, config in servers.items():
-            if not isinstance(config, dict):
-                raise MCPConfigError("each server configuration must be an object")
-            config, _ = mcp_secrets.split_secrets(name, config)
-            allowed_names(config)
-            timeout_seconds(config, "connect_timeout", 10)
-            timeout_seconds(config, "tool_timeout", 30)
-            if config.get("url"):
-                http_options(config)
-            elif not config.get("command") or config.get("bearer_file"):
-                raise MCPConfigError("configure an HTTP URL or a stdio command without bearer_file")
-        with write_transaction(None, scope="configure_mcp") as db:
-            tools = get_setting("tools", db=db) or {}
-            servers = mcp_secrets.replace_servers(tools.get("mcpServers") or {}, servers, db=db)
-            tools["mcpServers"] = servers
-            set_setting("tools", tools, db=db)
-    except MCPConfigError as error:
-        print(f"MCP configuration refused: {error}", file=sys.stderr)
-        return 2
-    except (OSError, ValueError, TypeError):
-        print("MCP configuration refused: cannot read a valid JSON configuration file", file=sys.stderr)
-        return 2
-    print(f"Configured {len(servers)} MCP servers. Restart this backend to discover their tools.")
-    return 0
+def configure_mcp(_args) -> int:
+    """Refuse the retired settings-backed writer until it uses Connected apps."""
+    print(
+        "MCP configuration refused: Bringing apps over from other apps isn't available in this build yet; "
+        "add the app in Connected apps.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def build_parser(subparsers) -> None:
@@ -177,6 +144,6 @@ def build_parser(subparsers) -> None:
     approve.add_argument("server_id")
     approve.set_defaults(func=approve_mcp_server)
 
-    configure = commands.add_parser("configure", help="Replace tools.mcpServers from a JSON file")
+    configure = commands.add_parser("configure", help="Retired; add apps through Connected apps")
     configure.add_argument("file")
     configure.set_defaults(func=configure_mcp)

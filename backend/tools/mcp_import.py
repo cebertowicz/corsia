@@ -1,8 +1,8 @@
 """Bounded, server-side MCP configuration discovery and import.
 
 Only documented user configuration files are read. Detection returns server names
-and kinds; raw configuration stays inside this module until a selected server is
-copied into CORSIA's canonical tools.mcpServers setting.
+and kinds; raw configuration stays inside this module. Import persistence is
+retired until it can create approved Connected Apps records.
 """
 from __future__ import annotations
 
@@ -183,31 +183,8 @@ def prepare_import(selected: list[dict[str, str]], home: Path | None = None) -> 
     return additions, statuses
 
 
-def save_import(additions: dict[str, dict[str, Any]]) -> dict[str, str]:
-    """Merge selected configs and classify existing names in one transaction.
-
-    A new server's credential values go to the key store and its config keeps
-    references. A name already set up is never overwritten, and its stored
-    credentials are left as they are.
-    """
-    from infra.database import write_transaction
-    from infra.settings import get_setting, set_setting
-
-    outcomes: dict[str, str] = {}
-    with write_transaction(None, scope="import_mcp_servers") as db:
-        tools = get_setting("tools", db=db) or {}
-        servers = tools.get("mcpServers", {})
-        servers = dict(servers) if isinstance(servers, dict) else {}
-        for name, config in additions.items():
-            clean, lifted = mcp_secrets.split_secrets(name, config)
-            if name not in servers:
-                mcp_secrets.store_secrets(lifted, db=db)
-                servers[name] = clean
-                outcomes[name] = "saved"
-            elif servers[name] == clean and mcp_secrets.stored_matches(lifted, db=db):
-                outcomes[name] = "existing_equal"
-            else:
-                outcomes[name] = "conflict"
-        tools["mcpServers"] = servers
-        set_setting("tools", tools, db=db)
-    return outcomes
+def save_import(_additions: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Refuse the retired settings-backed import writer until it creates connected apps."""
+    raise MCPConfigError(
+        "Bringing apps over from other apps isn't available in this build yet; add the app in Connected apps."
+    )

@@ -116,6 +116,17 @@ async def test_mcp_key_write_reconnects_only_its_stable_app(client, monkeypatch)
     assert response.status_code == 200, response.text
     assert calls == [("reconnect", app["id"])]
 
+    def persisted_config_text() -> str:
+        db = get_db()
+        try:
+            return "".join(
+                row[0] for row in db.execute("SELECT config_json FROM connected_apps").fetchall()
+            ) + "".join(row[0] for row in db.execute("SELECT value FROM settings").fetchall())
+        finally:
+            db.close()
+
+    assert VALUE not in await run_in_db(persisted_config_text)
+
 
 @pytest.mark.asyncio
 async def test_set_leaves_the_settings_table_alone_and_a_refused_set_changes_nothing(client):

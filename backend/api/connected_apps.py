@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from api.connected_app_rows import _agent_next_step, app_reaches_project, server_row
 from infra.auth import is_person_session, require_user
 from infra.db_async import run_in_db
 
@@ -77,7 +78,12 @@ def _agent_thread(user: dict, db) -> tuple[str, dict]:
     return thread_id, scope
 
 
-def _agent_reach(scope: dict) -> dict[str, object]:
+def _agent_reach(thread_id: str, scope: dict, *, db) -> dict[str, object]:
+    """Limit ordinary agents to their place; CORSIA proposes workspace apps for all projects."""
+    from infra.corsia_agent import is_corsia_agent
+
+    if is_corsia_agent(thread_id, db=db):
+        return {"mode": "all", "project_ids": [], "outside_projects": False}
     project_id = scope["project_id"]
     return {
         "mode": "selected",
@@ -126,55 +132,7 @@ def _local_app_notice(config: object) -> str | None:
     return LOCAL_APP_NOTICE if isinstance(config, dict) and isinstance(config.get("command"), str) else None
 
 
-def _transport(config: object) -> str | None:
-    if not isinstance(config, dict):
-        return None
-    if isinstance(config.get("command"), str):
-        return "stdio"
-    if isinstance(config.get("url"), str):
-        return "http"
-    return None
-
-
-def _server_row(app: dict[str, object], *, on_here: bool, full: bool) -> dict[str, object]:
-    if app["state"] in {"awaiting_approval", "expired"}:
-        live = {"state": app["state"], "state_since": app["state_since"], "tool_count": 0, "failure_class": None}
-    else:
-        from tools.mcp_runtime import connected_app_state
-
-        live = connected_app_state(app["id"])
-    if not full:
-        return {"name": app["name"], "state": live["state"], "on_here": False}
-    config = app["config"]
-    assert isinstance(config, dict)
-    return {
-        "id": app["id"],
-        "name": app["name"],
-        "transport": _transport(config),
-        "state": live["state"],
-        "state_since": live["state_since"] or app["state_since"],
-        "tool_count": live["tool_count"],
-        "failure_class": live["failure_class"],
-        "key_refs": config.get("key_refs", []),
-        "config": config,
-        "pending_config": app["pending_config"],
-        "pending_actor_thread_id": app["pending_actor_thread_id"],
-        "pending_actor_name": app["pending_actor_name"],
-        "created_by_thread_id": app["created_by_thread_id"],
-        "created_at": app["created_at"],
-        "revision": app["revision"],
-        "reach": app["reach"],
-        "on_here": on_here,
-    }
-
-
-def _app_reaches_project(app: dict[str, object], project_id: str | None) -> bool:
-    reach = app["reach"]
-    assert isinstance(reach, dict)
-    if reach["mode"] == "all":
-        return True
-    return bool(reach["outside_projects"]) if project_id is None else project_id in reach["project_ids"]
-
+# List projections are kept in connected_app_rows to preserve this route module's size budget.
 
 @connected_apps_router.get("/servers")
 async def list_servers(
@@ -198,20 +156,21 @@ async def list_servers(
         from connections.app_reach import app_reaches_thread, list_apps
         from connections.account_policy import project_exists
 
-        apps = list_apps(db=_db())
+        db = _db()
+        apps = list_apps(db=db)
         if human:
             if project is not None:
-                if not project_exists(project, db=_db()):
+                if not project_exists(project, db=db):
                     raise _refusal("project not found", 404)
-                return [_server_row(app, on_here=_app_reaches_project(app, project), full=True) for app in apps]
+                return [server_row(app, on_here=app_reaches_project(app, project), full=True, db=db) for app in apps]
             if place == "workspace":
-                return [_server_row(app, on_here=True, full=True) for app in apps if app["reach"]["mode"] == "all"]
-            return [_server_row(app, on_here=True, full=True) for app in apps]
-        thread_id, _scope = _agent_thread(user, _db())
+                return [server_row(app, on_here=True, full=True, db=db) for app in apps if app["reach"]["mode"] == "all"]
+            return [server_row(app, on_here=True, full=True, db=db) for app in apps]
+        thread_id, _scope = _agent_thread(user, db)
         return [
-            _server_row(app, on_here=reachable, full=reachable)
+            server_row(app, on_here=reachable, full=reachable, db=db)
             for app in apps
-            for reachable in (app_reaches_thread(app["id"], thread_id, db=_db()),)
+            for reachable in (app_reaches_thread(app["id"], thread_id, db=db),)
         ]
 
     return {"servers": await run_in_db(read)}
@@ -243,7 +202,7 @@ async def create_server(body: dict[str, Any], user: dict = Depends(require_user)
             from connections.app_lifecycle import create_pending_app
             thread_id, scope = _agent_thread(user, _db())
             return create_pending_app(
-                name, config, _agent_reach(scope), actor_thread_id=thread_id,
+                name, config, _agent_reach(thread_id, scope, db=_db()), actor_thread_id=thread_id,
                 audit_actor=_audit_actor(user), db=_db(),
             )
     try:

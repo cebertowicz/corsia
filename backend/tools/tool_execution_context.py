@@ -9,8 +9,12 @@ from tools.tool_surface import connected_app_reach_refusal, mcp_app_id, mcp_tool
 
 async def mcp_reach_refusal(tool: Tool, thread_context: dict[str, Any]) -> str | None:
     """Refuse an unreachable connected app before any tool/session access."""
-    if mcp_app_id(tool) is None:
+    from tools.mcp import MCPToolWrapper
+
+    if not isinstance(tool, MCPToolWrapper):
         return None
+    if mcp_app_id(tool) is None:
+        return connected_app_reach_refusal()
     from infra.database import get_db
     from infra.db_async import run_in_db
 

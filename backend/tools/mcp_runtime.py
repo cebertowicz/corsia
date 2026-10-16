@@ -125,25 +125,37 @@ async def apply_connected_app_runtime(action: str, app_id: str) -> dict[str, obj
             _reconnect_at.pop(app_id, None)
             return {"state": "disconnected", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
         if _stopped:
-            return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "runtime_stopped"}
+            return {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "cannot_start"}
         if action == "reconnect":
             now = time.monotonic()
             if now - _reconnect_at.get(app_id, float("-inf")) < 10:
-                raise MCPReconnectRateLimitError("This app was just reconnected; try again in a few seconds.")
+                raise MCPReconnectRateLimitError("This app was just reconnected; try again in 10 seconds.")
             _reconnect_at[app_id] = now
             await _remove_connected_app(app_id)
         elif app_id in _app_stacks:
             return _app_states[app_id]
-        from connections.app_reach import load_runtime_app_config
+        from connections.app_reach import load_runtime_app_config, missing_app_key_refs
 
         name, config = await run_in_db(load_runtime_app_config, app_id)
+        connecting = {"state": "connecting", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": None}
+        await _publish_app_state(app_id, connecting)
+        if await run_in_db(missing_app_key_refs, app_id):
+            result = {
+                "state": "needs_token", "state_since": utc_now_iso(), "tool_count": 0,
+                "failure_class": None,
+            }
+            await _publish_app_state(app_id, result)
+            return result
         _app_servers[app_id] = name
         stack = AsyncExitStack()
         errors = await connect_mcp_servers({name: config}, _registry, stack)
         if error := errors.get(name):
             await stack.aclose()
             _app_servers.pop(app_id, None)
-            result = {"state": "failed", "state_since": utc_now_iso(), "tool_count": 0, "failure_class": "connection_failed"}
+            result = {
+                "state": "failed", "state_since": utc_now_iso(), "tool_count": 0,
+                "failure_class": getattr(error, "failure_class", "protocol_error"),
+            }
         else:
             names = {
                 name for name in _registry.tool_names

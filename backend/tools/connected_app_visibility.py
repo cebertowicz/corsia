@@ -16,7 +16,7 @@ def mcp_tool_reaches_thread(tool: Tool, thread_id: str, *, db: Any) -> bool:
     """Apply the connected-app reach owner to one app-bound MCP tool."""
     app_id = mcp_app_id(tool)
     if app_id is None:
-        return True
+        return False
     from connections.app_reach import app_reaches_thread
 
     return app_reaches_thread(app_id, thread_id, db=db)
@@ -33,7 +33,7 @@ def connected_app_reach_refusal() -> str:
 def mcp_tool_visible_here(tool: Tool) -> bool:
     """Check an app-bound tool against this server's current thread context."""
     if mcp_app_id(tool) is None:
-        return True
+        return False
     from infra import state
     from infra.database import get_db
 

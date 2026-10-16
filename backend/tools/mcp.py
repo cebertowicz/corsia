@@ -23,6 +23,68 @@ from tools.mcp_local_transport import (
 from tools.registry import ToolRegistry, _is_reserved_execution_param
 
 
+class _StoredHeadersAuth(httpx.Auth):
+    """Send managed header keys while keeping their values out of transport logs."""
+
+    def __init__(self, headers: dict[str, str]) -> None:
+        self._headers = headers
+
+    def auth_flow(self, request):
+        request.headers.update(self._headers)
+        yield request
+
+    def redact(self, value):
+        if isinstance(value, str):
+            for header_value in self._headers.values():
+                value = value.replace(header_value, "[REDACTED]")
+            return value
+        if isinstance(value, dict):
+            return {self.redact(key): self.redact(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self.redact(item) for item in value]
+        return value
+
+
+class MCPConnectionError(MCPConfigError):
+    """A safe connection error retaining the fixed runtime failure class."""
+
+    def __init__(self, message: str, failure_class: str) -> None:
+        super().__init__(message)
+        self.failure_class = failure_class
+
+
+class MCPConnectionFailure(str):
+    """Legacy-compatible error text with structured safe classification."""
+
+    failure_class: str
+
+    def __new__(cls, message: str, failure_class: str) -> "MCPConnectionFailure":
+        instance = super().__new__(cls, message)
+        instance.failure_class = failure_class
+        return instance
+
+
+def mcp_failure_class(error: BaseException, config: dict) -> str:
+    """Classify one launch failure before its safe text loses the machine cause."""
+    if isinstance(error, BaseExceptionGroup):
+        return mcp_failure_class(error.exceptions[0], config)
+    if isinstance(error, MCPConnectionError):
+        return error.failure_class
+    if isinstance(error, (TimeoutError, httpx.TimeoutException)):
+        return "timed_out"
+    if isinstance(error, OSError) and isinstance(config.get("command"), str):
+        return "cannot_start"
+    if isinstance(error, httpx.HTTPStatusError):
+        if error.response.status_code in {401, 403} and (
+            config.get("secret_env") or config.get("secret_headers")
+        ):
+            return "token_rejected"
+        return "protocol_error"
+    if isinstance(error, MCPConfigError) and "public tool name collision" in str(error):
+        return "name_collision"
+    return "protocol_error"
+
+
 class MCPToolWrapper(Tool):
     """Wrap one upstream tool without leaking backend identity or credentials."""
 
@@ -133,10 +195,7 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
     from tools.mcp_secrets import resolve
 
     auth = None
-    if config.get("secret_headers"):
-        # A legacy credential header stays refused at launch, before any value is read.
-        raise MCPConfigError("literal credential headers are refused; use bearer_file for bearer authentication")
-    secret_env, _ = await run_in_db(resolve, config.get("connected_app_id", name), config)
+    secret_env, secret_headers = await run_in_db(resolve, config.get("connected_app_id", name), config)
     if config.get("command"):
         if config.get("bearer_file"):
             raise MCPConfigError("bearer_file is supported only for HTTP MCP servers")
@@ -155,6 +214,11 @@ async def _open_session(name: str, config: dict, stack: AsyncExitStack):
         from mcp.client.streamable_http import streamable_http_client
 
         options, auth = http_options(config)
+        if secret_headers:
+            if auth is not None:
+                raise MCPConfigError("stored header keys cannot be combined with bearer_file")
+            auth = _StoredHeadersAuth(secret_headers)
+            options["auth"] = auth
         protect_transport_logs(auth)
         client = await stack.enter_async_context(httpx.AsyncClient(**options))
         read, write, _ = await stack.enter_async_context(
@@ -213,7 +277,9 @@ class _ServerConnection:
         except Exception as error:
             self.error = safe_error(error)
             if not self.ready.done():
-                self.ready.set_exception(MCPConfigError(safe_error(error)))
+                self.ready.set_exception(
+                    MCPConnectionError(self.error, mcp_failure_class(error, self.config))
+                )
             else:
                 logger.error("MCP server '{}': {}", self.name, safe_error(error))
         finally:
@@ -244,7 +310,7 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
     server cannot cancel the caller or another server. Publish each server's
     complete allowlisted set atomically, without replacing built-ins.
     """
-    errors = {}
+    errors: dict[str, str] = {}
     registry.mcp_server_configs = {**getattr(registry, "mcp_server_configs", {}), **mcp_servers}
     from tools.catalog import TOOL_CATALOG
 
@@ -262,9 +328,10 @@ async def connect_mcp_servers(mcp_servers: dict, registry: ToolRegistry,
             stack.push_async_callback(connection.close)
             logger.info("MCP server '{}': connected, {} tools registered", name, len(wrappers))
         except Exception as error:
-            errors[name] = safe_error(error)
+            failure = MCPConnectionFailure(safe_error(error), mcp_failure_class(error, config))
+            errors[name] = failure
             registry.mcp_server_states = {
-                **getattr(registry, "mcp_server_states", {}), name: errors[name],
+                **getattr(registry, "mcp_server_states", {}), name: failure,
             }
             logger.error("MCP server '{}': {}", name, errors[name])
             if connection:

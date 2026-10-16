@@ -9,23 +9,39 @@ from __future__ import annotations
 
 import pytest
 
-from tests.test_tool_surface_disclosure import _CaptureTool, _registry
+from tests.test_tool_surface_disclosure import (
+    _CaptureTool,
+    _execute_as,
+    _mcp_wrapper,
+    _registry,
+    _seed_thread,
+    reachable_mcp_tools,
+)
 
 
 class _Tool(_CaptureTool):
     user_configured = True
 
-    def __init__(self, server: str, raw: str, description: str = "", *, config=None, instructions=None):
+    def __init__(
+        self, server: str, raw: str, description: str = "", *, config=None,
+        instructions=None, app_id: str | None = "reachable-app",
+    ):
         super().__init__(f"mcp_{server}_{raw}")
         self.mcp_server_name = server
         self.mcp_tool_name = raw
         self.mcp_server_config = config or {}
         self.mcp_instructions = instructions
+        self.mcp_app_id = app_id
         self._description = description
 
     @property
     def description(self) -> str:
         return self._description
+
+
+@pytest.fixture(autouse=True)
+def _fixture_mcp_tools_are_reachable(reachable_mcp_tools):
+    """Use the disclosure fixture's reachable bound-app model for index tests."""
 
 
 def _line(tmp_path, server: str, raws: list[str], description: str = "", **kwargs) -> str:
@@ -105,6 +121,23 @@ def test_a_server_name_loses_its_control_characters_in_the_line(tmp_path):
 
     assert "- wiki: 1 tool; " in index
     assert "\x00" not in index
+
+
+@pytest.mark.asyncio
+async def test_unbound_mcp_tool_is_absent_from_the_index_and_refused(isolated_db, tmp_path):
+    _seed_thread(isolated_db, "unbound-purpose-thread")
+    unbound = _mcp_wrapper()
+    registry = _registry(tmp_path)
+    registry.register(unbound)
+
+    index = registry.get("tools_load").description
+    refused = await _execute_as("unbound-purpose-thread", registry, "tool_call", {
+        "name": unbound.name, "arguments": {},
+    })
+
+    assert unbound.name not in index
+    assert "not available to this project" in refused
+    unbound._session.call_tool.assert_not_awaited()
 
 
 @pytest.mark.asyncio

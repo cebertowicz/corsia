@@ -135,6 +135,46 @@ def key_entry_names(app_id: str, config: object) -> set[str]:
     return entries
 
 
+def key_ref_descriptors(app_id: str, config: object, *, db: sqlite3.Connection) -> list[dict[str, object]]:
+    """Return declared app keys with set state, never their values or value references."""
+    if not isinstance(config, dict) or not isinstance(config.get("key_refs"), list):
+        raise AppReachError("invalid app key references")
+    from tools.mcp_secrets import entry_name
+
+    refs = config["key_refs"]
+    entries = key_entry_names(app_id, config)
+    if not refs:
+        return []
+    marks = ",".join("?" for _ in entries)
+    set_entries = {
+        row["name"] for row in db.execute(
+            f"SELECT name FROM key_store_entries WHERE name IN ({marks}) AND value_ref IS NOT NULL",
+            tuple(entries),
+        )
+    }
+    result: list[dict[str, object]] = []
+    for ref in refs:
+        if not isinstance(ref, dict) or set(ref) != {"kind", "name"}:
+            raise AppReachError("invalid app key references")
+        field = "secret_env" if ref["kind"] == "env" else "secret_headers"
+        result.append({
+            "kind": ref["kind"],
+            "name": ref["name"],
+            "set": entry_name(app_id, field, ref["name"]) in set_entries,
+        })
+    return result
+
+
+def missing_app_key_refs(app_id: str, *, db: sqlite3.Connection) -> list[str]:
+    """Return unset declared key names without resolving their values."""
+    app = get_app(app_id, db=db)
+    return [
+        str(ref["name"])
+        for ref in key_ref_descriptors(app_id, app["config"], db=db)
+        if not ref["set"]
+    ]
+
+
 def _requesting_agent_name(thread_id: str | None, *, db: sqlite3.Connection) -> str | None:
     """Resolve an approval-card name without making a removed thread authoritative."""
     if not isinstance(thread_id, str) or not thread_id:
@@ -203,17 +243,18 @@ def runtime_app_config(app_id: str, *, db: sqlite3.Connection) -> tuple[str, dic
     if not isinstance(config, dict):
         raise AppReachError("invalid app config")
     runtime_config = dict(config)
-    refs = runtime_config.pop("key_refs", [])
-    if not isinstance(refs, list):
-        raise AppReachError("invalid app key references")
-    runtime_config["secret_env"] = [
-        ref["name"] for ref in refs if isinstance(ref, dict) and ref.get("kind") == "env"
-    ]
-    runtime_config["secret_headers"] = [
-        ref["name"] for ref in refs if isinstance(ref, dict) and ref.get("kind") == "header"
-    ]
-    if len(runtime_config["secret_env"]) + len(runtime_config["secret_headers"]) != len(refs):
-        raise AppReachError("invalid app key references")
+    if "key_refs" in runtime_config:
+        refs = runtime_config.pop("key_refs")
+        if not isinstance(refs, list):
+            raise AppReachError("invalid app key references")
+        runtime_config["secret_env"] = [
+            ref["name"] for ref in refs if isinstance(ref, dict) and ref.get("kind") == "env"
+        ]
+        runtime_config["secret_headers"] = [
+            ref["name"] for ref in refs if isinstance(ref, dict) and ref.get("kind") == "header"
+        ]
+        if len(runtime_config["secret_env"]) + len(runtime_config["secret_headers"]) != len(refs):
+            raise AppReachError("invalid app key references")
     runtime_config["connected_app_id"] = app_id
     name = app["name"]
     if not isinstance(name, str):

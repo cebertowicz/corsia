@@ -216,10 +216,16 @@ def test_migration_moves_name_config_and_key_reference_to_app_id() -> None:
 
     app = db.execute("SELECT id,name,config_json,reach_mode,outside_projects FROM connected_apps").fetchone()
     assert app["name"] == "GitHub"
-    assert json.loads(app["config_json"]) == config
+    assert json.loads(app["config_json"]) == {
+        "command": "example", "key_refs": [{"kind": "env", "name": "TOKEN"}],
+    }
     assert (app["reach_mode"], app["outside_projects"]) == ("all", 0)
     assert db.execute("SELECT project_id FROM connected_app_reach").fetchall() == []
     assert json.loads(db.execute("SELECT value FROM settings WHERE key='tools'").fetchone()[0]) == {"other": True}
     assert db.execute("SELECT 1 FROM key_store_entries WHERE name=?", (old_entry,)).fetchone() is None
     new_entry = entry_name(app["id"], "secret_env", "TOKEN")
     assert db.execute("SELECT value_ref FROM key_store_entries WHERE name=?", (new_entry,)).fetchone()[0] == "opaque-ref"
+    from connections.app_reach import runtime_app_config
+
+    name, runtime = runtime_app_config(app["id"], db=db)
+    assert (name, runtime["secret_env"], runtime["secret_headers"]) == ("GitHub", ["TOKEN"], [])

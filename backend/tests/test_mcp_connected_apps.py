@@ -24,7 +24,7 @@ def connected_apps_client(monkeypatch):
             "INSERT INTO projects(id,name,created_at,updated_at) VALUES (?,?,?,?)",
             (project_id, project_id, "t", "t"),
         )
-    for thread_id, project_id in (("thread-a", "project-a"), ("thread-b", "project-b")):
+    for thread_id, project_id in (("thread-a", "project-a"), ("thread-b", "project-b"), ("workspace", None)):
         db.execute(
             "INSERT INTO threads(id,user_id,project_id,created_at,updated_at) VALUES (?,?,?,?,?)",
             (thread_id, "user", project_id, "t", "t"),
@@ -67,14 +67,58 @@ def test_agent_list_hides_unreached_configuration(connected_apps_client) -> None
     by_name = {row["name"]: row for row in rows}
     assert by_name["A"]["id"] == reached["id"]
     assert by_name["A"]["config"]["command"] == "a"
+    assert by_name["A"]["key_refs"] == [{"kind": "env", "name": "A_TOKEN", "set": False}]
     assert by_name["A"]["on_here"] is True
-    assert by_name["B"] == {"name": "B", "state": "disconnected", "on_here": False}
+    assert by_name["A"]["next_step"] == (
+        "A lost its connection. Open A in project-a's Connected apps and press Reconnect."
+    )
+    assert by_name["B"] == {
+        "name": "B", "state": "disconnected", "on_here": False,
+        "next_step": "B is turned off for this project; ask the person to turn it on in Connected apps.",
+    }
 
     refused = client.patch(
         f"/api/mcp/servers/{unreachable['id']}",
         json={"config": {"command": "changed"}, "key_refs": [], "expected_revision": 1},
     )
     assert refused.status_code == 403
+
+
+def test_agent_state_guidance_uses_the_persons_connected_apps_words():
+    from api.connected_apps import _agent_next_step
+
+    place = "Research's Connected apps"
+    cases = {
+        "awaiting_approval": "Ask the person to approve GitHub in Research's Connected apps.",
+        "expired": (
+            "My request to connect GitHub expired after seven days without an answer. "
+            "Do you still want it? If so, I'll send it again."
+        ),
+        "connecting": "Wait for the connection attempt to finish.",
+        "working": 'Load its tools with tools_load(server="GitHub").',
+        "needs_token": "GitHub needs a key. Press Set key next to GitHub in Research's Connected apps. Please don't paste it here.",
+        "token_rejected": "GitHub didn't accept its key. Press Replace key next to GitHub in Research's Connected apps.",
+        "disconnected": "GitHub lost its connection. Open GitHub in Research's Connected apps and press Reconnect.",
+        "failed": (
+            "Reconnect GitHub once. If it fails again, tell the person: GitHub couldn't connect: no response. "
+            "I tried once more and it still didn't connect. Open GitHub in Research's Connected apps to see why."
+        ),
+    }
+
+    for state, expected in cases.items():
+        assert _agent_next_step(
+            "GitHub", state, "timed_out", [{"kind": "env", "name": "GITHUB_TOKEN", "set": False}],
+            on_here=True, place=place,
+        ) == expected
+    for failure_class, plain_cause in {
+        "cannot_start": "app didn't start",
+        "timed_out": "no response",
+        "protocol_error": "not compatible",
+        "name_collision": "clashes with another app",
+    }.items():
+        step = _agent_next_step("GitHub", "failed", failure_class, [], on_here=True, place=place)
+        assert plain_cause in step
+        assert failure_class not in step
 
 
 def test_agent_proposal_needs_person_and_preserves_active_config(connected_apps_client) -> None:
@@ -123,6 +167,23 @@ def test_agent_create_uses_server_thread_scope_and_refuses_reach(connected_apps_
     assert created.json()["reach"] == {
         "mode": "selected", "project_ids": ["project-a"], "outside_projects": False,
     }
+
+
+def test_workspace_corsia_proposes_an_app_for_all_projects(connected_apps_client) -> None:
+    client, db, actor = connected_apps_client
+    actor["thread_id"] = "workspace"
+    db.execute(
+        "INSERT INTO settings(key,value,updated_at) VALUES ('corsia_agent_thread_id', ?, 't')",
+        ('{"session_id":"workspace"}',),
+    )
+    db.commit()
+
+    created = client.post(
+        "/api/mcp/servers", json={"name": "Workspace app", "config": {"command": "app"}, "key_refs": []},
+    )
+
+    assert created.status_code == 201
+    assert created.json()["reach"] == {"mode": "all", "project_ids": [], "outside_projects": False}
 
 
 def test_local_app_connect_returns_the_approved_mac_notice(connected_apps_client) -> None:
@@ -217,7 +278,8 @@ def test_expired_proposal_is_listed_and_cannot_be_approved(connected_apps_client
     row = listed.json()["servers"][0]
     assert row["id"] == proposal["id"]
     assert row["state"] == "expired"
-    assert row["config"] == {"command": "a", "key_refs": []}
+    assert row["config"] == {"command": "a"}
+    assert row["key_refs"] == []
     assert row["pending_actor_name"] == "Planning"
     assert row["on_here"] is True
 
@@ -268,6 +330,35 @@ def test_human_reach_change_is_revision_checked_and_key_refs_never_accept_values
         },
     )
     assert invalid_ref.status_code == 422
+
+
+def test_connected_app_add_and_edit_never_persist_a_literal_credential(connected_apps_client) -> None:
+    client, db, actor = connected_apps_client
+    actor.clear()
+    actor.update({"id": "user", "token_kind": "session"})
+    literal = "must-never-reach-config-storage"
+    reach = {"mode": "selected", "project_ids": ["project-a"], "outside_projects": False}
+
+    rejected_add = client.post(
+        "/api/mcp/servers",
+        json={"name": "A", "config": {"command": "a", "env": {"SERVICE_TOKEN": literal}}, "key_refs": [], "reach": reach},
+    )
+    assert rejected_add.status_code == 422
+    created = client.post(
+        "/api/mcp/servers",
+        json={"name": "A", "config": {"command": "a"}, "key_refs": [{"kind": "env", "name": "SERVICE_TOKEN"}], "reach": reach},
+    )
+    assert created.status_code == 201
+    rejected_edit = client.patch(
+        f"/api/mcp/servers/{created.json()['id']}",
+        json={"config": {"command": "b", "env": {"SERVICE_TOKEN": literal}}, "key_refs": [], "expected_revision": 1},
+    )
+    assert rejected_edit.status_code == 422
+
+    persisted = "".join(
+        row[0] for row in db.execute("SELECT config_json FROM connected_apps").fetchall()
+    ) + "".join(row[0] for row in db.execute("SELECT value FROM settings").fetchall())
+    assert literal not in persisted
 
 
 def test_delete_removes_only_a_persons_stable_app_keys(connected_apps_client) -> None:
