@@ -169,15 +169,12 @@ def assert_current_ask(
         raise AnswerRefused("ask_stale", STALE)
 
 
-def answer(
-    db, artifact_id: str, verdict: str, note: str | None,
-    hold_ids: list[str] | None = None,
-) -> ReviewAnswer:
+def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer:
     """Check the verdict against the round, then close the user's open feedback batch.
 
-    ``hold_ids`` are the asks the person's bar showed (``round_state``); when
-    the newest open ask is not among them, it replaced what they read, so the
-    verdict is refused as stale rather than applied to a request they never saw.
+    The caller has already run ``assert_current_ask``, so the asks the
+    person's bar showed are exactly the open set; an artifact with no open ask
+    is refused as stale rather than answered.
 
     Runs in the caller's write transaction, before the asks are released, so
     the feedback task exists when the release notice points at it.
@@ -189,7 +186,6 @@ def answer(
     note = (note or "").strip() or None
     if note and len(note) > NOTE_MAX:
         raise AnswerRefused("note_too_long", f"The note is over {NOTE_MAX} characters.")
-    assert_current_ask(db, artifact_id, hold_ids)
     asks = raised_asks(db, artifact_id)
     if not asks:
         raise AnswerRefused("ask_stale", STALE)

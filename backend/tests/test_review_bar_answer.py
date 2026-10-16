@@ -276,6 +276,15 @@ def test_a_retired_ask_returns_stale(db):
     assert refused.value.code == "ask_stale"
 
 
+def test_a_verdict_on_a_document_never_asked_about_returns_stale(db):
+    artifact = seed_document(db, "owner", name="proposal.md")
+
+    with pytest.raises(review_bar.AnswerRefused) as refused:
+        attention.clear_attention(artifact, outcome="answer", verdict="approved", db=db)
+
+    assert refused.value.code == "ask_stale"
+
+
 def test_a_verdict_on_a_replaced_ask_is_stale_and_leaves_the_replacement_open(db):
     artifact = seed_document(db, "owner", name="proposal.md")
     node = _ask(db, artifact)

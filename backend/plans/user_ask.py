@@ -171,7 +171,10 @@ def _open_ask_rows(db, artifact_id: str) -> list:
 
 
 def defer_asks(db, artifact_id: str) -> int:
-    """Defer every current ask hold for an artifact without revising its nodes."""
+    """Defer every current ask hold for an artifact without revising its nodes.
+
+    Defers every open ask on the artifact and ignores hold_ids.
+    """
     rows = _open_ask_rows(db, artifact_id)
     now = service._now()
     for row in rows:
@@ -303,7 +306,10 @@ def withdraw_node_asks(
     return len(rows)
 
 
-def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None) -> int:
+def cleared(
+    artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None,
+    released_executors: set[str] | None = None,
+) -> int:
     """Release the tasks this ask held once its attention lifecycle ends.
 
     Returns how many holds cleared. Idempotent: a second clear finds none.
@@ -318,7 +324,10 @@ def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | No
         why, wake_verb = _ENDS_ASK[outcome]
         from plans import user_ask_release
 
-        return user_ask_release.release(
+        cleared_count, executors = user_ask_release.release(
             connection, artifact_id, why, wake_verb=wake_verb,
             retired=outcome == "retire", ask_release=release,
         )
+        if released_executors is not None:
+            released_executors.update(executors)
+        return cleared_count

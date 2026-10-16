@@ -237,7 +237,7 @@ def _clear_attention(
         )
         answer = None
         if verdict is not None:
-            answer = review_bar.answer(_db, str(row["id"]), verdict, note, hold_ids)
+            answer = review_bar.answer(_db, str(row["id"]), verdict, note)
         defer_condition = None
         if outcome == "defer":
             defer_condition = validate_defer_condition(condition)

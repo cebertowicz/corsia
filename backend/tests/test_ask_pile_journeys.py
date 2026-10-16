@@ -395,8 +395,11 @@ def test_an_asker_with_no_model_selected_takes_only_the_route_back(db):
     assert result.route_disposition is not None
 
 
-def test_a_route_back_reaches_a_document_owner_the_release_did_not_wake(db):
+def test_a_route_back_reaches_a_document_owner_the_release_did_not_wake(db, monkeypatch):
+    from contextlib import contextmanager
+
     from parent_review.disposition import REJECT_WITH_REASON, dispose
+    from plans import public as plans_public
     from registry.ownership import rehome_artifact
 
     db.execute(
@@ -410,7 +413,13 @@ def test_a_route_back_reaches_a_document_owner_the_release_did_not_wake(db):
         new_owner_thread_id="writer", actor_thread_id="owner", authority="test",
         reason="Hand-off", source_path="test.ask_pile", db=db,
     )
+    @contextmanager
+    def collect_with_unrelated_writer_wake(_db, recipients):
+        yield
+        if recipients is not None:
+            recipients.append("writer")
 
+    monkeypatch.setattr(plans_public, "collect_wake_recipients", collect_with_unrelated_writer_wake)
     result = dispose(artifact_id, REJECT_WITH_REASON, reason="Not yet", db=db)
 
     assert result.routed_to == "writer"
@@ -418,6 +427,41 @@ def test_a_route_back_reaches_a_document_owner_the_release_did_not_wake(db):
     assert db.execute(
         "SELECT COUNT(*) FROM context_change_journal WHERE change_kind='artifact.disposition'",
     ).fetchone()[0] == 1
+
+
+def test_reroute_refuses_an_ask_replaced_after_the_old_guard(db, monkeypatch):
+    from doceditor import review_bar
+    from infra.corsia_agent import set_corsia_agent
+    from parent_review import disposition
+    from registry import artifact_record as AR
+
+    db.execute(
+        """INSERT INTO threads (id,user_id,project_id,title,model,created_at,updated_at)
+           VALUES ('writer','user','project','Writer','test/model','t','t')"""
+    )
+    set_corsia_agent("owner", db=db)
+    plan_id, node_id, artifact_id, hold_id = _asked(db)
+    replacement = service.add_node(
+        plan_id, kind="task", title="Replacement review", acceptance_criteria="Reviewed", db=db,
+    )
+    do_reroute = disposition._do_reroute
+
+    def replace_ask(*args, **kwargs):
+        _withdraw(db, plan_id, node_id, hold_id)
+        _ask(db, plan_id, replacement.id, artifact_id)
+        return do_reroute(*args, **kwargs)
+
+    monkeypatch.setattr(disposition, "_do_reroute", replace_ask)
+    with pytest.raises(review_bar.AnswerRefused, match=review_bar.STALE) as refused:
+        disposition.dispose(
+            artifact_id, disposition.REROUTE_OWNER, new_owner="writer", authority="test",
+            reason="Hand-off", actor_thread="owner", hold_ids=[hold_id], db=db,
+        )
+
+    assert refused.value.code == "ask_stale"
+    assert AR.register_or_resolve(
+        {"integration": "workspace", "type": "document", "external_id": "proposal.md"}, db=db,
+    ).owner_thread == "owner"
 
 
 def test_a_disposition_whose_release_fails_records_nothing(db, monkeypatch):

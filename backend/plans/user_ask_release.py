@@ -7,8 +7,8 @@ _PROVENANCE = "user.ask_cleared"
 def release(
     db, artifact_id: str, why: str, *, wake_verb: str, retired: bool = False,
     ask_release=None,
-) -> int:
-    """Clear an ask's holds, reconcile plans, and deliver each asker's one wake."""
+) -> tuple[int, set[str]]:
+    """Clear an ask's holds, reconcile plans, and report each ask-release executor."""
     from plans import admission_projection, holds, plan_wake, user_ask
     from plans.plan_events import append_owner_event
     from plans.user_steering import CHANGE_KIND
@@ -39,6 +39,7 @@ def release(
     ]
     executors = {row["hold_id"]: admission_projection.executor_of(row, row) for row in rows}
     handoffs = _reconcile_for_askers(db, rows, executors)
+    released_executors: set[str] = set()
     for row, (cause_id, cause_at) in zip(rows, causes):
         summary = _release_summary(row, wake_verb, retired=retired, ask_release=ask_release)
         executor = executors[row["hold_id"]]
@@ -57,6 +58,8 @@ def release(
             ),
             open_node_id=str(row["node_id"]),
         )
+        if wake_id is not None:
+            released_executors.add(executor)
         append_owner_event(
             db,
             plan_id=str(row["plan_id"]),
@@ -75,7 +78,7 @@ def release(
         from plans import notifications
 
         notifications.report_touched({str(row["plan_id"]) for row in rows}, db=db)
-    return len(rows)
+    return len(rows), released_executors
 
 
 def _reconcile_for_askers(db, rows, executors: dict) -> dict[tuple[str, str], dict]:
