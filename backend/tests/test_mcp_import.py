@@ -6,6 +6,9 @@ import json
 
 import pytest
 
+from auth_fixtures import OWNER_USER
+from oauth_fake_as import BASE, MCP_URL
+from oauth_fixtures import SESSION, env  # noqa: F401
 from tests.mcp_import_fixtures import seed_project
 from tools import mcp_import
 from tools.mcp_import_reach import project_reach
@@ -283,6 +286,96 @@ def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeyp
     assert result["state"] == "working"
     assert secret not in json.dumps(result)
     assert secret not in caplog.text
+
+
+def test_import_mixes_sign_in_pending_place_unsupported_and_plain_without_http(tmp_path, monkeypatch):
+    import sqlite3
+
+    import httpx
+
+    from connections.app_reach import get_app
+    from infra.database import initialize_schema
+
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    initialize_schema(db)
+    outside_project = tmp_path / "not-corsia"
+    _json(tmp_path / ".claude.json", {
+        "mcpServers": {
+            "OAuth": {
+                "type": "http", "url": "https://example.test/mcp", "oauth": {},
+                "headers": {"Authorization": "discard-me", "X-Region": "us-west-2"},
+                "connect_timeout": 12,
+            },
+            "Unsupported": {"type": "ws", "url": "wss://example.test/mcp"},
+            "Plain": {"command": "npx", "args": ["-y", "plain-app"]},
+        },
+        "projects": {str(outside_project): {"mcpServers": {
+            "Pending place": {"command": "npx", "args": ["-y", "folder-app"]},
+        }}},
+    })
+
+    def unexpected_http(*_args, **_kwargs):
+        pytest.fail("import must not make an HTTP call")
+
+    monkeypatch.setattr(httpx.Client, "request", unexpected_http)
+    monkeypatch.setattr(httpx.AsyncClient, "request", unexpected_http)
+    imported = mcp_import.import_selected([
+        {"source": "claude_code", "name": "OAuth"},
+        {"source": "claude_code", "name": "Pending place"},
+        {"source": "claude_code", "name": "Unsupported"},
+        {"source": "claude_code", "name": "Plain"},
+    ], db=db, home=tmp_path, actor="agent")
+
+    sign_in, pending_place, unsupported, plain = imported["rows"]
+    assert sign_in == {
+        "id": sign_in["id"], "name": "OAuth", "state": "needs_sign_in",
+        "message": "OAuth: needs you to sign in. Press Sign in next to OAuth in Settings › Connected apps.",
+    }
+    app = get_app(sign_in["id"], db=db)
+    assert app["state"] == "needs_sign_in"
+    assert app["config"] == {
+        "url": "https://example.test/mcp", "transport": "http", "headers": {"X-Region": "us-west-2"},
+        "connect_timeout": 12, "key_refs": [],
+    }
+    assert pending_place == {"name": "Pending place", "status": "outside_project", "folder": "not-corsia"}
+    assert unsupported == {"name": "Unsupported", "status": "cannot_connect"}
+    assert plain == {"id": plain["id"], "name": "Plain", "state": "awaiting_approval"}
+    assert db.execute("SELECT count(*) FROM key_store_entries").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_imported_oauth_row_starts_sign_in_through_the_api(tmp_path, monkeypatch, env):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.mcp import router
+    from infra.auth import require_user, require_user_header_only
+    import tools.mcp_oauth_flow as flow
+
+    _json(tmp_path / ".claude.json", {"mcpServers": {
+        "OAuth": {"type": "http", "url": MCP_URL, "oauth": {}},
+    }})
+    monkeypatch.setattr(mcp_import, "_home", lambda: tmp_path)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user_header_only] = lambda: {"id": OWNER_USER}
+    app.dependency_overrides[require_user] = lambda: {"id": OWNER_USER, "token_kind": "session"}
+
+    with TestClient(app, base_url="http://127.0.0.1:3001", client=("127.0.0.1", 5000)) as client:
+        imported = client.post("/api/mcp/import", json={
+            "servers": [{"source": "claude_code", "name": "OAuth"}],
+        })
+        app_id = imported.json()["rows"][0]["id"]
+        sign_in = client.post(f"/api/mcp/servers/{app_id}/sign-in", headers={
+            "Authorization": f"Bearer {SESSION}",
+        })
+
+        assert imported.status_code == 200
+        assert sign_in.status_code == 200
+        assert sign_in.json()["authorization_url"].startswith(f"{BASE}/authorize")
+        assert env.fake.registrations
+        client.portal.call(flow.stop_all)
 
 
 def test_project_reach_uses_real_paths_components_and_deepest_match(tmp_path):
