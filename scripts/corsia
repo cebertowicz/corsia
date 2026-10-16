@@ -379,6 +379,7 @@ case "${1:-status}" in
             esac
         done
         require_no_extra_lifecycle_args start "${start_args[@]}" || exit 1
+        refuse_if_app_owns_install || exit 1
         if [ "${CORSIA_INSTALL_FLOW:-}" = 1 ]; then
             echo "7/8  Starting…"
         else
@@ -403,6 +404,7 @@ case "${1:-status}" in
         ;;
     restart)
         require_no_extra_lifecycle_args restart "${@:2}" || exit 1
+        refuse_if_app_owns_install || exit 1
         echo "Restarting CORSIA..."
         run_owned_restart_lifecycle restart_current_release
         ;;
