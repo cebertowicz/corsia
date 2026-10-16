@@ -466,15 +466,6 @@ def _user_block_on_document_asked_elsewhere(db, scene):
     )
 
 
-def _user_block_restated_on_open_ask(db, scene):
-    """The same task asks again about its open request with a new reason."""
-    ask = document_ask(db, "root")
-    _user_block(db, scene, ask_artifact_id=ask)()
-    return _user_block(
-        db, scene, ask_artifact_id=ask, reason="Review the revision",
-    )
-
-
 def _user_block_on_non_document(db, scene):
     ask = _artifact(db, external_id="user-ask-pr", owner="root")
     return _user_block(db, scene, ask_artifact_id=ask)
@@ -544,7 +535,9 @@ _CASES = {
         '"a decision is not blocked on; raise it, and it holds its task by itself"',
     ): _user_block_on_decision_artifact,
     ("user_ask.py", "NOT_ASKABLE"): _user_block_on_non_document,
-    ("user_ask.py", "_already_asked(existing[0])"): _user_block_on_document_asked_elsewhere,
+    ("one_open_ask.py", 'f"this document already has an open review request on task {row[\'title\']!r} " '
+                        'f"(node_id {row[\'node_id\']}, hold_id {row[\'hold_id\']}); " '
+                        '"resolve that blocker, then ask again"'): _user_block_on_document_asked_elsewhere,
     # --- plans/node_creation.py ---
     ("node_creation.py", 'f"invalid plan node kind: {kind}"'): _operation(
         "add", {"kind": "epic", "title": "T", "acceptance_criteria": "DOD"},
@@ -748,8 +741,6 @@ _CASES = {
     ("holds.py", '"invalid plan hold kind"'): _invalid_hold_kind,
     ("holds.py", '"a blocker anyone but the user clears is a wait, not a hold; " '
                  '"block_node arms it with a deadline"'): _wait_owner_as_hold,
-    ("holds.py", 'f"task already has an open ask on this artifact (hold_id {existing[\'id\']}); " '
-                 '"resolve hold first, then ask again"'): _user_block_restated_on_open_ask,
     # --- plans/blocked_wait.py ---
     ("blocked_wait.py", '"a blocker only the user can clear is a hold; any other is a wait " '
                         '"that ends at a deadline, so its condition must be a deadline"'):

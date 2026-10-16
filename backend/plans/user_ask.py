@@ -13,6 +13,7 @@ user clears that ask, the holds it placed clear and the agent is told
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import plans.service as service
@@ -62,8 +63,7 @@ def raised_asks(db, artifact_id: str) -> list:
     """The user holds that wait on this artifact, newest first, with their asking agent."""
     return db.execute(
         f"""SELECT h.id AS hold_id, h.reason, h.created_at AS raised_at,
-                  n.id AS node_id, n.title AS task_title,
-                  p.owner_id AS asker_id, t.title AS asker_name
+                  n.id AS node_id, p.owner_id AS asker_id, t.title AS asker_name
              FROM plan_node_artifact_links l
              JOIN plan_nodes n ON n.id = l.node_id
              JOIN plans p ON p.id = n.plan_id
@@ -107,6 +107,93 @@ def user_ask_hold_sql(event_id_expr: str, column: str) -> str:
     )
 
 
+def ask_holds(db, hold_ids) -> dict[str, dict]:
+    """The user asks among ``hold_ids``, by hold id, read by primary key in two batches.
+
+    Each is ``{artifact_id, open, raised_in, answer}``: the artifact asked about,
+    whether the ask is still open, where the agent raised it (``turn_id``,
+    ``tool_invocation_id``, ``provider_call_id``; empty for a hold placed before
+    they were recorded) and what a clearing review recorded (``verdict``,
+    ``feedback_counts``; empty when it recorded none). A hold that is not a user
+    ask, or does not exist, is absent.
+    """
+    ids = list(dict.fromkeys(hold_ids))
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    rows = db.execute(
+        f"""SELECT h.id, h.node_id, h.owner_id, h.clearance_event_id,
+                   {open_user_block_sql('h')} AS is_open
+              FROM plan_node_holds h
+             WHERE h.id IN ({marks}) AND h.kind='blocked' AND h.owner_kind='user'
+               AND h.owner_id IS NOT NULL""",
+        ids,
+    ).fetchall()
+    cleared = [r["clearance_event_id"] for r in rows if r["clearance_event_id"]]
+    # holds.clear_write keeps the release detail under its own ``detail`` key.
+    answers = {
+        event_id: detail
+        for event_id, payload in _event_payloads(db, cleared).items()
+        if isinstance(detail := payload.get("detail"), dict)
+    }
+    placed = _placed_raised_in(db, [r["id"] for r in rows], {r["node_id"] for r in rows})
+    return {
+        r["id"]: {
+            "artifact_id": r["owner_id"],
+            "open": bool(r["is_open"]),
+            "raised_in": placed.get(r["id"], {}),
+            "answer": {
+                k: v for k, v in answers.get(r["clearance_event_id"], {}).items()
+                if k in ("verdict", "feedback_counts")
+            },
+        }
+        for r in rows
+    }
+
+
+def _event_payloads(db, event_ids: list[str]) -> dict[str, dict]:
+    if not event_ids:
+        return {}
+    marks = ",".join("?" * len(event_ids))
+    found = {}
+    for row in db.execute(
+        f"SELECT id, payload_json FROM plan_node_events WHERE id IN ({marks})", event_ids,
+    ):
+        payload = _decoded(row["payload_json"])
+        if payload is not None:
+            found[row["id"]] = payload
+    return found
+
+
+def _decoded(raw) -> dict | None:
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _placed_raised_in(db, hold_ids: list[str], node_ids) -> dict[str, dict]:
+    """Where each hold was raised, from its ``hold_placed`` event, found by the task's event index."""
+    if not node_ids:
+        return {}
+    marks = ",".join("?" * len(node_ids))
+    wanted = set(hold_ids)
+    found: dict[str, dict] = {}
+    for row in db.execute(
+        f"""SELECT payload_json FROM plan_node_events
+             WHERE node_id IN ({marks}) AND event='hold_placed'""",
+        sorted(node_ids),
+    ):
+        payload = _decoded(row["payload_json"])
+        if payload is None or payload.get("hold_id") not in wanted:
+            continue
+        raised_in = payload.get("raised_in")
+        found[payload["hold_id"]] = {
+            k: v for k, v in raised_in.items() if isinstance(v, str) and v
+        } if isinstance(raised_in, dict) else {}
+    return found
+
 
 def require(db, plan, node_id: str, params, actor) -> str | None:
     """Return the artifact an agent's user block asks about, or refuse the block.
@@ -149,21 +236,7 @@ def require(db, plan, node_id: str, params, actor) -> str | None:
         )
     if identity["type"] not in ASKABLE_TYPES or identity["state"] != "active":
         raise service.PlanInputError(NOT_ASKABLE)
-    ask = ask.strip()
-    existing = raised_asks(db, ask)
-    if existing and all(str(row["node_id"]) != node_id for row in existing):
-        raise service.PlanInputError(_already_asked(existing[0]))
-    return ask
-
-
-def _already_asked(open_ask) -> str:
-    """The one-open-ask refusal, naming the exact hold an agent withdraws in one call."""
-    task = open_ask["task_title"] or open_ask["node_id"]
-    return (
-        f"this document already has an open review request on task {task!r} "
-        f"(node_id {open_ask['node_id']}, hold_id {open_ask['hold_id']}); "
-        "withdraw it (resolve the blocker) and ask again"
-    )
+    return ask.strip()
 
 
 def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenance: str) -> None:
@@ -175,29 +248,6 @@ def attach(db, node_id: str, artifact_id: str, *, actor_id: str | None, provenan
         node_id, artifact_id, "attention", actor_id=actor_id, provenance=provenance, db=db,
     )
     attention.raise_attention(artifact_id, db=db)
-
-
-def withdraw_node_asks(
-    db, node_id: str, *, actor_id: str | None, provenance: str,
-) -> int:
-    """Withdraw the open asks a terminal or archived task no longer owns."""
-    from plans import holds
-
-    rows = db.execute(
-        f"""SELECT h.id AS hold_id
-              FROM plan_node_holds h
-              JOIN plan_node_artifact_links l
-                ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
-             WHERE h.node_id=? AND {open_user_block_sql('h')} AND h.owner_id IS NOT NULL
-             ORDER BY h.created_at,h.id""",
-        (node_id,),
-    ).fetchall()
-    for row in rows:
-        holds.clear_write(
-            node_id, str(row["hold_id"]), expected_kind="blocked", actor_id=actor_id,
-            provenance=provenance, detail={"ended": "withdrawn"}, db=db,
-        )
-    return len(rows)
 
 
 def cleared(artifact_id: str, outcome: str, *, db=None, release: AskRelease | None = None) -> int:

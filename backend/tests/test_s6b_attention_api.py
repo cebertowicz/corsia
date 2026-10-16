@@ -151,17 +151,6 @@ class TestClearing:
         listed = integration_client.get("/api/attention/raised", headers=_H(_TOKEN)).json()
         assert aid not in [it["external_id"] for it in listed["items"]]
 
-    def test_clear_refuses_the_internal_withdraw_outcome(self, integration_client):
-        aid = _eid()
-        _seed(aid, _GOOD)
-
-        response = integration_client.post(
-            f"/api/attention/{aid}/clear", json={"token": _TOKEN, "outcome": "withdraw"},
-        )
-
-        assert response.status_code == 400
-        assert "unknown clearing outcome" in response.json()["detail"]
-
     def test_clear_emits_one_product_event_from_the_attention_owner(
         self, integration_client, monkeypatch,
     ):

@@ -33,7 +33,6 @@ VERDICTS = frozenset({"approved", "approved_with_changes", "changes_requested"})
 NEEDS_REVIEW = "needs_review"
 ANSWERED = "answered"
 REPLACED = "replaced"
-WITHDRAWN = "withdrawn"
 UNAVAILABLE = "unavailable"
 
 UNAVAILABLE_TITLE = "No longer available"
@@ -113,8 +112,6 @@ def ask_state(
     if hold["open"]:
         return NEEDS_REVIEW, None
     answer = hold["answer"]
-    if answer.get("ended") == "withdrawn":
-        return WITHDRAWN, None
     verdict = answer.get("verdict")
     if verdict in VERDICTS:
         return verdict, _counts(answer.get("feedback_counts"))

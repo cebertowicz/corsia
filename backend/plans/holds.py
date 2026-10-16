@@ -154,28 +154,10 @@ def clear(
     """
 
     node = _validate_node(db, node_id, expected_revision)
-    hold = db.execute(
-        """SELECT h.owner_id FROM plan_node_holds h
-           JOIN plan_node_artifact_links l
-             ON l.node_id=h.node_id AND l.artifact_id=h.owner_id AND l.role='attention'
-           WHERE h.id=? AND h.node_id=? AND h.kind=? AND h.owner_kind='user'
-             AND h.cleared_at IS NULL""",
-        (hold_id, node_id, expected_kind),
-    ).fetchone()
-    if expected_kind == "blocked" and hold is not None and hold["owner_id"] is not None:
-        from plans.boundary import is_user_audit_id
-
-        clear_write(
-            node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
-            provenance=provenance,
-            detail=None if is_user_audit_id(actor_id) else {"ended": "withdrawn"},
-            db=db,
-        )
-    else:
-        clear_write(
-            node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
-            provenance=provenance, db=db,
-        )
+    clear_write(
+        node_id, hold_id, expected_kind=expected_kind, actor_id=actor_id,
+        provenance=provenance, db=db,
+    )
     from plans import admission
 
     admission.reconcile_plan(
@@ -291,10 +273,8 @@ def block_hold(
 
     Only the user's own blocker is a hold: one anyone else clears is a wait
     with a deadline (``plans.blocked_wait``), so it never sits unlooked-at.
-    Re-blocking a task on the artifact it already asks about keeps one open
-    hold for that ask: the same reason writes nothing. A new reason is refused
-    while the old ask is open, so the user never reads competing requests.
-    Resolve the open hold before asking again with the revised reason.
+    A user hold on an artifact is a review request, so ``one_open_ask.already_open``
+    keeps it to one open request per document.
     """
     if owner_kind in WAIT_OWNERS:
         raise service.PlanInputError(
@@ -302,22 +282,11 @@ def block_hold(
             "block_node arms it with a deadline"
         )
     if owner_kind == "user" and owner_id is not None:
+        from plans.one_open_ask import already_open
+
         node = _validate_node(db, node_id, expected_revision)
-        # Served by ``idx_plan_holds_active_node``: it reads only this task's
-        # open blocked holds, never its cleared history.
-        existing = db.execute(
-            """SELECT id,reason_key,reason FROM plan_node_holds
-               WHERE node_id=? AND kind='blocked' AND owner_kind='user'
-                 AND owner_id=? AND cleared_at IS NULL""",
-            (node_id, owner_id),
-        ).fetchone()
-        if existing is not None:
-            if (existing["reason_key"], existing["reason"]) == (reason_key, reason):
-                return node
-            raise service.PlanInputError(
-                f"task already has an open ask on this artifact (hold_id {existing['id']}); "
-                "resolve hold first, then ask again"
-            )
+        if already_open(db, node_id, owner_id, reason_key=reason_key, reason=reason):
+            return node
     return place_hold(
         node_id,
         kind="blocked",

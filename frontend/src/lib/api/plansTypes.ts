@@ -169,7 +169,7 @@ export interface OperatorNode {
 	 * gathers it into its level's "N completed" row. Still counted as done.
 	 */
 	folded: boolean;
-	/** A branch that reads as its leaves (`node_states.is_container`); its need is theirs, counted once. */
+	/** A branch that reads as its leaves (`node_states.is_container`) and has no ask of its own; its need is theirs, counted once. */
 	container: boolean;
 	requires_user_action: boolean;
 	executor: OperatorExecutor;

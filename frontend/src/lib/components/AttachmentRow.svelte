@@ -44,7 +44,7 @@
 		const state: MessageCardState | undefined = cardState ?? (card.available ? undefined : 'unavailable');
 		if (!state) return null;
 		if (state === 'needs_review') return 'ask';
-		return state === 'replaced' || state === 'withdrawn' || state === 'unavailable' ? 'muted' : 'verdict';
+		return state === 'replaced' || state === 'unavailable' ? 'muted' : 'verdict';
 	});
 	// A verdict that carries feedback shows its counts in the task's place (C3); otherwise the task, then the file
 	// name, which repeats the title for a file titled by its name: omit it, comparing the full strings.
