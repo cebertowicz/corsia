@@ -282,7 +282,6 @@ class TestAppPath:
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
-        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: True)
         monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
@@ -364,7 +363,6 @@ class TestAppPath:
     @pytest.mark.parametrize("failed, expected", [
         ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
         ("local_download", ("local_download",)),
-        ("gmail_eligible", ("gmail_eligible",)),
         ("web_search_ready", ("web_search_ready",)),
         ("own_omlx_source", ("own_omlx_source",)),
         ("setup", ("setup",)),
@@ -379,7 +377,6 @@ class TestAppPath:
         monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
             "sources": [], "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
-        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: True)
         monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
@@ -388,8 +385,6 @@ class TestAppPath:
             monkeypatch.setattr(first_run_wake, "_model_sources", fail)
         elif failed == "local_download":
             monkeypatch.setattr(first_run_wake, "_app_local_download", fail)
-        elif failed == "gmail_eligible":
-            monkeypatch.setattr(first_run_wake, "_gmail_eligible", fail)
         elif failed == "web_search_ready":
             monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "own_omlx_source":
@@ -403,6 +398,7 @@ class TestAppPath:
 
         for name in expected:
             assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[name]}
+        assert facts["gmail_eligible"] is True
 
     async def test_app_setup_decisions_omit_projects_consent_and_address(self, monkeypatch):
         from onboarding import first_run_wake, setup_decisions
