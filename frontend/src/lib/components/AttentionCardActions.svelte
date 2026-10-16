@@ -43,10 +43,13 @@
 		try {
 			const tok = get(token);
 			if (!tok) throw new Error('Not authenticated');
-			await clearAttention(tok, artifactId, outcome, opts);
+			await clearAttention(tok, artifactId, outcome, { ...opts, hold_ids: item.hold_ids });
 			onDone?.(artifactId, outcome);
 		} catch (e: unknown) {
-			errorMsg = e instanceof Error ? e.message : 'Action failed';
+			const stale = (e as { status?: number; body?: string }).status === 409
+				&& (e as { body?: string }).body?.includes('ask_stale');
+			errorMsg = stale ? 'This review request has ended.' : e instanceof Error ? e.message : 'Action failed';
+			if (stale) onDone?.(artifactId, outcome);
 		} finally {
 			busy = false;
 		}
@@ -81,13 +84,16 @@
 		try {
 			const tok = get(token);
 			if (!tok) throw new Error('Not authenticated');
-			await disposeAttention(tok, artifactId, outcome, opts);
+			await disposeAttention(tok, artifactId, outcome, { ...opts, hold_ids: item.hold_ids });
 			onDone?.(artifactId, outcome);
 		} catch (e: unknown) {
+			const response = e as { status?: number; body?: string };
+			const stale = response.status === 409 && response.body?.includes('ask_stale');
 			const msg = e instanceof Error ? e.message : 'Action failed';
-			errorMsg = msg.includes('409') || msg.toLowerCase().includes('blocking')
+			errorMsg = stale ? 'This review request has ended.' : msg.includes('409') || msg.toLowerCase().includes('blocking')
 				? 'A review profile flagged a blocking issue. Resolve it or supply an authorized override before approving.'
 				: msg;
+			if (stale) onDone?.(artifactId, outcome);
 		} finally {
 			busy = false;
 		}

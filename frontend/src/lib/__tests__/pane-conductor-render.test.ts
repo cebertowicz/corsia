@@ -150,6 +150,25 @@ describe('ArtifactPane — fetchRaised called in conductor mode', () => {
 		});
 	});
 
+	it('refetches raised items when plans change', async () => {
+		token.set('tok');
+		component = mount(ArtifactPane, {
+			target: host,
+			props: { threadId: 'cond-123', conductorThreadId: 'cond-123' },
+		});
+		flushSync();
+		await vi.waitFor(() => {
+			expect(vi.mocked(fetchRaised)).toHaveBeenCalledWith('tok', 'cond-123');
+		});
+		vi.mocked(fetchRaised).mockClear();
+
+		emit('plans_changed', { type: 'plans_changed', plans: [] });
+
+		await vi.waitFor(() => {
+			expect(vi.mocked(fetchRaised)).toHaveBeenCalledWith('tok', 'cond-123');
+		});
+	});
+
 	it('does NOT call fetchRaised when not in conductor mode (threadId differs)', async () => {
 		token.set('tok');
 

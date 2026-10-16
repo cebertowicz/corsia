@@ -12,15 +12,19 @@ import plans.service as service
 from plans.user_ask import open_asks_sql
 
 
-def already_open(db, node_id: str, artifact_id: str, *, reason_key: str, reason: str) -> bool:
+def already_open(
+    db, node_id: str, artifact_id: str, *, reason_key: str, reason: str,
+    actor_id: str | None, provenance: str,
+) -> bool:
     """Apply the rule before a user hold on ``artifact_id`` is placed.
 
     True when this task already holds that request with the same reason, so the
-    caller writes nothing. Any other open request on the document is refused,
-    naming its task and hold: this task's own, with a new reason, is the
-    agent's to resolve first; another task's is the user's to answer, even when
-    that task has ended. One indexed read by artifact
-    (``idx_plan_node_artifact_links_artifact``), on a user block only.
+    caller writes nothing. This task's own request with a new reason is ended as
+    replaced in the caller's transaction, and False lets the caller place the
+    new one: the user reads one current request. Another task's open request is
+    refused, naming its task and hold: it is the user's to answer. Every way a
+    task ends withdraws its requests, so that task is live. One indexed read by
+    artifact (``idx_plan_node_artifact_links_artifact``), on a user block only.
     """
     row = db.execute(
         open_asks_sql("h.id AS hold_id, h.reason_key, h.reason, n.id AS node_id, n.title")
@@ -38,7 +42,10 @@ def already_open(db, node_id: str, artifact_id: str, *, reason_key: str, reason:
         )
     if (row["reason_key"], row["reason"]) == (reason_key, reason):
         return True
-    raise service.PlanInputError(
-        f"this document already has an open review request on this {held}; "
-        "resolve that blocker, then ask again"
+    from plans import ask_endings, holds
+
+    holds.clear_write(
+        node_id, str(row["hold_id"]), expected_kind="blocked", actor_id=actor_id,
+        provenance=provenance, detail=ask_endings.detail(why="replaced", actor_id=actor_id), db=db,
     )
+    return False

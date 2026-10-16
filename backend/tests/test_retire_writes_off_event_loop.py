@@ -13,6 +13,19 @@ import pytest
 from infra.db_loop_guard import LOOP_WRITE_STRICT_ENV
 
 
+@pytest.fixture(autouse=True)
+def _no_provider_handles():
+    """Start with no Codex provider handles. The registry is process-wide, and
+    other suites leave a ``thread-1`` handle that makes retire report a change."""
+    from subagents.codex_runtime_state import _CODEX_THREADS
+
+    saved = dict(_CODEX_THREADS)
+    _CODEX_THREADS.clear()
+    yield
+    _CODEX_THREADS.clear()
+    _CODEX_THREADS.update(saved)
+
+
 def _thread_row(thread_id: str, parent: str | None = None) -> None:
     from infra.database import get_db
 
