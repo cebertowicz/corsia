@@ -474,6 +474,16 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires CORSIA_E2E_MAIN_PORT from a disposable host's plain-HTTP main listener"]
+    async fn disposable_plain_http_listener_is_classified_as_server() {
+        let port = std::env::var("CORSIA_E2E_MAIN_PORT").unwrap().parse().unwrap();
+        assert_eq!(
+            pair("127.0.0.1", port, "0000").await,
+            Err(PairError::Unreachable(Unreachable::Server))
+        );
+    }
+
+    #[tokio::test]
     #[ignore = "requires CORSIA_E2E_PORT after its disposable real-TLS host has stopped"]
     async fn stopped_disposable_tls_host_is_classified_as_server() {
         let port = std::env::var("CORSIA_E2E_PORT").unwrap().parse().unwrap();
