@@ -1163,6 +1163,51 @@ mod tests {
     use base64::Engine;
     use std::fs;
 
+    fn acl_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .invoke_handler(|invoke| match invoke.message.command() {
+                "disconnect_remote" | "start_window_drag" => {
+                    invoke.resolver.resolve(serde_json::Value::Null);
+                    true
+                }
+                _ => false,
+            })
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+
+    fn invoke_from(webview: &tauri::WebviewWindow<tauri::test::MockRuntime>, command: &str, url: &str) -> Result<tauri::ipc::InvokeResponseBody, serde_json::Value> {
+        tauri::test::get_ipc_response(webview, tauri::webview::InvokeRequest {
+            cmd: command.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: url.parse().unwrap(),
+            body: tauri::ipc::InvokeBody::default(),
+            headers: Default::default(),
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        })
+    }
+
+    #[test]
+    fn remote_only_commands_are_refused_from_remote_and_non_shell_origins() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        for command in ["disconnect_remote", "start_window_drag"] {
+            for origin in ["https://studio.example", "https://untrusted.example"] {
+                let refusal = invoke_from(&webview, command, origin).unwrap_err();
+                assert!(refusal.to_string().contains("not allowed"), "{command} was not ACL-refused from {origin}: {refusal}");
+            }
+        }
+    }
+
+    #[test]
+    fn remote_only_commands_reach_their_handlers_from_the_shell_origin() {
+        let app = acl_test_app();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        assert!(invoke_from(&webview, "disconnect_remote", "tauri://localhost").is_ok());
+        assert!(invoke_from(&webview, "start_window_drag", "tauri://localhost").is_ok());
+    }
+
     #[test]
     fn discovery_policy_denial_is_reported_to_the_remote_connect_ui() {
         assert!(discovery_policy_denied(&discovery::DiscoveryError::Service(-65_570)));
