@@ -170,10 +170,46 @@ pub fn client_config(trust: &Trust) -> Result<ClientConfig, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_rustls::{TlsAcceptor, TlsConnector};
 
     #[test]
     fn malformed_certificate_cannot_be_pinned() {
         let certificate = CertificateDer::from(vec![1, 2, 3]);
         assert!(spki_sha256(&certificate).is_err());
+    }
+
+    #[tokio::test]
+    async fn real_self_signed_tls_system_rejects_and_pins_control_the_handshake() {
+        let identity = crate::test_tls::generated_self_signed_identity();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let config = Arc::clone(&identity.config);
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let _ = TlsAcceptor::from(Arc::clone(&config)).accept(stream).await;
+            }
+        });
+        let name = ServerName::try_from("127.0.0.1".to_owned()).unwrap();
+
+        let system = TlsConnector::from(Arc::new(client_config(&Trust::System).unwrap()))
+            .connect(name.clone(), TcpStream::connect(("127.0.0.1", port)).await.unwrap())
+            .await;
+        assert!(system.is_err(), "a generated self-signed host must not pass system trust");
+
+        let matching = TlsConnector::from(Arc::new(client_config(&Trust::Pinned { spki_sha256: identity.pin }).unwrap()))
+            .connect(name.clone(), TcpStream::connect(("127.0.0.1", port)).await.unwrap())
+            .await;
+        assert!(matching.is_ok(), "the matching SPKI pin must complete the handshake");
+        drop(matching);
+
+        let mut wrong_pin = identity.pin;
+        wrong_pin[0] ^= 1;
+        let mismatched = TlsConnector::from(Arc::new(client_config(&Trust::Pinned { spki_sha256: wrong_pin }).unwrap()))
+            .connect(name, TcpStream::connect(("127.0.0.1", port)).await.unwrap())
+            .await;
+        assert!(mismatched.is_err(), "a different SPKI pin must fail at the TLS handshake");
+        server.await.unwrap();
     }
 }
