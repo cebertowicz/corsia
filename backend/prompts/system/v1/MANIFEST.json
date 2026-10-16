@@ -268,10 +268,10 @@
       "sha256": "90ef9c6a26a32624ec249125654b405263f95a4a09030245f0cfe43b4e4b8029"
     },
     {
-      "bytes": 6069,
+      "bytes": 6120,
       "kind": "skill",
       "path": "skills/github/references/agent-account.md",
-      "sha256": "62fe7af00e0d14b96e96b065ff5907ece33c6698aa9b186aa6d2e78f44ef7ad4"
+      "sha256": "53475943bc0a3144587d78e257868381a1f9e9c4026538da95957768db681316"
     },
     {
       "bytes": 4556,

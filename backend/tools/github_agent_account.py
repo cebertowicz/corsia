@@ -106,8 +106,9 @@ class GitHubAgentAccountTool(Tool):
             "a named cause, and its login once verified. connect: create it if missing and "
             "start sign-in; returns a user_code and verification_uri for the person to enter "
             "in a browser signed in as the agents' GitHub account, never their own, or a "
-            "named cause and next step (skill github, agent-account.md). check: after the person entered the code, read the sign-in and "
-            "verify the account; repeat until ready or a named cause. sign_out: sign the "
+            "named cause and next step (skill github, agent-account.md). check: after the "
+            "person entered the code, read the sign-in and verify the account; repeat "
+            "until ready or a named cause. sign_out: sign the "
             "account out; agent shells stay locked until it is connected again. Never run "
             "gh auth login in the shell."
         )
