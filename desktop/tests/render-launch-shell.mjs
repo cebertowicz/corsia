@@ -24,6 +24,14 @@ function resolveWithin(root, requestPath) {
 	return resolved;
 }
 
+const contentTypes = new Map([
+	['.html', 'text/html; charset=utf-8'],
+	['.css', 'text/css'],
+	['.svg', 'image/svg+xml'],
+	['.png', 'image/png'],
+	['.js', 'text/javascript'],
+]);
+
 function startStaticServer() {
 	const server = createServer(async (request, response) => {
 		try {
@@ -38,7 +46,7 @@ function startStaticServer() {
 					: requestUrl.pathname;
 			const file = resolveWithin(root, suffix);
 			if (!(await stat(file)).isFile()) throw new Error('not a file');
-			response.writeHead(200);
+			response.writeHead(200, { 'Content-Type': contentTypes.get(path.extname(file)) ?? 'application/octet-stream' });
 			response.end(await readFile(file));
 		} catch {
 			response.writeHead(404);
@@ -71,6 +79,17 @@ async function render(page, state) {
 		await page.waitForFunction(() => document.getElementById('approval-check').dataset.state === 'on');
 	}
 	if (state === 'quit-failure') await page.evaluate(() => window.__corsiaShowQuitFailure());
+}
+
+async function assertImagesLoaded(page, state, theme) {
+	const images = await page.locator('img').evaluateAll((nodes) => nodes.map((image) => ({
+		src: image.currentSrc || image.src,
+		naturalWidth: image.naturalWidth,
+	})));
+	const unloaded = images.filter((image) => image.naturalWidth === 0);
+	if (unloaded.length) throw new Error(`${state} ${theme} has unloaded image(s): ${unloaded.map((image) => image.src).join(', ')}`);
+	console.log(`img-check: ${state}/${theme}: ${images.length} image(s) loaded`);
+	return images;
 }
 
 async function assertState(page, state) {
@@ -138,6 +157,33 @@ async function pixelDifference(page, left, right, ignoredRects = []) {
 	}, { left, right, ignoredRects });
 }
 
+async function nonBackgroundPixels(page, src, rect) {
+	return page.evaluate(async ({ src, rect }) => {
+		const image = await new Promise((resolve, reject) => {
+			const candidate = new Image();
+			candidate.onload = () => resolve(candidate);
+			candidate.onerror = reject;
+			candidate.src = src;
+		});
+		const canvas = document.createElement('canvas');
+		canvas.width = image.width;
+		canvas.height = image.height;
+		const context = canvas.getContext('2d', { willReadFrequently: true });
+		context.drawImage(image, 0, 0);
+		const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+		const sampleX = Math.max(0, rect.x - 1);
+		const sampleY = Math.max(0, rect.y - 1);
+		const sampleOffset = (sampleY * canvas.width + sampleX) * 4;
+		const background = [pixels[sampleOffset], pixels[sampleOffset + 1], pixels[sampleOffset + 2]];
+		let nonBackground = 0;
+		for (let y = rect.y; y < rect.y + rect.height; y++) for (let x = rect.x; x < rect.x + rect.width; x++) {
+			const offset = (y * canvas.width + x) * 4;
+			if (Math.abs(pixels[offset] - background[0]) + Math.abs(pixels[offset + 1] - background[1]) + Math.abs(pixels[offset + 2] - background[2]) > 12) nonBackground++;
+		}
+		return nonBackground;
+	}, { src, rect });
+}
+
 async function renderFrames(browser, baseUrl) {
 	const frames = [];
 	for (const theme of ['light', 'dark']) for (const state of ['starting', 'startup-failure', 'background-off', 'background-on', 'quit-failure']) {
@@ -147,11 +193,12 @@ async function renderFrames(browser, baseUrl) {
 		await page.goto(`${baseUrl}/desktop/dist-shell/index.html`, { waitUntil: 'networkidle' });
 		await render(page, state);
 		const observed = await assertState(page, state);
+		const images = await assertImagesLoaded(page, state, theme);
 		const file = `${state}-${theme}-1280x900.png`;
 		await page.screenshot({ path: path.join(output, file) });
 		const mark = await page.locator('.mark').boundingBox();
 		const primary = state === 'startup-failure' ? await page.locator('.primary:visible').boundingBox() : null;
-		frames.push({ file, state, theme, size: '1280x900', observed, mark, primary });
+		frames.push({ file, state, theme, size: '1280x900', observed, images, mark, primary });
 		await context.close();
 	}
 	return frames;
@@ -166,10 +213,11 @@ async function renderSmallFrame(browser, baseUrl) {
 		await page.goto(`${baseUrl}/desktop/dist-shell/index.html`, { waitUntil: 'networkidle' });
 		await render(page, 'background-off');
 		const observed = await assertState(page, 'background-off');
+		const images = await assertImagesLoaded(page, 'background-off', theme);
 		if (!observed.noScroll) throw new Error(`background-off ${theme} scrolls at 800x600`);
 		const file = `background-off-${theme}-800x600.png`;
 		await page.screenshot({ path: path.join(output, file) });
-		frames.push({ file, state: 'background-off', theme, size: '800x600', observed });
+		frames.push({ file, state: 'background-off', theme, size: '800x600', observed, images });
 		await context.close();
 	}
 	return frames;
@@ -191,8 +239,12 @@ async function writeEvidence(baseUrl, frames, diffPage) {
 		const mark = { x: Math.floor(frame.mark.x) - 2, y: Math.floor(frame.mark.y) - 2, width: Math.ceil(frame.mark.width) + 4, height: Math.ceil(frame.mark.height) + 4 };
 		const primary = { x: Math.floor(frame.primary.x) - 12, y: Math.floor(frame.primary.y) - 12, width: Math.ceil(frame.primary.width) + 24, height: Math.ceil(frame.primary.height) + 24 };
 		const outsideLogoAndPrimary = await pixelDifference(diffPage, `${baseUrl}/evidence/${frame.file}`, `${baseUrl}/approved/${approvedFile}`, [mark, primary]);
-		if (outsideLogoAndPrimary.changed > 50) throw new Error(`startup-failure ${theme} layout differs from the approved r3 frame outside Logo B and the current token primary action by ${outsideLogoAndPrimary.changed} pixels at ${JSON.stringify(outsideLogoAndPrimary.bounds)}`);
-		parity.push({ theme, approvedFile, rawChangedPixels: raw.changed, outsideLogoAndPrimaryChangedPixels: outsideLogoAndPrimary.changed });
+		if (outsideLogoAndPrimary.changed !== 0) throw new Error(`startup-failure ${theme} differs from the approved r3 frame outside Logo B and the tokenized primary action by ${outsideLogoAndPrimary.changed} pixels at ${JSON.stringify(outsideLogoAndPrimary.bounds)}`);
+		const logoDelta = await pixelDifference(diffPage, `${baseUrl}/evidence/${frame.file}`, `${baseUrl}/approved/${approvedFile}`, [primary]);
+		if (logoDelta.changed === 0) throw new Error(`startup-failure ${theme} Logo B does not differ from the approved Logo A frame`);
+		const nonBackgroundLogoPixels = await nonBackgroundPixels(diffPage, `${baseUrl}/evidence/${frame.file}`, mark);
+		if (nonBackgroundLogoPixels === 0) throw new Error(`startup-failure ${theme} Logo B is blank`);
+		parity.push({ theme, approvedFile, rawChangedPixels: raw.changed, outsideLogoAndPrimaryChangedPixels: outsideLogoAndPrimary.changed, logoDeltaChangedPixels: logoDelta.changed, nonBackgroundLogoPixels });
 	}
 	const elements = {
 		starting: 'spinner',
@@ -202,7 +254,7 @@ async function writeEvidence(baseUrl, frames, diffPage) {
 		'quit-failure': 'Open Login Items pill and Try again text action',
 	};
 	const lines = frames.map((frame) => `- ${frame.file}: ${elements[frame.state]}`).join('\n');
-	const report = `# Launch restyle frame evidence\n\n${lines}\n\nMinimum pair difference: ${Math.min(...pairDifferences.map((entry) => entry.changedPixels))} changed pixels (pass mark: more than 50).\n\nStartup failure parity (Logo A swapped for B):\n${parity.map((entry) => `- ${entry.theme}: ${entry.rawChangedPixels} raw changed pixels; ${entry.outsideLogoAndPrimaryChangedPixels} outside the 96px logo box and current token primary action.`).join('\n')}\n`;
+	const report = `# Launch restyle frame evidence\n\n${lines}\n\nImage check: every page image loaded in all ${frames.length} frames.\n\nMinimum pair difference: ${Math.min(...pairDifferences.map((entry) => entry.changedPixels))} changed pixels (pass mark: more than 50).\n\nStartup failure parity (Logo A swapped for B):\nPrimary exclusion: parity excludes the Logo B and primary-action rectangles because the primary uses the design-system token RGB 91,63,208 while the approved r3 mockup used older blue RGB 0,118,158.\n${parity.map((entry) => `- ${entry.theme}: ${entry.rawChangedPixels} raw changed pixels; ${entry.outsideLogoAndPrimaryChangedPixels} outside the Logo B and primary rectangles; Logo B delta ${entry.logoDeltaChangedPixels}; ${entry.nonBackgroundLogoPixels} non-background Logo B pixels.`).join('\n')}\n`;
 	await writeFile(path.join(output, 'FRAME-EVIDENCE.md'), report);
 	await writeFile(path.join(output, 'frame-metrics.json'), `${JSON.stringify({ frames, minimumPairDifference: Math.min(...pairDifferences.map((entry) => entry.changedPixels)), pairDifferences, parity }, null, 2)}\n`);
 	return { minimumPairDifference: Math.min(...pairDifferences.map((entry) => entry.changedPixels)), parity };
