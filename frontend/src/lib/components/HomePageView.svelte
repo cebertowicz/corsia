@@ -85,10 +85,31 @@
 
 	const easeOutQuint = cubicOut;
 	let setupMode = $state<'login' | 'flow'>('login');
+
+	function reduceMotion() {
+		return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	}
+
+	function duration(node: Element, name: '--dur-tight' | '--dur-standard') {
+		return Number.parseFloat(getComputedStyle(node).getPropertyValue(name)) || 0;
+	}
+
+	function authGateExit(node: Element) {
+		return fade(node, { duration: duration(node, reduceMotion() ? '--dur-tight' : '--dur-standard'), easing: easeOutQuint });
+	}
+
+	function appGateEnter(node: Element) {
+		const reduced = reduceMotion();
+		return fade(node, {
+			duration: duration(node, reduced ? '--dur-tight' : '--dur-standard'),
+			delay: reduced ? 0 : duration(node, '--dur-tight'),
+			easing: easeOutQuint,
+		});
+	}
 </script>
 
 {#if setupMode === 'flow'}
-	<div class="auth-gate" out:fade={{ duration: 320, easing: easeOutQuint }}>
+	<div class="auth-gate" out:authGateExit>
 		<SetupScreen
 			onExistingAccount={() => setupMode = 'login'}
 			onAccountCreated={() => setupMode = 'flow'}
@@ -96,11 +117,12 @@
 		/>
 	</div>
 {:else if !isAuthenticated}
-	<div class="auth-gate" out:fade={{ duration: 320, easing: easeOutQuint }}>
+	<div class="auth-gate" out:authGateExit>
 		<LoginScreen onNoAccount={() => setupMode = 'flow'} />
 	</div>
 {:else}
-	<HomeShell
+	<div class="app-gate" in:appGateEnter>
+		<HomeShell
 		{activeView}
 		bind:sidebarOpen
 		bind:chatPanelRef
@@ -129,6 +151,7 @@
 		onCloseMeasurement={onCloseMeasurement}
 		{onGoWorkspace}
 	/>
+	</div>
 {/if}
 
 <HomeOverlays
@@ -143,3 +166,7 @@
 	onConfirmDeleteThread={onConfirmDeleteThread}
 	onCancelDeleteThread={onCancelDeleteThread}
 />
+
+<style>
+	@media (prefers-reduced-motion: reduce) { .auth-gate, .app-gate { animation-duration: var(--dur-tight) !important; } }
+</style>

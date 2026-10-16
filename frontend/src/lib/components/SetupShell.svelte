@@ -136,8 +136,8 @@
 	function jobHeightMotion(node: Element, _params: undefined, { direction }: { direction: 'in' | 'out' | 'both' }) {
 		const style = getComputedStyle(node);
 		const tight = Number.parseFloat(style.getPropertyValue('--dur-tight')) || 0;
-		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return fade(node, { duration: tight });
 		const standard = Number.parseFloat(style.getPropertyValue('--dur-standard')) || 0;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return fade(node, { duration: tight });
 		return {
 			duration: direction === 'out' ? standard * 0.7 : standard,
 			css: (t: number) => `grid-template-rows: ${t}fr; opacity: ${t}`,
@@ -147,13 +147,21 @@
 	function jobRegionMotion(node: Element, _params: undefined, { direction }: { direction: 'in' | 'out' | 'both' }) {
 		const style = getComputedStyle(node);
 		const tight = Number.parseFloat(style.getPropertyValue('--dur-tight')) || 0;
-		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return fade(node, { duration: tight });
 		const standard = Number.parseFloat(style.getPropertyValue('--dur-standard')) || 0;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return fade(node, { duration: tight });
 		const height = node.getBoundingClientRect().height;
 		return {
 			duration: direction === 'out' ? standard * 0.7 : standard,
 			css: (t: number) => `height: ${t * height}px; opacity: ${t}; overflow: hidden`,
 		};
+	}
+
+	function sceneMotion(node: HTMLElement, params: undefined, options: { direction: 'in' | 'out' | 'both' }) {
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			const tight = Number.parseFloat(getComputedStyle(node).getPropertyValue('--dur-tight')) || 0;
+			return fade(node, { duration: tight });
+		}
+		return peerFade(node, params, options);
 	}
 </script>
 
@@ -181,7 +189,7 @@
 		<div class="drag" data-tauri-drag-region></div>
 		<div class="pane-scenes">
 			{#key page}
-				<section class="pane-scene" data-setup-page={page} in:peerFade out:peerFade onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
+				<section class="pane-scene" data-setup-page={page} in:sceneMotion out:sceneMotion onoutrostart={(event) => (event.currentTarget as HTMLElement).inert = true}>
 					<header>{#if mark}<img class="mark" src="/icons/corsia-mark.svg" alt="" />{/if}<h1 bind:this={sceneHeading} tabindex="-1">{title}</h1></header>
 					{#if lede}<p class="lede">{lede}</p>{/if}
 					<div class="body">{@render children?.()}</div>
@@ -247,6 +255,7 @@
 	/* The pill clips the exiting label while it shrinks; scoped here so the shared pill keeps its touch-target ::after. */
 	:global(.primary-action .btn.pill) { overflow: hidden; }
 	:global(.primary-action .btn.pill) { interpolate-size: allow-keywords; transition: width var(--dur-tight) var(--ease-snap), min-width var(--dur-tight) var(--ease-snap), background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), color var(--dur-tight) var(--ease-snap), opacity var(--dur-tight) var(--ease-snap), transform var(--dur-tight) var(--ease-snap); }
+	@media (prefers-reduced-motion: reduce) { .pane-scene, .job-region, .job-row, .primary-label { animation-duration: var(--dur-tight) !important; } }
 	.footer-note { max-width: calc(var(--space-8) * 6); color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
 	.job-region { overflow: hidden; }
 	.job-region-inner { min-height: 0; overflow: hidden; }
