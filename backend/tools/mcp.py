@@ -163,10 +163,16 @@ def _mcp_denial_guidance(text: str) -> str | None:
     if guidance := denial_guidance_for_output(text):
         path, separator, message = guidance.partition(" — ")
         if separator and "requires reviewed host access" in message:
-            return f"{path} — CORSIA private state is blocked for local MCP apps. Nothing was returned."
+            return (
+                f"{path} — CORSIA private state is blocked for local MCP apps. Nothing was returned. "
+                "Use the app's own working directory or a supported non-private integration."
+            )
         return guidance
     if "Operation not permitted" in text:
-        return "local MCP Safehouse confinement refused the operation; no private state was returned"
+        return (
+            "CORSIA private state is blocked for local MCP apps. Nothing was returned. "
+            "Use the app's own working directory or a supported non-private integration."
+        )
     return None
 
 

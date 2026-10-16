@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from tools.mcp import connect_mcp_servers
+from tools.mcp import _mcp_denial_guidance, connect_mcp_servers
 from tools.registry import ToolRegistry
 
 
@@ -104,6 +104,26 @@ def test_mcp_profile_denies_lexical_and_resolved_state_roots(monkeypatch, tmp_pa
     assert f'(subpath "{state / "keys"}")' in profile
     assert '(deny process-info*)' in profile
     assert '(allow signal (target same-sandbox))' in profile
+
+
+def test_mcp_safehouse_operation_not_permitted_names_private_state_boundary():
+    assert _mcp_denial_guidance("open: Operation not permitted") == (
+        "CORSIA private state is blocked for local MCP apps. Nothing was returned. "
+        "Use the app's own working directory or a supported non-private integration."
+    )
+
+
+def test_mcp_safehouse_path_denial_names_private_state_recovery(monkeypatch):
+    monkeypatch.setattr(
+        "tools.host_path_policy.denial_guidance_for_output",
+        lambda _text: "/state/keys/value — requires reviewed host access",
+    )
+
+    assert _mcp_denial_guidance("denied") == (
+        "/state/keys/value — CORSIA private state is blocked for local MCP apps. "
+        "Nothing was returned. Use the app's own working directory or a supported "
+        "non-private integration."
+    )
 
 
 @pytest.mark.asyncio
