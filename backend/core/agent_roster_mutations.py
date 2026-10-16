@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from loguru import logger
-
 from core.thread_naming import THREAD_TITLE_MAX_CHARS
 from infra.conductor import get_scope_coordinator
 from infra.database import write_transaction
 from infra.passive_changes import append_agent_roster_transition
+from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from infra.time import utc_now_iso
 
@@ -172,10 +171,15 @@ def change_agent(
             rehome_on_thread_end(db, thread_id, "agent_disabled")
         append_agent_roster_transition(
             db, before=thread, after=updated,
-            summary=f"Agent responsibility map updated: {thread['title'] or 'Untitled'}",
+            summary=f"Agent responsibility map updated: {updated['title'] or 'Untitled'}",
         )
         row = dict(updated)
     _publish_roster_row(row)
+    if row["title"] != thread["title"]:
+        emit_product_event(
+            "session", "renamed", thread_id=thread_id, user_id=row["user_id"],
+            properties={"title_len": len(row["title"])},
+        )
     return {"ok": True, "changed": True, "thread_id": thread_id}
 
 
@@ -188,12 +192,9 @@ def _publish_roster_row(row: dict[str, Any]) -> None:
     """
     from infra import state
 
-    try:
-        state.broadcast_event(row["id"], row["user_id"], {
-            "type": "session_updated",
-            "thread_id": row["id"],
-            **{key: row[key] for key in ROSTER_FRAME_FIELDS},
-            "updated_at": row["updated_at"],
-        })
-    except Exception as exc:  # noqa: BLE001 - the committed row stays authoritative
-        logger.warning("agent roster update delivery failed: {}", type(exc).__name__)
+    state.broadcast_event(row["id"], row["user_id"], {
+        "type": "session_updated",
+        "thread_id": row["id"],
+        **{key: row[key] for key in ROSTER_FRAME_FIELDS},
+        "updated_at": row["updated_at"],
+    })

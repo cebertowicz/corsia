@@ -24,6 +24,8 @@ def test_rename_field_is_named_on_the_roster_step():
 def test_home_step_writes_the_index_then_rehomes_it():
     step = _step(5)
     assert "shared/<domain>/INDEX.md" in step
+    assert "reuse it and leave that index as it is" in step
+    assert "add the category's line to `shared/INDEX.md`" in step
     assert "`artifact_rehome`" in step and "`artifact_resolve`" in step
     assert "refused until that file exists" in step
     assert "can't edit an index someone else owns" in step

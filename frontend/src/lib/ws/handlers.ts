@@ -33,7 +33,7 @@ import { acceptThreadModelTruth } from '../stores/models';
 import { handleCheckpointChanged } from './checkpointInvalidation';
 import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
 
-import { threadFrameFields } from './threadSwitchFields';
+import { threadFrameFields } from './threadFrameFields';
 import { FORWARDED_TYPES } from './forwardedTypes';
 
 function reconcileCorrelatedMessage(

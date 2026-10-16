@@ -60,24 +60,3 @@ def test_unchanged_retry_publishes_nothing(plain_thread, frames):
     change_agent("t1", body, user_id="user")
     change_agent("t1", body, user_id="user")
     assert len(frames) == 1
-
-
-def test_delivery_failure_keeps_the_committed_change(plain_thread, monkeypatch):
-    from core.agent_roster_mutations import change_agent
-    from infra.database import get_db
-
-    def boom(*_args, **_kwargs):
-        raise RuntimeError("socket gone")
-
-    monkeypatch.setattr("infra.state.broadcast_event", boom)
-    result = change_agent(
-        "t1", {"agent_enabled": True, "responsibility": "Owns docs."}, user_id="user",
-    )
-    assert result["changed"] is True
-    db = get_db()
-    try:
-        assert db.execute(
-            "SELECT agent_enabled FROM threads WHERE id='t1'"
-        ).fetchone()[0] == 1
-    finally:
-        db.close()
