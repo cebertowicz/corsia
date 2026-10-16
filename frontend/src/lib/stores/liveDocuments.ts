@@ -33,7 +33,7 @@ export const LIVE_OPEN_WAIT_MS = 30_000;
 const NOT_CONNECTED: DocOpenRefusal = {
 	code: 'not_connected',
 	title: 'Live editing is not connected.',
-	message: 'CORSIA could not reach the server to open this document. Text in this tab is kept. Retry when the connection returns.',
+	message: 'CORSIA could not reach the server to open this document. Text in this tab is kept. It reopens when the connection returns.',
 };
 /** A live session, or a non-live answer with the reason live editing is unavailable, if the server gave one. */
 export type LiveOpenOutcome = LiveDocumentSession | LiveUnavailable | null;
