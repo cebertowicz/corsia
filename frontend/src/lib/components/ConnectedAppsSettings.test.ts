@@ -35,6 +35,26 @@ describe('ConnectedAppsSettings', () => {
 		(host.querySelector('button.btn.primary') as HTMLButtonElement).click();
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/mcp/servers/github/approve'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ expected_revision: 1 }) })));
 		await vi.waitFor(() => expect(host.textContent).toContain('Connected · 2 actions'));
+		const connectedRow = host.querySelector('.app-row');
+		expect(connectedRow?.querySelector('.summary')?.getAttribute('aria-expanded')).toBe('false');
+		expect(connectedRow?.querySelector('[aria-hidden="true"]')?.textContent).toBe('›');
+	});
+
+	it('uses the waiting-row type treatment for connected rows too', async () => {
+		const connected = { ...awaiting, id: 'notes', name: 'Notes', state: 'working', tool_count: 2 };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [connected, awaiting] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelectorAll('.waiting-copy strong')).toHaveLength(2));
+		expect(host.querySelector('.app-copy')?.classList.contains('waiting-copy')).toBe(true);
+		expect(host.querySelector('.app-copy .second.status')).toBeNull();
+		expect(host.querySelector('.app-copy .second')?.textContent).toBe('Connected · 2 actions · All projects');
+	});
+
+	it('uses amber only for connected-app states needing attention', async () => {
+		const needsSignIn = { ...awaiting, id: 'notion', name: 'Notion', state: 'needs_sign_in' };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [needsSignIn] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('.app-copy .second.status')?.textContent).toContain('Needs you to sign in'));
 	});
 
 	it('calls decline for an awaiting approval row', async () => {

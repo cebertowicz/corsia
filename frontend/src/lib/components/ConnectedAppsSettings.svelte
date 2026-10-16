@@ -129,7 +129,7 @@
 				{:else}
 				<article class:open={isOpen(app)} class="app-row">
 					<button class="summary press-tint" aria-expanded={isOpen(app)} onclick={() => openId = openId === app.id ? null : app.id}>
-						<span class="app-copy"><strong title={app.name}>{app.name}</strong><span>{needsPlace(app) ? stateLine(app) : `${stateLine(app)} · ${placeLine(app)}`}</span></span><span aria-hidden="true">›</span>
+						<span class="app-copy waiting-copy"><strong title={app.name}>{app.name}</strong><span class="second" class:status={app.state !== 'working'}>{stateLine(app)}{#if !needsPlace(app)}<span class="place">{` · ${placeLine(app)}`}</span>{/if}</span></span><span aria-hidden="true">›</span>
 					</button>
 					{#if isOpen(app)}
 						<div class="details">
@@ -159,7 +159,7 @@
 {#if whereApp}<WhereItWorks app={whereApp} approve={whereApprove} onClose={() => whereApp = null} onSaved={(app) => { replace(app); whereApp = null; }} />{/if}
 
 <style>
-	.connected-apps { max-width: 760px; margin-top: var(--space-7); scroll-margin-top: var(--space-5); }
+	.connected-apps { width: 100%; margin-top: var(--space-7); scroll-margin-top: var(--space-5); }
 	.heading h2 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); }
 	.heading p { margin: var(--space-2) 0 0; color: var(--text-secondary); line-height: 1.5; }
 	.rows { display: grid; gap: var(--space-2); margin-top: var(--space-5); }
@@ -172,13 +172,14 @@
 	.second.status .place { color: var(--text-tertiary); }
 	.waiting-actions { display: flex; align-items: center; gap: var(--space-2); }
 	.waiting-row .error, .waiting-panel { flex-basis: 100%; margin: 0; }
-	.app-row { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); overflow: hidden; }
-	.summary { appearance: none; border: 0; background: none; color: inherit; width: 100%; padding: var(--space-4); display: flex; justify-content: space-between; align-items: center; cursor: pointer; text-align: left; }
+	/* Connected and waiting apps are one flat list; the chevron still discloses each connected app's details. */
+	.app-row { min-height: 38px; }
+	.summary { appearance: none; border: 0; background: none; color: inherit; width: 100%; padding: var(--space-2) var(--space-3); display: flex; justify-content: space-between; align-items: center; cursor: pointer; text-align: left; }
 	.app-copy { min-width: 0; display: grid; gap: var(--space-1); }
 	.app-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
-	.app-copy span, .state { color: var(--text-secondary); font-size: var(--text-footnote); }
-	.details { border-top: 1px solid var(--border-subtle); padding: var(--space-3) var(--space-4); }
-	.actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+	.state { color: var(--text-secondary); font-size: var(--text-footnote); }
+	.details { padding: var(--space-2) 0 var(--space-2) var(--space-3); }
+	.actions { display: flex; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; }
 	.error { color: var(--red); margin: 0 0 var(--space-2); font-size: var(--text-footnote); }
 	.state { margin: var(--space-5) 0; display: grid; gap: var(--space-3); }
 	@media (max-width: 768px) { .connected-apps { margin-top: var(--space-5); } }
