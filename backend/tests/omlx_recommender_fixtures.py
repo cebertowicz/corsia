@@ -52,7 +52,7 @@ class FakeOmlx:
     def asks(self) -> int:
         return sum(1 for _method, path, _body in self.calls if path == "/hf/recommendations")
 
-    def puts(self) -> list[tuple[str, dict]]:
+    def puts(self) -> list[tuple[str, object]]:
         return [(path, body) for method, path, body in self.calls if method == "PUT"]
 
     async def admin_request(self, _cfg, method, path, *, json=None, timeout=None):
