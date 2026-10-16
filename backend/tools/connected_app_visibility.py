@@ -43,6 +43,8 @@ def mcp_tool_visible_here(tool: Tool) -> bool:
     try:
         return mcp_tool_reaches_thread(tool, thread_id, db=db)
     except Exception:
+        # Discovery is fail-closed: unavailable identity or reach state must
+        # never disclose an app's server, schema, or configuration references.
         return False
     finally:
         db.close()
