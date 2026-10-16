@@ -24,6 +24,16 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def asset_root() -> Path:
+    """Return the app-owned location for the corrections asset."""
+    overridden = os.environ.get("CORSIA_CORRECTIONS_ASSET_DIR")
+    if overridden:
+        return Path(overridden)
+    from infra.config import STATE_ROOT
+
+    return STATE_ROOT / "assets" / classifier.CORRECTIONS_SPEC.asset_id
+
+
 def staging_dir(root: Path) -> Path:
     """Beside the root, so the final swap is a rename on one filesystem."""
     return root.parent / f".{root.name}.staging-{max(PINNED_MANIFESTS)}"
@@ -35,7 +45,7 @@ def previous_dir(root: Path) -> Path:
 
 def recover_interrupted_install(root: Path | None = None) -> bool:
     """Put the parked version back when a swap died between its two renames."""
-    root = root or classifier.asset_root()
+    root = root or asset_root()
     previous = previous_dir(root)
     if root.exists() or not previous.is_dir():
         return False

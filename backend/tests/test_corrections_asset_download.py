@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import corrections_asset_download as download  # noqa: E402
 from core import corrections_asset_pins  # noqa: E402
 from core import corrections_asset_signals as signals  # noqa: E402
-from core.corrections_classifier import AssetError  # noqa: E402
+from core.onnx_asset import AssetError  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
 
 

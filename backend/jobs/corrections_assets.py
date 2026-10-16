@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
 
 from core import corrections_classifier
+from core.corrections_asset_files import asset_root
 from core.onnx_asset import AssetError, AssetManifest, load_pinned_manifest
 
 _VERSION_LABEL = re.compile(r"v([0-9]+)")
@@ -25,16 +25,6 @@ class AssetSelectionError(AssetError):
     ) -> None:
         super().__init__(message, reader=reader)
         self.versions = versions
-
-
-def asset_root() -> Path:
-    """Return the app-owned location for the corrections asset."""
-    overridden = os.environ.get("CORSIA_CORRECTIONS_ASSET_DIR")
-    if overridden:
-        return Path(overridden)
-    from infra.config import STATE_ROOT
-
-    return STATE_ROOT / "assets" / corrections_classifier.CORRECTIONS_SPEC.asset_id
 
 
 def version_number(label: str) -> int:

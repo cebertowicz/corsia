@@ -11,6 +11,7 @@ is checked against that manifest by size and sha256 before it is installed.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import shutil
@@ -21,10 +22,11 @@ from typing import Any, Callable
 
 import httpx
 
-from core import corrections_classifier as classifier
 from core.corrections_asset_files import (
-    free_bytes, previous_dir, recover_interrupted_install, sha256, short_of_space, staging_dir,
+    asset_root, free_bytes, previous_dir, recover_interrupted_install, sha256, short_of_space, staging_dir,
 )
+from core.corrections_classifier import CORRECTIONS_SPEC
+from core.onnx_asset import AssetError, AssetManifest, load_manifest, run_self_test
 from core.corrections_asset_pins import PINNED_MANIFESTS
 from core.corrections_asset_signals import State, broadcast_update, public_state, wake_corrections
 
@@ -67,9 +69,9 @@ class ClassifierDownload:
     def __init__(
         self,
         *,
-        root: Callable[[], Path] = classifier.asset_root,
+        root: Callable[[], Path] = asset_root,
         url: Callable[[], str] = base_url,
-        self_test: Callable[[Path], None] = classifier.run_self_test,
+        self_test: Callable[[Path], None] = functools.partial(run_self_test, spec=CORRECTIONS_SPEC),
         free_bytes: Callable[[Path], int] = free_bytes,
         sleep: Callable[[float], None] = time.sleep,
         client_factory: Callable[[], httpx.Client] | None = None,
@@ -215,7 +217,7 @@ class ClassifierDownload:
         previous = previous_dir(root)
         try:
             self._self_test(root)
-        except classifier.AssetError as error:
+        except AssetError as error:
             logger.info("Installed corrections classifier did not pass its check: %s", error)
             if not previous.is_dir():
                 return False
@@ -224,13 +226,13 @@ class ClassifierDownload:
             os.replace(previous, root)
             try:
                 self._self_test(root)
-            except classifier.AssetError:
+            except AssetError:
                 return False
             return True
         shutil.rmtree(previous, ignore_errors=True)
         return True
 
-    def _fetch_manifest(self, client: httpx.Client, staging: Path, pin: str) -> classifier.AssetManifest:
+    def _fetch_manifest(self, client: httpx.Client, staging: Path, pin: str) -> AssetManifest:
         path = staging / "manifest.json"
         path.unlink(missing_ok=True)
         self._download(client, f"{self._url()}/manifest.json", path)
@@ -241,8 +243,8 @@ class ClassifierDownload:
                 "The download is not the version this app expects.",
             )
         try:
-            return classifier.AssetManifest.load(path, expected_sha256=pin)
-        except classifier.AssetError as error:
+            return load_manifest(path, CORRECTIONS_SPEC, expected_sha256=pin)
+        except AssetError as error:
             path.unlink(missing_ok=True)
             raise _Failure("manifest_mismatch", _reader(error)) from error
 
@@ -372,7 +374,7 @@ class ClassifierDownload:
             self._set(state="self_testing")
             self._self_test(root)
         except Exception as error:
-            damaged = isinstance(error, classifier.AssetError)
+            damaged = isinstance(error, AssetError)
             if placed and damaged:
                 shutil.rmtree(root, ignore_errors=True)
             elif placed:
