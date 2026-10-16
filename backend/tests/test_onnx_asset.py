@@ -231,3 +231,31 @@ def test_unreadable_memory_during_load_is_deterministic(monkeypatch, tmp_path):
 
     assert raised.value.kind == "deterministic"
     assert not child.running
+
+
+def test_a_child_that_exits_during_load_stays_a_transient_crash(monkeypatch, tmp_path):
+    from core import onnx_child
+    from core.onnx_asset import load_manifest
+
+    class _ExitedConnection(_FakeConnection):
+        def poll(self, _timeout):
+            return True
+
+        def recv(self):
+            raise EOFError
+
+    path = _manifest(tmp_path, asset_id="email-prompt-guard", policy="email-prompt-v1", head="injection")
+    spec = _other_spec({"v1": hashlib.sha256(path.read_bytes()).hexdigest()})
+    child, _connection = _child_with(monkeypatch, load_manifest(path, spec), spec, [])
+    monkeypatch.setattr(onnx_child, "Pipe", lambda: (_ExitedConnection([]), _FakeConnection([])))
+
+    def exited(_process):
+        raise psutil.NoSuchProcess(pid=123)
+
+    monkeypatch.setattr(onnx_child, "_child_rss_bytes", exited)
+
+    with pytest.raises(onnx_child.OnnxUnavailable) as raised:
+        child.ensure_loaded()
+
+    assert (raised.value.kind, raised.value.cause) == ("transient", "child_exited")
+    assert not child.running

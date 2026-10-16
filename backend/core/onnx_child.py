@@ -11,6 +11,8 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any, Callable
 
+import psutil
+
 from core.onnx_asset import (
     AssetManifest,
     OnnxAssetSpec,
@@ -202,6 +204,8 @@ class OnnxChild:
     def _check_rss(self, request: dict[str, Any] | None) -> None:
         try:
             rss = _child_rss_bytes(self._process)
+        except psutil.NoSuchProcess:
+            return  # an exited child holds no memory; its closed pipe reports child_exited
         except Exception as error:
             self._stop(graceful=False)
             if request is None:
@@ -240,8 +244,6 @@ def _child_rss_bytes(process: Process | None) -> int:
     """Read the child RSS or fail rather than permit an uncapped process to continue."""
     if process is None:
         raise RuntimeError("child has no process")
-    import psutil
-
     return psutil.Process(process.pid).memory_info().rss
 
 
