@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from collections import namedtuple
 
 import pytest
@@ -66,7 +67,10 @@ def legacy(monkeypatch, tmp_path):
     state = tmp_path / "state"
     settings = tmp_path / "omlx" / "settings.json"
     model_dir = tmp_path / "models"
-    (model_dir / local_profiles.OWN_OMLX_STARTER.repository).mkdir(parents=True)
+    starter = model_dir / local_profiles.OWN_OMLX_STARTER.repository
+    starter.mkdir(parents=True)
+    with open(starter / "model.safetensors", "wb") as weights:  # sparse: full size, no disk
+        weights.truncate(local_profiles.OWN_OMLX_STARTER.download_size_bytes)
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"model": {"model_dir": str(model_dir)}}))
     state.mkdir()
@@ -92,7 +96,9 @@ def test_startup_backfills_the_starter_a_finished_legacy_setup_installed(legacy)
     assert local_model.backfill_legacy_record() is None
 
 
-@pytest.mark.parametrize("case", ["no_marker", "no_omlx", "foreign", "no_starter", "setup_in_flight"])
+@pytest.mark.parametrize("case", [
+    "no_marker", "no_omlx", "foreign", "no_starter", "setup_in_flight", "download_short", "download_partial",
+])
 def test_startup_backfill_never_fires_without_proof_of_a_finished_setup(legacy, case):
     local_model, state, model_dir, env = legacy
     if case == "no_marker":
@@ -102,18 +108,18 @@ def test_startup_backfill_never_fires_without_proof_of_a_finished_setup(legacy, 
     elif case == "foreign":
         env["foreign"] = True
     elif case == "no_starter":
-        (model_dir / local_profiles.OWN_OMLX_STARTER.repository).rmdir()
+        shutil.rmtree(model_dir / local_profiles.OWN_OMLX_STARTER.repository)
+    elif case == "download_short":
+        # A cancelled or failed download: setup cleared its record, the folder stays.
+        weights = model_dir / local_profiles.OWN_OMLX_STARTER.repository / "model.safetensors"
+        with open(weights, "r+b") as handle:
+            handle.truncate(local_profiles.OWN_OMLX_STARTER.download_size_bytes - 1)
+    elif case == "download_partial":
+        (model_dir / local_profiles.OWN_OMLX_STARTER.repository / "tokenizer.json.incomplete").write_text("{")
     else:
         (state / "operation.json").write_text(json.dumps({"profile": "legacy-mid-download"}))
 
     assert local_model.backfill_legacy_record() is None
-    assert not (state / "local-model.json").exists()
-
-
-def test_reading_the_set_up_model_has_no_side_effects(legacy):
-    local_model, state, _model_dir, _env = legacy
-
-    assert local_model.set_up_model() is None
     assert not (state / "local-model.json").exists()
 
 

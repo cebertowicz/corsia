@@ -169,8 +169,8 @@ def record_set_up(model: LocalModel) -> None:
 
 
 def _starter_installed(starter: LocalModel) -> bool:
-    """Whether CORSIA's own oMLX has the pre-record starter in its configured model directory."""
-    from llm.local_setup_ownership import own_omlx_settings_file
+    """Whether CORSIA's own oMLX has the whole pre-record starter in its configured model directory."""
+    from llm.local_setup_ownership import download_complete, own_omlx_settings_file
 
     try:
         raw = json.loads(own_omlx_settings_file().read_text(encoding="utf-8"))
@@ -178,7 +178,9 @@ def _starter_installed(starter: LocalModel) -> bool:
         return False
     model = raw.get("model") if isinstance(raw, dict) else None
     model_dir = model.get("model_dir") if isinstance(model, dict) else None
-    return isinstance(model_dir, str) and bool(model_dir) and (Path(model_dir) / starter.repository).is_dir()
+    if not isinstance(model_dir, str) or not model_dir:
+        return False
+    return download_complete(Path(model_dir) / starter.repository, starter.download_size_bytes)
 
 
 def backfill_legacy_record() -> LocalModel | None:
@@ -186,7 +188,8 @@ def backfill_legacy_record() -> LocalModel | None:
 
     Writes only when there is no record and no recovery record of any version (a
     setup may be mid-download), setup's own marker is present, the current oMLX
-    runs and is setup's own, and that oMLX's model directory holds the starter.
+    runs and is setup's own, and that oMLX's model directory holds the whole starter
+    (the marker is written before the download starts, so it proves no download).
     Blocking: run it off the event loop.
     """
     from llm import local_setup_operation
