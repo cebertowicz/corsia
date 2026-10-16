@@ -181,23 +181,37 @@ def _starter_installed(starter: LocalModel) -> bool:
     return isinstance(model_dir, str) and bool(model_dir) and (Path(model_dir) / starter.repository).is_dir()
 
 
-def _backfill_starter() -> LocalModel | None:
-    """Write the one missing legacy record when CORSIA's own old oMLX still has its starter."""
-    from llm.local_profiles import OWN_OMLX_STARTER
-    from llm.local_setup_ownership import existing_install_is_foreign
+def backfill_legacy_record() -> LocalModel | None:
+    """Once at startup, record the starter a finished pre-record setup installed.
 
-    if existing_install_is_foreign() or not _starter_installed(OWN_OMLX_STARTER):
+    Writes only when there is no record and no recovery record of any version (a
+    setup may be mid-download), setup's own marker is present, the current oMLX
+    runs and is setup's own, and that oMLX's model directory holds the starter.
+    Blocking: run it off the event loop.
+    """
+    from llm import local_setup_operation
+    from llm.local_profiles import OWN_OMLX_STARTER
+    from llm.local_setup_ownership import existing_install_is_foreign, installed_omlx, marker_path
+
+    if _record_path().exists() or local_setup_operation.record_path().exists() or not marker_path().exists():
         return None
-    record_set_up(OWN_OMLX_STARTER)
+    if installed_omlx() is None or existing_install_is_foreign() or not _starter_installed(OWN_OMLX_STARTER):
+        return None
+    try:
+        record_set_up(OWN_OMLX_STARTER)
+    except OSError as error:
+        log.warning("could not record the earlier setup's starter model: %s", error)
+        return None
+    log.info("recorded the starter model a finished earlier setup installed")
     return OWN_OMLX_STARTER
 
 
 def set_up_model() -> LocalModel | None:
-    """The model the last finished setup installed, backfilling the one pre-record starter when present."""
+    """The model the last finished setup installed, else None."""
     try:
         raw = json.loads(_record_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return _backfill_starter()
+        return None
     except (OSError, ValueError) as error:
         log.warning("local model record is unreadable; treating it as absent: %s", error)
         return None
