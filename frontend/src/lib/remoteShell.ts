@@ -33,7 +33,7 @@ export function shellInfo(): ShellInfo | null {
 function invoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
 	const call = (window as ShellWindow).__TAURI_INTERNALS__?.invoke;
 	if (!call) return Promise.reject(new Error('shell unavailable'));
-	return call(command, args);
+	return args === undefined ? call(command) : call(command, args);
 }
 
 export async function remoteDiscovered(): Promise<DiscoveredResult> {

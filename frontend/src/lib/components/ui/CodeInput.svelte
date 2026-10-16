@@ -28,7 +28,12 @@
 	let boxes: HTMLInputElement[] = $state([]);
 	const chars = $derived(Array.from({ length }, (_, i) => value[i] ?? ''));
 
-	onMount(() => { if (focusAt !== undefined) boxes[focusAt]?.focus({ preventScroll: true }); });
+	onMount(() => {
+		if (focusAt === undefined) return;
+		// A page change moves focus to its heading on the next tick; take it back after that.
+		const timer = setTimeout(() => boxes[focusAt]?.focus({ preventScroll: true }), 0);
+		return () => clearTimeout(timer);
+	});
 
 	let lastRefocus = untrack(() => refocus);
 	$effect(() => {
