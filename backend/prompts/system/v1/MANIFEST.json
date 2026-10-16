@@ -166,10 +166,10 @@
       "sha256": "2a6b6df1b4b545683daa4eded9421b1625d356d275aabcc7fa5cb4aa7f1b9d88"
     },
     {
-      "bytes": 2249,
+      "bytes": 2259,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-agent.md",
-      "sha256": "db04a28cd613ee8908ca6c3169feb388a5c09579052faa69e98cf87f031468a1"
+      "sha256": "4e9e3892141fdb3f400e696d884a42aada09b43e0bd4618b8d4196829b5a29d0"
     },
     {
       "bytes": 11099,
@@ -274,10 +274,10 @@
       "sha256": "5a737798876019404b7802a8aebf33d712658bb21e1df33ce00a325f558bc175"
     },
     {
-      "bytes": 4449,
+      "bytes": 4459,
       "kind": "skill",
       "path": "skills/google-setup/SKILL.md",
-      "sha256": "21b56d785d63291f8dbc79ca1c60484cc1e98c6410ae7ba0b54d4a6c54c3af44"
+      "sha256": "7f00e6289dfc872302f40578d045f3ba36f5a7ddd9e427be38bd1f9b7f56eaf1"
     },
     {
       "bytes": 5925,

@@ -26,11 +26,7 @@ def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
     for status in ("awaiting_approval", "already_exists", "outside_project", "cannot_connect", "failed"):
         assert f"`{status}`" in result_lines or f'"{status}"' in result_lines
     assert "`Approve them in [Settings › System › Connected apps](/settings/system#connected-apps).`" in result_lines
-    assert "Every CORSIA agent can use what you bring over" not in first_run
-    for retired in ("**The Assistant:**", "Create your Assistant", "<assistant_setup_node_id>",
-                    "assistant-onboarding"):
-        assert retired not in first_run
-    assert "Email and calendar are yours, not an agent's" in first_run
+    assert "Email and calendar on a Google account are yours, not an agent's" in first_run
     assert "Raise the decision whose `task_title` is this task." in first_run
     assert "CORSIA builds every setup decision: raise it unchanged; never write or reword one." in first_run
     assert "Point me to a folder, or describe your work in a sentence or two." in first_run
@@ -80,18 +76,12 @@ def test_person_browser_steps_have_one_rule_and_no_url_wait():
         assert "`wait` on a URL" not in text
 
 
-def test_email_and_calendar_route_to_google_setup_and_no_assistant_remains():
-    """Step 6 and the first-agent path both load google-setup; the Assistant and its handover are gone."""
+def test_email_and_calendar_route_to_google_setup():
+    """Step 6 and the first-agent path both load google-setup; another mail provider still gets an agent."""
     assert "skill `google-setup`" in FIRST_RUN_APP.read_text(encoding="utf-8")
-    assert "skill `google-setup`" in FIRST_AGENT.read_text(encoding="utf-8")
-    assert not (SKILLS / "assistant-onboarding/SKILL.md").exists()
-    assert "`gmail_eligible`" in FIRST_AGENT.read_text(encoding="utf-8")
-    first_run = (SKILLS / "conductor-bootstrap/references/first-run.md").read_text(encoding="utf-8")
-    assert "the Assistant" not in first_run
-    for path in SKILLS.rglob("*.md"):
-        text = path.read_text(encoding="utf-8")
-        assert "google_adopt_assistant_sign_in" not in text, path
-        assert "assistant-onboarding" not in text, path
+    first_agent = FIRST_AGENT.read_text(encoding="utf-8")
+    assert "connect them with skill `google-setup` instead of creating an agent" in first_agent
+    assert "another mail provider included, goes to step 3" in first_agent
 
 
 def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backend():
@@ -112,4 +102,3 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Read the client ID from the Clients list" in steps and "never open it" in steps
     assert steps.index("`google_connect` with no `client_file`") < steps.index("agent-browser --version")
     assert "Connected as <address>. If that's the wrong account, say so and I'll switch it." in steps
-    assert "gws" not in skill

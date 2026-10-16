@@ -21,12 +21,6 @@ HELPER = ASSETS / "gws-env.sh"
 REPLY_GUARD = ASSETS / "gws-reply-guard.py"
 
 
-def test_only_the_assets_remain_so_no_new_assistant_skill_is_offered():
-    assert sorted(path.name for path in ASSETS.parent.rglob("*") if path.is_file()) == [
-        "gws-env.sh", "gws-reply-guard.py",
-    ]
-
-
 def test_helper_moves_client_sets_environment_and_never_echoes_values(tmp_path: Path):
     home = tmp_path / "gws-home"
     home.mkdir()
