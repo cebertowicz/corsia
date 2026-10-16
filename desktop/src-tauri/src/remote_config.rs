@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
+
+use crate::trust::Trust;
 
 const CONFIG_FILE: &str = "config.json";
 const CONFIG_TEMP_FILE: &str = "config.json.remote.tmp";
@@ -17,6 +20,36 @@ pub enum Locator {
 pub enum RemoteTrust {
     Pinned { spki_sha256: String },
     System,
+}
+
+impl From<&Trust> for RemoteTrust {
+    fn from(value: &Trust) -> Self {
+        match value {
+            Trust::Pinned { spki_sha256 } => Self::Pinned {
+                spki_sha256: BASE64.encode(spki_sha256),
+            },
+            Trust::System => Self::System,
+        }
+    }
+}
+
+impl TryFrom<&RemoteTrust> for Trust {
+    type Error = String;
+
+    fn try_from(value: &RemoteTrust) -> Result<Self, Self::Error> {
+        match value {
+            RemoteTrust::System => Ok(Self::System),
+            RemoteTrust::Pinned { spki_sha256 } => {
+                let decoded = BASE64
+                    .decode(spki_sha256)
+                    .map_err(|_| "saved remote trust is not valid base64".to_owned())?;
+                let bytes: [u8; 32] = decoded
+                    .try_into()
+                    .map_err(|_| "saved remote trust must contain exactly 32 bytes".to_owned())?;
+                Ok(Self::Pinned { spki_sha256: bytes })
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -85,9 +118,23 @@ mod tests {
     fn record() -> RemoteRecord {
         RemoteRecord {
             locator: Locator::DnsSd { instance: "Studio".into() },
-            trust: RemoteTrust::Pinned { spki_sha256: "YWJj".into() },
+            trust: RemoteTrust::Pinned { spki_sha256: BASE64.encode([7_u8; 32]) },
             name: "Studio".into(),
             proxy_port: 47911,
+        }
+    }
+
+    #[test]
+    fn trust_round_trips_as_standard_base64() {
+        let trust = Trust::Pinned { spki_sha256: [7_u8; 32] };
+        let saved = RemoteTrust::from(&trust);
+        assert_eq!(Trust::try_from(&saved), Ok(trust));
+    }
+
+    #[test]
+    fn corrupt_pinned_trust_is_rejected_without_system_fallback() {
+        for encoded in [BASE64.encode([7_u8; 31]), BASE64.encode([7_u8; 33]), "not base64!".into()] {
+            assert!(Trust::try_from(&RemoteTrust::Pinned { spki_sha256: encoded }).is_err());
         }
     }
 
