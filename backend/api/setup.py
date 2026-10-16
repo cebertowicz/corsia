@@ -149,6 +149,24 @@ def _required_username() -> str | None:
     return owners[0] if len(owners) == 1 else None
 
 
+_READY_AI_NAMES = {"claude-code": "Claude Code", "codex": "Codex"}
+
+
+def _ready_ai() -> str | None:
+    """The name of a CLI source that the startup check already found Ready, else None.
+
+    Only the stored check result is read, so nothing runs before an account exists. A
+    stale "ready" is harmless: the account step rechecks with a session before it skips.
+    """
+    from connections.models import get_connection
+    from connections.source_state import HARNESS_PROVIDERS, row_state
+
+    for provider in HARNESS_PROVIDERS:
+        if row_state(get_connection(provider))["state"] == "ready":
+            return _READY_AI_NAMES.get(provider, provider)
+    return None
+
+
 def _setup_status() -> dict:
     """Build the bounded pre-auth screen facts without exposing machine identity."""
     from llm.local_setup_gates import host_ram_bytes, profile_eligibility
@@ -174,6 +192,7 @@ def _setup_status() -> dict:
         "model_size_gb": round(DEFAULT_PROFILE.download_size_bytes / 1000**3, 1),
         "required_username": _required_username(),
         "existing_omlx": existing_omlx_requires_consent(),
+        "ready_ai": _ready_ai(),
     }
 
 

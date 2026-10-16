@@ -34,6 +34,23 @@ afterEach(async () => {
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 
+async function createAccountFromWelcome() {
+	Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
+	await settle();
+	for (const [input, value] of [
+		[host.querySelector('input[autocomplete="name"]'), 'First Person'],
+		[host.querySelector('input[autocomplete="username"]'), 'first'],
+		...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
+	] as [HTMLInputElement, string][]) {
+		input.value = value;
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+	}
+	await tick();
+	const primary = Array.from(host.querySelectorAll('button')).find((button) => ['Continue', 'Start using CORSIA'].includes(button.textContent?.trim() ?? ''));
+	primary?.click();
+	await settle();
+}
+
 describe('SetupScreen', () => {
 	it('reads only setup status before showing the Welcome decision', async () => {
 		await settle();
@@ -369,17 +386,35 @@ describe('SetupScreen', () => {
 		expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Downloading')).toBe(false);
 	});
 
-	it('enables Start only when a source is ready beside a local download', async () => {
+	it('skips the AI step when a source is already Ready, with Start using CORSIA on the account step', async () => {
 		if (component) await unmount(component);
+		const onFinished = vi.fn();
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30 });
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, ready_ai: 'Claude Code' });
 			if (url === '/api/setup/local-download') return json({ in_progress: true });
-			if (url === '/api/setup/first-account') return json({ token: '[REDACTED]', user: { id: 'setup-user', name: 'First Person' } });
+			if (url === '/api/setup/first-account') return json({ token: 'session-token', user: { id: 'setup-user', name: 'First Person' } });
 			if (url === '/api/providers/sources/recheck') return json({ sources: [
 				{ source: 'omlx', name: 'Local model', state: 'needs_setup', setup_stage: 'Installing', download_percent: null },
 				{ source: 'claude-code', name: 'Claude Code', state: 'ready', accounts: [{ state: 'ready' }] },
 			] });
+			return json({ sources: [] });
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished } });
+		flushSync();
+		await settle();
+		await createAccountFromWelcome();
+
+		expect(onFinished).toHaveBeenCalledTimes(1);
+		expect(host.textContent).not.toContain('Connect an AI');
+	});
+
+	it('names the ready source in the sidebar and reads Start using CORSIA before the account exists', async () => {
+		if (component) await unmount(component);
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, model_name: 'Qwen 3.8', model_size_gb: 30, ready_ai: 'Claude Code' });
+			if (url === '/api/setup/local-download') return json({ in_progress: true });
 			return json({ sources: [] });
 		}));
 		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
@@ -387,20 +422,10 @@ describe('SetupScreen', () => {
 		await settle();
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
 		await settle();
-		for (const [input, value] of [
-			[host.querySelector('input[autocomplete="name"]'), 'First Person'],
-			[host.querySelector('input[autocomplete="username"]'), 'first'],
-			...Array.from(host.querySelectorAll('input[autocomplete="new-password"]')).map((input) => [input, 'correct-password']),
-		] as [HTMLInputElement, string][]) {
-			input.value = value;
-			input.dispatchEvent(new Event('input', { bubbles: true }));
-		}
-		await tick();
-		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Continue'))?.click();
-		await settle();
 
-		expect(host.textContent).toContain('Installing');
-		expect(host.textContent).toContain('Ready to use.');
-		expect(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Start using CORSIA'))).toHaveProperty('disabled', false);
+		expect(host.querySelector('[aria-label="Setup progress"]')?.textContent).toContain('Claude Code');
+		const buttons = Array.from(host.querySelectorAll('button'));
+		expect(buttons.some((button) => button.textContent?.trim() === 'Start using CORSIA')).toBe(true);
+		expect(buttons.some((button) => button.textContent?.trim() === 'Continue')).toBe(false);
 	});
 });

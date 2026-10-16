@@ -125,6 +125,7 @@ def test_status_exposes_only_screen_facts(client, monkeypatch):
         "model_size_gb": 30.0,
         "required_username": None,
         "existing_omlx": False,
+        "ready_ai": None,
     }
     monkeypatch.setattr(setup_api, "_setup_status", lambda: facts)
     response = client.get("/api/setup/status", headers=LOOPBACK_HEADERS)
@@ -384,6 +385,24 @@ def test_status_has_a_stable_below_minimum_ram_variant(monkeypatch, tmp_path):
     assert status["local_eligible"] is False
     assert status["free_disk_gb"] is not None
     assert status["work_folder"] == "…/workspace"
+
+
+@pytest.mark.parametrize(
+    ("states", "expected"),
+    [
+        ({}, None),
+        ({"claude-code": "needs_auth", "codex": "not_installed"}, None),
+        ({"claude-code": "needs_auth", "codex": "ready"}, "Codex"),
+        ({"claude-code": "ready", "codex": "ready"}, "Claude Code"),
+    ],
+)
+def test_status_names_a_ready_cli_source_from_the_stored_check(monkeypatch, states, expected):
+    from connections import models as connection_models
+    from connections import source_state
+
+    monkeypatch.setattr(connection_models, "get_connection", lambda provider: {"provider": provider})
+    monkeypatch.setattr(source_state, "row_state", lambda row: {"state": states.get(row["provider"], "not_installed")})
+    assert setup_api._ready_ai() == expected
 
 
 def test_routes_are_registered():
