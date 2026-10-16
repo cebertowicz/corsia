@@ -8,8 +8,8 @@ from typing import Any
 
 from loguru import logger as log
 
-from events.connectors import github_reviewer_gate, github_reviewer_notifications
-from events import reviewer_fork_hold, reviewer_gate_retry_log, reviewer_gate_state
+from events.connectors import github_reviewer_fork_hold, github_reviewer_gate, github_reviewer_notifications
+from events import reviewer_gate_retry_log, reviewer_gate_state
 from infra.product_events import emit_product_event
 
 
@@ -251,7 +251,7 @@ def _evaluate_ready_pr(
             return
         _report_mergeability_unresolved(repo, pr_number, head_sha, loop)
         return
-    if reviewer_fork_hold.holds_review(repo, pr_number, head_sha, pr_info):
+    if github_reviewer_fork_hold.holds_review(repo, pr_number, head_sha, pr_info):
         return
     if github_reviewer_gate.hold_pr_until_reviewable(repo, pr_number, head_sha, pr_info):
         return

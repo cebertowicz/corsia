@@ -53,7 +53,7 @@ def test_ingress_runs_the_label_gate_leg_off_the_loop() -> None:
         return None
 
     with patch("events.ingress.route_leg", fake_route), \
-         patch("events.reviewer_fork_hold.approve_head") as approve:
+         patch("events.connectors.github_reviewer_fork_hold.approve_head") as approve:
         result = asyncio.run(handle_event("webhook.github.pr_labeled", _labeled(LABEL_REVIEW)))
 
     assert result["reviewer_gate"] == "evaluated"

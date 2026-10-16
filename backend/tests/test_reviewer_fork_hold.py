@@ -92,7 +92,7 @@ def _label(gate_mod, payload, pr_info):
     fetch, checks, emit = _green(gate_mod, pr_info)
     with fetch, checks, emit as emitted, patch("reviewer.reviewer_status.set_status"), \
          patch("reviewer.gh_fork_hold.approve_waiting_runs", return_value=2) as approve, \
-         patch("events.reviewer_fork_hold.emit_product_event") as fork_emitted, \
+         patch("events.connectors.github_reviewer_fork_hold.emit_product_event") as fork_emitted, \
          patch.object(gate_mod, "_run_reviewer") as review:
         handled = check_gate_on_trigger("webhook.github.pr_labeled", payload)
     return handled, review, approve, fork_emitted
@@ -138,7 +138,7 @@ def test_a_label_event_without_a_head_is_reported_not_approved(_reload_gate):
 
     payload = _payload("labeled", "")
     with patch("events.reviewer_route.emit_product_event") as emitted, \
-         patch("events.reviewer_fork_hold.approve_head") as approve:
+         patch("events.connectors.github_reviewer_fork_hold.approve_head") as approve:
         assert check_gate_on_trigger("webhook.github.pr_labeled", payload) is False
 
     approve.assert_not_called()

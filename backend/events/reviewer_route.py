@@ -54,7 +54,7 @@ def run_review(internal_event: str, payload: dict[str, Any]) -> None:
         (head_sha or "?")[:8],
     )
 
-    from events.reviewer_fork_hold import on_fork_push
+    from events.connectors.github_reviewer_fork_hold import on_fork_push
 
     repo = (payload.get("repository") or {}).get("full_name", "")
     on_fork_push(repo, pr_number, head_sha, internal_event, payload)
@@ -194,7 +194,7 @@ def _check_label_event(
     if (payload.get("label") or {}).get("name") != LABEL_REVIEW:
         return True
 
-    from events.reviewer_fork_hold import approve_head
+    from events.connectors.github_reviewer_fork_hold import approve_head
 
     approve_head(
         repo, pr_number, head_sha, (payload.get("sender") or {}).get("login"),
