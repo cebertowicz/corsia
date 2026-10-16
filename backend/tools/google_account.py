@@ -44,8 +44,10 @@ class GoogleConnectTool(Tool):
         return (
             "Call google_status first. If it returns needs_action, follow it before calling "
             "google_connect. If it says not_connected, this tool starts the person's Google sign-in "
-            "for email and calendar and returns a URL for the person to open; they sign in and click "
-            "Allow in their own browser, and the token never reaches you. Pass client_file, the path "
+            "and returns a URL for the person to open; they sign in and click Allow in their own "
+            "browser, and the token never reaches you. Google asks them to allow Gmail, Calendar, "
+            "Drive, Docs and Sheets in one go; today CORSIA's Google tools cover email and calendar "
+            "only, so promise nothing for the others. Pass client_file, the path "
             "of the Desktop app OAuth client JSON they downloaded from Google Cloud, unless a client "
             "was saved by an earlier sign-in. To set Google up from the start, follow skill "
             "`google-setup`."
