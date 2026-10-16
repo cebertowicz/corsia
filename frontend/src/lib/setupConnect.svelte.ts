@@ -155,14 +155,14 @@ export function createSetupConnect(deps: ConnectDeps) {
 		}
 		if (source.state === 'not_installed') return { meta: lines(`CORSIA installs ${copy.cli} for you.`), action: { label: 'Set up', run: () => setConnect(source.source, { phase: 'confirm' }) } };
 		if (source.limited) return { meta: lines('It has reached its usage limit for now.') };
-		if (source.state === 'unverified' && source.cli_package_manager) {
-			const command = source.cli_package_manager === 'homebrew'
-				? `brew upgrade ${source.source === 'claude-code' ? 'claude-code' : 'codex'}`
-				: `npm update -g ${source.source === 'claude-code' ? '@anthropic-ai/claude-code' : '@openai/codex'}`;
-			const manager = source.cli_package_manager === 'homebrew' ? 'Homebrew' : 'npm';
-			return { meta: lines(`CORSIA can’t use this copy of ${copy.cli}, which ${manager} installed.`), detail: `Update it in Terminal with ${command}. CORSIA notices when you come back to this window.`, error: true };
+		if (source.state === 'unverified') {
+			return {
+				meta: lines(`CORSIA couldn’t check ${copy.cli}’s sign-in.`),
+				error: true,
+				action: { label: 'Check again', run: () => void deps.refreshSources() },
+				more: [{ label: 'Sign in', run: () => void beginSignIn(source) }],
+			};
 		}
-		if (source.state === 'unverified') return { meta: lines(`CORSIA can’t use this version of ${copy.cli}. Update installs the current one with ${copy.maker}’s official installer.`), action: { label: 'Update', run: () => setConnect(source.source, { phase: 'confirm', operation: 'update' }) } };
 		return { meta: lines(`${copy.cli} is installed. Sign in to use it.`), action: { label: 'Sign in', run: () => void beginSignIn(source) } };
 	}
 
