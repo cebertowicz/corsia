@@ -79,7 +79,6 @@
   --accent: #60a5fa;
   --accent-hover: #93c5fd;
   --accent-subtle: rgba(96, 165, 250, 0.12);
-  --accent-bg: rgba(96, 165, 250, 0.08);
   --accent-bg-hover: rgba(96, 165, 250, 0.14);
   --green: #34d399;
   --green-bg: rgba(52, 211, 153, 0.08);
@@ -124,25 +123,22 @@
   --hl-number: #d19a66;
   --purple: #8b5cf6;
 
-  /* No scope selected: the app's accent set is CORSIA blue, including the
-     legacy --violet roles still used by the composer and selection controls. */
+  /* The accent roles: text, wash, hairline, fill and the ink on that fill. These are the CORSIA-blue defaults;
+     under a project scope +layout replaces --accent and every role from accentRoles(). */
+  --accent-text: var(--accent);
+  --accent-wash: rgba(96, 165, 250, 0.08);
+  --accent-line: rgba(96, 165, 250, 0.28);
+  --accent-fill: var(--accent);
+  --accent-on-fill: #0a0a0b;
+  /* Deprecated aliases of the accent roles, slated for removal in the design-system token migration. Declared once
+     here so they resolve against whichever theme and scope the roles carry; new code uses the roles. */
   --violet: var(--accent);
   --violet-2: var(--accent-hover);
-  --violet-text: var(--accent);
-  --violet-bg: var(--accent-bg);
-  --violet-line: rgba(96, 165, 250, 0.28);
+  --violet-text: var(--accent-text);
+  --violet-bg: var(--accent-wash);
+  --violet-line: var(--accent-line);
+  --accent-bg: var(--accent-wash);
   --violet-brand: #8b5cf6;
-  /* Accent roles are used throughout the app; +layout derives --accent-on-fill and the scoped roles from the selected
-     project colour, while these values preserve the unscoped CORSIA-blue default. */
-  --accent-fill: var(--violet-text);
-  --accent-on-fill: #0a0a0b;
-  --accent-text: var(--violet-text, var(--violet));
-  --accent-line: var(--accent);
-  --accent-wash: var(--violet-bg);
-  /* Scope-aware application accent roles; preserve legacy violet pixels during migration. */
-  --accent-scope-text: var(--violet-text);
-  --accent-scope-wash: var(--violet-bg);
-  --accent-scope-line: var(--violet-line);
   --teal: #2dd4bf;
   --teal-bg: rgba(45, 212, 191, 0.10);
   --teal-line: rgba(45, 212, 191, 0.28);
@@ -189,7 +185,6 @@
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --accent-subtle: rgba(37, 99, 235, 0.08);
-  --accent-bg: rgba(37, 99, 235, 0.10);
   --accent-bg-hover: rgba(37, 99, 235, 0.16);
   --green: #34d399;
   --green-bg: #f0fdf4;
@@ -223,22 +218,11 @@
 }
 
 [data-theme="light"] {
-  --violet: var(--accent);
-  --violet-2: var(--accent-hover);
-  --violet-text: var(--accent-hover);
-  --violet-bg: var(--accent-bg);
-  --violet-line: rgba(37, 99, 235, 0.32);
-  /* Accent roles are used throughout the app; +layout derives --accent-on-fill and the scoped roles from the selected
-     project colour, while these values preserve the unscoped CORSIA-blue default. */
-  --accent-fill: var(--violet-text);
+  --accent-text: #1d4ed8;
+  --accent-wash: rgba(37, 99, 235, 0.10);
+  --accent-line: rgba(37, 99, 235, 0.32);
+  --accent-fill: var(--accent);
   --accent-on-fill: #ffffff;
-  --accent-text: var(--violet-text, var(--violet));
-  --accent-line: var(--accent);
-  --accent-wash: var(--violet-bg);
-  /* Scope-aware application accent roles; preserve legacy violet pixels during migration. */
-  --accent-scope-text: var(--violet-text);
-  --accent-scope-wash: var(--violet-bg);
-  --accent-scope-line: var(--violet-line);
   --teal: #0d9488;
   --teal-bg: rgba(13, 148, 136, 0.08);
   --teal-line: rgba(13, 148, 136, 0.32);
@@ -264,9 +248,6 @@
 
 @supports (color: color(display-p3 1 1 1)) {
   :root {
-    --violet: var(--accent);
-    --violet-2: var(--accent-hover);
-    --violet-text: var(--accent);
     --teal: color(display-p3 0.176 0.831 0.749);
     --sky: color(display-p3 0.376 0.647 0.98);
     --amber: color(display-p3 0.961 0.62 0.043);
@@ -274,13 +255,18 @@
     --accent-hover: color(display-p3 0.576 0.773 0.992);
   }
   [data-theme="light"] {
-    --violet: var(--accent);
-    --violet-2: var(--accent-hover);
-    --violet-text: var(--accent-hover);
     --teal: color(display-p3 0.051 0.58 0.533);
     --sky: color(display-p3 0.145 0.388 0.922);
     --amber: color(display-p3 0.851 0.467 0.024);
     --accent: color(display-p3 0.145 0.388 0.922);
     --accent-hover: color(display-p3 0.114 0.306 0.816);
+    --accent-text: color(display-p3 0.114 0.306 0.816);
   }
+}
+
+/* Hover and subtle tones keep their own CORSIA-blue shades by default; under a project scope (+layout sets the
+   attribute) they follow its accent through the roles rather than a second derivation. */
+:root[data-project-accent] {
+  --accent-hover: var(--accent);
+  --accent-subtle: var(--accent-wash);
 }

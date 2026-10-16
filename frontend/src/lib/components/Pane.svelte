@@ -143,6 +143,6 @@
 		border-top: 1px solid var(--border-subtle);
 		transition: background var(--dur-tight), color var(--dur-tight);
 	}
-	.proj-new:hover { background: var(--lg-row-hover, var(--bg-hover)); color: var(--accent-scope-text); }
+	.proj-new:hover { background: var(--lg-row-hover, var(--bg-hover)); color: var(--accent-text); }
 	.proj-new-plus { font-size: var(--text-callout); line-height: 1; width: 9px; text-align: center; }
 </style>

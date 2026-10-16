@@ -67,7 +67,7 @@ describe('composer action row: who gives way first', () => {
 	});
 
 	it('uses the scoped readable accent token for model and effort labels', () => {
-		expect(model.color).toBe('var(--accent-scope-text, var(--accent))');
-		expect(declarations('.effort-chip').color).toBe('var(--accent-scope-text, var(--accent))');
+		expect(model.color).toBe('var(--accent-text)');
+		expect(declarations('.effort-chip').color).toBe('var(--accent-text)');
 	});
 });

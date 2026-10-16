@@ -563,7 +563,11 @@ describe("ThreadPlanPane", () => {
     const rows = [...host.querySelectorAll<HTMLButtonElement>(".decision-row")];
     expect(rows).toHaveLength(1);
     expect(rows[0].textContent).toContain("Decision for this thread");
-    expect(host.querySelector(".decision-indicator")?.textContent).toContain("1 more decision");
+    // Every row is this thread's own, so none repeats the thread's name.
+    expect(rows[0].textContent).not.toContain("This thread");
+    // The rows are the queue's whole account of this thread: no count mixed in from the plan
+    // that could only open a listed row or another thread's decision.
+    expect(host.querySelector(".decision-indicator")).toBeNull();
     expect(host.textContent).not.toContain("Decision for another thread");
     __reset();
   });

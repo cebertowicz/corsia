@@ -15,7 +15,7 @@
 <style>
 	.held { margin: 0; font-size: var(--text-caption); line-height: var(--lh-snug); color: var(--text-secondary); overflow-wrap: anywhere; }
 	.check { color: var(--green); vertical-align: -2px; margin-right: 4px; }
-	.reopen { display: inline; padding: 0 0 0 4px; font: inherit; font-weight: var(--fw-semibold); color: var(--accent-scope-text); background: none; border: none; cursor: pointer; }
+	.reopen { display: inline; padding: 0 0 0 4px; font: inherit; font-weight: var(--fw-semibold); color: var(--accent-text); background: none; border: none; cursor: pointer; }
 	@media (pointer: coarse) { .reopen { min-height: calc(var(--space-8) - var(--space-1)); padding-inline: 8px; } }
 	.reopen:hover { text-decoration: underline; }
 	.reopen:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }

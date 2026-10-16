@@ -31,7 +31,7 @@
 <style>
 	.ic { display: flex; flex-shrink: 0; color: var(--text-tertiary); }
 	.ic svg { width: 15px; height: 15px; }
-	/* The tile keeps the row's geometry; the icon's colour carries the type, with no tint behind it. */
+	/* The tile keeps the row's geometry; the icon's shape carries the type, in the shared --text-tertiary, with no tint behind it. */
 	.ic.filled {
 		align-items: center;
 		justify-content: center;

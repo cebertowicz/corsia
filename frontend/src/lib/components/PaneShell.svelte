@@ -81,7 +81,7 @@
 		background: var(--glass-thick);
 	}
 	.pane-scope { font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-secondary); }
-	.pane-scope.accent { color: var(--accent-scope-text); }
+	.pane-scope.accent { color: var(--accent-text); }
 
 	@media (min-width: 1025px) {
 		.pane.overlay {

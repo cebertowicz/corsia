@@ -313,7 +313,7 @@
 		font: inherit; font-size: inherit; color: inherit; text-align: left; cursor: pointer;
 	}
 	.scoped-item-trigger:disabled { cursor: default; }
-	.scoped-item.identity .scoped-item-trigger > svg:first-child { color: var(--accent-scope-text); opacity: 1; }
+	.scoped-item.identity .scoped-item-trigger > svg:first-child { color: var(--accent-text); opacity: 1; }
 	.agent-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 	.lbl, .update-summary { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.lbl { font-size: var(--text-subhead); }
@@ -333,7 +333,7 @@
 	.scoped-item.conductor .lbl { font-weight: 600; color: var(--text-primary); }
 	.scoped-item.conductor.disabled .lbl { color: var(--text-tertiary); }
 	.scoped-item.conductor.disabled svg { color: var(--text-tertiary); opacity: 0.8; }
-	.scoped-item.conductor svg { color: var(--accent-scope-text); opacity: 1; }
+	.scoped-item.conductor svg { color: var(--accent-text); opacity: 1; }
 	.scoped-item.active { background: var(--violet-bg); }
 	.drawer-toggle {
 		display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0;
@@ -349,7 +349,7 @@
 	.drawer-separator { flex-shrink: 0; color: var(--text-tertiary); }
 	.drawer-attention {
 		flex-shrink: 0; max-width: 52%; overflow: hidden; text-overflow: ellipsis;
-		white-space: nowrap; color: var(--accent-scope-text); font-weight: 600;
+		white-space: nowrap; color: var(--accent-text); font-weight: 600;
 	}
 	@keyframes spin { to { transform: rotate(360deg); } }
 

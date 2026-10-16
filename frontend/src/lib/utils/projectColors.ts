@@ -41,18 +41,44 @@ const ACCENT_TEXT_SURFACES: Record<'light' | 'dark', string[]> = {
 };
 const ON_FILL_LIGHT = '#ffffff';
 
+export interface AccentRoles {
+	base: string;
+	text: string;
+	wash: string;
+	line: string;
+	fill: string;
+	onFill: string;
+}
+
+/** The token each role paints through, defined with its default in `app-tokens.css`. */
+export const ACCENT_ROLE_TOKENS: Record<keyof AccentRoles, string> = {
+	base: '--accent',
+	text: '--accent-text',
+	wash: '--accent-wash',
+	line: '--accent-line',
+	fill: '--accent-fill',
+	onFill: '--accent-on-fill',
+};
+
 /**
- * What a project's colour becomes when it is the accent: the fill stays the colour itself,
- * text in it is the same hue stepped until it reads (4.5:1) on every pane, and ink on the
- * fill takes the maximum-contrast ink from the shared `inkOn` rule. Primary-action labels
- * are ordinary small text, so their on-fill contrast stays readable.
+ * What a project's colour becomes when it is the accent, every role from this one place.
+ * The base is the colour itself. Text is the same hue stepped until it reads (4.5:1) on every pane. The fill is the colour
+ * itself, and the ink on it is the shared `inkOn` choice; near the crossover where neither
+ * ink reaches 4.5:1, the fill steps away from its ink until it does, so the ink is always
+ * chosen for the exact colour behind it.
  */
-export function accentRoles(colour: string, theme: 'light' | 'dark'): { text: string; onFill: string } {
+export function accentRoles(colour: string, theme: 'light' | 'dark'): AccentRoles {
+	const wash = `color-mix(in srgb, ${colour} 12%, transparent)`;
+	const line = `color-mix(in srgb, ${colour} 30%, transparent)`;
 	const own = parseColor(colour);
-	if (!own) return { text: colour, onFill: ON_FILL_LIGHT };
+	if (!own) return { base: colour, text: colour, wash, line, fill: colour, onFill: ON_FILL_LIGHT };
 	const surfaces = ACCENT_TEXT_SURFACES[theme].map((hex) => parseColor(hex)!);
 	const text = toHex(stepToContrast(own, surfaces, theme, 4.5));
-	return { text, onFill: inkOn(colour) };
+	const onFill = inkOn(colour);
+	// White ink needs a darker fill and near-black ink a lighter one: the same stepping
+	// direction as text in the light and dark themes respectively.
+	const fill = toHex(stepToContrast(own, [parseColor(onFill)!], onFill === ON_FILL_LIGHT ? 'light' : 'dark', 4.5));
+	return { base: colour, text, wash, line, fill, onFill };
 }
 
 export const ACCENT_SWATCHES = [

@@ -290,18 +290,18 @@
 		transition: background var(--dur-tight);
 	}
 	.ta-row:hover { background: var(--bg-hover); }
-	.ta-row.active { color: var(--accent-scope-text); cursor: default; }
+	.ta-row.active { color: var(--accent-text); cursor: default; }
 	.row-glyph {
 		flex-shrink: 0; color: var(--text-tertiary);
 		background: var(--bg-secondary); border-radius: var(--radius-circle);
 		padding: 2px; box-sizing: content-box; z-index: 1;
 	}
-	.ta-row.active .row-glyph { color: var(--accent-scope-text); }
+	.ta-row.active .row-glyph { color: var(--accent-text); }
 	.ta-phrase {
 		flex: 1; min-width: 0; color: var(--text-primary);
 		overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 	}
-	.ta-row.active .ta-phrase { color: var(--accent-scope-text); }
+	.ta-row.active .ta-phrase { color: var(--accent-text); }
 	.ta-outcome {
 		flex-shrink: 0; max-width: 40%; color: var(--text-tertiary);
 		font-size: var(--text-caption);

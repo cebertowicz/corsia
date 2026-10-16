@@ -173,7 +173,7 @@
 	.fold-state { display: flex; align-items: center; gap: 8px; padding: 0 0 12px; color: var(--text-muted); font-size: var(--text-footnote); }
 	.fold-error { color: var(--red-text); }
 	.fold-error .fold-action { min-height: 32px; padding: 0 4px; }
-	.fold-action { padding: 0 0 12px; border: 0; background: transparent; color: var(--accent-scope-text); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
+	.fold-action { padding: 0 0 12px; border: 0; background: transparent; color: var(--accent-text); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
 	.fold-history { padding: 8px 0 0 21px; }
 	.fold-details :global(.plan-limit-paused), .fold-history :global(.plan-limit-paused) { margin: 0 auto 12px; }
 	@media (pointer: coarse) {

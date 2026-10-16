@@ -319,19 +319,25 @@
 <style>
 	.attention-dock {
 		flex: none;
-		/* No side inset of its own: the chat column places it, so its edges are the transcript's. */
-		padding: var(--space-4) 0 0;
+		/* The slot's shadow gutter (none outside the slot). A scroller clips at its padding
+		   edge, so the dock pads into that gutter at the sides and bottom and its cards'
+		   rounded corners and drop shadows paint there instead of being cut flat at the
+		   card edge. The negative margins keep the layout box on the band's pixels. */
+		--dock-gutter: var(--chat-attention-shadow-gutter, 0px);
+		/* No side inset of its own: the chat column places it, so its content edges are the transcript's. */
+		padding: var(--space-4) var(--dock-gutter) var(--dock-gutter);
+		margin: 0 calc(-1 * var(--dock-gutter)) calc(-1 * var(--dock-gutter));
 		/* Transcript scrolling beneath fades out across that top inset, so the row's edge
-		   reads without a border or a tint. Invisible when nothing is under it. */
-		background: linear-gradient(to bottom, transparent, var(--bg-primary) var(--space-4));
-		/* The chat slot publishes this height budget so an opened chip scrolls
+		   reads without a border or a tint. Invisible when nothing is under it. It covers
+		   the band only, never the gutter. */
+		background: linear-gradient(to bottom, transparent, var(--bg-primary) var(--space-4))
+			center top / calc(100% - 2 * var(--dock-gutter)) calc(100% - var(--dock-gutter)) no-repeat;
+		/* The chat slot publishes this height budget so an opened row scrolls
 		   inside it instead of growing off the top of the viewport (measured at
-		   320px: heading and close button at y = -91). */
-		max-height: var(--chat-attention-available-height, none);
-		/* Never clip here: the opened chip already painted visible, and clipping the
-		   collapsed row cut its rounded bottom corners and drop shadow flat. The
-		   shadow paints into the slot's own shadow gutter below. */
-		overflow: visible;
+		   320px: heading and close button at y = -91). The bottom gutter is outside it. */
+		max-height: calc(var(--chat-attention-available-height, 100dvh) + var(--dock-gutter));
+		overflow-y: auto;
+		overscroll-behavior: contain;
 	}
 	.dock-row { display: flex; align-items: center; gap: var(--space-2); }
 	.dock-bar {

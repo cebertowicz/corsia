@@ -6,9 +6,8 @@
 	} from '$lib/stores/checkpoints';
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { descendantRunning } from '$lib/stores/activity';
-	import { emitProductEvent } from '$lib/product_events';
 	import ThreadPlanStateMark from './ThreadPlanStateMark.svelte';
-	import { isYourMove, slotThreeWord } from './threadRowMark';
+	import { isYourMove } from './threadRowMark';
 	import ThreadPausedMark from './ThreadPausedMark.svelte';
 	import ThreadDoneMark from './ThreadDoneMark.svelte';
 
@@ -74,28 +73,8 @@
 	);
 	const planState = $derived($threadPlanStates[thread.id]);
 	const updateSummary = $derived(planState?.latest_update?.summary);
+	// What the user owes takes the second line, in place of the update summary; the mark owns it either way.
 	const needsYou = $derived(isYourMove(planState));
-	const attentionCount = $derived((planState?.attention_items ?? []).length);
-	// ThreadPlanStateEntry has no structured blocker field. The first attention item
-	// is the available structured action label; never infer one from update prose.
-	const needsYouText = $derived(!needsYou
-		? ''
-		: attentionCount === 0
-			? 'Needs you'
-			: planState?.attention_items?.[0]?.title
-				? `Needs you · ${planState.attention_items[0].title}`
-				: 'Needs you');
-
-	function openNeedsYou(event: MouseEvent): void {
-		event.stopPropagation();
-		emitProductEvent('sidebar', 'attention_opened', {
-			thread_id: thread.id,
-			state: planState?.state,
-			word: slotThreeWord(planState),
-			count: attentionCount,
-		});
-		onOpenAttention?.(thread.id, needsYouText);
-	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -185,10 +164,8 @@
 						<ThreadPlanStateMark threadId={thread.id} {onOpenAttention} onOpenThread={onSelect} />
 					{/if}
 				</div>
-				{#if needsYou && attentionCount === 0}
-					<span class="thread-update-summary needs-you static" title={needsYouText}>{needsYouText}</span>
-				{:else if needsYou}
-					<button type="button" class="thread-update-summary needs-you" title={needsYouText} onclick={openNeedsYou} onpointerdown={(event) => event.stopPropagation()}>{needsYouText}</button>
+				{#if needsYou}
+					<ThreadPlanStateMark threadId={thread.id} line {onOpenAttention} onOpenThread={onSelect} />
 				{:else if updateSummary}
 					<span class="thread-update-summary" title={updateSummary}>{updateSummary}</span>
 				{/if}
@@ -308,14 +285,10 @@
 		flex: 1; min-width: 0;
 	}
 	.thread-update-summary {
-		display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 1px;
-		padding: 0; border: 0; background: none;
-		font: inherit; font-size: var(--text-caption); line-height: 1.2; color: var(--text-tertiary);
-		white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;
+		display: block; min-width: 0; margin-top: 1px;
+		font-size: var(--text-caption); line-height: 1.2; color: var(--text-tertiary);
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 	}
-	.thread-update-summary.needs-you { color: var(--amber-text); cursor: pointer; }
-	.thread-update-summary.needs-you.static { cursor: default; }
-	.thread-update-summary.needs-you:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-2xs); }
 	.thread-cutover {
 		flex-shrink: 0;
 		font-size: var(--text-caption);

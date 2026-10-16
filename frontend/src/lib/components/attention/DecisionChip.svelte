@@ -283,8 +283,8 @@
 
 <style>
 	.decision-chip { background: transparent; overflow: visible; }
-	/* The decision drawer is opaque: its sticky heading must be the same opaque
-	   sheet material, otherwise scrolled options visibly pass behind the title. */
+	/* The decision drawer is opaque: its sticky heading and sticky actions footer must be
+	   the same opaque sheet material, otherwise scrolled options visibly pass behind them. */
 	header { position: sticky; top: 0; z-index: 2; display: flex; gap: var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary); }
 	.eyebrow { display: block; margin-bottom: var(--space-1); color: var(--violet-text); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
 	.eyebrow .scope { color: var(--text-tertiary); }
@@ -312,7 +312,7 @@
 	.other-option textarea { min-width: 0; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-primary); padding: var(--space-1) var(--space-2); outline: none; font-family: inherit; font-size: inherit; line-height: var(--lh-normal); resize: none; overflow-y: auto; min-height: calc(1em * var(--lh-normal) + var(--space-2)); max-height: min(40vh, 12em); }
 	.other-option textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 	.decision-buttons { display: flex; flex: none; align-items: center; gap: var(--space-2); }
-	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0 max(var(--space-3), env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); color: var(--text-tertiary); font-size: var(--text-footnote); }
+	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0 max(var(--space-3), env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); background: var(--bg-secondary); color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.receipt { flex: 1; min-width: 0; margin: 0; }
 	.hint { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	fieldset.pick-any { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
