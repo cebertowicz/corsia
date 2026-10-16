@@ -282,7 +282,6 @@ class TestAppPath:
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
-        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: False)
         monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
@@ -323,13 +322,21 @@ class TestAppPath:
         assert len(warnings) == 1 and first_run_wake.APP_REFERENCE in warnings[0].message
 
     @pytest.mark.asyncio
-    async def test_app_facts_are_private_and_use_an_addressless_github_decision(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("profile_email", ["person@gmail.com", "person@workspace.example", ""])
+    async def test_app_facts_offer_google_setup_without_leaking_profile_email(
+        self, monkeypatch, tmp_path, profile_email,
+    ):
         from infra import config
         from onboarding import first_run_wake
 
         profile = tmp_path / "context" / "50-USER-PROFILE.md"
         profile.parent.mkdir()
-        profile.write_text("- **Preferred name:** Pat\x01 " + "n" * 130 + "\n- **Email:** person@gmail.com\n", encoding="utf-8")
+        profile.write_text(
+            "- **Preferred name:** Pat\x01 " + "n" * 130
+            + (f"\n- **Email:** {profile_email}" if profile_email else "")
+            + "\n",
+            encoding="utf-8",
+        )
         monkeypatch.setattr(config, "WORKSPACE", tmp_path)
         monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
             "sources": [{"source": "claude-code", "state": "ready"}],
@@ -346,13 +353,16 @@ class TestAppPath:
         assert facts["gmail_eligible"] is True
         assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "work": None, "place": None, "check_first": None, "answer_style": None}
         assert "the address you give me in chat" in wake
-        assert not any(value in wake for value in ("person@gmail.com", "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles"))
+        assert not any(
+            value in wake
+            for value in (profile_email, "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles")
+            if value
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failed, expected", [
         ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
         ("local_download", ("local_download",)),
-        ("gmail_eligible", ("gmail_eligible",)),
         ("web_search_ready", ("web_search_ready",)),
         ("own_omlx_source", ("own_omlx_source",)),
         ("setup", ("setup",)),
@@ -367,7 +377,6 @@ class TestAppPath:
         monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
             "sources": [], "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
-        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: False)
         monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
@@ -376,8 +385,6 @@ class TestAppPath:
             monkeypatch.setattr(first_run_wake, "_model_sources", fail)
         elif failed == "local_download":
             monkeypatch.setattr(first_run_wake, "_app_local_download", fail)
-        elif failed == "gmail_eligible":
-            monkeypatch.setattr(first_run_wake, "_gmail_eligible", fail)
         elif failed == "web_search_ready":
             monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "own_omlx_source":
@@ -391,6 +398,7 @@ class TestAppPath:
 
         for name in expected:
             assert facts[name] == {"unavailable": first_run_wake.UNAVAILABLE_READS[name]}
+        assert facts["gmail_eligible"] is True
 
     async def test_app_setup_decisions_omit_projects_consent_and_address(self, monkeypatch):
         from onboarding import first_run_wake, setup_decisions
