@@ -114,7 +114,7 @@ async function createProjectAndOpenSettings(page: Page, name: string) {
 	await modal.getByRole('button', { name: 'Create project' }).click();
 	await expect(page.getByRole('button', { name: 'Project settings' })).toBeVisible({ timeout: 10_000 });
 	await page.getByRole('button', { name: 'Project settings' }).click();
-	await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(name);
+	await expect(page.getByRole('region', { name: 'Identity' }).getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(name);
 }
 
 test.describe('@surface:provider-policy Slice 2 subscription capture matrix', () => {
