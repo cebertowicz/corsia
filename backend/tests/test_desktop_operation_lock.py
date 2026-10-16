@@ -40,3 +40,27 @@ async def test_operation_active_refuses_an_untrusted_caller(monkeypatch):
     with pytest.raises(HTTPException) as refused:
         await system.system_operation_active(object())
     assert refused.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("host", "status"),
+    # The first is the exact Host the desktop shell sends (lib.rs local_get_request).
+    [("127.0.0.1:43123", 200), ("127.0.0.1", 403), ("127.0.0.1:43124", 403)],
+)
+def test_the_real_guard_admits_the_shells_host_and_nothing_portless(monkeypatch, host, status):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api import system
+
+    async def fake_run_in_db(callback):
+        return None
+
+    monkeypatch.setattr(system, "run_in_db", fake_run_in_db)
+    app = FastAPI()
+    app.include_router(system.router)
+    with TestClient(app, base_url="http://127.0.0.1:43123", client=("127.0.0.1", 50101)) as client:
+        response = client.get("/api/system/operation-active", headers={"Host": host})
+    assert response.status_code == status
+    if status == 200:
+        assert response.json() == {"active": False}

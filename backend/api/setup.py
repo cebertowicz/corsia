@@ -154,21 +154,19 @@ def _required_username() -> str | None:
     return owners[0] if len(owners) == 1 else None
 
 
-_READY_AI_NAMES = {"claude-code": "Claude Code", "codex": "Codex"}
-
-
 def _ready_ai() -> str | None:
     """The name of a CLI source that the startup check already found Ready, else None.
 
     Only the stored check result is read, so nothing runs before an account exists. A
     stale "ready" is harmless: the account step rechecks with a session before it skips.
     """
+    from connections.account_profiles import profile_for
     from connections.models import get_connection
     from connections.source_state import HARNESS_PROVIDERS, row_state
 
     for provider in HARNESS_PROVIDERS:
         if row_state(get_connection(provider))["state"] == "ready":
-            return _READY_AI_NAMES.get(provider, provider)
+            return profile_for(provider).label
     return None
 
 

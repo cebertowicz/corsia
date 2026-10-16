@@ -178,23 +178,31 @@ fn port_for_startup(first_run: &first_run::FirstRun, recorded: Option<u16>) -> R
     }
 }
 
-fn probe_health(port: u16) -> bool {
+/// The one request line the shell sends to its own service. The Host header
+/// carries the port: the backend's loopback guard refuses a Host without the
+/// port it is bound to.
+fn local_get_request(port: u16, path: &str) -> String {
+    format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+}
+
+fn local_get(port: u16, path: &str) -> Result<String, String> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(250)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
-    if stream
-        .write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .is_err()
-    {
-        return false;
-    }
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(250))
+        .map_err(|_| "the CORSIA service is unavailable")?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .and_then(|_| stream.set_write_timeout(Some(Duration::from_millis(500))))
+        .and_then(|_| stream.write_all(local_get_request(port, path).as_bytes()))
+        .map_err(|_| "the CORSIA service is unavailable")?;
     let mut response = String::new();
     stream
         .read_to_string(&mut response)
-        .is_ok_and(|_| response.starts_with("HTTP/1.1 200"))
+        .map_err(|_| "the CORSIA service is unavailable")?;
+    Ok(response)
+}
+
+fn probe_health(port: u16) -> bool {
+    local_get(port, "/api/health").is_ok_and(|response| response.starts_with("HTTP/1.1 200"))
 }
 
 fn operation_is_active_response(response: &str) -> Result<bool, String> {
@@ -238,43 +246,11 @@ fn setup_account_exists_response(response: &str) -> Result<bool, String> {
 }
 
 fn setup_account_exists(port: u16) -> Result<bool, String> {
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(250))
-        .map_err(|_| "the CORSIA service is unavailable")?;
-    stream
-        .set_read_timeout(Some(Duration::from_millis(500)))
-        .map_err(|error| format!("could not read CORSIA setup status: {error}"))?;
-    stream
-        .set_write_timeout(Some(Duration::from_millis(500)))
-        .map_err(|error| format!("could not read CORSIA setup status: {error}"))?;
-    stream
-        .write_all(b"GET /api/setup/status HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .map_err(|_| "the CORSIA service is unavailable")?;
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|_| "the CORSIA service is unavailable")?;
-    setup_account_exists_response(&response)
+    setup_account_exists_response(&local_get(port, "/api/setup/status")?)
 }
 
 fn operation_is_active(port: u16) -> Result<bool, String> {
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(250))
-        .map_err(|_| "the CORSIA service is unavailable")?;
-    stream
-        .set_read_timeout(Some(Duration::from_millis(500)))
-        .map_err(|error| format!("could not read CORSIA operation state: {error}"))?;
-    stream
-        .set_write_timeout(Some(Duration::from_millis(500)))
-        .map_err(|error| format!("could not read CORSIA operation state: {error}"))?;
-    stream
-        .write_all(b"GET /api/system/operation-active HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .map_err(|_| "the CORSIA service is unavailable")?;
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|_| "the CORSIA service is unavailable")?;
-    operation_is_active_response(&response)
+    operation_is_active_response(&local_get(port, "/api/system/operation-active")?)
 }
 
 fn run_service_command(action: &str) -> Result<(), String> {
@@ -838,6 +814,27 @@ mod tests {
     use super::*;
     use base64::Engine;
     use std::fs;
+
+    #[test]
+    fn local_requests_name_the_port_the_backend_guard_requires() {
+        // backend/api/setup.py _loopback_host refuses a Host without the bound port.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a test port");
+        let port = listener.local_addr().expect("test port").port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept the shell request");
+            let mut request = [0_u8; 512];
+            let read = stream.read(&mut request).expect("read the shell request");
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"active\":false}")
+                .expect("answer the shell request");
+            String::from_utf8_lossy(&request[..read]).into_owned()
+        });
+
+        assert_eq!(operation_is_active(port), Ok(false));
+        let request = server.join().expect("test server");
+        assert!(request.starts_with("GET /api/system/operation-active HTTP/1.1\r\n"));
+        assert!(request.contains(&format!("\r\nHost: 127.0.0.1:{port}\r\n")));
+    }
 
     #[test]
     fn updater_configuration_pins_the_release_verification_key() {

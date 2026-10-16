@@ -10,10 +10,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import fcntl
 import json
+import logging
 import os
 from pathlib import Path
 from typing import IO
 
+
+logger = logging.getLogger(__name__)
 
 _RECORD_NAME = "local-setup-operation.json"
 _LOCK_NAME = "local-setup-operation.lock"
@@ -45,14 +48,18 @@ def read() -> Operation | None:
         payload = json.loads(record_path().read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
+        logger.warning("local setup operation record is unreadable; treating it as absent: %s", error)
         return None
-    if not isinstance(payload, dict):
-        return None
-    profile_id, kind, task_id = payload.get("profile_id"), payload.get("kind"), payload.get("task_id")
-    if not isinstance(profile_id, str) or not isinstance(kind, str):
-        return None
-    if task_id is not None and not isinstance(task_id, str):
+    profile_id = payload.get("profile_id") if isinstance(payload, dict) else None
+    kind = payload.get("kind") if isinstance(payload, dict) else None
+    task_id = payload.get("task_id") if isinstance(payload, dict) else None
+    if (
+        not isinstance(profile_id, str)
+        or not isinstance(kind, str)
+        or (task_id is not None and not isinstance(task_id, str))
+    ):
+        logger.warning("local setup operation record is malformed; treating it as absent")
         return None
     return Operation(profile_id=profile_id, kind=kind, task_id=task_id)
 
