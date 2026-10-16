@@ -98,7 +98,7 @@ def test_service_file_lines_accept_state_dir_without_an_unsupported_key_note(tmp
 
 
 def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
-    paths = _platform_paths()
+    snapshots = importlib.import_module("infra.adoption_snapshot")
     state = tmp_path / "Application Support" / "com.cebertowicz.corsia" / "state"
     state.mkdir(parents=True)
     database = state / "corsia.db"
@@ -114,7 +114,7 @@ def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
     (state / "devices").mkdir(mode=0o700)
     (state / "devices" / "registered").write_text("device")
 
-    snapshot = paths.create_adoption_snapshot(state)
+    snapshot = snapshots.create_adoption_snapshot(state)
     with sqlite3.connect(database) as connection:
         connection.execute("insert into agents values ('new-build')")
     (state / "keys" / "new-key").write_text("new")
@@ -122,7 +122,7 @@ def test_adoption_snapshot_restores_database_files_and_permissions(tmp_path):
     (state / "corsia.db-wal").write_text("wal")
     (state / "corsia.db-shm").write_text("shm")
 
-    paths.restore_adoption_snapshot(state, snapshot)
+    snapshots.restore_adoption_snapshot(state, snapshot)
 
     with sqlite3.connect(database) as connection:
         assert connection.execute("select id from agents order by id").fetchall() == [("before-adopt",)]
