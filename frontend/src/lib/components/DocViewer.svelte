@@ -23,6 +23,7 @@
 	import { canvasCommentHighlights, commentSurfaceStatus, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentsInDocumentOrder, type CanvasScrollTarget } from '$lib/docCanvasComments';
 	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
+	import { connectionState } from '$lib/stores/connection';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -175,6 +176,7 @@
 
 	let prevTarget: DocViewerTarget | null = null;
 	let reloadNonce = $state(0);
+	let wasConnected = false;
 	export function reload() {
 		if (liveSession) reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus);
 		else reloadNonce += 1;
@@ -202,6 +204,12 @@
 		if (!legacyAwaitingSave || !save.draft || save.draft.status !== 'saved') return;
 		legacyAwaitingSave = false;
 		reloadNonce += 1;
+	});
+	$effect(() => {
+		const connected = $connectionState === 'connected';
+		const shouldReopen = connected && !wasConnected && openRefusal?.code === 'not_connected';
+		wasConnected = connected;
+		if (shouldReopen) reloadNonce += 1;
 	});
 	function onPrepareCleanReload(): Promise<(() => void) | null> {
 		const d = target;

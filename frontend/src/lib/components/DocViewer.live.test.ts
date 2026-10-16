@@ -137,6 +137,45 @@ describe('composed live viewer', () => {
 		}
 	});
 
+	it('reopens a not_connected refusal only after the connection returns and clears the refusal on success', async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+		connectionState.set('connecting');
+		render();
+		await Promise.resolve(); await Promise.resolve();
+		vi.advanceTimersByTime(LIVE_OPEN_WAIT_MS);
+		await Promise.resolve(); await Promise.resolve();
+		await vi.waitFor(() => expect(host.textContent).toContain('Live editing is not connected.'));
+		expect(host.textContent).toContain('It reopens when the connection returns.');
+		expect(wire.frames.filter(frame => frame.type === 'doc_open')).toEqual([]);
+		vi.useRealTimers();
+		connectionState.set('connected');
+		await serverOpen();
+		expect(host.textContent).not.toContain('Live editing is not connected.');
+		expect(editorView().state.readOnly).toBe(false);
+	});
+
+	it.each(['store_damaged', 'store_unavailable', 'setup_failed'] as const)('does not reopen a %s refusal when the connection returns', async code => {
+		const title = 'Live editing is unavailable for this document.';
+		if (code !== 'setup_failed') {
+			api.fetchContent.mockRejectedValue(Object.assign(new Error('Live editing could not start.'), { code, title }));
+		}
+		render();
+		if (code === 'setup_failed') {
+			await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_open')).toBe(true));
+			const request = wire.frames.findLast(frame => frame.type === 'doc_open')!;
+			emit('doc_error', { type: 'doc_error', request_id: request.request_id, code, title, message: 'The shared target could not be prepared.' });
+		}
+		await vi.waitFor(() => expect(host.textContent).toContain(title));
+		const opens = wire.frames.filter(frame => frame.type === 'doc_open').length;
+		const loads = api.fetchContent.mock.calls.length;
+		// Flush between the two so the viewer sees a real transition into connected.
+		connectionState.set('connecting'); flushSync();
+		connectionState.set('connected'); flushSync();
+		await Promise.resolve(); await Promise.resolve();
+		expect(wire.frames.filter(frame => frame.type === 'doc_open')).toHaveLength(opens);
+		expect(api.fetchContent).toHaveBeenCalledTimes(loads);
+	});
+
 	it.each(['not_connected', 'store_unavailable'])('keeps an unsaved edit through a %s refusal and its Retry, never replacing it with server text', async code => {
 		seedDraft(target, 'disk copy'); setDraftText(target, 'my unsaved edit');
 		api.writeContent.mockResolvedValue({ saved: true, revision: 'r-edit' });
@@ -160,7 +199,9 @@ describe('composed live viewer', () => {
 		expect(existingDraft(target)?.editText).toBe('my unsaved edit');
 		expect(wire.frames.filter(frame => frame.type === 'doc_open')).toEqual([]);
 		connectionState.set('connected');
-		[...host.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Retry')!.click();
+		if (code === 'store_unavailable') {
+			[...host.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Retry')!.click();
+		}
 		await serverOpen('my unsaved edit');
 		expect(text()).toBe('my unsaved edit');
 		expect(existingDraft(target)?.editText).toBe('my unsaved edit');

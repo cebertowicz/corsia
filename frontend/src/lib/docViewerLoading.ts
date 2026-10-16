@@ -32,6 +32,8 @@ interface LoadOptions {
 
 /** Product Experience approved this body for a refused tab showing the file snapshot. */
 export { SNAPSHOT_REFUSAL_MESSAGE } from '$lib/docOpenRefusal';
+/** A disconnected tab keeps the snapshot disclosure truthful while saying it will reopen. */
+export const NOT_CONNECTED_SNAPSHOT_REFUSAL_MESSAGE = "This tab shows the last saved version of the file. Changes from this browser that weren't saved yet aren't shown here. It reopens when the connection returns.";
 
 /** What a refused tab's editor shows; a refusal never reads the device copy. */
 export type RefusedView = 'draft' | 'snapshot' | 'none';
@@ -43,7 +45,8 @@ export type RefusedView = 'draft' | 'snapshot' | 'none';
  * that and claims nothing kept; title and code, and so Copy and Retry, stay.
  */
 export function refusalForView(refusal: DocOpenRefusal, view: RefusedView): DocOpenRefusal {
-	return view === 'snapshot' ? { ...refusal, message: SNAPSHOT_REFUSAL_MESSAGE } : refusal;
+	if (view !== 'snapshot') return refusal;
+	return { ...refusal, message: refusal.code === 'not_connected' ? NOT_CONNECTED_SNAPSHOT_REFUSAL_MESSAGE : SNAPSHOT_REFUSAL_MESSAGE };
 }
 
 /** How a tab's document shows the moment it mounts, before the loader answers. */

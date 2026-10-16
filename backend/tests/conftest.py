@@ -391,6 +391,18 @@ def _no_cached_omlx_ownership_between_tests():
 
 
 @pytest.fixture(autouse=True)
+def _no_local_model_between_tests(monkeypatch, tmp_path_factory):
+    """The set-up model record and Welcome's pick outlive a test; each test starts with neither."""
+    from llm import local_model
+
+    record = tmp_path_factory.mktemp("local-model") / "local-model.json"
+    monkeypatch.setattr(local_model, "_record_path", lambda: record)
+    prepare = sys.modules.get("llm.local_setup_prepare")
+    if prepare is not None:
+        monkeypatch.setattr(prepare, "_prepare", prepare._Prepare())
+
+
+@pytest.fixture(autouse=True)
 def _exact_tail_carry_pin(request, monkeypatch):
     """Pin the exact Assistant Step tail window to zero for marked modules.
 
