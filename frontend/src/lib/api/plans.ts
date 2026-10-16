@@ -12,6 +12,7 @@ import { decodeOperatorEnvelope } from './plansDecode';
 
 export * from './activityIndexTypes';
 export * from './plansCostTypes';
+export * from './plansExecutionTypes';
 export * from './plansTypes';
 export type { OperatorFoldLevel } from './plansFolded';
 

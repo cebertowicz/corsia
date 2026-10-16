@@ -1,49 +1,20 @@
-"""Verified local ONNX correction-classifier asset: manifest, source pin, file checks and self-test.
-
-The manifest is the one asset owner: it supplies model identity, input policy and heads;
-callers receive that immutable version with every result. The model process itself is
-``core.corrections_child``.
-"""
+"""Corrections-specific configuration over the generic verified ONNX runtime."""
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
-import shutil
-import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Mapping
 
-from loguru import logger
-
+from core.corrections_asset_pins import PINNED_MANIFESTS
 from core.corrections_input import tokenize
 from core.corrections_recording import ClassifierVersion
-
-ASSET_ID = "corrections-classifier"
-INPUT_POLICY_ID = "modernbert-owner-context-v2-2048"
-_HASH_CHUNK_BYTES = 1024 * 1024
-# One in-process self-test at a time: a second would load a second model session.
-_SELF_TEST_LOCK = threading.Lock()
-# Verified file stats per manifest: a file is re-hashed only when its stat changes,
-# so a call never re-reads the whole model.
-_VERIFIED: dict[Path, tuple[tuple[str, int, int], ...]] = {}
-
-
-class AssetError(RuntimeError):
-    """A local classifier asset cannot safely be used.
-
-    `reader` is the sentence a person may be shown; the message stays technical.
-    """
-
-    def __init__(self, message: str, *, reader: str | None = None):
-        super().__init__(message)
-        self.reader = reader
+from core.onnx_asset import OnnxAssetSpec
 
 
 @dataclass(frozen=True)
 class Classification:
+    """The corrections-specific representation of one generic head score."""
+
     version: ClassifierVersion
     score: float
     label: str
@@ -51,146 +22,10 @@ class Classification:
     original_tokens: int
 
 
-@dataclass(frozen=True)
-class AssetManifest:
-    path: Path
-    asset_id: str
-    version: str
-    files: Mapping[str, Mapping[str, Any]]
-    heads: Mapping[str, Mapping[str, Any]]
-    input_policy_id: str
-    self_test: tuple[Mapping[str, Any], ...]
-
-    @classmethod
-    def load(cls, path: Path, *, expected_sha256: str | None = None) -> "AssetManifest":
-        """Read and check one manifest against its pin; a bad manifest raises ``AssetError``."""
-        raw = path.read_bytes()
-        actual = hashlib.sha256(raw).hexdigest()
-        if expected_sha256 and actual != expected_sha256:
-            raise AssetError(
-                "manifest sha256 does not match the source pin",
-                reader="The corrections classifier download is not the version this app expects. "
-                "Retry setup.",
-            )
-        try:
-            value = json.loads(raw)
-            files = value["files"]
-            heads = {head["name"]: head for head in value["heads"]}
-            manifest = cls(
-                path=path,
-                asset_id=str(value["asset_id"]),
-                version=str(value["version"]),
-                files=files,
-                heads=heads,
-                input_policy_id=str(value["input_policy_id"]),
-                self_test=tuple(value["self_test"]),
-            )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-            raise AssetError(
-                "manifest has an invalid classifier shape",
-                reader="The corrections classifier download is damaged (its description is unreadable). "
-                "Retry setup.",
-            ) from error
-        if manifest.asset_id != ASSET_ID or manifest.input_policy_id != INPUT_POLICY_ID:
-            raise AssetError("manifest does not describe the supported corrections asset")
-        if "correction" not in manifest.heads or len(manifest.self_test) != 4:
-            raise AssetError("manifest is missing the correction head or four self-test vectors")
-        try:
-            float(manifest.heads["correction"]["threshold"])
-        except (KeyError, TypeError, ValueError) as error:
-            raise AssetError("manifest has no usable correction threshold") from error
-        return manifest
-
-    def verify_files(self) -> None:
-        """Check each listed file's size and checksum, rehashing only files that changed."""
-        root = self.path.parent
-        stats = []
-        for name, details in self.files.items():
-            candidate = root / name
-            if not candidate.is_file() or candidate.stat().st_size != int(details["bytes"]):
-                raise AssetError(
-                    f"asset file {name} is absent or has the wrong size",
-                    reader=f"The corrections classifier download is incomplete ({_file_label(name)} "
-                    "is missing or has the wrong size). Retry setup.",
-                )
-            stat = candidate.stat()
-            stats.append((name, stat.st_size, stat.st_mtime_ns))
-        if _VERIFIED.get(self.path) == tuple(stats):
-            return
-        _VERIFIED.pop(self.path, None)
-        for name, details in self.files.items():
-            digest = hashlib.sha256()
-            with (root / name).open("rb") as handle:
-                while chunk := handle.read(_HASH_CHUNK_BYTES):
-                    digest.update(chunk)
-            if digest.hexdigest() != details["sha256"]:
-                raise AssetError(
-                    f"asset file {name} has a sha256 mismatch",
-                    reader=f"The corrections classifier download is damaged ({_file_label(name)} "
-                    "does not match its checksum). Retry setup.",
-                )
-        _VERIFIED[self.path] = tuple(stats)
-
-    def classifier_version(self, head: str = "correction") -> ClassifierVersion:
-        """Return the version identity that facts and the activation record use for this asset."""
-        try:
-            threshold = float(self.heads[head]["threshold"])
-        except (KeyError, TypeError, ValueError) as error:
-            raise AssetError(f"manifest has no usable {head} head") from error
-        return ClassifierVersion(self.asset_id, self.version, head, threshold, self.input_policy_id)
-
-
-def _file_label(name: str) -> str:
-    if name.endswith((".onnx", ".onnx.data")):
-        return "the model file"
-    if name.startswith("tokenizer"):
-        return "a tokenizer file"
-    return "a licence file" if name.upper().startswith(("LICENSE", "NOTICE")) else "a file"
-
-
-def asset_root() -> Path:
-    """Return the app-owned location; tests may override only their disposable root."""
-    overridden = os.environ.get("CORSIA_CORRECTIONS_ASSET_DIR")
-    if overridden:
-        return Path(overridden)
-    from infra.config import STATE_ROOT
-
-    return STATE_ROOT / "assets" / ASSET_ID
-
-
-def cleanup_staging() -> None:
-    """Discard an interrupted asset install; only a complete verified root is loadable."""
-    root = asset_root()
-    staging = root.with_name(f"{root.name}.staging")
-    if staging.exists():
-        shutil.rmtree(staging)
-
-
-def open_session(manifest: AssetManifest, ort: Any) -> Any:
-    """One CPU session with the options both the child and the setup self-test use."""
-    ort.disable_telemetry_events()
-    options = ort.SessionOptions()
-    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    options.inter_op_num_threads = 1
-    options.intra_op_num_threads = 4
-    model_name = next(name for name in manifest.files if name.endswith(".onnx"))
-    return ort.InferenceSession(
-        str(manifest.path.parent / model_name), options, providers=["CPUExecutionProvider"],
-    )
-
-
-def load_tokenizer(manifest: AssetManifest) -> Any:
-    """The asset's own tokenizer, read from beside its manifest."""
-    from tokenizers import Tokenizer
-
-    return Tokenizer.from_file(str(manifest.path.parent / "tokenizer.json"))
-
-
-def score_input(
-    session: Any, np: Any, tokenizer: Any, context: list[tuple[str, str]], owner: str,
-) -> tuple[float, bool, int]:
-    """Score one input: the correction probability, whether it was truncated, its token count."""
-    ids, truncated, original = tokenize(tokenizer, context, owner)
+def score_request(session: Any, np: Any, tokenizer: Any, request: Mapping[str, Any]) -> tuple[float, bool, int]:
+    """Score a generic corrections request with the correction head's probability."""
+    context = list(request.get("context", []))
+    ids, truncated, original = tokenize(tokenizer, context, str(request["owner"]))
     logits = session.run(None, {
         "input_ids": np.asarray([ids], dtype=np.int64),
         "attention_mask": np.ones((1, len(ids)), dtype=np.int64),
@@ -198,78 +33,31 @@ def score_input(
     return float(np.exp(logits[1]) / np.exp(logits).sum()), truncated, original
 
 
-def check_self_test(manifest: AssetManifest, session: Any, np: Any, tokenizer: Any) -> None:
-    """Raise ``AssetError`` unless the session reproduces every manifest self-test score."""
-    for vector in manifest.self_test:
-        score, _, _ = score_input(session, np, tokenizer, list(vector.get("context", [])), str(vector["owner"]))
-        if abs(score - float(vector["expected_score"])) > 1e-4:
-            raise AssetError(
-                "classifier self-test did not reproduce the manifest score",
-                reader="The corrections classifier gave unexpected answers on its built-in checks. "
-                "Retry setup.",
-            )
+CORRECTIONS_SPEC = OnnxAssetSpec(
+    asset_id="corrections-classifier",
+    input_policy_id="modernbert-owner-context-v2-2048",
+    required_heads=("correction",),
+    min_self_test_vectors=4,
+    pins=PINNED_MANIFESTS,
+    display_name="corrections classifier",
+    labels={"correction": ("not_correction", "correction")},
+    rss_limit_bytes=int(2.5 * 1024**3),
+    load_timeout_seconds=180.0,
+    call_timeout_seconds=30.0,
+    idle_seconds=10 * 60,
+    score=score_request,
+)
 
 
-def _readable(sentence: str) -> AssetError:
-    return AssetError(sentence, reader=sentence)
-
-
-def load_pinned_manifest(asset_dir: Path) -> AssetManifest:
-    """Load an asset's manifest only when its bytes match the source pin for the version it declares.
-
-    The pin is keyed by the manifest's own version, never by the directory name, so the
-    installed location can be named anything and an unpinned asset is always refused.
-    """
-    from core.corrections_asset_pins import PINNED_MANIFESTS
-
-    path = asset_dir / "manifest.json"
-    if not path.is_file():
-        raise AssetError(
-            "classifier asset is absent",
-            reader="The corrections classifier download is incomplete (its description is missing). "
-            "Retry setup.",
-        )
-    declared = AssetManifest.load(path)
-    pin = PINNED_MANIFESTS.get(declared.version)
-    if pin is None:
-        raise AssetError(
-            f"classifier version {declared.version} is not pinned in source",
-            reader="The corrections classifier is a version this app does not recognise. "
-            "Update the app, then retry setup.",
-        )
-    manifest = AssetManifest.load(path, expected_sha256=pin)
-    if manifest.version != declared.version:
-        raise AssetError("classifier manifest changed while it was being read")
-    return manifest
-
-
-def run_self_test(asset_dir: Path) -> None:
-    """Prove an installed asset loads and reproduces its manifest scores, in this process.
-
-    Raises AssetError with a sentence a person can read; never returns a partial pass.
-    """
-    if not _SELF_TEST_LOCK.acquire(blocking=False):
-        raise _readable("The corrections classifier is already being checked. Try again in a moment.")
-    session = None
-    try:
-        manifest = load_pinned_manifest(asset_dir)
-        manifest.verify_files()
-        import numpy as np
-        import onnxruntime as ort
-
-        session = open_session(manifest, ort)
-        check_self_test(manifest, session, np, load_tokenizer(manifest))
-    except AssetError as error:
-        # The technical message goes to the log; the person sees only the readable sentence.
-        logger.warning("corrections classifier self-test refused the asset: {}", error)
-        raise AssetError(error.reader or _GENERIC_READER) from None
-    except Exception as error:
-        # The cause (ABI, session or tokenizer failure) is logged; asset vectors hold no owner text.
-        logger.exception("corrections classifier self-test failed: {}: {}", type(error).__name__, error)
-        raise AssetError(_GENERIC_READER) from None
-    finally:
-        del session
-        _SELF_TEST_LOCK.release()
-
-
-_GENERIC_READER = "The corrections classifier could not start on this computer. Retry setup."
+def classification_from_reply(reply: Mapping[str, Any]) -> Classification:
+    """Turn one generic corrections-head reply into the existing ``Classification`` value."""
+    version = ClassifierVersion(**reply["version"])
+    negative, positive = CORRECTIONS_SPEC.labels[version.head]
+    score = float(reply["score"])
+    return Classification(
+        version=version,
+        score=score,
+        label=positive if score >= version.threshold else negative,
+        truncated=bool(reply["truncated"]),
+        original_tokens=int(reply["original_tokens"]),
+    )
