@@ -151,10 +151,85 @@ describe('SetupScreen', () => {
 
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Get started'))?.click();
 		await settle();
+		// Let CORSIA manage it is Welcome's recommended choice, so its consent names the admin key.
+		expect(Array.from(host.querySelectorAll('li')).map((item) => item.textContent)).toEqual([
+			'your oMLX port setting', 'the installed oMLX version', 'your oMLX server to find its available models', 'your oMLX’s admin key']);
+		expect(host.textContent).toContain('It changes your oMLX’s settings only after you approve each one in chat.');
+		expect(host.textContent).not.toContain('It won’t change your oMLX.');
 		Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use it')?.click();
 		await settle();
 		expect(calls).toEqual(['/api/setup/status', '/api/setup/classifier', '/api/setup/local-download']);
-		expect(bodies).toEqual(['{"consent_existing":true}']);
+		expect(bodies).toEqual(['{"consent_existing":true,"manage_existing":true}']);
+	});
+
+	describe('their own oMLX on Welcome (J9)', () => {
+		let bodies: string[];
+
+		async function mountOwnOmlx(existing = true) {
+			if (component) await unmount(component);
+			calls = []; bodies = [];
+			vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input); calls.push(url);
+				if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: true, existing_omlx: existing });
+				if (url.startsWith('/api/setup/local-model')) return picked();
+				if (url === '/api/setup/local-download') {
+					bodies.push(String(init?.body));
+					return existing || bodies.length > 1 ? json({ in_progress: true }) : json({ code: 'consent_required' }, 409);
+				}
+				return json({ sources: [] });
+			}));
+			component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+			flushSync();
+			await settle();
+		}
+		const button = (text: string) => Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim().startsWith(text));
+
+		it('offers both choices with Let CORSIA manage it current, and the disclosure', async () => {
+			await mountOwnOmlx();
+			const group = host.querySelector('[role="group"][aria-label="Your oMLX"]')!;
+			expect(host.textContent).toContain('CORSIA found oMLX on this computer. Both choices use it.');
+			expect(host.textContent).not.toContain('The download starts in the background when you press Get started.');
+			expect(group.querySelector('[aria-current="step"]')?.textContent).toContain('Let CORSIA manage it');
+			expect(group.textContent).toContain('Recommended. CORSIA keeps your oMLX’s settings right for each model.');
+			expect(group.textContent).toContain('CORSIA uses your models and changes nothing. Change settings in oMLX’s own admin page.');
+			expect(host.querySelector('.disclose')?.textContent).toBe(
+				'Letting CORSIA manage it means CORSIA reads your oMLX’s admin key and changes settings for every app that uses this oMLX: the settings of the model it sets up, and two oMLX-wide settings, each shown with its current and new value first. It never touches your key, sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.');
+			expect(calls).toEqual(['/api/setup/status']);
+		});
+
+		it('gives Use mine the read-only consent and never asks to manage', async () => {
+			await mountOwnOmlx();
+			button('Use mine')!.click();
+			await settle();
+			expect(host.querySelector('[aria-label="Your oMLX"] [aria-current="step"]')?.textContent).toContain('Use mine');
+
+			button('Get started')!.click();
+			await settle();
+			expect(host.textContent).not.toContain('admin key');
+			expect(host.textContent).toContain('It won’t change your oMLX.');
+			button('Use it')!.click();
+			await settle();
+			expect(bodies).toEqual(['{"consent_existing":true,"manage_existing":false}']);
+		});
+
+		it('hides both choices when the switch is off', async () => {
+			await mountOwnOmlx();
+			(host.querySelector('button[aria-label="Also run AI on this computer"]') as HTMLButtonElement).click();
+			await settle();
+			expect(host.querySelector('[aria-label="Your oMLX"]')).toBeNull();
+			expect(host.textContent).not.toContain('Letting CORSIA manage it');
+		});
+
+		it('treats a consent Welcome never offered as Use mine', async () => {
+			await mountOwnOmlx(false);
+			expect(host.querySelector('[aria-label="Your oMLX"]')).toBeNull();
+			button('Get started')!.click();
+			await settle();
+			expect(host.textContent).not.toContain('admin key');
+			button('Use it')!.click();
+			await settle();
+			expect(bodies).toEqual(['{"consent_existing":false,"manage_existing":false}', '{"consent_existing":true,"manage_existing":false}']);
+		});
 	});
 
 	it('shows the existing oMLX choice when local download reports consent required', async () => {

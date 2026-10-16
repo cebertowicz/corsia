@@ -118,17 +118,19 @@ describe('the picker\'s Local group', () => {
 		await render();
 		setupResponses = ['consent', 'ok'];
 		button('Try again')!.click();
-		await vi.waitFor(() => expect(setupBodies).toEqual([{ consent_existing: false }]));
+		await vi.waitFor(() => expect(setupBodies).toEqual([{ consent_existing: false, manage_existing: false }]));
 		expect(setupResponses).toEqual(['ok']);
 		await vi.waitFor(() => expect(get(toasts)).toHaveLength(1));
-		expect(setupBodies).toEqual([{ consent_existing: false }]);
+		expect(setupBodies).toEqual([{ consent_existing: false, manage_existing: false }]);
 		await vi.waitFor(() => expect(get(toasts)[0]?.message).toBe('CORSIA can read the existing oMLX version, settings, and local server to adopt it without changing its settings.'));
 		const consent = get(toasts)[0]!;
 		expect(consent.action?.label).toBe('Use existing oMLX');
 
 		await toasts.runAction(consent.id);
 
-		expect(setupBodies).toEqual([{ consent_existing: false }, { consent_existing: true }]);
+		// The picker's consent is Use mine's: it never asks to manage their oMLX.
+		expect(setupBodies).toEqual([
+			{ consent_existing: false, manage_existing: false }, { consent_existing: true, manage_existing: false }]);
 		expect(calls.filter((call) => call === 'GET /api/providers/sources')).toHaveLength(3);
 	});
 
