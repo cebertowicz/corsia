@@ -178,19 +178,20 @@ async def _inline_first_run_wake(thread_id: str, model: str) -> str | None:
     """
     from infra.database import get_db
     from infra.db_async import run_in_db
-    from infra.onboarding_events import has_held_first_run_wake
+    from infra.onboarding_events import held_first_run_path
     from onboarding import first_run_wake
 
-    def _held() -> bool:
+    def _held_path() -> str | None:
         db = get_db()
         try:
-            return has_held_first_run_wake(thread_id, db=db)
+            return held_first_run_path(thread_id, db=db)
         finally:
             db.close()
 
-    if not await run_in_db(_held):
+    path = await run_in_db(_held_path)
+    if path is None:
         return None
-    return await first_run_wake.render_for(model)
+    return await first_run_wake.render_for(model, path)
 
 
 async def _apply_first_selection(

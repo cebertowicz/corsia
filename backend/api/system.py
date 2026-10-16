@@ -7,8 +7,9 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from api.setup import _trusted_request
 from api.system_admin import router as system_admin_router
 from api.system_reviewer import (
     host_access_reviewer_status as _host_access_reviewer_status,
@@ -44,6 +45,16 @@ async def health():
     if state._thread_driver_failure is not None:
         raise HTTPException(503, f"thread driver failed: {state._thread_driver_failure}")
     return {"status": "ok"}
+
+
+@router.get("/system/operation-active")
+async def system_operation_active(request: Request):
+    """Expose only whether the durable update/restart lock currently holds."""
+    if not _trusted_request(request):
+        raise HTTPException(403)
+    from automation import self_restart
+
+    return {"active": await run_in_db(self_restart.in_flight_request) is not None}
 
 
 def _security_alert_path() -> Path:

@@ -39,13 +39,13 @@ def service_binary(vendor: str) -> str | None:
     return shutil.which(binary, path=service_path()) if binary else None
 
 
-def shell_binary(binary: str) -> str | None:
-    """Ask the person's login shell where a binary is; raises TimeoutError if it hangs."""
+def _shell_value(command: str) -> str | None:
+    """Read one marked value from the person's login shell."""
     shell = os.environ.get("SHELL") or "/bin/zsh"
-    command = f"printf '%s\\n' {_BEGIN}; command -v {binary}; printf '%s\\n' {_END}"
+    wrapped = f"printf '%s\\n' {_BEGIN}; {command}; printf '%s\\n' {_END}"
     try:
         process = subprocess.Popen(
-            [shell, "-ilc", command], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            [shell, "-ilc", wrapped], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, start_new_session=True,
         )
         output, _ = process.communicate(timeout=_SHELL_TIMEOUT_SECONDS)
@@ -60,6 +60,16 @@ def shell_binary(binary: str) -> str | None:
     except IndexError:
         return None
     return candidate or None
+
+
+def shell_binary(binary: str) -> str | None:
+    """Ask the person's login shell where a binary is; raises TimeoutError if it hangs."""
+    return _shell_value(f"command -v {binary}")
+
+
+def login_shell_path() -> str | None:
+    """Return the person's login-shell PATH once, without sourcing it into this process."""
+    return _shell_value("printf '%s\\n' \"$PATH\"")
 
 
 def validated_binary(binary: str, candidate: str | None, home: Path) -> Path | None:

@@ -77,6 +77,34 @@ async def test_version_reports_unavailable_head_outside_a_repository(tmp_path, m
     assert result["backend"]["current_head"] == _UNAVAILABLE_HEAD
 
 
+@pytest.mark.asyncio
+async def test_app_bundle_reports_bundled_build_identity_and_service_generation(
+    tmp_path, monkeypatch
+):
+    """An app bundle has no git, so its backend identity is the bundled build-info."""
+    import json
+
+    import api.version as api_version
+
+    build = {"label": "0.4.0", "short_hash": "abc1234", "full_hash": "abc1234" * 5 + "ab"}
+    (tmp_path / "build-info.json").write_text(json.dumps(build))
+    monkeypatch.setattr(api_version, "FRONTEND_DIR", tmp_path)
+    monkeypatch.setattr(api_version, "_APP_BUNDLE", tmp_path / "CORSIA.app")
+    monkeypatch.setattr(
+        api_version.subprocess,
+        "check_output",
+        lambda *_a, **_k: pytest.fail("app bundle ran git"),
+    )
+    monkeypatch.setattr(api_version, "_BACKEND_BUILD", api_version._capture_backend_build_info())
+    monkeypatch.setenv("CORSIA_SERVICE_GENERATION", "0.4.0+7")
+
+    backend = (await api_version.get_version())["backend"]
+
+    assert backend["full_hash"] == build["full_hash"]
+    assert backend["current_head"] is None
+    assert backend["generation"] == "0.4.0+7"
+
+
 def test_version_git_reads_never_rewrite_the_serving_index(tmp_path, monkeypatch):
     """A version poll during Update must not take index.lock in the serving checkout."""
     import os

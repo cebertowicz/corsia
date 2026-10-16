@@ -281,8 +281,11 @@ class TestRestartInstanceIsolation:
             patch("api.settings_restart._prepare_current_release") as prepare,
             patch("subprocess.Popen") as popen,
         ):
-            client.post(f"/api/system/restart?token={_valid_token()}&mode=update")
+            response = client.post(f"/api/system/restart?token={_valid_token()}&mode=update")
         prepare.assert_called_once()
+        # An app bundle stages under the operation id, so prepare must carry it.
+        prepare_env = prepare.call_args[0][1]
+        assert prepare_env["CORSIA_RESTART_OPERATION_ID"] == response.json()["operation_id"]
         cmd = popen.call_args[0][0]
         assert "restart-prepared" in cmd
         assert "server" not in cmd
