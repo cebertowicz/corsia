@@ -37,7 +37,7 @@
 <style>
 	.wake-retry { display: flex; align-items: baseline; gap: 6px; max-width: 760px; margin: 0 auto 12px; color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.text { min-width: 0; overflow-wrap: anywhere; }
-	.retry { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
+	.retry { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--violet-text); font: inherit; cursor: pointer; }
 	.retry:disabled { cursor: wait; opacity: 0.45; }
 	@media (pointer: coarse) { .retry { min-height: 44px; padding: 0 8px; } }
 </style>

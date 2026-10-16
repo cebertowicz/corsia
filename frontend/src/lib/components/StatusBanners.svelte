@@ -128,7 +128,7 @@
 	}
 	.dismiss-btn:hover { background: rgba(255,255,255,0.3); }
 	.drain-banner {
-		background: var(--accent-subtle); color: var(--accent);
+		background: var(--accent-subtle); color: var(--violet-text);
 		padding: 6px 16px; font-size: var(--text-subhead); font-weight: 500;
 		display: flex; align-items: center; gap: 8px;
 		justify-content: center; flex-shrink: 0;

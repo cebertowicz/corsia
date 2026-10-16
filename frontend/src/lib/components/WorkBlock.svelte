@@ -165,7 +165,7 @@
 	.live-step.dimmed { opacity: 0.7; }
 	.live-step.fading { opacity: 0; }
 	@media (prefers-reduced-motion: reduce) { .live-step { transition: none; } }
-	.live-spinner { flex-shrink: 0; color: var(--accent); animation: live-spin 1s linear infinite; }
+	.live-spinner { flex-shrink: 0; color: var(--status-in-progress); animation: live-spin 1s linear infinite; }
 	@keyframes live-spin { to { transform: rotate(360deg); } }
 	/* No box: a 2 px rule down the left edge shows where the block starts and ends. */
 	.fold-details { margin: 8px 0 0 5px; padding: 2px 0 0 16px; border-left: 2px solid var(--border-subtle); }
@@ -173,7 +173,7 @@
 	.fold-state { display: flex; align-items: center; gap: 8px; padding: 0 0 12px; color: var(--text-muted); font-size: var(--text-footnote); }
 	.fold-error { color: var(--red-text); }
 	.fold-error .fold-action { min-height: 32px; padding: 0 4px; }
-	.fold-action { padding: 0 0 12px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
+	.fold-action { padding: 0 0 12px; border: 0; background: transparent; color: var(--violet-text); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
 	.fold-history { padding: 8px 0 0 21px; }
 	.fold-details :global(.plan-limit-paused), .fold-history :global(.plan-limit-paused) { margin: 0 auto 12px; }
 	@media (pointer: coarse) {

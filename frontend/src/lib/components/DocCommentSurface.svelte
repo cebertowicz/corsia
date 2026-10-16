@@ -370,14 +370,14 @@
 	.filter-popup { position: absolute; z-index: 2; right: 0; top: calc(100% + var(--space-1)); display: grid; min-width: 9rem; padding: var(--space-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); box-shadow: var(--shadow-chip); }
 	.filter-popup button { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); text-align: left; }
 	.filter-check { display: inline-flex; flex: none; width: 12px; height: 12px; }
-	.filter-popup button[aria-checked="true"] { color: var(--accent); font-weight: var(--fw-semibold); }
+	.filter-popup button[aria-checked="true"] { color: var(--violet-text); font-weight: var(--fw-semibold); }
 	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: 44px; } }
 	/* A filter switch crossfades: the leaving and arriving lists share one grid cell, so neither moves the other. */
 	.peers { display: grid; }
 	.peer { grid-area: 1 / 1; min-width: 0; }
 	.drawer-comments { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 	.drawer-status { color: var(--text-secondary); font-size: var(--text-footnote); margin: 4px 0; }
-	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
+	.drawer-empty-action { margin-left: var(--space-1); padding: 0; border: 0; background: none; color: var(--violet-text); font: inherit; font-weight: var(--fw-semibold); cursor: pointer; }
 	.drawer-empty-action:hover { text-decoration: underline; }
 	/* The one measured wrapper owns the drawer's pinned-footer height, including either or both child footers. */
 	.drawer-footers { flex: none; }
@@ -390,7 +390,7 @@
 	@media (max-width: 420px) { .drawer-unsent { gap: var(--space-1); padding-inline: var(--space-2); } }
 	@media (pointer: coarse) { .drawer-unsent :global(.btn) { min-height: 44px; } }
 	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent); cursor: pointer; }
+	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--violet-text); cursor: pointer; }
 	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
 	.suggestion-status button:disabled { opacity: 0.55; cursor: not-allowed; }
 	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-bg); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }

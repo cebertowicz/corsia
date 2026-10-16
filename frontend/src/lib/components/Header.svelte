@@ -232,7 +232,13 @@
 		white-space: nowrap; overflow: hidden;
 	}
 	.h-scope { overflow: hidden; text-overflow: ellipsis; }
-	.h-cond-glyph { color: var(--accent); flex-shrink: 0; }
+	/* An expanded document occupies the right canvas column. Keep the chat title
+	   inside its left column, with a visible gap before the document tab strip. */
+	:global(.app:has(.leaf-col:not(.rail):not(.full))) .h-title {
+		flex: 0 1 calc(100% - 648px);
+		margin-right: var(--space-2);
+	}
+	.h-cond-glyph { color: var(--violet-text); flex-shrink: 0; }
 	.h-cond-tag { color: var(--text-tertiary); font-weight: var(--fw-medium); flex-shrink: 0; }
 	.h-cond-tag::before { content: '· '; }
 
@@ -243,7 +249,7 @@
 		white-space: nowrap; transition: background var(--dur-tight), color var(--dur-tight);
 	}
 	.h-act:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.h-act.active { background: var(--accent-subtle, color-mix(in srgb, var(--accent) 14%, transparent)); color: var(--accent); }
+	.h-act.active { background: var(--accent-subtle, color-mix(in srgb, var(--accent) 14%, transparent)); color: var(--violet-text); }
 
 	.h-overflow { display: none; align-items: center; justify-content: center; width: 34px; height: 32px; border-radius: var(--radius-sm); background: none; border: none; cursor: pointer; color: var(--text-secondary); transition: background var(--dur-tight), color var(--dur-tight); }
 	.h-overflow:hover, .h-overflow.open { background: var(--bg-hover); color: var(--text-primary); }
@@ -260,7 +266,7 @@
 	@keyframes hSheetIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 	.h-ov-item { text-align: left; padding: 9px 11px; border-radius: var(--radius-xs); background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: var(--text-subhead); font-weight: var(--fw-medium); transition: background var(--dur-tight), color var(--dur-tight); }
 	.h-ov-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.h-ov-item.active { color: var(--accent); }
+	.h-ov-item.active { color: var(--violet-text); }
 
 	@media (max-width: 1100px) { .h-act.wide-only { display: none; } }
 
@@ -268,23 +274,36 @@
 		.shell-header {
 			transform: translateY(var(--empty-parallax-offset, 0));
 			height: var(--header-bottom);
-			padding-top: max(8px, calc(var(--safe-top) - 28px));
+			/* Moves the row down by exactly the clearance --header-bottom adds (app.css), so it
+			   keeps its place relative to the bottom edge, below the iOS 27 top-edge blur.
+			   ::before reads it to find the row. */
+			--header-pad-top: max(8px, calc(var(--safe-top) - 28px + var(--edge-blur-clearance)));
+			padding-top: var(--header-pad-top);
 			padding-left: max(10px, env(safe-area-inset-left, 0px));
 			padding-right: max(10px, env(safe-area-inset-right, 0px));
 			box-shadow: none;
 			display: grid; grid-template-columns: auto 1fr auto; gap: 4px;
 		}
 		/* The blur stays on this masked layer so it fades out with no hard edge.
-		   Known trade-off: the mask also thins the blur, so the transcript can
-		   show faintly through the title row. */
+		   Wherever the mask is below 1 the transcript shows through, so the mask stays opaque
+		   down to the bottom of the row's glyphs and then fades out linearly to the header
+		   bottom, over the same length as the fade below the row had before. The row is
+		   centred in the box below the padding, at 50% + pad / 2, and its 18px icons and the
+		   title end 9px below that centre.
+		   The tint keeps its old profile below the clearance strip: the strip (0 to c) stays
+		   at the first stop, and the old 50% and 80% stops of the old height (100% - c) sit
+		   at c + 50% and c + 80% of it, i.e. 50% + c/2 and 80% + c/5. With no top inset c is
+		   0 and these are the old tint stops. */
 		.shell-header::before {
 			background-image: linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--header-top-base) 70%, transparent) 0%,
-				color-mix(in srgb, var(--header-top-base) 45%, transparent) 50%,
-				color-mix(in srgb, var(--header-top-base) 15%, transparent) 80%,
+				color-mix(in srgb, var(--header-top-base) 70%, transparent) var(--edge-blur-clearance),
+				color-mix(in srgb, var(--header-top-base) 45%, transparent) calc(50% + var(--edge-blur-clearance) / 2),
+				color-mix(in srgb, var(--header-top-base) 15%, transparent) calc(80% + var(--edge-blur-clearance) / 5),
 				transparent 100%
 			);
+			-webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);
+			mask-image: linear-gradient(180deg, rgba(0,0,0,1) calc(50% + var(--header-pad-top) / 2 + 9px), transparent 100%);
 		}
 		.h-left { justify-self: start; }
 		.h-right { justify-self: end; margin-left: 0; }

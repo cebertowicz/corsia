@@ -88,3 +88,26 @@ test('preserves the #2965 priority result at 320px and 360px', async ({ page }) 
 		expect(await result('candidate'), `${width}px priority`).toEqual(await result('base'));
 	}
 });
+
+test('uses the same compact context control before Send at 393px in both themes', async ({ page }) => {
+	for (const theme of ['light', 'dark'] as const) {
+		await page.setViewportSize({ width: 393, height: 240 });
+		await page.goto(`/_design/context-chip-probe?source=estimated&pct=20&theme=${theme}&model=long`, { waitUntil: 'domcontentloaded' });
+		// This matches the narrow usable composer width at phone size, rather than
+		// making the viewport itself narrower than the reviewed 393px breakpoint.
+		await page.locator('.input-floater').evaluate((element) => { element.setAttribute('style', 'width: 360px'); });
+		const result = await page.locator('.action-row').evaluate((row) => {
+			const context = row.querySelector<HTMLElement>('.context-chip')!;
+			const send = row.querySelector<HTMLElement>('.send-btn')!;
+			const label = row.querySelector<HTMLElement>('.ctx-pct')!;
+			const contextBox = context.getBoundingClientRect();
+			const sendBox = send.getBoundingClientRect();
+			return {
+				gap: sendBox.left - contextBox.right,
+				labelVisible: getComputedStyle(label).display !== 'none',
+			};
+		});
+		expect(result.gap, `${theme} context-to-send gap`).toBeGreaterThanOrEqual(8);
+		expect(result.labelVisible, `${theme} compact form`).toBe(false);
+	}
+});

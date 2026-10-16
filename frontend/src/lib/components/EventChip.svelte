@@ -224,7 +224,7 @@
 		border-radius: var(--radius-xs);
 		border: 1px solid var(--border-subtle);
 		font-size: var(--text-caption);
-		font-family: var(--font-mono);
+		font-family: inherit;
 		color: var(--text-secondary);
 		background: var(--bg-secondary);
 	}
@@ -314,10 +314,12 @@
 		justify-content: space-between;
 		gap: var(--space-3);
 	}
+	.ev-detail > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.ev-detail time {
 		flex: 0 0 auto;
 		color: var(--text-tertiary);
 		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 	}
 	.ev-delivery {
 		display: flex;

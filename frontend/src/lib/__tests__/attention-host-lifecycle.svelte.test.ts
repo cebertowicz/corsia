@@ -226,13 +226,20 @@ describe('Chat slot owner — one component owns the bottom band', () => {
 	});
 
 	it('backs every line of dock copy that floats over the transcript', () => {
-		// A 10%-alpha tint with no blur let message text read straight through the
-		// band. .dock-deferred is the host-access-awaiting note this stack widens,
-		// and .dock-stale sits beside it — all three need real backing material,
-		// not just the bar. Asserted from source because the defect is pure CSS.
-		for (const selector of ['.dock-bar', '.dock-deferred', '.dock-stale']) {
-			const rule = new RegExp(`\\${selector}[^{}]*\\{[^{}]*\\}`);
-			const body = attentionDockSource.match(rule)?.[0] ?? '';
+		// The dock bar stays frosted, but it starts after its container's solid
+		// transcript-colour inset. That backing blocks message text before the bar's
+		// translucent material composites over it. .dock-deferred is the
+		// host-access-awaiting note this stack widens, and .dock-stale sits beside it.
+		const ruleOf = (selector: string) => attentionDockSource.match(new RegExp(`\\${selector}[^{}]*\\{[^{}]*\\}`))?.[0] ?? '';
+		const dock = ruleOf('.attention-dock');
+		expect(dock, '.attention-dock should declare a rule').not.toBe('');
+		expect(dock, '.attention-dock reserves its solid backing inset').toContain('padding: var(--space-4) 0 0');
+		expect(dock, '.attention-dock paints the solid backing beneath the bar').toContain(
+			'var(--bg-primary) var(--space-4)'
+		);
+		expect(ruleOf('.dock-bar'), '.dock-bar stays frosted over that backing').toContain('background: var(--glass-thin)');
+		for (const selector of ['.dock-deferred', '.dock-stale']) {
+			const body = ruleOf(selector);
 			expect(body, `${selector} should declare a rule`).not.toBe('');
 			expect(body, `${selector} needs opaque backing`).toContain('--glass-regular-thick');
 			expect(body, `${selector} needs the blur its peers use`).toContain('--glass-blur');

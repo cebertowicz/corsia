@@ -158,7 +158,7 @@
 	<header>
 		<div>
 			<span class="eyebrow">
-				Decision · {decision.source.thread_label}{#if decision.source.project_label}<span class="scope"> · {decision.source.project_label}</span>{/if}
+				Decision · {decision.source.thread_label}{#if decision.source.project_label}<span class="scope"><span aria-hidden="true">{' · '}</span>{decision.source.project_label}</span>{/if}
 			</span>
 			<h3 id={headingId} tabindex="-1" data-drawer-autofocus>{decision.title}</h3>
 			{#if !decision.source.parent_reviewed}
@@ -283,10 +283,9 @@
 
 <style>
 	.decision-chip { background: transparent; overflow: visible; }
-	/* Sticky over scrolling content: the same material and blur as the drawer
-	   panel that contains it. `--surface-1` never existed, so this whole
-	   declaration used to be dropped and the bar was transparent. */
-	header { position: sticky; top: 0; z-index: 2; display: flex; gap: var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); }
+	/* The decision drawer is opaque: its sticky heading must be the same opaque
+	   sheet material, otherwise scrolled options visibly pass behind the title. */
+	header { position: sticky; top: 0; z-index: 2; display: flex; gap: var(--space-3); padding: 0 0 var(--space-3); border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary); }
 	.eyebrow { display: block; margin-bottom: var(--space-1); color: var(--violet-text); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
 	.eyebrow .scope { color: var(--text-tertiary); }
 	h3 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); line-height: var(--lh-tight); }
@@ -295,7 +294,7 @@
 	.decision-top { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(220px, .85fr); gap: var(--space-4); }
 	.decision-context > p { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	dl { display: grid; gap: var(--space-2); margin: 0; }
-	dl div { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--bg-primary); }
+	dl div { padding: var(--space-2) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); }
 	dt { margin-bottom: var(--space-1); color: var(--text-tertiary); font-size: var(--text-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-cap); text-transform: uppercase; }
 	dd { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); line-height: var(--lh-normal); }
 	.options { display: flex; flex-direction: column; gap: var(--space-2); }

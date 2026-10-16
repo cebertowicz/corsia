@@ -343,7 +343,7 @@
 		--plan-row-line-height: calc(var(--text-subhead) * var(--lh-normal));
 		--plan-row-action-height: 28px;
 		display: flex; flex-wrap: nowrap; align-items: center; gap: var(--space-2); min-height: 38px;
-		padding: 6px 8px 6px calc(4px + var(--indent)); border-radius: var(--radius-xs);
+		padding: 6px 8px 6px calc(8px + var(--indent)); border-radius: var(--radius-xs);
 		width: 100%;
 	}
 	/* The fold face keeps its whole width, so the actions sit beside the

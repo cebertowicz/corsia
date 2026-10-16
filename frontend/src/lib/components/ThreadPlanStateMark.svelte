@@ -122,7 +122,7 @@
 	}
 	.plan-state.static { cursor: default; }
 	.plan-state:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: var(--radius-2xs); }
-	.plan-state.needs_input, .plan-state.blocked_on_you { color: var(--amber); }
+	.plan-state.needs_input, .plan-state.blocked_on_you { color: var(--amber-text); }
 	.plan-state.blocked_on_you { font-weight: 600; }
 	.plan-state.failed { color: var(--red); }
 	.update-dot {

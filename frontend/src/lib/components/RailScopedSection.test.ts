@@ -491,7 +491,7 @@ describe('RailScopedSection motion truth', () => {
 		renderRail();
 
 		const spinner = host.querySelector<SVGElement>('.scoped-item.agent .spinner');
-		expect(spinner?.getAttribute('stroke')).toBe('var(--accent)');
+		expect(spinner?.getAttribute('stroke')).toBe('var(--status-in-progress)');
 		expect(spinner?.getAttribute('aria-label')).toBe('Working');
 	});
 
@@ -521,7 +521,7 @@ describe('RailScopedSection motion truth', () => {
 		renderRail();
 
 		const spinner = host.querySelector<SVGElement>('.scoped-item.agent .spinner');
-		expect(spinner?.getAttribute('stroke')).toBe('var(--accent)');
+		expect(spinner?.getAttribute('stroke')).toBe('var(--status-in-progress)');
 	});
 
 	it('replaces the agent sparkle with the leading pause mark when the plan is paused', () => {

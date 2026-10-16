@@ -199,7 +199,7 @@
 			<ThreadPlanStateMark threadId={conductorThreadId} {onOpenAttention} onOpenThread={goConductor} />
 		{/if}
 		{#if conductorBusy}
-			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 		{:else if conductorThreadId && $descendantRunning.has(conductorThreadId)}
 			<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 		{/if}
@@ -265,7 +265,7 @@
 			</div>
 			<ThreadPlanStateMark threadId={agent.id} {onOpenAttention} onOpenThread={selectAgent} />
 			{#if activity === 'active'}
-				<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+				<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--status-in-progress)" stroke-width="3" role="img" aria-label="Working"><title>Working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			{:else if $descendantRunning.has(agent.id)}
 				<svg class="spinner" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="3" role="img" aria-label="Subagent working"><title>Subagent working</title><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 			{/if}
@@ -293,7 +293,6 @@
 		display: flex; flex-direction: column; gap: 1px;
 		padding: 6px 8px 8px;
 		margin: 0 0 2px;
-		border-bottom: 1px solid var(--border-subtle);
 	}
 	.scoped-item {
 		display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -314,7 +313,7 @@
 		font: inherit; font-size: inherit; color: inherit; text-align: left; cursor: pointer;
 	}
 	.scoped-item-trigger:disabled { cursor: default; }
-	.scoped-item.identity .scoped-item-trigger > svg:first-child { color: var(--accent); opacity: 1; }
+	.scoped-item.identity .scoped-item-trigger > svg:first-child { color: var(--violet-text); opacity: 1; }
 	.agent-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 	.lbl, .update-summary { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.lbl { font-size: var(--text-subhead); }
@@ -334,12 +333,8 @@
 	.scoped-item.conductor .lbl { font-weight: 600; color: var(--text-primary); }
 	.scoped-item.conductor.disabled .lbl { color: var(--text-tertiary); }
 	.scoped-item.conductor.disabled svg { color: var(--text-tertiary); opacity: 0.8; }
-	.scoped-item.conductor svg { color: var(--accent); opacity: 1; }
+	.scoped-item.conductor svg { color: var(--violet-text); opacity: 1; }
 	.scoped-item.active { background: var(--violet-bg); }
-	.scoped-item.active::before {
-		content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px;
-		background: var(--accent); border-radius: 0 2px 2px 0;
-	}
 	.drawer-toggle {
 		display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0;
 		padding: 7px 10px; border: none; border-radius: var(--radius-sm);
@@ -354,7 +349,7 @@
 	.drawer-separator { flex-shrink: 0; color: var(--text-tertiary); }
 	.drawer-attention {
 		flex-shrink: 0; max-width: 52%; overflow: hidden; text-overflow: ellipsis;
-		white-space: nowrap; color: var(--accent); font-weight: 600;
+		white-space: nowrap; color: var(--violet-text); font-weight: 600;
 	}
 	@keyframes spin { to { transform: rotate(360deg); } }
 
