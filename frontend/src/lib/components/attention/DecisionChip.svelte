@@ -290,7 +290,7 @@
 	.eyebrow .scope { color: var(--text-tertiary); }
 	h3 { margin: 0; color: var(--text-primary); font-size: var(--text-title3); line-height: var(--lh-tight); }
 	.source-note { margin: var(--space-1) 0 0; color: var(--text-tertiary); font-size: var(--text-caption); }
-	.decision-body { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4) 0 var(--space-5); }
+	.decision-body { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4) 0 0; }
 	.decision-top { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(220px, .85fr); gap: var(--space-4); }
 	.decision-context > p { margin: 0; color: var(--text-primary); font-size: var(--text-subhead); line-height: var(--lh-normal); }
 	dl { display: grid; gap: var(--space-2); margin: 0; }
@@ -312,7 +312,7 @@
 	.other-option textarea { min-width: 0; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-primary); padding: var(--space-1) var(--space-2); outline: none; font-family: inherit; font-size: inherit; line-height: var(--lh-normal); resize: none; overflow-y: auto; min-height: calc(1em * var(--lh-normal) + var(--space-2)); max-height: min(40vh, 12em); }
 	.other-option textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 	.decision-buttons { display: flex; flex: none; align-items: center; gap: var(--space-2); }
-	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0; border-top: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); color: var(--text-tertiary); font-size: var(--text-footnote); }
+	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0 max(var(--space-3), env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); background: var(--glass-thick); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.receipt { flex: 1; min-width: 0; margin: 0; }
 	.hint { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	fieldset.pick-any { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
