@@ -282,7 +282,7 @@ class TestAppPath:
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
-        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: False)
+        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: True)
         monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))
@@ -323,13 +323,21 @@ class TestAppPath:
         assert len(warnings) == 1 and first_run_wake.APP_REFERENCE in warnings[0].message
 
     @pytest.mark.asyncio
-    async def test_app_facts_are_private_and_use_an_addressless_github_decision(self, monkeypatch, tmp_path):
+    @pytest.mark.parametrize("profile_email", ["person@gmail.com", "person@workspace.example", ""])
+    async def test_app_facts_offer_google_setup_without_leaking_profile_email(
+        self, monkeypatch, tmp_path, profile_email,
+    ):
         from infra import config
         from onboarding import first_run_wake
 
         profile = tmp_path / "context" / "50-USER-PROFILE.md"
         profile.parent.mkdir()
-        profile.write_text("- **Preferred name:** Pat\x01 " + "n" * 130 + "\n- **Email:** person@gmail.com\n", encoding="utf-8")
+        profile.write_text(
+            "- **Preferred name:** Pat\x01 " + "n" * 130
+            + (f"\n- **Email:** {profile_email}" if profile_email else "")
+            + "\n",
+            encoding="utf-8",
+        )
         monkeypatch.setattr(config, "WORKSPACE", tmp_path)
         monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
             "sources": [{"source": "claude-code", "state": "ready"}],
@@ -346,7 +354,11 @@ class TestAppPath:
         assert facts["gmail_eligible"] is True
         assert facts["user_profile"] == {"name": "Pat " + "n" * 116, "work": None, "place": None, "check_first": None, "answer_style": None}
         assert "the address you give me in chat" in wake
-        assert not any(value in wake for value in ("person@gmail.com", "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles"))
+        assert not any(
+            value in wake
+            for value in (profile_email, "person+agents@gmail.com", str(tmp_path), "America/Los_Angeles")
+            if value
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failed, expected", [
@@ -367,7 +379,7 @@ class TestAppPath:
         monkeypatch.setattr(first_run_wake, "_model_sources", lambda: {
             "sources": [], "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
-        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: False)
+        monkeypatch.setattr(first_run_wake, "_gmail_eligible", lambda: True)
         monkeypatch.setattr(first_run_wake, "_own_omlx_source", lambda: False)
         monkeypatch.setattr(first_run_wake, "_app_user_profile", lambda: {})
         monkeypatch.setattr(first_run_wake, "_app_setup", AsyncMock(return_value={"setup_decisions": []}))

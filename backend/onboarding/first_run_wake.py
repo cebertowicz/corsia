@@ -143,11 +143,8 @@ def _own_omlx_source() -> bool:
 
 
 def _gmail_eligible() -> bool:
-    from infra import config
-    from infra.user_profile import profile_email
-    from onboarding.setup_decisions import GMAIL_DOMAINS
-
-    return profile_email(config.WORKSPACE).rsplit("@", 1)[-1].lower() in GMAIL_DOMAINS
+    """The Google email-and-calendar setup offer is available to every install."""
+    return True
 
 
 def _app_user_profile() -> dict[str, str | None]:
