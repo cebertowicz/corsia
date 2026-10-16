@@ -150,7 +150,7 @@ def test_plan_decision_schema_covers_exact_operation_vocabulary():
             assert "decision revision" in revision["description"].lower()
 
 
-def test_plan_decision_draft_refusal_explains_the_rationale_purpose():
+def test_plan_decision_rationale_publishes_its_purpose_and_limit():
     from tools.plans import PlanDecisionTool
 
     errors = PlanDecisionTool().validate_params({
@@ -172,10 +172,9 @@ def test_plan_decision_draft_refusal_explains_the_rationale_purpose():
         },
     })
 
-    assert errors == [
-        "params.rationale must be at most 240 chars. Why you recommend it: "
-        "the one point that clinches it, in a sentence or two. Not a second tradeoff."
-    ]
+    assert errors == ["params.rationale must be at most 240 chars"]
+    rationale = PlanDecisionTool().parameters["properties"]["params"]["properties"]["rationale"]
+    assert rationale["description"].startswith("Why you recommend it")
 
 
 @pytest.mark.parametrize("operation", sorted(_MUTATION_REQUIRED))
@@ -372,6 +371,8 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_decision 2,600 -> 3,000 (pick-any): `pick` and the list form of `recommendation` are published at the field, because an agent never told of them raises combination options instead.
 # plan_update 8,975 -> 9,076 (+101): `mark_done` also settles a step assigned to the user, so the line says
 # so, asks for evidence in plain words because the person reads it, and sends approvals to a decision.
+# plan_decision 3,000 -> 3,100: `rationale` publishes its purpose and 240-character limit at the field,
+# because the recommended option now shows it inline and an agent never told writes a second tradeoff.
 _PUBLISHED_BYTES = {"plan_update": 9_076, "plan_decision": 3_100}
 
 

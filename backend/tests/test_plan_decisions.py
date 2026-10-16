@@ -661,7 +661,7 @@ def test_updating_a_raised_decision_returns_it_to_draft_and_clears_attention(db)
     assert service._node_row(db, decision["node_id"])["state"] == "active"
 
 
-def test_update_requires_a_stored_overlong_rationale_to_be_shortened(db):
+def test_update_refuses_a_stored_overlong_rationale_until_it_is_shortened(db):
     import plans.decisions as decisions
 
     plan, source = _delegated(db)
@@ -674,7 +674,7 @@ def test_update_requires_a_stored_overlong_rationale_to_be_shortened(db):
     )
     db.commit()
 
-    with pytest.raises(service.PlanError, match="stored rationale must be shortened to 240"):
+    with pytest.raises(service.PlanError, match=r"rationale is too long \(limit 240"):
         decisions.update(
             decision["id"], expected_revision=decision["revision"], mutation_id=_mid(),
             actor=_thread_actor("worker"), provenance="p", db=db,

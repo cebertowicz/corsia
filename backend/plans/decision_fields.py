@@ -296,13 +296,6 @@ def answer_note(answer: dict | None) -> str | None:
 
 def patched(existing: dict, patch: dict) -> dict:
     """Merge a partial update onto the stored body, rejecting unknown fields."""
-    if (
-        "rationale" not in patch
-        and len(str(existing.get("rationale") or "").strip()) > MAX_RATIONALE
-    ):
-        raise DecisionInputError(
-            f"stored rationale must be shortened to {MAX_RATIONALE} characters before updating"
-        )
     unknown = sorted(set(patch) - set(CONTENT_FIELDS))
     if unknown:
         raise DecisionInputError(f"unknown decision fields: {', '.join(unknown)}")

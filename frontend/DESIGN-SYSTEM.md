@@ -19,8 +19,9 @@ support, and the live token split in `app-tokens.css` + `app.css`.
   status, action, card, accent) has one treatment taken from it; match it, and
   never use a treatment §0.2 lists as out.
 - **Use the live primitives** in `frontend/src/lib/components/ui/`: `Button`,
-  `Field`, `IconButton`, `Message`, `Modal`, `Section`, `StatePill`, `Toggle`.
-  Don't roll your own.
+  `Field`, `IconButton`, `Message`, `Modal`, `Section`, `Toggle`.
+  Don't roll your own. (`StatePill` still exists, but status is a dot or
+  coloured text, never a pill: §0.2.)
 - **All design values are tokens** in `frontend/src/app-tokens.css` (imported
   by `app.css`). Never hardcode colors, spacing, type, blurs, radii, motion,
   press behavior, elevations, or scrim alphas.
@@ -42,9 +43,8 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 ## 0. The reference screen: the chat view
 
 **Status:** approved look, 2026-10-15. Every other screen is brought into line
-with it, one screen at a time. Where this section and an older section below
-disagree, this section wins, and the older text gets fixed when that screen's
-pass reaches it.
+with it, one screen at a time. Where an older section below disagrees, it
+carries a **Superseded by §0** note at that point, and this section wins.
 
 **What this section is.** For each role on the screen, it gives the treatment the approved chat view
 actually draws, with its tokens and the component that draws it. It describes
@@ -98,8 +98,11 @@ any screen:
 ### 0.3 Known gaps inside the reference screen
 
 The approved view still has members that differ from their role. They're
-recorded here so no one copies them. They get fixed when their component is
-next touched; they're not a reason to change the approved look on its own.
+recorded here so no one copies them; they're not a reason to change the
+approved look on its own. **Owner:** Product Experience. **Trigger:** each gap
+is fixed in the coherence pass of the screen that draws it (Settings is
+first), or sooner in any change that touches its component; the fix removes
+its line here.
 
 - Row insets: sidebar row `7px 10px`, plan row `6px 8px`. The artifact and document rows have no minimum height, and the document row has a 24px left inset and a 2px accent edge when selected.
 - Section labels: the artifact lane uses raw weight `600`. The document source label is caption, bold and uppercase. Every label's padding differs.
@@ -539,6 +542,10 @@ Weight/line-height/tracking ladders (`--fw-*`, `--lh-*`, `--ls-*`)
 unchanged. Markdown content uses `--text-callout` and scales down inside
 `.live-reasoning-text` / `.reasoning-content` (subhead / 1.5).
 
+**Superseded by §0:** a section label is sentence case, `--text-footnote`,
+`--fw-semibold`, `--text-tertiary` (§0.1). The uppercase caps below are the
+old treatment, kept until each screen's pass removes them; don't add new ones.
+
 **Section caps** (PROJECTS, PINNED, CONVERSATIONS, etc. — used by
 `Section.svelte` and ad-hoc sidebar headers):
 - 9.5–10.5px / weight 700 / 0.10–0.12em letter-spacing / uppercase
@@ -866,6 +873,10 @@ match the visual contract.
 
 ### 3.5 StatePill
 
+**Superseded by §0:** show a status as a dot or coloured text (§0.1 Status);
+a filled pill holding a status is out (§0.2 item 4). Don't add new StatePill
+uses; existing ones go in each screen's pass.
+
 `ui/StatePill.svelte`. Small uppercase pill that visualizes a state.
 
 ```ts
@@ -888,9 +899,8 @@ interface Props {
 - `idle`, `default` → neutral (`--bg-tertiary` + `--text-tertiary`)
 
 **Don't:** Build a per-component badge with hardcoded `rgba(...)` (Timeline
-does this for active badges — flagged in §8.2). Use StatePill, or — when
-you genuinely need a smaller / non-state pill — propose adding `Badge`
-(see §4.5).
+does this for active badges — flagged in §8.2). Show the state as a dot or
+coloured text (§0.1 Status).
 
 ### 3.6 Section
 
@@ -906,6 +916,7 @@ interface Props {
 ```
 
 Title styling: 9.5px / 700 / 0.12em / uppercase / `--text-tertiary`.
+**Superseded by §0:** new and revised titles use the §0.1 Section label.
 Body uses `display: contents` (no wrapper div).
 
 Use this for a logical grouping inside a modal body or panel. **Not** for
@@ -913,6 +924,11 @@ sidebar section caps (PROJECTS, CONVERSATIONS) — those have a slightly
 different aesthetic; see §5.2.
 
 ### 3.7 Message
+
+**Superseded by §0:** a tinted banner is out (§0.2 items 1 and 2). New and
+revised screens state a result as coloured text in the §0.1 Status colours,
+with no fill or border. The banner below is the existing primitive, kept until
+each screen's pass replaces it.
 
 `ui/Message.svelte`. Inline status banner — pairs with form actions and
 modal bodies.
@@ -1028,6 +1044,9 @@ border-bottom.
 
 ### 4.5 Badge
 
+**Superseded by §0** for counts and statuses (§0.2 item 4): never put either
+in a badge.
+
 Smaller / less-formal than StatePill — a colored pill that semantically
 labels (e.g., "local", "tailscale", "active") rather than visualizing a
 state. Today: `entry-badge` (Timeline, hardcoded rgba), `ep-kind` (v7),
@@ -1090,6 +1109,10 @@ navigate sessions from anywhere.
 ### 5.2 Sidebars
 
 Material: `--glass-thick`. **Must include `box-shadow: var(--glass-rim)`.**
+
+**Superseded by §0:** sidebar group labels use the §0.1 Section label
+(sentence case, `--text-tertiary`, as `SidebarThreadList.svelte` draws it).
+The caps below are the older treatment.
 
 Section caps inside the sidebar (PROJECTS, PINNED, CONVERSATIONS) are
 unified at 10.5px / weight 700 / 0.1em letter-spacing /
@@ -1231,8 +1254,8 @@ The following are *don'ts*. Violations should be caught in review.
    Variable Convention rule. Numeric fallbacks (`var(--radius-xs, 4px)`)
    are fine.
 10. **Defining tokens inside components.** Tokens belong in `app-tokens.css`.
-11. **Nesting Modal inside Modal** for confirm-deletes. Use inline
-    `<Message>` + danger button instead.
+11. **Nesting Modal inside Modal** for confirm-deletes. Use an inline
+    confirm line (coloured text, §0.1 Status) + danger button instead.
 12. **Skipping the rim** on a glass surface.
 13. **Inlining new easing curves and durations.** New transitions pick a
     curve from §2.7.1 and a duration from §2.7.2, or propose adding to
