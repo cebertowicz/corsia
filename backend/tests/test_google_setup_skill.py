@@ -82,6 +82,9 @@ def test_email_and_calendar_route_to_google_setup():
     first_agent = FIRST_AGENT.read_text(encoding="utf-8")
     assert "connect them with skill `google-setup` instead of creating an agent" in first_agent
     assert "another mail provider included, goes to step 3" in first_agent
+    assert "When it ends, connected or not now, close task 7" in first_agent
+    task_7 = FIRST_RUN.read_text(encoding="utf-8").split("## Task 7:", 1)[1].split("## Every wake", 1)[0]
+    assert "or `google-setup` ends for an email answer" in task_7
 
 
 def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backend():
@@ -100,5 +103,9 @@ def test_google_setup_carries_the_approved_offer_and_leaves_secrets_to_the_backe
     assert "Never make a second project or client." in steps
     assert "shows the client secret, so take no snapshot or screenshot of it" in steps
     assert "Read the client ID from the Clients list" in steps and "never open it" in steps
-    assert steps.index("`google_connect` with no `client_file`") < steps.index("agent-browser --version")
+    assert steps.index("`google_connect` with no `client_file`") < steps.index("an error that says to install agent-browser")
+    assert "whatever the cause it names" in steps
+    assert "exactly the install commands that error names" in steps
+    assert "then call `browser_open` again" in steps
+    assert "@0." not in steps
     assert "Connected as <address>. If that's the wrong account, say so and I'll switch it." in steps
