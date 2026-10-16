@@ -55,14 +55,14 @@ def migrate_119_to_120(conn: sqlite3.Connection) -> None:
 
 def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
     """Clear orphaned user asks only when their task is positively retired."""
-    from plans import holds, node_states
+    from plans.public import TERMINAL_STATES, clear_hold_write
 
     present = {str(row[0]) for row in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
     )}
     if not present.issuperset(_TABLES):
         return 0
-    terminal = tuple(sorted(node_states._TERMINAL_STATES))
+    terminal = tuple(sorted(TERMINAL_STATES))
     marks = ",".join("?" for _ in terminal)
     rows = conn.execute(
         f"""SELECT h.id AS hold_id,h.node_id
@@ -77,9 +77,9 @@ def withdraw_retired_user_asks(conn: sqlite3.Connection) -> int:
         terminal,
     ).fetchall()
     for row in rows:
-        # clear_write only appends the hold event and touches the node: it neither
+        # clear_hold_write only appends the hold event and touches the node: it neither
         # validates live state nor reconciles admission, so it is migration-safe.
-        holds.clear_write(
+        clear_hold_write(
             str(row["node_id"]), str(row["hold_id"]), expected_kind="blocked",
             actor_id=None, provenance="migration.119_to_120", detail={"ended": "withdrawn"}, db=conn,
         )
