@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -68,6 +69,22 @@ def test_python_spake2_derives_rust_04_vector_key(order):
     assert pairing.finish(rust_message) == bytes.fromhex(exchange["derived_key_hex"])
 
 
+def test_python_first_vector_has_a_fixed_name_bound_confirm_s():
+    vector = _rust_vector()
+    exchange = vector["python_first"]
+    _, server_key = _split_key(bytes.fromhex(exchange["derived_key_hex"]))
+    transcript = (
+        PAIRING_IDENTITY
+        + b"verified:studio.local\0"
+        + bytes.fromhex(exchange["python_message_hex"])
+        + bytes.fromhex(exchange["rust_message_hex"])
+    )
+
+    confirm_s = hmac.new(server_key, transcript + b"name:Studio", hashlib.sha256).digest()
+
+    assert confirm_s.hex() == "944a40f6df11c32fd42a3a2652610d84113da85571c5d6f62a9e8867423be7e0"
+
+
 def test_python_spake2_wrong_code_disagrees_with_rust_04_vector():
     vector = _rust_vector()
     wrong = vector["wrong_code"]
@@ -109,10 +126,10 @@ def _finish(client: TestClient, exchange_id: str, confirm_c: bytes):
     )
 
 
-def test_disabled_pair_start_has_no_listener_or_key_side_effect():
+def test_disabled_pair_start_has_no_listener_or_key_side_effect(tmp_path):
     runtime.pairing.disable()
     assert runtime.listener is None
-    key_path, cert_path = _key_paths()
+    key_path, cert_path = _key_paths(tmp_path)
     assert not key_path.exists()
     assert not cert_path.exists()
 
@@ -126,7 +143,14 @@ def test_disabled_pair_start_has_no_listener_or_key_side_effect():
     assert not cert_path.exists()
 
 
-def test_pair_api_finishes_verified_exchange_with_canonical_host_vector():
+def test_pair_api_finishes_verified_exchange_with_canonical_host_vector(monkeypatch):
+    name = "Studio"
+    monkeypatch.setattr(devices_api, "local_hostname", lambda: name)
+    monkeypatch.setattr(
+        runtime,
+        "listener",
+        SimpleNamespace(announcement=SimpleNamespace(announced_name=None, error="DNS-SD failed")),
+    )
     client_pairing = _client_pairing(_enable_pairing())
     msg_c = client_pairing.start()
     client = TestClient(app)
@@ -141,16 +165,49 @@ def test_pair_api_finishes_verified_exchange_with_canonical_host_vector():
     finished = _finish(client, payload["exchange_id"], confirm_c)
 
     assert finished.status_code == 200
-    assert hmac.compare_digest(
+    expected_confirm_s = hmac.new(server_key, transcript + b"name:Studio", hashlib.sha256).digest()
+    assert finished.json() == {"confirm_s": _encoded(expected_confirm_s), "name": name}
+    assert not hmac.compare_digest(
         base64.b64decode(finished.json()["confirm_s"]),
-        hmac.new(server_key, transcript, hashlib.sha256).digest(),
+        hmac.new(server_key, transcript + b"name:Other", hashlib.sha256).digest(),
     )
     repeated = _finish(client, payload["exchange_id"], confirm_c)
     assert repeated.status_code == 409
     assert repeated.json()["detail"]["reason"] == "expired"
 
 
-def test_pair_api_client_rejects_confirm_c_replayed_as_confirm_s():
+def test_pair_finish_normalizes_and_caps_name_at_a_utf8_boundary(monkeypatch):
+    source_name = "e\u0301" * 31 + "aé"
+    expected_name = "é" * 31 + "a"
+    monkeypatch.setattr(devices_api, "local_hostname", lambda: source_name)
+    client_pairing = _client_pairing(_enable_pairing())
+    msg_c = client_pairing.start()
+    client = TestClient(app)
+    started = _start(client, msg_c)
+    payload = started.json()
+    msg_s = base64.b64decode(payload["msg_s"])
+    client_key, server_key = _split_key(client_pairing.finish(msg_s))
+    transcript = PAIRING_IDENTITY + b"verified:studio.local\0" + msg_c + msg_s
+    confirm_c = hmac.new(client_key, transcript, hashlib.sha256).digest()
+
+    finished = _finish(client, payload["exchange_id"], confirm_c)
+
+    assert finished.status_code == 200
+    assert finished.json() == {
+        "confirm_s": _encoded(
+            hmac.new(
+                server_key,
+                transcript + b"name:" + expected_name.encode(),
+                hashlib.sha256,
+            ).digest()
+        ),
+        "name": expected_name,
+    }
+    assert len(expected_name.encode()) == 63
+
+
+def test_pair_api_client_rejects_confirm_c_replayed_as_confirm_s(monkeypatch):
+    monkeypatch.setattr(devices_api, "local_hostname", lambda: "studio.local")
     client_pairing = _client_pairing(_enable_pairing())
     msg_c = client_pairing.start()
     client = TestClient(app)
@@ -165,7 +222,7 @@ def test_pair_api_client_rejects_confirm_c_replayed_as_confirm_s():
     finished = _finish(client, payload["exchange_id"], confirm_c)
 
     assert finished.status_code == 200
-    expected_confirm_s = hmac.new(server_key, transcript, hashlib.sha256).digest()
+    expected_confirm_s = hmac.new(server_key, transcript + b"name:studio.local", hashlib.sha256).digest()
     assert not hmac.compare_digest(confirm_c, expected_confirm_s)
     assert not hmac.compare_digest(confirm_c, base64.b64decode(finished.json()["confirm_s"]))
 
@@ -183,7 +240,9 @@ def test_pair_api_rejects_fifth_pending_exchange_with_429():
     assert capped.json()["detail"]["reason"] == "too_many_pending"
 
 
-def test_pair_api_failed_finish_consumes_exchange():
+def test_pair_api_failed_finish_consumes_exchange(monkeypatch):
+    name = "not-disclosed.local"
+    monkeypatch.setattr(devices_api, "local_hostname", lambda: name)
     client_pairing = _client_pairing(_enable_pairing())
     client = TestClient(app)
     started = _start(client, client_pairing.start())
@@ -193,7 +252,8 @@ def test_pair_api_failed_finish_consumes_exchange():
     repeated = _finish(client, started.json()["exchange_id"], b"not-a-confirmation")
 
     assert failed.status_code == 401
-    assert failed.json()["detail"]["reason"] == "wrong_code"
+    assert failed.json()["detail"] == {"reason": "wrong_code"}
+    assert name not in failed.text
     assert repeated.status_code == 409
     assert repeated.json()["detail"]["reason"] == "invalid_exchange"
 
@@ -214,8 +274,10 @@ def test_pair_api_fifth_failed_finish_ends_code():
 
 
 def test_pair_api_finishes_pinned_exchange_with_spki_binding(monkeypatch):
+    name = "studio.local"
     server_spki = bytes(range(32))
     monkeypatch.setattr(devices_api, "host_spki_sha256", lambda: server_spki)
+    monkeypatch.setattr(devices_api, "local_hostname", lambda: name)
     client_pairing = _client_pairing(_enable_pairing())
     msg_c = client_pairing.start()
     client = TestClient(app)
@@ -232,7 +294,7 @@ def test_pair_api_finishes_pinned_exchange_with_spki_binding(monkeypatch):
     assert finished.status_code == 200
     assert hmac.compare_digest(
         base64.b64decode(finished.json()["confirm_s"]),
-        hmac.new(server_key, transcript, hashlib.sha256).digest(),
+        hmac.new(server_key, transcript + b"name:studio.local", hashlib.sha256).digest(),
     )
 
 
