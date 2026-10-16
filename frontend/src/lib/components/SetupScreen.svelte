@@ -57,8 +57,9 @@
 		{ label: 'Your account', icon: 'person', state: page === 'account' ? 'current' : page === 'models' && !existingOmlxConsent ? 'done' : 'todo' },
 		{ label: status.ready_ai && page !== 'models' ? status.ready_ai : 'Your AI', icon: 'chip', state: page === 'models' ? 'current' : status.ready_ai ? 'done' : 'todo' },
 	]);
-	/** Manage counts only where Welcome showed both choices; a consent found any other way is Use mine's. */
-	const manageExisting = $derived(manageOwnOmlx && Boolean(status.existing_omlx) && localPick.wanted);
+	/** Welcome's choice where it showed both (Let CORSIA manage it, Use mine); undefined where it didn't. */
+	const ownOmlxChoice = $derived(status.existing_omlx && localPick.wanted ? manageOwnOmlx : undefined);
+	const manageExisting = $derived(ownOmlxChoice === true);
 	const local = $derived(sources.find((source) => source.source === 'omlx'));
 	const localDownloading = $derived(Boolean(local?.setup_downloading || local?.setup_stage || (localDownloadPending && !local?.setup_error)));
 	const localJob = $derived(buildLocalJob(local, localDownloading, localPick.pick?.model?.name, page, Boolean(get(token)), localStartError, () => void cancelDownload()));
@@ -122,7 +123,7 @@
 
 	async function startLocalDownload(consentExisting = false): Promise<LocalDownloadStart> {
 		if (!localPick.downloads(status.free_disk_gb) && !consentExisting) return 'started';
-		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting, manage_existing: consentExisting && manageExisting }) });
+		const response = await fetch('/api/setup/local-download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent_existing: consentExisting, manage_existing: consentExisting ? ownOmlxChoice : undefined }) });
 		const result = await response.json().catch(() => null);
 		if (response.status === 409 && result?.code === 'consent_required') return 'consent_required';
 		return response.ok && result?.ok !== false ? 'started' : 'failed';
@@ -164,7 +165,7 @@
 			const current = get(token);
 			returnToModels = Boolean(current);
 			const start = current
-				? await setupLocalSource(current, true, manageExisting)
+				? await setupLocalSource(current, true, ownOmlxChoice)
 				: await startLocalDownload(true);
 			const started = typeof start === 'string' ? start === 'started' : start.ok;
 			if (started) localDownloadPending = true;

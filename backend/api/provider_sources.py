@@ -137,13 +137,14 @@ async def setup_local_source(
     no_subscription_only: bool = Body(False, embed=True),
     automatic: bool = Body(False, embed=True),
     consent_existing: bool = Body(False, embed=True),
-    manage_existing: bool = Body(False, embed=True),
+    manage_existing: bool | None = Body(None, embed=True),
     _user: dict = Depends(require_user_header_only),
 ) -> dict[str, Any]:
     """Start the local setup flight, or report the one already running.
 
     The model is the one CORSIA's own oMLX picks for this Mac (``local_model`` on GET).
-    ``manage_existing`` is "Let CORSIA manage it" for the person's own oMLX.
+    ``manage_existing`` is the person's choice for their own oMLX: True "Let CORSIA
+    manage it", False "Use mine", absent where neither was shown.
     """
     from llm.local_setup import begin_local_setup
     from llm.local_setup_ownership import existing_omlx_requires_consent, record_existing_omlx_consent

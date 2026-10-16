@@ -811,7 +811,8 @@ class TestRecheck:
         assert response.json() == {"detail": {"code": "consent_required"}}
 
     @pytest.mark.parametrize("body,manage", [
-        ({"consent_existing": True}, False),
+        ({"consent_existing": True}, None),
+        ({"consent_existing": True, "manage_existing": False}, False),
         ({"consent_existing": True, "manage_existing": True}, True),
     ])
     def test_local_setup_route_records_accepted_existing_omlx_consent(

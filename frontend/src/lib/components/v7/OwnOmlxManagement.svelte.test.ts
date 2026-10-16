@@ -53,7 +53,8 @@ describe('OwnOmlxManagement', () => {
 		const dialog = document.querySelector('[role="alertdialog"]')!;
 		expect(dialog.textContent).toContain('Stop managing your oMLX?');
 		expect(dialog.textContent).toContain(
-			'CORSIA puts back Max Concurrent Requests to 4; Ctx Window for Qwen3.8-27B-oQ4e-mtp to oMLX default. Then it stops using your oMLX’s admin key.');
+			'CORSIA puts back Max Concurrent Requests to 4; Ctx Window for Qwen3.8-27B-oQ4e-mtp to oMLX default. Then CORSIA forgets the admin key it stored. '
+			+ 'To keep using your oMLX in CORSIA, enter that key again in CORSIA.');
 		expect(posted).toEqual([]);
 
 		management = { state: 'not_managed', cannot_check: null, restores: [], forgets_key: false };
@@ -104,7 +105,7 @@ describe('OwnOmlxManagement', () => {
 		button('Let CORSIA manage it')!.click();
 		flushSync();
 		expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-			'Letting CORSIA manage it means CORSIA reads your oMLX’s admin key and changes settings for every app that uses this oMLX');
+			'Letting CORSIA manage it means CORSIA reads your oMLX’s admin key, never changing it, and changes these settings for every app that uses this oMLX');
 		expect(posted).toEqual([]);
 		[...document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')].find((item) => item.textContent?.trim() === 'Let CORSIA manage it')!.click();
 		await vi.waitFor(() => expect(onResult).toHaveBeenCalledWith('CORSIA is setting up your oMLX. It asks in chat before it changes any setting.', false));

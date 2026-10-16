@@ -193,7 +193,7 @@ describe('SetupScreen', () => {
 			expect(group.textContent).toContain('Recommended. CORSIA keeps your oMLX’s settings right for each model.');
 			expect(group.textContent).toContain('CORSIA uses your models and changes nothing. Change settings in oMLX’s own admin page.');
 			expect(host.querySelector('.disclose')?.textContent).toBe(
-				'Letting CORSIA manage it means CORSIA reads your oMLX’s admin key and changes settings for every app that uses this oMLX: the settings of the model it sets up, and two oMLX-wide settings, each shown with its current and new value first. It never touches your key, sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.');
+				'Letting CORSIA manage it means CORSIA reads your oMLX’s admin key, never changing it, and changes these settings for every app that uses this oMLX: Max Concurrent Requests and Prefill Priority, and for the model it sets up, Ctx Window, Max Tokens, TurboQuant KV Cache (bits and skip last layer) and Native MTP. Each is shown with its current and new value first. It never touches your sign-in, network settings, port, folders, default model or other models. Stopping management in Settings puts your values back.');
 			expect(calls).toEqual(['/api/setup/status']);
 		});
 
@@ -220,7 +220,7 @@ describe('SetupScreen', () => {
 			expect(host.textContent).not.toContain('Letting CORSIA manage it');
 		});
 
-		it('treats a consent Welcome never offered as Use mine', async () => {
+		it('sends no choice for a consent Welcome never offered the two choices for', async () => {
 			await mountOwnOmlx(false);
 			expect(host.querySelector('[aria-label="Your oMLX"]')).toBeNull();
 			button('Get started')!.click();
@@ -228,7 +228,7 @@ describe('SetupScreen', () => {
 			expect(host.textContent).not.toContain('admin key');
 			button('Use it')!.click();
 			await settle();
-			expect(bodies).toEqual(['{"consent_existing":false,"manage_existing":false}', '{"consent_existing":true,"manage_existing":false}']);
+			expect(bodies).toEqual(['{"consent_existing":false}', '{"consent_existing":true}']);
 		});
 	});
 

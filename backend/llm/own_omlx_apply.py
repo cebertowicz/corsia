@@ -3,7 +3,7 @@
 Every write goes through the existing writers (``omlx_settings.save_global_settings``
 and ``update_model_settings``); there is no second writer for someone else's oMLX.
 While CORSIA manages it, each value is recorded in ``own_omlx_management`` before
-the first change to it is sent.
+the first change to it is sent. Under Use mine nothing is ever sent.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ class ApplyRefused(RuntimeError):
 
 
 STALE = "The settings changed since you were shown them; show the new diff and ask again"
+USE_MINE = "You chose Use mine, so CORSIA changes nothing on your oMLX"
 
 
 def _allowed(entries: list[dict[str, Any]]) -> bool:
@@ -45,19 +46,24 @@ def _allowed(entries: list[dict[str, Any]]) -> bool:
 
 async def apply(server: dict[str, Any], supplied: str) -> dict[str, Any]:
     """Apply the fingerprinted diff to ``server``; per-row results, as the conductor reports them."""
+    if await asyncio.to_thread(own_omlx_management.uses_mine):
+        raise ApplyRefused(409, USE_MINE)
     entries = differences([server["id"]])
     if not entries:
         raise ApplyRefused(409, "No shown oMLX settings are available to apply")
     if not await asyncio.to_thread(_allowed, entries) or supplied != fingerprint(server["id"], entries):
         raise ApplyRefused(409, STALE)
     globals_ = {row["setting"]: row for row in entries if "model" not in row}
-    models = {row["setting"]: row for row in entries if "model" in row}
+    models: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in entries:
+        if "model" in row:
+            models.setdefault(row["model"], {})[row["setting"]] = row
     if await asyncio.to_thread(own_omlx_management.active):
         try:
             await asyncio.to_thread(
                 own_omlx_management.record_originals,
                 {key: row["current"] for key, row in globals_.items()},
-                {key: row["current"] for key, row in models.items()},
+                {model_id: {key: row["current"] for key, row in rows.items()} for model_id, rows in models.items()},
             )
         except Exception:
             raise ApplyRefused(503, "CORSIA couldn't record your current values, so it changed nothing") from None
@@ -68,11 +74,11 @@ async def apply(server: dict[str, Any], supplied: str) -> dict[str, Any]:
         if not saved.get("ok"):
             raise ApplyRefused(int(saved.get("status", 503)), str(saved.get("message")))
         applied = list(saved.get("runtime_applied", []))
-    model_saved = True
-    if models:
-        model_id = next(iter(models.values()))["model"]
-        written = await update_model_settings(cfg, model_id, {key: row["recommended"] for key, row in models.items()})
-        model_saved = bool(written.get("ok"))
+    models_saved = set()
+    for model_id, rows in models.items():
+        written = await update_model_settings(cfg, model_id, {key: row["recommended"] for key, row in rows.items()})
+        if written.get("ok"):
+            models_saved.add(model_id)
     verified = await record_observation(server, retain_on_failure=True)
     remaining = (differences([server["id"]]) if verified else entries) or []
     left = {(row["setting"], row.get("model")) for row in remaining}
@@ -80,7 +86,7 @@ async def apply(server: dict[str, Any], supplied: str) -> dict[str, Any]:
     for row in entries:
         model = row.get("model")
         done = (verified and (row["setting"], model) not in left and reports(server["id"], row["setting"], model)
-                and (model is None or model_saved))
+                and (model is None or model in models_saved))
         active = done and (row["setting"] in applied if model is None else True)
         results.append({"setting": row["setting"], **({"model": model} if model else {}),
                         "saved": done, "active": active})
@@ -91,8 +97,9 @@ async def apply(server: dict[str, Any], supplied: str) -> dict[str, Any]:
 async def stop(server: dict[str, Any] | None) -> dict[str, Any]:
     """Stop managing: no further change, then put back every recorded value.
 
-    A restore that fails keeps the record (and the key it needs) for another try.
-    Only a key CORSIA stored itself is removed once every value is back.
+    Each model gets back only its own values, one at a time. A restore that fails
+    keeps what is still to put back (and the key it needs) for another try. Only
+    a key CORSIA stored itself is removed once every value is back.
     """
     record = await asyncio.to_thread(own_omlx_management.begin_stop)
     if record is None:
@@ -101,13 +108,17 @@ async def stop(server: dict[str, Any] | None) -> dict[str, Any]:
         await asyncio.to_thread(own_omlx_management.restore_failed)
         raise ApplyRefused(503, "Start your oMLX, then try again.")
     cfg = {"server_id": server["id"]}
-    restored = True
-    if record.originals_global:
-        restored = bool((await save_global_settings(cfg, dict(record.originals_global))).get("ok"))
-    if restored and record.originals_model and record.model is not None:
-        restored = bool((await update_model_settings(cfg, record.model.model, dict(record.originals_model))).get("ok"))
-    if not restored:
-        await asyncio.to_thread(own_omlx_management.restore_failed)
+    global_restored = not record.originals_global or bool(
+        (await save_global_settings(cfg, dict(record.originals_global))).get("ok"))
+    models_restored = []
+    for model_id, values in record.originals_models.items():
+        written = await update_model_settings(cfg, model_id, dict(values))
+        # A model the person removed from their oMLX has nothing left to put back.
+        if written.get("ok") or written.get("model_missing"):
+            models_restored.append(model_id)
+    if not global_restored or len(models_restored) != len(record.originals_models):
+        await asyncio.to_thread(own_omlx_management.restore_failed,
+                                global_restored=global_restored, models_restored=tuple(models_restored))
         raise ApplyRefused(502, "CORSIA couldn't put your values back. Try again.")
     if record.key_registered:
         from infra.db_async import run_in_db

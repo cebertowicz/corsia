@@ -168,9 +168,9 @@ def omlx_management() -> dict[str, Any]:
     record = own_omlx_management.read()
     if record is None:
         return {"state": "not_managed", "cannot_check": None, "restores": [], "forgets_key": False}
-    model = record.model.model if record.model else None
     restores = [*_restore_lines(record.originals_global),
-                *(_restore_lines(record.originals_model, model) if model else [])]
+                *(line for model, values in sorted(record.originals_models.items())
+                  for line in _restore_lines(values, model))]
     return {"state": "managed" if record.active else "restore_failed",
             "cannot_check": record.cannot_check if record.active else None, "restores": restores,
             "forgets_key": record.key_registered}

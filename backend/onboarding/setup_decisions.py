@@ -36,8 +36,10 @@ class Facts:
 
     ``omlx_differences`` is None when the person has no oMLX of their own or its
     settings are unknown, and empty when they already match. ``omlx_managed`` is
-    whether they let CORSIA manage it, so every difference is offered. ``email``
-    is the address the person confirmed at install, or empty.
+    whether they let CORSIA manage it, so every difference is offered;
+    ``omlx_use_mine`` whether they chose Use mine, so none is. With neither (an
+    install that never showed the choice) only concurrent requests is offered.
+    ``email`` is the address the person confirmed at install, or empty.
     """
 
     omlx_differences: tuple[dict[str, Any], ...] | None = None
@@ -46,6 +48,7 @@ class Facts:
     session_apps: tuple[str, ...] = ()
     email: str = ""
     omlx_managed: bool = False
+    omlx_use_mine: bool = False
 
 
 def _safe(value: object) -> str:
@@ -146,8 +149,8 @@ def _managed_omlx(rows: tuple[dict[str, Any], ...]) -> dict[str, Any]:
 
 
 def omlx_decision(facts: Facts) -> dict[str, Any] | None:
-    """The oMLX settings decision, or None when nothing differs or the self-check failed."""
-    if not facts.self_check_passed:
+    """The oMLX settings decision, or None when nothing differs, the self-check failed, or under Use mine."""
+    if not facts.self_check_passed or facts.omlx_use_mine:
         return None
     if facts.omlx_managed:
         return _managed_omlx(facts.omlx_differences) if facts.omlx_differences else None
@@ -214,11 +217,12 @@ async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool =
     so its decision stays for the conductor to settle after testing it itself.
     """
     from infra.db_async import run_in_db, run_off_db
+    from llm import own_omlx_management
 
     from onboarding.project_discovery import Roots, session_apps
 
     omlx: tuple[dict[str, Any], ...] | None = None
-    managed = False
+    managed = use_mine = False
     sessions = tuple(await run_off_db(session_apps, Roots.for_user()))
     if self_check_passed:
         from api.provider_sources import list_sources
@@ -227,8 +231,9 @@ async def read_facts(*, self_check_passed: bool = True, probe_web_search: bool =
             if row.get("source") == "omlx" and row.get("omlx_settings") is not None:
                 omlx = tuple((row["omlx_settings"] or {}).get("differences") or ())
                 managed = (row.get("omlx_management") or {}).get("state") == "managed"
+                use_mine = await run_off_db(own_omlx_management.uses_mine)
     works = await web_search_works() if probe_web_search else False
-    return Facts(omlx, works, self_check_passed, sessions, await run_off_db(_saved_email), managed)
+    return Facts(omlx, works, self_check_passed, sessions, await run_off_db(_saved_email), managed, use_mine)
 
 
 async def setup_plan(*, self_check_passed: bool = True, probe_web_search: bool = True) -> dict[str, Any]:

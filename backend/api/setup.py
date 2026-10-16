@@ -45,7 +45,8 @@ class LocalDownloadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     consent_existing: bool = False
-    manage_existing: bool = False
+    #: Welcome's choice for it: Let CORSIA manage it, Use mine, or None where it wasn't shown.
+    manage_existing: bool | None = None
 
 
 class FirstAccountRequest(BaseModel):

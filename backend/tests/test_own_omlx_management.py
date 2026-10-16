@@ -40,13 +40,18 @@ class _Response:
 
 
 class FakeOmlx:
-    """oMLX's admin routes: nested global GET, flat global POST, model list GET, model PUT (null unsets)."""
+    """oMLX's admin routes: nested global GET, flat global POST, model list GET, model PUT (null unsets).
+
+    A PUT for a model oMLX doesn't have answers 404 ``Model not found``, as upstream
+    oMLX v0.7.0 does (``omlx/admin/routes.py`` 2745).
+    """
 
     def __init__(self):
         self.globals = {**GLOBALS_BEFORE, "port": 8000, "host": "127.0.0.1", "model_dir": "/opt/omlx-models"}
         self.models = {MODEL.model: dict(MODEL_BEFORE), OTHER: dict(OTHER_BEFORE)}
         self.requests: list[tuple[str, str, dict | None]] = []
         self.fail_writes = False
+        self.fail_models: set[str] = set()
 
     @property
     def writes(self) -> list[tuple[str, str, dict | None]]:
@@ -68,9 +73,12 @@ class FakeOmlx:
         if path == "/models" and method == "GET":
             return _Response(200, {"models": [{"id": mid, "settings": dict(s)} for mid, s in self.models.items()]})
         if path.startswith("/models/") and path.endswith("/settings") and method == "PUT":
-            if self.fail_writes:
+            model_id = path.split("/")[2]
+            if self.fail_writes or model_id in self.fail_models:
                 return _Response(500, {})
-            settings = self.models[path.split("/")[2]]
+            if model_id not in self.models:
+                return _Response(404, {"detail": f"Model not found: {model_id}"})
+            settings = self.models[model_id]
             for key, value in json.items():
                 if value is None:
                     settings.pop(key, None)

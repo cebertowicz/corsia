@@ -141,7 +141,15 @@ async def get_model_settings(cfg: dict, model_id: str) -> dict[str, Any]:
 async def update_model_settings(
     cfg: dict, model_id: str, settings: dict[str, Any],
 ) -> dict[str, Any]:
-    """Update per-model admin settings."""
+    """Update per-model admin settings.
+
+    A value sent as None clears that setting to oMLX's default. A failure carries
+    oMLX's ``status``; ``model_missing`` is oMLX's own answer that it has no such
+    model. Both are upstream oMLX's ``PUT /admin/api/models/{model_id}/settings``
+    (github.com/jundot/omlx, tag v0.7.0, ``omlx/admin/routes.py`` 2714-2752:
+    ``model_fields_set`` tells a sent null from an omitted field, and an unknown
+    model is a 404 ``Model not found: {model_id}``).
+    """
     wire = {_OMLX_FIELD_ALIASES.get(k, k): v for k, v in settings.items()}
     try:
         resp = await admin_request(cfg, "PUT", f"/models/{model_id}/settings", json=wire)
@@ -153,6 +161,17 @@ async def update_model_settings(
                     _OMLX_FIELD_ALIASES_REVERSE.get(k, k): v for k, v in raw.items()
                 }
             return {"ok": True, **resp_json}
-        return {"ok": False, "message": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+        return {"ok": False, "status": resp.status_code,
+                "model_missing": resp.status_code == 404 and _detail(resp) == f"Model not found: {model_id}",
+                "message": f"HTTP {resp.status_code}: {resp.text[:200]}"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
+
+
+def _detail(resp: Any) -> object:
+    """FastAPI's error ``detail`` from an oMLX response, else None."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return None
+    return body.get("detail") if isinstance(body, dict) else None
