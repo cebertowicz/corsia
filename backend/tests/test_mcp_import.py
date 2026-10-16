@@ -238,6 +238,16 @@ def test_codex_environment_tokens_stay_unread_and_need_a_token(tmp_path, monkeyp
     assert secret not in json.dumps({"row": app, "response": imported})
     assert secret not in str(db.execute("SELECT name,value_ref FROM key_store_entries").fetchall())
 
+    from connections.app_lifecycle import approve_proposal
+    from connections.app_reach import key_entry_names
+    from infra import key_store
+
+    app = approve_proposal(app["id"], db=db)
+    [entry_name] = key_entry_names(app["id"], app["config"])
+    entry = key_store.entry_metadata(entry_name, db=db)
+    assert entry["label"] == "codex key"
+    assert entry["is_set"] is False
+
     monkeypatch.setattr(mcp_runtime, "_stopped", False)
     monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
     monkeypatch.setattr(mcp_runtime, "_registry", ToolRegistry())

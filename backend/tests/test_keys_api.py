@@ -101,7 +101,10 @@ async def test_mcp_key_write_reconnects_only_its_stable_app(client, monkeypatch)
             db.close()
 
     app, key_name = await run_in_db(setup_app)
-    assert (await run_in_db(key_store.entry_metadata, key_name))["name"] == key_name
+    entry = await run_in_db(key_store.entry_metadata, key_name)
+    assert entry["name"] == key_name
+    assert entry["label"] == "GitHub key"
+    assert entry["is_set"] is False
     calls = []
 
     async def reconnect(action: str, app_id: str) -> dict[str, object]:

@@ -97,12 +97,12 @@ def test_agent_state_guidance_uses_the_persons_connected_apps_words():
         "connecting": "Wait for the connection attempt to finish.",
         "working": 'Load its tools with tools_load(server="GitHub").',
         "needs_token": (
-            "GitHub needs a key, but Connected apps has no way to set one. Ask the person to open GitHub in "
-            "Research's Connected apps, press Remove, then ask me to bring it over again. Please don't paste it here."
+            "GitHub needs a key. Ask the person to open Settings › Keys, find the GitHub key card, and press Set. "
+            "Please don't paste it here."
         ),
         "token_rejected": (
-            "GitHub didn't accept its key, and Connected apps has no way to replace it. Ask the person to open "
-            "GitHub in Research's Connected apps, press Remove, then ask me to bring it over again."
+            "GitHub didn't accept its key. Ask the person to open Settings › Keys, find the GitHub key card, "
+            "and press Replace."
         ),
         "disconnected": "GitHub lost its connection. Open GitHub in Research's Connected apps and press Reconnect.",
         "failed": (
