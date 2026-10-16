@@ -49,6 +49,7 @@ enum CommandLineMode {
     Service,
     UpdateStage(String),
     UpdateSwap(String),
+    UpdateRollback(String),
 }
 
 fn operation_argument(args: &[OsString], flag: &str) -> Result<Option<String>, String> {
@@ -69,9 +70,11 @@ fn command_line_mode(args: &[OsString]) -> Result<Option<CommandLineMode>, Strin
     }
     let stage = operation_argument(args, "--update-stage")?;
     let swap = operation_argument(args, "--update-swap")?;
-    Ok(match (stage, swap) {
-        (Some(operation_id), None) => Some(CommandLineMode::UpdateStage(operation_id)),
-        (None, Some(operation_id)) => Some(CommandLineMode::UpdateSwap(operation_id)),
+    let rollback = operation_argument(args, "--update-rollback")?;
+    Ok(match (stage, swap, rollback) {
+        (Some(operation_id), None, None) => Some(CommandLineMode::UpdateStage(operation_id)),
+        (None, Some(operation_id), None) => Some(CommandLineMode::UpdateSwap(operation_id)),
+        (None, None, Some(operation_id)) => Some(CommandLineMode::UpdateRollback(operation_id)),
         _ => None,
     })
 }
@@ -214,18 +217,24 @@ fn should_prevent_quit(operation_state: Result<bool, String>) -> bool {
 }
 
 fn setup_account_exists_response(response: &str) -> Result<bool, String> {
-    if !response.starts_with("HTTP/1.1 200") {
-        return Err("could not read whether a CORSIA account already exists".into());
-    }
     let body = response
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
         .ok_or("the CORSIA setup-status response was malformed")?;
-    serde_json::from_str::<serde_json::Value>(body)
-        .map_err(|_| "the CORSIA setup-status response was malformed".to_string())?
-        .get("has_users")
-        .and_then(serde_json::Value::as_bool)
-        .ok_or_else(|| "the CORSIA setup-status response was malformed".into())
+    let body = serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|_| "the CORSIA setup-status response was malformed".to_string())?;
+    let body = body
+        .as_object()
+        .ok_or("the CORSIA setup-status response was malformed")?;
+    if response.starts_with("HTTP/1.1 409")
+        && body.get("code").and_then(serde_json::Value::as_str) == Some("setup_complete")
+    {
+        return Ok(true);
+    }
+    if response.starts_with("HTTP/1.1 200") {
+        return Ok(false);
+    }
+    Err("could not read whether a CORSIA account already exists".into())
 }
 
 fn setup_account_exists(port: u16) -> Result<bool, String> {
@@ -674,6 +683,9 @@ pub fn run() {
         Some(CommandLineMode::UpdateSwap(operation_id)) => {
             std::process::exit(update_swap::run(operation_id))
         }
+        Some(CommandLineMode::UpdateRollback(operation_id)) => {
+            std::process::exit(update_swap::rollback(operation_id))
+        }
         Some(CommandLineMode::UpdateStage(_)) | None => {}
     }
     let context = tauri::generate_context!();
@@ -900,13 +912,16 @@ mod tests {
     #[test]
     fn setup_status_response_reports_whether_an_account_exists() {
         assert_eq!(
-            setup_account_exists_response("HTTP/1.1 200 OK\r\n\r\n{\"has_users\":false}"),
+            setup_account_exists_response(
+                "HTTP/1.1 200 OK\r\n\r\n{\"apple_silicon\":true,\"macos_supported\":true,\"ram_tier\":\"eligible\",\"free_disk_gb\":123.0,\"app_location\":\"applications\",\"local_eligible\":true,\"work_folder\":\"~/corsia\",\"model_name\":\"Example model\",\"model_size_gb\":30.0,\"required_username\":null,\"existing_omlx\":false,\"ready_ai\":null}",
+            ),
             Ok(false)
         );
         assert_eq!(
-            setup_account_exists_response("HTTP/1.1 200 OK\r\n\r\n{\"has_users\":true}"),
+            setup_account_exists_response("HTTP/1.1 409 Conflict\r\n\r\n{\"code\":\"setup_complete\"}"),
             Ok(true)
         );
+        assert!(setup_account_exists_response("HTTP/1.1 409 Conflict\r\n\r\n{\"code\":\"other\"}").is_err());
         assert!(setup_account_exists_response("HTTP/1.1 500 Server Error\r\n\r\n").is_err());
     }
 
@@ -939,6 +954,10 @@ mod tests {
             Ok(Some(CommandLineMode::UpdateSwap("op-1".into())))
         );
         assert_eq!(
+            command_line_mode(&args(&["--update-rollback", "op-1"])),
+            Ok(Some(CommandLineMode::UpdateRollback("op-1".into())))
+        );
+        assert_eq!(
             command_line_mode(&args(&["--service", "status"])),
             Ok(Some(CommandLineMode::Service))
         );
@@ -948,6 +967,7 @@ mod tests {
             &["--update-swap"],
             &["--update-stage", "op-1", "--service"],
             &["--update-swap", "op-1", "--update-stage"],
+            &["--update-rollback", "op-1", "--update-stage"],
         ] {
             assert!(command_line_mode(&args(refused)).is_err(), "{refused:?}");
         }
@@ -961,6 +981,7 @@ mod tests {
         assert!(!should_relaunch("0.4.0+1", None, unreachable));
         assert!(!should_relaunch("0.4.0+1", Some("0.4.1+2"), || false));
         assert!(should_relaunch("0.4.0+1", Some("0.4.1+2"), || true));
+        assert!(should_relaunch("0.4.1+2", Some("0.4.0+1"), || true));
     }
 
     #[test]

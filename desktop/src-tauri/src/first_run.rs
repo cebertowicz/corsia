@@ -23,9 +23,9 @@ use serde::Serialize;
 pub const SERVICE_FILE: &str = "service.json";
 const WORKSPACE_FOLDER: &str = "corsia";
 const LEGACY_STATE_FOLDER: &str = "com.cebertowicz.corsia";
-// Entries that do not make a folder "someone's data": the repository a
-// previous interrupted first run left behind, and Finder's view settings.
-const IGNORED_ENTRIES: [&str; 2] = [".git", ".DS_Store"];
+// Finder's view settings do not make a folder someone's data. A `.git`
+// directory is ignored only when it has no branch refs or packed branch refs.
+const IGNORED_ENTRIES: [&str; 1] = [".DS_Store"];
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum FirstRun {
@@ -89,7 +89,68 @@ pub fn ensure_folder_writable(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not finish checking {}: {error}", path.display()))
 }
 
-pub fn remove_default_folder_if_fresh(default_folder: &Path, chosen_folder: &Path) -> Result<bool, String> {
+fn directory_has_files(path: &Path) -> Result<bool, String> {
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?
+    {
+        let entry = entry.map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        if entry.path().is_dir() {
+            if directory_has_files(&entry.path())? {
+                return Ok(true);
+            }
+        } else {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn git_has_no_commits(git_dir: &Path) -> Result<bool, String> {
+    let heads = git_dir.join("refs").join("heads");
+    match fs::metadata(&heads) {
+        Ok(metadata) => {
+            if !metadata.is_dir() || directory_has_files(&heads)? {
+                return Ok(false);
+            }
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("could not read {}: {error}", heads.display())),
+    }
+    let packed_refs = git_dir.join("packed-refs");
+    let packed_refs = match fs::read_to_string(&packed_refs) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(format!("could not read {}: {error}", packed_refs.display())),
+    };
+    Ok(!packed_refs
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .any(|reference| reference.starts_with("refs/heads/")))
+}
+
+fn workspace_is_fresh(path: &Path) -> Result<bool, String> {
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("could not read {}: {error}", path.display()))?;
+        if IGNORED_ENTRIES.contains(&entry.file_name().to_string_lossy().as_ref()) {
+            continue;
+        }
+        if entry.file_name() != ".git"
+            || !entry.path().is_dir()
+            || !git_has_no_commits(&entry.path())?
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub fn remove_default_folder_if_fresh(
+    default_folder: &Path,
+    chosen_folder: &Path,
+) -> Result<bool, String> {
     if default_folder == chosen_folder || !default_folder.is_dir() {
         return Ok(false);
     }
@@ -102,7 +163,11 @@ pub fn remove_default_folder_if_fresh(default_folder: &Path, chosen_folder: &Pat
     else {
         return Ok(false);
     };
-    if entry.file_name() != ".git" || !entry.path().is_dir() || entries.next().is_some() {
+    if entry.file_name() != ".git"
+        || !entry.path().is_dir()
+        || entries.next().is_some()
+        || !git_has_no_commits(&entry.path())?
+    {
         return Ok(false);
     }
     fs::remove_dir_all(default_folder)
@@ -181,14 +246,7 @@ pub fn plan(home: &Path, app_dir: &Path) -> Result<FirstRun, String> {
                 "A file named {shown} is in the way of CORSIA's default workspace folder."
             ));
         }
-        let holds_files = fs::read_dir(&path)
-            .map_err(|error| format!("could not read {}: {error}", path.display()))?
-            .any(|child| {
-                child.map_or(true, |child| {
-                    !IGNORED_ENTRIES.contains(&child.file_name().to_string_lossy().as_ref())
-                })
-            });
-        if holds_files {
+        if !workspace_is_fresh(&path)? {
             return existing_install(format!(
                 "The folder {shown} already has files in it, so CORSIA left it alone."
             ));
@@ -548,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_or_git_only_workspace_is_reused_under_its_own_name() {
+    fn an_empty_or_no_commit_git_workspace_is_reused_under_its_own_name() {
         let home = Home::new("reuse");
         fs::create_dir_all(home.0.join("Corsia").join(".git")).unwrap();
         fs::write(home.0.join("Corsia").join(".DS_Store"), "").unwrap();
@@ -559,6 +617,23 @@ mod tests {
                 workspace: home.0.join("Corsia")
             }
         );
+    }
+
+    #[test]
+    fn a_repository_with_branch_refs_is_an_existing_install() {
+        let heads = Home::new("heads-ref");
+        fs::create_dir_all(heads.0.join("corsia").join(".git").join("refs").join("heads")).unwrap();
+        fs::write(heads.0.join("corsia").join(".git").join("refs").join("heads").join("main"), "abc").unwrap();
+        assert_refused(&heads, "~/corsia");
+
+        let packed = Home::new("packed-ref");
+        fs::create_dir_all(packed.0.join("corsia").join(".git")).unwrap();
+        fs::write(
+            packed.0.join("corsia").join(".git").join("packed-refs"),
+            "abc refs/heads/main\n",
+        )
+        .unwrap();
+        assert_refused(&packed, "~/corsia");
     }
 
     #[test]
@@ -682,8 +757,14 @@ mod tests {
         assert!(remove_default_folder_if_fresh(&default_folder, &chosen).unwrap());
         assert!(!default_folder.exists());
 
+        fs::create_dir_all(default_folder.join(".git").join("refs").join("heads")).unwrap();
+        fs::write(default_folder.join(".git").join("refs").join("heads").join("main"), "abc").unwrap();
+        assert!(!remove_default_folder_if_fresh(&default_folder, &chosen).unwrap());
+        assert!(default_folder.exists());
+
+        fs::remove_dir_all(&default_folder).unwrap();
         fs::create_dir_all(default_folder.join(".git")).unwrap();
-        fs::write(default_folder.join("notes.md"), "keep me").unwrap();
+        fs::write(default_folder.join(".git").join("packed-refs"), "abc refs/heads/main\n").unwrap();
         assert!(!remove_default_folder_if_fresh(&default_folder, &chosen).unwrap());
         assert!(default_folder.exists());
     }

@@ -69,6 +69,45 @@ pub fn run(_operation_id: &str) -> i32 {
     }
 }
 
+/// Put the app retained after a successful swap back at the installed path.
+/// The failed update remains at `.previous` until its caller proves the old
+/// service is healthy and deletes it.
+pub fn rollback(_operation_id: &str) -> i32 {
+    let state_dir = match app_paths::app_dir() {
+        Ok(app_dir) => app_paths::state_dir_for(&app_dir),
+        Err(reason) => {
+            eprintln!("update rollback failed: {reason}");
+            return SWAP_FAILED;
+        }
+    };
+    let _lock = match app_paths::try_lock_update(&state_dir) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            eprintln!("update rollback refused: another update is in progress");
+            return UPDATE_BUSY;
+        }
+        Err(reason) => {
+            eprintln!("update rollback failed: {reason}");
+            return SWAP_FAILED;
+        }
+    };
+    let installed = match update_stage::running_bundle() {
+        Ok(installed) => installed,
+        Err(reason) => {
+            eprintln!("update rollback failed: {reason}");
+            return SWAP_FAILED;
+        }
+    };
+    let previous = update_stage::previous_path(&installed);
+    match rollback_installed(&installed, &previous, exchange) {
+        Ok(()) => SWAPPED,
+        Err(SwapError::Swap(reason)) | Err(SwapError::Identity(reason)) => {
+            eprintln!("update rollback failed: {reason}");
+            SWAP_FAILED
+        }
+    }
+}
+
 fn swap_installed<V, X>(
     installed: &Path,
     staged: &Path,
@@ -110,6 +149,23 @@ where
         }));
     }
     Ok(previous)
+}
+
+fn rollback_installed<X>(
+    installed: &Path,
+    previous: &Path,
+    exchange: X,
+) -> Result<(), SwapError>
+where
+    X: Fn(&Path, &Path) -> Result<(), String>,
+{
+    if !previous.is_dir() {
+        return Err(SwapError::Swap(format!(
+            "no previous app at {}",
+            previous.display()
+        )));
+    }
+    exchange(installed, previous).map_err(SwapError::Swap)
 }
 
 #[cfg(target_os = "macos")]
@@ -173,6 +229,17 @@ mod tests {
     }
 
     #[test]
+    fn rollback_restores_the_previous_app_and_keeps_the_failed_update() {
+        let (_temp, installed, staged) = layout();
+        let previous = swap_installed(&installed, &staged, |_, _| Ok(()), exchange).unwrap();
+
+        rollback_installed(&installed, &previous, exchange).unwrap();
+
+        assert_eq!(marker(&installed), "old");
+        assert_eq!(marker(&previous), "new");
+    }
+
+    #[test]
     fn identity_failure_leaves_the_installed_app_and_discards_the_staged_copy() {
         let (_temp, installed, staged) = layout();
 
@@ -184,6 +251,19 @@ mod tests {
         assert_eq!(marker(&installed), "old");
         assert!(!staged.exists());
         assert!(!update_stage::previous_path(&installed).exists());
+    }
+
+    #[test]
+    fn rollback_without_a_previous_app_refuses_before_an_exchange() {
+        let (_temp, installed, _staged) = layout();
+
+        let result = rollback_installed(
+            &installed,
+            &update_stage::previous_path(&installed),
+            |_, _| -> Result<(), String> { panic!("exchanged") },
+        );
+
+        assert!(matches!(result, Err(SwapError::Swap(reason)) if reason.contains("no previous app")));
     }
 
     #[test]

@@ -9,8 +9,11 @@ bundle="$(CDPATH= cd -- "$contents/.." && pwd -P)"
 # test holds the three equal.
 CORSIA_APP_FOLDER=CORSIA
 app_dir="$HOME/Library/Application Support/$CORSIA_APP_FOLDER"
-# The state root has one definition, the backend's default_state_root(). A
-# pre-release preview folder's flat state moves into it first, once, before
+# Rust app_paths::state_dir_for and Python default_state_root each define the
+# packaged app's state root. This service invokes the Python definition; both
+# follow the CORSIA_STATE_DIR override or CORSIA app-folder/state convention,
+# but no shared implementation or parity test keeps them equal. A pre-release
+# preview folder's flat state moves into it first, once, before
 # anything opens it.
 state_dir="$(PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 "$resources/python/bin/python3" -I -c '
 import sys

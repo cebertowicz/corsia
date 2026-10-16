@@ -311,6 +311,35 @@ app_mode_swap_staged_update() {
     handoff_redeploy_restart "$_corsia_app_bundle/Contents/Resources"
 }
 
+app_mode_rollback_swapped_update() {
+    local previous="$1" reason="$2" operation_id="${CORSIA_RESTART_OPERATION_ID:-update}" previous_generation rollback_status
+    previous_generation="$(app_mode_generation "$previous" 2>/dev/null || echo unknown)"
+    warn "$reason Rolling back to version $previous_generation."
+    if service_is_loaded && ! bootout_service_and_wait "$(service_domain)" "$(service_label)"; then
+        fail "$reason CORSIA could not stop the new service, so it was not rolled back. The new app remains installed at $_corsia_app_bundle and the previous app remains at $previous."
+        return 1
+    fi
+    if "$_corsia_app_bundle/Contents/MacOS/CORSIA" --update-rollback "$operation_id"; then
+        :
+    else
+        rollback_status=$?
+        fail "$reason CORSIA could not roll back (rollback exit $rollback_status). The new app remains installed at $_corsia_app_bundle and the previous app remains at $previous."
+        return 1
+    fi
+    if ! launchctl bootstrap "$(service_domain)" "$(service_plist_path)"; then
+        fail "$reason CORSIA went back to version $previous_generation, but could not start it. The failed update remains at $previous."
+        return 1
+    fi
+    if ! wait_for_backend_health; then
+        fail "$reason CORSIA went back to version $previous_generation, but could not confirm it is healthy. The failed update remains at $previous."
+        return 1
+    fi
+    rm -rf "$previous" || warn "Could not remove the failed update at $previous"
+    ok "The update didn't start, so CORSIA went back to version $previous_generation"
+    print_backend_status
+    return 0
+}
+
 app_mode_start_swapped_update() {
     local previous="$1" job expected actual
     if service_is_loaded; then
@@ -320,24 +349,30 @@ app_mode_start_swapped_update() {
             return 1
         fi
         if ! launchctl kickstart -k "$(service_domain)/$(service_label)"; then
-            fail "The update was installed, but its service could not be restarted"
+            app_mode_rollback_swapped_update "$previous" "The updated service could not be restarted." || return 1
             return 1
         fi
     else
         require_no_unmanaged_backend "$BACKEND_PORT" || return 1
         if ! launchctl bootstrap "$(service_domain)" "$(service_plist_path)"; then
-            fail "The update was installed, but its service could not be started"
+            app_mode_rollback_swapped_update "$previous" "The updated service could not be started." || return 1
             return 1
         fi
     fi
-    wait_for_backend_health || return 1
-    expected="$(app_mode_generation "$_corsia_app_bundle")" || return 1
+    if ! wait_for_backend_health; then
+        app_mode_rollback_swapped_update "$previous" "The updated service did not become healthy." || return 1
+        return 1
+    fi
+    if ! expected="$(app_mode_generation "$_corsia_app_bundle")"; then
+        app_mode_rollback_swapped_update "$previous" "The updated app's version could not be read." || return 1
+        return 1
+    fi
     if ! actual="$(app_mode_backend_generation)"; then
-        fail "The updated service did not report its version; the previous app was kept at $previous"
+        app_mode_rollback_swapped_update "$previous" "The updated service did not report its version." || return 1
         return 1
     fi
     if [ "$actual" != "$expected" ]; then
-        fail "The updated service is version $actual, not $expected; the previous app was kept at $previous"
+        app_mode_rollback_swapped_update "$previous" "The updated service is version $actual, not $expected." || return 1
         return 1
     fi
     rm -rf "$previous" || warn "Could not remove the previous app at $previous"

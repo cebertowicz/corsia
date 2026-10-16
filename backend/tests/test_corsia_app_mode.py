@@ -89,6 +89,9 @@ with open(state / "curl", "a") as log:
     log.write(url.split("?")[0] + "\\n")
 serving = (state / "loaded").exists()
 if url.endswith("/api/health") and serving:
+    failed_generation = state / "health_fail_generation"
+    if failed_generation.exists() and (state / "generation").read_text() == failed_generation.read_text():
+        sys.exit(22)
     sys.exit(0)
 if url.endswith("/api/version") and serving:
     print(json.dumps({
@@ -127,8 +130,8 @@ if sys.argv[-1] in (state / "pids").read_text().split():
 sys.exit(1)
 """
 
-# The app binary's two update modes. A control file `<mode>_exit` makes a mode
-# fail with that status and change nothing.
+# The app binary's update modes. A control file `<mode>_exit` makes a mode fail
+# with that status and change nothing.
 _FAKE_APP = """
 import os, sys
 from pathlib import Path
@@ -146,6 +149,12 @@ if mode == "--update-swap":
     os.rename(bundle, previous)
     os.rename(bundle.with_name("CORSIA.app.staged"), bundle)
     print(previous)
+elif mode == "--update-rollback":
+    previous = bundle.with_name("CORSIA.app.previous")
+    temporary = bundle.with_name("CORSIA.app.rollback")
+    os.rename(bundle, temporary)
+    os.rename(previous, bundle)
+    os.rename(temporary, previous)
 """
 
 
@@ -464,7 +473,34 @@ def test_a_failed_swap_starts_the_installed_app_again(app):
     assert staged.exists()
 
 
-def test_after_the_swap_a_wrong_version_keeps_the_previous_app(app):
+def test_after_the_swap_a_health_failure_rolls_back_and_starts_the_old_app(app):
+    app.load()
+    app.stage("2.0.0", "2")
+    (app.launchd / "health_fail_generation").write_text("2.0.0+2")
+
+    result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "did not become healthy" in output
+    assert "went back to version 1.0.0+1" in output
+    domain = f"gui/{os.getuid()}"
+    assert app.launchd_calls() == [
+        f"bootout --wait {domain}/{LABEL}",
+        f"bootstrap {domain} {app.plist}",
+        f"bootout --wait {domain}/{LABEL}",
+        f"bootstrap {domain} {app.plist}",
+    ]
+    assert app.calls("app") == [
+        f"--update-swap {OPERATION_ID}",
+        f"--update-rollback {OPERATION_ID}",
+    ]
+    assert app.generation() == "1.0.0+1"
+    assert (app.launchd / "generation").read_text() == "1.0.0+1"
+    assert not app.bundle.with_name("CORSIA.app.previous").exists()
+
+
+def test_after_the_swap_a_wrong_version_rolls_back_and_starts_the_old_app(app):
     previous = app.bundle.with_name("CORSIA.app.previous")
     shutil.copytree(app.bundle, previous, symlinks=True)
     _set_version(app.bundle, "2.0.0", "2")
@@ -478,5 +514,10 @@ def test_after_the_swap_a_wrong_version_keeps_the_previous_app(app):
     result = app.run("restart-prepared", CORSIA_RESTART_OPERATION_ID=OPERATION_ID)
 
     assert result.returncode != 0
-    assert "is version 1.0.0+1, not 2.0.0+2" in result.stdout
-    assert previous.exists()
+    output = result.stdout + result.stderr
+    assert "is version 1.0.0+1, not 2.0.0+2" in output
+    assert "went back to version 1.0.0+1" in output
+    assert app.calls("app") == [f"--update-rollback {OPERATION_ID}"]
+    assert app.generation() == "1.0.0+1"
+    assert (app.launchd / "generation").read_text() == "1.0.0+1"
+    assert not previous.exists()

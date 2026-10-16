@@ -64,6 +64,23 @@ describe('SetupScreen', () => {
 		expect(calls).toEqual(['/api/setup/status']);
 	});
 
+	it('routes the setup_complete response to sign-in', async () => {
+		if (component) await unmount(component);
+		calls = [];
+		const onExistingAccount = vi.fn();
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+			calls.push(String(input));
+			return json({ code: 'setup_complete' }, 409);
+		}));
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount, onAccountCreated: vi.fn(), onFinished: vi.fn() } });
+		flushSync();
+
+		await settle();
+
+		expect(onExistingAccount).toHaveBeenCalledOnce();
+		expect(calls).toEqual(['/api/setup/status']);
+	});
+
 	it('shows existing oMLX consent before any adoption request, and Not now leaves it untouched', async () => {
 		if (component) await unmount(component);
 		calls = [];
